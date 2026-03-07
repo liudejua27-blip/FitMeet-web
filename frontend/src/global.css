@@ -1,0 +1,69 @@
+/* �T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T
+   DESIGN TOKENS
+�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T�T */
+:root {
+  --lime: #C8FF00;
+  --lime-dim: rgba(200,255,0,0.12);
+  --lime-glow: rgba(200,255,0,0.06);
+  --bg: #09090A;
+  --bg2: #111113;
+  --bg3: #191A1C;
+  --border: rgba(255,255,255,0.07);
+  --border-hover: rgba(200,255,0,0.25);
+  --text: #ECECEC;
+  --muted: rgba(236,236,236,0.38);
+  --muted2: rgba(236,236,236,0.55);
+  --danger: #FF4444;
+  --blue: #4488FF;
+
+  --f-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  --f-mono: 'JetBrains Mono', monospace;
+  --f-body: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
+  --r-xl: 24px;
+  --r-full: 999px;
+}
+
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; }
+body {
+  color: var(--text);
+  font-family: var(--f-body);
+  font-weight: 300;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* ������ SCROLLBAR ������ */
+::-webkit-scrollbar { width:3px; height:3px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--lime); border-radius:2px; }
+
+/* ������ NOISE OVERLAY ������ */
+body::before {
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:9990;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity:0.025; mix-blend-mode:overlay;
+}
+
+/* ������ ANIMATIONS ������ */
+@keyframes fadeUp {
+  from { opacity:0; transform:translateY(24px); }
+  to { opacity:1; transform:translateY(0); }
+}
+
+@keyframes orbFloat {
+  0%,100% { transform:translate(0,0) scale(1); }
+  50% { transform:translate(20px,20px) scale(1.05); }
+}
+
+@keyframes pulse {
+  0%,100%{opacity:1;transform:scale(1)}
+  50%{opacity:0.6;transform:scale(0.85)}
+}
+
+/* Animation utility classes */
+.animate-fadeUp { animation: fadeUp 0.6s ease-out both; }

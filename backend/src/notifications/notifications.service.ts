@@ -1,0 +1,89 @@
+import { Injectable } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { Notification } from './notification.schema';
+
+@Injectable()
+export class NotificationsService {
+  constructor(
+    @InjectModel(Notification.name)
+    private readonly notifModel: Model<Notification>,
+  ) {}
+
+  async findByUser(userId: number) {
+    const notifications = await this.notifModel
+      .find({ userId })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean()
+      .exec();
+
+    return notifications.map(n => ({
+      id: n._id.toString(),
+      type: n.type,
+      username: n.fromUsername,
+      avatar: n.fromAvatar,
+      color: n.fromColor,
+      text: n.text,
+      time: this.formatTime((n as any).createdAt as Date),
+      read: n.read,
+      targetId: n.targetId,
+    }));
+  }
+
+  async create(data: {
+    userId: number;
+    type: string;
+    text: string;
+    fromUserId?: number;
+    fromUsername?: string;
+    fromAvatar?: string;
+    fromColor?: string;
+    targetId?: number;
+  }) {
+    return this.notifModel.create({
+      userId: data.userId,
+      type: data.type,
+      text: data.text,
+      fromUserId: data.fromUserId || 0,
+      fromUsername: data.fromUsername || '系统',
+      fromAvatar: data.fromAvatar || 'S',
+      fromColor: data.fromColor || '#38BDF8',
+      targetId: data.targetId,
+    });
+  }
+
+  async markAsRead(notificationId: string) {
+    await this.notifModel.updateOne(
+      { _id: notificationId },
+      { read: true },
+    );
+    return { success: true };
+  }
+
+  async markAllRead(userId: number) {
+    await this.notifModel.updateMany(
+      { userId, read: false },
+      { read: true },
+    );
+    return { success: true };
+  }
+
+  async getUnreadCount(userId: number) {
+    const count = await this.notifModel.countDocuments({ userId, read: false });
+    return { unreadCount: count };
+  }
+
+  private formatTime(date: Date): string {
+    if (!date) return '';
+    const now = new Date();
+    const diff = now.getTime() - new Date(date).getTime();
+    const minutes = Math.floor(diff / 60000);
+
+    if (minutes < 1) return '刚刚';
+    if (minutes < 60) return `${minutes}分钟前`;
+    if (minutes < 1440) return `${Math.floor(minutes / 60)}小时前`;
+    if (minutes < 10080) return `${Math.floor(minutes / 1440)}天前`;
+    return '更早';
+  }
+}
