@@ -1,11 +1,11 @@
 import { memo, useCallback, useState } from 'react';
+import clsx from 'clsx';
 import { useNavigate } from 'react-router-dom';
 import { formatCount, sanitizeInput } from '../../lib/utils';
-import clsx from 'clsx';
-import type { Post } from '../../data/mockData';
-import { VIRTUAL_GIFTS } from '../../data/mockData';
-import { useSocialStore } from '../../stores';
-import { useAuthStore } from '../../stores';
+import type { Post } from '../../types';
+import { useAuthStore, useSocialStore } from '../../stores';
+import { SportVisual, Tooltip } from '../ui';
+import { getCustomCategoryName, getSportLabel } from '../../data/taxonomy';
 
 interface FeedCardProps {
   post: Post;
@@ -13,58 +13,56 @@ interface FeedCardProps {
   onSave: (id: number) => void;
   onAddFriend: (id: number) => void;
   onMeetRequest: (id: number) => void;
-  onSendGift: (postId: number, giftId: string) => void;
   onMessage: (id: number) => void;
 }
 
 const typeBadge: Record<string, { label: string; className: string }> = {
-  meet: { label: '约练邀请', className: 'bg-lime text-[#09090A]' },
-  log: { label: '健身日记', className: 'bg-black/70 text-white border border-border' },
-  coach: { label: '教练', className: 'bg-blue-500 text-white' },
+  meet: { label: '约练邀请', className: 'bg-lime text-white' },
+  log: { label: '训练日记', className: 'bg-[#24130a] text-white' },
+  help: { label: '其他求助', className: 'bg-[#ff8a1f] text-white' },
+  coach: { label: '教练', className: 'bg-mint text-white' },
 };
 
-export const FeedCard = memo(function FeedCard({ post, onLike, onSave, onAddFriend, onMeetRequest, onSendGift, onMessage }: FeedCardProps) {
-  const [showGifts, setShowGifts] = useState(false);
+export const FeedCard = memo(function FeedCard({
+  post,
+  onAddFriend,
+  onLike,
+  onMeetRequest,
+  onMessage,
+  onSave,
+}: FeedCardProps) {
   const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText] = useState('');
   const navigate = useNavigate();
   const { getComments, addComment, likeComment, isLiked, isSaved, getLikeDelta } = useSocialStore();
   const { isLoggedIn, user, openLogin } = useAuthStore();
   const postComments = getComments(post.id);
-
-  // Read liked/saved from global store instead of post props
   const liked = isLiked(post.id);
   const saved = isSaved(post.id);
   const likesCount = post.likes + getLikeDelta(post.id);
-
-  const handleLike = useCallback(() => onLike(post.id), [onLike, post.id]);
-  const handleSave = useCallback(() => onSave(post.id), [onSave, post.id]);
-  const handleAddFriend = useCallback(() => onAddFriend(post.id), [onAddFriend, post.id]);
-  const handleMeetRequest = useCallback(() => onMeetRequest(post.id), [onMeetRequest, post.id]);
-  const handleMessage = useCallback(() => onMessage(post.id), [onMessage, post.id]);
+  const customCategory = getCustomCategoryName(post.tags);
+  const sportLabel = customCategory || getSportLabel(post.sport);
+  const visibleTags = post.tags
+    .filter((tag) => !tag.startsWith('custom:') && !tag.startsWith('#custom:') && !tag.startsWith('subcategory:'))
+    .slice(0, 8);
+  const profilePath = `/user/${post.userId || post.id}`;
 
   const handleSubmitComment = useCallback(() => {
     const cleaned = sanitizeInput(commentText, 500);
     if (!cleaned) return;
-    if (!isLoggedIn) { openLogin(); return; }
+    if (!isLoggedIn) {
+      openLogin();
+      return;
+    }
     addComment(post.id, cleaned, user?.name || '我');
     setCommentText('');
-  }, [commentText, isLoggedIn, openLogin, addComment, post.id, user]);
-
-  const handleTagClick = useCallback((tag: string) => {
-    navigate(`/topic/${encodeURIComponent(tag.replace('#', ''))}`);
-  }, [navigate]);
-
-  const handleUsernameClick = useCallback(() => {
-    navigate(`/user/${post.id}`);
-  }, [navigate, post.id]);
+  }, [addComment, commentText, isLoggedIn, openLogin, post.id, user?.name]);
 
   return (
-    <article className="group rounded-xl border border-border bg-surface transition hover:-translate-y-1 hover:border-borderStrong hover:shadow-card">
-      {/* Image area */}
+    <article className="group overflow-hidden rounded-2xl border border-[#ead8c7] bg-white text-ink shadow-card transition hover:-translate-y-1 hover:border-lime/40">
       <div
-        className="relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-t-xl bg-surfaceMuted"
-        style={(!post.images?.length && !post.videoUrl) ? { background: post.colorBg } : {}}
+        className="relative flex aspect-[4/3] items-center justify-center overflow-hidden bg-[#fff0e2]"
+        style={!post.images?.length && !post.videoUrl ? { background: post.colorBg } : undefined}
       >
         {post.videoUrl ? (
           <video
@@ -80,198 +78,159 @@ export const FeedCard = memo(function FeedCard({ post, onLike, onSave, onAddFrie
         ) : post.images && post.images.length > 0 ? (
           <img
             src={post.images[0].url}
-            alt="post content"
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            alt="动态内容"
+            className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
           />
         ) : (
-          <span className="text-5xl">{post.emoji}</span>
+          <SportVisual
+            className="h-full w-full rounded-none"
+            gender={post.gender}
+            label={post.username}
+            variant={post.sport}
+          />
         )}
         <span
           className={clsx(
-            'absolute left-3 top-3 rounded-full px-3 py-1 text-[10px] font-mono tracking-[0.15em] uppercase z-10',
-            typeBadge[post.type]?.className
+            'absolute left-3 top-3 rounded-md px-3 py-1 text-[10px] font-black tracking-wide',
+            typeBadge[post.type]?.className,
           )}
         >
           {typeBadge[post.type]?.label ?? post.type}
         </span>
         {post.slots && (
-          <span className="absolute right-3 top-3 rounded-full border border-lime/50 bg-limeDim px-3 py-1 text-[10px] font-mono tracking-wide text-lime">
-            还剩 {post.slots} 人
-          </span>
-        )}
-        {/* Single cert badge */}
-        {post.cert && (
-          <span className="absolute left-3 bottom-3 text-xs">
-            ⭐ 已认证
+          <span className="absolute right-3 top-3 rounded-md border border-lime/30 bg-white/90 px-3 py-1 text-[10px] font-black text-lime">
+            余 {post.slots} 人
           </span>
         )}
       </div>
 
       <div className="space-y-3 p-4">
-        {/* Title */}
-        {post.title && (
-          <h3 className="font-bold text-base line-clamp-2 text-white mb-1 leading-snug">
-            {post.title}
-          </h3>
-        )}
-
-        {/* User info */}
         <div className="flex items-center gap-3">
-          <div
-            className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-display font-bold text-[#09090A]"
+          <button
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-black text-white"
             style={{ background: post.color }}
+            onClick={() => navigate(profilePath)}
           >
             {post.username[0]}
-          </div>
-          <div className="flex-1 leading-tight">
-            <div className="flex items-center gap-1 text-sm font-semibold text-white cursor-pointer hover:text-lime transition" onClick={handleUsernameClick}>
-              {post.username}
-              {post.cert && <span className="text-xs text-lime">✓</span>}
+          </button>
+          <div className="min-w-0 flex-1">
+            <button
+              className="truncate text-left text-sm font-black transition hover:text-lime"
+              onClick={() => navigate(profilePath)}
+            >
+              {post.username} {post.cert ? <span className="text-lime">✓</span> : null}
+            </button>
+            <div className="mt-0.5 truncate text-[11px] font-bold text-[#8b6a54]">
+              {post.city} · {post.dist} · {sportLabel} · {post.gender} {post.age}岁
             </div>
-            <div className="text-[11px] text-textSofter">📍 {post.city} · {post.dist} · {post.gender} {post.age}岁</div>
           </div>
           <button
-            className="text-lg hover:scale-110 transition"
-            onClick={handleMessage}
-            title="私信"
+            className="rounded-lg border border-[#ead8c7] px-3 py-2 text-xs font-black text-[#76543e] transition hover:border-lime/40 hover:text-lime"
+            onClick={() => onMessage(post.id)}
           >
-            💬
+            私信
           </button>
         </div>
 
-        {/* Content */}
-        <p className="text-sm leading-7 text-textMuted">{post.text}</p>
+        {post.title && <h3 className="line-clamp-2 text-base font-black leading-snug">{post.title}</h3>}
+        <p className="line-clamp-3 text-sm leading-7 text-[#76543e]">{post.text}</p>
 
-        {/* Tags */}
         <div className="flex flex-wrap gap-2">
-          {post.tags.map((tag) => (
-            <span key={tag} className="text-[11px] font-mono text-lime cursor-pointer hover:underline" onClick={() => handleTagClick(tag)}>
+          {customCategory && (
+            <button
+              className="rounded-md bg-[#fff0e2] px-2 py-1 text-[11px] font-bold text-lime"
+              onClick={() => navigate(`/topic/${encodeURIComponent(customCategory)}`)}
+            >
+              #{customCategory}
+            </button>
+          )}
+          {visibleTags.map((tag) => (
+            <button
+              key={tag}
+              className="rounded-md bg-[#fff0e2] px-2 py-1 text-[11px] font-bold text-lime"
+              onClick={() => navigate(`/topic/${encodeURIComponent(tag.replace('#', ''))}`)}
+            >
               {tag}
-            </span>
+            </button>
           ))}
         </div>
 
-        {/* Interaction bar */}
-        <div className="flex items-center gap-3 border-t border-border pt-3 text-xs text-textMuted">
+        <div className="flex items-center gap-2 border-t border-[#ead8c7] pt-3 text-xs text-[#8b6a54]">
+          <Tooltip content={`点赞 ${formatCount(likesCount)}`}>
+            <button
+              aria-label={`点赞 ${likesCount}`}
+              className={clsx(
+                'rounded-lg border px-3 py-2 font-black transition',
+                liked ? 'border-red-300 bg-red-50 text-coral' : 'border-[#ead8c7] hover:border-lime/40 hover:text-lime',
+              )}
+              onClick={() => onLike(post.id)}
+            >
+              ♥ {formatCount(likesCount)}
+            </button>
+          </Tooltip>
           <button
-            aria-label={`点赞 ${likesCount}`}
-            className={clsx(
-              'flex items-center gap-1 transition focus-visible:outline-2 focus-visible:outline-lime cursor-pointer',
-              liked ? 'text-red-400' : 'hover:text-white'
-            )}
-            onClick={handleLike}
+            className="rounded-lg border border-[#ead8c7] px-3 py-2 font-black transition hover:border-lime/40 hover:text-lime"
+            onClick={() => setShowComments((value) => !value)}
           >
-            {liked ? '❤️' : '🤍'} {formatCount(likesCount)}
-          </button>
-          <button
-            aria-label={`评论 ${post.comments}`}
-            className="flex items-center gap-1 transition hover:text-white focus-visible:outline-2 focus-visible:outline-lime cursor-pointer"
-            onClick={() => setShowComments(!showComments)}
-          >
-            💬 {formatCount(post.comments)}
-          </button>
-          <button
-            aria-label="送礼物"
-            className="flex items-center gap-1 transition hover:text-white cursor-pointer"
-            onClick={() => setShowGifts(!showGifts)}
-          >
-            🎁 送礼
+            评论 {formatCount(post.comments)}
           </button>
           <span className="flex-1" />
           <button
             className={clsx(
-              'rounded-full border px-3 py-1 text-xs font-semibold transition cursor-pointer',
-              saved
-                ? 'border-lime/40 text-lime bg-limeDim'
-                : 'border-border text-textMuted hover:border-borderStrong hover:text-white'
+              'rounded-lg border px-3 py-2 font-black transition',
+              saved ? 'border-lime/40 bg-[#fff0e2] text-lime' : 'border-[#ead8c7] hover:border-lime/40 hover:text-lime',
             )}
-            onClick={handleSave}
+            onClick={() => onSave(post.id)}
           >
-            {saved ? '🔖 已收藏' : '🔖 收藏'}
+            {saved ? '已收藏' : '收藏'}
           </button>
         </div>
 
-        {/* Action buttons row */}
-        <div className="flex items-center gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <button
-            className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-white transition hover:border-borderStrong cursor-pointer"
-            onClick={handleAddFriend}
+            className="rounded-lg border border-[#ead8c7] px-3 py-2 text-xs font-black text-[#76543e] transition hover:border-lime/40 hover:text-lime"
+            onClick={() => onAddFriend(post.id)}
           >
-            ➕ 加好友
+            加好友
           </button>
-          {post.type === 'meet' && (
-            <button
-              className="rounded-full border border-lime/60 bg-limeDim px-3 py-1 text-xs font-semibold text-lime transition hover:border-lime hover:bg-lime hover:text-[#09090A] cursor-pointer"
-              onClick={handleMeetRequest}
-            >
-              想约TA →
-            </button>
-          )}
+          <button
+            className="rounded-lg bg-lime px-3 py-2 text-xs font-black text-white transition hover:bg-brand2"
+            onClick={() => (post.type === 'meet' ? onMeetRequest(post.id) : onMessage(post.id))}
+          >
+            {post.type === 'meet' ? '想约TA' : '打招呼'}
+          </button>
         </div>
 
-        {/* Gift panel */}
-        {showGifts && (
-          <div className="border-t border-border pt-3">
-            <div className="text-[11px] text-textSofter mb-2 font-mono">送 TA 一份虚拟礼物</div>
-            <div className="flex gap-2 flex-wrap">
-              {VIRTUAL_GIFTS.map(gift => (
-                <button
-                  key={gift.id}
-                  className="flex flex-col items-center gap-0.5 p-2 rounded-lg border border-border hover:border-lime/30 hover:bg-limeDim transition cursor-pointer"
-                  onClick={() => { onSendGift(post.id, gift.id); setShowGifts(false); }}
-                >
-                  <span className="text-xl">{gift.emoji}</span>
-                  <span className="text-[9px] text-textMuted">{gift.name}</span>
-                  <span className="text-[9px] text-lime">{gift.price}币</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Comments panel */}
         {showComments && (
-          <div className="border-t border-border pt-3 space-y-3">
-            <div className="text-[11px] text-textSofter mb-2 font-mono">评论 ({postComments.length})</div>
-            {postComments.length === 0 && (
-              <div className="text-xs text-textSofter text-center py-2">暂无评论，快来说点什么吧~</div>
-            )}
-            {postComments.slice(0, 5).map(comment => (
+          <div className="space-y-3 border-t border-[#ead8c7] pt-3">
+            <div className="text-xs font-black text-[#8b6a54]">评论 ({postComments.length})</div>
+            {postComments.slice(0, 5).map((comment) => (
               <div key={comment.id} className="flex gap-2">
                 <div
-                  className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-[#09090A] flex-shrink-0"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[10px] font-black text-white"
                   style={{ background: comment.color }}
                 >
                   {comment.avatar}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-white">{comment.username}</span>
-                    <span className="text-[10px] text-textSofter">{comment.time}</span>
-                  </div>
-                  <p className="text-xs text-textMuted mt-0.5">{comment.text}</p>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-black">{comment.username}</div>
+                  <p className="mt-0.5 text-xs text-[#76543e]">{comment.text}</p>
                 </div>
-                <button
-                  className="text-[10px] text-textSofter hover:text-white flex-shrink-0 cursor-pointer"
-                  onClick={() => likeComment(post.id, comment.id)}
-                >
-                  ❤️ {comment.likes}
+                <button className="text-xs font-bold text-[#8b6a54]" onClick={() => likeComment(post.id, comment.id)}>
+                  ♥ {comment.likes}
                 </button>
               </div>
             ))}
-            <div className="flex gap-2 mt-2">
+            <div className="flex gap-2">
               <input
                 type="text"
                 placeholder="写评论..."
                 value={commentText}
-                onChange={e => setCommentText(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSubmitComment()}
-                className="flex-1 bg-surfaceMuted border border-border rounded-full px-3 py-1.5 text-xs text-white placeholder:text-textSofter outline-none focus:border-lime/30"
+                onChange={(e) => setCommentText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSubmitComment()}
+                className="min-w-0 flex-1 rounded-lg border border-[#ead8c7] bg-[#fffaf6] px-3 py-2 text-xs outline-none focus:border-lime/50"
               />
-              <button
-                className="px-3 py-1.5 rounded-full bg-lime text-[#09090A] text-xs font-bold hover:bg-[#d4ff1a] transition cursor-pointer"
-                onClick={handleSubmitComment}
-              >
+              <button className="rounded-lg bg-lime px-3 py-2 text-xs font-black text-white" onClick={handleSubmitComment}>
                 发送
               </button>
             </div>

@@ -1,10 +1,9 @@
 import { memo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '../../lib/utils';
-import { Button, Badge, StatBox } from '../ui';
+import { Button, Badge, SportVisual, StatBox } from '../ui';
 import { StarRating } from './StarRating';
-import type { Coach, Review } from '../../data/mockData';
-import { COACH_REVIEWS } from '../../data/mockData';
+import type { Coach, Review } from '../../types';
 import { useAuthStore, useMessageStore } from '../../stores';
 import { useModalA11y } from '../../hooks/useModalA11y';
 
@@ -33,32 +32,30 @@ export const CoachDetail = memo(function CoachDetail({ coach, onClose, onBook }:
 
   if (!coach) return null;
 
-  const successRate = Math.round(coach.reviews / coach.sessions * 100);
+  const reviews = coach.reviewList ?? [];
+  const successRate = coach.sessions > 0 ? Math.round(coach.reviews / coach.sessions * 100) : 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={handleBackdropClick}>
       <div ref={containerRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="教练详情" className="bg-surface border border-border rounded-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto outline-none">
         {/* Cover */}
-        <div
-          className="h-36 relative flex items-center justify-center rounded-t-2xl"
-          style={{ background: coach.coverBg }}
-        >
-          <span className="text-6xl">{coach.cover}</span>
+        <div className="relative h-40 overflow-hidden rounded-t-2xl">
+          <SportVisual className="h-full w-full rounded-none" label={coach.name} variant={coach.specialtyCode} />
           <button
-            className="absolute top-4 right-4 w-8 h-8 rounded-full bg-black/40 border border-white/20 flex items-center justify-center text-white hover:bg-black/60 transition cursor-pointer"
+            className="absolute right-4 top-4 flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-white/20 bg-black/40 text-white transition hover:bg-black/60"
             onClick={onClose}
           >
             ✕
           </button>
           {/* Avatar */}
           <div
-            className="absolute -bottom-8 left-6 w-20 h-20 rounded-full flex items-center justify-center text-2xl font-display font-bold text-[#09090A] border-4 border-surface"
+            className="absolute -bottom-8 left-6 flex h-20 w-20 items-center justify-center rounded-xl border-4 border-surface text-2xl font-display font-bold text-white"
             style={{ backgroundColor: coach.color }}
           >
             {coach.name[0]}
           </div>
           {coach.cert && (
-            <div className="absolute -bottom-4 left-20 w-6 h-6 bg-lime rounded-full flex items-center justify-center text-sm text-[#09090A] font-bold">
+            <div className="absolute -bottom-4 left-20 flex h-6 w-6 items-center justify-center rounded-md bg-lime text-sm font-bold text-white">
               ✓
             </div>
           )}
@@ -79,8 +76,8 @@ export const CoachDetail = memo(function CoachDetail({ coach, onClose, onBook }:
               </div>
             </div>
             <div className="text-right">
-              <div className="font-display font-extrabold text-3xl text-lime">¥{coach.price}</div>
-              <div className="text-xs text-textMuted">{coach.unit}</div>
+              <div className="font-display font-extrabold text-3xl text-lime">免费</div>
+              <div className="text-xs text-textMuted">预约交流</div>
             </div>
           </div>
 
@@ -89,7 +86,7 @@ export const CoachDetail = memo(function CoachDetail({ coach, onClose, onBook }:
             <StatBox value={coach.students.toString()} label="学员" size="md" />
             <StatBox value={coach.followers.toString()} label="粉丝" size="md" />
             <StatBox value={`${successRate}%`} label="好评率" highlight size="md" />
-            <StatBox value={coach.sessions.toString()} label="课程" size="md" />
+            <StatBox value={coach.sessions.toString()} label="交流" size="md" />
           </div>
 
           {/* Tags */}
@@ -145,32 +142,39 @@ export const CoachDetail = memo(function CoachDetail({ coach, onClose, onBook }:
                 </div>
               </div>
 
-              {/* Income Stats (coach view only — visible only to the coach themselves) */}
-              {isLoggedIn && useAuthStore.getState().user?.name === coach.name && <div className="p-4 bg-lime/5 border border-lime/15 rounded-xl">
-                <h4 className="font-mono text-[10px] text-lime uppercase tracking-wider mb-3">收入概览</h4>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="text-center">
-                    <div className="font-display font-bold text-lg text-lime">¥{(coach.sessions * coach.price * 0.3).toLocaleString()}</div>
-                    <div className="text-[10px] text-textMuted">总收入</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="font-display font-bold text-lg text-white">{Math.floor(coach.sessions * 0.7)}</div>
-                    <div className="text-[10px] text-textMuted">本月课程</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="font-display font-bold text-lg text-white">¥{(coach.price * 25).toLocaleString()}</div>
-                    <div className="text-[10px] text-textMuted">本月收入</div>
+              {isLoggedIn && useAuthStore.getState().user?.name === coach.name && (
+                <div className="p-4 bg-lime/5 border border-lime/15 rounded-xl">
+                  <h4 className="font-mono text-[10px] text-lime uppercase tracking-wider mb-3">公益交流概览</h4>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="text-center">
+                      <div className="font-display font-bold text-lg text-lime">{coach.sessions}</div>
+                      <div className="text-[10px] text-textMuted">累计交流</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="font-display font-bold text-lg text-white">{Math.floor(coach.sessions * 0.7)}</div>
+                      <div className="text-[10px] text-textMuted">本月交流</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="font-display font-bold text-lg text-white">免费</div>
+                      <div className="text-[10px] text-textMuted">平台模式</div>
+                    </div>
                   </div>
                 </div>
-              </div>}
+              )}
             </div>
           )}
 
           {activeTab === 'reviews' && (
             <div className="space-y-4">
-              {COACH_REVIEWS.map(review => (
-                <ReviewCard key={review.id} review={review} />
-              ))}
+              {reviews.length > 0 ? (
+                reviews.map(review => (
+                  <ReviewCard key={review.id} review={review} />
+                ))
+              ) : (
+                <div className="rounded-xl border border-border bg-surfaceMuted p-6 text-center text-sm text-textMuted">
+                  暂无评价
+                </div>
+              )}
             </div>
           )}
 
@@ -217,7 +221,7 @@ const ReviewCard = memo(function ReviewCard({ review }: { review: Review }) {
     <div className="p-4 bg-surfaceMuted rounded-xl border border-border">
       <div className="flex items-center gap-3 mb-2">
         <div
-          className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-[#09090A]"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-xs font-bold text-white"
           style={{ background: review.color }}
         >
           {review.avatar}

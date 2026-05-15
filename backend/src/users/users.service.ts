@@ -29,14 +29,20 @@ export class UsersService {
     const user = await this.userRepo.findOne({ where: { id } });
     if (!user) throw new NotFoundException('用户不存在');
 
-    const followersCount = await this.followRepo.count({ where: { followingId: id } });
-    const followingCount = await this.followRepo.count({ where: { followerId: id } });
+    const followersCount = await this.followRepo.count({
+      where: { followingId: id },
+    });
+    const followingCount = await this.followRepo.count({
+      where: { followerId: id },
+    });
     const postsCount = await this.postRepo.count({ where: { userId: id } });
     const meetHosted = await this.meetRepo.count({ where: { userId: id } });
-    const meetJoined = await this.participantRepo.count({ where: { userId: id } });
+    const meetJoined = await this.participantRepo.count({
+      where: { userId: id },
+    });
     const coach = await this.coachRepo.findOne({ where: { userId: id } });
 
-    const { password, ...rest } = user;
+    const rest = this.sanitizeUser(user);
     return {
       ...rest,
       followers: followersCount,
@@ -54,13 +60,54 @@ export class UsersService {
   }
 
   async updateProfile(id: number, data: Partial<User>) {
-    const { password, email, id: _, ...updateData } = data as any;
+    const updateData: Partial<User> = { ...data };
+    delete updateData.password;
+    delete updateData.email;
+    delete updateData.id;
+
     await this.userRepo.update(id, updateData);
     return this.findById(id);
   }
 
+  /**
+   * Update the user's last-known coordinates and (optionally) their
+   * nearby-match opt-in. Stamps `locationUpdatedAt` to now so the
+   * matching pipeline can age-out stale fixes.
+   */
+  async updateLocation(
+    id: number,
+    lat: number,
+    lng: number,
+    acceptNearbyMatch?: boolean,
+  ) {
+    const patch: Partial<User> = {
+      lat,
+      lng,
+      locationUpdatedAt: new Date(),
+    };
+    if (typeof acceptNearbyMatch === 'boolean') {
+      patch.acceptNearbyMatch = acceptNearbyMatch;
+    }
+    await this.userRepo.update(id, patch);
+    const user = await this.userRepo.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('用户不存在');
+    return {
+      id: user.id,
+      lat: user.lat,
+      lng: user.lng,
+      locationUpdatedAt: user.locationUpdatedAt,
+      acceptNearbyMatch: user.acceptNearbyMatch,
+    };
+  }
+
   async findAll() {
     const users = await this.userRepo.find();
-    return users.map(({ password, ...rest }) => rest);
+    return users.map((user) => this.sanitizeUser(user));
+  }
+
+  private sanitizeUser(user: User) {
+    const result: Partial<User> = { ...user };
+    delete result.password;
+    return result;
   }
 }

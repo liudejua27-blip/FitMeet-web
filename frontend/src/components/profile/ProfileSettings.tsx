@@ -1,80 +1,224 @@
-import { memo, useState, useCallback } from 'react';
+﻿import { memo, useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import type { ReactNode } from 'react';
 import type { UserProfile } from '../../types';
+import * as dataService from '../../services/dataService';
+import type { EmergencyContact, VerificationRequest } from '../../api/client';
 
 interface ProfileSettingsProps {
   profile: UserProfile;
+  onVerificationApproved?: () => Promise<void>;
 }
 
-interface SettingToggleProps {
-  label: string;
-  description: string;
-  icon: string;
-  defaultChecked?: boolean;
-}
+export const ProfileSettings = memo(function ProfileSettings({
+  profile,
+  onVerificationApproved,
+}: ProfileSettingsProps) {
+  const [contacts, setContacts] = useState<EmergencyContact[]>([]);
+  const [verifications, setVerifications] = useState<VerificationRequest[]>([]);
+  const [realName, setRealName] = useState('');
+  const [idNumberMasked, setIdNumberMasked] = useState('');
+  const [certName, setCertName] = useState('');
+  const [contactName, setContactName] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
+  const [contactRelation, setContactRelation] = useState('');
+  const [message, setMessage] = useState('');
 
-export const ProfileSettings = memo(function ProfileSettings({ profile }: ProfileSettingsProps) {
+  const refreshSafety = useCallback(async () => {
+    const [nextContacts, nextVerifications] = await Promise.all([
+      dataService.getEmergencyContacts().catch(() => []),
+      dataService.getMyVerificationRequests().catch(() => []),
+    ]);
+    setContacts(nextContacts);
+    setVerifications(nextVerifications);
+  }, []);
+
+  useEffect(() => {
+    void refreshSafety();
+  }, [refreshSafety]);
+
+  const submitRealName = useCallback(async () => {
+    if (!realName.trim() || !idNumberMasked.trim()) {
+      setMessage('请填写姓名和证件尾号');
+      return;
+    }
+    const request = await dataService.createVerificationRequest({
+      type: 'real_name',
+      realName,
+      idNumberMasked,
+    });
+    setRealName('');
+    setIdNumberMasked('');
+    setMessage(
+      request.status === 'approved' ? '实名认证已通过' : '实名认证申请已提交',
+    );
+    await refreshSafety();
+    if (request.status === 'approved') {
+      await onVerificationApproved?.();
+    }
+  }, [idNumberMasked, onVerificationApproved, realName, refreshSafety]);
+
+  const submitCoach = useCallback(async () => {
+    if (!certName.trim()) {
+      setMessage('请填写教练资质名称');
+      return;
+    }
+    await dataService.createVerificationRequest({
+      type: 'coach',
+      certName,
+    });
+    setCertName('');
+    setMessage('教练认证已通过');
+    void refreshSafety();
+  }, [certName, refreshSafety]);
+
+  const addContact = useCallback(async () => {
+    if (!contactName.trim() || !contactPhone.trim()) {
+      setMessage('请填写紧急联系人姓名和手机号');
+      return;
+    }
+    await dataService.addEmergencyContact({
+      name: contactName,
+      phone: contactPhone,
+      relation: contactRelation || '紧急联系人',
+    });
+    setContactName('');
+    setContactPhone('');
+    setContactRelation('');
+    setMessage('紧急联系人已保存');
+    void refreshSafety();
+  }, [contactName, contactPhone, contactRelation, refreshSafety]);
+
+  const latestRealName = verifications.find((item) => item.type === 'real_name');
+  const latestCoach = verifications.find((item) => item.type === 'coach');
+  const realNameStatus =
+    profile.verified || latestRealName?.status === 'approved'
+      ? '实名认证已通过'
+      : latestRealName?.status || '未提交';
+
   return (
     <div className="space-y-6">
-      {/* Safety & Verification */}
-      <SettingSection title="🛡️ 安全与认证">
-        <SettingToggle
-          icon="🪪"
+      {message && (
+        <div className="rounded-xl border border-lime/25 bg-lime/10 px-4 py-3 text-sm font-bold text-lime">
+          {message}
+        </div>
+      )}
+
+      <SettingSection title="安全与认证">
+        <SettingStatus
           label="实名认证"
-          description="完成实名认证获得信任标识"
-          defaultChecked={profile.verified}
+          value={realNameStatus}
         />
-        <SettingToggle
-          icon="📹"
-          label="视频认证"
-          description="通过视频验证真人身份"
+        <div className="grid gap-2 px-4 py-3.5 sm:grid-cols-[1fr_1fr_auto]">
+          <input
+            value={realName}
+            onChange={(event) => setRealName(event.target.value)}
+            placeholder="真实姓名"
+            className="rounded-lg border border-border bg-surfaceMuted px-3 py-2 text-sm outline-none focus:border-lime/30"
+          />
+          <input
+            value={idNumberMasked}
+            onChange={(event) => setIdNumberMasked(event.target.value)}
+            placeholder="证件后四位"
+            className="rounded-lg border border-border bg-surfaceMuted px-3 py-2 text-sm outline-none focus:border-lime/30"
+          />
+          <button
+            className="rounded-full bg-lime px-4 py-2 text-sm font-bold text-white"
+            onClick={submitRealName}
+          >
+            提交
+          </button>
+        </div>
+
+        <SettingStatus
+          label="教练认证"
+          value={profile.isCoach ? '已通过' : latestCoach?.status || '未提交'}
         />
-        <SettingToggle
-          icon="📍"
-          label="行程分享"
-          description="约练期间自动分享行程给紧急联系人"
-          defaultChecked
-        />
-        <SettingItem icon="📞" label="紧急联系人" value="已设置 1 人" action="编辑" />
-        <SettingItem icon="🚨" label="举报中心" value="" action="进入" />
+        <div className="grid gap-2 px-4 py-3.5 sm:grid-cols-[1fr_auto]">
+          <input
+            value={certName}
+            onChange={(event) => setCertName(event.target.value)}
+            placeholder="证书或资质名称"
+            className="rounded-lg border border-border bg-surfaceMuted px-3 py-2 text-sm outline-none focus:border-lime/30"
+          />
+          <button
+            className="rounded-full bg-lime px-4 py-2 text-sm font-bold text-white"
+            onClick={submitCoach}
+          >
+            提交
+          </button>
+        </div>
+
+        <SettingLink icon="!" label="举报与社区规范" to="/community" />
       </SettingSection>
 
-      {/* Coach Mode */}
-      <SettingSection title="🏋️ 教练模式">
-        <SettingToggle
-          icon="🎓"
-          label="教练模式"
-          description={profile.isCoach ? '你已开启教练身份' : '开启后可接受约课和约练'}
-          defaultChecked={profile.isCoach}
-        />
-        {profile.isCoach && (
-          <>
-            <SettingItem icon="💳" label="收款方式" value="微信支付" action="修改" />
-            <SettingItem icon="📊" label="收入明细" value={`¥${profile.coachIncome?.toLocaleString() || 0}`} action="查看" />
-          </>
-        )}
+      <SettingSection title="紧急联系人">
+        <div className="space-y-2 px-4 py-3.5">
+          {contacts.map((contact) => (
+            <div
+              key={contact.id}
+              className="flex items-center justify-between rounded-lg border border-border bg-surfaceMuted px-3 py-2"
+            >
+              <div>
+                <div className="text-sm font-bold">{contact.name}</div>
+                <div className="text-xs text-textMuted">
+                  {contact.relation} · {contact.phone}
+                </div>
+              </div>
+              <button
+                className="text-xs font-bold text-red-300"
+                onClick={() => {
+                  dataService.deleteEmergencyContact(contact.id).then(() => {
+                    void refreshSafety();
+                  });
+                }}
+              >
+                删除
+              </button>
+            </div>
+          ))}
+
+          <div className="grid gap-2 sm:grid-cols-3">
+            <input
+              value={contactName}
+              onChange={(event) => setContactName(event.target.value)}
+              placeholder="姓名"
+              className="rounded-lg border border-border bg-surfaceMuted px-3 py-2 text-sm outline-none focus:border-lime/30"
+            />
+            <input
+              value={contactPhone}
+              onChange={(event) => setContactPhone(event.target.value)}
+              placeholder="手机号"
+              className="rounded-lg border border-border bg-surfaceMuted px-3 py-2 text-sm outline-none focus:border-lime/30"
+            />
+            <input
+              value={contactRelation}
+              onChange={(event) => setContactRelation(event.target.value)}
+              placeholder="关系"
+              className="rounded-lg border border-border bg-surfaceMuted px-3 py-2 text-sm outline-none focus:border-lime/30"
+            />
+          </div>
+          <button
+            className="rounded-full border border-lime/30 px-4 py-2 text-sm font-bold text-lime transition hover:bg-lime hover:text-white"
+            onClick={addContact}
+          >
+            保存联系人
+          </button>
+        </div>
       </SettingSection>
 
-      {/* Account */}
-      <SettingSection title="⚙️ 账号设置">
-        <SettingItem icon="📱" label="手机号" value="138****8888" action="修改" />
-        <SettingItem icon="🔑" label="修改密码" value="" action="修改" />
-        <SettingItem icon="🔔" label="通知设置" value="已开启" action="管理" />
-        <SettingItem icon="🌐" label="隐私设置" value="" action="管理" />
-        <SettingItem icon="📦" label="数据导出" value="" action="导出" />
+      <SettingSection title="账号设置">
+        <SettingItem label="手机号" value="绑定后可用于短信登录" />
+        <SettingItem label="通知设置" value="系统通知、私信和约练提醒" />
+        <SettingItem label="隐私设置" value="控制资料、动态和距离展示" />
       </SettingSection>
 
-      {/* About */}
-      <SettingSection title="ℹ️ 关于">
-        <SettingItem icon="📄" label="用户协议" value="" action="查看" />
-        <SettingItem icon="🔒" label="隐私政策" value="" action="查看" />
-        <SettingItem icon="📧" label="联系我们" value="support@fitapp.cn" action="" />
-        <SettingItem icon="📱" label="当前版本" value="v1.0.0" action="" />
+      <SettingSection title="关于">
+        <SettingLink label="用户协议" to="/terms" />
+        <SettingLink label="隐私政策" to="/privacy" />
+        <SettingLink label="社区规范" to="/community" />
+        <SettingItem label="联系我们" value="support@fitapp.cn" />
       </SettingSection>
-
-      {/* Logout */}
-      <button className="w-full py-3 rounded-xl border border-red-500/30 text-red-400 font-bold text-sm hover:bg-red-500/10 transition">
-        退出登录
-      </button>
     </div>
   );
 });
@@ -84,67 +228,61 @@ const SettingSection = memo(function SettingSection({
   children,
 }: {
   title: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div>
-      <h3 className="font-display font-bold text-lg mb-3">{title}</h3>
-      <div className="bg-surface border border-border rounded-xl overflow-hidden divide-y divide-border">
+      <h3 className="mb-3 font-display text-lg font-bold">{title}</h3>
+      <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface">
         {children}
       </div>
     </div>
   );
 });
 
-const SettingToggle = memo(function SettingToggle({
-  icon,
+const SettingStatus = memo(function SettingStatus({
   label,
-  description,
-  defaultChecked = false,
-}: SettingToggleProps) {
-  const [checked, setChecked] = useState(defaultChecked);
-  const toggle = useCallback(() => setChecked((c) => !c), []);
-
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
   return (
     <div className="flex items-center gap-3 px-4 py-3.5">
-      <span className="text-xl">{icon}</span>
-      <div className="flex-1">
-        <div className="font-semibold text-sm">{label}</div>
-        <div className="text-[10px] text-textMuted mt-0.5">{description}</div>
-      </div>
-      <button
-        onClick={toggle}
-        className={`w-11 h-6 rounded-full transition-colors relative ${checked ? 'bg-lime' : 'bg-surfaceMuted'}`}
-      >
-        <span
-          className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-            checked ? 'left-[22px]' : 'left-0.5'
-          }`}
-        />
-      </button>
+      <div className="flex-1 text-sm font-semibold">{label}</div>
+      <span className="rounded-full border border-border px-3 py-1 text-xs text-textMuted">
+        {value}
+      </span>
     </div>
   );
 });
 
-const SettingItem = memo(function SettingItem({
+const SettingItem = memo(function SettingItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-3.5">
+      <div className="flex-1 text-sm font-semibold">{label}</div>
+      <span className="text-xs text-textMuted">{value}</span>
+    </div>
+  );
+});
+
+const SettingLink = memo(function SettingLink({
   icon,
   label,
-  value,
-  action,
+  to,
 }: {
-  icon: string;
+  icon?: string;
   label: string;
-  value: string;
-  action: string;
+  to: string;
 }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-3.5 hover:bg-surfaceMuted/50 transition cursor-pointer">
-      <span className="text-xl">{icon}</span>
-      <div className="flex-1 font-semibold text-sm">{label}</div>
-      {value && <span className="text-xs text-textMuted">{value}</span>}
-      {action && (
-        <span className="text-xs text-lime font-bold">{action} ›</span>
-      )}
-    </div>
+    <Link
+      to={to}
+      className="flex cursor-pointer items-center gap-3 px-4 py-3.5 transition hover:bg-surfaceMuted/50"
+    >
+      {icon && <span className="text-xl">{icon}</span>}
+      <div className="flex-1 text-sm font-semibold">{label}</div>
+      <span className="text-xs font-bold text-lime">查看</span>
+    </Link>
   );
 });

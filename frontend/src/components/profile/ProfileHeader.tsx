@@ -1,6 +1,6 @@
 import { memo, useCallback, useState } from 'react';
 import type { UserProfile } from '../../types';
-import { Button, Badge } from '../ui';
+import { Button, Badge, SportVisual } from '../ui';
 
 interface ProfileHeaderProps {
   profile: UserProfile;
@@ -12,9 +12,9 @@ export const ProfileHeader = memo(function ProfileHeader({ profile, onEdit }: Pr
 
   const handleShare = useCallback(() => {
     const shareUrl = `${window.location.origin}/user/${profile.id}`;
-    const shareText = `来看看 FitMate 上的 ${profile.name} 的个人主页！`;
+    const shareText = `来看看 FitMeet 上的 ${profile.name} 的个人主页！`;
     if (navigator.share) {
-      navigator.share({ title: `${profile.name} - FitMate`, text: shareText, url: shareUrl }).catch(() => {});
+      navigator.share({ title: `${profile.name} - FitMeet`, text: shareText, url: shareUrl }).catch(() => {});
     } else {
       navigator.clipboard.writeText(`${shareText}\n${shareUrl}`).then(() => {
         setShareToast(true);
@@ -26,19 +26,9 @@ export const ProfileHeader = memo(function ProfileHeader({ profile, onEdit }: Pr
   return (
     <div className="relative">
       {/* Cover Photo */}
-      <div
-        className="h-48 md:h-56 relative"
-        style={{
-          background: 'linear-gradient(135deg, #1a2200 0%, #0a1500 50%, #111113 100%)',
-        }}
-      >
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage: 'linear-gradient(rgba(200,255,0,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(200,255,0,0.03) 1px, transparent 1px)',
-            backgroundSize: '40px 40px',
-          }}
-        />
+      <div className="relative h-48 overflow-hidden md:h-56">
+        <SportVisual className="h-full w-full rounded-none" label={profile.name} variant="gym" />
+        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(18,11,7,0.06),rgba(18,11,7,0.88))]" />
         <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-base to-transparent" />
       </div>
 
@@ -48,13 +38,13 @@ export const ProfileHeader = memo(function ProfileHeader({ profile, onEdit }: Pr
           {/* Avatar */}
           <div className="relative">
             <div
-              className="w-24 h-24 md:w-28 md:h-28 rounded-full flex items-center justify-center text-3xl font-display font-bold text-[#09090A] border-4 border-base shadow-card"
+              className="flex h-24 w-24 items-center justify-center rounded-2xl border-4 border-base text-3xl font-display font-bold text-white shadow-card md:h-28 md:w-28"
               style={{ backgroundColor: profile.color }}
             >
               {profile.avatar}
             </div>
             {profile.singleCert && (
-              <div className="absolute -bottom-1 -right-1 bg-yellow-500 rounded-full w-8 h-8 flex items-center justify-center text-lg border-2 border-base" title="单身认证">
+              <div className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-lg border-2 border-base bg-amber text-lg" title="单身认证">
                 ⭐
               </div>
             )}
@@ -79,7 +69,7 @@ export const ProfileHeader = memo(function ProfileHeader({ profile, onEdit }: Pr
               {profile.interestTags.map((tag, i) => (
                 <span
                   key={i}
-                  className="px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-limeDim border border-lime/20 text-lime"
+                  className="rounded-lg border border-lime/20 bg-limeDim px-2.5 py-1 text-[11px] font-black text-lime"
                 >
                   {tag}
                 </span>
@@ -117,7 +107,7 @@ export const ProfileHeader = memo(function ProfileHeader({ profile, onEdit }: Pr
 
       {/* Share Toast */}
       {shareToast && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-xl bg-lime text-[#09090A] font-bold text-sm shadow-glow animate-bounce">
+        <div className="fixed left-1/2 top-20 z-[100] -translate-x-1/2 rounded-xl bg-lime px-6 py-3 text-sm font-bold text-white shadow-glow">
           ✅ 链接已复制到剪贴板
         </div>
       )}

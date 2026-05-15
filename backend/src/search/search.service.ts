@@ -17,32 +17,62 @@ export class SearchService {
   ) {}
 
   async search(query: string) {
-    if (!query || query.trim().length === 0) return { users: [], posts: [], coaches: [] };
+    if (!query || query.trim().length === 0)
+      return { users: [], posts: [], coaches: [] };
 
-    const users = await this.userRepo.createQueryBuilder('user')
-      .where("to_tsvector('simple', user.name || ' ' || coalesce(user.bio, '')) @@ to_tsquery('simple', :q)", { q: `${query}:*` })
+    const users = await this.userRepo
+      .createQueryBuilder('user')
+      .where(
+        "to_tsvector('simple', user.name || ' ' || coalesce(user.bio, '')) @@ to_tsquery('simple', :q)",
+        { q: `${query}:*` },
+      )
       .orWhere('user.name ILIKE :lq', { lq: `%${query}%` }) // Fallback for short words
       .take(10)
       .getMany();
 
-    const posts = await this.postRepo.createQueryBuilder('post')
+    const posts = await this.postRepo
+      .createQueryBuilder('post')
       .leftJoinAndSelect('post.user', 'user')
-      .where("to_tsvector('simple', coalesce(post.title, '') || ' ' || post.text || ' ' || array_to_string(string_to_array(post.tags, ','), ' ')) @@ to_tsquery('simple', :q)", { q: `${query}:*` })
-      .orWhere('post.title ILIKE :lq OR post.text ILIKE :lq', { lq: `%${query}%` })
+      .where(
+        "to_tsvector('simple', coalesce(post.title, '') || ' ' || post.text || ' ' || array_to_string(string_to_array(post.tags, ','), ' ')) @@ to_tsquery('simple', :q)",
+        { q: `${query}:*` },
+      )
+      .orWhere('post.title ILIKE :lq OR post.text ILIKE :lq', {
+        lq: `%${query}%`,
+      })
       .take(10)
       .getMany();
 
-    const coaches = await this.coachRepo.createQueryBuilder('coach')
+    const coaches = await this.coachRepo
+      .createQueryBuilder('coach')
       .leftJoinAndSelect('coach.user', 'user')
-      .where("to_tsvector('simple', coach.desc || ' ' || coach.specialty) @@ to_tsquery('simple', :q)", { q: `${query}:*` })
+      .where(
+        "to_tsvector('simple', coach.desc || ' ' || coach.specialty) @@ to_tsquery('simple', :q)",
+        { q: `${query}:*` },
+      )
       .orWhere('coach.desc ILIKE :lq', { lq: `%${query}%` })
       .take(5)
       .getMany();
 
     return {
-      users: users.map(u => ({ id: u.id, name: u.name, avatar: u.avatar, type: 'user' })),
-      posts: posts.map(p => ({ id: p.id, content: p.text.substring(0, 50), author: p.user.name, type: 'post' })),
-      coaches: coaches.map(c => ({ id: c.id, name: c.user.name, title: c.specialty, type: 'coach' })),
+      users: users.map((u) => ({
+        id: u.id,
+        name: u.name,
+        avatar: u.avatar,
+        type: 'user',
+      })),
+      posts: posts.map((p) => ({
+        id: p.id,
+        content: p.text.substring(0, 50),
+        author: p.user.name,
+        type: 'post',
+      })),
+      coaches: coaches.map((c) => ({
+        id: c.id,
+        name: c.user.name,
+        title: c.specialty,
+        type: 'coach',
+      })),
     };
   }
 
@@ -60,6 +90,6 @@ export class SearchService {
     // Assuming tags is a string column for now based on simple ILike usage above,
     // or if simple-array in TypeORM, ILike works on the stringified version.
 
-    return users.map(u => u.name);
+    return users.map((u) => u.name);
   }
 }

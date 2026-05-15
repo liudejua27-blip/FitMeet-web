@@ -6,10 +6,11 @@ import { Post } from './post.entity';
 import { PostLike } from './post-like.entity';
 import { PostSave } from './post-save.entity';
 import { ModerationModule } from '../moderation/moderation.module';
+import { Meet } from '../meets/meet.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Post, PostLike, PostSave]),
+    TypeOrmModule.forFeature([Post, PostLike, PostSave, Meet]),
     ModerationModule,
   ],
   controllers: [PostsController],

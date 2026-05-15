@@ -17,7 +17,7 @@ export const Card = React.memo(function Card({
   return (
     <div
       className={cn(
-        'bg-surface border border-border rounded-2xl overflow-hidden transition-all duration-200',
+        'bg-surface border border-border rounded-xl overflow-hidden transition-all duration-200',
         variant === 'interactive' && 'cursor-pointer hover:border-borderStrong hover:-translate-y-1 hover:shadow-card',
         variant === 'selected' && 'border-lime/45 bg-surfaceMuted',
         padding === 'sm' && 'p-3',

@@ -12,7 +12,7 @@ export interface AvatarProps {
 
 export const Avatar = React.memo(function Avatar({
   name,
-  color = '#C8FF00',
+  color = '#FF6A00',
   size = 'md',
   online,
   verified,
@@ -29,7 +29,7 @@ export const Avatar = React.memo(function Avatar({
     <div className={cn('relative inline-flex', className)}>
       <div
         className={cn(
-          'rounded-full flex items-center justify-center font-display font-bold text-base',
+          'rounded-lg flex items-center justify-center font-display font-bold text-base text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.18)]',
           sizeClasses[size]
         )}
         style={{ backgroundColor: color }}
@@ -50,7 +50,7 @@ export const Avatar = React.memo(function Avatar({
 
       {/* Verified badge */}
       {verified && (
-        <div className="absolute -right-1 -top-1 w-4 h-4 bg-lime rounded-full flex items-center justify-center text-[8px] text-[#09090A]">
+        <div className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-md bg-lime text-[8px] text-white">
           ✓
         </div>
       )}

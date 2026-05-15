@@ -50,6 +50,24 @@ export class Post {
   @Column({ default: '' })
   dist!: string;
 
+  @Column({ default: '' })
+  city!: string;
+
+  @Column({ default: '' })
+  loc!: string;
+
+  @Column({ default: '' })
+  address!: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  poiId!: string | null;
+
+  @Column({ type: 'double precision', nullable: true })
+  lat!: number | null;
+
+  @Column({ type: 'double precision', nullable: true })
+  lng!: number | null;
+
   @Column({ default: 0 })
   likesCount!: number;
 

@@ -1,5 +1,6 @@
-import { useCallback } from 'react';
+﻿import { useCallback } from 'react';
 import clsx from 'clsx';
+import { useNavigate } from 'react-router-dom';
 import { useNotificationStore } from '../stores';
 import type { AppNotification } from '../stores';
 
@@ -21,28 +22,41 @@ const NOTIF_COLORS: Record<AppNotification['type'], string> = {
 
 export const NotificationsPage = () => {
   const { notifications, unreadCount, markAsRead, markAllRead } = useNotificationStore();
+  const navigate = useNavigate();
 
   const handleClick = useCallback(
-    (id: number) => {
-      markAsRead(id);
+    (notif: AppNotification) => {
+      markAsRead(notif.id);
+      if (notif.targetType === 'user' && notif.targetId) {
+        navigate(`/user/${notif.targetId}`);
+      } else if (notif.targetType === 'meet' && notif.targetId) {
+        navigate('/meet', { state: { highlightMeetId: notif.targetId } });
+      } else if (notif.targetType === 'post' && notif.targetId) {
+        navigate('/discover', { state: { highlightPostId: notif.targetId } });
+      } else if (notif.type === 'follow') {
+        // no targetId — go to discover feed
+        navigate('/discover');
+      } else if (notif.type === 'meet') {
+        navigate('/meet');
+      }
     },
-    [markAsRead]
+    [markAsRead, navigate],
   );
 
   return (
-    <div className="min-h-screen pb-20">
+    <div className="min-h-screen bg-base pb-20 text-cream">
       {/* Header */}
       <div className="sticky top-16 z-40 border-b border-border bg-base/95 backdrop-blur-xl">
         <div className="max-w-2xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
-            <h2 className="font-display font-bold text-lg text-white">🔔 通知中心</h2>
+            <h2 className="font-display text-lg font-black text-white">通知中心</h2>
             <p className="text-xs text-textSofter mt-0.5">
               {unreadCount > 0 ? `${unreadCount} 条未读通知` : '全部已读'}
             </p>
           </div>
           {unreadCount > 0 && (
             <button
-              className="px-3 py-1.5 rounded-full text-xs font-semibold bg-surfaceMuted text-textMuted border border-border hover:text-white hover:border-borderStrong transition cursor-pointer"
+              className="cursor-pointer rounded-lg border border-border bg-surfaceMuted px-3 py-1.5 text-xs font-semibold text-textMuted transition hover:border-borderStrong hover:text-white"
               onClick={markAllRead}
             >
               全部已读
@@ -63,12 +77,12 @@ export const NotificationsPage = () => {
                   ? 'border-border bg-surface/50 hover:bg-surface'
                   : `border-l-2 ${NOTIF_COLORS[notif.type]} bg-surface hover:bg-surfaceMuted`
               )}
-              onClick={() => handleClick(notif.id)}
+              onClick={() => handleClick(notif)}
             >
               {/* Icon */}
               <div className="flex-shrink-0 mt-0.5">
                 <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-[#09090A]"
+                  className="flex h-10 w-10 items-center justify-center rounded-lg text-sm font-black text-white"
                   style={{ background: notif.color }}
                 >
                   {notif.avatar}

@@ -1,4 +1,4 @@
-import { memo, useState, useCallback } from 'react';
+﻿import { memo, useState, useCallback } from 'react';
 import type { MeetRecord } from '../../types';
 import { useNotificationStore } from '../../stores';
 
@@ -36,7 +36,7 @@ export const ProfileMeets = memo(function ProfileMeets({ records: initialRecords
       type: 'meet',
       username: record?.partner || '约练',
       avatar: (record?.partner || '约')[0],
-      color: '#C8FF00',
+      color: '#FF6A00',
       text: `你已确认约练「${record?.sport}」`,
       time: '刚刚',
     });
@@ -92,9 +92,9 @@ export const ProfileMeets = memo(function ProfileMeets({ records: initialRecords
           <button
             key={tab.key}
             onClick={() => setFilter(tab.key)}
-            className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition ${
+            className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-bold transition ${
               filter === tab.key
-                ? 'bg-lime text-[#09090A]'
+                ? 'bg-lime text-white'
                 : 'bg-surface border border-border text-textMuted hover:border-borderStrong'
             }`}
           >
@@ -162,7 +162,7 @@ export const ProfileMeets = memo(function ProfileMeets({ records: initialRecords
                 取消
               </button>
               <button
-                className="flex-1 py-2 rounded-lg bg-lime text-[#09090A] text-sm font-bold hover:bg-[#d4ff1a] transition cursor-pointer disabled:opacity-50"
+                className="flex-1 cursor-pointer rounded-lg bg-lime py-2 text-sm font-bold text-white transition hover:bg-brand2 disabled:opacity-50"
                 onClick={handleSubmitReview}
                 disabled={!reviewText.trim()}
               >
@@ -175,7 +175,7 @@ export const ProfileMeets = memo(function ProfileMeets({ records: initialRecords
 
       {/* Success Toast */}
       {successMsg && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-xl bg-lime text-[#09090A] font-bold text-sm shadow-glow animate-bounce">
+        <div className="fixed left-1/2 top-20 z-[100] -translate-x-1/2 rounded-xl bg-lime px-6 py-3 text-sm font-bold text-white shadow-glow">
           ✅ {successMsg}
         </div>
       )}
@@ -205,7 +205,7 @@ const MeetRecordCard = memo(function MeetRecordCard({
             <span>📅 {record.time}</span>
           </div>
         </div>
-        <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${status.color}`}>
+        <span className={`rounded-md px-2 py-1 text-[10px] font-bold ${status.color}`}>
           {status.label}
         </span>
       </div>
@@ -216,7 +216,7 @@ const MeetRecordCard = memo(function MeetRecordCard({
           <>
             <span className="text-border">|</span>
             <span className="flex items-center gap-1">
-              <span className="w-5 h-5 rounded-full bg-surfaceMuted inline-block text-center leading-5 text-[10px]">
+              <span className="inline-block h-5 w-5 rounded-md bg-surfaceMuted text-center text-[10px] leading-5">
                 👤
               </span>
               {record.partner}
@@ -240,7 +240,7 @@ const MeetRecordCard = memo(function MeetRecordCard({
       {record.status === 'pending' && (
         <div className="mt-3 pt-3 border-t border-border flex gap-2">
           <button
-            className="flex-1 py-2 rounded-lg bg-lime text-[#09090A] text-xs font-bold hover:bg-[#d4ff1a] transition cursor-pointer"
+            className="flex-1 cursor-pointer rounded-lg bg-lime py-2 text-xs font-bold text-white transition hover:bg-brand2"
             onClick={() => onConfirm(record.id)}
           >
             确认

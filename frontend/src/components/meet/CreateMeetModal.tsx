@@ -1,70 +1,66 @@
-import { memo, useState, useCallback } from 'react';
-import { Button } from '../ui';
-import { validateField, sanitizeInput } from '../../lib/utils';
+﻿import { memo, useCallback, useState } from 'react';
+import type { AmapPlace } from '../../lib/amap';
+import { getBrowserLocation, resolveCurrentPlace } from '../../lib/location';
+import { sanitizeInput, validateField } from '../../lib/utils';
 import { useModalA11y } from '../../hooks/useModalA11y';
+import { LocationPicker } from './LocationPicker';
+import { LEVEL_FILTERS, SPORT_GROUP_OPTIONS, getSportLabel, normalizeSportGroup } from '../../data/taxonomy';
 
 interface CreateMeetModalProps {
   open: boolean;
   onClose: () => void;
   onSubmit: (data: MeetFormData) => void;
+  clubContext?: {
+    clubId: number;
+    clubName: string;
+    city: string;
+    sportType: string;
+  };
 }
 
 export interface MeetFormData {
   title: string;
   type: string;
+  sport: string;
+  customCategoryName?: string;
+  subcategoryId?: string;
+  scenarioTags?: string[];
+  equipmentTags?: string[];
   time: string;
   location: string;
+  address?: string;
+  poiId?: string;
+  lat?: number;
+  lng?: number;
+  clubId?: number;
+  city?: string;
+  startAt?: string;
   maxSlots: number;
   level: string;
   price: string;
-  feeType: string;
+  feeType: 'free';
   groupType: string;
   creatorType: string;
   desc: string;
 }
 
-const sportTypes = [
-  { id: 'gym', label: '🏋️ 健身房' },
-  { id: 'run', label: '🏃 跑步' },
-  { id: 'yoga', label: '🧘 瑜伽' },
-  { id: 'outdoor', label: '🌿 户外' },
-  { id: 'swim', label: '🏊 游泳' },
-  { id: 'martial', label: '🥊 武术' },
-  { id: 'ball', label: '⚽ 球类' },
-];
-
-const levels = [
-  { id: 'all', label: '全部水平' },
-  { id: 'beginner', label: '新手' },
-  { id: 'intermediate', label: '进阶' },
-  { id: 'pro', label: '专业' },
-];
-
-const feeTypes = [
-  { id: 'free', label: '免费' },
-  { id: 'aa', label: 'AA制' },
-  { id: 'paid', label: '付费带练' },
-];
-
-const groupTypes = [
-  { id: '1v1', label: '1对1' },
-  { id: 'small', label: '小组(3-5人)' },
-  { id: 'group', label: '多人(6+)' },
-];
-
-const creatorTypes = [
-  { id: 'find-coach', label: '寻找教练' },
-  { id: 'coach-mode', label: '我来带练' },
-  { id: 'peer', label: '互助约练' },
-];
-
-export const CreateMeetModal = memo(function CreateMeetModal({ open, onClose, onSubmit }: CreateMeetModalProps) {
-  const { containerRef, handleBackdropClick } = useModalA11y<HTMLDivElement>({ open, onClose });
-  const [form, setForm] = useState<MeetFormData>({
+const createInitialMeetForm = (
+  clubContext?: CreateMeetModalProps['clubContext'],
+): MeetFormData => {
+  const sportId = normalizeSportGroup(clubContext?.sportType);
+  const sport = SPORT_GROUP_OPTIONS.find((item) => item.id === sportId) || SPORT_GROUP_OPTIONS[0];
+  return {
     title: '',
-    type: 'gym',
+    type: sport.id,
+    sport: sport.shortLabel,
+    customCategoryName: '',
+    subcategoryId: '',
+    scenarioTags: [],
+    equipmentTags: [],
     time: '',
     location: '',
+    clubId: clubContext?.clubId,
+    city: clubContext?.city,
     maxSlots: 4,
     level: 'all',
     price: '免费',
@@ -72,260 +68,448 @@ export const CreateMeetModal = memo(function CreateMeetModal({ open, onClose, on
     groupType: 'small',
     creatorType: 'peer',
     desc: '',
+  };
+};
+
+const groupTypes = [
+  { id: '1v1', label: '1 对 1' },
+  { id: 'small', label: '小组 3-5 人' },
+  { id: 'group', label: '多人 6+' },
+];
+
+const creatorTypes = [
+  { id: 'find-coach', label: '找教练' },
+  { id: 'coach-mode', label: '我来带练' },
+  { id: 'peer', label: '互助约练' },
+];
+
+export const CreateMeetModal = memo(function CreateMeetModal({
+  open,
+  onClose,
+  onSubmit,
+  clubContext,
+}: CreateMeetModalProps) {
+  const { containerRef, handleBackdropClick } = useModalA11y<HTMLDivElement>({
+    open,
+    onClose,
   });
-
+  const [form, setForm] = useState<MeetFormData>(() => createInitialMeetForm(clubContext));
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [locating, setLocating] = useState(false);
+  const [coordsForSearch, setCoordsForSearch] = useState<{ lat: number; lng: number } | null>(null);
+  const [step, setStep] = useState(1);
 
-  const updateField = useCallback(<K extends keyof MeetFormData>(key: K, value: MeetFormData[K]) => {
-    setForm(prev => ({ ...prev, [key]: value }));
-    // Clear field error on change
-    setErrors(prev => { const next = { ...prev }; delete next[key]; return next; });
+  const updateField = useCallback(
+    <K extends keyof MeetFormData>(key: K, value: MeetFormData[K]) => {
+      setForm((prev) => ({ ...prev, [key]: value }));
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    },
+    [],
+  );
+
+  const handleSportChange = useCallback((id: string) => {
+    const sport = SPORT_GROUP_OPTIONS.find((item) => item.id === id);
+    setForm((prev) => ({
+      ...prev,
+      type: id,
+      sport: sport?.shortLabel || id,
+      customCategoryName: id === 'other' ? prev.customCategoryName : '',
+    }));
   }, []);
 
+  const handlePlaceSelect = useCallback((place: AmapPlace) => {
+    setForm((prev) => ({
+      ...prev,
+      location: place.name,
+      address: [place.district, place.address].filter(Boolean).join(' '),
+      poiId: place.id,
+      lat: place.location.lat,
+      lng: place.location.lng,
+      city: place.district || prev.city,
+    }));
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.location;
+      return next;
+    });
+  }, []);
+
+  const handleLocationTextChange = useCallback((value: string) => {
+    setForm((prev) => ({
+      ...prev,
+      location: value,
+      address: '',
+      poiId: undefined,
+      lat: undefined,
+      lng: undefined,
+    }));
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.location;
+      return next;
+    });
+  }, []);
+
+  const handleUseCurrentLocation = useCallback(async () => {
+    setLocating(true);
+    try {
+      const coords = await getBrowserLocation();
+      setCoordsForSearch(coords);
+      handlePlaceSelect(await resolveCurrentPlace(coords));
+    } catch (error) {
+      setErrors((prev) => ({
+        ...prev,
+        location: error instanceof Error ? error.message : '定位失败，请检查浏览器权限',
+      }));
+    } finally {
+      setLocating(false);
+    }
+  }, [handlePlaceSelect]);
+
   const handleSubmit = useCallback(() => {
-    const errs: Record<string, string> = {};
-
+    const nextErrors: Record<string, string> = {};
     const titleErr = validateField(form.title, '标题', { maxLength: 50 });
-    if (titleErr) errs.title = titleErr;
-
-    if (!form.time) errs.time = '请选择时间';
-
+    if (titleErr) nextErrors.title = titleErr;
+    if (!form.time) nextErrors.time = '请选择时间';
     const locErr = validateField(form.location, '地点', { maxLength: 100 });
-    if (locErr) errs.location = locErr;
+    if (locErr) nextErrors.location = locErr;
+    if (!Number.isFinite(form.lat) || !Number.isFinite(form.lng)) {
+      nextErrors.location = '请选择地点或使用当前位置后再发布';
+    }
+    if (form.desc.trim().length > 500) {
+      nextErrors.desc = '描述不能超过 500 个字符';
+    }
+    if (form.type === 'other' && !form.customCategoryName?.trim()) {
+      nextErrors.customCategoryName = '请输入自定义品类名称';
+    }
 
-    if (form.desc && form.desc.trim().length > 500) errs.desc = '描述不能超过500个字符';
-
-    if (Object.keys(errs).length > 0) {
-      setErrors(errs);
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
       return;
     }
 
-    // Sanitize text fields before submitting
-    const sanitized: MeetFormData = {
+    onSubmit({
       ...form,
       title: sanitizeInput(form.title, 50),
+      sport: form.type === 'other'
+        ? sanitizeInput(form.customCategoryName || '', 20)
+        : getSportLabel(form.type),
+      customCategoryName: sanitizeInput(form.customCategoryName || '', 20),
       location: sanitizeInput(form.location, 100),
+      address: sanitizeInput(form.address || '', 120),
       desc: sanitizeInput(form.desc, 500),
       price: sanitizeInput(form.price, 50),
-    };
-    onSubmit(sanitized);
-    onClose();
-  }, [form, onSubmit, onClose]);
+      clubId: clubContext?.clubId,
+      city: clubContext?.city || form.city,
+      startAt: form.time,
+    });
+  }, [clubContext, form, onSubmit]);
 
   if (!open) return null;
 
+  const stepLabels = ['基本信息', '时间 & 地点', '详情设置'];
+
+  const canNext1 = form.title.trim().length > 0;
+  const hasLocation = Number.isFinite(form.lat) && Number.isFinite(form.lng);
+  const canNext2 = !!form.time && hasLocation;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={handleBackdropClick}>
-      <div ref={containerRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="发起约练" className="bg-surface border border-border rounded-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto outline-none">
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center bg-black/50 backdrop-blur-sm"
+      onClick={handleBackdropClick}
+    >
+      <div
+        ref={containerRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label="发起约练"
+        className="relative mx-0 w-full max-w-xl sm:mx-4 sm:rounded-2xl overflow-hidden bg-white shadow-2xl outline-none"
+        style={{ maxHeight: '92vh' }}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-border">
-          <h2 className="font-display font-extrabold text-xl">发起约练</h2>
+        <div className="flex items-center justify-between border-b border-[#e5ddd5] px-5 py-4">
           <button
-            className="w-8 h-8 rounded-full border border-border flex items-center justify-center text-textMuted hover:text-white hover:border-borderStrong transition cursor-pointer"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-[#76543e] transition hover:bg-[#f5f0eb] hover:text-[#1a1208]"
             onClick={onClose}
           >
-            ✕
+            <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
           </button>
+          <div className="text-center">
+            <h3 className="text-base font-black text-[#1a1208]">发起约练</h3>
+            <p className="text-xs text-[#8b6a54]">步骤 {step} / 3 — {stepLabels[step - 1]}</p>
+          </div>
+          <div className="w-8" />
         </div>
 
-        {/* Form */}
-        <div className="p-5 space-y-5">
-          {/* Title */}
-          <FormField label="约练标题" error={errors.title}>
-            <input
-              type="text"
-              placeholder="例：今晚望京深蹲约练"
-              value={form.title}
-              maxLength={50}
-              onChange={e => updateField('title', e.target.value)}
-              className="w-full bg-surfaceMuted border border-border rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-textSofter outline-none focus:border-lime/30"
-            />
-          </FormField>
+        {/* Progress bar */}
+        <div className="flex h-1.5 w-full">
+          {[1, 2, 3].map((s) => (
+            <div key={s} className={`flex-1 transition-all ${s <= step ? 'bg-lime' : 'bg-[#e5ddd5]'}`} style={{ marginRight: s < 3 ? 2 : 0 }} />
+          ))}
+        </div>
 
-          {/* Sport Type */}
-          <FormField label="运动类型">
-            <div className="flex flex-wrap gap-2">
-              {sportTypes.map(s => (
-                <button
-                  key={s.id}
-                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition cursor-pointer ${
-                    form.type === s.id
-                      ? 'bg-lime text-[#09090A] border-lime'
-                      : 'border-border text-textMuted hover:border-borderStrong'
-                  }`}
-                  onClick={() => updateField('type', s.id)}
-                >
-                  {s.label}
-                </button>
-              ))}
+        <div className="overflow-y-auto" style={{ maxHeight: 'calc(92vh - 130px)' }}>
+          {clubContext && (
+            <div className="mx-5 mt-4 rounded-xl border border-lime/20 bg-lime/5 px-4 py-2.5 text-xs font-bold text-lime">
+              发布到「{clubContext.clubName}」· {clubContext.city}
             </div>
-          </FormField>
+          )}
 
-          {/* Creator Type */}
-          <FormField label="约练模式">
-            <div className="flex gap-2">
-              {creatorTypes.map(c => (
-                <button
-                  key={c.id}
-                  className={`flex-1 py-2 rounded-lg text-xs font-semibold border transition cursor-pointer ${
-                    form.creatorType === c.id
-                      ? 'bg-lime/15 text-lime border-lime/30'
-                      : 'border-border text-textMuted hover:border-borderStrong'
-                  }`}
-                  onClick={() => updateField('creatorType', c.id)}
-                >
-                  {c.label}
-                </button>
-              ))}
-            </div>
-          </FormField>
-
-          {/* Time & Location */}
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="时间" error={errors.time}>
-              <input
-                type="datetime-local"
-                value={form.time}
-                onChange={e => updateField('time', e.target.value)}
-                className="w-full bg-surfaceMuted border border-border rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-lime/30"
-              />
-            </FormField>
-            <FormField label="地点" error={errors.location}>
-              <input
-                type="text"
-                placeholder="例：望京SOHO 极限健身"
-                value={form.location}
-                maxLength={100}
-                onChange={e => updateField('location', e.target.value)}
-                className="w-full bg-surfaceMuted border border-border rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-textSofter outline-none focus:border-lime/30"
-              />
-            </FormField>
-          </div>
-
-          {/* Group Type & Slots */}
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="人数类型">
-              <div className="flex flex-col gap-1.5">
-                {groupTypes.map(g => (
-                  <button
-                    key={g.id}
-                    className={`py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${
-                      form.groupType === g.id
-                        ? 'bg-lime/15 text-lime border-lime/30'
-                        : 'border-border text-textMuted hover:border-borderStrong'
-                    }`}
-                    onClick={() => updateField('groupType', g.id)}
-                  >
-                    {g.label}
-                  </button>
-                ))}
+          {/* Step 1: Title + Sport + CreatorType */}
+          {step === 1 && (
+            <div className="p-5 space-y-5">
+              <div>
+                <label className="mb-1.5 block text-xs font-black text-[#5a3d2b]">约练标题 <span className="text-red-400">*</span></label>
+                <input
+                  type="text"
+                  placeholder="如：今晚望京深蹲约练，求搭子"
+                  value={form.title}
+                  maxLength={50}
+                  onChange={(event) => updateField('title', event.target.value)}
+                  className="w-full rounded-xl border border-[#e5ddd5] bg-[#faf7f4] px-4 py-3 text-sm text-[#1a1208] outline-none transition placeholder:text-[#b09580] focus:border-lime/40 focus:bg-white"
+                />
+                {errors.title && <p className="mt-1 text-xs text-red-500">{errors.title}</p>}
+                <div className="mt-1 text-right text-[11px] text-[#b09580]">{form.title.length}/50</div>
               </div>
-            </FormField>
-            <FormField label="人数上限">
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={form.maxSlots}
-                onChange={e => updateField('maxSlots', parseInt(e.target.value) || 1)}
-                className="w-full bg-surfaceMuted border border-border rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-lime/30"
-              />
-            </FormField>
-          </div>
 
-          {/* Level */}
-          <FormField label="要求水平">
-            <div className="flex gap-2">
-              {levels.map(l => (
-                <button
-                  key={l.id}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${
-                    form.level === l.id
-                      ? 'bg-lime/15 text-lime border-lime/30'
-                      : 'border-border text-textMuted hover:border-borderStrong'
-                  }`}
-                  onClick={() => updateField('level', l.id)}
-                >
-                  {l.label}
-                </button>
-              ))}
+              <div>
+                <div className="mb-2 text-xs font-black text-[#5a3d2b]">运动类型</div>
+                <div className="flex flex-wrap gap-2">
+                  {SPORT_GROUP_OPTIONS.map((item) => (
+                    <button
+                      key={item.id}
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition ${
+                        form.type === item.id
+                          ? 'border-lime bg-lime text-white'
+                          : 'border-[#e5ddd5] text-[#5a3d2b] hover:border-lime/50 hover:text-lime'
+                      }`}
+                      onClick={() => handleSportChange(item.id)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {form.type === 'other' && (
+                <div>
+                  <label className="mb-1.5 block text-xs font-black text-[#5a3d2b]">自定义运动名称</label>
+                  <input
+                    type="text"
+                    placeholder="如：宠物徒步、飞盘高尔夫"
+                    value={form.customCategoryName || ''}
+                    maxLength={20}
+                    onChange={(event) => updateField('customCategoryName', event.target.value)}
+                    className="w-full rounded-xl border border-[#e5ddd5] bg-[#faf7f4] px-4 py-3 text-sm text-[#1a1208] outline-none transition placeholder:text-[#b09580] focus:border-lime/40 focus:bg-white"
+                  />
+                  {errors.customCategoryName && <p className="mt-1 text-xs text-red-500">{errors.customCategoryName}</p>}
+                </div>
+              )}
+
+              <div>
+                <div className="mb-2 text-xs font-black text-[#5a3d2b]">约练模式</div>
+                <div className="grid grid-cols-3 gap-3">
+                  {creatorTypes.map((item) => (
+                    <button
+                      key={item.id}
+                      className={`rounded-xl border-2 py-3 text-xs font-black transition ${
+                        form.creatorType === item.id
+                          ? 'border-lime bg-lime/5 text-lime'
+                          : 'border-[#e5ddd5] text-[#5a3d2b] hover:border-lime/40'
+                      }`}
+                      onClick={() => updateField('creatorType', item.id)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
-          </FormField>
+          )}
 
-          {/* Fee */}
-          <FormField label="费用设置">
-            <div className="flex gap-2 mb-2">
-              {feeTypes.map(f => (
-                <button
-                  key={f.id}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${
-                    form.feeType === f.id
-                      ? 'bg-lime/15 text-lime border-lime/30'
-                      : 'border-border text-textMuted hover:border-borderStrong'
-                  }`}
-                  onClick={() => {
-                    updateField('feeType', f.id);
-                    updateField('price', f.id === 'free' ? '免费' : f.id === 'aa' ? 'AA制' : '');
-                  }}
-                >
-                  {f.label}
-                </button>
-              ))}
+          {/* Step 2: Time + Location */}
+          {step === 2 && (
+            <div className="p-5 space-y-5">
+              <div>
+                <label className="mb-1.5 block text-xs font-black text-[#5a3d2b]">约练时间 <span className="text-red-400">*</span></label>
+                <input
+                  type="datetime-local"
+                  value={form.time}
+                  onChange={(event) => updateField('time', event.target.value)}
+                  className="w-full rounded-xl border border-[#e5ddd5] bg-[#faf7f4] px-4 py-3 text-sm text-[#1a1208] outline-none transition focus:border-lime/40 focus:bg-white"
+                />
+                {errors.time && <p className="mt-1 text-xs text-red-500">{errors.time}</p>}
+              </div>
+
+              {/* Location - full width prominent */}
+              <div className="rounded-2xl border border-[#e5ddd5] bg-[#faf7f4] p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-lime text-xs text-white">📍</span>
+                      <span className="text-sm font-black text-[#1a1208]">约练地点 <span className="text-red-400">*</span></span>
+                    </div>
+                    <p className="mt-1 text-xs text-[#8b6a54]">搜索高德 POI 或使用当前位置</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="flex items-center gap-1.5 rounded-lg border border-[#e5ddd5] bg-white px-3 py-1.5 text-xs font-bold text-[#76543e] transition hover:border-lime/40 hover:text-lime disabled:opacity-60"
+                    disabled={locating}
+                    onClick={handleUseCurrentLocation}
+                  >
+                    {locating ? (
+                      <><span className="h-3 w-3 animate-spin rounded-full border border-lime border-t-transparent" />定位中...</>
+                    ) : (
+                      <><span>📡</span>当前位置</>
+                    )}
+                  </button>
+                </div>
+
+                <LocationPicker
+                  value={form.location}
+                  error={errors.location}
+                  selectedLocation={Number.isFinite(form.lat) && Number.isFinite(form.lng) ? { lat: form.lat as number, lng: form.lng as number } : null}
+                  selectedTitle={form.location}
+                  showMap
+                  userCoords={coordsForSearch}
+                  onTextChange={handleLocationTextChange}
+                  onPlaceSelect={handlePlaceSelect}
+                />
+
+                {hasLocation && (
+                  <div className="mt-3 flex items-start gap-2 rounded-xl border border-lime/20 bg-lime/5 px-3 py-2.5">
+                    <span className="mt-0.5 text-sm text-lime">✓</span>
+                    <div className="text-xs text-[#5a3d2b]">
+                      <span className="font-bold">{form.location}</span>
+                      {form.address && <span className="ml-1 text-[#8b6a54]">· {form.address}</span>}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-            {form.feeType === 'paid' && (
-              <input
-                type="text"
-                placeholder="例：¥200/人"
-                value={form.price}
-                onChange={e => updateField('price', e.target.value)}
-                className="w-full bg-surfaceMuted border border-border rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-textSofter outline-none focus:border-lime/30"
-              />
-            )}
-          </FormField>
+          )}
 
-          {/* Description */}
-          <FormField label="详细描述" error={errors.desc}>
-            <textarea
-              placeholder="描述一下这次约练的具体安排..."
-              value={form.desc}
-              maxLength={500}
-              onChange={e => updateField('desc', e.target.value)}
-              rows={3}
-              className="w-full bg-surfaceMuted border border-border rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-textSofter outline-none focus:border-lime/30 resize-none"
-            />
-          </FormField>
+          {/* Step 3: GroupType + MaxSlots + Level + Desc */}
+          {step === 3 && (
+            <div className="p-5 space-y-5">
+              <div>
+                <div className="mb-2 text-xs font-black text-[#5a3d2b]">组队类型</div>
+                <div className="grid grid-cols-3 gap-3">
+                  {groupTypes.map((item) => (
+                    <button
+                      key={item.id}
+                      className={`rounded-xl border-2 py-3 text-xs font-black transition ${
+                        form.groupType === item.id
+                          ? 'border-lime bg-lime/5 text-lime'
+                          : 'border-[#e5ddd5] text-[#5a3d2b] hover:border-lime/40'
+                      }`}
+                      onClick={() => updateField('groupType', item.id)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          {/* Safety Notice */}
-          <div className="flex items-center gap-2.5 p-3 bg-lime/5 border border-lime/15 rounded-xl">
-            <span className="text-lg flex-shrink-0">🛡️</span>
-            <p className="text-[11px] text-textMuted leading-relaxed">
-              发布后系统将自动匹配附近用户。请确保个人信息真实，约练地点安全。支持开启行程分享和紧急联系人功能。
-            </p>
-          </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1.5 block text-xs font-black text-[#5a3d2b]">人数上限</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={form.maxSlots}
+                      onChange={(event) => updateField('maxSlots', parseInt(event.target.value, 10) || 1)}
+                      className="w-full rounded-xl border border-[#e5ddd5] bg-[#faf7f4] px-4 py-3 text-center text-sm text-[#1a1208] outline-none transition focus:border-lime/40 focus:bg-white"
+                    />
+                    <span className="shrink-0 text-xs text-[#8b6a54]">人</span>
+                  </div>
+                </div>
+                <div>
+                  <div className="mb-1.5 text-xs font-black text-[#5a3d2b]">要求水平</div>
+                  <div className="flex flex-col gap-1.5">
+                    {LEVEL_FILTERS.map((item) => (
+                      <button
+                        key={item.id}
+                        className={`rounded-lg border py-1.5 text-xs font-bold transition ${
+                          form.level === item.id
+                            ? 'border-lime bg-lime/10 text-lime'
+                            : 'border-[#e5ddd5] text-[#5a3d2b] hover:border-lime/50'
+                        }`}
+                        onClick={() => updateField('level', item.id)}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-black text-[#5a3d2b]">活动描述 <span className="font-normal text-[#b09580]">（选填）</span></label>
+                <textarea
+                  placeholder="描述约练的具体安排、器材需求、联系方式..."
+                  value={form.desc}
+                  maxLength={500}
+                  onChange={(event) => updateField('desc', event.target.value)}
+                  rows={4}
+                  className="w-full resize-none rounded-xl border border-[#e5ddd5] bg-[#faf7f4] px-4 py-3 text-sm text-[#1a1208] outline-none transition placeholder:text-[#b09580] focus:border-lime/40 focus:bg-white"
+                />
+                {errors.desc && <p className="mt-1 text-xs text-red-500">{errors.desc}</p>}
+                <div className="mt-1 text-right text-[11px] text-[#b09580]">{form.desc.length}/500</div>
+              </div>
+
+              <div className="rounded-xl border border-[#e5ddd5] bg-[#fff8f0] px-4 py-3 text-xs leading-relaxed text-[#76543e]">
+                发布后申请者将默认待确认。建议选择公开地点，并在出发前开启行程分享。
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
-        <div className="flex gap-3 p-5 border-t border-border">
-          <Button variant="outline" size="lg" className="flex-1" onClick={onClose}>
-            取消
-          </Button>
-          <Button variant="primary" size="lg" className="flex-1" onClick={handleSubmit}>
-            发布约练
-          </Button>
+        <div className="border-t border-[#e5ddd5] bg-white px-5 py-4">
+          <div className="flex items-center gap-3">
+            {step > 1 && (
+              <button
+                onClick={() => setStep((s) => s - 1)}
+                className="flex h-11 items-center gap-1.5 rounded-xl border border-[#e5ddd5] px-4 text-sm font-bold text-[#76543e] transition hover:border-[#c5b9ae] hover:text-[#1a1208]"
+              >
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                上一步
+              </button>
+            )}
+            <div className="flex flex-1 items-center justify-center gap-1.5">
+              {[1, 2, 3].map((s) => (
+                <div key={s} className={`h-2 rounded-full transition-all ${s === step ? 'w-6 bg-lime' : s < step ? 'w-2 bg-lime/40' : 'w-2 bg-[#e5ddd5]'}`} />
+              ))}
+            </div>
+            {step < 3 ? (
+              <button
+                onClick={() => setStep((s) => s + 1)}
+                disabled={(step === 1 && !canNext1) || (step === 2 && !canNext2)}
+                className="flex h-11 items-center gap-1.5 rounded-xl bg-lime px-5 text-sm font-black text-white transition hover:bg-[#e55f00] disabled:cursor-not-allowed disabled:bg-[#e5ddd5] disabled:text-[#a09080]"
+              >
+                下一步
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" /></svg>
+              </button>
+            ) : (
+              <button
+                onClick={handleSubmit}
+                className="flex h-11 items-center gap-2 rounded-xl bg-lime px-6 text-sm font-black text-white transition hover:bg-[#e55f00]"
+              >
+                发布约练
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" /></svg>
+              </button>
+            )}
+          </div>
         </div>
       </div>
-    </div>
-  );
-});
-
-const FormField = memo(function FormField({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="block font-mono text-[11px] text-textMuted uppercase tracking-wider mb-2">
-        {label}
-      </label>
-      {children}
-      {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
     </div>
   );
 });

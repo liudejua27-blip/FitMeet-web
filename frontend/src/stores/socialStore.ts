@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { SAMPLE_COMMENTS } from '../data/mockData';
 import type { Comment } from '../types';
 import { sanitizeInput } from '../lib/utils';
 import * as dataService from '../services/dataService';
+import { STORAGE_KEYS, migrateLocalStorageKey } from '../lib/storageKeys';
+
+migrateLocalStorageKey(STORAGE_KEYS.legacySocialStore, STORAGE_KEYS.socialStore);
 
 interface SocialState {
   followedUsers: number[];
@@ -31,13 +33,7 @@ interface SocialState {
   loadComments: (postId: number) => Promise<void>;
 }
 
-const COLORS = ['#C8FF00', '#FF6B9D', '#A78BFA', '#F97316', '#38BDF8', '#22C55E'];
-
-const INITIAL_COMMENTS: Record<number, Comment[]> = {
-  1: SAMPLE_COMMENTS.slice(0, 2),
-  2: SAMPLE_COMMENTS.slice(1, 4),
-  4: SAMPLE_COMMENTS.slice(0, 3),
-};
+const COLORS = ['#FF6A00', '#F97316', '#FFB000', '#EF4444', '#16C784', '#38BDF8'];
 
 export const useSocialStore = create<SocialState>()(
   persist(
@@ -46,7 +42,7 @@ export const useSocialStore = create<SocialState>()(
       likedPosts: [],
       savedPosts: [],
       likeDelta: {},
-      comments: INITIAL_COMMENTS,
+      comments: {},
       _synced: false,
 
       syncFromServer: async () => {
@@ -63,21 +59,19 @@ export const useSocialStore = create<SocialState>()(
             likeDelta: {},
             _synced: true,
           });
-        } catch {
-          // Keep local state if API fails
+        } catch (error) {
+          console.error('Failed to sync social state', error);
         }
       },
 
       loadComments: async (postId) => {
         try {
           const comments = await dataService.getComments(postId);
-          if (comments.length > 0) {
-            set((state) => ({
-              comments: { ...state.comments, [postId]: comments },
-            }));
-          }
-        } catch {
-          // keep local
+          set((state) => ({
+            comments: { ...state.comments, [postId]: comments },
+          }));
+        } catch (error) {
+          console.error('Failed to load comments', error);
         }
       },
 
@@ -90,7 +84,9 @@ export const useSocialStore = create<SocialState>()(
           return { followedUsers: [...state.followedUsers, userId] };
         });
         // Sync with backend
-        dataService.toggleFollow(userId);
+        dataService.toggleFollow(userId).catch((error) => {
+          console.error('Failed to sync follow state', error);
+        });
       },
 
       isFollowing: (userId) => get().followedUsers.includes(userId),
@@ -111,7 +107,9 @@ export const useSocialStore = create<SocialState>()(
           };
         });
         // Sync with backend
-        dataService.likePost(postId);
+        dataService.likePost(postId).catch((error) => {
+          console.error('Failed to sync like state', error);
+        });
       },
 
       isLiked: (postId) => get().likedPosts.includes(postId),
@@ -127,7 +125,9 @@ export const useSocialStore = create<SocialState>()(
           return { savedPosts: [...state.savedPosts, postId] };
         });
         // Sync with backend
-        dataService.savePost(postId);
+        dataService.savePost(postId).catch((error) => {
+          console.error('Failed to sync save state', error);
+        });
       },
 
       isSaved: (postId) => get().savedPosts.includes(postId),
@@ -151,7 +151,9 @@ export const useSocialStore = create<SocialState>()(
           },
         }));
         // Sync with backend
-        dataService.addComment(postId, safeText);
+        dataService.addComment(postId, safeText).catch((error) => {
+          console.error('Failed to sync comment', error);
+        });
       },
 
       getComments: (postId) => get().comments[postId] || [],
@@ -166,11 +168,13 @@ export const useSocialStore = create<SocialState>()(
           },
         }));
         // Sync with backend
-        dataService.likeComment(commentId);
+        dataService.likeComment(commentId).catch((error) => {
+          console.error('Failed to sync comment like', error);
+        });
       },
     }),
     {
-      name: 'fitmate-social',
+      name: STORAGE_KEYS.socialStore,
     },
   ),
 );

@@ -27,6 +27,18 @@ export class FriendsService {
     }
   }
 
+  async ensureFollowing(followerId: number, followingId: number) {
+    const existing = await this.followRepo.findOne({
+      where: { followerId, followingId },
+    });
+
+    if (!existing) {
+      await this.followRepo.save({ followerId, followingId });
+    }
+
+    return { following: true };
+  }
+
   async isFollowing(followerId: number, followingId: number) {
     const count = await this.followRepo.count({
       where: { followerId, followingId },
@@ -37,13 +49,15 @@ export class FriendsService {
   /** Get mutual follows (friends) */
   async getFriends(userId: number) {
     // Get users I follow
-    const myFollows = await this.followRepo.find({ where: { followerId: userId } });
-    const myFollowingIds = myFollows.map(f => f.followingId);
+    const myFollows = await this.followRepo.find({
+      where: { followerId: userId },
+    });
+    const myFollowingIds = myFollows.map((f) => f.followingId);
 
     if (myFollowingIds.length === 0) {
       // Even if no mutual follows, return some users for friends list
       const users = await this.userRepo.find({ take: 10 });
-      return users.map(u => ({
+      return users.map((u) => ({
         id: u.id,
         name: u.name,
         avatar: u.avatar || u.name[0],
@@ -59,7 +73,7 @@ export class FriendsService {
       .andWhere('f.followingId = :userId', { userId })
       .getMany();
 
-    const friendIds = mutualFollows.map(f => f.followerId);
+    const friendIds = mutualFollows.map((f) => f.followerId);
 
     if (friendIds.length === 0) {
       // Return following users as fallback
@@ -67,7 +81,7 @@ export class FriendsService {
         .createQueryBuilder('u')
         .where('u.id IN (:...ids)', { ids: myFollowingIds })
         .getMany();
-      return users.map(u => ({
+      return users.map((u) => ({
         id: u.id,
         name: u.name,
         avatar: u.avatar || u.name[0],
@@ -81,7 +95,7 @@ export class FriendsService {
       .where('u.id IN (:...ids)', { ids: friendIds })
       .getMany();
 
-    return friends.map(u => ({
+    return friends.map((u) => ({
       id: u.id,
       name: u.name,
       avatar: u.avatar || u.name[0],
@@ -91,7 +105,9 @@ export class FriendsService {
   }
 
   async getFollowedUserIds(userId: number) {
-    const follows = await this.followRepo.find({ where: { followerId: userId } });
-    return follows.map(f => f.followingId);
+    const follows = await this.followRepo.find({
+      where: { followerId: userId },
+    });
+    return follows.map((f) => f.followingId);
   }
 }

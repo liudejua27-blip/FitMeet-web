@@ -18,7 +18,8 @@ export class CoachesService {
   ) {}
 
   async findAll(specialty?: string) {
-    const qb = this.coachRepo.createQueryBuilder('coach')
+    const qb = this.coachRepo
+      .createQueryBuilder('coach')
       .leftJoinAndSelect('coach.user', 'user')
       .orderBy('coach.rating', 'DESC');
 
@@ -27,7 +28,7 @@ export class CoachesService {
     }
 
     const coaches = await qb.getMany();
-    return Promise.all(coaches.map(c => this.toCoachResponse(c)));
+    return Promise.all(coaches.map((c) => this.toCoachResponse(c)));
   }
 
   async findOne(id: number) {
@@ -47,7 +48,7 @@ export class CoachesService {
     const response = await this.toCoachResponse(coach);
     return {
       ...response,
-      reviewList: reviews.map(r => ({
+      reviewList: reviews.map((r) => ({
         id: r.id,
         username: r.user?.name || '',
         avatar: r.user?.avatar || '',
@@ -73,15 +74,15 @@ export class CoachesService {
     await this.reviewRepo.save(review);
 
     // Update coach rating
-    const { avg } = await this.reviewRepo
+    const ratingSummary = await this.reviewRepo
       .createQueryBuilder('review')
       .select('AVG(review.rating)', 'avg')
       .where('review.coachId = :coachId', { coachId })
-      .getRawOne();
+      .getRawOne<{ avg: string | null }>();
     const count = await this.reviewRepo.count({ where: { coachId } });
 
     await this.coachRepo.update(coachId, {
-      rating: parseFloat(avg) || 0,
+      rating: parseFloat(ratingSummary?.avg ?? '0') || 0,
       reviewCount: count,
     });
 

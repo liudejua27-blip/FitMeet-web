@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+﻿import { useMemo, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import * as dataService from '../services/dataService';
 import type { Post, Meet } from '../types';
@@ -86,7 +86,7 @@ export const TopicPage = () => {
                 >
                   <div className="flex items-center gap-3 mb-2">
                     <div
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-[#09090A]"
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white"
                       style={{ background: post.color }}
                     >
                       {post.username[0]}

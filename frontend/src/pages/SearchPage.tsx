@@ -1,7 +1,6 @@
-import { useState, useCallback, memo, useEffect } from 'react';
+﻿import { useState, useCallback, memo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { searchApi } from '../api/searchApi';
-import { FEED_DATA } from '../data/mockData';
 
 const HOT_TOPICS = ['#增肌', '#跑步打卡', '#瑜伽', '#减脂', '#深蹲', '#户外运动', '#游泳', '#HIIT'];
 const SEARCH_HISTORY_KEY = 'search_history';
@@ -18,10 +17,10 @@ const SearchResultCard = memo(function SearchResultCard({
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center gap-3 p-3 rounded-xl border border-border bg-surface hover:border-borderStrong hover:bg-surfaceMuted transition text-left cursor-pointer"
+      className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-surface p-3 text-left transition hover:border-borderStrong hover:bg-surfaceMuted"
     >
       <div
-        className="w-10 h-10 rounded-full flex items-center justify-center text-lg overflow-hidden flex-shrink-0"
+        className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg text-lg"
         style={{ backgroundColor: item.color ? item.color + '20' : '#333' }}
       >
         {item.avatar ? (
@@ -34,7 +33,7 @@ const SearchResultCard = memo(function SearchResultCard({
         <div className="font-bold text-white text-sm truncate">{item.title}</div>
         <div className="text-xs text-textMuted truncate">{item.desc}</div>
       </div>
-      <span className="text-[10px] text-textSofter bg-surfaceMuted px-2 py-0.5 rounded-full flex-shrink-0">
+      <span className="flex-shrink-0 rounded-md bg-surfaceMuted px-2 py-0.5 text-[10px] text-textSofter">
         {type}
       </span>
     </button>
@@ -63,6 +62,7 @@ export const SearchPage = () => {
 
   const [results, setResults] = useState<SearchResultItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -73,6 +73,7 @@ export const SearchPage = () => {
       }
 
       setLoading(true);
+      setError('');
       try {
         const data = await searchApi.search(query);
 
@@ -83,7 +84,7 @@ export const SearchPage = () => {
           avatar: u.avatar,
           emoji: '👤',
           type: '用户',
-          onClick: () => navigate(`/profile/${u.id}`),
+          onClick: () => navigate(`/user/${u.id}`),
         }));
 
         const mappedPosts = data.posts.map((p) => ({
@@ -93,7 +94,7 @@ export const SearchPage = () => {
           emoji: '📝',
           color: '#3B82F6',
           type: '动态',
-          onClick: () => navigate(`/post/${p.id}`),
+          onClick: () => navigate('/discover'),
         }));
 
         const mappedCoaches = data.coaches.map((c) => ({
@@ -103,12 +104,14 @@ export const SearchPage = () => {
           emoji: '🏋️',
           color: '#10B981',
           type: '教练',
-          onClick: () => navigate(`/coach/${c.id}`),
+          onClick: () => navigate('/coach'),
         }));
 
         setResults([...mappedUsers, ...mappedPosts, ...mappedCoaches]);
       } catch (err) {
         console.error('Search error', err);
+        setError('搜索失败，请稍后重试');
+        setResults([]);
       } finally {
         setLoading(false);
       }
@@ -134,7 +137,7 @@ export const SearchPage = () => {
   }, []);
 
   return (
-    <div className="min-h-screen pb-20 bg-base text-white">
+    <div className="min-h-screen bg-base pb-20 text-white">
       {/* Search Header */}
       <div className="sticky top-0 z-40 border-b border-border bg-base/95 backdrop-blur-xl">
         <div className="max-w-2xl mx-auto px-4 py-3">
@@ -145,7 +148,7 @@ export const SearchPage = () => {
             >
               ←
             </button>
-            <div className="flex-1 flex items-center gap-2 bg-surface border border-border rounded-full px-4 py-2.5 focus-within:border-lime/50 transition">
+            <div className="flex flex-1 items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2.5 transition focus-within:border-lime/50">
               <span className="text-textMuted">🔍</span>
               <input
                 type="text"
@@ -166,7 +169,7 @@ export const SearchPage = () => {
               )}
             </div>
             <button
-              className="px-4 py-2 rounded-full bg-lime text-[#09090A] text-sm font-bold cursor-pointer hover:bg-[#d4ff1a] transition"
+              className="cursor-pointer rounded-lg bg-lime px-4 py-2 text-sm font-black text-white transition hover:bg-brand2"
               onClick={() => handleSearch(query)}
             >
               搜索
@@ -191,7 +194,7 @@ export const SearchPage = () => {
                     <button
                       key={i}
                       onClick={() => handleSearch(h)}
-                      className="px-3 py-1.5 rounded-full bg-surface hover:bg-surfaceMuted transition text-sm text-textMuted"
+                      className="rounded-lg bg-surface px-3 py-1.5 text-sm text-textMuted transition hover:bg-surfaceMuted"
                     >
                       {h}
                     </button>
@@ -207,7 +210,7 @@ export const SearchPage = () => {
                   <button
                     key={i}
                     onClick={() => handleSearch(topic.replace('#', ''))}
-                    className="px-3 py-1.5 rounded-full border border-lime/20 text-lime bg-lime/5 hover:bg-lime/10 transition text-sm"
+                    className="rounded-lg border border-lime/20 bg-lime/5 px-3 py-1.5 text-sm text-lime transition hover:bg-lime/10"
                   >
                     {topic}
                   </button>
@@ -215,32 +218,16 @@ export const SearchPage = () => {
               </div>
             </div>
 
-            {/* Trending Section using Mock Data (since we don't have Trending API yet) */}
-            <section>
-              <h3 className="text-sm font-display font-bold text-white mb-3">📈 热门推荐</h3>
-              <div className="space-y-2">
-                {FEED_DATA.slice(0, 4).map((post, i) => (
-                  <button
-                    key={post.id}
-                    className="w-full flex items-center gap-3 p-3 rounded-xl border border-border bg-surface hover:border-borderStrong transition text-left cursor-pointer"
-                    onClick={() => navigate('/discover')}
-                  >
-                    <span className={`text-lg font-bold font-mono ${i < 3 ? 'text-lime' : 'text-textSofter'}`}>
-                      {i + 1}
-                    </span>
-                    <span className="text-2xl">{post.emoji}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-white truncate">{post.text.slice(0, 30)}...</div>
-                      <div className="text-[11px] text-textSofter">{post.username} · ❤️ {post.likes}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </section>
           </div>
         ) : (
           <div className="space-y-3 animate-fade-in">
              {loading && <div className="text-center py-4 text-textMuted">Loading...</div>}
+
+             {!loading && error && (
+               <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                 {error}
+               </div>
+             )}
 
              {!loading && (
                <div className="text-sm text-textMuted mb-2">

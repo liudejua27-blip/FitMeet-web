@@ -27,3 +27,15 @@ dist-ssr
 .env
 .env.local
 .env.*.local
+
+# Generated GEO/SEO static assets
+public/about/
+public/city/
+public/guides/
+public/press/
+public/sports/
+public/llms.txt
+public/llms-full.txt
+public/robots.txt
+public/sitemap.xml
+public/sitemap-index.xml

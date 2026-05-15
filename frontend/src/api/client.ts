@@ -1,23 +1,91 @@
 import type {
-  Post, Meet, Coach, Category, Friend, UserProfile,
-  MeetRecord, Comment, Review, VirtualGift,
+  Post,
+  Meet,
+  Club,
+  ClubMember,
+  Coach,
+  Category,
+  Friend,
+  UserProfile,
+  MeetRecord,
+  Comment,
+  Review,
+  AiDelegateProfile,
+  AiMatchCandidate,
+  AiMatchSession,
+  AiAutopilotHistoryItem,
+  AiAutopilotRunResult,
+  SocialCandidate,
+  SocialRequest,
+  PublicSocialIntent,
 } from '../types';
+import { STORAGE_KEYS, migrateLocalStorageKey } from '../lib/storageKeys';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
 /** Stored JWT token key */
-const TOKEN_KEY = 'fitmate-token';
+const TOKEN_KEY = STORAGE_KEYS.token;
+migrateLocalStorageKey(STORAGE_KEYS.legacyToken, TOKEN_KEY);
+const TOKEN_FALLBACK_KEYS = [
+  STORAGE_KEYS.legacyToken,
+  'accessToken',
+  'authToken',
+  'token',
+  'fitmeet_token',
+  'fitmeetToken',
+] as const;
+
+type ApiErrorResponse = {
+  message?: string | string[] | Record<string, unknown>;
+  error?: string;
+  statusCode?: number;
+};
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly payload?: ApiErrorResponse;
+  readonly rawBody?: string;
+
+  constructor(
+    status: number,
+    message: string,
+    payload?: ApiErrorResponse,
+    rawBody?: string,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.payload = payload;
+    this.rawBody = rawBody;
+  }
+}
 
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+  const current = localStorage.getItem(TOKEN_KEY);
+  if (current) return current;
+
+  for (const key of TOKEN_FALLBACK_KEYS) {
+    const value = localStorage.getItem(key);
+    if (value) {
+      localStorage.setItem(TOKEN_KEY, value);
+      localStorage.removeItem(key);
+      return value;
+    }
+  }
+  return null;
 }
 
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
+  localStorage.removeItem(STORAGE_KEYS.legacyToken);
 }
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(STORAGE_KEYS.legacyToken);
+  for (const key of TOKEN_FALLBACK_KEYS) {
+    localStorage.removeItem(key);
+  }
 }
 
 /**
@@ -38,7 +106,13 @@ export async function request<T>(endpoint: string, options?: RequestInit): Promi
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`API ${res.status}: ${res.statusText} — ${body}`);
+    const payload = parseApiErrorBody(body);
+    throw new ApiError(
+      res.status,
+      resolveApiErrorMessage(payload, body, res.statusText),
+      payload,
+      body,
+    );
   }
 
   // Handle 204 No Content
@@ -46,15 +120,47 @@ export async function request<T>(endpoint: string, options?: RequestInit): Promi
   return res.json() as Promise<T>;
 }
 
+function parseApiErrorBody(body: string): ApiErrorResponse | undefined {
+  if (!body.trim()) return undefined;
+
+  try {
+    const parsed = JSON.parse(body) as ApiErrorResponse;
+    return typeof parsed === 'object' && parsed !== null ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveApiErrorMessage(
+  payload: ApiErrorResponse | undefined,
+  rawBody: string,
+  statusText: string,
+): string {
+  const message = payload?.message;
+  if (Array.isArray(message)) return message.join('；');
+  if (typeof message === 'string' && message.trim()) return message;
+  if (typeof message === 'object' && message !== null) {
+    const nested = message.message;
+    if (typeof nested === 'string' && nested.trim()) return nested;
+  }
+  if (payload?.error) return payload.error;
+  if (rawBody.trim()) return rawBody;
+  return statusText || '请求失败';
+}
+
 // ── Auth ─────────────────────────────────────────────────
 
 export interface AuthResult {
   access_token: string;
-  refresh_token: string;
+  refresh_token?: string;
   user: UserProfile;
 }
 
-export function register(data: { email: string; password: string; name: string }): Promise<AuthResult> {
+export function register(data: {
+  email: string;
+  password: string;
+  name: string;
+}): Promise<AuthResult> {
   return request<AuthResult>('/auth/register', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -110,11 +216,102 @@ export function getProfile(): Promise<UserProfile> {
   return request<UserProfile>('/auth/profile');
 }
 
+export type UpsertAiDelegateProfileInput = Partial<
+  Omit<AiDelegateProfile, 'id' | 'userId'>
+>;
+
+export function getAiDelegateProfile(): Promise<AiDelegateProfile> {
+  return request<AiDelegateProfile>('/ai-match/profile');
+}
+
+export function saveAiDelegateProfile(
+  data: UpsertAiDelegateProfileInput,
+): Promise<AiDelegateProfile> {
+  return request<AiDelegateProfile>('/ai-match/profile', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function getAiMatchCandidates(): Promise<AiMatchCandidate[]> {
+  return request<AiMatchCandidate[]>('/ai-match/candidates');
+}
+
+export function simulateAiMatch(targetUserId: number): Promise<AiMatchSession> {
+  return request<AiMatchSession>('/ai-match/simulate', {
+    method: 'POST',
+    body: JSON.stringify({ targetUserId }),
+  });
+}
+
+export function approveAiMatchFriend(sessionId: number): Promise<{
+  following: boolean;
+  targetUserId: number;
+  message: string;
+}> {
+  return request(`/ai-match/sessions/${sessionId}/approve-friend`, {
+    method: 'POST',
+  });
+}
+
+export function runAiAutopilot(): Promise<AiAutopilotRunResult> {
+  return request<AiAutopilotRunResult>('/ai-match/autopilot/run', {
+    method: 'POST',
+  });
+}
+
+export function getAiAutopilotHistory(): Promise<AiAutopilotHistoryItem[]> {
+  return request<AiAutopilotHistoryItem[]>('/ai-match/autopilot/history');
+}
+
+export interface CreateSocialRequestInput {
+  requestType: string;
+  title?: string;
+  description: string;
+  city?: string;
+  loc?: string;
+  lat?: number;
+  lng?: number;
+  radiusKm?: number;
+  timePreference?: string;
+  visibility?: string;
+  verifiedOnly?: boolean;
+  interests?: string[];
+  limit?: number;
+}
+
+export function getSocialRequests(): Promise<SocialRequest[]> {
+  return request<SocialRequest[]>('/agents/social-requests');
+}
+
+export function createSocialRequest(data: CreateSocialRequestInput): Promise<{
+  request: SocialRequest;
+  candidates: SocialCandidate[];
+}> {
+  return request('/agents/social-requests', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 // ── Feed / Discover ──────────────────────────────────────
 
-export function getFeed(params?: { category?: string }): Promise<Post[]> {
-  const qs = params?.category && params.category !== 'all' ? `?category=${params.category}` : '';
-  return request<Post[]>(`/feed${qs}`);
+export function getFeed(params?: {
+  category?: string;
+  page?: number;
+  pageSize?: number;
+  lat?: number;
+  lng?: number;
+}): Promise<Post[]> {
+  const search = new URLSearchParams();
+  if (params?.category && params.category !== 'all') search.set('category', params.category);
+  if (params?.page) search.set('page', String(params.page));
+  // Backend uses "limit" for page size.
+  if (params?.pageSize) search.set('limit', String(params.pageSize));
+  if (Number.isFinite(params?.lat)) search.set('lat', String(params?.lat));
+  if (Number.isFinite(params?.lng)) search.set('lng', String(params?.lng));
+  const qs = search.toString();
+  return request<{ data: Post[] }>(`/feed${qs ? `?${qs}` : ''}`).then((r) => r.data);
 }
 
 export function createPost(data: Partial<Post>): Promise<Post> {
@@ -134,6 +331,27 @@ export function savePost(id: number): Promise<{ saved: boolean }> {
 
 export function getPostInteractions(): Promise<{ likedPostIds: number[]; savedPostIds: number[] }> {
   return request('/feed/interactions');
+}
+
+export function getPublicSocialIntents(params?: {
+  page?: number;
+  limit?: number;
+  q?: string;
+  city?: string;
+  requestType?: string;
+  status?: string;
+}): Promise<PublicSocialIntent[]> {
+  const search = new URLSearchParams();
+  if (params?.page) search.set('page', String(params.page));
+  if (params?.limit) search.set('limit', String(params.limit));
+  if (params?.q) search.set('q', params.q);
+  if (params?.city) search.set('city', params.city);
+  if (params?.requestType) search.set('requestType', params.requestType);
+  if (params?.status) search.set('status', params.status);
+  const qs = search.toString();
+  return request<{ data: PublicSocialIntent[] }>(`/public/social-intents${qs ? `?${qs}` : ''}`).then(
+    (r) => r.data,
+  );
 }
 
 // ── Comments ─────────────────────────────────────────────
@@ -186,9 +404,21 @@ export function getFollowedIds(): Promise<number[]> {
 
 // ── Meet ─────────────────────────────────────────────────
 
-export function getMeets(params?: { type?: string }): Promise<Meet[]> {
-  const qs = params?.type && params.type !== 'all' ? `?type=${params.type}` : '';
-  return request<Meet[]>(`/meets${qs}`);
+export function getMeets(params?: {
+  type?: string;
+  city?: string;
+  clubId?: number;
+  lat?: number;
+  lng?: number;
+}): Promise<Meet[]> {
+  const search = new URLSearchParams();
+  if (params?.type && params.type !== 'all') search.set('type', params.type);
+  if (params?.city) search.set('city', params.city);
+  if (Number.isFinite(params?.clubId)) search.set('clubId', String(params?.clubId));
+  if (Number.isFinite(params?.lat)) search.set('lat', String(params?.lat));
+  if (Number.isFinite(params?.lng)) search.set('lng', String(params?.lng));
+  const qs = search.toString();
+  return request<Meet[]>(`/meets${qs ? `?${qs}` : ''}`);
 }
 
 export function getMeetDetail(id: number): Promise<Meet> {
@@ -206,14 +436,125 @@ export function joinMeet(id: number): Promise<void> {
   return request(`/meets/${id}/join`, { method: 'POST' });
 }
 
+export function confirmMeetParticipant(
+  meetId: number,
+  participantId: number,
+): Promise<{ confirmed: boolean }> {
+  return request(`/meets/${meetId}/participants/${participantId}/confirm`, {
+    method: 'POST',
+  });
+}
+
+export function cancelMeet(id: number): Promise<{ cancelled: boolean }> {
+  return request(`/meets/${id}/cancel`, { method: 'POST' });
+}
+
+export function createTripShare(id: number): Promise<{ token: string; url: string }> {
+  return request(`/meets/${id}/trip-share`, { method: 'POST' });
+}
+
+export type TripShareInfo = {
+  type: 'meet';
+  meet: Meet;
+  participant?: unknown;
+};
+
+export function getTripShare(token: string): Promise<TripShareInfo> {
+  return request<TripShareInfo>(`/meets/trip/${encodeURIComponent(token)}`);
+}
+
+export function createMeetActivity(
+  meetId: number,
+): Promise<{ activityId: number; reused: boolean }> {
+  return request(`/meets/${meetId}/create-activity`, { method: 'POST' });
+}
+
 export function getMeetRecords(): Promise<MeetRecord[]> {
   return request<MeetRecord[]>('/meets/records/me');
+}
+
+// Clubs
+
+export type CreateClubInput = {
+  name: string;
+  city: string;
+  sportType: string;
+  description?: string;
+  coverUrl?: string;
+  joinPolicy?: Club['joinPolicy'];
+  announcement?: string;
+};
+
+export type UpdateClubInput = Partial<CreateClubInput>;
+
+export function getClubs(params?: {
+  city?: string;
+  sportType?: string;
+  q?: string;
+  mine?: boolean;
+}): Promise<Club[]> {
+  const search = new URLSearchParams();
+  if (params?.city) search.set('city', params.city);
+  if (params?.sportType && params.sportType !== 'all') search.set('sportType', params.sportType);
+  if (params?.q) search.set('q', params.q);
+  if (params?.mine) search.set('mine', 'true');
+  const qs = search.toString();
+  return request<Club[]>(`/clubs${qs ? `?${qs}` : ''}`);
+}
+
+export function createClub(data: CreateClubInput): Promise<Club> {
+  return request<Club>('/clubs', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function getClub(id: number): Promise<Club> {
+  return request<Club>(`/clubs/${id}`);
+}
+
+export function updateClub(id: number, data: UpdateClubInput): Promise<Club> {
+  return request<Club>(`/clubs/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export function joinClub(id: number): Promise<ClubMember> {
+  return request<ClubMember>(`/clubs/${id}/join`, { method: 'POST' });
+}
+
+export function approveClubMember(clubId: number, memberId: number): Promise<ClubMember> {
+  return request<ClubMember>(`/clubs/${clubId}/members/${memberId}/approve`, {
+    method: 'POST',
+  });
+}
+
+export function rejectClubMember(clubId: number, memberId: number): Promise<ClubMember> {
+  return request<ClubMember>(`/clubs/${clubId}/members/${memberId}/reject`, {
+    method: 'POST',
+  });
+}
+
+export function removeClubMember(clubId: number, memberId: number): Promise<{ removed: boolean }> {
+  return request<{ removed: boolean }>(`/clubs/${clubId}/members/${memberId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function getClubMeets(id: number, params?: { lat?: number; lng?: number }): Promise<Meet[]> {
+  const search = new URLSearchParams();
+  if (Number.isFinite(params?.lat)) search.set('lat', String(params?.lat));
+  if (Number.isFinite(params?.lng)) search.set('lng', String(params?.lng));
+  const qs = search.toString();
+  return request<Meet[]>(`/clubs/${id}/meets${qs ? `?${qs}` : ''}`);
 }
 
 // ── Coach ────────────────────────────────────────────────
 
 export function getCoaches(params?: { specialty?: string }): Promise<Coach[]> {
-  const qs = params?.specialty && params.specialty !== 'all' ? `?specialty=${params.specialty}` : '';
+  const qs =
+    params?.specialty && params.specialty !== 'all' ? `?specialty=${params.specialty}` : '';
   return request<Coach[]>(`/coaches${qs}`);
 }
 
@@ -221,7 +562,10 @@ export function getCoachDetail(id: number): Promise<Coach> {
   return request<Coach>(`/coaches/${id}`);
 }
 
-export function addCoachReview(coachId: number, data: { rating: number; text: string; tags?: string[] }): Promise<Review> {
+export function addCoachReview(
+  coachId: number,
+  data: { rating: number; text: string; tags?: string[] },
+): Promise<Review> {
   return request<Review>(`/coaches/${coachId}/reviews`, {
     method: 'POST',
     body: JSON.stringify(data),
@@ -253,6 +597,15 @@ export interface ApiMessage {
   text: string;
   time: string;
   isMine: boolean;
+  source?: 'user' | 'ai_delegate';
+  card?: {
+    type: 'fitmeet_contact_card';
+    userId: number;
+    name: string;
+    profileUrl: string;
+    sports: string[];
+    city: string;
+  } | null;
 }
 
 export interface StartConversationResponse {
@@ -264,18 +617,18 @@ export function getConversations(): Promise<ApiConversation[]> {
 }
 
 export function getMessages(conversationId: string): Promise<ApiMessage[]> {
-  return request<ApiMessage[]>(`/messages/conversations/${conversationId}/messages`);
+  return request<ApiMessage[]>(`/messages/conversations/${conversationId}`);
 }
 
 export function sendMessage(conversationId: string, text: string): Promise<ApiMessage> {
-  return request<ApiMessage>(`/messages/conversations/${conversationId}/messages`, {
+  return request<ApiMessage>(`/messages/conversations/${conversationId}/send`, {
     method: 'POST',
     body: JSON.stringify({ text }),
   });
 }
 
 export function startConversation(otherUserId: number): Promise<StartConversationResponse> {
-  return request<StartConversationResponse>('/messages/conversations', {
+  return request<StartConversationResponse>('/messages/start', {
     method: 'POST',
     body: JSON.stringify({ otherUserId }),
   });
@@ -288,24 +641,22 @@ export function getUnreadMessageCount(): Promise<{ unreadCount: number }> {
 // ── Notifications ────────────────────────────────────────
 
 export interface ApiNotification {
-  _id: string;
-  userId: number;
+  id: string;
   type: 'like' | 'comment' | 'follow' | 'meet' | 'system';
+  username: string;
+  avatar: string;
+  color: string;
   text: string;
-  fromUserId?: number;
-  fromUsername?: string;
-  fromAvatar?: string;
-  fromColor?: string;
+  time: string;
   read: boolean;
   targetId?: number;
-  createdAt: string;
 }
 
 export function getNotifications(): Promise<ApiNotification[]> {
   return request<ApiNotification[]>('/notifications');
 }
 
-export function getUnreadNotificationCount(): Promise<{ count: number }> {
+export function getUnreadNotificationCount(): Promise<{ unreadCount: number }> {
   return request('/notifications/unread');
 }
 
@@ -317,8 +668,120 @@ export function markAllNotificationsRead(): Promise<void> {
   return request('/notifications/read-all', { method: 'POST' });
 }
 
-// ── Gifts ────────────────────────────────────────────────
+// Safety
 
-export function getGifts(): Promise<VirtualGift[]> {
-  return request<VirtualGift[]>('/gifts');
+export type SafetyReport = {
+  id: number;
+  reporterId: number;
+  targetType: 'user' | 'post' | 'meet' | 'comment';
+  targetId: number;
+  reason: string;
+  description: string;
+  status: 'pending' | 'reviewing' | 'resolved' | 'rejected';
+  adminNote: string;
+  createdAt: string;
+};
+
+export type VerificationRequest = {
+  id: number;
+  userId: number;
+  type: 'real_name' | 'coach';
+  realName: string;
+  idNumberMasked: string;
+  certName: string;
+  certImageUrl: string;
+  status: 'pending' | 'approved' | 'rejected';
+  adminNote: string;
+  createdAt: string;
+};
+
+export type EmergencyContact = {
+  id: number;
+  name: string;
+  phone: string;
+  relation: string;
+};
+
+export function createReport(data: {
+  targetType: SafetyReport['targetType'];
+  targetId: number;
+  reason: string;
+  description?: string;
+}) {
+  return request<SafetyReport>('/safety/reports', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function blockUser(userId: number) {
+  return request<{ blocked: boolean }>(`/safety/blocks/${userId}`, {
+    method: 'POST',
+  });
+}
+
+export function getBlockedUserIds() {
+  return request<number[]>('/safety/blocks/ids');
+}
+
+export function createVerificationRequest(data: {
+  type: VerificationRequest['type'];
+  realName?: string;
+  idNumberMasked?: string;
+  certName?: string;
+  certImageUrl?: string;
+}) {
+  return request<VerificationRequest>('/safety/verifications', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function getMyVerificationRequests() {
+  return request<VerificationRequest[]>('/safety/verifications/me');
+}
+
+export function getEmergencyContacts() {
+  return request<EmergencyContact[]>('/safety/emergency-contacts');
+}
+
+export function addEmergencyContact(data: { name: string; phone: string; relation: string }) {
+  return request<EmergencyContact>('/safety/emergency-contacts', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteEmergencyContact(id: number) {
+  return request<{ deleted: boolean }>(`/safety/emergency-contacts/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export function listSafetyReports() {
+  return request<SafetyReport[]>('/safety/admin/reports');
+}
+
+export function updateSafetyReport(
+  id: number,
+  data: { status: SafetyReport['status']; adminNote?: string },
+) {
+  return request<SafetyReport>(`/safety/admin/reports/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export function listVerificationRequests() {
+  return request<VerificationRequest[]>('/safety/admin/verifications');
+}
+
+export function updateVerificationRequest(
+  id: number,
+  data: { status: VerificationRequest['status']; adminNote?: string },
+) {
+  return request<VerificationRequest>(`/safety/admin/verifications/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
 }

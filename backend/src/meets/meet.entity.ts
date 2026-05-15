@@ -1,8 +1,14 @@
 import {
-  Entity, PrimaryGeneratedColumn, Column,
-  CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn,
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
 import { User } from '../users/user.entity';
+import { Club } from '../clubs/club.entity';
 
 @Entity('meets')
 export class Meet {
@@ -25,6 +31,18 @@ export class Meet {
 
   @Column()
   loc: string;
+
+  @Column({ default: '' })
+  address: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  poiId: string | null;
+
+  @Column({ type: 'double precision', nullable: true })
+  lat: number | null;
+
+  @Column({ type: 'double precision', nullable: true })
+  lng: number | null;
 
   @Column({ default: '' })
   dist: string;
@@ -54,7 +72,19 @@ export class Meet {
   creatorType: string;
 
   @Column({ default: 'pending' })
-  status: 'pending' | 'active' | 'completed' | 'cancelled';
+  status:
+    | 'pending'
+    | 'active'
+    | 'matched'
+    | 'activity_created'
+    | 'completed'
+    | 'cancelled';
+
+  @Column({ type: 'varchar', nullable: true })
+  tripShareToken: string | null;
+
+  @Column({ type: 'integer', nullable: true })
+  activityId: number | null;
 
   @Column({ type: 'decimal', precision: 3, scale: 1, default: 0 })
   rating: number;
@@ -68,6 +98,25 @@ export class Meet {
 
   @Column()
   userId: number;
+
+  @ManyToOne(() => Club, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'clubId' })
+  club: Club | null;
+
+  @Column({ type: 'integer', nullable: true })
+  clubId: number | null;
+
+  @Column({ default: '' })
+  city: string;
+
+  @Column({ type: 'timestamp', nullable: true })
+  startAt: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  autoCancelAt: Date | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  cancelReason: string | null;
 
   @CreateDateColumn()
   createdAt: Date;

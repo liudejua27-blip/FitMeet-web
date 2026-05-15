@@ -17,6 +17,9 @@ export type { FilterChipProps } from './FilterChip';
 export { Tag } from './Tag';
 export type { TagProps } from './Tag';
 
+export { Tooltip } from './Tooltip';
+export { SportVisual } from './SportVisual';
+
 export { Skeleton, FeedCardSkeleton, CoachCardSkeleton, MeetCardSkeleton } from './Skeleton';
 export { BackToTop } from './BackToTop';
 export { EmptyState } from './EmptyState';

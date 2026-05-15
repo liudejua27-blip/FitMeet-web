@@ -1,4 +1,4 @@
-import {
+﻿import {
   useState,
   useCallback,
   useRef,
@@ -6,9 +6,11 @@ import {
   useMemo,
 } from 'react';
 import clsx from 'clsx';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMessageStore } from '../stores';
 
 export const MessagesPage = () => {
+  const [searchParams] = useSearchParams();
   const {
     conversations,
     activeConvId,
@@ -28,6 +30,13 @@ export const MessagesPage = () => {
   );
 
   useEffect(() => {
+    const fromQuery =
+      searchParams.get('conversationId') ?? searchParams.get('conversation');
+    if (!fromQuery || activeConvId === fromQuery) return;
+    selectConv(fromQuery);
+  }, [activeConvId, searchParams, selectConv]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeMessages]);
 
@@ -38,8 +47,8 @@ export const MessagesPage = () => {
   }, [inputText, activeConvId, sendMessage]);
 
   return (
-    <div className="min-h-screen">
-      <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] h-[calc(100vh-64px)]">
+    <div className="min-h-screen bg-[#100b08] text-cream">
+      <div className="grid h-[calc(100vh-72px)] grid-cols-1 lg:grid-cols-[380px_1fr]">
         {/* Conversation List */}
         <div
           className={clsx(
@@ -48,7 +57,7 @@ export const MessagesPage = () => {
           )}
         >
           <div className="sticky top-0 z-10 bg-base/95 backdrop-blur-xl border-b border-border px-5 py-4">
-            <h2 className="font-display font-bold text-lg text-white">💬 消息</h2>
+            <h2 className="font-display text-lg font-black text-white">消息</h2>
             <p className="text-xs text-textSofter mt-0.5">
               {conversations.filter((c) => c.unread > 0).length} 条未读
             </p>
@@ -68,13 +77,13 @@ export const MessagesPage = () => {
               >
                 <div className="relative flex-shrink-0">
                   <div
-                    className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold text-[#09090A]"
+                    className="flex h-11 w-11 items-center justify-center rounded-lg text-sm font-black text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]"
                     style={{ background: conv.color }}
                   >
                     {conv.avatar}
                   </div>
                   {conv.online && (
-                    <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-lime border-2 border-base" />
+                    <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-md border-2 border-base bg-lime" />
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -114,7 +123,7 @@ export const MessagesPage = () => {
                   ←
                 </button>
                 <div
-                  className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-[#09090A]"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-sm font-black text-white"
                   style={{ background: activeConv.color }}
                 >
                   {activeConv.avatar}
@@ -141,15 +150,44 @@ export const MessagesPage = () => {
                       className={clsx(
                         'max-w-[70%] px-4 py-2.5 rounded-2xl text-sm',
                         msg.isMine
-                          ? 'bg-lime text-[#09090A] rounded-br-md'
+                          ? 'rounded-br-md bg-lime text-white shadow-glow'
                           : 'bg-surface border border-border text-white rounded-bl-md'
                       )}
                     >
+                      {msg.source === 'ai_delegate' && (
+                        <div
+                          className={clsx(
+                            'mb-2 inline-flex rounded-md px-2 py-0.5 text-[10px] font-black',
+                            msg.isMine
+                              ? 'bg-white/20 text-white'
+                              : 'bg-lime/15 text-lime',
+                          )}
+                        >
+                          AI托管代发
+                        </div>
+                      )}
                       <p>{msg.text}</p>
+                      {msg.card?.type === 'fitmeet_contact_card' && (
+                        <Link
+                          to={msg.card.profileUrl}
+                          className={clsx(
+                            'mt-3 block rounded-xl border p-3 transition',
+                            msg.isMine
+                              ? 'border-white/25 bg-white/10 hover:bg-white/20'
+                              : 'border-lime/25 bg-lime/10 hover:bg-lime/15',
+                          )}
+                        >
+                          <div className="text-xs font-black">FitMeet 站内名片</div>
+                          <div className="mt-1 text-sm font-black">{msg.card.name}</div>
+                          <div className="mt-1 text-xs opacity-80">
+                            {[msg.card.city, ...msg.card.sports].filter(Boolean).join(' · ') || '查看个人主页'}
+                          </div>
+                        </Link>
+                      )}
                       <div
                         className={clsx(
                           'text-[10px] mt-1',
-                          msg.isMine ? 'text-[#09090A]/60' : 'text-textSofter'
+                          msg.isMine ? 'text-white/65' : 'text-textSofter'
                         )}
                       >
                         {msg.time}
@@ -169,13 +207,13 @@ export const MessagesPage = () => {
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-                    className="flex-1 bg-surface border border-border rounded-full px-4 py-2.5 text-sm text-white placeholder:text-textSofter outline-none focus:border-lime/30 transition"
+                    className="flex-1 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm text-white outline-none transition placeholder:text-textSofter focus:border-lime/50"
                   />
                   <button
                     className={clsx(
-                      'px-5 py-2.5 rounded-full text-sm font-bold transition cursor-pointer',
+                      'cursor-pointer rounded-lg px-5 py-2.5 text-sm font-black transition',
                       inputText.trim()
-                        ? 'bg-lime text-[#09090A] hover:bg-[#d4ff1a]'
+                        ? 'bg-lime text-white hover:bg-brand2 hover:shadow-glow'
                         : 'bg-surfaceMuted text-textSofter cursor-not-allowed'
                     )}
                     onClick={handleSend}

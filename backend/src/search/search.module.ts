@@ -7,9 +7,7 @@ import { Post as PostEntity } from '../posts/post.entity';
 import { Coach } from '../coaches/coach.entity';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([User, PostEntity, Coach]),
-  ],
+  imports: [TypeOrmModule.forFeature([User, PostEntity, Coach])],
   controllers: [SearchController],
   providers: [SearchService],
 })

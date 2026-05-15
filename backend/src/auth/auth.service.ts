@@ -10,17 +10,20 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
+import { randomUUID } from 'crypto';
 import { User } from '../users/user.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { SendSmsDto } from './dto/send-sms.dto';
 import { PhoneLoginDto } from './dto/phone-login.dto';
 import { WechatLoginDto } from './dto/wechat-login.dto';
+import { DevLoginDto } from './dto/dev-login.dto';
 import { RedisService } from '../redis/redis.service';
-import { v4 as uuidv4 } from 'uuid';
 
 const REFRESH_TOKEN_TTL = 60 * 60 * 24 * 7; // 7 days
 const SMS_CODE_TTL = 300; // 5 minutes
+const PLACEHOLDER_PATTERN =
+  /^(|change_me.*|your-.*|replace-.*|.*_here|secret_key|password)$/i;
 
 interface WeChatTokenResponse {
   errcode?: number;
@@ -56,12 +59,16 @@ export class AuthService {
     return this.configService.get<string>('NODE_ENV') === 'production';
   }
 
+  private hasConfiguredValue(value?: string | null): value is string {
+    return !!value?.trim() && !PLACEHOLDER_PATTERN.test(value.trim());
+  }
+
   /* ========== Email Auth ========== */
 
   async register(dto: RegisterDto) {
-    const existing = await this.userRepo.findOne({
-      where: { email: dto.email },
-    });
+    const email = this.normalizeEmail(dto.email);
+    const name = dto.name.trim();
+    const existing = await this.findUserByEmail(email);
     if (existing) {
       throw new ConflictException('该邮箱已被注册');
     }
@@ -77,10 +84,10 @@ export class AuthService {
     ];
 
     const user = this.userRepo.create({
-      email: dto.email,
+      email,
       password: hashedPassword,
-      name: dto.name,
-      avatar: dto.name[0]?.toUpperCase() || 'U',
+      name,
+      avatar: name[0]?.toUpperCase() || 'U',
       color: colors[Math.floor(Math.random() * colors.length)],
     });
 
@@ -90,11 +97,10 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
-    const user = await this.userRepo.findOne({
-      where: { email: dto.email },
-    });
+    const email = this.normalizeEmail(dto.email);
+    const user = await this.findUserByEmail(email);
     if (!user) {
-      this.logger.warn(`Failed login attempt for email: ${dto.email}`);
+      this.logger.warn(`Failed login attempt for email: ${email}`);
       throw new UnauthorizedException('邮箱或密码错误');
     }
 
@@ -135,13 +141,16 @@ export class AuthService {
   private dispatchSms(phone: string, code: string) {
     const smsAccessKey = this.configService.get<string>('SMS_ACCESS_KEY');
     const smsSecretKey = this.configService.get<string>('SMS_SECRET_KEY');
+    const hasSmsConfig =
+      this.hasConfiguredValue(smsAccessKey) &&
+      this.hasConfiguredValue(smsSecretKey);
 
-    if (this.isProduction && (!smsAccessKey || !smsSecretKey)) {
+    if (this.isProduction && !hasSmsConfig) {
       this.logger.error('SMS configuration missing in production environment');
       throw new BadRequestException('短信服务配置错误'); // Don't crash, but fail gracefully
     }
 
-    if (smsAccessKey && smsSecretKey) {
+    if (hasSmsConfig) {
       // TODO: Integrate actual SMS provider SDK here (e.g., Aliyun, Tencent)
       // For now, simulating the external call
       this.logger.log(
@@ -183,7 +192,7 @@ export class AuthService {
       user = this.userRepo.create({
         phone,
         email: `${phone}@phone.local`, // TODO: Consider nullable email or enforced binding
-        password: await bcrypt.hash(uuidv4(), 10), // random password
+        password: await bcrypt.hash(randomUUID(), 10), // random password
         name: `用户${phone.slice(-4)}`,
         avatar: '📱',
         color: colors[Math.floor(Math.random() * colors.length)],
@@ -204,7 +213,7 @@ export class AuthService {
       this.configService.get<string>('WECHAT_REDIRECT_URI') ||
       'http://localhost:3000/api/auth/wechat/callback';
 
-    if (!appId) {
+    if (!this.hasConfiguredValue(appId)) {
       this.logger.warn('WECHAT_APP_ID not configured');
       // In strict production, might want to throw error.
       // But for now, returning a generic error URL or fallback.
@@ -216,7 +225,7 @@ export class AuthService {
 
     const encodedRedirect = encodeURIComponent(redirectUri);
     // CSRF protection: state should be random string stored in session/redis
-    const state = uuidv4();
+    const state = randomUUID();
     // Ideally store state in redis to verify on callback
     const url = `https://open.weixin.qq.com/connect/qrconnect?appid=${appId}&redirect_uri=${encodedRedirect}&response_type=code&scope=snsapi_login&state=${state}#wechat_redirect`;
     return { url };
@@ -226,7 +235,10 @@ export class AuthService {
     const appId = this.configService.get<string>('WECHAT_APP_ID');
     const appSecret = this.configService.get<string>('WECHAT_APP_SECRET');
 
-    if (!appId || !appSecret) {
+    if (
+      !this.hasConfiguredValue(appId) ||
+      !this.hasConfiguredValue(appSecret)
+    ) {
       if (this.isProduction) {
         throw new BadRequestException('微信登录服务配置错误');
       }
@@ -269,6 +281,45 @@ export class AuthService {
     }
   }
 
+  /* ========== Dev Quick Login ========== */
+
+  async devLogin(dto: DevLoginDto) {
+    if (this.isProduction) {
+      throw new BadRequestException('开发登录仅限非生产环境');
+    }
+
+    const requiredToken = this.configService.get<string>('DEV_LOGIN_TOKEN');
+    if (requiredToken && dto.token !== requiredToken) {
+      throw new UnauthorizedException('开发登录口令不正确');
+    }
+
+    const email = this.normalizeEmail(dto.email || 'dev@fitmeet.local');
+    const name = dto.name?.trim() || '开发者';
+
+    let user = await this.findUserByEmail(email);
+    if (!user) {
+      const colors = [
+        '#C8FF00',
+        '#FF6B9D',
+        '#A78BFA',
+        '#F97316',
+        '#38BDF8',
+        '#22C55E',
+      ];
+      user = this.userRepo.create({
+        email,
+        password: await bcrypt.hash(randomUUID(), 10),
+        name,
+        avatar: name[0]?.toUpperCase() || 'U',
+        color: colors[Math.floor(Math.random() * colors.length)],
+      });
+      user = await this.userRepo.save(user);
+      this.logger.log(`Dev user created: ${user.id} (${user.email})`);
+    }
+
+    return this.issueTokens(user);
+  }
+
   private async ensureUserByWechat(
     openid: string,
     userInfo: WeChatUserInfoResponse,
@@ -287,7 +338,7 @@ export class AuthService {
       user = this.userRepo.create({
         wechatOpenId: openid,
         email: `wx_${openid.slice(0, 10)}@wechat.local`,
-        password: await bcrypt.hash(uuidv4(), 10),
+        password: await bcrypt.hash(randomUUID(), 10),
         name: userInfo.nickname || `微信用户`,
         avatar: userInfo.headimgurl || '',
         color: colors[Math.floor(Math.random() * colors.length)],
@@ -359,7 +410,15 @@ export class AuthService {
 
   private async issueTokens(user: User) {
     const accessToken = this.generateAccessToken(user);
-    const refreshToken = await this.generateRefreshToken(user);
+    let refreshToken = '';
+    try {
+      refreshToken = await this.generateRefreshToken(user);
+    } catch (error) {
+      this.logger.error(
+        `Failed to issue refresh token for user ${user.id}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
 
     return {
       access_token: accessToken,
@@ -377,13 +436,24 @@ export class AuthService {
 
   private async generateRefreshToken(user: User): Promise<string> {
     const redis = this.redisService.getClient();
-    const token = uuidv4();
+    const token = randomUUID();
     await redis.setex(
       `refresh:${token}`,
       REFRESH_TOKEN_TTL,
       user.id.toString(),
     );
     return token;
+  }
+
+  private normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+  }
+
+  private findUserByEmail(email: string) {
+    return this.userRepo
+      .createQueryBuilder('u')
+      .where('LOWER(u.email) = :email', { email: this.normalizeEmail(email) })
+      .getOne();
   }
 
   private sanitizeUser(user: User) {

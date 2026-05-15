@@ -1,0 +1,660 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import {
+  AgentApprovalRequest,
+  ApprovalRiskLevel,
+  ApprovalStatus,
+  ApprovalType,
+} from './entities/agent-approval-request.entity';
+import { AgentConnection } from './entities/agent-connection.entity';
+import {
+  AgentSettings,
+  AgentSettingsMode,
+} from './entities/agent-settings.entity';
+import {
+  AgentAutoActionType,
+  canAutoExecute,
+} from './agent-autonomy.policy';
+import {
+  AgentActivityLog,
+  ActionResult,
+  LoggedAction,
+} from './entities/agent-activity-log.entity';
+import { AgentWebhookService } from './agent-webhook.service';
+
+/**
+ * Approval lifecycle helpers + risk classifier.
+ *
+ * Use `classify()` to decide whether a given agent action requires user
+ * approval, then `create()` to persist the request, then
+ * `approve()` / `reject()` to resolve. `dispatchOnApprove` is a callback
+ * the caller (typically AgentGatewayService) provides so the service
+ * can stay decoupled from per-action wiring (avoiding a circular
+ * dependency with AgentGatewayService.sendMessage).
+ */
+@Injectable()
+export class AgentApprovalService {
+  private readonly logger = new Logger(AgentApprovalService.name);
+
+  constructor(
+    @InjectRepository(AgentApprovalRequest)
+    private readonly repo: Repository<AgentApprovalRequest>,
+    @InjectRepository(AgentActivityLog)
+    private readonly logRepo: Repository<AgentActivityLog>,
+    private readonly webhooks: AgentWebhookService,
+  ) {}
+
+  // ───────────────────────────────────────────────
+  //  RISK CLASSIFIER
+  // ───────────────────────────────────────────────
+
+  /**
+   * Decide whether the given action requires owner approval and at
+   * what risk band. Pure function over (actionType, payload, settings,
+   * ctx).
+   *
+   * Hard rules from spec:
+   *  - first message to stranger → required
+   *  - create / join offline activity → required
+   *  - contact exchange / location share / photo upload → required
+   *  - night activity / alcohol / payment → required (high)
+   *  - target user has unknown risk profile → required (high)
+   *  - settings.requireApprovalForAll → required for any write
+   *  - mode === Basic        → any write needs approval
+   *  - mode === SandboxInternal → block contact with real users entirely
+   *  - mode === Open         → platform safety filters still apply (handled
+   *                            by capBlocked + context bumps below; this
+   *                            mode does NOT bypass blocked-content,
+   *                            blocked-user, payment, or harassment checks)
+   */
+  classify(input: {
+    type: ApprovalType;
+    actionType?: AgentAutoActionType;
+    payload: Record<string, unknown>;
+    settings: AgentSettings;
+    ctx?: {
+      isFirstContact?: boolean;
+      targetRiskUnknown?: boolean;
+      isNight?: boolean;
+      involvesAlcohol?: boolean;
+      involvesPayment?: boolean;
+    };
+  }): {
+    requiresApproval: boolean;
+    blocked: boolean;
+    blockedReason?: string;
+    riskLevel: ApprovalRiskLevel;
+    summary: string;
+    reasons: string[];
+  } {
+    const { type, settings, ctx = {} } = input;
+    const actionType = input.actionType ?? this.toAutoActionType(type);
+    const reasons: string[] = [];
+    let risk: ApprovalRiskLevel = ApprovalRiskLevel.Low;
+    const bumpRisk = (level: ApprovalRiskLevel) => {
+      const order = [
+        ApprovalRiskLevel.Low,
+        ApprovalRiskLevel.Medium,
+        ApprovalRiskLevel.High,
+      ];
+      if (order.indexOf(level) > order.indexOf(risk)) risk = level;
+    };
+
+    // SandboxInternal mode (legacy Lab): cannot touch real users at all
+    // for any messaging / activity / contact action.
+    if (settings.mode === AgentSettingsMode.SandboxInternal) {
+      const realUserAction = [
+        ApprovalType.SendMessage,
+        ApprovalType.FirstMessage,
+        ApprovalType.ContactRequest,
+        ApprovalType.ContactExchange,
+        ApprovalType.CreateActivity,
+        ApprovalType.JoinActivity,
+        ApprovalType.OfflineMeeting,
+        ApprovalType.ShareLocation,
+        ApprovalType.PhotoUpload,
+      ].includes(type);
+      if (realUserAction) {
+        return {
+          requiresApproval: false,
+          blocked: true,
+          blockedReason:
+            'Sandbox mode: agent can only operate in the agent-to-agent sandbox.',
+          riskLevel: ApprovalRiskLevel.High,
+          summary: 'Action blocked by sandbox policy.',
+          reasons: ['sandbox_internal_blocks_real_user_action'],
+        };
+      }
+    }
+
+    // Per-capability hard switches from settings.
+    const capBlocked = this.checkCapability(type, settings, actionType);
+    if (capBlocked) {
+      return {
+        requiresApproval: false,
+        blocked: true,
+        blockedReason: capBlocked,
+        riskLevel: ApprovalRiskLevel.High,
+        summary: `Action blocked: ${capBlocked}`,
+        reasons: ['capability_disabled'],
+      };
+    }
+
+    // Per-type baseline risk.
+    let needs = false;
+    switch (type) {
+      case ApprovalType.SendMessage:
+        bumpRisk(ApprovalRiskLevel.Low);
+        if (settings.requireApprovalForFirstMessage && ctx.isFirstContact) {
+          needs = true;
+          bumpRisk(ApprovalRiskLevel.Medium);
+          reasons.push('first_contact_with_stranger');
+        }
+        if (
+          settings.mode === AgentSettingsMode.Basic ||
+          settings.mode === AgentSettingsMode.Assisted
+        ) {
+          needs = true;
+          reasons.push('basic_mode_blocks_auto_send');
+        }
+        break;
+      case ApprovalType.FirstMessage:
+        needs = true;
+        bumpRisk(ApprovalRiskLevel.Medium);
+        reasons.push('first_contact_with_stranger');
+        break;
+      case ApprovalType.ContactRequest:
+      case ApprovalType.ContactExchange:
+        needs = true;
+        bumpRisk(ApprovalRiskLevel.High);
+        reasons.push('contact_exchange_high_risk');
+        break;
+      case ApprovalType.CreateActivity:
+      case ApprovalType.OfflineMeeting:
+        needs = true;
+        bumpRisk(ApprovalRiskLevel.Medium);
+        reasons.push('offline_meeting_requires_consent');
+        break;
+      case ApprovalType.JoinActivity:
+        needs = true;
+        bumpRisk(ApprovalRiskLevel.Medium);
+        reasons.push('joining_offline_activity');
+        break;
+      case ApprovalType.ShareLocation:
+        needs = true;
+        bumpRisk(ApprovalRiskLevel.High);
+        reasons.push('precise_location_high_risk');
+        break;
+      case ApprovalType.PhotoUpload:
+      case ApprovalType.SubmitCompletionProof:
+        if (settings.requireApprovalForPhotoUpload) {
+          needs = true;
+          bumpRisk(ApprovalRiskLevel.Medium);
+          reasons.push('photo_upload_requires_review');
+        }
+        break;
+      case ApprovalType.NightActivity:
+        needs = true;
+        bumpRisk(ApprovalRiskLevel.High);
+        reasons.push('night_activity_high_risk');
+        break;
+      case ApprovalType.AlcoholActivity:
+        needs = true;
+        bumpRisk(ApprovalRiskLevel.High);
+        reasons.push('alcohol_involved_high_risk');
+        break;
+      case ApprovalType.Payment:
+        needs = true;
+        bumpRisk(ApprovalRiskLevel.High);
+        reasons.push('payment_action_blocked_by_policy');
+        break;
+      case ApprovalType.UnknownRisk:
+        needs = true;
+        bumpRisk(ApprovalRiskLevel.High);
+        reasons.push('target_risk_profile_unknown');
+        break;
+      case ApprovalType.PostPublish:
+      case ApprovalType.Custom:
+      default:
+        bumpRisk(ApprovalRiskLevel.Low);
+        break;
+    }
+
+    // Contextual bumps.
+    if (ctx.isNight) {
+      needs = true;
+      bumpRisk(ApprovalRiskLevel.High);
+      reasons.push('night_activity_context');
+    }
+    if (ctx.involvesAlcohol) {
+      needs = true;
+      bumpRisk(ApprovalRiskLevel.High);
+      reasons.push('alcohol_context');
+    }
+    if (ctx.involvesPayment) {
+      needs = true;
+      bumpRisk(ApprovalRiskLevel.High);
+      reasons.push('payment_context');
+    }
+    if (ctx.targetRiskUnknown) {
+      needs = true;
+      bumpRisk(ApprovalRiskLevel.High);
+      reasons.push('target_risk_profile_unknown');
+    }
+
+    // Master switch.
+    if (settings.requireApprovalForAll) {
+      needs = true;
+      reasons.push('user_requires_approval_for_all_actions');
+    }
+
+    if (!canAutoExecute(actionType, settings.mode, risk)) {
+      needs = true;
+      reasons.push(`${settings.mode}_requires_pending_${actionType}`);
+    }
+
+    return {
+      requiresApproval: needs,
+      blocked: false,
+      riskLevel: risk,
+      summary: this.buildSummary(type, input.payload),
+      reasons,
+    };
+  }
+
+  private checkCapability(
+    type: ApprovalType,
+    s: AgentSettings,
+    actionType: AgentAutoActionType,
+  ): string | null {
+    switch (type) {
+      case ApprovalType.SendMessage:
+      case ApprovalType.FirstMessage:
+        if (
+          !s.allowSendMessage &&
+          s.mode !== AgentSettingsMode.Assisted &&
+          s.mode !== AgentSettingsMode.Basic
+        ) {
+          return 'Agent is not allowed to send messages.';
+        }
+        break;
+      case ApprovalType.CreateActivity:
+      case ApprovalType.OfflineMeeting:
+        if (
+          !s.allowCreateActivity &&
+          s.mode !== AgentSettingsMode.Assisted &&
+          s.mode !== AgentSettingsMode.Basic &&
+          s.mode !== AgentSettingsMode.Normal &&
+          s.mode !== AgentSettingsMode.Standard
+        ) {
+          return 'Agent is not allowed to create activities.';
+        }
+        break;
+      case ApprovalType.JoinActivity:
+        if (!s.allowJoinActivity)
+          return 'Agent is not allowed to join activities.';
+        break;
+      case ApprovalType.ShareLocation:
+        if (!s.allowShareLocation)
+          return 'Agent is not allowed to share precise location.';
+        break;
+      case ApprovalType.PhotoUpload:
+      case ApprovalType.SubmitCompletionProof:
+        if (!s.allowUploadProof)
+          return 'Agent is not allowed to upload photos / proof.';
+        break;
+      case ApprovalType.ContactRequest:
+      case ApprovalType.ContactExchange:
+        if (actionType === 'add_friend') break;
+        if (!s.allowContactExchange)
+          return 'Agent is not allowed to exchange contact info.';
+        break;
+    }
+    return null;
+  }
+
+  private toAutoActionType(type: ApprovalType): AgentAutoActionType {
+    switch (type) {
+      case ApprovalType.SendMessage:
+      case ApprovalType.FirstMessage:
+        return 'send_message';
+      case ApprovalType.ContactRequest:
+      case ApprovalType.ContactExchange:
+        return 'add_friend';
+      case ApprovalType.CreateActivity:
+      case ApprovalType.OfflineMeeting:
+        return 'create_activity';
+      case ApprovalType.JoinActivity:
+        return 'invite_activity';
+      case ApprovalType.PostPublish:
+        return 'generate_suggestion';
+      default:
+        return 'generate_suggestion';
+    }
+  }
+
+  private buildSummary(
+    type: ApprovalType,
+    payload: Record<string, unknown>,
+  ): string {
+    const agentName =
+      (payload._agentDisplayName as string) ||
+      (payload._agentName as string) ||
+      'Agent';
+    const target =
+      (payload._targetDisplayName as string) ||
+      (payload.toUserId !== undefined
+        ? `用户 #${payload.toUserId}`
+        : '对方');
+    switch (type) {
+      case ApprovalType.SendMessage:
+      case ApprovalType.FirstMessage:
+        return `${agentName} 想代表你给 ${target} 发送${
+          type === ApprovalType.FirstMessage ? '第一条' : '一条'
+        }消息。`;
+      case ApprovalType.ContactRequest:
+      case ApprovalType.ContactExchange:
+        return `${agentName} 想代表你和 ${target} 交换联系方式。`;
+      case ApprovalType.CreateActivity:
+        return `${agentName} 想代表你创建一个线下活动。`;
+      case ApprovalType.OfflineMeeting:
+        return `${agentName} 想代表你确认一个线下见面安排。`;
+      case ApprovalType.JoinActivity:
+        return `${agentName} 想代表你报名一个线下活动。`;
+      case ApprovalType.ShareLocation:
+        return `${agentName} 想代表你分享精确位置。`;
+      case ApprovalType.PhotoUpload:
+      case ApprovalType.SubmitCompletionProof:
+        return `${agentName} 想代表你上传一张活动证明照片。`;
+      case ApprovalType.NightActivity:
+        return `${agentName} 想代表你确认一个夜间活动。`;
+      case ApprovalType.AlcoholActivity:
+        return `${agentName} 想代表你确认一个含酒精的活动。`;
+      case ApprovalType.Payment:
+        return `${agentName} 想代表你完成一次支付。`;
+      case ApprovalType.UnknownRisk:
+        return `${agentName} 想对一个风险等级未知的目标执行动作。`;
+      case ApprovalType.PostPublish:
+        return `${agentName} 想代表你发布一条动态。`;
+      default:
+        return `${agentName} 想代表你执行一个需要确认的动作。`;
+    }
+  }
+
+  // ───────────────────────────────────────────────
+  //  PERSISTENCE
+  // ───────────────────────────────────────────────
+
+  async create(input: {
+    userId: number;
+    agentConnectionId: number | null;
+    type: ApprovalType;
+    actionType?: string;
+    skillName?: string;
+    payload: Record<string, unknown>;
+    summary: string;
+    riskLevel: ApprovalRiskLevel;
+    reason?: string;
+    createdBy?: 'ai' | 'agent' | 'system';
+    relatedSocialRequestId?: number | null;
+    relatedCandidateId?: number | null;
+    relatedActivityId?: number | null;
+    rationale?: string;
+    ttlMs?: number;
+  }): Promise<AgentApprovalRequest> {
+    const ttl = input.ttlMs ?? 24 * 60 * 60 * 1000;
+    const saved = await this.repo.save(
+      this.repo.create({
+        userId: input.userId,
+        agentConnectionId: input.agentConnectionId,
+        type: input.type,
+        actionType: input.actionType ?? input.type,
+        skillName: input.skillName ?? input.type,
+        payload: input.payload,
+        summary: input.summary,
+        reason: input.reason ?? input.rationale ?? '',
+        createdBy: input.createdBy ?? 'agent',
+        relatedSocialRequestId:
+          input.relatedSocialRequestId ??
+          ((input.payload.socialRequestId as number | undefined) ?? null),
+        relatedCandidateId:
+          input.relatedCandidateId ??
+          ((input.payload.candidateRecordId as number | undefined) ?? null),
+        relatedActivityId:
+          input.relatedActivityId ??
+          ((input.payload.activityId as number | undefined) ?? null),
+        riskLevel: input.riskLevel,
+        agentRationale: input.rationale ?? '',
+        expiresAt: new Date(Date.now() + ttl),
+      }),
+    );
+    void this.emitApprovalWebhook(saved, 'approval.created');
+    return saved;
+  }
+
+  async getPending(userId: number) {
+    return this.repo.find({
+      where: { userId, status: ApprovalStatus.Pending },
+      order: { createdAt: 'DESC' },
+      take: 100,
+    });
+  }
+
+  async getById(id: number, userId: number) {
+    const row = await this.repo.findOne({ where: { id, userId } });
+    if (!row) throw new NotFoundException('Approval not found');
+    return row;
+  }
+
+  /**
+   * Approves the request and (if possible) dispatches the underlying
+   * action. The dispatcher is provided by the caller to avoid a
+   * circular dependency on AgentGatewayService.
+   */
+  async approve(
+    id: number,
+    userId: number,
+    dispatcher?: (
+      approval: AgentApprovalRequest,
+    ) => Promise<unknown> | unknown,
+  ): Promise<{
+    approval: AgentApprovalRequest;
+    dispatched: boolean;
+    dispatchResult?: unknown;
+    dispatchError?: string;
+  }> {
+    const row = await this.repo.findOne({ where: { id, userId } });
+    if (!row) throw new NotFoundException('Approval not found');
+    if (row.status !== ApprovalStatus.Pending) {
+      throw new BadRequestException(
+        `Approval already resolved (${row.status})`,
+      );
+    }
+    if (row.expiresAt < new Date()) {
+      row.status = ApprovalStatus.Expired;
+      await this.repo.save(row);
+      throw new BadRequestException('Approval has expired');
+    }
+    row.status = ApprovalStatus.Approved;
+    row.respondedAt = new Date();
+    const saved = await this.repo.save(row);
+
+    let dispatched = false;
+    let dispatchResult: unknown;
+    let dispatchError: string | undefined;
+    if (dispatcher) {
+      try {
+        dispatchResult = await dispatcher(saved);
+        dispatched = true;
+      } catch (err) {
+        dispatchError =
+          err instanceof Error ? err.message : 'Dispatch failed';
+        this.logger.warn(
+          `Approval ${id} approved but dispatch failed: ${dispatchError}`,
+        );
+      }
+    }
+    void this.emitApprovalWebhook(saved, 'approval.approved', {
+      dispatched,
+      dispatchResult,
+      dispatchError,
+    });
+    return { approval: saved, dispatched, dispatchResult, dispatchError };
+  }
+
+  async reject(id: number, userId: number) {
+    const row = await this.repo.findOne({ where: { id, userId } });
+    if (!row) throw new NotFoundException('Approval not found');
+    if (row.status !== ApprovalStatus.Pending) {
+      throw new BadRequestException(
+        `Approval already resolved (${row.status})`,
+      );
+    }
+    row.status = ApprovalStatus.Rejected;
+    row.respondedAt = new Date();
+    const saved = await this.repo.save(row);
+    await this.writeDecisionLog(saved, ActionResult.Blocked);
+    void this.emitApprovalWebhook(saved, 'approval.rejected');
+    return saved;
+  }
+
+  private async emitApprovalWebhook(
+    approval: AgentApprovalRequest,
+    event: 'approval.created' | 'approval.approved' | 'approval.rejected',
+    extra: Record<string, unknown> = {},
+  ) {
+    try {
+      await this.webhooks.emitToConnection(approval.agentConnectionId, event, {
+        approvalId: approval.id,
+        userId: approval.userId,
+        type: approval.type,
+        actionType: approval.actionType,
+        skillName: approval.skillName,
+        status: approval.status,
+        riskLevel: approval.riskLevel,
+        summary: approval.summary,
+        relatedSocialRequestId: approval.relatedSocialRequestId,
+        relatedCandidateId: approval.relatedCandidateId,
+        relatedActivityId: approval.relatedActivityId,
+        ...extra,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to emit ${event} webhook for approval ${approval.id}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  private async writeDecisionLog(
+    approval: AgentApprovalRequest,
+    result: ActionResult,
+  ) {
+    try {
+      await this.logRepo.save(
+        this.logRepo.create({
+          agentConnectionId: approval.agentConnectionId ?? null,
+          userId: approval.userId,
+          action: this.toLoggedAction(approval),
+          payload: {
+            approvalId: approval.id,
+            actionType: approval.actionType,
+            socialRequestId: approval.relatedSocialRequestId,
+            candidateRecordId: approval.relatedCandidateId,
+            decision: approval.status,
+          },
+          result,
+          riskScore: 0,
+          blockReason:
+            approval.status === ApprovalStatus.Rejected
+              ? 'User rejected pending action'
+              : null,
+        }),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Failed to write approval decision log ${approval.id}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  private toLoggedAction(approval: AgentApprovalRequest): LoggedAction {
+    if (approval.actionType === 'add_friend') return LoggedAction.ContactRequest;
+    switch (approval.type) {
+      case ApprovalType.SendMessage:
+      case ApprovalType.FirstMessage:
+        return LoggedAction.SendMessage;
+      case ApprovalType.ContactRequest:
+      case ApprovalType.ContactExchange:
+        return LoggedAction.ContactRequest;
+      case ApprovalType.CreateActivity:
+      case ApprovalType.OfflineMeeting:
+        return LoggedAction.CreateActivity;
+      case ApprovalType.JoinActivity:
+        return LoggedAction.JoinActivity;
+      case ApprovalType.PhotoUpload:
+      case ApprovalType.SubmitCompletionProof:
+        return LoggedAction.SubmitCompletionProof;
+      default:
+        return LoggedAction.Intercepted;
+    }
+  }
+
+  /**
+   * Used by the agent-token side to confirm an approval is still
+   * usable before performing the underlying action a second time.
+   */
+  async assertApproved(
+    approvalId: number,
+    userId: number,
+    type: ApprovalType,
+  ): Promise<AgentApprovalRequest> {
+    const row = await this.repo.findOne({ where: { id: approvalId, userId } });
+    if (!row) throw new NotFoundException('Approval not found');
+    if (row.type !== type)
+      throw new BadRequestException('Approval type mismatch');
+    if (row.status !== ApprovalStatus.Approved)
+      throw new ForbiddenException('Approval not granted');
+    if (row.expiresAt < new Date())
+      throw new ForbiddenException('Approval expired');
+    return row;
+  }
+}
+
+/** Convenience helper for callers that want to detect night-time. */
+export function isNightHour(d: Date = new Date()): boolean {
+  const h = d.getHours();
+  return h >= 22 || h < 6;
+}
+
+export function detectAlcoholInText(text?: string | null): boolean {
+  if (!text) return false;
+  const t = text.toLowerCase();
+  return /酒|啤酒|白酒|红酒|alcohol|beer|wine|whisky|cocktail|bar\b/.test(t);
+}
+
+export function detectPaymentInText(text?: string | null): boolean {
+  if (!text) return false;
+  const t = text.toLowerCase();
+  return /转账|红包|付款|支付|venmo|paypal|wire transfer|gift card/.test(t);
+}
+
+/** Returns true when a Date string or {start} appears to be in night hours. */
+export function timeFieldIsNight(value?: string | Date | null): boolean {
+  if (!value) return false;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return false;
+  return isNightHour(d);
+}
+
+interface AgentConnectionLike {
+  id: number;
+  userId: number;
+}
+export type { AgentConnection, AgentConnectionLike };

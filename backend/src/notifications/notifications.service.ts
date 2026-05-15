@@ -18,14 +18,14 @@ export class NotificationsService {
       .lean()
       .exec();
 
-    return notifications.map(n => ({
+    return notifications.map((n) => ({
       id: n._id.toString(),
       type: n.type,
       username: n.fromUsername,
       avatar: n.fromAvatar,
       color: n.fromColor,
       text: n.text,
-      time: this.formatTime((n as any).createdAt as Date),
+      time: this.formatTime((n as { createdAt?: Date }).createdAt),
       read: n.read,
       targetId: n.targetId,
     }));
@@ -54,18 +54,12 @@ export class NotificationsService {
   }
 
   async markAsRead(notificationId: string) {
-    await this.notifModel.updateOne(
-      { _id: notificationId },
-      { read: true },
-    );
+    await this.notifModel.updateOne({ _id: notificationId }, { read: true });
     return { success: true };
   }
 
   async markAllRead(userId: number) {
-    await this.notifModel.updateMany(
-      { userId, read: false },
-      { read: true },
-    );
+    await this.notifModel.updateMany({ userId, read: false }, { read: true });
     return { success: true };
   }
 
@@ -74,7 +68,7 @@ export class NotificationsService {
     return { unreadCount: count };
   }
 
-  private formatTime(date: Date): string {
+  private formatTime(date?: Date): string {
     if (!date) return '';
     const now = new Date();
     const diff = now.getTime() - new Date(date).getTime();

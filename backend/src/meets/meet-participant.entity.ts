@@ -1,6 +1,11 @@
 import {
-  Entity, PrimaryGeneratedColumn, Column,
-  CreateDateColumn, ManyToOne, JoinColumn, Unique,
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  ManyToOne,
+  JoinColumn,
+  Unique,
 } from 'typeorm';
 import { User } from '../users/user.entity';
 import { Meet } from './meet.entity';
@@ -27,6 +32,9 @@ export class MeetParticipant {
 
   @Column({ default: 'pending' })
   status: 'pending' | 'active' | 'completed' | 'cancelled';
+
+  @Column({ type: 'varchar', nullable: true })
+  tripShareToken: string | null;
 
   @CreateDateColumn()
   createdAt: Date;

@@ -1,7 +1,6 @@
-import { memo, useState, useMemo } from 'react';
+﻿import { memo, useState, useMemo } from 'react';
 import type { Post } from '../../types';
 import { useSocialStore } from '../../stores';
-import { FEED_DATA } from '../../data/mockData';
 
 interface ProfilePostsProps {
   posts: Post[];
@@ -13,12 +12,10 @@ export const ProfilePosts = memo(function ProfilePosts({ posts }: ProfilePostsPr
 
   const filtered = useMemo(() => {
     if (tab === 'liked') {
-      // Show all posts the user has liked (from entire feed)
-      return FEED_DATA.filter((p) => likedPosts.includes(p.id));
+      return posts.filter((p) => likedPosts.includes(p.id));
     }
     if (tab === 'saved') {
-      // Show all posts the user has saved (from entire feed)
-      return FEED_DATA.filter((p) => savedPosts.includes(p.id));
+      return posts.filter((p) => savedPosts.includes(p.id));
     }
     return posts;
   }, [tab, posts, likedPosts, savedPosts]);
@@ -35,9 +32,9 @@ export const ProfilePosts = memo(function ProfilePosts({ posts }: ProfilePostsPr
           <button
             key={item.key}
             onClick={() => setTab(item.key)}
-            className={`px-4 py-2 rounded-full text-xs font-bold transition ${
+            className={`rounded-lg px-4 py-2 text-xs font-bold transition ${
               tab === item.key
-                ? 'bg-lime text-[#09090A]'
+                ? 'bg-lime text-white'
                 : 'bg-surface border border-border text-textMuted hover:border-borderStrong'
             }`}
           >
@@ -69,7 +66,7 @@ const PostItem = memo(function PostItem({ post, liked, saved, likeDelta }: { pos
       {/* Header */}
       <div className="flex items-center gap-3 mb-3">
         <div
-          className="w-9 h-9 rounded-full flex items-center justify-center text-lg font-bold"
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-lg font-bold"
           style={{ backgroundColor: post.colorBg, color: post.color }}
         >
           {post.emoji}
@@ -113,7 +110,7 @@ const PostItem = memo(function PostItem({ post, liked, saved, likeDelta }: { pos
           {post.tags.map((tag) => (
             <span
               key={tag}
-              className="px-2 py-0.5 bg-lime/10 text-lime text-[10px] font-bold rounded-full"
+              className="rounded-md bg-lime/10 px-2 py-0.5 text-[10px] font-bold text-lime"
             >
               {tag.startsWith('#') ? tag : `#${tag}`}
             </span>

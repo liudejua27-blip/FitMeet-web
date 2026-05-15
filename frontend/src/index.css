@@ -12,12 +12,23 @@
   }
 
   body {
-    @apply bg-base text-white font-body min-h-screen;
-    background-image: radial-gradient(circle at 20% 20%, rgba(200,255,0,0.08), transparent 30%),
-      radial-gradient(circle at 80% 0%, rgba(68,136,255,0.08), transparent 35%);
+    @apply bg-[#050505] font-body;
   }
 
   a {
-    @apply text-white no-underline;
+    @apply no-underline;
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+  }
+}
+
+@layer components {
+  .field {
+    @apply w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-semibold text-cream outline-none transition placeholder:text-textSofter focus:border-lime/60 focus:bg-black/30;
   }
 }

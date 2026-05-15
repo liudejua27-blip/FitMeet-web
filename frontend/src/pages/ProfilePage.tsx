@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+﻿import { useState, useCallback, useEffect } from 'react';
 import { ProfileHeader } from '../components/profile/ProfileHeader';
 import { ProfileStats } from '../components/profile/ProfileStats';
 import { ProfileCoach } from '../components/profile/ProfileCoach';
@@ -20,20 +20,60 @@ const tabs: { id: TabId; label: string; icon: string }[] = [
 
 export const ProfilePage = () => {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
-  const { user, openLogin, updateProfile } = useAuthStore();
+  const { user, openLogin, updateProfile, refreshProfile } = useAuthStore();
   const { addNotification } = useNotificationStore();
   const [myPosts, setMyPosts] = useState<Post[]>([]);
   const [meetRecords, setMeetRecords] = useState<MeetRecord[]>([]);
   const [isEditing, setIsEditing] = useState(false);
+  const [profileContentError, setProfileContentError] = useState('');
+
+  const fetchProfileContent = useCallback(async () => {
+    if (!user) return;
+    const [posts, records] = await Promise.all([
+      dataService.getFeed(),
+      dataService.getMeetRecords(),
+    ]);
+    return {
+      posts: posts.filter((p) => p.userId === user.id || p.username === user.name),
+      records,
+    };
+  }, [user]);
 
   useEffect(() => {
-    if (!user) return;
-    dataService.getFeed().then((posts) => {
-      const mine = posts.filter((p) => p.username === user.name);
-      setMyPosts(mine.length > 0 ? mine : posts.slice(0, 4));
-    });
-    dataService.getMeetRecords().then(setMeetRecords);
-  }, [user]);
+    let cancelled = false;
+    async function load() {
+      try {
+        const result = await fetchProfileContent();
+        if (cancelled || !result) return;
+        setProfileContentError('');
+        setMyPosts(result.posts);
+        setMeetRecords(result.records);
+      } catch {
+        if (cancelled) return;
+        setMyPosts([]);
+        setMeetRecords([]);
+        setProfileContentError('加载个人内容失败，请重试');
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchProfileContent]);
+
+  const loadProfileContent = useCallback(async () => {
+    try {
+      const result = await fetchProfileContent();
+      if (!result) return;
+      setProfileContentError('');
+      setMyPosts(result.posts);
+      setMeetRecords(result.records);
+    } catch {
+      setMyPosts([]);
+      setMeetRecords([]);
+      setProfileContentError('加载个人内容失败，请重试');
+    }
+  }, [fetchProfileContent]);
   const [editName, setEditName] = useState(user?.name || '');
   const [editBio, setEditBio] = useState(user?.bio || '');
   const [successMsg, setSuccessMsg] = useState('');
@@ -66,7 +106,7 @@ export const ProfilePage = () => {
           <p className="text-textMuted text-lg">请先登录查看个人资料</p>
           <button
             onClick={openLogin}
-            className="px-6 py-2 bg-lime text-[#09090A] font-bold rounded-full hover:bg-[#d4ff1a] transition cursor-pointer"
+            className="cursor-pointer rounded-lg bg-lime px-6 py-2 font-bold text-white transition hover:bg-brand2"
           >
             登录
           </button>
@@ -81,15 +121,15 @@ export const ProfilePage = () => {
       <ProfileHeader profile={user} onEdit={handleEditProfile} />
 
       {/* Tab Navigation */}
-      <div className="sticky top-16 z-40 border-b border-border bg-base/95 backdrop-blur-xl">
+      <div className="sticky top-[72px] z-40 border-b border-white/10 bg-[#100b08]/95 backdrop-blur-xl">
         <div className="max-w-4xl mx-auto flex">
           {tabs.map(tab => (
             <button
               key={tab.id}
               className={`flex-1 py-3.5 text-sm font-display font-semibold transition cursor-pointer border-b-2 ${
                 activeTab === tab.id
-                  ? 'text-lime border-lime'
-                  : 'text-textMuted border-transparent hover:text-white'
+                ? 'text-lime border-lime'
+                : 'text-textMuted border-transparent hover:text-white'
               }`}
               onClick={() => setActiveTab(tab.id)}
             >
@@ -101,6 +141,24 @@ export const ProfilePage = () => {
 
       {/* Tab Content */}
       <div className="max-w-4xl mx-auto px-6 pt-6">
+        {profileContentError && (
+          <div
+            className="mb-4 flex items-center justify-between rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200"
+            role="alert"
+            aria-live="assertive"
+          >
+            <span>{profileContentError}</span>
+            <button
+              className="underline underline-offset-2 hover:text-white cursor-pointer"
+              onClick={() => {
+                void loadProfileContent();
+              }}
+            >
+              重试
+            </button>
+          </div>
+        )}
+
         {activeTab === 'overview' && (
           <div className="space-y-6">
             <ProfileStats profile={user} />
@@ -117,7 +175,10 @@ export const ProfilePage = () => {
         )}
 
         {activeTab === 'settings' && (
-          <ProfileSettings profile={user} />
+          <ProfileSettings
+            profile={user}
+            onVerificationApproved={refreshProfile}
+          />
         )}
       </div>
 
@@ -152,7 +213,7 @@ export const ProfilePage = () => {
                 取消
               </button>
               <button
-                className="flex-1 py-2 rounded-lg bg-lime text-[#09090A] text-sm font-bold hover:bg-[#d4ff1a] transition cursor-pointer"
+                className="flex-1 cursor-pointer rounded-lg bg-lime py-2 text-sm font-bold text-white transition hover:bg-brand2"
                 onClick={handleSaveProfile}
               >
                 保存
@@ -163,7 +224,7 @@ export const ProfilePage = () => {
       )}
       {/* Success Toast */}
       {successMsg && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-xl bg-lime text-[#09090A] font-bold text-sm shadow-glow animate-bounce">
+        <div className="fixed left-1/2 top-20 z-[100] -translate-x-1/2 rounded-xl bg-lime px-6 py-3 text-sm font-bold text-white shadow-glow">
           ✅ {successMsg}
         </div>
       )}

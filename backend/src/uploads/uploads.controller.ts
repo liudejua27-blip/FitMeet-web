@@ -4,7 +4,7 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
-  UseGuards
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UploadsService } from './uploads.service';
@@ -26,16 +26,21 @@ export class UploadsController {
 
   @Post('image')
   @UseGuards(JwtAuthGuard)
-  @UseInterceptors(FileInterceptor('file', {
-    storage: diskStorage({
-      destination: './public/uploads/temp', // Use a temp dir for raw uploads before processing
-      filename: (req, file, cb) => {
-        const randomName = Array(32).fill(null).map(() => (Math.round(Math.random() * 16)).toString(16)).join('');
-        return cb(null, `${randomName}${extname(file.originalname)}`);
-      }
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: './public/uploads/temp', // Use a temp dir for raw uploads before processing
+        filename: (req, file, cb) => {
+          const randomName = Array(32)
+            .fill(null)
+            .map(() => Math.round(Math.random() * 16).toString(16))
+            .join('');
+          return cb(null, `${randomName}${extname(file.originalname)}`);
+        },
+      }),
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
     }),
-    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
-  }))
+  )
   async uploadImage(@UploadedFile() file: Express.Multer.File) {
     if (!file) throw new BadRequestException('No file uploaded');
     const result = await this.uploadsService.saveImage(file);
@@ -44,21 +49,23 @@ export class UploadsController {
 
   @Post('video')
   @UseGuards(JwtAuthGuard)
-  @UseInterceptors(FileInterceptor('file', {
-    storage: diskStorage({
-      destination: './public/uploads', // Direct save for video (no processing for now)
-      filename: (req, file, cb) => {
-        const randomName = Array(32).fill(null).map(() => (Math.round(Math.random() * 16)).toString(16)).join('');
-        return cb(null, `${randomName}${extname(file.originalname)}`);
-      }
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: './public/uploads', // Direct save for video (no processing for now)
+        filename: (req, file, cb) => {
+          const randomName = Array(32)
+            .fill(null)
+            .map(() => Math.round(Math.random() * 16).toString(16))
+            .join('');
+          return cb(null, `${randomName}${extname(file.originalname)}`);
+        },
+      }),
+      limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit for video
     }),
-    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit for video
-  }))
+  )
   async uploadVideo(@UploadedFile() file: Express.Multer.File) {
     if (!file) throw new BadRequestException('No file uploaded');
-    // For video, we just return the URL directly since we saved it in place
-    // In a real scenario, use FFMPEG or cloud transcoding service here
-    const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-    return { url: `${baseUrl}/uploads/${file.filename}` };
+    return { url: await this.uploadsService.saveFile(file) };
   }
 }

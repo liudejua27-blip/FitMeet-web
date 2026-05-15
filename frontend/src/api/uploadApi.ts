@@ -1,4 +1,4 @@
-import { getToken } from './client';
+import { ApiError, getToken } from './client';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
@@ -17,10 +17,36 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   });
 
   if (!res.ok) {
-     const body = await res.text().catch(() => '');
-     throw new Error(`Upload Failed: ${res.statusText} ${body}`);
+    const body = await res.text().catch(() => '');
+    const parsed = parseErrorBody(body);
+    throw new ApiError(
+      res.status,
+      resolveUploadErrorMessage(parsed, res.statusText),
+      parsed,
+      body,
+    );
   }
   return res.json() as Promise<T>;
+}
+
+function parseErrorBody(body: string) {
+  if (!body.trim()) return undefined;
+  try {
+    const data = JSON.parse(body) as { message?: string | string[]; error?: string };
+    return typeof data === 'object' && data !== null ? data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveUploadErrorMessage(
+  payload: { message?: string | string[]; error?: string } | undefined,
+  statusText: string,
+) {
+  if (Array.isArray(payload?.message)) return payload.message.join('，');
+  if (payload?.message) return payload.message;
+  if (payload?.error) return payload.error;
+  return statusText || '上传失败';
 }
 
 export async function uploadImage(file: File): Promise<{ url: string; width: number; height: number }> {

@@ -7,10 +7,7 @@ import { Post } from '../posts/post.entity';
 import { ModerationModule } from '../moderation/moderation.module';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Comment, Post]),
-    ModerationModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Comment, Post]), ModerationModule],
   controllers: [CommentsController],
   providers: [CommentsService],
   exports: [CommentsService],

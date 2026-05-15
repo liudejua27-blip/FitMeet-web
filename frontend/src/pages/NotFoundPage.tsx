@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+﻿import { Link } from 'react-router-dom';
 
 export function NotFoundPage() {
   return (
@@ -21,7 +21,7 @@ export function NotFoundPage() {
         </button>
         <Link
           to="/"
-          className="rounded-full bg-lime px-6 py-2.5 font-display text-sm font-bold text-[#09090A] transition hover:shadow-glow"
+          className="rounded-full bg-lime px-6 py-2.5 font-display text-sm font-bold text-white transition hover:shadow-glow"
         >
           返回首页
         </Link>

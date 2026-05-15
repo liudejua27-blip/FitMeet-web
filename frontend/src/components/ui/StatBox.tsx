@@ -19,7 +19,7 @@ const sizeStyles: Record<StatBoxSize, { wrapper: string; value: string; label: s
     label: 'text-[10px] text-textMuted',
   },
   md: {
-    wrapper: 'p-3 bg-surfaceMuted rounded-xl',
+    wrapper: 'p-3 bg-surfaceMuted rounded-lg',
     value: 'font-display font-bold text-base',
     label: 'text-[10px] text-textMuted',
   },

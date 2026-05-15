@@ -22,7 +22,7 @@ export class CommentsService {
       relations: ['user'],
       order: { createdAt: 'ASC' },
     });
-    return comments.map(c => this.toResponse(c));
+    return comments.map((c) => this.toResponse(c));
   }
 
   async create(postId: number, userId: number, dto: CreateCommentDto) {
@@ -55,7 +55,8 @@ export class CommentsService {
     const minutes = Math.floor(diff / 60000);
     let timeStr = '刚刚';
     if (minutes > 0 && minutes < 60) timeStr = `${minutes}分钟前`;
-    else if (minutes >= 60 && minutes < 1440) timeStr = `${Math.floor(minutes / 60)}小时前`;
+    else if (minutes >= 60 && minutes < 1440)
+      timeStr = `${Math.floor(minutes / 60)}小时前`;
     else if (minutes >= 1440) timeStr = `${Math.floor(minutes / 1440)}天前`;
 
     return {

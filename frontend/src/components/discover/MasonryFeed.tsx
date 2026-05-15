@@ -11,7 +11,6 @@ interface MasonryFeedProps {
   onSave: (id: number) => void;
   onAddFriend: (id: number) => void;
   onMeetRequest: (id: number) => void;
-  onSendGift: (postId: number, giftId: string) => void;
   onMessage: (id: number) => void;
 }
 
@@ -22,19 +21,18 @@ interface RowContentProps {
     onSave: (id: number) => void;
     onAddFriend: (id: number) => void;
     onMeetRequest: (id: number) => void;
-    onSendGift: (postId: number, giftId: string) => void;
     onMessage: (id: number) => void;
   };
 }
 
 const RowContent = memo(({ rowData, context }: RowContentProps) => {
-  const { onLike, onSave, onAddFriend, onMeetRequest, onSendGift, onMessage } =
+  const { onLike, onSave, onAddFriend, onMeetRequest, onMessage } =
     context;
   const [leftPost, rightPost] = rowData;
 
   return (
-    <div className="flex w-full gap-2 px-2 pb-2">
-      <div className="w-1/2 flex flex-col">
+    <div className="flex w-full flex-col gap-4 px-1 pb-4 md:flex-row">
+      <div className="flex w-full flex-col md:w-1/2">
         {leftPost && (
           <FeedCard
             post={leftPost}
@@ -42,12 +40,11 @@ const RowContent = memo(({ rowData, context }: RowContentProps) => {
             onSave={onSave}
             onAddFriend={onAddFriend}
             onMeetRequest={onMeetRequest}
-            onSendGift={onSendGift}
             onMessage={onMessage}
           />
         )}
       </div>
-      <div className="w-1/2 flex flex-col">
+      <div className="flex w-full flex-col md:w-1/2">
         {rightPost && (
           <FeedCard
             post={rightPost}
@@ -55,7 +52,6 @@ const RowContent = memo(({ rowData, context }: RowContentProps) => {
             onSave={onSave}
             onAddFriend={onAddFriend}
             onMeetRequest={onMeetRequest}
-            onSendGift={onSendGift}
             onMessage={onMessage}
           />
         )}

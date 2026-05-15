@@ -13,7 +13,10 @@ export class RecommendationsService {
     private usersRepository: Repository<User>,
   ) {}
 
-  async getRecommendedPosts(userId: number, limit: number = 10): Promise<Post[]> {
+  async getRecommendedPosts(
+    userId: number,
+    limit: number = 10,
+  ): Promise<Post[]> {
     // Basic recommendation algorithm:
     // 1. Fetch recent posts
     // 2. Score them based on likes and views (simplified)
@@ -28,7 +31,7 @@ export class RecommendationsService {
 
     // Simple scoring: (likes * 2) + views
     // In a real app, you would use more complex logic, potentially involving user interests
-    const scoredPosts = posts.map(post => {
+    const scoredPosts = posts.map((post) => {
       const score = (post.likesCount || 0) * 2 + (post.viewCount || 0);
       return { post, score };
     });
@@ -36,13 +39,17 @@ export class RecommendationsService {
     // Sort by score descending
     scoredPosts.sort((a, b) => b.score - a.score);
 
-    return scoredPosts.slice(0, limit).map(item => item.post);
+    return scoredPosts.slice(0, limit).map((item) => item.post);
   }
 
-  async getRecommendedUsers(userId: number, limit: number = 5): Promise<User[]> {
+  async getRecommendedUsers(
+    userId: number,
+    limit: number = 5,
+  ): Promise<User[]> {
     // Recommend users not followed yet providing simplistic logic
     // Ensure we don't recommend self
-    return this.usersRepository.createQueryBuilder('user')
+    return this.usersRepository
+      .createQueryBuilder('user')
       .where('user.id != :userId', { userId })
       .orderBy('RANDOM()') // Postgres/SQLite specific, check database compatibility
       .take(limit)

@@ -3,29 +3,29 @@ import { persist } from 'zustand/middleware';
 import type { UserProfile } from '../types';
 import * as api from '../api/client';
 import * as dataService from '../services/dataService';
+import { STORAGE_KEYS, migrateLocalStorageKey } from '../lib/storageKeys';
 
-const REFRESH_TOKEN_KEY = 'fitmate-refresh-token';
+const REFRESH_TOKEN_KEY = STORAGE_KEYS.refreshToken;
+migrateLocalStorageKey(STORAGE_KEYS.legacyRefreshToken, REFRESH_TOKEN_KEY);
+migrateLocalStorageKey(STORAGE_KEYS.legacyAuthStore, STORAGE_KEYS.authStore);
 
 interface AuthState {
   isLoggedIn: boolean;
   user: UserProfile | null;
   showLoginModal: boolean;
   loading: boolean;
+  restoring: boolean;
   error: string | null;
-  /** Email login */
   login: (credentials: { email: string; password: string }) => Promise<void>;
-  /** Phone SMS login */
   loginWithPhone: (phone: string, code: string) => Promise<void>;
-  /** WeChat OAuth login */
   loginWithWechat: (code: string) => Promise<void>;
-  /** Send SMS verification code */
   sendSmsCode: (phone: string) => Promise<void>;
   register: (data: { email: string; password: string; name: string }) => Promise<void>;
   logout: () => void;
   openLogin: () => void;
   closeLogin: () => void;
   updateProfile: (data: Partial<UserProfile>) => void;
-  /** Restore session from stored token on app start */
+  refreshProfile: () => Promise<void>;
   restoreSession: () => Promise<void>;
 }
 
@@ -36,12 +36,14 @@ function handleAuthResult(
   api.setToken(result.access_token);
   if (result.refresh_token) {
     localStorage.setItem(REFRESH_TOKEN_KEY, result.refresh_token);
+    localStorage.removeItem(STORAGE_KEYS.legacyRefreshToken);
   }
   set({
     isLoggedIn: true,
     user: result.user as UserProfile,
     showLoginModal: false,
     loading: false,
+    restoring: false,
     error: null,
   });
 }
@@ -53,6 +55,7 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       showLoginModal: false,
       loading: false,
+      restoring: true,
       error: null,
 
       login: async (credentials) => {
@@ -63,7 +66,7 @@ export const useAuthStore = create<AuthState>()(
         } catch (err: unknown) {
           const message =
             err instanceof Error ? err.message : 'Unknown login error';
-          set({ loading: false, error: message || '登录失败' });
+          set({ loading: false, error: message || '登录失败，请稍后重试' });
           throw err;
         }
       },
@@ -76,7 +79,7 @@ export const useAuthStore = create<AuthState>()(
         } catch (err: unknown) {
           const message =
             err instanceof Error ? err.message : 'Unknown login error';
-          set({ loading: false, error: message || '验证码登录失败' });
+          set({ loading: false, error: message || '验证码登录失败，请稍后重试' });
           throw err;
         }
       },
@@ -89,7 +92,7 @@ export const useAuthStore = create<AuthState>()(
         } catch (err: unknown) {
           const message =
             err instanceof Error ? err.message : 'Unknown login error';
-          set({ loading: false, error: message || '微信登录失败' });
+          set({ loading: false, error: message || '微信登录失败，请稍后重试' });
           throw err;
         }
       },
@@ -102,7 +105,7 @@ export const useAuthStore = create<AuthState>()(
         } catch (err: unknown) {
           const message =
             err instanceof Error ? err.message : 'Unknown error';
-          set({ loading: false, error: message || '发送验证码失败' });
+          set({ loading: false, error: message || '验证码发送失败，请稍后重试' });
           throw err;
         }
       },
@@ -115,7 +118,7 @@ export const useAuthStore = create<AuthState>()(
         } catch (err: unknown) {
           const message =
             err instanceof Error ? err.message : 'Unknown register error';
-          set({ loading: false, error: message || '注册失败' });
+          set({ loading: false, error: message || '注册失败，请稍后重试' });
           throw err;
         }
       },
@@ -123,7 +126,8 @@ export const useAuthStore = create<AuthState>()(
       logout: () => {
         api.clearToken();
         localStorage.removeItem(REFRESH_TOKEN_KEY);
-        set({ isLoggedIn: false, user: null });
+        localStorage.removeItem(STORAGE_KEYS.legacyRefreshToken);
+        set({ isLoggedIn: false, user: null, restoring: false });
       },
 
       openLogin: () => set({ showLoginModal: true, error: null }),
@@ -133,18 +137,24 @@ export const useAuthStore = create<AuthState>()(
         set((state) => ({
           user: state.user ? { ...state.user, ...data } : null,
         }));
-        // Sync with backend
         dataService.updateUserProfile(data);
+      },
+
+      refreshProfile: async () => {
+        const user = await api.getProfile();
+        set({ isLoggedIn: true, user: user as UserProfile });
       },
 
       restoreSession: async () => {
         const token = api.getToken();
-        if (!token) return;
+        if (!token) {
+          set({ isLoggedIn: false, user: null, restoring: false });
+          return;
+        }
         try {
           const user = await api.getProfile();
-          set({ isLoggedIn: true, user: user as UserProfile });
+          set({ isLoggedIn: true, user: user as UserProfile, restoring: false });
         } catch {
-          // Token expired — try refresh
           const rt = localStorage.getItem(REFRESH_TOKEN_KEY);
           if (rt) {
             try {
@@ -152,17 +162,18 @@ export const useAuthStore = create<AuthState>()(
               handleAuthResult(result, set);
               return;
             } catch {
-              // Refresh also failed
+              // Refresh also failed.
             }
           }
           api.clearToken();
           localStorage.removeItem(REFRESH_TOKEN_KEY);
-          set({ isLoggedIn: false, user: null });
+          localStorage.removeItem(STORAGE_KEYS.legacyRefreshToken);
+          set({ isLoggedIn: false, user: null, restoring: false });
         }
       },
     }),
     {
-      name: 'fitmate-auth',
+      name: STORAGE_KEYS.authStore,
       partialize: (state) => ({
         isLoggedIn: state.isLoggedIn,
         user: state.user,

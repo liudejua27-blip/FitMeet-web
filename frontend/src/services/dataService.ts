@@ -1,208 +1,297 @@
-/**
- * Data service layer — wraps api/client with mock data fallback.
- *
- * In development (no backend), automatically falls back to local mock data.
- * In production (with backend), calls the real API.
- */
 import * as api from '../api/client';
-import {
-  FEED_DATA,
-  MEET_DATA,
-  COACH_DATA,
-  CATEGORIES,
-  FRIENDS,
-  VIRTUAL_GIFTS,
-  MEET_RECORDS,
-  SAMPLE_COMMENTS,
-} from '../data/mockData';
-import type { Post, Meet, Coach, Category, Friend, UserProfile, MeetRecord, Comment, VirtualGift } from '../types';
+import type {
+  Category,
+  Coach,
+  Club,
+  ClubMember,
+  Comment,
+  Friend,
+  Meet,
+  MeetRecord,
+  Post,
+  UserProfile,
+  AiMatchCandidate,
+  AiMatchSession,
+  AiDelegateProfile,
+  AiAutopilotHistoryItem,
+  AiAutopilotRunResult,
+  SocialCandidate,
+  SocialRequest,
+} from '../types';
 
-/** Whether to attempt real API calls first (set via env var) */
-const USE_API = true; // Enabled for backend integration
-
-/**
- * Try API first; on failure fall back to mock data.
- */
-async function withFallback<T>(apiFn: () => Promise<T>, mockData: T): Promise<T> {
-  if (!USE_API) return mockData;
-  try {
-    return await apiFn();
-  } catch (err) {
-    console.warn('[dataService] API unavailable, using mock data', err);
-    return mockData;
-  }
-}
-
-/** Fire-and-forget API call with silent catch */
-async function fireApi<T>(apiFn: () => Promise<T>): Promise<T | undefined> {
-  if (!USE_API) return undefined;
-  try {
-    return await apiFn();
-  } catch {
-    // Optimistic update — already handled in store
-    return undefined;
-  }
-}
-
-// ── Auth ───────────────────────────────────────────────
-export async function register(data: { email: string; password: string; name: string }) {
+export function register(data: { email: string; password: string; name: string }) {
   return api.register(data);
 }
 
-export async function login(data: { email: string; password: string }) {
+export function login(data: { email: string; password: string }) {
   return api.login(data);
 }
 
-export async function getProfile() {
+export function getProfile() {
   return api.getProfile();
 }
 
-// ── Feed / Discover ────────────────────────────────────
-export async function getFeed(params?: { category?: string }): Promise<Post[]> {
-  return withFallback(() => api.getFeed(params), filterMock(FEED_DATA, params?.category));
+export type UpsertAiDelegateProfileInput = api.UpsertAiDelegateProfileInput;
+
+export function getAiDelegateProfile(): Promise<AiDelegateProfile> {
+  return api.getAiDelegateProfile();
 }
 
-export async function createPost(data: Partial<Post>): Promise<Post | undefined> {
-  return fireApi(() => api.createPost(data));
+export function saveAiDelegateProfile(
+  data: UpsertAiDelegateProfileInput,
+): Promise<AiDelegateProfile> {
+  return api.saveAiDelegateProfile(data);
 }
 
-export async function likePost(id: number) {
-  return fireApi(() => api.likePost(id));
+export function getAiMatchCandidates(): Promise<AiMatchCandidate[]> {
+  return api.getAiMatchCandidates();
 }
 
-export async function savePost(id: number) {
-  return fireApi(() => api.savePost(id));
+export function simulateAiMatch(targetUserId: number): Promise<AiMatchSession> {
+  return api.simulateAiMatch(targetUserId);
 }
 
-export async function getPostInteractions() {
-  return withFallback(() => api.getPostInteractions(), { likedPostIds: [], savedPostIds: [] });
+export function approveAiMatchFriend(sessionId: number) {
+  return api.approveAiMatchFriend(sessionId);
 }
 
-// ── Comments ───────────────────────────────────────────
-export async function getComments(postId: number): Promise<Comment[]> {
-  return withFallback(() => api.getComments(postId), SAMPLE_COMMENTS);
+export function runAiAutopilot(): Promise<AiAutopilotRunResult> {
+  return api.runAiAutopilot();
 }
 
-export async function addComment(postId: number, text: string) {
-  return fireApi(() => api.addComment(postId, text));
+export function getAiAutopilotHistory(): Promise<AiAutopilotHistoryItem[]> {
+  return api.getAiAutopilotHistory();
 }
 
-export async function likeComment(commentId: number) {
-  return fireApi(() => api.likeComment(commentId));
+export type CreateSocialRequestInput = api.CreateSocialRequestInput;
+
+export function getSocialRequests(): Promise<SocialRequest[]> {
+  return api.getSocialRequests();
 }
 
-// ── Users ──────────────────────────────────────────────
-export async function getUser(id: number) {
-  return fireApi(() => api.getUser(id));
+export function createSocialRequest(data: CreateSocialRequestInput): Promise<{
+  request: SocialRequest;
+  candidates: SocialCandidate[];
+}> {
+  return api.createSocialRequest(data);
 }
 
-export async function updateUserProfile(data: Partial<UserProfile>) {
-  return fireApi(() => api.updateProfile(data));
+export function getFeed(params?: {
+  category?: string;
+  page?: number;
+  pageSize?: number;
+  lat?: number;
+  lng?: number;
+}): Promise<Post[]> {
+  return api.getFeed(params);
 }
 
-// ── Friends / Follow ───────────────────────────────────
-export async function getFriends(): Promise<Friend[]> {
-  return withFallback(() => api.getFriends(), FRIENDS);
+export function getPublicSocialIntents(params?: {
+  page?: number;
+  limit?: number;
+  q?: string;
+  city?: string;
+  requestType?: string;
+  status?: string;
+}) {
+  return api.getPublicSocialIntents(params);
 }
 
-export async function toggleFollow(userId: number) {
-  return fireApi(() => api.toggleFollow(userId));
+export function createPost(data: Partial<Post>): Promise<Post> {
+  return api.createPost(data);
 }
 
-export async function getFollowedIds(): Promise<number[]> {
-  return withFallback(() => api.getFollowedIds(), []);
+export function likePost(id: number) {
+  return api.likePost(id);
 }
 
-// ── Meet ───────────────────────────────────────────────
-export async function getMeets(params?: { type?: string }): Promise<Meet[]> {
-  return withFallback(
-    () => api.getMeets(params),
-    params?.type && params.type !== 'all'
-      ? MEET_DATA.filter((m) => m.type === params.type)
-      : MEET_DATA,
-  );
+export function savePost(id: number) {
+  return api.savePost(id);
 }
 
-export async function createMeet(data: Partial<Meet>) {
-  return fireApi(() => api.createMeet(data));
+export function getPostInteractions() {
+  return api.getPostInteractions();
 }
 
-export async function joinMeet(id: number) {
-  return fireApi(() => api.joinMeet(id));
+export function getComments(postId: number): Promise<Comment[]> {
+  return api.getComments(postId);
 }
 
-export async function getMeetRecords(): Promise<MeetRecord[]> {
-  return withFallback(() => api.getMeetRecords(), MEET_RECORDS);
+export function addComment(postId: number, text: string) {
+  return api.addComment(postId, text);
 }
 
-// ── Coach ──────────────────────────────────────────────
-export async function getCoaches(params?: { specialty?: string }): Promise<Coach[]> {
-  return withFallback(
-    () => api.getCoaches(params),
-    params?.specialty && params.specialty !== 'all'
-      ? COACH_DATA.filter((c) => c.specialtyCode === params.specialty)
-      : COACH_DATA,
-  );
+export function likeComment(commentId: number) {
+  return api.likeComment(commentId);
 }
 
-export async function getCoachDetail(id: number) {
-  return fireApi(() => api.getCoachDetail(id));
+export function getUser(id: number): Promise<UserProfile> {
+  return api.getUser(id);
 }
 
-export async function addCoachReview(coachId: number, data: { rating: number; text: string; tags?: string[] }) {
-  return fireApi(() => api.addCoachReview(coachId, data));
+export function updateUserProfile(data: Partial<UserProfile>) {
+  return api.updateProfile(data);
 }
 
-// ── Categories ─────────────────────────────────────────
-export async function getCategories(): Promise<Category[]> {
-  return withFallback(() => api.getCategories(), CATEGORIES);
+export function getFriends(): Promise<Friend[]> {
+  return api.getFriends();
 }
 
-// ── Messages ───────────────────────────────────────────
-export async function getConversations() {
-  return fireApi(() => api.getConversations());
+export function toggleFollow(userId: number) {
+  return api.toggleFollow(userId);
 }
 
-export async function getMessages(conversationId: string) {
-  return fireApi(() => api.getMessages(conversationId));
+export function getFollowedIds(): Promise<number[]> {
+  return api.getFollowedIds();
 }
 
-export async function sendMessage(conversationId: string, text: string) {
-  return fireApi(() => api.sendMessage(conversationId, text));
+export function getMeets(params?: {
+  type?: string;
+  city?: string;
+  clubId?: number;
+  lat?: number;
+  lng?: number;
+}): Promise<Meet[]> {
+  return api.getMeets(params);
 }
 
-export async function startConversation(otherUserId: number) {
-  return fireApi(() => api.startConversation(otherUserId));
+export function createMeet(data: Partial<Meet>) {
+  return api.createMeet(data);
 }
 
-export async function getUnreadMessageCount() {
-  return fireApi(() => api.getUnreadMessageCount());
+export function joinMeet(id: number) {
+  return api.joinMeet(id);
 }
 
-// ── Notifications ──────────────────────────────────────
-export async function getNotifications() {
-  return fireApi(() => api.getNotifications());
+export function confirmMeetParticipant(meetId: number, participantId: number) {
+  return api.confirmMeetParticipant(meetId, participantId);
 }
 
-export async function getUnreadNotificationCount() {
-  return fireApi(() => api.getUnreadNotificationCount());
+export function cancelMeet(id: number) {
+  return api.cancelMeet(id);
 }
 
-export async function markNotificationAsRead(id: string) {
-  return fireApi(() => api.markNotificationAsRead(id));
+export function createTripShare(id: number) {
+  return api.createTripShare(id);
 }
 
-export async function markAllNotificationsRead() {
-  return fireApi(() => api.markAllNotificationsRead());
+export function getTripShare(token: string) {
+  return api.getTripShare(token);
 }
 
-// ── Gifts ──────────────────────────────────────────────
-export async function getGifts(): Promise<VirtualGift[]> {
-  return withFallback(() => api.getGifts(), VIRTUAL_GIFTS);
+export function createMeetActivity(meetId: number) {
+  return api.createMeetActivity(meetId);
 }
 
-// ── Helpers ────────────────────────────────────────────
-function filterMock(data: Post[], category?: string): Post[] {
-  if (!category || category === 'all') return data;
-  return data.filter((p) => p.type === category || p.sport === category);
+export function getMeetRecords(): Promise<MeetRecord[]> {
+  return api.getMeetRecords();
 }
+
+export function getClubs(params?: {
+  city?: string;
+  sportType?: string;
+  q?: string;
+  mine?: boolean;
+}): Promise<Club[]> {
+  return api.getClubs(params);
+}
+
+export function createClub(data: api.CreateClubInput): Promise<Club> {
+  return api.createClub(data);
+}
+
+export function getClub(id: number): Promise<Club> {
+  return api.getClub(id);
+}
+
+export function updateClub(id: number, data: api.UpdateClubInput): Promise<Club> {
+  return api.updateClub(id, data);
+}
+
+export function joinClub(id: number): Promise<ClubMember> {
+  return api.joinClub(id);
+}
+
+export function approveClubMember(clubId: number, memberId: number): Promise<ClubMember> {
+  return api.approveClubMember(clubId, memberId);
+}
+
+export function rejectClubMember(clubId: number, memberId: number): Promise<ClubMember> {
+  return api.rejectClubMember(clubId, memberId);
+}
+
+export function removeClubMember(clubId: number, memberId: number) {
+  return api.removeClubMember(clubId, memberId);
+}
+
+export function getClubMeets(id: number, params?: { lat?: number; lng?: number }): Promise<Meet[]> {
+  return api.getClubMeets(id, params);
+}
+
+export function getCoaches(params?: { specialty?: string }): Promise<Coach[]> {
+  return api.getCoaches(params);
+}
+
+export function getCoachDetail(id: number) {
+  return api.getCoachDetail(id);
+}
+
+export function addCoachReview(
+  coachId: number,
+  data: { rating: number; text: string; tags?: string[] },
+) {
+  return api.addCoachReview(coachId, data);
+}
+
+export function getCategories(): Promise<Category[]> {
+  return api.getCategories();
+}
+
+export function getConversations() {
+  return api.getConversations();
+}
+
+export function getMessages(conversationId: string) {
+  return api.getMessages(conversationId);
+}
+
+export function sendMessage(conversationId: string, text: string) {
+  return api.sendMessage(conversationId, text);
+}
+
+export function startConversation(otherUserId: number) {
+  return api.startConversation(otherUserId);
+}
+
+export function getUnreadMessageCount() {
+  return api.getUnreadMessageCount();
+}
+
+export function getNotifications() {
+  return api.getNotifications();
+}
+
+export function getUnreadNotificationCount() {
+  return api.getUnreadNotificationCount();
+}
+
+export function markNotificationAsRead(id: string) {
+  return api.markNotificationAsRead(id);
+}
+
+export function markAllNotificationsRead() {
+  return api.markAllNotificationsRead();
+}
+
+export const createReport = api.createReport;
+export const blockUser = api.blockUser;
+export const getBlockedUserIds = api.getBlockedUserIds;
+export const createVerificationRequest = api.createVerificationRequest;
+export const getMyVerificationRequests = api.getMyVerificationRequests;
+export const getEmergencyContacts = api.getEmergencyContacts;
+export const addEmergencyContact = api.addEmergencyContact;
+export const deleteEmergencyContact = api.deleteEmergencyContact;
+export const listSafetyReports = api.listSafetyReports;
+export const updateSafetyReport = api.updateSafetyReport;
+export const listVerificationRequests = api.listVerificationRequests;
+export const updateVerificationRequest = api.updateVerificationRequest;

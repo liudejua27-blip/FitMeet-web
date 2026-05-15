@@ -3,12 +3,24 @@ import { persist } from 'zustand/middleware';
 import { io, Socket } from 'socket.io-client';
 import * as dataService from '../services/dataService';
 import * as api from '../api/client';
+import { STORAGE_KEYS, migrateLocalStorageKey } from '../lib/storageKeys';
+
+migrateLocalStorageKey(STORAGE_KEYS.legacyMessagesStore, STORAGE_KEYS.messagesStore);
 
 export interface ChatMessage {
   id: string | number;
   text: string;
   time: string;
   isMine: boolean;
+  source?: 'user' | 'ai_delegate';
+  card?: {
+    type: 'fitmeet_contact_card';
+    userId: number;
+    name: string;
+    profileUrl: string;
+    sports: string[];
+    city: string;
+  } | null;
 }
 
 export interface Conversation {
@@ -55,17 +67,43 @@ export const useMessageStore = create<MessageState>()(
         if (!token) return;
 
         const existingSocket = get().socket;
-        if (existingSocket?.connected) return;
+        // Already have a live (or auto-reconnecting) socket → no-op
+        if (existingSocket) {
+          if (existingSocket.connected) return;
+          // If a stale instance exists (e.g. after logout/login), tear it down first
+          try { existingSocket.disconnect(); } catch { /* noop */ }
+          set({ socket: null });
+        }
 
-        const socket = io(import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000', {
+        const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
+        const wsBase =
+          import.meta.env.VITE_WS_BASE_URL || apiBase.replace(/\/api\/?$/, '');
+
+        // Backend gateway uses the "messages" namespace.
+        const socket = io(`${wsBase}/messages`, {
           query: { token },
+          auth: { token },
           path: '/socket.io',
           transports: ['websocket'],
-          reconnectionAttempts: 5,
+          reconnection: true,
+          reconnectionAttempts: Infinity,
+          reconnectionDelay: 1000,
+          reconnectionDelayMax: 10000,
         });
 
         socket.on('connect', () => {
           console.log('[WS] Connected');
+          // Sync conversations on every (re)connect so we never miss messages dropped while offline
+          get().loadConversations();
+        });
+        socket.on('disconnect', (reason) => {
+          console.log('[WS] Disconnected:', reason);
+        });
+        socket.on('reconnect_attempt', (n) => {
+          console.log('[WS] Reconnect attempt', n);
+        });
+        socket.on('connect_error', (err) => {
+          console.warn('[WS] connect_error:', err?.message || err);
         });
 
         socket.on(
@@ -75,6 +113,8 @@ export const useMessageStore = create<MessageState>()(
             text: string;
             conversationId: string;
             time?: string;
+            source?: 'user' | 'ai_delegate';
+            card?: ChatMessage['card'];
           }) => {
             // payload: { id, text, senderId, conversationId, time }
             const state = get();
@@ -93,6 +133,8 @@ export const useMessageStore = create<MessageState>()(
              text: payload.text,
              time: payload.time || new Date().toLocaleTimeString(),
              isMine: false,
+             source: payload.source ?? 'user',
+             card: payload.card ?? null,
            };
 
            const isCurrent = state.activeConvId === conv.id;
@@ -159,15 +201,13 @@ export const useMessageStore = create<MessageState>()(
           if (!texts) return;
 
           const msgs: ChatMessage[] = texts.map((m) => ({
-            id: m._id || m.id,
+            id: m.id,
             text: m.text,
-            time: m.time
-              ? new Date(m.time).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
-              : new Date().toLocaleTimeString(),
+            // Backend already formats time as "HH:MM" (zh-CN).
+            time: m.time || new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
             isMine: m.isMine,
+            source: m.source ?? 'user',
+            card: m.card ?? null,
           }));
 
           set((state) => ({
@@ -204,6 +244,8 @@ export const useMessageStore = create<MessageState>()(
           text,
           time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
           isMine: true,
+          source: 'user',
+          card: null,
         };
 
         set((state) => ({
@@ -251,7 +293,7 @@ export const useMessageStore = create<MessageState>()(
       },
     }),
     {
-      name: 'fitmate-messages',
+      name: STORAGE_KEYS.messagesStore,
       partialize: (state) => ({
         conversations: state.conversations,
         messages: state.messages,

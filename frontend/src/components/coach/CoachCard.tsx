@@ -1,120 +1,106 @@
 import { memo, useCallback } from 'react';
-import { cn } from '../../lib/utils';
-import { Button, StatBox } from '../ui';
+import type { Coach } from '../../types';
+import { Button, SportVisual } from '../ui';
 import { StarRating } from './StarRating';
-import type { Coach } from '../../data/mockData';
 
 interface CoachCardProps {
   coach: Coach;
   onBook: (name: string) => void;
+  onView?: (coach: Coach) => void;
 }
 
-export const CoachCard = memo(function CoachCard({ coach, onBook }: CoachCardProps) {
-  const handleBook = useCallback(() => onBook(coach.name), [onBook, coach.name]);
-
-  const successRate = Math.round(coach.reviews / coach.sessions * 100);
+export const CoachCard = memo(function CoachCard({ coach, onBook, onView }: CoachCardProps) {
+  const handleBook = useCallback(
+    (event: React.MouseEvent) => {
+      event.stopPropagation();
+      onBook(coach.name);
+    },
+    [coach.name, onBook],
+  );
+  const handleView = useCallback(
+    (event: React.MouseEvent) => {
+      event.stopPropagation();
+      onView?.(coach);
+    },
+    [coach, onView],
+  );
+  const successRate = coach.sessions > 0 ? Math.round((coach.reviews / coach.sessions) * 100) : 98;
 
   return (
-    <article className="bg-surface border border-border rounded-2xl overflow-hidden transition-all duration-200 hover:-translate-y-1 hover:border-borderStrong hover:shadow-card">
-      {/* Cover */}
-      <div
-        className="h-24 relative flex items-center justify-center"
-        style={{ background: coach.coverBg }}
-      >
-        <span className="text-4xl">{coach.cover}</span>
-
-        {/* Avatar */}
+    <article className="group overflow-hidden rounded-2xl border border-[#ead8c7] bg-white text-ink shadow-card transition hover:-translate-y-1 hover:border-lime/40">
+      <div className="relative h-36 bg-[#24130a] text-white">
+        <SportVisual className="h-full w-full rounded-none" label={coach.name} variant={coach.specialtyCode} />
         <div
-          className="absolute -bottom-5 left-4 w-14 h-14 rounded-full flex items-center justify-center text-lg font-display font-bold text-[#09090A] border-4 border-surface"
+          className="absolute -bottom-7 left-5 flex h-16 w-16 items-center justify-center rounded-xl border-4 border-white text-xl font-black text-white shadow-card"
           style={{ backgroundColor: coach.color }}
         >
           {coach.name[0]}
         </div>
-
-        {/* Verified Badge */}
         {coach.cert && (
-          <div
-            className="absolute -bottom-2 left-14 w-5 h-5 bg-lime rounded-full flex items-center justify-center text-[10px] text-[#09090A] font-bold"
-            title="视频认证"
-          >
-            ✓
+          <div className="absolute bottom-3 right-3 rounded-lg bg-lime px-3 py-1 text-xs font-black text-white">
+            视频认证
           </div>
         )}
       </div>
 
-      {/* Body */}
-      <div className="p-4 pt-8">
-        {/* Name */}
-        <h3 className="font-display font-bold text-base mb-1">{coach.name}</h3>
-
-        {/* Specialty */}
-        <div className="text-xs text-textMuted mb-3">
-          <span>{coach.specialty}</span>
-          <span className="text-textSofter"> · {coach.experience}</span>
+      <div className="p-5 pt-10">
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-display text-xl font-black">{coach.name}</h3>
+            <p className="mt-1 text-xs font-bold text-[#8b6a54]">
+              {coach.specialty} · {coach.experience}
+            </p>
+          </div>
+          <div className="text-right">
+            <div className="font-display text-2xl font-black text-lime">免费</div>
+            <div className="text-[10px] font-bold text-[#8b6a54]">预约交流</div>
+          </div>
         </div>
 
-        {/* Tags */}
-        <div className="flex flex-wrap gap-1.5 mb-3.5">
-          {coach.tags.map((tag, i) => (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {coach.tags.slice(0, 4).map((tag, index) => (
             <span
-              key={i}
-              className={cn(
-                'px-2 py-0.5 rounded text-[10px] font-mono',
-                i === 0
-                  ? 'bg-limeDim border border-lime/25 text-lime'
-                  : 'bg-surfaceMuted border border-border text-textMuted'
-              )}
+              key={tag}
+              className={index === 0 ? 'rounded-md bg-[#fff0e2] px-2 py-1 text-xs font-black text-lime' : 'rounded-md bg-[#f8eee4] px-2 py-1 text-xs font-bold text-[#76543e]'}
             >
               {tag}
             </span>
           ))}
         </div>
 
-        {/* Rating */}
-        <div className="flex items-center gap-2 mb-3.5">
+        <div className="mb-4 flex items-center gap-2">
           <StarRating rating={coach.rating} showValue />
-          <span className="text-xs text-textMuted">({coach.reviews}条评价)</span>
+          <span className="text-xs font-bold text-[#8b6a54]">({coach.reviews} 条评价)</span>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-2 mb-4">
-          <StatBox value={coach.students.toString()} label="学员数" />
-          <StatBox value={coach.followers.toString()} label="粉丝" />
-          <StatBox value={`${successRate}%`} label="好评率" highlight />
+        <div className="mb-5 grid grid-cols-3 gap-2">
+          <Metric value={coach.students.toString()} label="学员" />
+          <Metric value={coach.followers.toString()} label="粉丝" />
+          <Metric value={`${successRate}%`} label="好评" hot />
         </div>
 
-        {/* Portfolio */}
-        <div className="mb-4">
-          <div className="font-mono text-[10px] text-textMuted uppercase tracking-wider mb-2">
-            作品集
-          </div>
-          <div className="flex gap-1.5">
-            {[1, 2, 3].map(i => (
-              <div
-                key={i}
-                className="w-10 h-10 rounded-lg bg-surfaceMuted border border-border flex items-center justify-center text-[10px] text-textMuted"
-              >
-                作品
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Price & CTA */}
-        <div className="flex items-center justify-between pt-3 border-t border-border">
-          <div>
-            <div className="font-display font-extrabold text-xl text-lime">
-              ¥{coach.price}
-            </div>
-            <div className="text-[10px] text-textMuted">{coach.unit}</div>
-          </div>
-          <Button variant="primary" size="md" onClick={handleBook}>
+        <div className="flex items-center gap-2 border-t border-[#ead8c7] pt-4">
+          <Button className="flex-1" onClick={handleBook}>
             立即预约
           </Button>
+          <button
+            className="rounded-lg border border-[#ead8c7] px-4 py-2.5 text-sm font-black text-[#76543e] transition hover:border-lime/40 hover:text-lime"
+            type="button"
+            onClick={handleView}
+          >
+            详情
+          </button>
         </div>
       </div>
     </article>
   );
 });
 
-
+const Metric = memo(function Metric({ hot = false, label, value }: { hot?: boolean; label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-[#fff8f0] p-3 text-center">
+      <div className={hot ? 'font-display text-base font-black text-lime' : 'font-display text-base font-black'}>{value}</div>
+      <div className="mt-1 text-[10px] font-bold text-[#8b6a54]">{label}</div>
+    </div>
+  );
+});

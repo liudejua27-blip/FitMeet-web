@@ -18,6 +18,22 @@ export class CreateMeetDto {
 
   @IsOptional()
   @IsString()
+  address?: string;
+
+  @IsOptional()
+  @IsString()
+  poiId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  lat?: number;
+
+  @IsOptional()
+  @IsNumber()
+  lng?: number;
+
+  @IsOptional()
+  @IsString()
   dist?: string;
 
   @IsOptional()
@@ -47,4 +63,16 @@ export class CreateMeetDto {
   @IsOptional()
   @IsString()
   creatorType?: string;
+
+  @IsOptional()
+  @IsNumber()
+  clubId?: number;
+
+  @IsOptional()
+  @IsString()
+  city?: string;
+
+  @IsOptional()
+  @IsString()
+  startAt?: string;
 }

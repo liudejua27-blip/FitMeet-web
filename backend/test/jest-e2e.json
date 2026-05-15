@@ -3,6 +3,9 @@
   "rootDir": ".",
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
+  "moduleNameMapper": {
+    "^pg$": "<rootDir>/../node_modules/pg/lib/index.js"
+  },
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   }

@@ -19,6 +19,8 @@
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": false,
     "strictBindCallApply": false,
-    "noFallthroughCasesInSwitch": false
-  }
+    "noFallthroughCasesInSwitch": false,
+    "useDefineForClassFields": false
+  },
+  "exclude": ["scripts/test-social-skills-runtime-flow.ts"]
 }

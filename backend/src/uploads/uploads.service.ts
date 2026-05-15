@@ -8,15 +8,21 @@ import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as sharp from 'sharp';
+import OSS from 'ali-oss';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { ModerationService } from '../moderation/moderation.service';
+
+const PLACEHOLDER_PATTERN =
+  /^(|change_me.*|your-.*|replace-.*|.*_here|secret_key|password)$/i;
 
 @Injectable()
 export class UploadsService implements OnModuleInit {
   private readonly logger = new Logger(UploadsService.name);
   private readonly uploadDir = 'public/uploads';
-  private s3Client!: S3Client;
-  private bucketName!: string;
+  private ossClient?: OSS;
+  private s3Client?: S3Client;
+  private bucketName = '';
+  private storageProvider: 'aliyun-oss' | 's3' | 'local' = 'local';
 
   constructor(
     private readonly configService: ConfigService,
@@ -25,8 +31,55 @@ export class UploadsService implements OnModuleInit {
     this.ensureUploadDir();
   }
 
+  private get isProduction() {
+    return this.configService.get<string>('NODE_ENV') === 'production';
+  }
+
+  private hasConfiguredValue(value?: string | null): value is string {
+    return !!value?.trim() && !PLACEHOLDER_PATTERN.test(value.trim());
+  }
+
   onModuleInit() {
-    // Default to empty value if keys are missing to prevent crash
+    if (this.initAliyunOss()) {
+      return;
+    }
+
+    this.initS3();
+  }
+
+  private initAliyunOss(): boolean {
+    const accessKeyId = this.configService.get<string>('ALIYUN_ACCESS_KEY_ID');
+    const accessKeySecret = this.configService.get<string>(
+      'ALIYUN_ACCESS_KEY_SECRET',
+    );
+    const bucket = this.configService.get<string>('ALIYUN_OSS_BUCKET');
+    const region = this.configService.get<string>('ALIYUN_OSS_REGION');
+    const endpoint = this.configService.get<string>('ALIYUN_OSS_ENDPOINT');
+
+    if (
+      !this.hasConfiguredValue(accessKeyId) ||
+      !this.hasConfiguredValue(accessKeySecret) ||
+      !this.hasConfiguredValue(bucket) ||
+      !this.hasConfiguredValue(region)
+    ) {
+      return false;
+    }
+
+    this.bucketName = bucket;
+    this.storageProvider = 'aliyun-oss';
+    this.ossClient = new OSS({
+      accessKeyId,
+      accessKeySecret,
+      bucket,
+      region,
+      endpoint,
+      secure: !endpoint || endpoint.startsWith('https://'),
+    });
+    this.logger.log(`Aliyun OSS client initialized for bucket: ${bucket}`);
+    return true;
+  }
+
+  private initS3() {
     this.bucketName = this.configService.get<string>('AWS_BUCKET_NAME') || '';
     const region = this.configService.get<string>('AWS_REGION');
     const accessKeyId = this.configService.get<string>('AWS_ACCESS_KEY_ID');
@@ -36,7 +89,11 @@ export class UploadsService implements OnModuleInit {
     const endpoint = this.configService.get<string>('S3_ENDPOINT'); // For MinIO/LocalStack
 
     // Only init S3 client if we have valid credentials
-    if (accessKeyId && secretAccessKey && this.bucketName) {
+    if (
+      this.hasConfiguredValue(accessKeyId) &&
+      this.hasConfiguredValue(secretAccessKey) &&
+      this.hasConfiguredValue(this.bucketName)
+    ) {
       this.s3Client = new S3Client({
         region: region || 'us-east-1',
         credentials: {
@@ -46,10 +103,11 @@ export class UploadsService implements OnModuleInit {
         endpoint: endpoint, // Optional, for MinIO
         forcePathStyle: !!endpoint, // needed for MinIO
       });
+      this.storageProvider = 's3';
       this.logger.log(`S3 Client initialized for bucket: ${this.bucketName}`);
     } else {
       this.logger.warn(
-        'AWS S3 Configuration missing. Falling back to local storage (production unsafe).',
+        'Object storage configuration missing. Falling back to local storage (production unsafe).',
       );
     }
   }
@@ -66,6 +124,13 @@ export class UploadsService implements OnModuleInit {
   async saveImage(
     file: Express.Multer.File,
   ): Promise<{ url: string; width: number; height: number }> {
+    if (this.isProduction && this.storageProvider === 'local') {
+      this.safeUnlink(file.path);
+      throw new BadRequestException(
+        'Uploads are disabled until object storage is configured.',
+      );
+    }
+
     if (!file.mimetype.match(/^image\/(jpg|jpeg|png|gif|webp)$/)) {
       throw new BadRequestException('Only image files are allowed!');
     }
@@ -81,21 +146,51 @@ export class UploadsService implements OnModuleInit {
         .webp({ quality: 80 })
         .toBuffer();
 
-      // 2. Moderation Check (on processed buffer, or original if preferred)
-      // We check the processed buffer because that's what we are keeping.
-      await this.moderationService.checkImage(
-        processedBuffer,
-        file.originalname,
-      );
-
       const filename = `${Date.now()}-${Math.round(Math.random() * 1e9)}.webp`;
+      const shouldModerateOssObject =
+        this.storageProvider === 'aliyun-oss' &&
+        this.moderationService.isAliyunImageModerationEnabled();
 
-      // 3. Upload to S3 if configured
-      if (this.s3Client) {
+      if (!shouldModerateOssObject) {
+        // Check the exact image bytes that will be stored.
+        await this.moderationService.checkImage(
+          processedBuffer,
+          file.originalname,
+        );
+      }
+
+      // 3. Upload to configured object storage
+      if (this.ossClient) {
+        let uploaded = false;
+        try {
+          await this.uploadToAliyunOss(filename, processedBuffer, 'image/webp');
+          uploaded = true;
+
+          if (shouldModerateOssObject) {
+            await this.moderationService.checkOssImage(filename, {
+              bucketName: this.bucketName,
+              regionId: this.configService.get<string>('ALIYUN_OSS_REGION'),
+            });
+          }
+        } catch (error) {
+          if (uploaded) {
+            await this.deleteFromAliyunOss(filename);
+          }
+          throw error;
+        } finally {
+          this.safeUnlink(file.path);
+        }
+
+        return {
+          url: this.getAliyunOssUrl(filename),
+          width: metadata.width || 0,
+          height: metadata.height || 0,
+        };
+      } else if (this.s3Client) {
         await this.uploadToS3(filename, processedBuffer, 'image/webp');
 
         // Cleanup local temp file
-        fs.unlinkSync(file.path);
+        this.safeUnlink(file.path);
 
         const s3Url = this.getS3Url(filename);
         return {
@@ -107,7 +202,7 @@ export class UploadsService implements OnModuleInit {
         // Fallback to local storage logic (or keep it as legacy)
         const filepath = path.join(this.uploadDir, filename);
         fs.writeFileSync(filepath, processedBuffer);
-        fs.unlinkSync(file.path);
+        this.safeUnlink(file.path);
 
         const baseUrl =
           this.configService.get<string>('BASE_URL') || 'http://localhost:3000';
@@ -121,7 +216,7 @@ export class UploadsService implements OnModuleInit {
       if (error instanceof Error) {
         this.logger.error(`Image processing/upload failed: ${error.message}`);
         // try cleanup
-        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+        this.safeUnlink(file.path);
         throw new BadRequestException(error.message || 'Image upload failed');
       }
       throw error;
@@ -132,10 +227,29 @@ export class UploadsService implements OnModuleInit {
    * Save generic file (video, etc.)
    */
   async saveFile(file: Express.Multer.File): Promise<string> {
+    if (this.isProduction && this.storageProvider === 'local') {
+      this.safeUnlink(file.path);
+      throw new BadRequestException(
+        'Uploads are disabled until object storage is configured.',
+      );
+    }
+
     const ext = path.extname(file.originalname);
     const filename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
 
-    if (this.s3Client) {
+    if (this.ossClient) {
+      try {
+        const fileBuffer = fs.readFileSync(file.path);
+        await this.uploadToAliyunOss(filename, fileBuffer, file.mimetype);
+        this.safeUnlink(file.path);
+        return this.getAliyunOssUrl(filename);
+      } catch (error) {
+        if (error instanceof Error) {
+          this.logger.error(`File upload failed: ${error.message}`);
+        }
+        throw new BadRequestException('File upload failed');
+      }
+    } else if (this.s3Client) {
       try {
         // Read from temp file
         const fileBuffer = fs.readFileSync(file.path);
@@ -145,7 +259,7 @@ export class UploadsService implements OnModuleInit {
 
         await this.uploadToS3(filename, fileBuffer, file.mimetype);
 
-        fs.unlinkSync(file.path);
+        this.safeUnlink(file.path);
         return this.getS3Url(filename);
       } catch (error) {
         if (error instanceof Error) {
@@ -164,7 +278,42 @@ export class UploadsService implements OnModuleInit {
     }
   }
 
+  private async uploadToAliyunOss(
+    key: string,
+    body: Buffer,
+    contentType: string,
+  ) {
+    if (!this.ossClient) {
+      throw new BadRequestException('Aliyun OSS client is not initialized');
+    }
+
+    await this.ossClient.put(key, body, {
+      mime: contentType,
+      headers: {
+        'x-oss-object-acl': 'public-read',
+      },
+    });
+  }
+
+  private async deleteFromAliyunOss(key: string) {
+    if (!this.ossClient) return;
+
+    try {
+      await this.ossClient.delete(key);
+    } catch (error) {
+      if (error instanceof Error) {
+        this.logger.warn(
+          `Failed to delete rejected OSS object ${key}: ${error.message}`,
+        );
+      }
+    }
+  }
+
   private async uploadToS3(key: string, body: Buffer, contentType: string) {
+    if (!this.s3Client) {
+      throw new BadRequestException('S3 client is not initialized');
+    }
+
     const command = new PutObjectCommand({
       Bucket: this.bucketName,
       Key: key,
@@ -173,6 +322,21 @@ export class UploadsService implements OnModuleInit {
       ACL: 'public-read', // Caution: Ensure bucket policy allows this or use signed URLs
     });
     await this.s3Client.send(command);
+  }
+
+  private getAliyunOssUrl(key: string): string {
+    const publicBaseUrl = this.configService.get<string>(
+      'ALIYUN_OSS_PUBLIC_BASE_URL',
+    );
+    if (publicBaseUrl) {
+      return `${publicBaseUrl.replace(/\/$/, '')}/${encodeURI(key)}`;
+    }
+
+    const endpoint =
+      this.configService.get<string>('ALIYUN_OSS_ENDPOINT') ||
+      `${this.configService.get<string>('ALIYUN_OSS_REGION')}.aliyuncs.com`;
+    const host = endpoint.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    return `https://${this.bucketName}.${host}/${encodeURI(key)}`;
   }
 
   private getS3Url(key: string): string {
@@ -184,5 +348,11 @@ export class UploadsService implements OnModuleInit {
     // AWS S3 style: https://bucket-name.s3.region.amazonaws.com/key
     const region = this.configService.get<string>('AWS_REGION');
     return `https://${this.bucketName}.s3.${region}.amazonaws.com/${key}`;
+  }
+
+  private safeUnlink(filePath: string) {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
   }
 }

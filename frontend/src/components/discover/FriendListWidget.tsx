@@ -1,19 +1,18 @@
-import { memo, useCallback, useState, useEffect } from 'react';
+﻿import { memo, useCallback, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FRIENDS } from '../../data/mockData';
 import { useMessageStore } from '../../stores';
 import type { Friend } from '../../types';
 import * as dataService from '../../services/dataService';
 
 interface FriendListWidgetProps {
-  /** Pass friends externally; if omitted, fetches from dataService (with mock fallback). */
+  /** Pass friends externally; if omitted, fetches from dataService. */
   friends?: Friend[];
 }
 
 export const FriendListWidget = memo(function FriendListWidget({ friends: friendsProp }: FriendListWidgetProps) {
   const navigate = useNavigate();
   const { startChat } = useMessageStore();
-  const [localFriends, setLocalFriends] = useState<Friend[]>(FRIENDS);
+  const [localFriends, setLocalFriends] = useState<Friend[]>([]);
   const friends = friendsProp ?? localFriends;
 
   // If not provided via props, load from data service on mount
@@ -21,9 +20,14 @@ export const FriendListWidget = memo(function FriendListWidget({ friends: friend
     if (friendsProp) return; // Use props if available
 
     let cancelled = false;
-    dataService.getFriends().then((data) => {
-      if (!cancelled) setLocalFriends(data);
-    });
+    dataService.getFriends()
+      .then((data) => {
+        if (!cancelled) setLocalFriends(data);
+      })
+      .catch((error) => {
+        console.error('Failed to load friends', error);
+        if (!cancelled) setLocalFriends([]);
+      });
     return () => { cancelled = true; };
   }, [friendsProp]);
 
@@ -48,14 +52,14 @@ export const FriendListWidget = memo(function FriendListWidget({ friends: friend
           >
             <div className="relative">
               <div
-                className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold text-[#09090A]"
+                className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold text-white"
                 style={{ background: friend.color }}
               >
                 {friend.avatar}
               </div>
               <span
                 className="absolute -bottom-1 -right-1 h-3 w-3 rounded-full border-2 border-surface"
-                style={{ background: friend.status === 'online' ? '#C8FF00' : 'rgba(236,236,236,0.5)' }}
+                style={{ background: friend.status === 'online' ? '#FF6A00' : 'rgba(236,236,236,0.5)' }}
               />
             </div>
             <div className="flex-1">

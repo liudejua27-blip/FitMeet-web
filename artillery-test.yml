@@ -1,0 +1,123 @@
+# Artillery 压力测试配置
+# 运行: artillery run artillery-test.yml
+
+config:
+  target: 'http://localhost:3000'
+  phases:
+    # 预热阶段 - 1分钟，每秒10个用户
+    - duration: 60
+      arrivalRate: 10
+      name: "预热阶段"
+
+    # 正常负载 - 5分钟，每秒50个用户
+    - duration: 300
+      arrivalRate: 50
+      name: "正常负载"
+
+    # 高负载 - 3分钟，每秒100个用户
+    - duration: 180
+      arrivalRate: 100
+      name: "高负载"
+
+    # 峰值负载 - 2分钟，每秒200个用户
+    - duration: 120
+      arrivalRate: 200
+      name: "峰值负载"
+
+    # 极限测试 - 1分钟，每秒500个用户
+    - duration: 60
+      arrivalRate: 500
+      name: "极限测试"
+
+  # 性能指标阈值
+  ensure:
+    maxErrorRate: 1  # 最大错误率 1%
+    p95: 1000        # 95% 的请求在 1000ms 内完成
+    p99: 2000        # 99% 的请求在 2000ms 内完成
+
+  # HTTP 配置
+  http:
+    timeout: 10
+
+  # 变量定义
+  variables:
+    testEmail: "test{{ $randomNumber() }}@test.com"
+    testPassword: "Test123456"
+
+scenarios:
+  # 场景1: 浏览帖子（最常见操作）
+  - name: "浏览帖子"
+    weight: 40
+    flow:
+      - get:
+          url: "/api/feed"
+          capture:
+            - json: "$[0].id"
+              as: "postId"
+      - think: 2
+      - get:
+          url: "/api/feed/{{ postId }}"
+      - think: 3
+      - get:
+          url: "/api/feed?page=2"
+
+  # 场景2: 用户注册和登录
+  - name: "注册登录"
+    weight: 10
+    flow:
+      - post:
+          url: "/api/auth/register"
+          json:
+            email: "{{ testEmail }}"
+            password: "{{ testPassword }}"
+            name: "测试用户"
+          capture:
+            - json: "$.access_token"
+              as: "token"
+      - think: 1
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "{{ testEmail }}"
+            password: "{{ testPassword }}"
+
+  # 场景3: 查看活动列表
+  - name: "查看活动"
+    weight: 20
+    flow:
+      - get:
+          url: "/api/meets"
+      - think: 2
+      - get:
+          url: "/api/meets?type=running"
+      - think: 2
+      - get:
+          url: "/api/meets/1"
+
+  # 场景4: 搜索功能
+  - name: "搜索"
+    weight: 15
+    flow:
+      - get:
+          url: "/api/search?q=健身"
+      - think: 1
+      - get:
+          url: "/api/search?q=跑步"
+
+  # 场景5: 查看教练列表
+  - name: "查看教练"
+    weight: 15
+    flow:
+      - get:
+          url: "/api/coaches"
+      - think: 2
+      - get:
+          url: "/api/coaches?specialty=yoga"
+      - think: 2
+      - get:
+          url: "/api/coaches/1"
+
+# 报告配置
+plugins:
+  expect: {}
+  metrics-by-endpoint: {}

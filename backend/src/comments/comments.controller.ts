@@ -1,11 +1,18 @@
 import {
-  Controller, Get, Post, Param, Body,
-  UseGuards, Request, ParseIntPipe,
+  Controller,
+  Get,
+  Post,
+  Param,
+  Body,
+  UseGuards,
+  Request,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Public } from '../common/decorators/public.decorator';
+import type { AuthenticatedRequest } from '../common/types/authenticated-request';
 
 @Controller('feed')
 export class CommentsController {
@@ -21,7 +28,7 @@ export class CommentsController {
   @Post(':postId/comments')
   create(
     @Param('postId', ParseIntPipe) postId: number,
-    @Request() req,
+    @Request() req: AuthenticatedRequest,
     @Body() dto: CreateCommentDto,
   ) {
     return this.commentsService.create(postId, req.user.id, dto);

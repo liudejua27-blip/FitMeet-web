@@ -1,105 +1,147 @@
 import {
-  WebSocketGateway,
-  WebSocketServer,
+  ConnectedSocket,
+  MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
   SubscribeMessage,
-  MessageBody,
-  ConnectedSocket,
+  WebSocketGateway,
+  WebSocketServer,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
+import { MessagesService } from './messages.service';
+
+interface JwtPayload {
+  sub: number;
+  email: string;
+}
+
+type AuthenticatedSocket = Socket & { data: { userId?: number } };
+
+function getSocketCorsOrigins(): string[] {
+  const origins = process.env.ALLOWED_ORIGINS?.split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (origins?.length) {
+    return origins;
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('ALLOWED_ORIGINS is required for messages gateway');
+  }
+
+  return ['http://localhost:5173'];
+}
 
 @WebSocketGateway({
-  cors: {
-    origin: '*',
-  },
   namespace: 'messages',
+  cors: {
+    origin: getSocketCorsOrigins(),
+    credentials: true,
+  },
+  transports: ['websocket', 'polling'],
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  maxHttpBufferSize: 1e6,
+  allowEIO3: false,
 })
-export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect {
-  @WebSocketServer() server: Server;
-  private readonly logger = new Logger(MessagesGateway.name);
+export class MessagesGateway
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
+  @WebSocketServer()
+  server!: Server;
 
-  // Map to store connected clients: userId -> Set of socketIds
-  private connectedClients = new Map<number, Set<string>>();
+  private readonly userSockets = new Map<number, string>();
 
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly messagesService: MessagesService,
+    private readonly jwtService: JwtService,
+  ) {}
 
-  async handleConnection(client: Socket) {
-    try {
-      const token = this.extractToken(client);
-      if (!token) {
-        // Allow connection but maybe restrict functionality?
-        // Or disconnect immediately. Strict auth for now.
-        client.disconnect();
-        return;
-      }
-
-      const payload = this.jwtService.verify(token);
-      const userId = Number(payload.sub);
-
-      if (!userId) {
-        client.disconnect();
-        return;
-      }
-
-      client.data.userId = userId;
-      this.addClient(userId, client.id);
-
-      // Join a room for targeted messaging
-      client.join(`user_${userId}`);
-
-      this.logger.log(`Client connected: ${client.id} (User ${userId})`);
-    } catch (error) {
-      this.logger.error(`Connection Unauthorized: ${error.message}`);
+  handleConnection(client: AuthenticatedSocket) {
+    const userId = this.validateToken(this.extractToken(client));
+    if (!userId) {
       client.disconnect();
+      return;
     }
+
+    this.userSockets.set(userId, client.id);
+    client.data.userId = userId;
   }
 
-  handleDisconnect(client: Socket) {
+  handleDisconnect(client: AuthenticatedSocket) {
     const userId = client.data.userId;
     if (userId) {
-      this.removeClient(userId, client.id);
+      this.userSockets.delete(userId);
     }
-    this.logger.log(`Client disconnected: ${client.id}`);
   }
 
-  /* ========== Public Methods ========== */
+  @SubscribeMessage('sendMessage')
+  async handleMessage(
+    @MessageBody()
+    data: { conversationId: string; content?: string; text?: string },
+    @ConnectedSocket() client: AuthenticatedSocket,
+  ) {
+    const userId = client.data.userId;
+    const text = data.content ?? data.text ?? '';
 
-  notifyNewMessage(toUserId: number, message: any) {
-    this.server.to(`user_${toUserId}`).emit('newMessage', message);
+    if (!userId) return { error: '未登录' };
+    if (!text.trim()) return { error: '消息不能为空' };
+    if (text.length > 5000) return { error: '消息内容过长' };
+
+    const message = await this.messagesService.sendMessage(
+      data.conversationId,
+      userId,
+      text,
+    );
+    const participants = await this.messagesService.getParticipantIds(
+      data.conversationId,
+    );
+    const recipientId = participants.find((id) => id !== userId);
+    const recipientSocketId = recipientId
+      ? this.userSockets.get(recipientId)
+      : undefined;
+
+    if (recipientSocketId) {
+      this.server.to(recipientSocketId).emit('newMessage', message);
+    }
+
+    return message;
   }
 
-  /* ========== Helpers ========== */
+  /**
+   * Push a newMessage event to a specific user if they are connected.
+   * Returns true when the recipient was online and the event was emitted.
+   * Used by AgentGatewayService when an external Agent sends a message.
+   */
+  pushNewMessageToUser(userId: number, message: unknown): boolean {
+    const socketId = this.userSockets.get(userId);
+    if (!socketId) return false;
+    this.server.to(socketId).emit('newMessage', message);
+    return true;
+  }
 
   private extractToken(client: Socket): string | undefined {
-    // Try query param first
-    if (client.handshake.query.token && typeof client.handshake.query.token === 'string') {
-      return client.handshake.query.token;
-    }
-    // Try headers
-    const authHeader = client.handshake.headers.authorization;
-    if (authHeader && authHeader.split(' ')[0] === 'Bearer') {
-      return authHeader.split(' ')[1];
-    }
-    return undefined;
+    const auth = client.handshake.auth as { token?: string };
+    const authToken = auth.token;
+    const queryToken = client.handshake.query?.token;
+    const headerToken = client.handshake.headers.authorization;
+    const rawToken = authToken || queryToken || headerToken;
+
+    if (Array.isArray(rawToken)) return rawToken[0];
+    if (!rawToken) return undefined;
+    return rawToken.replace(/^Bearer\s+/i, '');
   }
 
-  private addClient(userId: number, socketId: string) {
-    if (!this.connectedClients.has(userId)) {
-      this.connectedClients.set(userId, new Set());
-    }
-    this.connectedClients.get(userId)?.add(socketId);
-  }
+  private validateToken(token?: string): number | null {
+    if (!token) return null;
 
-  private removeClient(userId: number, socketId: string) {
-    if (this.connectedClients.has(userId)) {
-      const socketIds = this.connectedClients.get(userId);
-      socketIds?.delete(socketId);
-      if (socketIds?.size === 0) {
-        this.connectedClients.delete(userId);
-      }
+    try {
+      const payload = this.jwtService.verify<JwtPayload>(token);
+      return payload.sub;
+    } catch {
+      return null;
     }
   }
 }

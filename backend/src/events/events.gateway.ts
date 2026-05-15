@@ -12,11 +12,34 @@ import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { RedisService } from '../redis/redis.service';
 
+interface JwtPayload {
+  sub: number;
+}
+
+type AuthenticatedSocket = Socket & { data: { userId?: number } };
+
+function getSocketCorsOrigins(): string[] {
+  const origins = process.env.ALLOWED_ORIGINS?.split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (origins?.length) {
+    return origins;
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('ALLOWED_ORIGINS is required for events gateway');
+  }
+
+  return ['http://localhost:5173'];
+}
+
 @WebSocketGateway({
   cors: {
-    origin: '*',
+    origin: getSocketCorsOrigins(),
+    credentials: true,
   },
-  namespace: 'events'
+  namespace: 'events',
 })
 export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -29,32 +52,29 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly redisService: RedisService,
   ) {}
 
-  async handleConnection(client: Socket) {
+  async handleConnection(client: AuthenticatedSocket) {
     try {
-      const token = client.handshake.auth.token || client.handshake.headers['authorization'];
+      const token = this.extractToken(client);
       if (!token) {
         // Allow anonymous connection? Perhaps not for user tracking.
         return;
       }
 
-      const payload = this.jwtService.verify(token.replace('Bearer ', ''));
+      const payload = this.jwtService.verify<JwtPayload>(token);
       const userId = payload.sub;
       client.data.userId = userId;
 
-      // Join a room for personal notifications
-      client.join(`user:${userId}`);
+      void client.join(`user:${userId}`);
 
-      // Mark online in Redis
       await this.redisService.getClient().set(`user:online:${userId}`, 'true');
       this.logger.log(`Client connected: ${userId}`);
-
-    } catch (e) {
+    } catch {
       this.logger.warn('Socket connection failed auth');
       client.disconnect();
     }
   }
 
-  async handleDisconnect(client: Socket) {
+  async handleDisconnect(client: AuthenticatedSocket) {
     const userId = client.data.userId;
     if (userId) {
       await this.redisService.getClient().del(`user:online:${userId}`);
@@ -63,24 +83,41 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('join_room')
-  handleJoinRoom(@ConnectedSocket() client: Socket, @MessageBody() roomId: string) {
-    client.join(roomId);
+  handleJoinRoom(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() roomId: string,
+  ) {
+    void client.join(roomId);
     this.logger.log(`User ${client.data.userId} joined room ${roomId}`);
   }
 
   @SubscribeMessage('leave_room')
-  handleLeaveRoom(@ConnectedSocket() client: Socket, @MessageBody() roomId: string) {
-    client.leave(roomId);
+  handleLeaveRoom(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() roomId: string,
+  ) {
+    void client.leave(roomId);
   }
 
-  // Example: Client sends message
   @SubscribeMessage('send_message')
-  handleMessage(@ConnectedSocket() client: Socket, @MessageBody() payload: { roomId: string, text: string }) {
-    // Broadcast to room
+  handleMessage(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: { roomId: string; text: string },
+  ) {
     this.server.to(payload.roomId).emit('new_message', {
       senderId: client.data.userId,
       text: payload.text,
       timestamp: new Date(),
     });
+  }
+
+  private extractToken(client: Socket): string | undefined {
+    const auth = client.handshake.auth as { token?: string };
+    const authToken = auth.token;
+    const headerToken = client.handshake.headers.authorization;
+    const rawToken = authToken || headerToken;
+
+    if (!rawToken) return undefined;
+    return rawToken.replace(/^Bearer\s+/i, '');
   }
 }

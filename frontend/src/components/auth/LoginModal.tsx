@@ -1,272 +1,199 @@
-import { memo, useState, useCallback, useEffect, useRef } from 'react';
-import { useAuthStore } from '../../stores';
+import { type FormEvent, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import clsx from 'clsx';
 import { useModalA11y } from '../../hooks/useModalA11y';
+import { useAuthStore } from '../../stores';
 
-const loginTabs = [
-  { id: 'email', label: '📧 邮箱', icon: '📧' },
-  { id: 'phone', label: '📱 手机号', icon: '📱' },
-  { id: 'wechat', label: '💬 微信', icon: '💬' },
-];
+type AuthMode = 'login' | 'register';
 
-export const LoginModal = memo(function LoginModal() {
-  const { showLoginModal, closeLogin, login, loginWithPhone, loginWithWechat, sendSmsCode, register, loading, error } = useAuthStore();
-  const { containerRef, handleBackdropClick } = useModalA11y<HTMLDivElement>({ open: showLoginModal, onClose: closeLogin });
-  const [tab, setTab] = useState('email');
-  const [phone, setPhone] = useState('');
-  const [code, setCode] = useState('');
-  const [codeSent, setCodeSent] = useState(false);
-  const [countdown, setCountdown] = useState(0);
-  const [agreed, setAgreed] = useState(false);
-  // Email/password fields
+const normalizeEmail = (value: string) => value.trim().toLowerCase();
+
+export function LoginModal() {
+  const {
+    showLoginModal,
+    loading,
+    error,
+    login,
+    register,
+    closeLogin,
+  } = useAuthStore();
+  const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [isRegister, setIsRegister] = useState(false);
-  const countdownRef = useRef<ReturnType<typeof setInterval> | undefined>(
-    undefined,
-  );
+  const [localError, setLocalError] = useState<string | null>(null);
 
-  // Countdown timer for SMS resend
+  const { containerRef, handleBackdropClick } = useModalA11y({
+    open: showLoginModal,
+    onClose: closeLogin,
+  });
+
   useEffect(() => {
-    if (countdown > 0) {
-      countdownRef.current = setInterval(() => {
-        setCountdown((c) => {
-          if (c <= 1) {
-            setCodeSent(false);
-            clearInterval(countdownRef.current);
-            return 0;
-          }
-          return c - 1;
-        });
-      }, 1000);
+    if (!showLoginModal) {
+      setPassword('');
+      setLocalError(null);
+      return;
     }
-    return () => clearInterval(countdownRef.current);
-  }, [countdown]);
-
-  const handleSendCode = useCallback(async () => {
-    if (phone.length === 11 && !codeSent) {
-      try {
-        await sendSmsCode(phone);
-        setCodeSent(true);
-        setCountdown(60);
-      } catch {
-        // error is set in store
-      }
-    }
-  }, [phone, codeSent, sendSmsCode]);
-
-  const handleLogin = useCallback(async () => {
-    if (tab === 'email' && email && password) {
-      try {
-        if (isRegister && name) {
-          await register({ email, password, name });
-        } else {
-          await login({ email, password });
-        }
-      } catch {
-        // error is set in store
-      }
-    } else if (tab === 'phone' && phone && code) {
-      try {
-        await loginWithPhone(phone, code);
-      } catch {
-        // error is set in store
-      }
-    } else if (tab === 'wechat') {
-      try {
-        // In dev mode, generate a unique code for simulated WeChat login
-        const devCode = `dev_${Date.now()}`;
-        await loginWithWechat(devCode);
-      } catch {
-        // error is set in store
-      }
-    }
-  }, [tab, email, password, name, isRegister, phone, code, login, loginWithPhone, loginWithWechat, register]);
+    setLocalError(null);
+  }, [showLoginModal, mode]);
 
   if (!showLoginModal) return null;
 
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center" onClick={handleBackdropClick}>
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+  const title = mode === 'login' ? '登录 FitMeet' : '创建 FitMeet 账号';
+  const submitLabel = mode === 'login' ? '登录' : '注册并登录';
 
-      {/* Modal */}
-      <div ref={containerRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="登录" className="relative w-full max-w-md mx-4 bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in outline-none">
-        {/* Header */}
-        <div className="relative px-6 pt-8 pb-4 text-center">
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalizedEmail = normalizeEmail(email);
+    const trimmedName = name.trim();
+
+    if (!normalizedEmail || !password) {
+      setLocalError('请输入邮箱和密码');
+      return;
+    }
+    if (mode === 'register' && !trimmedName) {
+      setLocalError('请输入昵称');
+      return;
+    }
+
+    try {
+      setLocalError(null);
+      if (mode === 'login') {
+        await login({ email: normalizedEmail, password });
+      } else {
+        await register({
+          email: normalizedEmail,
+          password,
+          name: trimmedName,
+        });
+      }
+    } catch {
+      // The store keeps the user-facing error text.
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/72 px-4 py-6 backdrop-blur-md"
+      onMouseDown={handleBackdropClick}
+    >
+      <section
+        ref={containerRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="login-modal-title"
+        tabIndex={-1}
+        className="w-full max-w-[430px] rounded-xl border border-white/10 bg-[#15100d] p-5 text-cream shadow-2xl outline-none sm:p-6"
+      >
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-lime">
+              FitMeet
+            </p>
+            <h2 id="login-modal-title" className="mt-2 text-2xl font-black">
+              {title}
+            </h2>
+          </div>
           <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 text-xl leading-none text-textMuted transition hover:border-lime/40 hover:text-cream"
+            aria-label="关闭登录窗口"
             onClick={closeLogin}
-            className="absolute right-4 top-4 w-8 h-8 flex items-center justify-center rounded-full text-textMuted hover:text-white hover:bg-surfaceMuted transition cursor-pointer"
           >
-            ✕
+            x
           </button>
-          <h2 className="text-2xl font-display font-extrabold text-white">
-            欢迎来到 <span className="text-lime">FitMate</span>
-          </h2>
-          <p className="text-sm text-textMuted mt-1">找到你的健身搭子</p>
         </div>
 
-        {/* Login Tabs */}
-        <div className="flex border-b border-border mx-6">
-          {loginTabs.map((t) => (
+        <div className="mb-5 grid grid-cols-2 rounded-lg border border-white/10 bg-white/[0.04] p-1">
+          {(['login', 'register'] as const).map((item) => (
             <button
-              key={t.id}
-              className={`flex-1 py-3 text-sm font-display font-semibold transition cursor-pointer border-b-2 ${
-                tab === t.id
-                  ? 'text-lime border-lime'
-                  : 'text-textMuted border-transparent hover:text-white'
-              }`}
-              onClick={() => setTab(t.id)}
+              key={item}
+              type="button"
+              className={clsx(
+                'rounded-md px-3 py-2 text-sm font-black transition',
+                mode === item
+                  ? 'bg-lime text-white shadow-glow'
+                  : 'text-textMuted hover:text-cream',
+              )}
+              onClick={() => setMode(item)}
             >
-              {t.label}
+              {item === 'login' ? '登录' : '注册'}
             </button>
           ))}
         </div>
 
-        {/* Login Form */}
-        <div className="p-6 space-y-4">
-          {/* Error message */}
-          {error && (
-            <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
-              {error}
-            </div>
+        <form className="grid gap-4" onSubmit={handleSubmit}>
+          {mode === 'register' && (
+            <label className="grid gap-2 text-sm font-bold text-textMuted">
+              昵称
+              <input
+                className="h-12 rounded-lg border border-white/10 bg-black/30 px-4 text-base text-cream outline-none transition placeholder:text-textSofter focus:border-lime/60"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                autoComplete="name"
+                maxLength={32}
+                placeholder="你的展示名"
+              />
+            </label>
           )}
 
-          {tab === 'email' && (
-            <>
-              <div className="space-y-3">
-                {isRegister && (
-                  <input
-                    type="text"
-                    placeholder="昵称"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full bg-surfaceMuted border border-border rounded-lg px-4 py-3 text-sm text-white placeholder:text-textSofter outline-none focus:border-lime/40 transition"
-                  />
-                )}
-                <input
-                  type="email"
-                  placeholder="邮箱地址"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-surfaceMuted border border-border rounded-lg px-4 py-3 text-sm text-white placeholder:text-textSofter outline-none focus:border-lime/40 transition"
-                />
-                <input
-                  type="password"
-                  placeholder="密码（至少6位）"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-surfaceMuted border border-border rounded-lg px-4 py-3 text-sm text-white placeholder:text-textSofter outline-none focus:border-lime/40 transition"
-                />
-              </div>
-
-              <button
-                className={`w-full py-3 rounded-full font-display font-bold text-sm transition cursor-pointer ${
-                  email && password && agreed && (!isRegister || name)
-                    ? 'bg-lime text-[#09090A] hover:bg-[#d4ff1a] hover:shadow-glow'
-                    : 'bg-surfaceMuted text-textSofter cursor-not-allowed'
-                }`}
-                onClick={handleLogin}
-                disabled={!email || !password || !agreed || (isRegister && !name) || loading}
-              >
-                {loading ? '处理中...' : isRegister ? '注册' : '登录'}
-              </button>
-
-              <button
-                className="w-full text-xs text-textMuted hover:text-lime transition cursor-pointer"
-                onClick={() => setIsRegister(!isRegister)}
-              >
-                {isRegister ? '已有账号？去登录' : '没有账号？去注册'}
-              </button>
-            </>
-          )}
-
-          {tab === 'phone' && (
-            <>
-              <div className="space-y-3">
-                <div className="flex gap-2">
-                  <span className="flex items-center px-3 bg-surfaceMuted border border-border rounded-lg text-sm text-textMuted">
-                    +86
-                  </span>
-                  <input
-                    type="tel"
-                    placeholder="输入手机号"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
-                    className="flex-1 bg-surfaceMuted border border-border rounded-lg px-4 py-3 text-sm text-white placeholder:text-textSofter outline-none focus:border-lime/40 transition"
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="输入6位验证码"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    className="flex-1 bg-surfaceMuted border border-border rounded-lg px-4 py-3 text-sm text-white placeholder:text-textSofter outline-none focus:border-lime/40 transition"
-                  />
-                  <button
-                    className={`px-4 py-3 rounded-lg text-sm font-semibold transition cursor-pointer whitespace-nowrap ${
-                      phone.length === 11 && !codeSent
-                        ? 'bg-lime/15 text-lime border border-lime/30 hover:bg-lime/25'
-                        : 'bg-surfaceMuted text-textSofter border border-border cursor-not-allowed'
-                    }`}
-                    onClick={handleSendCode}
-                    disabled={phone.length !== 11 || codeSent || loading}
-                  >
-                    {codeSent ? `${countdown}s` : '获取验证码'}
-                  </button>
-                </div>
-              </div>
-
-              <button
-                className={`w-full py-3 rounded-full font-display font-bold text-sm transition cursor-pointer ${
-                  phone && code.length === 6 && agreed
-                    ? 'bg-lime text-[#09090A] hover:bg-[#d4ff1a] hover:shadow-glow'
-                    : 'bg-surfaceMuted text-textSofter cursor-not-allowed'
-                }`}
-                onClick={handleLogin}
-                disabled={!phone || code.length !== 6 || !agreed || loading}
-              >
-                {loading ? '处理中...' : '登录 / 注册'}
-              </button>
-            </>
-          )}
-
-          {tab === 'wechat' && (
-            <div className="text-center py-8">
-              <div className="w-40 h-40 mx-auto bg-surfaceMuted rounded-xl border border-border flex items-center justify-center mb-4">
-                <div className="text-5xl">💬</div>
-              </div>
-              <p className="text-sm text-textMuted mb-4">使用微信扫码登录</p>
-              <button
-                className={`w-full py-3 rounded-full font-display font-bold text-sm transition cursor-pointer ${
-                  agreed
-                    ? 'bg-[#07C160] text-white hover:bg-[#06ad56]'
-                    : 'bg-surfaceMuted text-textSofter cursor-not-allowed'
-                }`}
-                onClick={handleLogin}
-                disabled={!agreed || loading}
-              >
-                {loading ? '处理中...' : '微信登录'}
-              </button>
-            </div>
-          )}
-
-          {/* Agreement */}
-          <label className="flex items-start gap-2 cursor-pointer">
+          <label className="grid gap-2 text-sm font-bold text-textMuted">
+            邮箱
             <input
-              type="checkbox"
-              checked={agreed}
-              onChange={(e) => setAgreed(e.target.checked)}
-              className="mt-0.5 accent-lime"
+              className="h-12 rounded-lg border border-white/10 bg-black/30 px-4 text-base text-cream outline-none transition placeholder:text-textSofter focus:border-lime/60"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              autoComplete="email"
+              inputMode="email"
+              placeholder="you@example.com"
             />
-            <span className="text-xs text-textSofter leading-relaxed">
-              我已阅读并同意 <span className="text-lime cursor-pointer">《用户协议》</span> 和{' '}
-              <span className="text-lime cursor-pointer">《隐私政策》</span>
-            </span>
           </label>
+
+          <label className="grid gap-2 text-sm font-bold text-textMuted">
+            密码
+            <input
+              className="h-12 rounded-lg border border-white/10 bg-black/30 px-4 text-base text-cream outline-none transition placeholder:text-textSofter focus:border-lime/60"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              type="password"
+              minLength={6}
+              placeholder={mode === 'login' ? '输入密码' : '至少 6 位'}
+            />
+          </label>
+
+          {(localError || error) && (
+            <div className="rounded-lg border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-100">
+              {localError || error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="mt-1 h-12 rounded-lg bg-lime px-5 text-sm font-black text-white transition hover:bg-brand2 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? '处理中...' : submitLabel}
+          </button>
+        </form>
+
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-sm">
+          <button
+            type="button"
+            className="font-bold text-lime transition hover:text-brand2"
+            onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
+          >
+            {mode === 'login' ? '没有账号？立即注册' : '已有账号？去登录'}
+          </button>
+          <Link
+            to="/forgot-password"
+            className="font-bold text-textMuted transition hover:text-cream"
+            onClick={closeLogin}
+          >
+            忘记密码
+          </Link>
         </div>
-      </div>
+      </section>
     </div>
   );
-});
+}
