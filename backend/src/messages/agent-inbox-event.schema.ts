@@ -3,11 +3,15 @@ import { Document, Types } from 'mongoose';
 
 export type AgentInboxEventType =
   | 'profile.match.recommended'
+  | 'social_request.match.recommended'
   | 'match.completed'
   | 'message.received'
   | 'message.created'
   | 'agent.reply.sent'
-  | 'agent.inbox.updated';
+  | 'agent.inbox.updated'
+  | 'contact.request.received'
+  | 'contact.request.accepted'
+  | 'contact.request.declined';
 
 @Schema({ timestamps: true })
 export class AgentInboxEvent extends Document {

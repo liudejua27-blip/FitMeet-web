@@ -382,7 +382,7 @@ export class AgentDiscoveryService {
 
   async listInboxForConnection(
     conn: AgentConnection,
-    opts: { limit?: number; unreadOnly?: boolean } = {},
+    opts: { limit?: number; unreadOnly?: boolean; eventType?: string } = {},
   ) {
     const [conversations, events] = await Promise.all([
       this.messages.getAgentInboxConversations(conn.id, opts),
@@ -399,7 +399,7 @@ export class AgentDiscoveryService {
 
   async listInboxEventsForConnection(
     conn: AgentConnection,
-    opts: { limit?: number; unreadOnly?: boolean } = {},
+    opts: { limit?: number; unreadOnly?: boolean; eventType?: string } = {},
   ) {
     const events = await this.messages.getAgentInboxEvents(conn.id, opts);
     return {
@@ -409,6 +409,48 @@ export class AgentDiscoveryService {
       events,
       total: events.length,
     };
+  }
+
+  async recordInboxHeartbeat(
+    conn: AgentConnection,
+    opts: { limit?: number; unreadOnly?: boolean; eventType?: string } = {},
+  ) {
+    const now = new Date();
+    await this.connectionRepo.update(conn.id, { lastActiveAt: now });
+    await this.actionLogRepo.save(
+      this.actionLogRepo.create({
+        agentId: conn.id,
+        ownerUserId: conn.userId,
+        actionType: AgentActionType.AgentEvent,
+        eventType: 'agent.heartbeat.poll',
+        conversationId: null,
+        messageId: null,
+        status: 'success',
+        actionStatus: AgentActionStatus.Executed,
+        riskLevel: AgentActionRiskLevel.Low,
+        targetUserId: null,
+        targetAgentId: null,
+        relatedSocialRequestId: null,
+        relatedCandidateId: null,
+        relatedActivityId: null,
+        inputSummary: 'OpenClaw inbox heartbeat poll',
+        outputSummary: 'heartbeat recorded',
+        payload: {
+          source: 'agent_inbox_events',
+          limit: opts.limit ?? null,
+          unreadOnly: opts.unreadOnly ?? false,
+          eventType: opts.eventType ?? null,
+        },
+        reason: null,
+      }),
+    );
+  }
+
+  async ackInboxEventsForConnection(
+    conn: AgentConnection,
+    dto: { eventIds?: string[] },
+  ) {
+    return this.messages.ackAgentInboxEvents(conn.id, dto.eventIds ?? []);
   }
 
   async listInboxMessagesForConnection(
@@ -491,6 +533,7 @@ export class AgentDiscoveryService {
       agentProfileId?: number;
       limit?: number;
       unreadOnly?: boolean;
+      eventType?: string;
     } = {},
   ) {
     if (!opts.agentProfileId) {
@@ -521,6 +564,7 @@ export class AgentDiscoveryService {
         this.messages.getAgentInboxEvents(conn.id, {
           limit: opts.limit,
           unreadOnly: opts.unreadOnly,
+          eventType: opts.eventType,
         }),
       ]);
       const safe = Array.isArray(conversations) ? conversations : [];
@@ -560,6 +604,7 @@ export class AgentDiscoveryService {
         this.messages.getAgentInboxEvents(profile.id, {
           limit: opts.limit,
           unreadOnly: opts.unreadOnly,
+          eventType: opts.eventType,
         }),
       ]);
       const safe = Array.isArray(conversations) ? conversations : [];

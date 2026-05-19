@@ -15,6 +15,8 @@ import { AuthModule } from '../auth/auth.module';
 import { AgentConnection } from '../agent-gateway/entities/agent-connection.entity';
 import { AgentActivityLog } from '../agent-gateway/entities/agent-activity-log.entity';
 import { AgentActionLog } from '../agent-gateway/entities/agent-action-log.entity';
+import { PublicSocialIntent } from '../agent-gateway/entities/public-social-intent.entity';
+import { UserSocialRequest } from '../social-requests/social-request.entity';
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { AgentActionLog } from '../agent-gateway/entities/agent-action-log.entit
       AgentConnection,
       AgentActivityLog,
       AgentActionLog,
+      PublicSocialIntent,
+      UserSocialRequest,
     ]),
     AuthModule,
   ],

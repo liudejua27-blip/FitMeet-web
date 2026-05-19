@@ -52,6 +52,7 @@ import { UsersModule } from './users/users.module';
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => {
         const nodeEnv = configService.get<string>('NODE_ENV');
+        const defaultSynchronize = nodeEnv === 'production' ? 'false' : 'true';
 
         return {
           type: 'postgres',
@@ -65,7 +66,9 @@ import { UsersModule } from './users/users.module';
           migrationsRun:
             nodeEnv === 'production' &&
             configService.get<string>('DB_MIGRATIONS_RUN', 'true') !== 'false',
-          synchronize: nodeEnv !== 'production',
+          synchronize:
+            configService.get<string>('DB_SYNCHRONIZE', defaultSynchronize) ===
+            'true',
           extra: {
             max: 100,
             min: 10,

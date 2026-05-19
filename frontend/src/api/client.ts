@@ -21,7 +21,7 @@ import type {
 } from '../types';
 import { STORAGE_KEYS, migrateLocalStorageKey } from '../lib/storageKeys';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '');
 
 /** Stored JWT token key */
 const TOKEN_KEY = STORAGE_KEYS.token;
@@ -93,7 +93,7 @@ export function clearToken(): void {
  * Automatically attaches JWT Authorization header.
  */
 export async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const url = `${BASE_URL}${endpoint}`;
+  const url = `${API_BASE_URL}${endpoint}`;
   const token = getToken();
   const authHeaders: Record<string, string> = {};
   if (token) {
@@ -631,6 +631,13 @@ export function startConversation(otherUserId: number): Promise<StartConversatio
   return request<StartConversationResponse>('/messages/start', {
     method: 'POST',
     body: JSON.stringify({ otherUserId }),
+  });
+}
+
+export function startPublicIntentConversation(publicIntentId: string, text: string): Promise<StartConversationResponse> {
+  return request<StartConversationResponse>(`/messages/public-intents/${encodeURIComponent(publicIntentId)}/start`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
   });
 }
 

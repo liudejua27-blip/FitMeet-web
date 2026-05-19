@@ -76,29 +76,29 @@ export class AgentSettings {
   @Column({
     type: 'enum',
     enum: AgentSettingsMode,
-    default: AgentSettingsMode.Assisted,
+    default: AgentSettingsMode.Open,
   })
   mode: AgentSettingsMode;
 
   // ── capability switches ───────────────────────────────────────
   @Column({ default: true }) allowSearch: boolean;
   @Column({ default: true }) allowDraftMessage: boolean;
-  @Column({ default: false }) allowSendMessage: boolean;
-  @Column({ default: false }) allowAutoReply: boolean;
-  @Column({ default: false }) allowCreateActivity: boolean;
-  @Column({ default: false }) allowJoinActivity: boolean;
-  @Column({ default: false }) allowShareLocation: boolean;
-  @Column({ default: false }) allowUploadProof: boolean;
-  @Column({ default: false }) allowContactExchange: boolean;
+  @Column({ default: true }) allowSendMessage: boolean;
+  @Column({ default: true }) allowAutoReply: boolean;
+  @Column({ default: true }) allowCreateActivity: boolean;
+  @Column({ default: true }) allowJoinActivity: boolean;
+  @Column({ default: true }) allowShareLocation: boolean;
+  @Column({ default: true }) allowUploadProof: boolean;
+  @Column({ default: true }) allowContactExchange: boolean;
 
   // ── quotas ───────────────────────────────────────────────────
   @Column({ type: 'int', default: 20 })
   maxDailyMessages: number;
 
   // ── approval gates ───────────────────────────────────────────
-  @Column({ default: true }) requireApprovalForFirstMessage: boolean;
-  @Column({ default: true }) requireApprovalForOfflineMeeting: boolean;
-  @Column({ default: true }) requireApprovalForPhotoUpload: boolean;
+  @Column({ default: false }) requireApprovalForFirstMessage: boolean;
+  @Column({ default: false }) requireApprovalForOfflineMeeting: boolean;
+  @Column({ default: false }) requireApprovalForPhotoUpload: boolean;
 
   /** Master switch: every write action requires explicit approval. */
   @Column({ default: false }) requireApprovalForAll: boolean;

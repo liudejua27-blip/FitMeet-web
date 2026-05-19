@@ -263,6 +263,10 @@ export function startConversation(otherUserId: number) {
   return api.startConversation(otherUserId);
 }
 
+export function startPublicIntentConversation(publicIntentId: string, text: string) {
+  return api.startPublicIntentConversation(publicIntentId, text);
+}
+
 export function getUnreadMessageCount() {
   return api.getUnreadMessageCount();
 }

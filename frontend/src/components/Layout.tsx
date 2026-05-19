@@ -7,8 +7,10 @@ import { BackToTop } from './ui';
 const navItems = [
   { to: '/hall', label: 'FitMeet 大厅' },
   { to: '/ai', label: 'Agent 宇宙' },
+  { to: '/ai-profile', label: 'AI 画像' },
   { to: '/ai-hosting', label: 'AI 托管' },
   { to: '/agent-inbox', label: 'Agent Inbox' },
+  { to: '/match-confirmations', label: '确认中心' },
   { to: '/developers/social-skills', label: 'Social Skills' },
   { to: '/safety', label: '安全' },
 ];

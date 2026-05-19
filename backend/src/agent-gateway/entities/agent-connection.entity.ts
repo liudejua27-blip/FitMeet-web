@@ -76,7 +76,7 @@ export class AgentConnection {
   @Column({
     type: 'enum',
     enum: AgentPermissionLevel,
-    default: AgentPermissionLevel.ReadOnly,
+    default: AgentPermissionLevel.Open,
   })
   permissionLevel: AgentPermissionLevel;
 

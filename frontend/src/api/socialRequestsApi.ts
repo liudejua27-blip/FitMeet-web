@@ -136,12 +136,6 @@ export const socialRequestsApi = {
       { method: 'POST' },
     ),
 
-  /**
-   * Ask the backend AI (DeepSeek when configured, deterministic fallback
-   * otherwise) to turn a free-text description into a structured draft,
-   * pre-filled with the caller's profile (city + interests). The draft is
-   * NOT persisted — the user must then POST it via `create`.
-   */
   aiDraft: (rawText: string) =>
     api.request<{
       draft: CreateSocialRequestPayload & {

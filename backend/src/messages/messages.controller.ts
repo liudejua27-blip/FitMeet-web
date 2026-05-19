@@ -44,6 +44,15 @@ export class MessagesController {
     return this.messagesService.startConversation(user.id, otherUserId);
   }
 
+  @Post('public-intents/:id/start')
+  startPublicIntentConversation(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Body('text') text?: string,
+  ) {
+    return this.messagesService.startPublicIntentConversation(user.id, id, text);
+  }
+
   @Get('unread')
   getUnreadCount(@CurrentUser() user: User) {
     return this.messagesService.getUnreadCount(user.id);

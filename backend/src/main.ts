@@ -13,16 +13,17 @@ import { AppModule } from './app.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
 function getAllowedOrigins(): string[] {
-  const configured = process.env.ALLOWED_ORIGINS?.split(',')
+  const configured = (process.env.CORS_ORIGIN || process.env.ALLOWED_ORIGINS)
+    ?.split(',')
     .map((origin) => origin.trim())
-    .filter(Boolean);
+    .filter((origin) => origin && origin !== '*');
 
   if (configured?.length) {
     return configured;
   }
 
   if (process.env.NODE_ENV === 'production') {
-    throw new Error('ALLOWED_ORIGINS is required in production');
+    return ['https://www.ourfitmeet.cn', 'https://ourfitmeet.cn'];
   }
 
   return ['http://localhost:5173', 'http://localhost:3000'];

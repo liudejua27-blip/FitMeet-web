@@ -64,6 +64,16 @@ export interface AiProfileMatchSignals {
   source: string;
 }
 
+export interface AiCompatibilityRescore {
+  score: number;
+  confidence: number;
+  source: 'deepseek' | 'fallback';
+  publicReason: string;
+  privateReason: string;
+  reasons: string[];
+  riskWarnings: string[];
+}
+
 /**
  * Pluggable AI capability surface used across FitMeet.
  *
@@ -558,6 +568,107 @@ export class AIService {
     }
   }
 
+  /**
+   * DeepSeek second pass for card/request matching.
+   *
+   * CompatibilityScorerService remains the deterministic source of truth for
+   * hard filters and base ranking. This method lets DeepSeek adjust the final
+   * score only inside a small bounded window and returns a deterministic
+   * fallback when the model is unavailable.
+   */
+  async rescoreCompatibility(input: {
+    baseScore: number;
+    request: {
+      title?: string | null;
+      city?: string | null;
+      activityType?: string | null;
+      interestTags?: string[] | null;
+      timePreference?: string | null;
+      socialGoal?: string | null;
+      personalityPreference?: string[] | null;
+    };
+    ownerProfile?: {
+      city?: string | null;
+      publicTags?: string[] | null;
+      traits?: string[] | null;
+      preferredTraits?: string[] | null;
+      availability?: string[] | null;
+    } | null;
+    candidate: {
+      nickname?: string | null;
+      city?: string | null;
+      publicTags?: string[] | null;
+      traits?: string[] | null;
+      commonTags?: string[] | null;
+      verified?: boolean | null;
+      acceptsAgentMessages?: boolean | null;
+    };
+    deterministicReasons?: string[];
+    scoreBreakdown?: Record<string, number>;
+  }): Promise<AiCompatibilityRescore> {
+    const baseScore = clampScore(input.baseScore);
+    const fallback: AiCompatibilityRescore = {
+      score: baseScore,
+      confidence: baseScore >= 70 ? 0.72 : baseScore >= 55 ? 0.58 : 0.42,
+      source: 'fallback',
+      publicReason:
+        input.deterministicReasons?.find(Boolean) ??
+        '基础匹配器根据城市、时间、兴趣、画像和安全偏好给出该分数。',
+      privateReason:
+        '未启用 DeepSeek 二次评分，当前结果来自确定性兼容度评分器。',
+      reasons: (input.deterministicReasons ?? []).slice(0, 4),
+      riskWarnings: [],
+    };
+    if (!this.isLlmEnabled()) return fallback;
+
+    try {
+      const out = await this.callDeepseekJson(
+        [
+          '你是 FitMeet 的 AI 匹配二次评分器。',
+          '输入已经通过确定性 CompatibilityScorerService 完成硬过滤和基础评分。',
+          '你的任务是在不绕过安全边界的前提下，对 baseScore 做小幅修正，并解释原因。',
+          '要求：',
+          '1. 只输出 JSON，不要 markdown。',
+          '2. score 必须是 0 到 100 的整数，且相对 baseScore 调整不超过 12 分。',
+          '3. 不能输出手机号、邮箱、微信、精确地址、收入数字、学校/单位等敏感信息。',
+          '4. 如果资料不足，降低 confidence，并保守调低分数。',
+          '5. 线下见面、加好友、交换联系方式必须保留双方确认。',
+          '输出字段：{"score":number,"confidence":number,"publicReason":string,"privateReason":string,"reasons":string[],"riskWarnings":string[]}',
+        ].join('\n'),
+        JSON.stringify(input),
+      );
+      const parsed = this.safeJson<Partial<AiCompatibilityRescore>>(out);
+      if (!parsed) return fallback;
+      const score = boundedAiScore(
+        typeof parsed.score === 'number' ? parsed.score : baseScore,
+        baseScore,
+      );
+      return {
+        score,
+        confidence:
+          typeof parsed.confidence === 'number'
+            ? Number(Math.max(0, Math.min(1, parsed.confidence)).toFixed(2))
+            : fallback.confidence,
+        source: 'deepseek',
+        publicReason: sanitizeAiMatchText(
+          parsed.publicReason || fallback.publicReason,
+          220,
+        ),
+        privateReason: sanitizeAiMatchText(
+          parsed.privateReason || fallback.privateReason,
+          260,
+        ),
+        reasons: sanitizeAiMatchList(parsed.reasons, fallback.reasons),
+        riskWarnings: sanitizeAiMatchList(parsed.riskWarnings, []),
+      };
+    } catch (err) {
+      this.logger.warn(
+        `rescoreCompatibility fell back: ${(err as Error).message}`,
+      );
+      return fallback;
+    }
+  }
+
   // ---------- internals ----------
 
   private profileAnswersToText(
@@ -857,12 +968,17 @@ export class AIService {
       ],
       12,
     );
+    const semanticPrivateTags = this.cleanStrings(
+      sensitivePrivateTags.flatMap((tag) => this.semanticAliasesForTag(tag)),
+      12,
+    );
     const matchKeywords = this.cleanStrings(
       [
         ...(input.matchKeywords ?? []),
         ...publicTags,
         ...privatePreferenceTags,
         ...sensitivePrivateTags,
+        ...semanticPrivateTags,
       ],
       24,
     );
@@ -882,6 +998,11 @@ export class AIService {
   private extractSensitiveTags(text: string): string[] {
     const lower = text.toLowerCase();
     return [
+      'wealth_resource',
+      '年少多金',
+      '高消费',
+      '有钱',
+      '资源',
       'rich',
       'money',
       'wealth',
@@ -905,9 +1026,37 @@ export class AIService {
   }
 
   private isSensitiveTag(tag: string): boolean {
+    if (/wealth_resource|status_signal/i.test(tag)) return true;
     return /rich|money|wealth|income|salary|handsome|beautiful|good-looking|resources|status|有钱|富|收入|高薪|颜值|帅|美|资源|身份/i.test(
       tag,
     );
+  }
+
+  private semanticAliasesForTag(tag: string): string[] {
+    const normalized = (tag ?? '').trim().toLowerCase();
+    const aliases: string[] = [];
+    if (
+      /(wealth_resource|rich|wealth|money|income|salary|resource|resources|asset|net.?worth|有钱|财富|资源|收入|高薪|年少多金|身价|资产|高消费)/i.test(
+        normalized,
+      )
+    ) {
+      aliases.push('wealth_resource');
+    }
+    if (
+      /(founder|entrepreneur|startup|business|ceo|创业|创始人|企业家|商业|事业型)/i.test(
+        normalized,
+      )
+    ) {
+      aliases.push('business_builder');
+    }
+    if (
+      /(status_signal|high.?status|elite|vip|身份|地位|名流|精英)/i.test(
+        normalized,
+      )
+    ) {
+      aliases.push('status_signal');
+    }
+    return aliases;
   }
 
   private pickKeywords(text: string, keywords: string[]): string[] {
@@ -1265,4 +1414,40 @@ export class AIService {
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function clampScore(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function boundedAiScore(value: number, baseScore: number): number {
+  const base = clampScore(baseScore);
+  const next = clampScore(value);
+  return Math.max(base - 12, Math.min(base + 12, next));
+}
+
+function sanitizeAiMatchList(
+  value: unknown,
+  fallback: string[],
+): string[] {
+  if (!Array.isArray(value)) return fallback.slice(0, 4);
+  const list = value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => sanitizeAiMatchText(item, 120))
+    .filter(Boolean);
+  return Array.from(new Set(list)).slice(0, 4);
+}
+
+function sanitizeAiMatchText(value: string, max: number): string {
+  const redacted = (value || '')
+    .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[已隐藏]')
+    .replace(/(?:\+?\d[\d\s-]{6,}\d)/g, '[已隐藏]')
+    .replace(
+      /(微信|wechat|qq|手机号|电话|地址|住址|门牌|收入|月薪|年薪)[:：]?\s*[^，。；;\n]{2,}/gi,
+      '$1已隐藏',
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+  return redacted.length > max ? `${redacted.slice(0, max - 1)}…` : redacted;
 }

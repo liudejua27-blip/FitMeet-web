@@ -2,6 +2,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AiMatchSession } from '../ai-match/ai-match-session.entity';
 import { MessagesService } from '../messages/messages.service';
+import { MatchReasonerService } from './match-reasoner.service';
 import { SafetyService } from '../safety/safety.service';
 import { UserSocialProfile } from '../users/user-social-profile.entity';
 import { User } from '../users/user.entity';
@@ -11,6 +12,11 @@ import {
   ConnectionStatus,
 } from './entities/agent-connection.entity';
 import { ProfileMatchService } from './profile-match.service';
+import { ContactRequest } from './entities/contact-request.entity';
+import { AgentActionLogService } from './agent-action-log.service';
+import { AgentApprovalService } from './agent-approval.service';
+import { CompatibilityScorerService } from '../match/compatibility-scorer.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const mockRepo = () => ({
   create: jest.fn((data) => data),
@@ -39,9 +45,17 @@ describe('ProfileMatchService', () => {
   let userRepo: ReturnType<typeof mockRepo>;
   let sessionRepo: ReturnType<typeof mockRepo>;
   let connectionRepo: ReturnType<typeof mockRepo>;
-  let messages: { createAgentInboxEvent: jest.Mock };
+  let contactRepo: ReturnType<typeof mockRepo>;
+  let messages: {
+    createAgentInboxEvent: jest.Mock;
+    startConversation: jest.Mock;
+    sendMessage: jest.Mock;
+  };
   let webhooks: { emitToConnection: jest.Mock };
   let safety: { getMutualBlockUserIds: jest.Mock };
+  let actionLog: { logAgentAction: jest.Mock };
+  let approvals: { create: jest.Mock };
+  let notifications: { create: jest.Mock };
 
   beforeEach(async () => {
     profileRepo = mockRepo();
@@ -49,9 +63,19 @@ describe('ProfileMatchService', () => {
     sessionRepo = mockRepo();
     sessionRepo.find.mockResolvedValue([]);
     connectionRepo = mockRepo();
-    messages = { createAgentInboxEvent: jest.fn() };
-    webhooks = { emitToConnection: jest.fn() };
+    contactRepo = mockRepo();
+    messages = {
+      createAgentInboxEvent: jest.fn(),
+      startConversation: jest.fn().mockResolvedValue({ conversationId: 'conv-1' }),
+      sendMessage: jest.fn().mockResolvedValue({ id: 'msg-1' }),
+    };
+    webhooks = { emitToConnection: jest.fn().mockResolvedValue(undefined) };
     safety = { getMutualBlockUserIds: jest.fn().mockResolvedValue(new Set()) };
+    actionLog = { logAgentAction: jest.fn().mockResolvedValue(null) };
+    approvals = {
+      create: jest.fn(async (input) => ({ id: 9001, ...input })),
+    };
+    notifications = { create: jest.fn().mockResolvedValue({}) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -60,9 +84,15 @@ describe('ProfileMatchService', () => {
         { provide: getRepositoryToken(User), useValue: userRepo },
         { provide: getRepositoryToken(AiMatchSession), useValue: sessionRepo },
         { provide: getRepositoryToken(AgentConnection), useValue: connectionRepo },
+        { provide: getRepositoryToken(ContactRequest), useValue: contactRepo },
         { provide: SafetyService, useValue: safety },
         { provide: MessagesService, useValue: messages },
         { provide: AgentWebhookService, useValue: webhooks },
+        MatchReasonerService,
+        CompatibilityScorerService,
+        { provide: AgentActionLogService, useValue: actionLog },
+        { provide: AgentApprovalService, useValue: approvals },
+        { provide: NotificationsService, useValue: notifications },
       ],
     }).compile();
 
@@ -126,8 +156,15 @@ describe('ProfileMatchService', () => {
         metadata: expect.objectContaining({
           aiMatchSessionId: 300,
           nextAction: 'owner_confirmation_required',
+          publicReasons: expect.any(Array),
+          privateReasonAvailable: true,
+          riskTips: expect.any(Array),
         }),
       }),
+    );
+    const inboxPayload = messages.createAgentInboxEvent.mock.calls[0][0];
+    expect(JSON.stringify(inboxPayload.metadata.safeProfile)).not.toMatch(
+      /rich|收入|手机号|身份证/i,
     );
     expect(webhooks.emitToConnection).toHaveBeenCalledWith(
       9,
@@ -149,5 +186,243 @@ describe('ProfileMatchService', () => {
 
     expect(result.matchedCount).toBe(0);
     expect(messages.createAgentInboxEvent).not.toHaveBeenCalled();
+  });
+
+  it('matches confirmed private wealth/resource signals semantically without public leakage', async () => {
+    profileRepo.findOne.mockResolvedValue({
+      userId: 1,
+      city: 'Shanghai',
+      profileDiscoverable: true,
+      agentCanRecommendMe: true,
+      interestTags: ['running'],
+      wantToMeet: ['resources'],
+      matchSignals: { privatePreferenceTags: ['resources'] },
+    });
+    profileRepo.createQueryBuilder.mockReturnValue(
+      qbReturning([
+        {
+          userId: 2,
+          city: 'Shanghai',
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+          interestTags: ['running'],
+          matchSignals: {
+            publicTags: ['running'],
+            sensitivePrivateTags: ['rich'],
+          },
+          sensitiveTagDecisions: {
+            rich: { status: 'confirmed', category: 'wealth' },
+          },
+        },
+      ]),
+    );
+    sessionRepo.find.mockResolvedValue([]);
+    userRepo.find.mockResolvedValue([
+      {
+        id: 2,
+        name: 'Candidate',
+        avatar: 'C',
+        color: '#16C784',
+        city: 'Shanghai',
+      },
+    ]);
+    connectionRepo.find.mockResolvedValue([
+      { id: 9, userId: 1, status: ConnectionStatus.Active },
+    ]);
+
+    const result = await service.runOnce(1);
+
+    expect(result.matchedCount).toBe(1);
+    const inboxPayload = messages.createAgentInboxEvent.mock.calls[0][0];
+    expect(JSON.stringify(inboxPayload.metadata.publicReasons)).not.toMatch(
+      /rich|wealth|resources/i,
+    );
+    expect(inboxPayload.metadata.privateReasonAvailable).toBe(true);
+    expect(inboxPayload.metadata.privateReasons).toBeUndefined();
+  });
+
+  it('creates a target-consent contact request only after owner confirmation', async () => {
+    sessionRepo.findOne.mockResolvedValue({
+      id: 300,
+      ownerId: 1,
+      targetUserId: 2,
+      score: 70,
+      status: 'review',
+      source: 'profile_pool',
+      summary: 'Shared tags: running',
+      reasons: ['Shared tags: running'],
+      transcript: [],
+      createdAt: new Date('2026-05-15T00:00:00Z'),
+    });
+    contactRepo.findOne.mockResolvedValue(null);
+    contactRepo.save.mockResolvedValue({ id: 99 });
+    connectionRepo.findOne.mockResolvedValue({
+      id: 9,
+      userId: 1,
+      status: ConnectionStatus.Active,
+    });
+
+    const result = await service.confirmContact(1, 300, '手机号 13800000000');
+
+    expect(contactRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requesterId: 1,
+        targetUserId: 2,
+        agentConnectionId: 9,
+        note: '手机号已隐藏',
+      }),
+    );
+    expect(sessionRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'approved', contactCardSent: true }),
+    );
+    expect(result).toMatchObject({
+      status: 'pending_target_consent',
+      contactRequestId: 99,
+      requiresTargetConsent: true,
+    });
+  });
+
+  it('ignore writes action log + inbox event + webhook', async () => {
+    sessionRepo.findOne.mockResolvedValue({
+      id: 300,
+      ownerId: 1,
+      targetUserId: 2,
+      score: 60,
+      status: 'review',
+      source: 'profile_pool',
+      summary: 's',
+      reasons: [],
+      transcript: [],
+      createdAt: new Date(),
+    });
+    profileRepo.findOne.mockResolvedValue({
+      userId: 2,
+      city: 'Shanghai',
+      profileDiscoverable: true,
+      agentCanRecommendMe: true,
+      interestTags: ['running'],
+      matchSignals: {},
+    });
+    userRepo.findOne.mockResolvedValue({
+      id: 2,
+      name: 'Candidate',
+      avatar: 'C',
+      color: '#16C784',
+      city: 'Shanghai',
+    });
+    connectionRepo.find.mockResolvedValue([
+      { id: 9, userId: 1, status: ConnectionStatus.Active },
+    ]);
+
+    const result = await service.ignore(1, 300);
+
+    expect(result.action).toBe('recommendation.ignored');
+    expect(actionLog.logAgentAction).toHaveBeenCalled();
+    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'recommendation.ignored',
+        metadata: expect.objectContaining({
+          recommendationId: 300,
+          targetUserId: 2,
+          action: 'recommendation.ignored',
+        }),
+      }),
+    );
+    expect(webhooks.emitToConnection).toHaveBeenCalledWith(
+      9,
+      'recommendation.ignored',
+      expect.any(Object),
+    );
+  });
+
+  it('send-intro sends directly under open-token mode', async () => {
+    sessionRepo.findOne.mockResolvedValue({
+      id: 300,
+      ownerId: 1,
+      targetUserId: 2,
+      score: 70,
+      status: 'review',
+      source: 'profile_pool',
+      transcript: [],
+      reasons: [],
+      summary: '',
+      createdAt: new Date(),
+    });
+    connectionRepo.find.mockResolvedValue([]);
+    connectionRepo.findOne.mockResolvedValue({
+      id: 44,
+      userId: 1,
+      status: ConnectionStatus.Active,
+    });
+
+    const result = await service.sendIntro(1, 300, {
+      ownerConfirmed: false,
+      text: 'hello',
+    });
+
+    expect(approvals.create).not.toHaveBeenCalled();
+    expect(messages.startConversation).toHaveBeenCalledWith(
+      1,
+      2,
+      expect.objectContaining({ agentConnectionId: 44 }),
+    );
+    expect(messages.sendMessage).toHaveBeenCalledWith(
+      'conv-1',
+      1,
+      'hello',
+      expect.objectContaining({ agentConnectionId: 44 }),
+    );
+    expect(result).toMatchObject({
+      status: 'sent',
+      requiresOwnerConfirmation: false,
+      conversationId: 'conv-1',
+    });
+  });
+
+  it('request-contact-exchange creates a target-consent contact request directly', async () => {
+    sessionRepo.findOne.mockResolvedValue({
+      id: 300,
+      ownerId: 1,
+      targetUserId: 2,
+      score: 70,
+      status: 'review',
+      source: 'profile_pool',
+      transcript: [],
+      reasons: [],
+      summary: '',
+      createdAt: new Date(),
+    });
+    connectionRepo.find.mockResolvedValue([]);
+    connectionRepo.findOne.mockResolvedValue({
+      id: 44,
+      userId: 1,
+      status: ConnectionStatus.Active,
+    });
+    contactRepo.findOne.mockResolvedValue(null);
+    contactRepo.save.mockResolvedValue({
+      id: 800,
+      requesterId: 1,
+      targetUserId: 2,
+      status: 'pending',
+    });
+
+    const result = await service.requestContactExchange(1, 300, {
+      ownerConfirmed: true,
+      note: 'lets exchange',
+    });
+
+    expect(approvals.create).not.toHaveBeenCalled();
+    expect(contactRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requesterId: 1,
+        targetUserId: 2,
+        agentConnectionId: 44,
+      }),
+    );
+    expect(result).toMatchObject({
+      status: 'pending_target_consent',
+      contactRequestId: 800,
+      requiresTargetConsent: true,
+    });
   });
 });

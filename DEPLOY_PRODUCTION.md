@@ -48,34 +48,63 @@ backend/
 
 Do not publish `.env.production` to GitHub. It contains real secrets.
 
-## 3. Build Frontend For The Domain
+## 3. Build Frontend
 
-Run locally or on the server:
+Recommended: build `frontend/dist` locally or in CI, then upload it with the
+deployment bundle. The production frontend must use relative API routing so the
+browser calls the same origin (`https://www.ourfitmeet.cn/api/...`) and never
+crosses from `www.ourfitmeet.cn` to `ourfitmeet.cn`.
+
+Run locally or in CI:
 
 ```bash
 cd frontend
 pnpm install --frozen-lockfile
-VITE_API_BASE_URL=https://www.ourfitmeet.cn/api \
-VITE_WS_BASE_URL=https://www.ourfitmeet.cn \
+VITE_API_BASE_URL=/api \
+VITE_WS_BASE_URL= \
 pnpm build
 ```
 
 On PowerShell:
 
 ```powershell
-$env:VITE_API_BASE_URL="https://www.ourfitmeet.cn/api"
-$env:VITE_WS_BASE_URL="https://www.ourfitmeet.cn"
+$env:VITE_API_BASE_URL="/api"
+$env:VITE_WS_BASE_URL=""
 pnpm -C frontend build
 ```
 
+`pnpm build` deletes `frontend/dist` first and then runs
+`pnpm run check:prod-build`. The check fails if the built assets contain:
+
+```text
+https://ourfitmeet.cn/api
+https://www.ourfitmeet.cn/api
+localhost:3000/api
+```
+
+If you must build on the 1.8GB production server, use the low-memory command:
+
+```bash
+NODE_OPTIONS=--max-old-space-size=1024 pnpm -C frontend run build:lowmem
+```
+
+The server deploy script defaults to using an existing `frontend/dist`. Set
+`BUILD_FRONTEND=true` only when you intentionally want to build on the server.
+
 ## 4. Deploy Or Update Code
+
+Build and scan a zip locally before upload:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build-deploy-zip.ps1 -Output fitmeet-deploy.zip
+```
 
 Zip upload flow:
 
 ```bash
 mkdir -p /opt/fitmeet-new
 cd /opt/fitmeet-new
-unzip -o /path/to/fitness-app.zip
+unzip -o /path/to/fitmeet-deploy.zip
 cp /opt/fitness-app/.env.production /opt/fitmeet-new/.env.production
 # IMPORTANT: if .env.production was edited on Windows it may contain CRLF
 # line endings, which `docker compose --env-file` silently treats as part of
@@ -88,7 +117,8 @@ cp /opt/fitness-app/nginx/ssl/privkey.pem /opt/fitmeet-new/nginx/ssl/privkey.pem
 bash scripts/deploy-production.sh
 ```
 
-The deploy script builds `frontend/dist` on the server and then rebuilds/restarts the Docker Compose stack.
+The deploy script uses uploaded `frontend/dist` when present, scans it for
+forbidden API origins, and then rebuilds/restarts the Docker Compose stack.
 
 On the server:
 
@@ -118,13 +148,13 @@ frontend/dist/ only if you build on the server
 From the project root on the server:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 ```
 
 Watch logs:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml logs -f backend
+docker compose -f docker-compose.prod.yml --env-file .env.production logs -f backend
 ```
 
 The backend should log Nest startup and TypeORM migrations. Production config uses:
@@ -136,6 +166,22 @@ migrationsRun=true
 ```
 
 Keep `DB_MIGRATIONS_RUN` unset or set to `true` for this release.
+
+Manual migration commands are available if you need to run them explicitly:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production exec backend pnpm run migration:run:prod
+```
+
+The canonical production services are:
+
+```text
+backend
+nginx
+postgres
+mongo
+redis
+```
 
 ## 6. Confirm Agent Tables Exist
 
@@ -167,6 +213,12 @@ From any machine:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\verify-production.ps1
+```
+
+Quick health check:
+
+```bash
+curl https://www.ourfitmeet.cn/api/health
 ```
 
 Expected after the new backend is deployed:

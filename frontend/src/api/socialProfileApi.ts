@@ -1,11 +1,12 @@
 import * as api from './client';
 
 /**
- * 用户社交画像（与 `/social-request/ai` 页面绑定）。
+ * User social profile.
  *
- * 后端表为 `user_social_profiles`，1:1 关联到 `users(id)`。
- * 未保存过的用户调用 GET 时后端会返回一份带默认空值的占位对象，
- * 因此前端无需区分「从未保存」和「保存为全空」。
+ * This is the single source of truth for both the AI Profile page and the AI
+ * social-card generator. The backend table is `user_social_profiles`, one row
+ * per user. If the user has never saved a profile, GET still returns an empty
+ * placeholder object so the UI does not need a separate "not created" state.
  */
 export interface UserSocialProfile {
   userId: number;
@@ -40,6 +41,10 @@ export interface UserSocialProfile {
   aiSummary: string;
   aiProfileCard: Record<string, unknown>;
   matchSignals: AiProfileMatchSignals;
+  sensitiveTagDecisions?: Record<
+    string,
+    { status: string; category?: string; decidedAt?: string }
+  >;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -97,6 +102,10 @@ export interface AiProfileBuilderCard {
 export interface AiProfileQuestion {
   key: string;
   question: string;
+  type?: string;
+  domain?: string;
+  privacyTier?: 'public' | 'private_match' | 'sensitive_review';
+  matchRole?: 'profile_field' | 'match_preference' | 'safety_boundary';
 }
 
 export interface SocialProfileCompletion {
@@ -135,11 +144,17 @@ export const socialProfileApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  aiSave: (data: { profile: AiProfileBuilderCard; enableMatching?: boolean }) =>
+  aiSave: (data: {
+    profile: AiProfileBuilderCard;
+    enableMatching?: boolean;
+    sensitiveTagsConfirmed?: boolean;
+    sensitiveTagDecisions?: Record<string, 'confirmed' | 'rejected' | 'hidden'>;
+  }) =>
     api.request<{
       profile: UserSocialProfile;
       aiDelegateProfile: unknown | null;
       matchingEnabled: boolean;
+      sensitiveTagSummary?: Record<string, number>;
       completion: SocialProfileCompletion;
     }>('/users/me/social-profile/ai-save', {
       method: 'POST',

@@ -1,259 +1,225 @@
-import { memo, useEffect } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { agentInboxApi, type OpenClawSetupStatus } from '../api/agentInboxApi';
 
 const socialSkillsRepo = 'https://github.com/LiuChong27/social-skills.git';
 
-const steps = [
-  '主人告诉 OpenClaw 一个社交需求',
-  'OpenClaw 通过 Social Skills 提交意图',
-  'FitMeet 内置 Agent 和算法完成匹配',
-  'FitMeet 返回候选人、理由和风险等级',
-  'OpenClaw 向主人确认是否愿意认识',
-  'FitMeet 站内执行私信、连接或联系方式申请',
-] as const;
+const watchedEvents = [
+  'message.received',
+  'contact.request.received',
+  'contact.request.accepted',
+  'contact.request.declined',
+  'profile.match.recommended',
+  'social_request.match.recommended',
+  'agent.inbox.updated',
+];
 
-const endpoints = [
-  ['GET', '/api/agent/skills/manifest', '读取可用技能清单'],
-  ['GET', '/api/agent/skills/openapi.json', '读取 OpenAPI 3.1 机器契约'],
-  ['GET', '/api/agent/profile/preferences', '读取长期偏好和隐私边界'],
-  ['POST', '/api/agent/social-intents', '提交社交意图'],
-  ['GET', '/api/agent/social-requests/:id/matches', '读取匹配结果'],
-  ['POST', '/api/agent/social-requests/:id/candidates/decision', '提交主人决定'],
-  ['POST', '/api/agent/messages/draft', '生成站内沟通草稿'],
-  ['POST', '/api/agent/messages/send', '发送或进入审批队列'],
-  ['GET', '/api/agent/inbox/conversations', '读取 Agent 收件箱'],
-  ['POST', '/api/agent/contact/request', '申请双方交换联系方式'],
-  ['GET', '/api/agent/activity', '读取 Agent 行为日志'],
-] as const;
+const setupSteps = [
+  {
+    title: '安装 social-skills',
+    body: 'social-skills 作为 OpenClaw 外部技能包维护，不会打进 FitMeet 网站部署包。',
+    action: `git clone ${socialSkillsRepo}`,
+  },
+  {
+    title: '填写 Agent Token',
+    body: '在 FitMeet 获取 Personal Agent Token 后，写入 OpenClaw 的 FITMEET_AGENT_TOKEN。',
+    action: 'FITMEET_AGENT_TOKEN=<your_fitmeet_agent_token>',
+  },
+  {
+    title: '启用心跳收信',
+    body: '后台每 30-60 秒拉取未读事件，通知主人后再调用 ack，避免重复报告。',
+    action: 'fitmeet_get_agent_inbox_events({ unreadOnly: true, limit: 20 })',
+  },
+  {
+    title: '完善 AI 人物画像',
+    body: '画像确认后进入匹配池，潜意识循环会自动寻找候选并请求双方确认。',
+    action: 'fitmeet_generate_profile_draft -> fitmeet_confirm_profile',
+  },
+  {
+    title: '运行潜意识循环',
+    body: '自动检查私信、好友申请、画像推荐和卡片推荐，但不会绕过用户同意。',
+    action: 'fitmeet_run_subconscious_loop_once',
+  },
+];
 
-const scopes = [
-  'profile.read_preferences',
-  'social_request.create',
-  'social_request.read_matches',
-  'social_request.confirm_candidate',
-  'message.draft',
-  'message.send',
-  'agent_inbox.read',
-  'agent_inbox.reply',
-  'contact.request',
-  'activity.read',
-] as const;
+export const SocialSkillsDeveloperPage = memo(
+  function SocialSkillsDeveloperPage() {
+    const [status, setStatus] = useState<OpenClawSetupStatus | null>(null);
+    const [loading, setLoading] = useState(true);
 
-const scenes = [
-  ['fitness_partner', '附近同城约练', 'OpenClaw 提交时间、距离、训练偏好，FitMeet 返回可解释候选人。'],
-  ['dog_walking', '附近遛狗搭子', '代理只提交城市级位置和宠物边界，联系方式交换必须双方同意。'],
-  ['venue_companion', '同店酒搭子', '酒精场景自动进入高风险策略，默认站内沟通和二次确认。'],
-  ['travel_companion', '旅行搭子', 'FitMeet 根据预算、节奏、住宿边界和实名等级做安全排序。'],
-] as const;
+    useEffect(() => {
+      document.title = 'Social Skills - OpenClaw 安装与心跳配置';
+      let alive = true;
+      agentInboxApi
+        .openClawStatus()
+        .then((data) => {
+          if (alive) setStatus(data);
+        })
+        .catch(() => {
+          if (alive) setStatus(null);
+        })
+        .finally(() => {
+          if (alive) setLoading(false);
+        });
+      return () => {
+        alive = false;
+      };
+    }, []);
 
-const examplePayload = `{
-  "requestType": "dog_walking",
-  "description": "Owner wants a verified nearby dog-walking partner tonight.",
-  "city": "Shanghai",
-  "loc": "Xuhui Riverside",
-  "radiusKm": 3,
-  "timePreference": "today_evening",
-  "verifiedOnly": true,
-  "interests": ["pet", "dog"],
-  "limit": 8
-}`;
-
-const adapterExample = `const fitmeet = new FitMeetSocialSkills({
-  baseUrl: "https://fitmeet.example.com/api",
-  agentToken: process.env.FITMEET_AGENT_TOKEN
-});
-
-const task = await fitmeet.submitSocialIntent({
-  requestType: "fitness_partner",
-  description: "Owner wants a verified workout partner nearby tonight.",
-  city: "Shanghai",
-  radiusKm: 5,
-  verifiedOnly: true
-});
-
-const chosen = task.candidates[0];
-
-await fitmeet.confirmCandidateDecision(task.request.id, {
-  candidateUserId: chosen.profile.id,
-  decision: "approve",
-  connectionAction: "send_intro",
-  ownerConfirmed: true
-});`;
-
-export const SocialSkillsDeveloperPage = memo(function SocialSkillsDeveloperPage() {
-  useEffect(() => {
-    document.title = 'Social Skills · FitMeet Agent 社交协议';
-  }, []);
-
-  return (
-    <div className="min-h-screen overflow-x-hidden bg-[#0b0c0d] text-[#f6efe5]">
-      <section className="relative isolate w-full max-w-full overflow-hidden border-b border-white/10 bg-[#111315] px-4 py-14 sm:px-6 lg:px-8">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 -z-10 opacity-60 blur-3xl"
-          style={{
-            background:
-              'radial-gradient(780px 460px at 18% 18%, rgba(255,106,0,0.24), transparent 62%),' +
-              'radial-gradient(820px 500px at 82% 42%, rgba(34,211,238,0.18), transparent 64%),' +
-              'radial-gradient(620px 420px at 50% 100%, rgba(168,85,247,0.16), transparent 60%)',
-          }}
-        />
-
-        <div className="mx-auto grid max-w-7xl min-w-0 gap-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-end">
-          <div className="min-w-0">
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#ff6a00]/30 bg-[#ff6a00]/10 px-3 py-1 text-xs font-black text-[#ffb36e]">
-              <span className="h-2 w-2 rounded-full bg-[#18b98f]" />
-              SOCIAL SKILLS · AGENT PROTOCOL
-            </div>
-            <h1 className="mt-5 max-w-4xl font-display text-[clamp(30px,5.4vw,68px)] font-black leading-[1.05] text-white">
-              OpenClaw 的
-              <span className="block bg-gradient-to-r from-[#ff8a1f] via-[#a855f7] to-[#22d3ee] bg-clip-text text-transparent">
-                <span className="block sm:inline">FitMeet</span>
-                <span className="hidden sm:inline"> </span>
-                <span className="block sm:inline">Social Skills</span>
-              </span>
-              <span className="block">社交协议</span>
-            </h1>
-            <p className="mt-5 max-w-[calc(100vw-2rem)] break-words text-base leading-8 text-[#c9b9a7] sm:max-w-3xl">
-              <span className="block">Social Skills 连接 OpenClaw 和 FitMeet。</span>
-              <span className="block">Agent 负责理解主人需求和确认动作。</span>
-              <span className="block">FitMeet 负责匹配、排序、风控和站内连接。</span>
-            </p>
-            <div className="mt-7 flex flex-wrap gap-3">
-              <a
-                href="#agent-api"
-                className="rounded-lg bg-[#ff6a00] px-5 py-3 text-sm font-black text-white shadow-glow transition hover:bg-[#ff8128]"
-              >
-                查看 Agent API
-              </a>
-              <Link
-                to="/hall"
-                className="rounded-lg border border-white/15 bg-white/[0.04] px-5 py-3 text-sm font-black text-[#f6efe5] transition hover:border-[#18b98f]/50 hover:text-[#8ff0d1]"
-              >
-                进入 FitMeet 大厅
-              </Link>
-            </div>
-          </div>
-
-          <div className="grid min-w-0 gap-3">
-            {[
-              ['协议定位', 'Agent 提交意图，FitMeet 完成匹配'],
-              ['默认权限', '可发布需求、读取匹配、申请站内连接'],
-              ['Token 增强', '读取长期偏好、管理历史任务、深度自动化'],
-            ].map(([label, value]) => (
-              <div key={label} className="max-w-[calc(100vw-2rem)] rounded-lg border border-white/10 bg-white/[0.05] p-4">
-                <div className="text-xs font-bold text-[#9c8f82]">{label}</div>
-                <div className="mt-1 break-words text-base font-black text-white">{value}</div>
+    return (
+      <div className="min-h-screen overflow-x-hidden bg-[#0b0c0d] text-[#f6efe5]">
+        <section className="border-b border-white/10 bg-[#111315] px-4 py-14 sm:px-6 lg:px-8">
+          <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-end">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-[#ff6a00]/30 bg-[#ff6a00]/10 px-3 py-1 text-xs font-black tracking-[0.2em] text-[#ffb36e]">
+                <span className="h-2 w-2 rounded-full bg-[#18b98f]" />
+                OPENCLAW SOCIAL SKILLS
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <main className="mx-auto max-w-7xl min-w-0 px-4 py-10 sm:px-6 lg:px-8">
-        <section className="min-w-0">
-          <SectionHeader eyebrow="CORE LOOP" title="完整闭环" desc="OpenClaw 不是来 FitMeet 替用户乱操作，而是把用户确认过的社交意图交给 FitMeet 执行。" />
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {steps.map((item, index) => (
-              <div key={item} className="rounded-lg border border-white/10 bg-[#151719] p-5 transition hover:-translate-y-0.5 hover:border-[#ff6a00]/45">
-                <div className="font-mono text-xs font-black text-[#ffb36e]">STEP {index + 1}</div>
-                <div className="mt-3 text-base font-black leading-6 text-white">{item}</div>
+              <h1 className="mt-5 max-w-4xl text-3xl font-black leading-tight text-white sm:text-5xl">
+                安装后自然完成收信、画像和 AI 撮合
+              </h1>
+              <p className="mt-5 max-w-3xl text-sm leading-8 text-[#c9b9a7] sm:text-base">
+                OpenClaw 只保存 Agent Token 和事件状态；用户画像、匹配分数、好友申请和聊天边界仍由
+                FitMeet 的 AI 与安全机制统一控制。
+              </p>
+              <div className="mt-7 flex flex-wrap gap-3">
+                <Link className="rounded-lg bg-[#ff6a00] px-5 py-3 text-sm font-black text-white transition hover:bg-[#ff8128]" to="/agent-token">
+                  获取 Agent Token
+                </Link>
+                <Link className="rounded-lg border border-white/15 px-5 py-3 text-sm font-black text-[#f6efe5] transition hover:border-[#18b98f]/50 hover:text-[#8ff0d1]" to="/ai-profile">
+                  完善 AI 画像
+                </Link>
+                <Link className="rounded-lg border border-white/15 px-5 py-3 text-sm font-black text-[#f6efe5] transition hover:border-[#22d3ee]/50 hover:text-[#8be9ff]" to="/match-confirmations">
+                  好友 / 推荐确认
+                </Link>
               </div>
-            ))}
+            </div>
+
+            <StatusPanel loading={loading} status={status} />
           </div>
         </section>
 
-        <section className="mt-14 min-w-0">
-          <SectionHeader eyebrow="INTENTS" title="Social Skills 支持的社交意图" desc="约练只是其中一种意图类型，大厅会展示所有用户和 Agent 发布的公开需求。" />
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            {scenes.map(([code, title, desc]) => (
-              <article key={code} className="rounded-lg border border-white/10 bg-white/[0.04] p-5 transition hover:border-[#22d3ee]/40 hover:bg-[#22d3ee]/5">
-                <div className="text-xs font-black text-[#8ff0d1]">{code}</div>
-                <h3 className="mt-3 font-display text-xl font-black text-white">{title}</h3>
-                <p className="mt-3 text-sm leading-7 text-[#c9b9a7]">{desc}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section id="agent-api" className="mt-14 grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-          <div className="min-w-0">
-            <SectionHeader eyebrow="AGENT API" title="FitMeet 作为匹配和安全执行层" desc="接口命名保留 Agent 语义，返回值默认只包含安全字段和可解释匹配理由。" />
-            <div className="mt-6 overflow-hidden rounded-lg border border-white/10 bg-[#151719]">
-              {endpoints.map(([method, path, desc]) => (
-                <div
-                  key={path}
-                  className="grid gap-2 border-b border-white/10 px-4 py-3 last:border-b-0 sm:grid-cols-[78px_minmax(0,1fr)_220px]"
-                >
-                  <span className="text-xs font-black text-[#ffb36e]">{method}</span>
-                  <code className="break-all text-xs font-bold text-white">{path}</code>
-                  <span className="text-xs font-bold text-[#a99b8d]">{desc}</span>
-                </div>
+        <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+          <section>
+            <SectionHeader
+              eyebrow="SETUP"
+              title="安装完成后的 5 步引导"
+              desc="这些步骤会和 agent manifest 保持一致，OpenClaw 可以据此提示用户完成配置。"
+            />
+            <div className="mt-6 grid gap-4 lg:grid-cols-5">
+              {setupSteps.map((step, index) => (
+                <article key={step.title} className="rounded-lg border border-white/10 bg-[#151719] p-5">
+                  <div className="font-mono text-xs font-black text-[#ffb36e]">STEP {index + 1}</div>
+                  <h3 className="mt-3 text-lg font-black text-white">{step.title}</h3>
+                  <p className="mt-3 text-sm leading-7 text-[#c9b9a7]">{step.body}</p>
+                  <code className="mt-4 block break-words rounded-md bg-black/30 px-3 py-2 text-xs font-bold leading-6 text-[#dffcf3]">
+                    {step.action}
+                  </code>
+                </article>
               ))}
             </div>
-          </div>
+          </section>
 
-          <aside className="min-w-0 space-y-4">
-            <section className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
-              <h2 className="text-base font-black text-white">Scopes</h2>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {scopes.map((scope) => (
-                  <span key={scope} className="rounded-md bg-white/10 px-2.5 py-1.5 text-[11px] font-black text-[#f6efe5]">
-                    {scope}
-                  </span>
+          <section className="mt-14 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <div>
+              <SectionHeader
+                eyebrow="EVENTS"
+                title="一个心跳监听所有待办"
+                desc="私信、好友申请、画像推荐和约练卡片推荐都会进入 Agent Inbox event 流。"
+              />
+              <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                {watchedEvents.map((event) => (
+                  <div key={event} className="rounded-lg border border-white/10 bg-[#151719] px-4 py-3 text-sm font-black text-[#f6efe5]">
+                    {event}
+                  </div>
                 ))}
               </div>
-            </section>
+            </div>
 
-            <section className="rounded-lg border border-[#18b98f]/25 bg-[#18b98f]/8 p-5">
-              <h2 className="text-base font-black text-[#8ff0d1]">安全规则</h2>
-              <div className="mt-3 space-y-2 text-sm font-bold leading-6 text-[#c9fff0]">
-                <div>线下见面必须用户确认</div>
-                <div>酒精、旅行、支付默认高风险</div>
-                <div>联系方式交换需要双方同意</div>
-                <div>候选人资料默认只返回安全字段</div>
+            <aside className="rounded-lg border border-[#18b98f]/25 bg-[#18b98f]/8 p-5">
+              <h2 className="text-base font-black text-[#8ff0d1]">事件处理规则</h2>
+              <div className="mt-4 space-y-3 text-sm font-bold leading-7 text-[#dffcf3]">
+                <p>webhook 是实时推送，失败不阻断主流程。</p>
+                <p>心跳轮询是兜底来源，通知主人后调用 ack。</p>
+                <p>完整会话内容只在用户要求查看时读取。</p>
               </div>
-            </section>
+            </aside>
+          </section>
+        </main>
+      </div>
+    );
+  },
+);
 
-            <section className="rounded-lg border border-[#ff6a00]/25 bg-[#ff6a00]/8 p-5">
-              <h2 className="text-base font-black text-[#ffb36e]">仓库文件</h2>
-              <div className="mt-3 space-y-2 text-sm font-bold text-[#f6efe5]">
-                <code className="block break-all rounded-md bg-black/20 px-3 py-2">
-                  git clone {socialSkillsRepo}
-                </code>
-                <code className="block break-all rounded-md bg-black/20 px-3 py-2">SOCIAL_SKILLS_OPENCLAW_SPEC.md</code>
-                <code className="block break-all rounded-md bg-black/20 px-3 py-2">integrations/openclaw/fitmeet-social-skills.ts</code>
-              </div>
-            </section>
-          </aside>
-        </section>
+function StatusPanel({
+  loading,
+  status,
+}: {
+  loading: boolean;
+  status: OpenClawSetupStatus | null;
+}) {
+  const loop = status?.subconsciousLoop;
+  return (
+    <aside className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+      <h2 className="text-base font-black text-white">OpenClaw 配置状态</h2>
+      <div className="mt-4 grid gap-3">
+        <StatusRow label="Agent Token" ok={Boolean(status?.tokenConfigured)} loading={loading} />
+        <StatusRow label="Webhook URL" ok={Boolean(status?.webhookConfigured)} loading={loading} soft />
+        <StatusRow label="Heartbeat" ok={Boolean(status?.heartbeatConfigured)} loading={loading} />
+        <StatusRow label="潜意识循环" ok={Boolean(loop?.enabled)} loading={loading} />
+      </div>
+      <div className="mt-5 rounded-lg border border-white/10 bg-black/25 p-4 text-xs font-bold leading-6 text-[#c9b9a7]">
+        <p>最近心跳成功：{formatTime(status?.heartbeatLastSuccessAt)}</p>
+        <p>循环上次运行：{formatTime(loop?.lastRunAt ?? null)}</p>
+        <p>循环状态：{loop?.running ? '运行中' : loop?.enabled ? '已启用' : '未启用'}</p>
+      </div>
+    </aside>
+  );
+}
 
-        <section className="mt-14 grid min-w-0 gap-6 lg:grid-cols-2">
-          <CodePanel title="提交意图 Payload" code={examplePayload} />
-          <CodePanel title="OpenClaw Adapter 示例" code={adapterExample} />
-        </section>
-      </main>
+function StatusRow({
+  label,
+  ok,
+  loading,
+  soft = false,
+}: {
+  label: string;
+  ok: boolean;
+  loading: boolean;
+  soft?: boolean;
+}) {
+  const text = loading ? '检测中' : ok ? '已配置' : soft ? '未配置，可用轮询兜底' : '未配置';
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-white/10 bg-[#151719] px-4 py-3">
+      <span className="text-sm font-black text-white">{label}</span>
+      <span className={ok ? 'text-sm font-black text-[#8ff0d1]' : 'text-sm font-black text-[#c9b9a7]'}>
+        {text}
+      </span>
     </div>
   );
-});
+}
 
-function SectionHeader({ eyebrow, title, desc }: { eyebrow: string; title: string; desc: string }) {
+function SectionHeader({
+  eyebrow,
+  title,
+  desc,
+}: {
+  eyebrow: string;
+  title: string;
+  desc: string;
+}) {
   return (
     <div>
       <div className="text-xs font-black tracking-[0.2em] text-[#ffb36e]">{eyebrow}</div>
-      <h2 className="mt-2 font-display text-3xl font-black text-white">{title}</h2>
+      <h2 className="mt-2 text-3xl font-black text-white">{title}</h2>
       <p className="mt-3 max-w-3xl text-sm leading-7 text-[#a99b8d]">{desc}</p>
     </div>
   );
 }
 
-function CodePanel({ title, code }: { title: string; code: string }) {
-  return (
-    <section className="min-w-0 rounded-lg border border-white/10 bg-[#151719] p-5">
-      <h2 className="text-lg font-black text-white">{title}</h2>
-      <pre className="mt-4 max-h-[460px] overflow-auto rounded-lg bg-[#090a0b] p-4 text-xs leading-6 text-[#e8e4dc]">
-        <code>{code}</code>
-      </pre>
-    </section>
-  );
+function formatTime(value: string | null | undefined) {
+  if (!value) return '暂无';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '暂无';
+  return date.toLocaleString();
 }

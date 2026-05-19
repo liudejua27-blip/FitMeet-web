@@ -26,8 +26,9 @@ export class RegisterAgentDto {
   @IsUrl()
   agentWebhookUrl?: string;
 
+  @IsOptional()
   @IsEnum(AgentPermissionLevel)
-  permissionLevel: AgentPermissionLevel;
+  permissionLevel?: AgentPermissionLevel;
 
   @IsOptional()
   @IsInt()

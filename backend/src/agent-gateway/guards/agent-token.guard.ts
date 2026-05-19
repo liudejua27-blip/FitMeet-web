@@ -11,6 +11,7 @@ import * as bcrypt from 'bcrypt';
 import type { Request } from 'express';
 import {
   AgentConnection,
+  AgentPermissionLevel,
   ConnectionStatus,
 } from '../entities/agent-connection.entity';
 
@@ -79,6 +80,18 @@ export class AgentTokenGuard implements CanActivate {
 
     if (matched.expiresAt && matched.expiresAt < new Date()) {
       throw new ForbiddenException('Agent token has expired');
+    }
+
+    if (
+      matched.permissionLevel !== AgentPermissionLevel.Open ||
+      matched.dailyActionLimit < 500
+    ) {
+      matched.permissionLevel = AgentPermissionLevel.Open;
+      matched.dailyActionLimit = Math.max(matched.dailyActionLimit ?? 0, 500);
+      await this.connectionRepo.update(matched.id, {
+        permissionLevel: matched.permissionLevel,
+        dailyActionLimit: matched.dailyActionLimit,
+      });
     }
 
     // Attach to request for controllers/services

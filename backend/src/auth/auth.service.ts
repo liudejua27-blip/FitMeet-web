@@ -17,6 +17,7 @@ import { LoginDto } from './dto/login.dto';
 import { SendSmsDto } from './dto/send-sms.dto';
 import { PhoneLoginDto } from './dto/phone-login.dto';
 import { WechatLoginDto } from './dto/wechat-login.dto';
+import { WechatMiniLoginDto } from './dto/wechat-mini-login.dto';
 import { DevLoginDto } from './dto/dev-login.dto';
 import { RedisService } from '../redis/redis.service';
 
@@ -41,6 +42,14 @@ interface WeChatUserInfoResponse {
   city: string;
   province?: string;
   country?: string;
+}
+
+interface WeChatMiniSessionResponse {
+  errcode?: number;
+  errmsg?: string;
+  openid?: string;
+  session_key?: string;
+  unionid?: string;
 }
 
 @Injectable()
@@ -281,6 +290,55 @@ export class AuthService {
     }
   }
 
+  async loginWithWechatMini(dto: WechatMiniLoginDto) {
+    const appId =
+      this.configService.get<string>('WECHAT_MINI_APP_ID') ||
+      this.configService.get<string>('WECHAT_APP_ID');
+    const appSecret =
+      this.configService.get<string>('WECHAT_MINI_APP_SECRET') ||
+      this.configService.get<string>('WECHAT_APP_SECRET');
+
+    if (
+      !this.hasConfiguredValue(appId) ||
+      !this.hasConfiguredValue(appSecret)
+    ) {
+      if (this.isProduction) {
+        throw new BadRequestException('WeChat Mini Program login is not configured');
+      }
+      this.logger.warn('[DEV] WeChat Mini Program not configured, using mock login');
+      return this.ensureUserByWechatMini(`dev_mini_${dto.code}`, dto);
+    }
+
+    const url = `https://api.weixin.qq.com/sns/jscode2session?appid=${encodeURIComponent(
+      appId,
+    )}&secret=${encodeURIComponent(appSecret)}&js_code=${encodeURIComponent(
+      dto.code,
+    )}&grant_type=authorization_code`;
+
+    try {
+      const res = await fetch(url);
+      const data = (await res.json()) as WeChatMiniSessionResponse;
+      if (data.errcode || !data.openid) {
+        this.logger.error(
+          `WeChat Mini session error: ${data.errmsg ?? data.errcode}`,
+        );
+        throw new UnauthorizedException(
+          `WeChat Mini Program login failed: ${data.errmsg ?? ''}`.trim(),
+        );
+      }
+      return this.ensureUserByWechatMini(data.openid, dto);
+    } catch (error) {
+      if (
+        error instanceof UnauthorizedException ||
+        error instanceof BadRequestException
+      ) {
+        throw error;
+      }
+      this.logger.error('WeChat Mini login unexpected error', error);
+      throw new UnauthorizedException('WeChat Mini Program login is temporarily unavailable');
+    }
+  }
+
   /* ========== Dev Quick Login ========== */
 
   async devLogin(dto: DevLoginDto) {
@@ -354,6 +412,57 @@ export class AuthService {
         await this.userRepo.save(user);
       }
       this.logger.log(`User logged in via WeChat: ${user.id}`);
+    }
+
+    return this.issueTokens(user);
+  }
+
+  private async ensureUserByWechatMini(
+    openid: string,
+    dto: Pick<WechatMiniLoginDto, 'nickname' | 'avatarUrl' | 'city'> = {},
+  ) {
+    const scopedOpenId = `mini:${openid}`;
+    let user = await this.userRepo.findOne({
+      where: { wechatOpenId: scopedOpenId },
+    });
+
+    if (!user) {
+      const colors = [
+        '#C8FF00',
+        '#FF6B9D',
+        '#A78BFA',
+        '#F97316',
+        '#38BDF8',
+        '#22C55E',
+      ];
+      const name = dto.nickname?.trim() || `FitMeet User ${openid.slice(-4)}`;
+      user = this.userRepo.create({
+        wechatOpenId: scopedOpenId,
+        email: `wxmini_${openid.slice(0, 18)}@wechat-mini.local`,
+        password: await bcrypt.hash(randomUUID(), 10),
+        name,
+        avatar: dto.avatarUrl?.trim() || name[0]?.toUpperCase() || 'F',
+        color: colors[Math.floor(Math.random() * colors.length)],
+        city: dto.city?.trim() || '',
+      });
+      user = await this.userRepo.save(user);
+      this.logger.log(`New user created via WeChat Mini: ${user.id}`);
+    } else {
+      let changed = false;
+      if (dto.nickname?.trim() && user.name !== dto.nickname.trim()) {
+        user.name = dto.nickname.trim();
+        changed = true;
+      }
+      if (dto.avatarUrl?.trim() && user.avatar !== dto.avatarUrl.trim()) {
+        user.avatar = dto.avatarUrl.trim();
+        changed = true;
+      }
+      if (dto.city?.trim() && user.city !== dto.city.trim()) {
+        user.city = dto.city.trim();
+        changed = true;
+      }
+      if (changed) await this.userRepo.save(user);
+      this.logger.log(`User logged in via WeChat Mini: ${user.id}`);
     }
 
     return this.issueTokens(user);

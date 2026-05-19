@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AiProfileController } from './ai-profile.controller';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { SocialProfileService } from './social-profile.service';
@@ -25,7 +26,7 @@ import { AiDelegateProfile } from '../ai-match/ai-delegate-profile.entity';
       AiDelegateProfile,
     ]),
   ],
-  controllers: [UsersController],
+  controllers: [UsersController, AiProfileController],
   providers: [UsersService, SocialProfileService],
   exports: [UsersService, SocialProfileService, TypeOrmModule],
 })

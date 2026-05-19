@@ -14,7 +14,10 @@ import {
   AgentAction,
 } from '../entities/agent-permission.entity';
 import { AGENT_CONNECTION_KEY } from './agent-token.guard';
-import { AgentConnection } from '../entities/agent-connection.entity';
+import {
+  AgentConnection,
+  AgentPermissionLevel,
+} from '../entities/agent-connection.entity';
 import {
   AgentActivityLog,
   LoggedAction,
@@ -139,6 +142,18 @@ export class AgentPermissionGuard implements CanActivate {
         reason: 'daily_action_limit_reached',
       });
       throw new ForbiddenException('Daily agent action limit reached');
+    }
+
+    if (conn.permissionLevel === AgentPermissionLevel.Open) {
+      conn.dailyActionsUsed += 1;
+      conn.lastActiveAt = now;
+      await this.connectionRepo.update(conn.id, {
+        dailyActionsUsed: conn.dailyActionsUsed,
+        dailyResetAt: conn.dailyResetAt,
+        lastActiveAt: conn.lastActiveAt,
+      });
+      req[AGENT_CONNECTION_KEY] = conn;
+      return true;
     }
 
     const permission = await this.permissionRepo.findOne({

@@ -12,6 +12,7 @@ import {
   PublicSocialSkillsController,
 } from './agent-gateway.controller';
 import { AgentSkillsController } from './agent-skills.controller';
+import { MiniProgramController } from './mini-program.controller';
 import { AgentTokenGuard } from './guards/agent-token.guard';
 import { AgentPermissionGuard } from './guards/agent-permission.guard';
 import { AgentOwnerOrTokenGuard } from './guards/agent-owner-or-token.guard';
@@ -22,12 +23,24 @@ import { UserPreference } from './entities/user-preference.entity';
 import { MatchCandidate } from './entities/match-candidate.entity';
 import { AgentActivityLog } from './entities/agent-activity-log.entity';
 import { AgentActionLog } from './entities/agent-action-log.entity';
+import {
+  AgentRuntimeGoal,
+  AgentRuntimeLog,
+  AgentRuntimePlan,
+  AgentRuntimeResult,
+  AgentRuntimeStep,
+  AgentRuntimeTask,
+  AgentRuntimeToolCall,
+} from './entities/agent-runtime.entity';
+import { AgentTask, AgentTaskEvent } from './entities/agent-task.entity';
 import { AgentActionLogService } from './agent-action-log.service';
 import { AgentWebhookService } from './agent-webhook.service';
 import { AiSocialAutopilotService } from './ai-social-autopilot.service';
 import { AgentDiscoveryService } from './agent-discovery.service';
 import { AgentProfileQAService } from './agent-profile-qa.service';
 import { ProfileMatchService } from './profile-match.service';
+import { ProfileMatchAutopilotService } from './profile-match-autopilot.service';
+import { MatchReasonerService } from './match-reasoner.service';
 import { MatchModule } from '../match/match.module';
 import { AgentApprovalRequest } from './entities/agent-approval-request.entity';
 import { AgentSettings } from './entities/agent-settings.entity';
@@ -44,6 +57,7 @@ import { MessagesModule } from '../messages/messages.module';
 import { MeetsModule } from '../meets/meets.module';
 import { SafetyModule } from '../safety/safety.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { FriendsModule } from '../friends/friends.module';
 import { SocialRequestsModule } from '../social-requests/social-requests.module';
 import { UserSocialRequest } from '../social-requests/social-request.entity';
 import { SocialRequestCandidate } from '../match/social-request-candidate.entity';
@@ -58,6 +72,7 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
     MeetsModule,
     SafetyModule,
     NotificationsModule,
+    FriendsModule,
     UsersModule,
     forwardRef(() => ActivitiesModule),
     forwardRef(() => SocialRequestsModule),
@@ -70,6 +85,15 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
       MatchCandidate,
       AgentActivityLog,
       AgentActionLog,
+      AgentRuntimeTask,
+      AgentRuntimeGoal,
+      AgentRuntimePlan,
+      AgentRuntimeStep,
+      AgentRuntimeToolCall,
+      AgentRuntimeResult,
+      AgentRuntimeLog,
+      AgentTask,
+      AgentTaskEvent,
       AgentApprovalRequest,
       AgentSettings,
       SafetyEvent,
@@ -97,6 +121,8 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
     AgentDiscoveryService,
     AgentProfileQAService,
     ProfileMatchService,
+    ProfileMatchAutopilotService,
+    MatchReasonerService,
     AgentTokenGuard,
     AgentPermissionGuard,
     AgentOwnerOrTokenGuard,
@@ -106,6 +132,7 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
     AgentApiController,
     AgentProfileQAController,
     AgentSkillsController,
+    MiniProgramController,
     AgentControlController,
     PublicSocialIntentController,
     PublicSocialSkillsController,
@@ -120,6 +147,7 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
     AgentWebhookService,
     AiSocialAutopilotService,
     ProfileMatchService,
+    ProfileMatchAutopilotService,
     AgentTokenGuard,
     AgentPermissionGuard,
     AgentOwnerOrTokenGuard,

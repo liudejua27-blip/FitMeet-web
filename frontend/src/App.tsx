@@ -40,6 +40,11 @@ const AgentControlCenterPage = lazy(() =>
 const AgentInboxPage = lazy(() =>
   import('./pages/AgentInboxPage').then((m) => ({ default: m.AgentInboxPage })),
 );
+const MatchConfirmationsPage = lazy(() =>
+  import('./pages/MatchConfirmationsPage').then((m) => ({
+    default: m.MatchConfirmationsPage,
+  })),
+);
 const AgentConnectPage = lazy(() =>
   import('./pages/AgentConnectPage').then((m) => ({ default: m.AgentConnectPage })),
 );
@@ -210,6 +215,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <AgentInboxPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/match-confirmations"
+                element={
+                  <ProtectedRoute>
+                    <MatchConfirmationsPage />
                   </ProtectedRoute>
                 }
               />

@@ -129,6 +129,10 @@ export class UserSocialProfile {
   @Column({ default: false })
   agentCanStartChatAfterApproval: boolean;
 
+  /** 是否隐藏敏感标签，只在私密匹配逻辑中保留 */
+  @Column({ default: true })
+  hideSensitiveTags: boolean;
+
   /** AI 生成的人物卡摘要 */
   @Column({ type: 'text', default: '' })
   aiSummary: string;
@@ -140,6 +144,20 @@ export class UserSocialProfile {
   /** Structured matching signals. Sensitive tags are private-only. */
   @Column({ type: 'jsonb', default: {} })
   matchSignals: Record<string, unknown>;
+
+  /**
+   * Per-user decisions on sensitive private tags (wealth / income / looks /
+   * status / relationship / contact / precise location / identity-bearing
+   * info). Shape:
+   *   { [tag]: { status, category, decidedAt } }
+   *   status in { 'pending', 'confirmed', 'rejected', 'hidden' }
+   * Only tags whose status is 'confirmed' may participate in matching.
+   */
+  @Column({ type: 'jsonb', default: {} })
+  sensitiveTagDecisions: Record<
+    string,
+    { status: string; category?: string; decidedAt?: string }
+  >;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

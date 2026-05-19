@@ -5,6 +5,7 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
 import { UserSocialRequest } from '../social-requests/social-request.entity';
 import { UserPreference } from '../agent-gateway/entities/user-preference.entity';
 import { SocialRequestCandidate } from './social-request-candidate.entity';
+import { CompatibilityScorerService } from './compatibility-scorer.service';
 import { MatchService } from './match.service';
 import { MatchController } from './match.controller';
 import { AgentMatchController } from './agent-match.controller';
@@ -34,7 +35,12 @@ import { SafetyEvent } from '../agent-gateway/entities/safety-event.entity';
     forwardRef(() => AgentGatewayModule),
   ],
   controllers: [MatchController, AgentMatchController],
-  providers: [MatchService, AgentTokenGuard, AgentPermissionGuard],
-  exports: [MatchService, TypeOrmModule],
+  providers: [
+    MatchService,
+    CompatibilityScorerService,
+    AgentTokenGuard,
+    AgentPermissionGuard,
+  ],
+  exports: [MatchService, CompatibilityScorerService, TypeOrmModule],
 })
 export class MatchModule {}

@@ -18,6 +18,218 @@ type AiProfileAnswer = {
   value?: unknown;
 };
 
+type SensitiveTagSaveStatus = 'confirmed' | 'rejected' | 'hidden';
+
+type SaveAiDraftInput = {
+  profile?: AiProfileBuilderCard;
+  enableMatching?: boolean;
+  sensitiveTagsConfirmed?: boolean;
+  sensitiveTagDecisions?: Record<string, SensitiveTagSaveStatus>;
+};
+
+type ProfileInterviewQuestion = {
+  key: string;
+  question: string;
+  type?: string;
+  domain:
+    | 'basic'
+    | 'personality'
+    | 'location'
+    | 'fitness'
+    | 'lifestyle'
+    | 'intent'
+    | 'availability'
+    | 'boundary'
+    | 'privacy';
+  privacyTier: 'public' | 'private_match' | 'sensitive_review';
+  matchRole: 'profile_field' | 'match_preference' | 'safety_boundary';
+};
+
+export type SensitiveTagTier =
+  | 'public'
+  | 'private_match'
+  | 'sensitive_private'
+  | 'unavailable';
+
+/**
+ * Sensitive-tag categories. Order matters: first match wins.
+ *
+ *   wealth         — net worth / asset / wealth class
+ *   income         — salary / monthly income / yearly compensation
+ *   looks          — face / body shape / attractiveness
+ *   status         — celebrity / executive / VIP-style identity
+ *   relationship   — marital / dating / partner status
+ *   contact        — phone / WeChat / email / IM handles
+ *   location       — precise residential or workplace addresses
+ *   identity       — school / employer / ID / passport / license info
+ */
+const SENSITIVE_TAG_CATEGORIES: ReadonlyArray<readonly [string, RegExp]> = [
+  [
+    'wealth',
+    /(rich|wealth|millionaire|net.?worth|asset|wealth_resource|有钱|富|资源|年少多金|高消费|资产|身家|豪)/i,
+  ],
+  ['income', /(income|salary|annual|monthly.?pay|高薪|收入|年薪|月薪|薪资)/i],
+  ['looks', /(handsome|beautiful|good.?looking|attractive|颜值|帅|美|靓|肌肉)/i],
+  ['status', /(ceo|founder|executive|elite|vip|celebrity|身份|地位|名流|大佬)/i],
+  [
+    'relationship',
+    /(married|single|divorced|dating|partnered|girlfriend|boyfriend|已婚|未婚|离异|恋爱|有对象)/i,
+  ],
+  ['contact', /(phone|wechat|whatsapp|telegram|qq|email|手机|微信|联系方式)/i],
+  ['location', /(home.?address|residence|apartment|公寓|住址|精确位置|家庭住址)/i],
+  [
+    'identity',
+    /(school|university|employer|工作单位|学校|就读|身份证|护照|证件|车牌|学号|工号)/i,
+  ],
+];
+
+/**
+ * Hard-block patterns: never expose and never use for matching, regardless
+ * of owner confirmation. These look like raw identifiers (phone numbers,
+ * IDs, street addresses) rather than tag labels.
+ */
+const HARD_BLOCK_TAG_PATTERNS: ReadonlyArray<RegExp> = [
+  /\b1\d{10}\b/, // CN mobile
+  /\b\d{15,18}\b/, // CN national ID
+  /[A-Z]{2}\d{6,}/, // passport-ish
+  /\d{1,4}\s*(号|室|栋|单元|弄|楼)/, // street/apt level location
+];
+
+/** Private-but-matchable preference tags (lifestyle/avoid/boundary). */
+const PRIVATE_MATCH_TAG_PATTERN =
+  /(want.?to.?meet|preferred|avoid|boundary|relationship.?goal|想认识|拒绝|偏好|底线)/i;
+
+const PROFILE_INTERVIEW_BANK: ProfileInterviewQuestion[] = [
+  {
+    key: 'nickname',
+    question: '你希望人物画像里展示什么昵称？',
+    type: 'text',
+    domain: 'basic',
+    privacyTier: 'public',
+    matchRole: 'profile_field',
+  },
+  {
+    key: 'city',
+    question: '你常驻或优先匹配的城市是哪里？',
+    type: 'text',
+    domain: 'location',
+    privacyTier: 'public',
+    matchRole: 'profile_field',
+  },
+  {
+    key: 'nearbyArea',
+    question: '你通常在哪个区、商圈或健身房附近活动？可以只写模糊区域。',
+    type: 'text',
+    domain: 'location',
+    privacyTier: 'private_match',
+    matchRole: 'match_preference',
+  },
+  {
+    key: 'mbti',
+    question: '你的 MBTI 或最接近的性格关键词是什么？不确定可以写“不确定”。',
+    type: 'text',
+    domain: 'personality',
+    privacyTier: 'public',
+    matchRole: 'profile_field',
+  },
+  {
+    key: 'zodiac',
+    question: '你的星座是什么？不想参与匹配可以跳过。',
+    type: 'text',
+    domain: 'personality',
+    privacyTier: 'public',
+    matchRole: 'profile_field',
+  },
+  {
+    key: 'traits',
+    question: '你觉得自己最明显的性格标签有哪些？比如慢热、主动、真诚、自律。',
+    type: 'text',
+    domain: 'personality',
+    privacyTier: 'public',
+    matchRole: 'profile_field',
+  },
+  {
+    key: 'fitnessGoals',
+    question: '你最近的运动或健身目标是什么？',
+    type: 'text',
+    domain: 'fitness',
+    privacyTier: 'public',
+    matchRole: 'profile_field',
+  },
+  {
+    key: 'lifestyleTags',
+    question: '运动之外，你的生活方式或话题偏好是什么？比如创业、旅行、咖啡、高消费生活方式等。',
+    type: 'text',
+    domain: 'lifestyle',
+    privacyTier: 'sensitive_review',
+    matchRole: 'match_preference',
+  },
+  {
+    key: 'socialScenes',
+    question: '你更适合哪些社交场景？比如约练、咖啡、饭局、创业交流、周末活动。',
+    type: 'text',
+    domain: 'intent',
+    privacyTier: 'public',
+    matchRole: 'profile_field',
+  },
+  {
+    key: 'wantToMeet',
+    question: '你想认识什么样的人？可以写性格、城市、事业阶段、资源互补或生活方式偏好。',
+    type: 'text',
+    domain: 'intent',
+    privacyTier: 'private_match',
+    matchRole: 'match_preference',
+  },
+  {
+    key: 'preferredTraits',
+    question: '你更看重对方哪些特质？比如真诚、自律、外向、资源型、创业者、共同兴趣。',
+    type: 'text',
+    domain: 'intent',
+    privacyTier: 'private_match',
+    matchRole: 'match_preference',
+  },
+  {
+    key: 'avoidTraits',
+    question: '你不接受哪些行为或类型？这些会作为安全边界参与匹配。',
+    type: 'text',
+    domain: 'boundary',
+    privacyTier: 'private_match',
+    matchRole: 'safety_boundary',
+  },
+  {
+    key: 'relationshipGoals',
+    question: '这次匹配更偏交友、约练、人脉、创业交流还是长期陪伴？',
+    type: 'text',
+    domain: 'intent',
+    privacyTier: 'private_match',
+    matchRole: 'match_preference',
+  },
+  {
+    key: 'availableTimes',
+    question: '你通常什么时间方便社交或约练？',
+    type: 'text',
+    domain: 'availability',
+    privacyTier: 'private_match',
+    matchRole: 'match_preference',
+  },
+  {
+    key: 'socialPreference',
+    question: '你喜欢怎样的聊天节奏和相处方式？',
+    type: 'text',
+    domain: 'personality',
+    privacyTier: 'private_match',
+    matchRole: 'match_preference',
+  },
+  {
+    key: 'privacyBoundary',
+    question: '哪些信息永远不能公开或用于匹配？比如手机号、微信、详细住址、单位、收入数字。',
+    type: 'text',
+    domain: 'privacy',
+    privacyTier: 'sensitive_review',
+    matchRole: 'safety_boundary',
+  },
+];
+
 /**
  * 读 / upsert 当前登录用户的社交画像。最小可用版本：
  *   - 永远返回一份对象（未保存过则返回带默认空值的占位）
@@ -53,13 +265,57 @@ export class SocialProfileService {
       userId,
     } as UserSocialProfile;
     const saved = await this.repo.save(merged);
-    await this.syncAiDelegateProfile(userId, saved);
-    return saved;
+    const reseeded = await this.refreshSensitiveDecisions(saved);
+    await this.syncAiDelegateProfile(userId, reseeded);
+    return reseeded;
   }
 
   async generateQuestions(userId: number) {
     const profile = await this.get(userId);
+    const missing = PROFILE_INTERVIEW_BANK.filter(
+      ({ key }) => !this.hasValue(profile, key as keyof UserSocialProfile),
+    );
+    const completion = this.getCompletionFromProfile(profile);
+    const aiQuestions = await this.ai.generateProfileQuestions({
+      missingKeys: missing.map((item) => item.key),
+      contextSummary: this.buildInterviewContext(profile),
+    });
+    const bankByKey = new Map(missing.map((item) => [item.key, item]));
+    const selected: ProfileInterviewQuestion[] = aiQuestions
+      .flatMap((item) => {
+        const fromBank = bankByKey.get(item.key);
+        if (!fromBank) return [];
+        return [{
+          ...fromBank,
+          question: item.question || fromBank.question,
+          type: item.type || fromBank.type,
+        }];
+      });
+    const seen = new Set(selected.map((item) => item.key));
     const questions = [
+      ...selected,
+      ...missing.filter((item) => !seen.has(item.key)),
+    ].slice(0, 12);
+    const privacyBoundary = missing.find((item) => item.key === 'privacyBoundary');
+    if (
+      privacyBoundary &&
+      !questions.some((item) => item.key === 'privacyBoundary')
+    ) {
+      questions[questions.length >= 12 ? 11 : questions.length] = privacyBoundary;
+    }
+    return {
+      role: 'profile_interviewer',
+      questions,
+      completion,
+      guidance: {
+        public: 'public fields can be shown on profile cards',
+        private_match:
+          'private_match fields only affect matching and are not shown to other users',
+        sensitive_review:
+          'sensitive_review answers require owner confirmation before matching',
+      },
+    };
+    const legacyQuestions = [
       { key: 'nickname', question: '你希望人物画像里展示什么昵称？' },
       { key: 'gender', question: '你希望展示的性别是？' },
       { key: 'ageRange', question: '你希望展示的年龄段是？' },
@@ -83,10 +339,11 @@ export class SocialProfileService {
       { key: 'rejectRules', question: '有哪些情况 AI 必须替你拒绝？' },
       { key: 'privacyBoundary', question: '哪些隐私信息绝对不能自动透露？' },
     ].filter(({ key }) => !this.hasValue(profile, key as keyof UserSocialProfile));
-    return { questions: questions.slice(0, 12), completion: this.getCompletionFromProfile(profile) };
+    return { questions: legacyQuestions.slice(0, 12), completion: this.getCompletionFromProfile(profile) };
   }
 
   async saveAnswer(userId: number, key: string, answer: string) {
+    const normalizedKey = this.normalizeAnswerKey(key);
     const listFields = new Set([
       'fitnessGoals',
       'interestTags',
@@ -103,14 +360,15 @@ export class SocialProfileService {
       'profileDiscoverable',
       'agentCanRecommendMe',
       'agentCanStartChatAfterApproval',
+      'hideSensitiveTags',
     ]);
-    if (!this.isEditableKey(key)) return this.get(userId);
-    const value = listFields.has(key)
+    if (!this.isEditableKey(normalizedKey)) return this.get(userId);
+    const value = listFields.has(normalizedKey)
       ? this.cleanArr(this.splitAnswer(answer))
-      : booleanFields.has(key)
+      : booleanFields.has(normalizedKey)
         ? this.toBool(answer)
         : answer;
-    return this.upsert(userId, { [key]: value } as UpdateSocialProfileDto);
+    return this.upsert(userId, { [normalizedKey]: value } as UpdateSocialProfileDto);
   }
 
   async getCompletion(userId: number) {
@@ -140,22 +398,28 @@ export class SocialProfileService {
     };
   }
 
-  async saveAiDraft(
-    userId: number,
-    input: { profile?: AiProfileBuilderCard; enableMatching?: boolean },
-  ) {
+  async saveAiDraft(userId: number, input: SaveAiDraftInput) {
     const card = input.profile;
     const dto = this.profileCardToDto(card);
+    if (input.enableMatching === false) {
+      dto.profileDiscoverable = false;
+      dto.agentCanRecommendMe = false;
+      dto.agentCanStartChatAfterApproval = false;
+    }
     const saved = await this.upsert(userId, dto);
-    const shouldSync = input.enableMatching !== false;
-    const delegateProfile = shouldSync
-      ? await this.syncAiDelegateProfile(userId, saved)
-      : null;
+    const decided = await this.applySensitiveTagSaveDecisions(saved, {
+      confirmAll: input.sensitiveTagsConfirmed === true,
+      decisions: input.sensitiveTagDecisions,
+    });
+    const delegateProfile = await this.syncAiDelegateProfile(userId, decided);
     return {
-      profile: saved,
+      profile: decided,
       aiDelegateProfile: delegateProfile,
       matchingEnabled: Boolean(delegateProfile?.enabled),
-      completion: this.getCompletionFromProfile(saved),
+      sensitiveTagSummary: this.summarizeDecisions(
+        decided.sensitiveTagDecisions ?? {},
+      ),
+      completion: this.getCompletionFromProfile(decided),
     };
   }
 
@@ -192,9 +456,11 @@ export class SocialProfileService {
       profileDiscoverable: false,
       agentCanRecommendMe: false,
       agentCanStartChatAfterApproval: false,
+      hideSensitiveTags: true,
       aiSummary: '',
       aiProfileCard: {},
       matchSignals: {},
+      sensitiveTagDecisions: {},
     } as UserSocialProfile;
   }
 
@@ -248,6 +514,8 @@ export class SocialProfileService {
       out.agentCanStartChatAfterApproval = Boolean(
         dto.agentCanStartChatAfterApproval,
       );
+    if (dto.hideSensitiveTags !== undefined)
+      out.hideSensitiveTags = Boolean(dto.hideSensitiveTags);
     if (dto.aiSummary !== undefined) out.aiSummary = dto.aiSummary.trim();
     if (dto.aiProfileCard !== undefined) out.aiProfileCard = dto.aiProfileCard;
     if (dto.matchSignals !== undefined) out.matchSignals = dto.matchSignals;
@@ -268,6 +536,39 @@ export class SocialProfileService {
     return ['true', '1', 'yes', 'y', '是', '允许', '可以', '开启'].includes(
       (answer || '').trim().toLowerCase(),
     );
+  }
+
+  private normalizeAnswerKey(key: string): string {
+    const aliases: Record<string, string> = {
+      sports: 'fitnessGoals',
+      sport: 'fitnessGoals',
+      avoid: 'avoidTraits',
+      goals: 'relationshipGoals',
+      availability: 'availableTimes',
+      lifestyle: 'lifestyleTags',
+      interests: 'interestTags',
+    };
+    const normalized = (key ?? '').trim();
+    return aliases[normalized] ?? normalized;
+  }
+
+  private buildInterviewContext(profile: UserSocialProfile): string {
+    return JSON.stringify({
+      city: profile.city,
+      nearbyArea: profile.nearbyArea,
+      mbti: profile.mbti,
+      zodiac: profile.zodiac,
+      traits: profile.traits ?? [],
+      fitnessGoals: profile.fitnessGoals ?? [],
+      lifestyleTags: profile.lifestyleTags ?? [],
+      wantToMeet: profile.wantToMeet ?? [],
+      preferredTraits: profile.preferredTraits ?? [],
+      relationshipGoals: profile.relationshipGoals ?? [],
+      privacyBoundary: profile.privacyBoundary,
+      profileDiscoverable: profile.profileDiscoverable,
+      agentCanRecommendMe: profile.agentCanRecommendMe,
+      hideSensitiveTags: profile.hideSensitiveTags,
+    });
   }
 
   private isEditableKey(key: string): key is keyof UpdateSocialProfileDto {
@@ -300,6 +601,7 @@ export class SocialProfileService {
       'profileDiscoverable',
       'agentCanRecommendMe',
       'agentCanStartChatAfterApproval',
+      'hideSensitiveTags',
       'aiSummary',
       'aiProfileCard',
       'matchSignals',
@@ -414,6 +716,7 @@ export class SocialProfileService {
       agentCanStartChatAfterApproval: Boolean(
         card.visibility?.agentCanStartChatAfterApproval,
       ),
+      hideSensitiveTags: true,
       aiSummary: card.summary ?? '',
       aiProfileCard: card as unknown as Record<string, unknown>,
       matchSignals: this.normalizeMatchSignals(card.matchSignals),
@@ -505,16 +808,324 @@ export class SocialProfileService {
 
   private privateSignalTags(profile: UserSocialProfile): string[] {
     const signals = profile.matchSignals as Partial<AiProfileMatchSignals> | null;
+    const decisions = profile.sensitiveTagDecisions ?? {};
+    const confirmedSensitive = (
+      (signals?.sensitivePrivateTags as string[] | undefined) ?? []
+    ).filter((tag) => decisions[tag]?.status === 'confirmed');
     return this.cleanArr([
       ...((signals?.privatePreferenceTags as string[] | undefined) ?? []),
-      ...((signals?.sensitivePrivateTags as string[] | undefined) ?? []),
+      ...confirmedSensitive,
     ]);
   }
 
   private isSensitiveTag(tag: string): boolean {
-    return /rich|money|wealth|income|salary|handsome|beautiful|good-looking|resources|status|有钱|富|收入|高薪|颜值|帅|美|资源|身份/i.test(
-      tag,
+    return this.classifyTag(tag) === 'sensitive_private';
+  }
+
+  /**
+   * Tag tiering for FitMeet AI profile privacy.
+   *
+   * - 'sensitive_private': wealth/income/looks/identity/contact/precise
+   *   location/identity-bearing info — only used after explicit owner
+   *   confirmation; never returned to public or to non-owner agent reads.
+   * - 'unavailable': hard-blocked patterns (phone numbers, IDs, exact
+   *   street addresses) — never exposed and never used for matching.
+   * - 'private_match': preference signals retained for matching but not
+   *   shown publicly.
+   * - 'public': everything else (interests, MBTI, traits, scenes...).
+   */
+  classifyTag(tag: string): SensitiveTagTier {
+    const value = (tag ?? '').trim();
+    if (!value) return 'unavailable';
+    if (HARD_BLOCK_TAG_PATTERNS.some((re) => re.test(value))) {
+      return 'unavailable';
+    }
+    for (const [category, pattern] of SENSITIVE_TAG_CATEGORIES) {
+      if (pattern.test(value)) return 'sensitive_private';
+    }
+    if (PRIVATE_MATCH_TAG_PATTERN.test(value)) return 'private_match';
+    return 'public';
+  }
+
+  /** Returns the high-level category for a sensitive tag, or 'other'. */
+  classifySensitiveCategory(tag: string): string {
+    for (const [category, pattern] of SENSITIVE_TAG_CATEGORIES) {
+      if (pattern.test(tag)) return category;
+    }
+    return 'other';
+  }
+
+  /**
+   * Public view: anything safe to render to other users or unauthenticated
+   * Agent reads. Strips sensitive_private and unavailable tags, removes the
+   * `matchSignals.sensitivePrivateTags` field entirely, and zeroes-out
+   * free-text fields that often carry identity (privacyBoundary kept).
+   */
+  getPublicView(profile: UserSocialProfile): Record<string, unknown> {
+    const signals = (profile.matchSignals ??
+      {}) as Partial<AiProfileMatchSignals> & Record<string, unknown>;
+    const view: Record<string, unknown> = {
+      userId: profile.userId,
+      nickname: profile.nickname,
+      gender: profile.gender,
+      ageRange: profile.ageRange,
+      city: profile.city,
+      nearbyArea: profile.nearbyArea,
+      mbti: profile.mbti,
+      zodiac: profile.zodiac,
+      traits: this.filterPublic(profile.traits ?? []),
+      interestTags: this.filterPublic(profile.interestTags ?? []),
+      lifestyleTags: this.filterPublic(profile.lifestyleTags ?? []),
+      socialScenes: this.filterPublic(profile.socialScenes ?? []),
+      fitnessGoals: this.filterPublic(profile.fitnessGoals ?? []),
+      socialStyle: profile.socialStyle,
+      communicationStyle: profile.communicationStyle,
+      aiSummary: profile.aiSummary,
+      profileDiscoverable: profile.profileDiscoverable,
+      matchSignals: {
+        publicTags: this.filterPublic(
+          (signals.publicTags as string[] | undefined) ?? [],
+        ),
+        matchKeywords: this.filterPublic(
+          (signals.matchKeywords as string[] | undefined) ?? [],
+        ),
+        confidence:
+          typeof signals.confidence === 'number' ? signals.confidence : 0.5,
+        source: (signals.source as string | undefined) ?? 'fallback',
+      },
+    };
+    return view;
+  }
+
+  /**
+   * Agent public read: what an Agent Token holder may see about *another*
+   * user. Mirrors getPublicView but is deliberately a separate entry point
+   * so callers don't accidentally hand off the raw entity.
+   */
+  getAgentPublicView(profile: UserSocialProfile): Record<string, unknown> {
+    return this.getPublicView(profile);
+  }
+
+  /**
+   * Match view: tags actually fed into scoring. Sensitive tags are kept
+   * ONLY when the owner has confirmed them via the privacy console.
+   * 'unavailable' tags are always dropped.
+   */
+  getMatchView(profile: UserSocialProfile): {
+    publicTags: string[];
+    privateMatchTags: string[];
+    confirmedSensitiveTags: string[];
+  } {
+    const signals = (profile.matchSignals ??
+      {}) as Partial<AiProfileMatchSignals>;
+    const decisions = profile.sensitiveTagDecisions ?? {};
+    const sourceSensitive = this.cleanArr(signals.sensitivePrivateTags ?? []);
+    const confirmedSensitive = sourceSensitive.filter(
+      (tag) => decisions[tag]?.status === 'confirmed',
     );
+    return {
+      publicTags: this.filterPublic([
+        ...(signals.publicTags ?? []),
+        ...(signals.matchKeywords ?? []),
+        ...(profile.interestTags ?? []),
+        ...(profile.lifestyleTags ?? []),
+        ...(profile.socialScenes ?? []),
+        ...(profile.traits ?? []),
+      ]),
+      privateMatchTags: this.cleanArr([
+        ...((signals.privatePreferenceTags as string[] | undefined) ?? []),
+        ...(profile.wantToMeet ?? []),
+        ...(profile.preferredTraits ?? []),
+        ...(profile.relationshipGoals ?? []),
+      ]).filter((tag) => this.classifyTag(tag) !== 'unavailable'),
+      confirmedSensitiveTags: confirmedSensitive,
+    };
+  }
+
+  /** Filter helper: keep only tags whose tier is 'public'. */
+  private filterPublic(arr: string[]): string[] {
+    return this.cleanArr(arr).filter(
+      (tag) => this.classifyTag(tag) === 'public',
+    );
+  }
+
+  /**
+   * After persisting matchSignals.sensitivePrivateTags, walk the new list
+   * and seed a 'pending' decision for any tag the owner has not yet
+   * decided on. Existing confirmed/rejected/hidden decisions are kept.
+   */
+  private async refreshSensitiveDecisions(
+    profile: UserSocialProfile,
+  ): Promise<UserSocialProfile> {
+    const signals = (profile.matchSignals ??
+      {}) as Partial<AiProfileMatchSignals>;
+    const tags = this.cleanArr(signals.sensitivePrivateTags ?? []);
+    const decisions = { ...(profile.sensitiveTagDecisions ?? {}) };
+    let mutated = false;
+    for (const tag of tags) {
+      if (this.classifyTag(tag) === 'unavailable') continue;
+      if (!decisions[tag]) {
+        decisions[tag] = {
+          status: 'pending',
+          category: this.classifySensitiveCategory(tag),
+        };
+        mutated = true;
+      }
+    }
+    if (!mutated) return profile;
+    profile.sensitiveTagDecisions = decisions;
+    return this.repo.save(profile);
+  }
+
+  /** GET /api/ai-profile/privacy payload. */
+  async getPrivacy(userId: number) {
+    const profile = await this.get(userId);
+    return {
+      profileDiscoverable: profile.profileDiscoverable,
+      agentCanRecommendMe: profile.agentCanRecommendMe,
+      agentCanStartChatAfterApproval: profile.agentCanStartChatAfterApproval,
+      hideSensitiveTags: profile.hideSensitiveTags,
+      matchPoolEnabled:
+        profile.profileDiscoverable || profile.agentCanRecommendMe,
+      sensitiveTagSummary: this.summarizeDecisions(
+        profile.sensitiveTagDecisions ?? {},
+      ),
+    };
+  }
+
+  /** PATCH /api/ai-profile/privacy — only privacy switches, never tags. */
+  async updatePrivacy(
+    userId: number,
+    body: {
+      profileDiscoverable?: boolean;
+      agentCanRecommendMe?: boolean;
+      agentCanStartChatAfterApproval?: boolean;
+      hideSensitiveTags?: boolean;
+    },
+  ) {
+    const dto: UpdateSocialProfileDto = {};
+    if (body.profileDiscoverable !== undefined)
+      dto.profileDiscoverable = Boolean(body.profileDiscoverable);
+    if (body.agentCanRecommendMe !== undefined)
+      dto.agentCanRecommendMe = Boolean(body.agentCanRecommendMe);
+    if (body.agentCanStartChatAfterApproval !== undefined)
+      dto.agentCanStartChatAfterApproval = Boolean(
+        body.agentCanStartChatAfterApproval,
+      );
+    if (body.hideSensitiveTags !== undefined)
+      dto.hideSensitiveTags = Boolean(body.hideSensitiveTags);
+    await this.upsert(userId, dto);
+    return this.getPrivacy(userId);
+  }
+
+  /** GET /api/ai-profile/sensitive-tags/pending. */
+  async getPendingSensitiveTags(userId: number) {
+    const profile = await this.get(userId);
+    await this.refreshSensitiveDecisions(profile);
+    const fresh = await this.get(userId);
+    const decisions = fresh.sensitiveTagDecisions ?? {};
+    const pending = Object.entries(decisions)
+      .filter(([, value]) => value?.status === 'pending')
+      .map(([tag, value]) => ({
+        tag,
+        category: value.category ?? this.classifySensitiveCategory(tag),
+      }));
+    return { pending, total: pending.length };
+  }
+
+  /** POST /api/ai-profile/sensitive-tags/confirm. */
+  async confirmSensitiveTag(userId: number, tag: string) {
+    return this.setSensitiveDecision(userId, tag, 'confirmed');
+  }
+
+  /** POST /api/ai-profile/sensitive-tags/reject. */
+  async rejectSensitiveTag(userId: number, tag: string) {
+    return this.setSensitiveDecision(userId, tag, 'rejected');
+  }
+
+  private async setSensitiveDecision(
+    userId: number,
+    tag: string,
+    status: 'confirmed' | 'rejected' | 'hidden',
+  ) {
+    const trimmed = (tag ?? '').trim();
+    if (!trimmed) {
+      return { ok: false, error: 'tag is required' };
+    }
+    const existing = await this.repo.findOne({ where: { userId } });
+    const profile = existing ?? this.empty(userId);
+    const decisions = { ...(profile.sensitiveTagDecisions ?? {}) };
+    const prior = decisions[trimmed];
+    decisions[trimmed] = {
+      status,
+      category: prior?.category ?? this.classifySensitiveCategory(trimmed),
+      decidedAt: new Date().toISOString(),
+    };
+    const merged: UserSocialProfile = {
+      ...profile,
+      sensitiveTagDecisions: decisions,
+      userId,
+    } as UserSocialProfile;
+    const saved = await this.repo.save(merged);
+    await this.syncAiDelegateProfile(userId, saved);
+    return { ok: true, tag: trimmed, status, decisions: saved.sensitiveTagDecisions };
+  }
+
+  private async applySensitiveTagSaveDecisions(
+    profile: UserSocialProfile,
+    input: {
+      confirmAll?: boolean;
+      decisions?: Record<string, SensitiveTagSaveStatus>;
+    },
+  ): Promise<UserSocialProfile> {
+    const signals = (profile.matchSignals ??
+      {}) as Partial<AiProfileMatchSignals>;
+    const tags = this.cleanArr(signals.sensitivePrivateTags ?? []).filter(
+      (tag) => this.classifyTag(tag) !== 'unavailable',
+    );
+    if (!tags.length) return profile;
+
+    const existing = { ...(profile.sensitiveTagDecisions ?? {}) };
+    let mutated = false;
+    for (const tag of tags) {
+      const explicitStatus = input.decisions?.[tag];
+      const nextStatus =
+        explicitStatus ??
+        (input.confirmAll ? 'confirmed' : existing[tag]?.status ?? 'pending');
+      if (!['confirmed', 'rejected', 'hidden', 'pending'].includes(nextStatus)) {
+        continue;
+      }
+      const prior = existing[tag];
+      const category = prior?.category ?? this.classifySensitiveCategory(tag);
+      const changed =
+        prior?.status !== nextStatus || prior?.category !== category;
+      existing[tag] = {
+        status: nextStatus,
+        category,
+        decidedAt:
+          changed && nextStatus !== 'pending'
+            ? new Date().toISOString()
+            : prior?.decidedAt,
+      };
+      mutated = mutated || changed;
+    }
+    if (!mutated) return profile;
+    profile.sensitiveTagDecisions = existing;
+    return this.repo.save(profile);
+  }
+
+  private summarizeDecisions(
+    decisions: Record<
+      string,
+      { status: string; category?: string; decidedAt?: string }
+    >,
+  ) {
+    const summary = { pending: 0, confirmed: 0, rejected: 0, hidden: 0 };
+    for (const entry of Object.values(decisions ?? {})) {
+      const key = entry?.status as keyof typeof summary;
+      if (key && key in summary) summary[key] += 1;
+    }
+    return summary;
   }
 
   private joinText(parts: Array<string | null | undefined>): string {

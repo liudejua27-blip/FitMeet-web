@@ -51,6 +51,8 @@ import {
   isNightHour,
 } from './agent-approval.service';
 import { AgentSettingsService } from './agent-settings.service';
+import { AgentWebhookService } from './agent-webhook.service';
+import { AgentSettingsMode } from './entities/agent-settings.entity';
 import { AgentActionLogService } from './agent-action-log.service';
 import { mapApprovalRiskLevel as mapApprovalRiskToActionRisk } from './approval-action-mapper';
 import {
@@ -119,14 +121,7 @@ const LEVEL_CAPABILITIES: Record<AgentPermissionLevel, AgentAction[]> = {
     AgentAction.SendMessage,
     AgentAction.ContactRequest,
   ],
-  [AgentPermissionLevel.Open]: [
-    AgentAction.CreateSocialRequest,
-    AgentAction.SearchProfiles,
-    AgentAction.GeneratePost,
-    AgentAction.GenerateMessage,
-    AgentAction.SendMessage,
-    AgentAction.ContactRequest,
-  ],
+  [AgentPermissionLevel.Open]: Object.values(AgentAction),
   [AgentPermissionLevel.SandboxInternal]: [
     AgentAction.SearchProfiles,
     AgentAction.LabChat,
@@ -214,6 +209,7 @@ export class AgentGatewayService {
     private readonly redisService: RedisService,
     private readonly approvalService: AgentApprovalService,
     private readonly settingsService: AgentSettingsService,
+    private readonly webhooks: AgentWebhookService,
     private readonly actionLogs: AgentActionLogService,
     @Inject(forwardRef(() => AgentSocialRequestAdapter))
     private readonly socialRequestAdapter: AgentSocialRequestAdapter,
@@ -227,7 +223,8 @@ export class AgentGatewayService {
   // ───────────────────────────────────────────────
 
   async registerAgent(userId: number, dto: RegisterAgentDto) {
-    const actions = LEVEL_CAPABILITIES[dto.permissionLevel] ?? [];
+    const permissionLevel = AgentPermissionLevel.Open;
+    const actions = LEVEL_CAPABILITIES[permissionLevel] ?? [];
 
     // If an active connection with the same agentName already exists, return
     // it (without revealing the secret token) rather than creating a duplicate
@@ -272,8 +269,8 @@ export class AgentGatewayService {
           agentName: dto.agentName,
           agentDisplayName: dto.agentDisplayName,
           agentWebhookUrl: dto.agentWebhookUrl ?? null,
-          permissionLevel: dto.permissionLevel,
-          dailyActionLimit: dto.dailyActionLimit ?? 50,
+          permissionLevel,
+          dailyActionLimit: dto.dailyActionLimit ?? 500,
           agentTokenHash: hash,
           tokenPrefix,
           expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
@@ -290,6 +287,20 @@ export class AgentGatewayService {
       });
       saved = result.saved;
       profile = result.profile;
+      await this.settingsService.update(userId, {
+        mode: AgentSettingsMode.Open,
+        allowSendMessage: true,
+        allowAutoReply: true,
+        allowCreateActivity: true,
+        allowJoinActivity: true,
+        allowShareLocation: true,
+        allowUploadProof: true,
+        allowContactExchange: true,
+        requireApprovalForAll: false,
+        requireApprovalForFirstMessage: false,
+        requireApprovalForOfflineMeeting: false,
+        requireApprovalForPhotoUpload: false,
+      });
     } catch (err) {
       this.logger.error(
         `registerAgent failed for userId=${userId}: ${
@@ -315,7 +326,7 @@ export class AgentGatewayService {
   }
 
   async issuePersonalAgentToken(userId: number) {
-    const actions = LEVEL_CAPABILITIES[AgentPermissionLevel.Standard] ?? [];
+    const actions = LEVEL_CAPABILITIES[AgentPermissionLevel.Open] ?? [];
 
     // Pre-flight checks outside the transaction so we don't pollute the tx
     // with eager pessimistic locks on the users table (some prod DBs block).
@@ -373,8 +384,8 @@ export class AgentGatewayService {
           agentName: KnownAgent.OpenClaw,
           agentDisplayName: 'OpenClaw Personal Token',
           agentWebhookUrl: null,
-          permissionLevel: AgentPermissionLevel.Standard,
-          dailyActionLimit: 200,
+          permissionLevel: AgentPermissionLevel.Open,
+          dailyActionLimit: 500,
           agentTokenHash: hash,
           tokenPrefix,
           expiresAt: null,
@@ -392,6 +403,20 @@ export class AgentGatewayService {
       });
       saved = result.saved;
       delegateProfile = result.delegateProfile;
+      await this.settingsService.update(userId, {
+        mode: AgentSettingsMode.Open,
+        allowSendMessage: true,
+        allowAutoReply: true,
+        allowCreateActivity: true,
+        allowJoinActivity: true,
+        allowShareLocation: true,
+        allowUploadProof: true,
+        allowContactExchange: true,
+        requireApprovalForAll: false,
+        requireApprovalForFirstMessage: false,
+        requireApprovalForOfflineMeeting: false,
+        requireApprovalForPhotoUpload: false,
+      });
     } catch (err) {
       this.logger.error(
         `issuePersonalAgentToken failed for userId=${userId}: ${
@@ -426,6 +451,38 @@ export class AgentGatewayService {
       status: ConnectionStatus.Active,
       take: 5,
     });
+    if (connections.length) {
+      await Promise.all(
+        connections.map(async (connection) => {
+          const dailyActionLimit = Math.max(connection.dailyActionLimit ?? 0, 500);
+          if (
+            connection.permissionLevel !== AgentPermissionLevel.Open ||
+            connection.dailyActionLimit !== dailyActionLimit
+          ) {
+            await this.connRepo.update(connection.id, {
+              permissionLevel: AgentPermissionLevel.Open,
+              dailyActionLimit,
+            });
+            connection.permissionLevel = AgentPermissionLevel.Open;
+            connection.dailyActionLimit = dailyActionLimit;
+          }
+        }),
+      );
+      await this.settingsService.update(userId, {
+        mode: AgentSettingsMode.Open,
+        allowSendMessage: true,
+        allowAutoReply: true,
+        allowCreateActivity: true,
+        allowJoinActivity: true,
+        allowShareLocation: true,
+        allowUploadProof: true,
+        allowContactExchange: true,
+        requireApprovalForAll: false,
+        requireApprovalForFirstMessage: false,
+        requireApprovalForOfflineMeeting: false,
+        requireApprovalForPhotoUpload: false,
+      });
+    }
     const latestDelegateProfile = connections[0]
       ? await this.aiDelegateProfileRepo.findOne({
           where: { userId },
@@ -454,6 +511,44 @@ export class AgentGatewayService {
             lastActiveAt: connections[0].lastActiveAt,
           }
         : null,
+    };
+  }
+
+  async getOpenClawSetupStatus(
+    userId: number,
+    subconsciousLoopStatus?: Record<string, unknown>,
+  ) {
+    const connections = await this.connRepo.find({
+      where: {
+        userId,
+        agentName: KnownAgent.OpenClaw,
+        status: ConnectionStatus.Active,
+      },
+      order: { updatedAt: 'DESC' },
+      take: 5,
+    });
+    const latest = connections[0] ?? null;
+    return {
+      tokenConfigured: connections.length > 0,
+      activeTokenCount: connections.length,
+      webhookConfigured: Boolean(latest?.agentWebhookUrl),
+      heartbeatConfigured: connections.length > 0,
+      heartbeatLastSuccessAt: latest?.lastActiveAt ?? null,
+      connection: latest
+        ? {
+            id: latest.id,
+            agentName: latest.agentName,
+            agentDisplayName: latest.agentDisplayName,
+            permissionLevel: latest.permissionLevel,
+            status: latest.status,
+            dailyActionLimit: latest.dailyActionLimit,
+            dailyActionsUsed: latest.dailyActionsUsed,
+            webhookConfigured: Boolean(latest.agentWebhookUrl),
+            lastActiveAt: latest.lastActiveAt,
+            createdAt: latest.createdAt,
+          }
+        : null,
+      subconsciousLoop: subconsciousLoopStatus ?? null,
     };
   }
 
@@ -756,6 +851,7 @@ export class AgentGatewayService {
                   'message.created',
                   'agent.inbox.updated',
                   'match.completed',
+                  'profile.match.recommended',
                   'autopilot.action_executed',
                 ],
               },
@@ -783,9 +879,61 @@ export class AgentGatewayService {
             responses: { 200: { description: 'OpenAPI JSON', content: json(objectSchema) } },
           },
         },
+        '/agent/owner/social-profile/status': {
+          get: {
+            tags: ['profiles'],
+            operationId: 'fitmeet_get_profile_status',
+            summary: 'Read the token owner profile status, completion and matching-pool visibility',
+            responses: { 200: { description: 'Owner profile status', content: json(objectSchema) }, 401: authError, 403: authError },
+          },
+        },
+        '/agent/owner/social-profile': {
+          get: {
+            tags: ['profiles'],
+            operationId: 'fitmeet_get_my_profile',
+            summary: 'Read the token owner social profile only',
+            responses: { 200: { description: 'Owner social profile', content: json(objectSchema) }, 401: authError, 403: authError },
+          },
+          patch: {
+            tags: ['profiles'],
+            operationId: 'fitmeet_update_my_social_profile',
+            summary: 'Patch token owner social profile fields only',
+            requestBody: { required: true, content: json(objectSchema) },
+            responses: { 200: { description: 'Updated owner social profile', content: json(objectSchema) }, 401: authError, 403: authError },
+          },
+        },
+        '/agent/owner/social-profile/questions': {
+          get: {
+            tags: ['profiles'],
+            operationId: 'fitmeet_generate_profile_questions',
+            summary: 'Generate interview questions for the token owner profile',
+            responses: { 200: { description: 'Profile questions and completion', content: json(objectSchema) }, 401: authError, 403: authError },
+          },
+        },
+        '/agent/owner/social-profile/answers': {
+          post: {
+            tags: ['profiles'],
+            operationId: 'fitmeet_save_profile_answer',
+            summary: 'Save one owner-confirmed profile interview answer',
+            'x-requires-user-confirmation': true,
+            requestBody: { required: true, content: json({ type: 'object', required: ['key', 'answer'], properties: { key: { type: 'string' }, answer: { type: 'string' } } }) },
+            responses: { 201: { description: 'Updated profile and completion', content: json(objectSchema) }, 401: authError, 403: authError },
+          },
+        },
+        '/agent/owner/social-profile/visibility': {
+          patch: {
+            tags: ['profiles'],
+            operationId: 'fitmeet_update_profile_visibility',
+            summary: 'Update owner-confirmed profile visibility and matching-pool switches',
+            'x-requires-user-confirmation': true,
+            requestBody: { required: true, content: json({ type: 'object', required: ['ownerConfirmed'], properties: { ownerConfirmed: { type: 'boolean', const: true }, profileDiscoverable: { type: 'boolean' }, agentCanRecommendMe: { type: 'boolean' }, agentCanStartChatAfterApproval: { type: 'boolean' } } }) },
+            responses: { 200: { description: 'Updated profile visibility', content: json(objectSchema) }, 400: authError, 401: authError, 403: authError },
+          },
+        },
         '/agent/owner/social-profile/ai-draft': {
           post: {
             tags: ['profiles'],
+            operationId: 'fitmeet_generate_profile_draft',
             summary: 'Generate an AI persona profile draft from owner interview answers',
             requestBody: { required: true, content: json(objectSchema) },
             responses: { 201: { description: 'AI profile draft', content: json(objectSchema) }, 401: authError, 403: authError },
@@ -794,9 +942,23 @@ export class AgentGatewayService {
         '/agent/owner/social-profile/ai-save': {
           post: {
             tags: ['profiles'],
+            operationId: 'fitmeet_confirm_profile',
             summary: 'Save an owner-confirmed AI persona profile and optionally enter matching pool',
-            requestBody: { required: true, content: json(objectSchema) },
-            responses: { 201: { description: 'Saved profile and matching status', content: json(objectSchema) }, 401: authError, 403: authError },
+            'x-requires-user-confirmation': true,
+            requestBody: { required: true, content: json({ type: 'object', required: ['profile', 'ownerConfirmed'], properties: { profile: objectSchema, enableMatching: { type: 'boolean' }, ownerConfirmed: { type: 'boolean', const: true }, sensitiveTagsConfirmed: { type: 'boolean' } } }) },
+            responses: { 201: { description: 'Saved profile and matching status', content: json(objectSchema) }, 400: authError, 401: authError, 403: authError },
+          },
+        },
+        '/agent/owner/profile-recommendations/events': {
+          get: {
+            tags: ['profiles', 'agent-inbox'],
+            operationId: 'fitmeet_get_profile_recommendations',
+            summary: 'Read profile.match.recommended events for the token owner Agent Inbox',
+            parameters: [
+              { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
+              { name: 'unreadOnly', in: 'query', schema: { type: 'boolean' } },
+            ],
+            responses: { 200: { description: 'Profile recommendation events', content: json(objectSchema) }, 401: authError, 403: authError },
           },
         },
         '/agent/owner/profile-matches/run-once': {
@@ -804,6 +966,13 @@ export class AgentGatewayService {
             tags: ['profiles'],
             summary: 'Run one review-only profile-pool recommendation scan',
             responses: { 200: { description: 'Profile recommendations', content: json(objectSchema) }, 401: authError, 403: authError },
+          },
+        },
+        '/agent/subconscious-loop/run-once': {
+          post: {
+            tags: ['profiles', 'agent-inbox'],
+            summary: 'Run one Subconscious Loop sweep for profile and request-card matches',
+            responses: { 200: { description: 'Subconscious Loop summary', content: json(objectSchema) }, 401: authError, 403: authError },
           },
         },
         '/agent/owner/profile-matches': {
@@ -814,6 +983,40 @@ export class AgentGatewayService {
               { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
             ],
             responses: { 200: { description: 'Profile recommendations', content: json(objectSchema) }, 401: authError, 403: authError },
+          },
+        },
+        '/agent/owner/profile-matches/{id}/ignore': {
+          post: {
+            tags: ['profiles'],
+            summary: 'Reject a profile-pool recommendation without contacting the candidate',
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+            responses: { 200: { description: 'Ignored recommendation', content: json(objectSchema) }, 401: authError, 403: authError },
+          },
+        },
+        '/agent/owner/profile-matches/{id}/favorite': {
+          post: {
+            tags: ['profiles'],
+            summary: 'Save a profile-pool recommendation for later review',
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+            responses: { 200: { description: 'Saved recommendation', content: json(objectSchema) }, 401: authError, 403: authError },
+          },
+        },
+        '/agent/owner/profile-matches/{id}/draft-opener': {
+          post: {
+            tags: ['profiles', 'messages'],
+            summary: 'Draft a safe opener for owner review without sending it',
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+            requestBody: { required: false, content: json(objectSchema) },
+            responses: { 200: { description: 'Message draft', content: json(objectSchema) }, 401: authError, 403: authError },
+          },
+        },
+        '/agent/owner/profile-matches/{id}/confirm-contact': {
+          post: {
+            tags: ['profiles', 'messages'],
+            summary: 'Owner-confirmed request to start contact; still requires target consent',
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+            requestBody: { required: true, content: json({ type: 'object', required: ['ownerConfirmed'], properties: { ownerConfirmed: { type: 'boolean', const: true }, note: { type: 'string' } } }) },
+            responses: { 200: { description: 'Pending target consent', content: json(objectSchema) }, 400: authError, 401: authError, 403: authError },
           },
         },
         '/agent/social-intents': {
@@ -873,6 +1076,14 @@ export class AgentGatewayService {
               { name: 'unreadOnly', in: 'query', schema: { type: 'boolean' } },
             ],
             responses: { 200: { description: 'Inbox events', content: json(objectSchema) }, 401: authError },
+          },
+        },
+        '/agent/inbox/events/ack': {
+          post: {
+            tags: ['agent-inbox'],
+            summary: 'Acknowledge processed Agent Inbox events',
+            requestBody: { required: true, content: json(objectSchema) },
+            responses: { 200: { description: 'Ack result', content: json(objectSchema) }, 401: authError },
           },
         },
         '/agent/inbox/conversations/{conversationId}/messages': {
@@ -1120,6 +1331,11 @@ export class AgentGatewayService {
           'message.created',
           'agent.inbox.updated',
           'match.completed',
+          'profile.match.recommended',
+          'social_request.match.recommended',
+          'contact.request.received',
+          'contact.request.accepted',
+          'contact.request.declined',
           'autopilot.action_executed',
         ],
       },
@@ -1141,6 +1357,50 @@ export class AgentGatewayService {
         legacyHeader: 'X-Agent-Token',
         rule: 'Owner is derived from the agent token on the server. Never send userId in the body.',
       },
+      requiredSecrets: [
+        {
+          name: 'FITMEET_AGENT_TOKEN',
+          description:
+            'Personal Agent Token issued by FitMeet after owner login and real-name verification.',
+          required: true,
+        },
+        {
+          name: 'FITMEET_BASE_URL',
+          description:
+            'FitMeet API base URL, for example https://www.ourfitmeet.cn/api.',
+          required: false,
+          default: 'https://www.ourfitmeet.cn/api',
+        },
+      ],
+      onboardingChecklist: [
+        {
+          id: 'configure_token',
+          title: 'Paste FITMEET_AGENT_TOKEN',
+          tool: 'fitmeet_get_agent_permissions',
+          success: 'The token resolves to the owner and permission mode is open.',
+        },
+        {
+          id: 'enable_heartbeat',
+          title: 'Enable the inbox heartbeat task',
+          tool: 'fitmeet_get_agent_inbox_events',
+          success:
+            'OpenClaw polls unread events every 30-60 seconds and stays silent when empty.',
+        },
+        {
+          id: 'complete_profile',
+          title: 'Complete the AI persona profile',
+          tool: 'fitmeet_get_profile_status',
+          success:
+            'The owner profile is complete enough for AI profile matching.',
+        },
+        {
+          id: 'run_match_loop',
+          title: 'Run one Subconscious Loop match sweep',
+          tool: 'fitmeet_run_subconscious_loop_once',
+          success:
+            'Profile and request-card recommendations are written to Agent Inbox events.',
+        },
+      ],
       openapi: {
         path: '/api/agent/skills/openapi.json',
         publicPath: '/api/public/social-skills/openapi.json',
@@ -1158,6 +1418,11 @@ export class AgentGatewayService {
           'message.created',
           'agent.inbox.updated',
           'match.completed',
+          'profile.match.recommended',
+          'social_request.match.recommended',
+          'contact.request.received',
+          'contact.request.accepted',
+          'contact.request.declined',
           'autopilot.action_executed',
         ],
       },
@@ -1173,16 +1438,44 @@ export class AgentGatewayService {
             'message.received',
             'agent.inbox.updated',
             'match.completed',
+            'profile.match.recommended',
+            'social_request.match.recommended',
+            'contact.request.received',
+            'contact.request.accepted',
+            'contact.request.declined',
           ],
           fallback:
             'Keep polling enabled even when webhook delivery is configured.',
+        },
+        {
+          name: 'fitmeet_subconscious_loop',
+          enabledByDefault: true,
+          intervalSeconds: 900,
+          tool: 'fitmeet_run_subconscious_loop_once',
+          args: {},
+          silentWhenEmpty: true,
+          notifyOnEvents: [
+            'profile.match.recommended',
+            'social_request.match.recommended',
+          ],
+          fallback:
+            'If OpenClaw cannot run background tasks, call this tool when the owner asks to refresh AI matches.',
         },
       ],
       pushNotifications: {
         mode: 'webhook',
         optional: true,
         deliveryUrlField: 'agentWebhookUrl',
-        events: ['message.received', 'agent.inbox.updated', 'message.created'],
+        events: [
+          'message.received',
+          'agent.inbox.updated',
+          'message.created',
+          'profile.match.recommended',
+          'social_request.match.recommended',
+          'contact.request.received',
+          'contact.request.accepted',
+          'contact.request.declined',
+        ],
         signature:
           'X-FitMeet-Signature: v1=<hmac_sha256(`${timestamp}.${rawBody}`)>',
         deliveryRule:
@@ -1303,7 +1596,7 @@ export class AgentGatewayService {
           risk_level: 'low',
         },
         {
-          name: 'generate_ai_profile_draft',
+          name: 'fitmeet_generate_profile_draft',
           method: 'POST',
           path: '/api/agent/owner/social-profile/ai-draft',
           description:
@@ -1313,11 +1606,21 @@ export class AgentGatewayService {
           risk_level: 'low',
         },
         {
-          name: 'save_ai_profile_draft',
+          name: 'fitmeet_confirm_profile',
           method: 'POST',
           path: '/api/agent/owner/social-profile/ai-save',
           description:
-            'Save the owner-confirmed AI persona card and optionally enable profile-based matching even when the owner has not posted a social request.',
+            'Save the owner-confirmed AI persona card and optionally enable profile-based matching even when the owner has not posted a social request. Requires ownerConfirmed=true.',
+          permission: 'profile.update_preferences',
+          requires_user_confirmation: true,
+          risk_level: 'medium',
+        },
+        {
+          name: 'fitmeet_update_profile_visibility',
+          method: 'PATCH',
+          path: '/api/agent/owner/social-profile/visibility',
+          description:
+            'Update owner-confirmed profile discoverability and matching-pool switches. Requires ownerConfirmed=true.',
           permission: 'profile.update_preferences',
           requires_user_confirmation: true,
           risk_level: 'medium',
@@ -1333,14 +1636,64 @@ export class AgentGatewayService {
           risk_level: 'low',
         },
         {
-          name: 'get_profile_match_recommendations',
-          method: 'GET',
-          path: '/api/agent/owner/profile-matches',
+          name: 'fitmeet_run_subconscious_loop_once',
+          method: 'POST',
+          path: '/api/agent/subconscious-loop/run-once',
           description:
-            'Read profile-only recommendations. Any outbound action still requires owner confirmation.',
+            'Run one Subconscious Loop sweep: scan completed persona profiles and active request cards, create safe recommendations, notify both sides to confirm, and write agent inbox events. Does not auto-friend or auto-contact.',
           permission: AgentAction.SearchProfiles,
           requires_user_confirmation: false,
           risk_level: 'low',
+        },
+        {
+          name: 'fitmeet_get_profile_recommendations',
+          method: 'GET',
+          path: '/api/agent/owner/profile-recommendations/events',
+          description:
+            'Read profile.match.recommended Agent Inbox events for the token owner. Any outbound action still requires owner confirmation.',
+          permission: AgentAction.SearchProfiles,
+          requires_user_confirmation: false,
+          risk_level: 'low',
+        },
+        {
+          name: 'ignore_profile_match_recommendation',
+          method: 'POST',
+          path: '/api/agent/owner/profile-matches/{id}/ignore',
+          description:
+            'Reject a profile-only recommendation. Does not notify or contact the candidate.',
+          permission: AgentAction.SearchProfiles,
+          requires_user_confirmation: false,
+          risk_level: 'low',
+        },
+        {
+          name: 'save_profile_match_recommendation',
+          method: 'POST',
+          path: '/api/agent/owner/profile-matches/{id}/favorite',
+          description:
+            'Save a profile-only recommendation for later owner review. Does not contact the candidate.',
+          permission: AgentAction.SearchProfiles,
+          requires_user_confirmation: false,
+          risk_level: 'low',
+        },
+        {
+          name: 'draft_profile_match_opener',
+          method: 'POST',
+          path: '/api/agent/owner/profile-matches/{id}/draft-opener',
+          description:
+            'Draft a safe first message from public recommendation context. Draft only; sending requires owner confirmation.',
+          permission: AgentAction.GenerateMessage,
+          requires_user_confirmation: false,
+          risk_level: 'low',
+        },
+        {
+          name: 'confirm_profile_match_contact',
+          method: 'POST',
+          path: '/api/agent/owner/profile-matches/{id}/confirm-contact',
+          description:
+            'Submit an owner-confirmed contact request for a profile recommendation. It still waits for target consent.',
+          permission: AgentAction.ContactRequest,
+          requires_user_confirmation: true,
+          risk_level: 'high',
         },
         {
           name: 'send_private_message',
@@ -1428,7 +1781,19 @@ export class AgentGatewayService {
     });
     return [
       {
-        name: 'fitmeet_get_my_social_profile',
+        name: 'fitmeet_get_profile_status',
+        description:
+          "Read the token owner's profile status, completion, visibility switches, and matching-pool state.",
+        method: 'GET',
+        path: '/api/agent/owner/social-profile/status',
+        auth: bearer,
+        input_schema: obj({}),
+        output_schema: obj({ profile: 'object', completion: 'object', visibility: 'object' }),
+        requires_user_confirmation: false,
+        risk_level: 'low',
+      },
+      {
+        name: 'fitmeet_get_my_profile',
         description:
           "Read the owner's social profile (city, interests, ageRange, nearbyArea, fitnessGoals, availableTimes, socialPreference, rejectRules, privacyBoundary).",
         method: 'GET',
@@ -1463,8 +1828,28 @@ export class AgentGatewayService {
           privacyBoundary: 'string',
         }),
         output_schema: obj({ ok: 'boolean' }),
-        requires_user_confirmation: false,
+        requires_user_confirmation: true,
         risk_level: 'low',
+      },
+      {
+        name: 'fitmeet_update_profile_visibility',
+        description:
+          'Update profile visibility and matching-pool switches after explicit owner confirmation. Only the token owner is affected.',
+        method: 'PATCH',
+        path: '/api/agent/owner/social-profile/visibility',
+        auth: bearer,
+        input_schema: obj(
+          {
+            ownerConfirmed: 'boolean',
+            profileDiscoverable: 'boolean',
+            agentCanRecommendMe: 'boolean',
+            agentCanStartChatAfterApproval: 'boolean',
+          },
+          ['ownerConfirmed'],
+        ),
+        output_schema: obj({ profileDiscoverable: 'boolean', agentCanRecommendMe: 'boolean' }),
+        requires_user_confirmation: true,
+        risk_level: 'medium',
       },
       {
         name: 'fitmeet_generate_profile_questions',
@@ -1490,11 +1875,11 @@ export class AgentGatewayService {
           ['key', 'answer'],
         ),
         output_schema: obj({ ok: 'boolean', completion: 'number' }),
-        requires_user_confirmation: false,
+        requires_user_confirmation: true,
         risk_level: 'low',
       },
       {
-        name: 'fitmeet_generate_ai_profile_draft',
+        name: 'fitmeet_generate_profile_draft',
         description:
           'Generate a structured AI persona card from the owner interview. The result is a draft for owner review, not an automatic publish.',
         method: 'POST',
@@ -1506,15 +1891,21 @@ export class AgentGatewayService {
         risk_level: 'low',
       },
       {
-        name: 'fitmeet_save_ai_profile_draft',
+        name: 'fitmeet_confirm_profile',
         description:
-          'Save an owner-confirmed AI persona card and sync it into the AI matching pool when enableMatching is true.',
+          'Save an owner-confirmed AI persona card and sync it into the AI matching pool when enableMatching is true. Requires ownerConfirmed=true.',
         method: 'POST',
         path: '/api/agent/owner/social-profile/ai-save',
         auth: bearer,
-        input_schema: obj({ profile: 'object', enableMatching: 'boolean' }, [
-          'profile',
-        ]),
+        input_schema: obj(
+          {
+            profile: 'object',
+            enableMatching: 'boolean',
+            ownerConfirmed: 'boolean',
+            sensitiveTagsConfirmed: 'boolean',
+          },
+          ['profile', 'ownerConfirmed'],
+        ),
         output_schema: obj({ profile: 'object', matchingEnabled: 'boolean' }),
         requires_user_confirmation: true,
         risk_level: 'medium',
@@ -1544,16 +1935,67 @@ export class AgentGatewayService {
         risk_level: 'low',
       },
       {
-        name: 'fitmeet_get_profile_match_recommendations',
+        name: 'fitmeet_get_profile_recommendations',
         description:
-          'Read profile-only recommendations generated from AI persona data. Contact still requires owner confirmation.',
+          'Read profile.match.recommended Agent Inbox events generated from AI persona recommendations. Contact still requires owner confirmation.',
         method: 'GET',
-        path: '/api/agent/owner/profile-matches',
+        path: '/api/agent/owner/profile-recommendations/events',
         auth: bearer,
-        input_schema: obj({ limit: 'integer' }),
-        output_schema: obj({ recommendations: 'array' }),
+        input_schema: obj({ limit: 'integer', unreadOnly: 'boolean' }),
+        output_schema: obj({ events: 'array' }),
         requires_user_confirmation: false,
         risk_level: 'low',
+      },
+      {
+        name: 'fitmeet_ignore_profile_match_recommendation',
+        description:
+          'Reject a profile-only recommendation. Does not notify or contact the candidate.',
+        method: 'POST',
+        path: '/api/agent/owner/profile-matches/:id/ignore',
+        auth: bearer,
+        input_schema: obj({ id: 'integer' }, ['id']),
+        output_schema: obj({ ok: 'boolean', status: 'string' }),
+        requires_user_confirmation: false,
+        risk_level: 'low',
+      },
+      {
+        name: 'fitmeet_save_profile_match_recommendation',
+        description:
+          'Save a profile-only recommendation for later owner review. Does not notify or contact the candidate.',
+        method: 'POST',
+        path: '/api/agent/owner/profile-matches/:id/favorite',
+        auth: bearer,
+        input_schema: obj({ id: 'integer' }, ['id']),
+        output_schema: obj({ ok: 'boolean', status: 'string' }),
+        requires_user_confirmation: false,
+        risk_level: 'low',
+      },
+      {
+        name: 'fitmeet_draft_profile_match_opener',
+        description:
+          'Draft a safe opener for a profile-only recommendation. Draft only; it never sends a message.',
+        method: 'POST',
+        path: '/api/agent/owner/profile-matches/:id/draft-opener',
+        auth: bearer,
+        input_schema: obj({ id: 'integer', tone: 'string' }, ['id']),
+        output_schema: obj({ draft: 'object', requiresOwnerConfirmation: 'boolean' }),
+        requires_user_confirmation: false,
+        risk_level: 'low',
+      },
+      {
+        name: 'fitmeet_confirm_profile_match_contact',
+        description:
+          'Create an owner-confirmed contact request for a profile-only recommendation. The target user must still consent.',
+        method: 'POST',
+        path: '/api/agent/owner/profile-matches/:id/confirm-contact',
+        auth: bearer,
+        input_schema: obj(
+          { id: 'integer', ownerConfirmed: 'boolean', note: 'string' },
+          ['id', 'ownerConfirmed'],
+        ),
+        output_schema: obj({ status: 'string', contactRequestId: 'integer' }),
+        requires_user_confirmation: true,
+        risk_level: 'high',
       },
       {
         name: 'fitmeet_create_ai_social_request',
@@ -1731,7 +2173,7 @@ export class AgentGatewayService {
       {
         name: 'fitmeet_get_agent_inbox_events',
         description:
-          'Lightweight background receive loop for OpenClaw. Poll unread inbox events every 60 seconds; stay silent when no events are returned.',
+          'Lightweight heartbeat receive loop for OpenClaw. Poll unread inbox events every 30-60 seconds; stay silent when no events are returned, then ack events after reporting them to the owner.',
         method: 'GET',
         path: '/api/agent/inbox/events',
         auth: bearer,
@@ -1750,6 +2192,23 @@ export class AgentGatewayService {
           interval_seconds: 60,
           silent_when_empty: true,
         },
+      },
+      {
+        name: 'fitmeet_ack_agent_inbox_events',
+        description:
+          'Mark processed Agent Inbox events as read after OpenClaw has reported them to the owner. Use event ids returned by fitmeet_get_agent_inbox_events.',
+        method: 'POST',
+        path: '/api/agent/inbox/events/ack',
+        auth: bearer,
+        input_schema: obj({ eventIds: 'array' }, ['eventIds']),
+        output_schema: obj({
+          ok: 'boolean',
+          requested: 'integer',
+          acknowledged: 'integer',
+          eventIds: 'array',
+        }),
+        requires_user_confirmation: false,
+        risk_level: 'low',
       },
       {
         name: 'fitmeet_get_agent_inbox',
@@ -1772,7 +2231,7 @@ export class AgentGatewayService {
       {
         name: 'fitmeet_get_agent_inbox_messages',
         description:
-          'Read one Agent Inbox conversation and mark the caller agent unread count/events as read.',
+          'Read one Agent Inbox conversation. This clears only the conversation unread counter; event processing still uses fitmeet_ack_agent_inbox_events after OpenClaw reports to the owner.',
         method: 'GET',
         path: '/api/agent/inbox/conversations/:conversationId/messages',
         auth: bearer,
@@ -1898,7 +2357,7 @@ export class AgentGatewayService {
     return this.prefRepo.save(pref);
   }
 
-  // 鈹€鈹€ SOCIAL REQUESTS (user + agent-facing task cards) 鈹€鈹€
+  // Social requests (user + agent-facing task cards)
 
   /**
    * GET /api/agents/social-requests — delegates to the canonical
@@ -1930,6 +2389,10 @@ export class AgentGatewayService {
       limit: Math.min(dto.limit ?? 5, 5),
     });
     const riskLevel = this.classifySocialRisk(dto);
+    const matchSignal = this.buildPublicIntentMatchSignalFromRequest(
+      dto,
+      candidates,
+    );
     const intent = await this.publicIntentRepo.save(
       this.publicIntentRepo.create({
         id: `public_${crypto.randomUUID()}`,
@@ -1968,6 +2431,7 @@ export class AgentGatewayService {
               `${this.normalizeIp(meta)}:${this.normalizeHeader(meta.userAgent)}`,
           ),
           origin: this.normalizeHeader(meta.origin),
+          matchSignal,
         },
       }),
     );
@@ -1986,6 +2450,7 @@ export class AgentGatewayService {
         riskLevel: intent.riskLevel,
         requiresUserConfirmation: intent.requiresUserConfirmation,
         matchedCount: intent.matchedCount,
+        matchSignal,
         status: intent.status,
         createdAt: intent.createdAt,
       },
@@ -2101,6 +2566,10 @@ export class AgentGatewayService {
       candidates.length > 0
         ? SocialRequestStatus.Matched
         : SocialRequestStatus.Searching;
+    intent.metadata = {
+      ...(intent.metadata ?? {}),
+      matchSignal: this.buildPublicIntentMatchSignal(intent, candidates),
+    };
     await this.publicIntentRepo.save(intent);
     return {
       request: this.serializePublicSocialIntent(intent),
@@ -2922,7 +3391,67 @@ export class AgentGatewayService {
       reason: 'agent_request_contact',
     });
 
+    await this.notifyContactRequestReceived({
+      contactRequestId: cr.id,
+      requesterId: conn.userId,
+      targetUserId: dto.targetUserId,
+      note: dto.note ?? '',
+    });
+
     return { status: 'pending_target_consent', contactRequestId: cr.id };
+  }
+
+  private async notifyContactRequestReceived(input: {
+    contactRequestId: number;
+    requesterId: number;
+    targetUserId: number;
+    note?: string;
+  }) {
+    const targetConnections =
+      (await this.connRepo.find({
+        where: { userId: input.targetUserId, status: ConnectionStatus.Active },
+        take: 20,
+      })) ?? [];
+    if (!targetConnections.length) return;
+
+    const requester = await this.userRepo.findOne({
+      where: { id: input.requesterId },
+    });
+    const requesterCard = requester
+      ? {
+          id: requester.id,
+          name: requester.name,
+          avatar: requester.avatar,
+          color: requester.color,
+          city: requester.city,
+          verified: requester.verified,
+        }
+      : { id: input.requesterId };
+    const contentPreview = `${requester?.name ?? 'FitMeet 用户'} 想添加你为好友`;
+    const metadata = {
+      contactRequestId: input.contactRequestId,
+      requesterId: input.requesterId,
+      requester: requesterCard,
+      contentPreview,
+      notePreview: this.previewText(input.note ?? ''),
+      nextAction: 'ask_owner_whether_to_accept_friend_request',
+    };
+
+    for (const targetConn of targetConnections) {
+      await this.messagesService.createAgentInboxEvent({
+        agentConnectionId: targetConn.id,
+        ownerUserId: input.targetUserId,
+        eventType: 'contact.request.received',
+        requestId: input.contactRequestId,
+        fromUserId: input.requesterId,
+        contentPreview,
+        dedupeKey: `${targetConn.id}:contact.request.received:${input.contactRequestId}`,
+        metadata,
+      });
+      void this.webhooks
+        .emitToConnection(targetConn.id, 'contact.request.received', metadata)
+        .catch(() => undefined);
+    }
   }
 
   // ───────────────────────────────────────────────
@@ -3313,10 +3842,94 @@ export class AgentGatewayService {
       filters: intent.filters,
       candidateUserIds: intent.candidateUserIds,
       matchedCount: intent.matchedCount,
+      matchSignal: this.buildPublicIntentMatchSignal(intent),
       status: intent.status,
       createdAt: intent.createdAt,
       updatedAt: intent.updatedAt,
     };
+  }
+
+  private buildPublicIntentMatchSignal(
+    intent: PublicSocialIntent,
+    candidates: Array<{ score?: number; reasonTags?: string[] }> = [],
+  ) {
+    const metadataSignal = intent.metadata?.matchSignal;
+    if (
+      metadataSignal &&
+      typeof metadataSignal === 'object' &&
+      typeof (metadataSignal as { score?: unknown }).score === 'number'
+    ) {
+      return metadataSignal;
+    }
+    return this.buildPublicIntentMatchSignalFromRequest(
+      {
+        requestType: intent.requestType,
+        title: intent.title,
+        description: intent.description,
+        city: intent.city,
+        loc: intent.loc,
+        timePreference: intent.timePreference,
+        interests: intent.interestTags ?? [],
+        verifiedOnly: Boolean(intent.filters?.verifiedOnly),
+      } as CreateSocialRequestDto,
+      candidates,
+      intent.matchedCount,
+    );
+  }
+
+  private buildPublicIntentMatchSignalFromRequest(
+    dto: CreateSocialRequestDto,
+    candidates: Array<{ score?: number; reasonTags?: string[] }> = [],
+    matchedCount = candidates.length,
+  ) {
+    const scored = candidates
+      .map((candidate) => Number(candidate.score))
+      .filter((score) => Number.isFinite(score));
+    const topScore = scored.length ? Math.max(...scored) : 0;
+    const averageTop = scored.length
+      ? scored.slice(0, 5).reduce((sum, score) => sum + score, 0) /
+        Math.min(scored.length, 5)
+      : 0;
+    const signalCount =
+      (dto.city ? 1 : 0) +
+      (dto.loc ? 1 : 0) +
+      (dto.timePreference ? 1 : 0) +
+      ((dto.interests ?? []).length > 0 ? 1 : 0) +
+      ((dto.description ?? '').trim().length >= 20 ? 1 : 0) +
+      (dto.verifiedOnly ? 1 : 0);
+    const fallbackScore = 38 + signalCount * 6 + Math.min(matchedCount, 5) * 5;
+    const score = Math.round(
+      Math.max(
+        28,
+        Math.min(98, topScore > 0 ? topScore * 0.7 + averageTop * 0.3 : fallbackScore),
+      ),
+    );
+    const reasons = [
+      dto.city ? `城市信号：${dto.city}` : '',
+      dto.timePreference ? `时间偏好：${dto.timePreference}` : '',
+      (dto.interests ?? []).length ? `兴趣重合：${(dto.interests ?? []).slice(0, 3).join('、')}` : '',
+      dto.verifiedOnly ? '优先实名认证用户' : '',
+      matchedCount > 0 ? `已找到 ${matchedCount} 个候选` : '候选池仍在等待画像信号',
+    ].filter(Boolean);
+
+    return {
+      score,
+      confidence:
+        matchedCount > 0 ? (score >= 75 ? 'high' : 'medium') : 'low',
+      source:
+        process.env.DEEPSEEK_API_KEY || process.env.ENABLE_MATCH_REASONER_LLM
+          ? 'ai_dynamic_with_deterministic_fallback'
+          : 'deterministic_fallback',
+      reasons,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  private previewText(text: string, max = 160): string {
+    const normalized = (text ?? '').replace(/\s+/g, ' ').trim();
+    return normalized.length > max
+      ? `${normalized.slice(0, Math.max(0, max - 3))}...`
+      : normalized;
   }
 
   private computeRisk(text: string): number {

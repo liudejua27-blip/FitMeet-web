@@ -1,9 +1,7 @@
-import { ApiError, getToken } from './client';
-
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
+import { API_BASE_URL, ApiError, getToken } from './client';
 
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const url = `${BASE_URL}${endpoint}`;
+  const url = `${API_BASE_URL}${endpoint}`;
   const token = getToken();
   const authHeaders: Record<string, string> = {};
   if (token) {

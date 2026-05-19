@@ -46,7 +46,7 @@ export class NotificationsService {
       type: data.type,
       text: data.text,
       fromUserId: data.fromUserId || 0,
-      fromUsername: data.fromUsername || '系统',
+      fromUsername: data.fromUsername || 'System',
       fromAvatar: data.fromAvatar || 'S',
       fromColor: data.fromColor || '#38BDF8',
       targetId: data.targetId,
@@ -74,10 +74,10 @@ export class NotificationsService {
     const diff = now.getTime() - new Date(date).getTime();
     const minutes = Math.floor(diff / 60000);
 
-    if (minutes < 1) return '刚刚';
-    if (minutes < 60) return `${minutes}分钟前`;
-    if (minutes < 1440) return `${Math.floor(minutes / 60)}小时前`;
-    if (minutes < 10080) return `${Math.floor(minutes / 1440)}天前`;
-    return '更早';
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    if (minutes < 1440) return `${Math.floor(minutes / 60)} hr ago`;
+    if (minutes < 10080) return `${Math.floor(minutes / 1440)} day ago`;
+    return 'earlier';
   }
 }

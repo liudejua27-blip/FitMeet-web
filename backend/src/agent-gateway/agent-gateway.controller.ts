@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -26,6 +27,7 @@ import { AiSocialAutopilotService } from './ai-social-autopilot.service';
 import { AgentDiscoveryService } from './agent-discovery.service';
 import { AgentProfileQAService } from './agent-profile-qa.service';
 import { ProfileMatchService } from './profile-match.service';
+import { ProfileMatchAutopilotService } from './profile-match-autopilot.service';
 import { AgentType } from './entities/agent-profile.entity';
 import {
   AgentActionRiskLevel,
@@ -88,6 +90,7 @@ export class AgentUserController {
     private readonly discovery: AgentDiscoveryService,
     private readonly autopilot: AiSocialAutopilotService,
     private readonly profileMatches: ProfileMatchService,
+    private readonly profileMatchAutopilot: ProfileMatchAutopilotService,
   ) {}
   /** GET /api/agents */
   @Get()
@@ -130,13 +133,13 @@ export class AgentUserController {
     return this.svc.getPersonalAgentTokenStatus(req.user.id);
   }
 
-  /** GET /api/agents/connections �?list all connected agents */
+  /** GET /api/agents/connections - list all connected agents */
   @Get('connections')
   listConnections(@Req() req: FitMeetRequest) {
     return this.svc.listConnections(req.user.id);
   }
 
-  /** DELETE /api/agents/connections/:id �?revoke an agent */
+  /** DELETE /api/agents/connections/:id - revoke an agent */
   @Delete('connections/:id')
   revokeConnection(
     @Req() req: FitMeetRequest,
@@ -307,6 +310,43 @@ export class AgentUserController {
     return this.profileMatches.runOnce(req.user.id);
   }
 
+  /** POST /api/agents/profile-match/autopilot/run-once */
+  @Post('profile-match/autopilot/run-once')
+  @HttpCode(200)
+  async runProfileMatchAutopilotOnce(@Req() req: FitMeetRequest) {
+    const summary = await this.profileMatchAutopilot.runOnce(
+      'manual',
+      req.user.id,
+    );
+    return { ok: true, summary };
+  }
+
+  /** POST /api/agents/subconscious-loop/run-once */
+  @Post('subconscious-loop/run-once')
+  @HttpCode(200)
+  async runSubconsciousLoopOnce(@Req() req: FitMeetRequest) {
+    const summary = await this.profileMatchAutopilot.runOnce(
+      'manual',
+      req.user.id,
+    );
+    return { ok: true, loop: 'subconscious', summary };
+  }
+
+  /** GET /api/agents/subconscious-loop/status */
+  @Get('subconscious-loop/status')
+  getSubconsciousLoopStatus() {
+    return this.profileMatchAutopilot.getStatus();
+  }
+
+  /** GET /api/agents/openclaw/status */
+  @Get('openclaw/status')
+  getOpenClawStatus(@Req() req: FitMeetRequest) {
+    return this.svc.getOpenClawSetupStatus(
+      req.user.id,
+      this.profileMatchAutopilot.getStatus(),
+    );
+  }
+
   /** GET /api/agents/profile-matches?limit=30 */
   @Get('profile-matches')
   listProfileMatches(
@@ -317,6 +357,147 @@ export class AgentUserController {
       req.user.id,
       limit ? Number(limit) : undefined,
     );
+  }
+
+  /** POST /api/agents/profile-matches/:id/ignore */
+  @Post('profile-matches/:id/ignore')
+  @HttpCode(200)
+  ignoreProfileMatch(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body?: { ownerConfirmed?: boolean },
+  ) {
+    return this.profileMatches.ignore(req.user.id, id, {
+      ownerConfirmed: body?.ownerConfirmed,
+    });
+  }
+
+  /** POST /api/agents/profile-matches/:id/favorite */
+  @Post('profile-matches/:id/favorite')
+  @HttpCode(200)
+  favoriteProfileMatch(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body?: { ownerConfirmed?: boolean },
+  ) {
+    return this.profileMatches.favorite(req.user.id, id, {
+      ownerConfirmed: body?.ownerConfirmed,
+    });
+  }
+
+  /** POST /api/agents/profile-matches/:id/draft-opener */
+  @Post('profile-matches/:id/draft-opener')
+  @HttpCode(200)
+  draftProfileMatchOpener(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { tone?: string },
+  ) {
+    return this.profileMatches.draftOpener(req.user.id, id, body?.tone);
+  }
+
+  /** POST /api/agents/profile-matches/:id/confirm-contact */
+  @Post('profile-matches/:id/confirm-contact')
+  @HttpCode(200)
+  confirmProfileMatchContact(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { note?: string; ownerConfirmed?: boolean },
+  ) {
+    return this.profileMatches.confirmContact(req.user.id, id, body?.note, {
+      ownerConfirmed: body?.ownerConfirmed,
+    });
+  }
+
+  /** POST /api/agents/profile-matches/:id/request-contact-exchange */
+  @Post('profile-matches/:id/request-contact-exchange')
+  @HttpCode(200)
+  requestProfileMatchContactExchange(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { note?: string; ownerConfirmed?: boolean },
+  ) {
+    return this.profileMatches.requestContactExchange(
+      req.user.id,
+      id,
+      body ?? {},
+    );
+  }
+
+  /** POST /api/agents/profile-matches/:id/send-intro */
+  @Post('profile-matches/:id/send-intro')
+  @HttpCode(200)
+  sendProfileMatchIntro(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { text?: string; ownerConfirmed?: boolean },
+  ) {
+    if (body?.ownerConfirmed !== true) {
+      // still allow approval creation path; service handles ownerConfirmed=false
+      return this.profileMatches.sendIntro(req.user.id, id, body ?? {});
+    }
+    return this.profileMatches.sendIntro(req.user.id, id, body);
+  }
+
+  /** Aliases under /api/agents/recommendations/:id/* for cards UI */
+  @Post('recommendations/:id/ignore')
+  @HttpCode(200)
+  ignoreRecommendation(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body?: { ownerConfirmed?: boolean },
+  ) {
+    return this.ignoreProfileMatch(req, id, body);
+  }
+
+  @Post('recommendations/:id/save')
+  @HttpCode(200)
+  saveRecommendation(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body?: { ownerConfirmed?: boolean },
+  ) {
+    return this.favoriteProfileMatch(req, id, body);
+  }
+
+  @Post('recommendations/:id/draft-opener')
+  @HttpCode(200)
+  draftRecommendationOpener(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { tone?: string },
+  ) {
+    return this.draftProfileMatchOpener(req, id, body);
+  }
+
+  @Post('recommendations/:id/confirm-contact')
+  @HttpCode(200)
+  confirmRecommendationContact(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { note?: string; ownerConfirmed?: boolean },
+  ) {
+    return this.confirmProfileMatchContact(req, id, body);
+  }
+
+  @Post('recommendations/:id/request-contact-exchange')
+  @HttpCode(200)
+  requestRecommendationContactExchange(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { note?: string; ownerConfirmed?: boolean },
+  ) {
+    return this.requestProfileMatchContactExchange(req, id, body);
+  }
+
+  @Post('recommendations/:id/send-intro')
+  @HttpCode(200)
+  sendRecommendationIntro(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { text?: string; ownerConfirmed?: boolean },
+  ) {
+    return this.sendProfileMatchIntro(req, id, body);
   }
 
   /** GET /api/agents/inbox/conversations?agentProfileId=&limit=&unreadOnly= */
@@ -540,6 +721,7 @@ export class AgentApiController {
     private readonly actionLogs: AgentActionLogService,
     private readonly autopilot: AiSocialAutopilotService,
     private readonly profileMatches: ProfileMatchService,
+    private readonly profileMatchAutopilot: ProfileMatchAutopilotService,
   ) {}
 
   /**
@@ -645,13 +827,39 @@ export class AgentApiController {
     @Req() req: FitMeetRequest,
     @Query('limit') limit?: string,
     @Query('unreadOnly') unreadOnly?: string,
+    @Query('eventType') eventType?: string,
   ) {
+    void this.discovery
+      .recordInboxHeartbeat(req[AGENT_CONNECTION_KEY], {
+        limit: limit ? Number(limit) : undefined,
+        unreadOnly: unreadOnly === 'true',
+        eventType,
+      })
+      .catch(() => undefined);
     return this.discovery.listInboxEventsForConnection(
       req[AGENT_CONNECTION_KEY],
       {
         limit: limit ? Number(limit) : undefined,
         unreadOnly: unreadOnly === 'true',
+        eventType,
       },
+    );
+  }
+
+  @Get('subconscious-loop/status')
+  getAgentSubconsciousLoopStatus() {
+    return this.profileMatchAutopilot.getStatus();
+  }
+
+  @Post('inbox/events/ack')
+  @HttpCode(200)
+  ackAgentInboxEvents(
+    @Req() req: FitMeetRequest,
+    @Body() body: { eventIds?: string[] },
+  ) {
+    return this.discovery.ackInboxEventsForConnection(
+      req[AGENT_CONNECTION_KEY],
+      body ?? {},
     );
   }
 
@@ -698,6 +906,29 @@ export class AgentApiController {
     return this.socialProfiles.get(conn.userId);
   }
 
+  @Get('owner/social-profile/status')
+  async getOwnerSocialProfileStatus(@Req() req: FitMeetRequest) {
+    const conn = req[AGENT_CONNECTION_KEY];
+    const [profile, completion] = await Promise.all([
+      this.socialProfiles.get(conn.userId),
+      this.socialProfiles.getCompletion(conn.userId),
+    ]);
+    const matchingPoolEnabled = Boolean(
+      profile.profileDiscoverable || profile.agentCanRecommendMe,
+    );
+    return {
+      profile,
+      completion,
+      visibility: {
+        profileDiscoverable: profile.profileDiscoverable,
+        agentCanRecommendMe: profile.agentCanRecommendMe,
+        agentCanStartChatAfterApproval: profile.agentCanStartChatAfterApproval,
+      },
+      matchingPoolEnabled,
+      nextStep: completion.percent >= 80 ? 'review_or_confirm_profile' : 'ask_more_questions',
+    };
+  }
+
   @Patch('owner/social-profile')
   updateOwnerSocialProfile(
     @Req() req: FitMeetRequest,
@@ -705,6 +936,28 @@ export class AgentApiController {
   ) {
     const conn = req[AGENT_CONNECTION_KEY];
     return this.socialProfiles.upsert(conn.userId, dto);
+  }
+
+  @Patch('owner/social-profile/visibility')
+  updateOwnerSocialProfileVisibility(
+    @Req() req: FitMeetRequest,
+    @Body()
+    body: {
+      profileDiscoverable?: boolean;
+      agentCanRecommendMe?: boolean;
+      agentCanStartChatAfterApproval?: boolean;
+      ownerConfirmed?: boolean;
+    },
+  ) {
+    if (body?.ownerConfirmed !== true) {
+      throw new BadRequestException('ownerConfirmed=true is required');
+    }
+    const conn = req[AGENT_CONNECTION_KEY];
+    return this.socialProfiles.upsert(conn.userId, {
+      profileDiscoverable: body.profileDiscoverable,
+      agentCanRecommendMe: body.agentCanRecommendMe,
+      agentCanStartChatAfterApproval: body.agentCanStartChatAfterApproval,
+    });
   }
 
   @Get('owner/social-profile/questions')
@@ -747,8 +1000,22 @@ export class AgentApiController {
   @Post('owner/social-profile/ai-save')
   saveOwnerAiSocialProfileDraft(
     @Req() req: FitMeetRequest,
-    @Body() body: { profile?: AiProfileBuilderCard; enableMatching?: boolean },
+    @Body()
+    body: {
+      profile?: AiProfileBuilderCard;
+      enableMatching?: boolean;
+      ownerConfirmed?: boolean;
+      sensitiveTagsConfirmed?: boolean;
+      sensitiveTagDecisions?: Record<string, 'confirmed' | 'rejected' | 'hidden'>;
+    },
   ) {
+    if (body?.ownerConfirmed !== true) {
+      throw new BadRequestException('ownerConfirmed=true is required');
+    }
+    const sensitiveTags = body.profile?.matchSignals?.sensitivePrivateTags ?? [];
+    if (sensitiveTags.length > 0 && body.sensitiveTagsConfirmed !== true) {
+      throw new BadRequestException('sensitiveTagsConfirmed=true is required');
+    }
     const conn = req[AGENT_CONNECTION_KEY];
     return this.socialProfiles.saveAiDraft(conn.userId, body ?? {});
   }
@@ -767,6 +1034,32 @@ export class AgentApiController {
     return this.profileMatches.runOnce(conn.userId);
   }
 
+  /** POST /api/agent/profile-match/autopilot/run-once */
+  @Post('profile-match/autopilot/run-once')
+  @HttpCode(200)
+  @RequirePermission(AgentAction.SearchProfiles)
+  async runOwnerProfileMatchAutopilotOnce(@Req() req: FitMeetRequest) {
+    const conn = req[AGENT_CONNECTION_KEY];
+    const summary = await this.profileMatchAutopilot.runOnce(
+      'manual',
+      conn.userId,
+    );
+    return { ok: true, summary };
+  }
+
+  /** POST /api/agent/subconscious-loop/run-once */
+  @Post('subconscious-loop/run-once')
+  @HttpCode(200)
+  @RequirePermission(AgentAction.SearchProfiles)
+  async runOwnerSubconsciousLoopOnce(@Req() req: FitMeetRequest) {
+    const conn = req[AGENT_CONNECTION_KEY];
+    const summary = await this.profileMatchAutopilot.runOnce(
+      'manual',
+      conn.userId,
+    );
+    return { ok: true, loop: 'subconscious', summary };
+  }
+
   @Get('owner/profile-matches')
   @RequirePermission(AgentAction.SearchProfiles)
   listOwnerProfileMatches(
@@ -778,6 +1071,180 @@ export class AgentApiController {
       conn.userId,
       limit ? Number(limit) : undefined,
     );
+  }
+
+  @Get('owner/profile-recommendations/events')
+  @RequirePermission(AgentAction.SearchProfiles)
+  listOwnerProfileRecommendationEvents(
+    @Req() req: FitMeetRequest,
+    @Query('limit') limit?: string,
+    @Query('unreadOnly') unreadOnly?: string,
+  ) {
+    const conn = req[AGENT_CONNECTION_KEY];
+    return this.discovery.listInboxEventsForConnection(conn, {
+      limit: limit ? Number(limit) : undefined,
+      unreadOnly: unreadOnly === 'true',
+      eventType: 'profile.match.recommended',
+    });
+  }
+
+  @Post('owner/profile-matches/:id/ignore')
+  @HttpCode(200)
+  @RequirePermission(AgentAction.SearchProfiles)
+  ignoreOwnerProfileMatch(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const conn = req[AGENT_CONNECTION_KEY];
+    return this.profileMatches.ignore(conn.userId, id);
+  }
+
+  @Post('owner/profile-matches/:id/favorite')
+  @HttpCode(200)
+  @RequirePermission(AgentAction.SearchProfiles)
+  favoriteOwnerProfileMatch(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const conn = req[AGENT_CONNECTION_KEY];
+    return this.profileMatches.favorite(conn.userId, id);
+  }
+
+  @Post('owner/profile-matches/:id/draft-opener')
+  @HttpCode(200)
+  @RequirePermission(AgentAction.GenerateMessage)
+  draftOwnerProfileMatchOpener(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { tone?: string },
+  ) {
+    const conn = req[AGENT_CONNECTION_KEY];
+    return this.profileMatches.draftOpener(conn.userId, id, body?.tone);
+  }
+
+  @Post('owner/profile-matches/:id/confirm-contact')
+  @HttpCode(200)
+  @RequirePermission(AgentAction.ContactRequest)
+  confirmOwnerProfileMatchContact(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { note?: string; ownerConfirmed?: boolean },
+  ) {
+    const conn = req[AGENT_CONNECTION_KEY];
+    return this.profileMatches.confirmContact(conn.userId, id, body?.note, {
+      ownerConfirmed: body?.ownerConfirmed,
+    });
+  }
+
+  @Post('owner/profile-matches/:id/request-contact-exchange')
+  @HttpCode(200)
+  @RequirePermission(AgentAction.ContactRequest)
+  requestOwnerProfileMatchContactExchange(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { note?: string; ownerConfirmed?: boolean },
+  ) {
+    const conn = req[AGENT_CONNECTION_KEY];
+    return this.profileMatches.requestContactExchange(
+      conn.userId,
+      id,
+      body ?? {},
+    );
+  }
+
+  @Post('owner/profile-matches/:id/send-intro')
+  @HttpCode(200)
+  @RequirePermission(AgentAction.GenerateMessage)
+  sendOwnerProfileMatchIntro(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { text?: string; ownerConfirmed?: boolean },
+  ) {
+    const conn = req[AGENT_CONNECTION_KEY];
+    return this.profileMatches.sendIntro(conn.userId, id, body ?? {});
+  }
+
+  /** Aliases under /api/agent/recommendations/:id/* */
+  @Post('recommendations/:id/ignore')
+  @HttpCode(200)
+  @RequirePermission(AgentAction.SearchProfiles)
+  ignoreOwnerRecommendation(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body?: { ownerConfirmed?: boolean },
+  ) {
+    const conn = req[AGENT_CONNECTION_KEY];
+    return this.profileMatches.ignore(conn.userId, id, {
+      ownerConfirmed: body?.ownerConfirmed,
+    });
+  }
+
+  @Post('recommendations/:id/save')
+  @HttpCode(200)
+  @RequirePermission(AgentAction.SearchProfiles)
+  saveOwnerRecommendation(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body?: { ownerConfirmed?: boolean },
+  ) {
+    const conn = req[AGENT_CONNECTION_KEY];
+    return this.profileMatches.favorite(conn.userId, id, {
+      ownerConfirmed: body?.ownerConfirmed,
+    });
+  }
+
+  @Post('recommendations/:id/draft-opener')
+  @HttpCode(200)
+  @RequirePermission(AgentAction.GenerateMessage)
+  draftOwnerRecommendationOpener(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { tone?: string },
+  ) {
+    const conn = req[AGENT_CONNECTION_KEY];
+    return this.profileMatches.draftOpener(conn.userId, id, body?.tone);
+  }
+
+  @Post('recommendations/:id/confirm-contact')
+  @HttpCode(200)
+  @RequirePermission(AgentAction.ContactRequest)
+  confirmOwnerRecommendationContact(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { note?: string; ownerConfirmed?: boolean },
+  ) {
+    const conn = req[AGENT_CONNECTION_KEY];
+    return this.profileMatches.confirmContact(conn.userId, id, body?.note, {
+      ownerConfirmed: body?.ownerConfirmed,
+    });
+  }
+
+  @Post('recommendations/:id/request-contact-exchange')
+  @HttpCode(200)
+  @RequirePermission(AgentAction.ContactRequest)
+  requestOwnerRecommendationContactExchange(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { note?: string; ownerConfirmed?: boolean },
+  ) {
+    const conn = req[AGENT_CONNECTION_KEY];
+    return this.profileMatches.requestContactExchange(
+      conn.userId,
+      id,
+      body ?? {},
+    );
+  }
+
+  @Post('recommendations/:id/send-intro')
+  @HttpCode(200)
+  @RequirePermission(AgentAction.GenerateMessage)
+  sendOwnerRecommendationIntro(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { text?: string; ownerConfirmed?: boolean },
+  ) {
+    const conn = req[AGENT_CONNECTION_KEY];
+    return this.profileMatches.sendIntro(conn.userId, id, body ?? {});
   }
 
   @Get('owner/pending-approvals')
@@ -929,7 +1396,7 @@ export class AgentApiController {
   /**
    * POST /api/agent/contact/request
    * Request that the platform mediate a contact exchange.
-   * Both sides must consent �?agent cannot bypass this.
+   * Both sides must consent; agent cannot bypass this.
    */
   @Post('contact/request')
   @RequirePermission(AgentAction.ContactRequest)

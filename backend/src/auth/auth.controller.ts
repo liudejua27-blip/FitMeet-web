@@ -17,6 +17,7 @@ import { RegisterDto } from './dto/register.dto';
 import { SendSmsDto } from './dto/send-sms.dto';
 import { PhoneLoginDto } from './dto/phone-login.dto';
 import { WechatLoginDto } from './dto/wechat-login.dto';
+import { WechatMiniLoginDto } from './dto/wechat-mini-login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 
 @Controller('auth')
@@ -59,6 +60,12 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   loginWithWechat(@Body() dto: WechatLoginDto) {
     return this.authService.loginWithWechat(dto);
+  }
+
+  @Post('wechat-mini/login')
+  @HttpCode(HttpStatus.OK)
+  loginWithWechatMini(@Body() dto: WechatMiniLoginDto) {
+    return this.authService.loginWithWechatMini(dto);
   }
 
   @Post('refresh')

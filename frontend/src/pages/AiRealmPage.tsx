@@ -48,6 +48,27 @@ const capabilities = [
   },
 ];
 
+const aiProductLayers = [
+  {
+    title: 'AI 画像工作室',
+    desc: '让用户或 OpenClaw 用自然语言补全人物画像，DeepSeek 自动生成公开标签、私密偏好、敏感标签和匹配关键词。',
+    cta: '开始画像采集',
+    href: '/ai-profile',
+  },
+  {
+    title: 'AI 匹配解释器',
+    desc: '匹配结果不只给 score，还给公开推荐理由、风险提示、下一步建议和开场白草稿。',
+    cta: '查看匹配推荐',
+    href: '/agent-inbox',
+  },
+  {
+    title: 'OpenClaw 代理闭环',
+    desc: 'OpenClaw 通过 social-skills 询问主人、生成草稿、读取推荐；保存、联系和发消息都需要真人确认。',
+    cta: '配置 Social Skills',
+    href: '/developers/social-skills',
+  },
+];
+
 const sampleAgents = [
   { name: 'ARIA-04', tag: '社交向导', spec: '擅长破冰 / 多语种 / 高共情', acc: 94 },
   { name: 'NEXUS-07', tag: '深度匹配', spec: '价值观对齐 / 长期关系 / 严选模式', acc: 89 },
@@ -124,6 +145,41 @@ export const AiRealmPage = memo(function AiRealmPage() {
         {/* === Live Agent Showcase === */}
         <div className="mt-20 lg:mt-28">
           <AgentOrbit activeIndex={activeAgent} agents={sampleAgents} onSelect={setActiveAgent} />
+        </div>
+      </section>
+
+      <section className="relative mx-auto max-w-7xl px-4 pb-8 sm:px-6 lg:px-8">
+        <div className="rounded-3xl border border-aiBright/20 bg-white/[0.04] p-6 backdrop-blur lg:p-8">
+          <span className="font-mono text-xs font-black tracking-[0.3em] text-aiCyan">PRODUCT LOOP</span>
+          <h2 className="mt-3 font-display text-4xl font-black tracking-tight text-cream">
+            三层 AI 模块，不只是一个生成按钮
+          </h2>
+          <p className="mt-3 max-w-3xl text-sm leading-7 text-cream/70">
+            FitMeet 会先让 AI 理解每个用户，再用可解释匹配把合适的人推到 Agent Inbox；
+            OpenClaw 可以参与采集，但所有高风险动作仍由真人确认。
+          </p>
+          <div className="mt-6 grid gap-4 lg:grid-cols-3">
+            {aiProductLayers.map((layer, index) => (
+              <article
+                key={layer.title}
+                className="rounded-2xl border border-white/10 bg-black/25 p-5"
+              >
+                <div className="font-mono text-4xl font-black text-aiBright/35">
+                  0{index + 1}
+                </div>
+                <h3 className="mt-3 font-display text-xl font-black text-cream">
+                  {layer.title}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-cream/70">{layer.desc}</p>
+                <Link
+                  to={layer.href}
+                  className="mt-4 inline-flex rounded-xl border border-aiBright/35 px-4 py-2 text-sm font-black text-aiBright transition hover:bg-aiBright/10"
+                >
+                  {layer.cta}
+                </Link>
+              </article>
+            ))}
+          </div>
         </div>
       </section>
 

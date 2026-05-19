@@ -53,7 +53,7 @@ export class AgentWebhookService {
 
     const payload: AgentWebhookPayload = {
       event,
-      event_id: `evt_${crypto.randomUUID()}`,
+      event_id: this.stableEventId(agentConnectionId, event, data),
       created_at: new Date().toISOString(),
       agent_connection_id: conn.id,
       user_id: conn.userId,
@@ -127,6 +127,28 @@ export class AgentWebhookService {
       .createHmac('sha256', secret)
       .update(`${timestamp}.${body}`)
       .digest('hex')}`;
+  }
+
+  private stableEventId(
+    agentConnectionId: number | null | undefined,
+    event: string,
+    data: Record<string, unknown>,
+  ) {
+    const stable =
+      data.eventId ??
+      data.event_id ??
+      data.inboxEventId ??
+      data.messageId ??
+      data.conversationId ??
+      data.recommendationId ??
+      data.aiMatchSessionId;
+    if (!stable) return `evt_${crypto.randomUUID()}`;
+    const digest = crypto
+      .createHash('sha256')
+      .update(`${agentConnectionId ?? 'none'}:${event}:${String(stable)}`)
+      .digest('hex')
+      .slice(0, 32);
+    return `evt_${digest}`;
   }
 
   private async logWebhookEvent(

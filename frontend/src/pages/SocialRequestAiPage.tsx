@@ -1,49 +1,15 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import {
-  socialRequestsApi,
-  type SocialRequestType,
-} from '../api/socialRequestsApi';
+import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { ApiError } from '../api/client';
 import {
   socialProfileApi,
   type UserSocialProfile,
 } from '../api/socialProfileApi';
-import { ApiError } from '../api/client';
-
-function formatApiError(e: unknown, fallback: string): string {
-  if (e instanceof ApiError) {
-    const raw =
-      (e.payload && typeof e.payload.message === 'string'
-        ? e.payload.message
-        : Array.isArray(e.payload?.message)
-          ? e.payload!.message!.join('；')
-          : e.message) || fallback;
-    if (e.status >= 500) return `${raw}（服务器繁忙 ${e.status}）`;
-    if (e.status === 401 || e.status === 403)
-      return `${raw}（请重新登录或检查权限 ${e.status}）`;
-    if (e.status >= 400) return `${raw}（${e.status}）`;
-    return raw;
-  }
-  return e instanceof Error ? e.message : fallback;
-}
-
-/**
- * AI 社交需求助手 (`/social-request/ai`)
- *
- * 9 字段完整卡片：
- *   title / description / interestTags / locationPreference / timePreference /
- *   socialGoal / personalityPreference  (可编辑)
- *   riskNotes / privacyNotes                                         (只读提示)
- *
- * 流程：
- *   Step 1  自然语言输入  + 展示已读取的画像
- *   Step 2  AI 生成卡片 → 可编辑 → 安全/隐私只读提示
- *   Step 3  发布前 checklist → 满足必要勾选才允许发布
- *           发布走现有 POST /social-requests，title / description / city /
- *           radiusKm / interestTags 持久化为主字段；locationPreference /
- *           timePreference / socialGoal / personalityPreference 等进入 metadata，
- *           用于同步大厅与匹配解释。
- */
+import {
+  socialRequestsApi,
+  type SocialRequestType,
+} from '../api/socialRequestsApi';
 
 const TYPE_OPTIONS: { value: SocialRequestType; label: string }[] = [
   { value: 'coffee_chat', label: '咖啡轻聊' },
@@ -55,35 +21,16 @@ const TYPE_OPTIONS: { value: SocialRequestType; label: string }[] = [
   { value: 'custom', label: '自定义' },
 ];
 
-interface DraftState {
-  type: SocialRequestType;
-  title: string;
-  description: string;
-  city: string;
-  radiusKm: number;
-  rawText: string;
-  timeStart?: string;
-  timeEnd?: string;
-  // 9-field card surface
-  interestTags: string[];
-  locationPreference: string;
-  timePreference: string;
-  socialGoal: string;
-  personalityPreference: string[];
-  riskNotes: string[];
-  privacyNotes: string[];
-}
-
 const REQUIRED_CHECKS = [
-  { id: 'publish', label: '我确认发布以上社交需求', required: true },
+  { id: 'publish', label: '我确认发布以上社交卡片', required: true },
   {
     id: 'match',
-    label: '我允许系统根据该需求推荐候选人',
+    label: '我允许系统根据这张卡片和我的 AI 画像推荐候选人',
     required: true,
   },
   {
     id: 'invite',
-    label: '我允许系统生成邀约话术',
+    label: '我允许系统生成邀请话术，但发送前仍需要我确认',
     required: false,
   },
   {
@@ -93,107 +40,61 @@ const REQUIRED_CHECKS = [
   },
 ];
 
+interface DraftState {
+  type: SocialRequestType;
+  title: string;
+  description: string;
+  city: string;
+  radiusKm: number;
+  rawText: string;
+  timeStart?: string;
+  timeEnd?: string;
+  interestTags: string[];
+  locationPreference: string;
+  timePreference: string;
+  socialGoal: string;
+  personalityPreference: string[];
+  riskNotes: string[];
+  privacyNotes: string[];
+}
+
 export function SocialRequestAiPage() {
   const navigate = useNavigate();
+  const [profile, setProfile] = useState<UserSocialProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
   const [rawText, setRawText] = useState('');
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [tagsText, setTagsText] = useState('');
   const [personalityText, setPersonalityText] = useState('');
   const [mode, setMode] = useState<'ai' | 'fallback' | null>(null);
-  const [profileSummary, setProfileSummary] = useState('');
   const [drafting, setDrafting] = useState(false);
   const [publishing, setPublishing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [checks, setChecks] = useState<Record<string, boolean>>({});
-
-  // 用户社交画像（进入页面时从后端拉取）
-  const [profile, setProfile] = useState<UserSocialProfile | null>(null);
-  const [profileForm, setProfileForm] = useState<UserSocialProfile | null>(
-    null,
-  );
-  const [profileFormText, setProfileFormText] = useState({
-    fitnessGoals: '',
-    interestTags: '',
-    availableTimes: '',
-  });
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [profileLoading, setProfileLoading] = useState(true);
-  const [profileSaving, setProfileSaving] = useState(false);
-  const [profileSavedAt, setProfileSavedAt] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const p = await socialProfileApi.get();
-        if (cancelled) return;
-        setProfile(p);
-        setProfileForm(p);
-        setProfileFormText({
-          fitnessGoals: (p.fitnessGoals || []).join('、'),
-          interestTags: (p.interestTags || []).join('、'),
-          availableTimes: (p.availableTimes || []).join('、'),
-        });
-      } catch {
-        // 没拿到画像不破坏页面使用。
-      } finally {
+
+    socialProfileApi
+      .get()
+      .then((nextProfile) => {
+        if (!cancelled) setProfile(nextProfile);
+      })
+      .catch(() => {
+        if (!cancelled) setProfile(null);
+      })
+      .finally(() => {
         if (!cancelled) setProfileLoading(false);
-      }
-    })();
+      });
+
     return () => {
       cancelled = true;
     };
   }, []);
 
-  function parseList(v: string): string[] {
-    return v
-      .split(/[,，、\s]+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-  }
-
-  function updateProfileField<K extends keyof UserSocialProfile>(
-    key: K,
-    value: UserSocialProfile[K],
-  ) {
-    setProfileForm((prev) => (prev ? { ...prev, [key]: value } : prev));
-  }
-
-  async function saveProfile() {
-    if (!profileForm) return;
-    setProfileSaving(true);
-    setError(null);
-    try {
-      const payload = {
-        gender: profileForm.gender,
-        ageRange: profileForm.ageRange,
-        city: profileForm.city,
-        nearbyArea: profileForm.nearbyArea,
-        fitnessGoals: parseList(profileFormText.fitnessGoals),
-        interestTags: parseList(profileFormText.interestTags),
-        availableTimes: parseList(profileFormText.availableTimes),
-        socialPreference: profileForm.socialPreference,
-        rejectRules: profileForm.rejectRules,
-        privacyBoundary: profileForm.privacyBoundary,
-      };
-      const saved = await socialProfileApi.save(payload);
-      setProfile(saved);
-      setProfileForm(saved);
-      setProfileFormText({
-        fitnessGoals: (saved.fitnessGoals || []).join('、'),
-        interestTags: (saved.interestTags || []).join('、'),
-        availableTimes: (saved.availableTimes || []).join('、'),
-      });
-      setProfileSavedAt(Date.now());
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '画像保存失败');
-    } finally {
-      setProfileSaving(false);
-    }
-  }
-
-  const allRequiredChecked = REQUIRED_CHECKS.filter((c) => c.required).every(
-    (c) => checks[c.id],
+  const profileSummary = useMemo(() => buildProfileSummary(profile), [profile]);
+  const allRequiredChecked = REQUIRED_CHECKS.filter((item) => item.required).every(
+    (item) => checks[item.id],
   );
 
   async function generateDraft() {
@@ -201,77 +102,64 @@ export function SocialRequestAiPage() {
       setError('请先告诉 AI 你想认识什么样的人。');
       return;
     }
+
     setDrafting(true);
     setError(null);
+
     try {
-      const res = await socialRequestsApi.aiDraft(rawText.trim());
-      const d = res.draft;
-      const c = res.card;
+      const result = await socialRequestsApi.aiDraft(rawText.trim());
+      const draftPayload = result.draft;
+      const card = result.card;
+      const interestTags = card.interestTags?.length
+        ? card.interestTags
+        : draftPayload.interestTags ?? [];
+      const personalityPreference = card.personalityPreference ?? [];
+
       setDraft({
-        type: d.type,
-        title: c.title || d.title || '',
-        description: c.description || d.description || '',
-        city: d.city || '',
-        radiusKm: d.radiusKm || 5,
-        rawText: d.rawText || rawText.trim(),
-        interestTags: c.interestTags || d.interestTags || [],
-        locationPreference: c.locationPreference || '',
-        timePreference: c.timePreference || '',
-        socialGoal: c.socialGoal || '',
-        personalityPreference: c.personalityPreference || [],
-        riskNotes: c.riskNotes || [],
-        privacyNotes: c.privacyNotes || [],
+        type: draftPayload.type,
+        title: card.title || draftPayload.title || '',
+        description: card.description || draftPayload.description || '',
+        city: draftPayload.city || profile?.city || '',
+        radiusKm: draftPayload.radiusKm || 5,
+        rawText: draftPayload.rawText || rawText.trim(),
+        timeStart: draftPayload.timeStart,
+        timeEnd: draftPayload.timeEnd,
+        interestTags,
+        locationPreference: card.locationPreference || profile?.nearbyArea || '',
+        timePreference: card.timePreference || '',
+        socialGoal: card.socialGoal || '',
+        personalityPreference,
+        riskNotes: card.riskNotes || [],
+        privacyNotes: card.privacyNotes || [],
       });
-      setTagsText((c.interestTags || d.interestTags || []).join('、'));
-      setPersonalityText((c.personalityPreference || []).join('、'));
-      setMode(res.mode);
-      const parts: string[] = [];
-      if (res.profileUsed.city) parts.push(`城市：${res.profileUsed.city}`);
-      if (res.profileUsed.nearbyArea)
-        parts.push(`区域：${res.profileUsed.nearbyArea}`);
-      if (res.profileUsed.ageRange)
-        parts.push(`年龄段：${res.profileUsed.ageRange}`);
-      if (res.profileUsed.interestTags?.length)
-        parts.push(
-          `兴趣：${res.profileUsed.interestTags.slice(0, 5).join('、')}`,
-        );
-      if (res.profileUsed.fitnessGoals?.length)
-        parts.push(
-          `目标：${res.profileUsed.fitnessGoals.slice(0, 3).join('、')}`,
-        );
-      if (res.profileUsed.availableTimes?.length)
-        parts.push(
-          `可约：${res.profileUsed.availableTimes.slice(0, 3).join('、')}`,
-        );
-      setProfileSummary(parts.join(' · '));
+      setTagsText(interestTags.join('、'));
+      setPersonalityText(personalityPreference.join('、'));
+      setMode(result.mode);
       setChecks({});
-    } catch (e: unknown) {
-      setError(formatApiError(e, 'AI 生成失败'));
+    } catch (err) {
+      setError(formatApiError(err, 'AI 生成社交卡片失败'));
     } finally {
       setDrafting(false);
     }
   }
 
-  function updateDraft<K extends keyof DraftState>(
-    key: K,
-    value: DraftState[K],
-  ) {
-    setDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
+  function updateDraft<K extends keyof DraftState>(key: K, value: DraftState[K]) {
+    setDraft((current) => (current ? { ...current, [key]: value } : current));
   }
 
   async function publish() {
     if (!draft) return;
     if (!allRequiredChecked) {
-      setError('请先完成必要的发布前确认项。');
+      setError('请先完成必要的发布前确认。');
       return;
     }
+
     setPublishing(true);
     setError(null);
+
     try {
-      const tags = tagsText
-        .split(/[,，、\s]+/)
-        .map((t) => t.trim())
-        .filter(Boolean);
+      const interestTags = parseList(tagsText);
+      const personalityPreference = parseList(personalityText);
       const created = await socialRequestsApi.create({
         type: draft.type,
         title: draft.title || undefined,
@@ -279,34 +167,37 @@ export function SocialRequestAiPage() {
         rawText: draft.rawText || undefined,
         city: draft.city || undefined,
         radiusKm: draft.radiusKm,
-        interestTags: tags,
+        interestTags,
         timeStart: draft.timeStart || undefined,
         timeEnd: draft.timeEnd || undefined,
         metadata: {
           source: 'ai_social_request',
+          profileSource: 'users.me.social-profile',
           locationPreference: draft.locationPreference,
           timePreference: draft.timePreference,
           socialGoal: draft.socialGoal,
-          personalityPreference: draft.personalityPreference,
+          personalityPreference,
           riskNotes: draft.riskNotes,
           privacyNotes: draft.privacyNotes,
         },
       });
+
       await socialRequestsApi.runMatch(created.id, 5).catch(() => undefined);
       const sync = await socialRequestsApi
         .syncPublicIntent(created.id)
-        .catch(() => ({ publicIntentId: '', synced: false }));
+        .catch(() => ({ synced: false }));
       const matches = await socialRequestsApi
         .candidates(created.id)
-        .catch(() => ({ candidates: [] as unknown[] }));
+        .catch(() => ({ candidates: [] }));
       const params = new URLSearchParams({
         published: '1',
         synced: sync.synced ? '1' : '0',
-        matched: String(matches.candidates?.length ?? 0),
+        matched: String(matches.candidates.length),
       });
+
       navigate(`/social-request/${created.id}?${params.toString()}`);
-    } catch (e: unknown) {
-      setError(formatApiError(e, '发布失败'));
+    } catch (err) {
+      setError(formatApiError(err, '发布失败'));
     } finally {
       setPublishing(false);
     }
@@ -314,353 +205,178 @@ export function SocialRequestAiPage() {
 
   return (
     <div className="min-h-screen bg-[#0d0d0b] text-[#F4EFE6]">
-      <div className="max-w-2xl mx-auto px-6 py-10 space-y-8">
+      <div className="mx-auto max-w-3xl px-6 py-12">
         <header className="space-y-3">
-          <div className="text-[10px] uppercase tracking-[0.3em] text-[#C8FF80]">
-            AI 社交需求助手
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-light leading-snug">
-            告诉 AI 你想认识什么样的人
+          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-[#C8FF80]">
+            AI 社交卡片
+          </p>
+          <h1 className="text-3xl font-light leading-snug">
+            基于我的 AI 画像，生成一张可匹配的社交卡片
           </h1>
-          <p className="text-sm text-[#C7C2B0] leading-7">
-            告诉 AI 你想认识什么样的人，FitMeet 会帮你整理需求、生成社交卡片，并推荐合适的人选。
+          <p className="text-sm leading-7 text-[#C7C2B0]">
+            AI 画像和社交画像现在是同一份资料。这里不会再保存第二套画像，只会读取
+            <Link to="/ai-profile" className="mx-1 font-bold text-[#C8FF80] underline underline-offset-4">
+              AI 画像
+            </Link>
+            中的城市、兴趣、偏好和隐私边界，再生成可发布的约练或交友卡片。
           </p>
         </header>
 
-        {/* 用户社交画像（持久化到后端，AI 会基于此生成卡片） */}
-        <section className="rounded-xl border border-[#26261d] bg-[#15150f]">
-          <button
-            type="button"
-            onClick={() => setProfileOpen((v) => !v)}
-            className="w-full flex items-center justify-between px-4 py-3 text-left"
-          >
-            <div className="space-y-0.5">
-              <div className="text-[10px] uppercase tracking-[0.3em] text-[#C8FF80]">
-                我的社交画像
+        <section className="mt-8 rounded-lg border border-[#2b3322] bg-[#11160d] p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-xs font-black uppercase tracking-[0.22em] text-[#C8FF80]">
+                当前 AI 画像
               </div>
-              <div className="text-xs text-[#C7C2B0]">
+              <p className="mt-2 text-sm leading-6 text-[#C7C2B0]">
                 {profileLoading
-                  ? '正在读取你的画像…'
-                  : profileFilled(profile)
-                    ? '已保存 · 进入页面时会自动作为 AI 的输入'
-                    : '尚未填写 · 点击展开并保存后，AI 会更懂你'}
-              </div>
+                  ? '正在读取画像...'
+                  : profileSummary || '你还没有完善 AI 画像。先去 AI 画像页保存后，推荐会更准确。'}
+              </p>
             </div>
-            <span className="text-[#8C8A6E] text-xs">
-              {profileOpen ? '收起 ▴' : '展开 ▾'}
-            </span>
-          </button>
-          {profileOpen && profileForm && (
-            <div className="border-t border-[#26261d] p-4 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="性别">
-                  <input
-                    value={profileForm.gender}
-                    onChange={(e) =>
-                      updateProfileField('gender', e.target.value)
-                    }
-                    placeholder="女 / 男 / 其他 / 不公开"
-                    className="input"
-                  />
-                </Field>
-                <Field label="年龄段">
-                  <input
-                    value={profileForm.ageRange}
-                    onChange={(e) =>
-                      updateProfileField('ageRange', e.target.value)
-                    }
-                    placeholder="例如 25-34"
-                    className="input"
-                  />
-                </Field>
-                <Field label="常驻城市">
-                  <input
-                    value={profileForm.city}
-                    onChange={(e) =>
-                      updateProfileField('city', e.target.value)
-                    }
-                    placeholder="北京"
-                    className="input"
-                  />
-                </Field>
-                <Field label="常活动区域">
-                  <input
-                    value={profileForm.nearbyArea}
-                    onChange={(e) =>
-                      updateProfileField('nearbyArea', e.target.value)
-                    }
-                    placeholder="朝阳-三里屯"
-                    className="input"
-                  />
-                </Field>
-              </div>
-              <Field label="健身目标（顿号或逗号分隔）">
-                <input
-                  value={profileFormText.fitnessGoals}
-                  onChange={(e) =>
-                    setProfileFormText((p) => ({
-                      ...p,
-                      fitnessGoals: e.target.value,
-                    }))
-                  }
-                  placeholder="减脂、增肌、塑形"
-                  className="input"
-                />
-              </Field>
-              <Field label="兴趣标签（顿号或逗号分隔）">
-                <input
-                  value={profileFormText.interestTags}
-                  onChange={(e) =>
-                    setProfileFormText((p) => ({
-                      ...p,
-                      interestTags: e.target.value,
-                    }))
-                  }
-                  placeholder="跑步、咖啡、独立电影、摄影"
-                  className="input"
-                />
-              </Field>
-              <Field label="可约时间（顿号或逗号分隔）">
-                <input
-                  value={profileFormText.availableTimes}
-                  onChange={(e) =>
-                    setProfileFormText((p) => ({
-                      ...p,
-                      availableTimes: e.target.value,
-                    }))
-                  }
-                  placeholder="工作日晚上、周六下午"
-                  className="input"
-                />
-              </Field>
-              <Field label="社交偏好">
-                <input
-                  value={profileForm.socialPreference}
-                  onChange={(e) =>
-                    updateProfileField('socialPreference', e.target.value)
-                  }
-                  placeholder="安静、慢热、尊重边界"
-                  className="input"
-                />
-              </Field>
-              <Field label="拒绝规则">
-                <input
-                  value={profileForm.rejectRules}
-                  onChange={(e) =>
-                    updateProfileField('rejectRules', e.target.value)
-                  }
-                  placeholder="不接受夜间私人场所约见"
-                  className="input"
-                />
-              </Field>
-              <Field label="隐私边界">
-                <input
-                  value={profileForm.privacyBoundary}
-                  onChange={(e) =>
-                    updateProfileField('privacyBoundary', e.target.value)
-                  }
-                  placeholder="不公开手机号 / 工作单位"
-                  className="input"
-                />
-              </Field>
-              <div className="flex items-center justify-between pt-2">
-                <span className="text-[11px] text-[#5e5d4a]">
-                  {profileSavedAt
-                    ? '已保存 ✓'
-                    : '保存后会作为 AI 生成卡片的输入'}
-                </span>
-                <button
-                  type="button"
-                  disabled={profileSaving}
-                  onClick={saveProfile}
-                  className="px-4 py-2 rounded-lg bg-[#C8FF80] text-[#0d0d0b] text-xs font-medium hover:bg-[#b8ef70] disabled:opacity-40"
-                >
-                  {profileSaving ? '正在保存…' : '保存画像'}
-                </button>
-              </div>
-            </div>
-          )}
+            <Link
+              to="/ai-profile"
+              className="shrink-0 rounded-lg border border-[#C8FF80]/30 px-3 py-2 text-xs font-bold text-[#C8FF80] hover:bg-[#C8FF80]/10"
+            >
+              完善画像
+            </Link>
+          </div>
         </section>
 
-        {/* Step 1: free-text input */}
-        <section className="space-y-2">
-          <label className="text-xs uppercase tracking-wider text-[#8C8A6E]">
+        <section className="mt-8 space-y-3">
+          <label className="text-xs font-bold uppercase tracking-[0.16em] text-[#8C8A6E]">
             你想认识什么样的人？
           </label>
           <textarea
             value={rawText}
-            onChange={(e) => setRawText(e.target.value)}
-            placeholder="例如：周六下午想在三里屯找一个对独立电影感兴趣的人喝杯咖啡聊一小时，性格安静一点就好。"
-            rows={4}
+            onChange={(event) => setRawText(event.target.value)}
+            placeholder="例如：周六下午想在三里屯找一个对独立电影感兴趣的人喝咖啡聊一小时，性格安静一点就好。"
+            rows={5}
             disabled={drafting || publishing}
-            className="w-full bg-[#15150f] border border-[#26261d] rounded-xl px-4 py-3 text-sm placeholder:text-[#5e5d4a] resize-none focus:outline-none focus:border-[#C8FF80]/60"
+            className="w-full resize-none rounded-lg border border-[#26261d] bg-[#15150f] px-4 py-3 text-sm text-[#F4EFE6] outline-none placeholder:text-[#5e5d4a] focus:border-[#C8FF80]/60"
           />
           <button
             type="button"
             disabled={drafting || publishing || !rawText.trim()}
             onClick={generateDraft}
-            className="w-full px-4 py-3 rounded-xl bg-[#C8FF80] text-[#0d0d0b] text-sm font-medium hover:bg-[#b8ef70] disabled:opacity-40"
+            className="w-full rounded-lg bg-[#C8FF80] px-4 py-3 text-sm font-black text-[#0d0d0b] hover:bg-[#b8ef70] disabled:opacity-40"
           >
             {drafting
-              ? 'AI 正在整理你的需求...'
+              ? 'AI 正在生成社交卡片...'
               : draft
-                ? '重新让 AI 生成'
-                : '用 AI 生成社交卡片 →'}
+                ? '重新生成社交卡片'
+                : '用 AI 生成社交卡片'}
           </button>
           {mode && (
             <p className="text-[11px] text-[#8C8A6E]">
-              当前模式：
-              {mode === 'ai' ? (
-                <span className="text-[#C8FF80]">AI 智能模式（DeepSeek）</span>
-              ) : (
-                <span className="text-[#C7C2B0]">
-                  基础规则模式（未配置 DEEPSEEK_API_KEY 或模型不可用）
-                </span>
-              )}
-            </p>
-          )}
-          {profileSummary && (
-            <p className="text-[11px] text-[#8C8A6E]">
-              已读取你的画像 · {profileSummary}
+              当前模式：{mode === 'ai' ? 'AI 智能生成' : '本地规则兜底生成'}
             </p>
           )}
         </section>
 
         {error && (
-          <div className="text-xs text-red-300 bg-red-900/20 border border-red-500/40 rounded-md px-3 py-2">
+          <div className="mt-5 rounded-lg border border-red-500/40 bg-red-900/20 px-3 py-2 text-xs text-red-200">
             {error}
           </div>
         )}
 
-        {/* Step 2: editable card */}
         {draft && (
-          <section className="space-y-6 border-t border-[#26261d] pt-8">
-            <div className="space-y-2">
-              <div className="text-[10px] uppercase tracking-[0.3em] text-[#8C8A6E]">
-                STEP 2 · 检查并编辑
-              </div>
-              <h2 className="text-lg font-light">AI 为你整理的社交卡片</h2>
-              <p className="text-xs text-[#8C8A6E]">
-                所有可编辑字段都可以修改，确认后再发布。
+          <section className="mt-10 space-y-6 border-t border-[#26261d] pt-8">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-[#8C8A6E]">
+                发布前确认
+              </p>
+              <h2 className="mt-2 text-xl font-black text-white">
+                AI 整理出的社交卡片
+              </h2>
+              <p className="mt-1 text-xs text-[#8C8A6E]">
+                可以修改字段。发布后会自动跑一次匹配，候选人仍需你确认后才能私信或加好友。
               </p>
             </div>
 
-            <div className="space-y-3">
-              <label className="text-xs uppercase tracking-wider text-[#8C8A6E]">
-                类型
-              </label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {TYPE_OPTIONS.map((opt) => (
+            <Field label="类型">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {TYPE_OPTIONS.map((option) => (
                   <button
-                    key={opt.value}
+                    key={option.value}
                     type="button"
-                    onClick={() => updateDraft('type', opt.value)}
-                    className={`px-3 py-2 rounded-xl border text-sm transition ${
-                      draft.type === opt.value
-                        ? 'border-[#C8FF80] bg-[#C8FF80]/10 text-[#F4EFE6]'
+                    onClick={() => updateDraft('type', option.value)}
+                    className={`rounded-lg border px-3 py-2 text-sm transition ${
+                      draft.type === option.value
+                        ? 'border-[#C8FF80] bg-[#C8FF80]/10 text-white'
                         : 'border-[#26261d] text-[#C7C2B0] hover:border-[#6B7A5A]'
                     }`}
                   >
-                    {opt.label}
+                    {option.label}
                   </button>
                 ))}
               </div>
-            </div>
+            </Field>
 
             <Field label="标题">
               <input
                 value={draft.title}
-                onChange={(e) => updateDraft('title', e.target.value)}
+                onChange={(event) => updateDraft('title', event.target.value)}
                 className="input"
               />
             </Field>
 
-            <Field label="需求描述">
+            <Field label="描述">
               <textarea
                 value={draft.description}
-                onChange={(e) => updateDraft('description', e.target.value)}
+                onChange={(event) => updateDraft('description', event.target.value)}
                 rows={3}
                 className="input resize-none"
               />
             </Field>
 
-            <Field label="社交目标 (socialGoal)">
-              <input
-                value={draft.socialGoal}
-                onChange={(e) => updateDraft('socialGoal', e.target.value)}
-                placeholder="一起约练 / 兴趣交流 / 拓展朋友圈"
-                className="input"
-              />
-            </Field>
-
-            <Field label="地点偏好 (locationPreference)">
-              <input
-                value={draft.locationPreference}
-                onChange={(e) =>
-                  updateDraft('locationPreference', e.target.value)
-                }
-                placeholder="室内 / 公园 / 城市步道"
-                className="input"
-              />
-            </Field>
-
-            <Field label="时间偏好 (timePreference)">
-              <input
-                value={draft.timePreference}
-                onChange={(e) => updateDraft('timePreference', e.target.value)}
-                placeholder="工作日晚上 / 周末下午"
-                className="input"
-              />
-            </Field>
-
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <Field label="城市">
                 <input
                   value={draft.city}
-                  onChange={(e) => updateDraft('city', e.target.value)}
-                  placeholder="北京"
+                  onChange={(event) => updateDraft('city', event.target.value)}
                   className="input"
                 />
               </Field>
-              <Field label={`半径 (${draft.radiusKm} km)`}>
+              <Field label={`半径 ${draft.radiusKm} km`}>
                 <input
                   type="range"
                   min={1}
                   max={50}
                   value={draft.radiusKm}
-                  onChange={(e) =>
-                    updateDraft('radiusKm', Number(e.target.value))
+                  onChange={(event) =>
+                    updateDraft('radiusKm', Number(event.target.value))
                   }
                   className="mt-3 w-full accent-[#C8FF80]"
                 />
               </Field>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="开始时间（可选）">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="开始时间">
                 <input
                   type="datetime-local"
-                  value={draft.timeStart ?? ''}
-                  onChange={(e) =>
+                  value={toLocalDateTimeValue(draft.timeStart)}
+                  onChange={(event) =>
                     updateDraft(
                       'timeStart',
-                      e.target.value
-                        ? new Date(e.target.value).toISOString()
+                      event.target.value
+                        ? new Date(event.target.value).toISOString()
                         : undefined,
                     )
                   }
                   className="input"
                 />
               </Field>
-              <Field label="结束时间（可选）">
+              <Field label="结束时间">
                 <input
                   type="datetime-local"
-                  value={draft.timeEnd ?? ''}
-                  onChange={(e) =>
+                  value={toLocalDateTimeValue(draft.timeEnd)}
+                  onChange={(event) =>
                     updateDraft(
                       'timeEnd',
-                      e.target.value
-                        ? new Date(e.target.value).toISOString()
+                      event.target.value
+                        ? new Date(event.target.value).toISOString()
                         : undefined,
                     )
                   }
@@ -669,89 +385,101 @@ export function SocialRequestAiPage() {
               </Field>
             </div>
 
-            <Field label="兴趣标签（5-8 个，逗号或顿号分隔）">
+            <Field label="社交目标">
+              <input
+                value={draft.socialGoal}
+                onChange={(event) => updateDraft('socialGoal', event.target.value)}
+                placeholder="一起约练 / 兴趣交流 / 拓展朋友"
+                className="input"
+              />
+            </Field>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="地点偏好">
+                <input
+                  value={draft.locationPreference}
+                  onChange={(event) =>
+                    updateDraft('locationPreference', event.target.value)
+                  }
+                  placeholder="室内 / 公园 / 城市步道"
+                  className="input"
+                />
+              </Field>
+              <Field label="时间偏好">
+                <input
+                  value={draft.timePreference}
+                  onChange={(event) => updateDraft('timePreference', event.target.value)}
+                  placeholder="工作日晚间 / 周末下午"
+                  className="input"
+                />
+              </Field>
+            </div>
+
+            <Field label="兴趣标签">
               <input
                 value={tagsText}
-                onChange={(e) => setTagsText(e.target.value)}
-                placeholder="独立电影、咖啡、摄影"
+                onChange={(event) => setTagsText(event.target.value)}
+                placeholder="跑步、咖啡、电影"
                 className="input"
               />
             </Field>
 
-            <Field label="性格偏好 personalityPreference（逗号或顿号分隔）">
+            <Field label="性格偏好">
               <input
                 value={personalityText}
-                onChange={(e) => {
-                  setPersonalityText(e.target.value);
-                  updateDraft(
-                    'personalityPreference',
-                    e.target.value
-                      .split(/[,，、\s]+/)
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                  );
+                onChange={(event) => {
+                  setPersonalityText(event.target.value);
+                  updateDraft('personalityPreference', parseList(event.target.value));
                 }}
-                placeholder="安静、尊重边界"
+                placeholder="安静、守时、尊重边界"
                 className="input"
               />
             </Field>
 
-            {/* Read-only safety / privacy panels */}
-            <div className="rounded-xl border border-amber-400/30 bg-amber-400/5 p-4 space-y-2">
-              <div className="text-xs font-medium text-amber-300">
-                ⚠️ 线下安全提醒
-              </div>
-              <ul className="text-xs text-[#E7DFC9] space-y-1 list-disc list-inside leading-6">
-                {draft.riskNotes.length === 0 && (
-                  <li>建议首次见面选择白天、人流量大的公共场所。</li>
-                )}
-                {draft.riskNotes.map((r, i) => (
-                  <li key={i}>{r}</li>
-                ))}
-              </ul>
-            </div>
+            <InfoList
+              tone="amber"
+              title="安全提醒"
+              items={
+                draft.riskNotes.length
+                  ? draft.riskNotes
+                  : ['首次见面建议选择白天、人流量大的公共场所。']
+              }
+            />
 
-            <div className="rounded-xl border border-sky-400/30 bg-sky-400/5 p-4 space-y-2">
-              <div className="text-xs font-medium text-sky-300">
-                🔒 隐私提醒
-              </div>
-              <ul className="text-xs text-[#E7DFC9] space-y-1 list-disc list-inside leading-6">
-                {draft.privacyNotes.length === 0 && (
-                  <li>不要在公开需求中填写精确住址、手机号或微信号。</li>
-                )}
-                {draft.privacyNotes.map((p, i) => (
-                  <li key={i}>{p}</li>
-                ))}
-              </ul>
-            </div>
+            <InfoList
+              tone="sky"
+              title="隐私提醒"
+              items={
+                draft.privacyNotes.length
+                  ? draft.privacyNotes
+                  : ['不要在公开卡片中填写精确住址、手机号或微信号。']
+              }
+            />
 
-            {/* Pre-publish confirmation checklist */}
-            <div className="rounded-xl border border-[#26261d] bg-[#15150f] p-4 space-y-3">
-              <div className="text-xs uppercase tracking-wider text-[#8C8A6E]">
-                STEP 3 · 发布前确认
+            <div className="rounded-lg border border-[#26261d] bg-[#15150f] p-4">
+              <div className="text-xs font-black uppercase tracking-[0.16em] text-[#8C8A6E]">
+                发布前确认
               </div>
-              <div className="space-y-2">
-                {REQUIRED_CHECKS.map((c) => (
+              <div className="mt-3 space-y-2">
+                {REQUIRED_CHECKS.map((item) => (
                   <label
-                    key={c.id}
-                    className="flex items-start gap-2 text-xs text-[#E7DFC9] cursor-pointer"
+                    key={item.id}
+                    className="flex cursor-pointer items-start gap-2 text-xs text-[#E7DFC9]"
                   >
                     <input
                       type="checkbox"
-                      checked={!!checks[c.id]}
-                      onChange={(e) =>
-                        setChecks((prev) => ({
-                          ...prev,
-                          [c.id]: e.target.checked,
+                      checked={Boolean(checks[item.id])}
+                      onChange={(event) =>
+                        setChecks((current) => ({
+                          ...current,
+                          [item.id]: event.target.checked,
                         }))
                       }
                       className="mt-0.5 accent-[#C8FF80]"
                     />
                     <span>
-                      {c.label}
-                      {c.required && (
-                        <span className="text-amber-300/80 ml-1">*</span>
-                      )}
+                      {item.label}
+                      {item.required && <span className="ml-1 text-amber-300">*</span>}
                     </span>
                   </label>
                 ))}
@@ -762,50 +490,36 @@ export function SocialRequestAiPage() {
               type="button"
               disabled={publishing || !allRequiredChecked}
               onClick={publish}
-              className="w-full px-4 py-3 rounded-xl bg-[#C8FF80] text-[#0d0d0b] text-sm font-medium hover:bg-[#b8ef70] disabled:opacity-40"
+              className="w-full rounded-lg bg-[#C8FF80] px-4 py-3 text-sm font-black text-[#0d0d0b] hover:bg-[#b8ef70] disabled:opacity-40"
             >
-              {publishing
-                ? '正在发布并匹配...'
-                : allRequiredChecked
-                  ? '确认发布并匹配候选人 →'
-                  : '请先勾选必要项'}
+              {publishing ? '正在发布并匹配...' : '确认发布并匹配候选人'}
             </button>
-            <p className="text-[11px] text-[#5e5d4a] text-center">
-              发布后会自动跑一次匹配，下一页可以查看 AI 推荐的候选人、发送邀约、并发起活动。
-            </p>
           </section>
         )}
       </div>
 
-      {/* Local utility classes to keep the markup compact. */}
       <style>{`
         .input {
           width: 100%;
-          background: #15150f;
           border: 1px solid #26261d;
           border-radius: 8px;
-          padding: 8px 12px;
-          font-size: 13px;
+          background: #15150f;
+          padding: 9px 12px;
           color: #F4EFE6;
+          font-size: 13px;
+          outline: none;
         }
+        .input:focus { border-color: rgba(200, 255, 128, 0.6); }
         .input::placeholder { color: #5e5d4a; }
-        .input:focus { outline: none; border-color: rgba(200,255,128,0.6); }
-        textarea.input { border-radius: 12px; padding: 10px 14px; }
       `}</style>
     </div>
   );
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="space-y-1">
-      <label className="text-xs uppercase tracking-wider text-[#8C8A6E]">
+      <label className="text-xs font-bold uppercase tracking-[0.14em] text-[#8C8A6E]">
         {label}
       </label>
       {children}
@@ -813,20 +527,74 @@ function Field({
   );
 }
 
-function profileFilled(p: UserSocialProfile | null): boolean {
-  if (!p) return false;
-  return !!(
-    p.gender ||
-    p.ageRange ||
-    p.city ||
-    p.nearbyArea ||
-    (p.fitnessGoals && p.fitnessGoals.length) ||
-    (p.interestTags && p.interestTags.length) ||
-    (p.availableTimes && p.availableTimes.length) ||
-    p.socialPreference ||
-    p.rejectRules ||
-    p.privacyBoundary
+function InfoList({
+  title,
+  items,
+  tone,
+}: {
+  title: string;
+  items: string[];
+  tone: 'amber' | 'sky';
+}) {
+  const toneClass =
+    tone === 'amber'
+      ? 'border-amber-400/30 bg-amber-400/5 text-amber-200'
+      : 'border-sky-400/30 bg-sky-400/5 text-sky-200';
+
+  return (
+    <div className={`rounded-lg border p-4 ${toneClass}`}>
+      <div className="text-xs font-black">{title}</div>
+      <ul className="mt-2 list-inside list-disc space-y-1 text-xs leading-6 text-[#E7DFC9]">
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
   );
+}
+
+function parseList(value: string): string[] {
+  return value
+    .split(/[,，、\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildProfileSummary(profile: UserSocialProfile | null): string {
+  if (!profile) return '';
+  const parts = [
+    profile.city ? `城市：${profile.city}` : '',
+    profile.nearbyArea ? `常活动区域：${profile.nearbyArea}` : '',
+    profile.ageRange ? `年龄段：${profile.ageRange}` : '',
+    profile.interestTags?.length
+      ? `兴趣：${profile.interestTags.slice(0, 5).join('、')}`
+      : '',
+    profile.fitnessGoals?.length
+      ? `目标：${profile.fitnessGoals.slice(0, 3).join('、')}`
+      : '',
+    profile.privacyBoundary ? `隐私边界：${profile.privacyBoundary}` : '',
+  ].filter(Boolean);
+  return parts.join(' · ');
+}
+
+function toLocalDateTimeValue(value?: string): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function formatApiError(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    const message = err.message || fallback;
+    if (err.status === 401 || err.status === 403) {
+      return `${message}（请重新登录或检查权限）`;
+    }
+    if (err.status >= 500) return `${message}（服务暂时不可用）`;
+    return message;
+  }
+  return err instanceof Error ? err.message : fallback;
 }
 
 export default SocialRequestAiPage;

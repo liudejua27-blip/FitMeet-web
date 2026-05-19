@@ -39,7 +39,7 @@ export enum CandidateMatchLevel {
 /**
  * Persisted scored candidate for a UserSocialRequest. Drives the
  * "match review" surface and prevents recomputing the algorithm on
- * every refresh / "换一批".
+ * every refresh or "try another" action.
  */
 @Entity('social_request_candidates')
 @Index(['socialRequestId', 'status'])

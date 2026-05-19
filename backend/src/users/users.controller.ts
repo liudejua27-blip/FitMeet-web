@@ -126,7 +126,13 @@ export class UsersController {
   @Post('me/social-profile/ai-save')
   saveAiSocialProfileDraft(
     @Request() req: AuthenticatedRequest,
-    @Body() body: { profile?: AiProfileBuilderCard; enableMatching?: boolean },
+    @Body()
+    body: {
+      profile?: AiProfileBuilderCard;
+      enableMatching?: boolean;
+      sensitiveTagsConfirmed?: boolean;
+      sensitiveTagDecisions?: Record<string, 'confirmed' | 'rejected' | 'hidden'>;
+    },
   ) {
     return this.socialProfileService.saveAiDraft(req.user.id, body ?? {});
   }

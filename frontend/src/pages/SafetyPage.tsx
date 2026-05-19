@@ -223,7 +223,7 @@ export const SafetyPage = memo(function SafetyPage() {
             遇到了问题？
           </h2>
           <p className="mt-3 text-sm text-textMuted">
-            App 内一键举报 · 邮件 safety@ourfitmeet.com · 紧急情况请直接拨打 110
+            App 内一键举报 · 邮箱 15253005312@163.com · 紧急情况请直接拨打 110
           </p>
           <div className="mt-6 flex flex-wrap justify-center gap-3">
             <Link

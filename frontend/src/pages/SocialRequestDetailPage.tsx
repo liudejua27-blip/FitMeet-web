@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import * as api from '../api/client';
+import { activitiesApi, type ActivityType } from '../api/activitiesApi';
 import {
   socialRequestsApi,
   type CandidateView,
   type SocialRequestSummary,
 } from '../api/socialRequestsApi';
-import { activitiesApi } from '../api/activitiesApi';
-import { SocialRequestCard } from '../components/agent-loop/SocialRequestCard';
 import { CandidateMatchCard } from '../components/agent-loop/CandidateMatchCard';
+import { SocialRequestCard } from '../components/agent-loop/SocialRequestCard';
 
-const TYPE_TO_ACTIVITY: Record<string, string> = {
+const TYPE_TO_ACTIVITY: Record<string, ActivityType> = {
   running_partner: 'running',
   fitness_partner: 'fitness',
   dog_walking: 'dog_walking',
@@ -35,14 +35,16 @@ export function SocialRequestDetailPage() {
 
   useEffect(() => {
     let cancelled = false;
+
     api
       .request<{ mode?: string }>('/agent/permissions')
-      .then((r) => {
-        if (!cancelled) setAutopilotMode(r?.mode ?? null);
+      .then((result) => {
+        if (!cancelled) setAutopilotMode(result?.mode ?? null);
       })
       .catch(() => {
         if (!cancelled) setAutopilotMode(null);
       });
+
     return () => {
       cancelled = true;
     };
@@ -51,25 +53,28 @@ export function SocialRequestDetailPage() {
   const autopilotActive =
     autopilotMode !== null &&
     ['normal', 'standard', 'open'].includes(autopilotMode);
+
   const autopilotHintShort = autopilotActive
-    ? 'AI 将持续帮你寻找候选人。'
-    : '已停在你的控制下，可手动触发匹配或继续完善画像后再放权给 AI。';
+    ? '潜意识循环会继续帮你寻找候选人，有合适人选会进入待确认。'
+    : '当前由你手动控制。你可以继续完善 AI 画像，或在 Agent 托管中开启自动模式。';
+
   const autopilotHintEmpty = autopilotActive
-    ? '建议补充画像、放宽城市/距离/时间条件；AI 自动驾驶也会稍后继续寻找。'
-    : '建议补充画像、放宽城市/距离/时间条件；或在「Agent Gateway」开启自动模式，让 AI 持续帮你寻找。';
+    ? '建议补充 AI 画像，放宽城市、距离或时间条件。潜意识循环也会稍后继续寻找。'
+    : '建议补充 AI 画像，放宽城市、距离或时间条件；也可以在 Agent 托管里开启自动模式。';
 
   const load = useCallback(async () => {
     if (!Number.isFinite(reqId)) return;
+
     try {
-      const [s, c] = await Promise.all([
+      const [request, candidateResult] = await Promise.all([
         socialRequestsApi.get(reqId),
         socialRequestsApi.candidates(reqId),
       ]);
-      setSummary(s);
-      setCandidates(c.candidates);
+      setSummary(request);
+      setCandidates(candidateResult.candidates);
       setError(null);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '加载失败');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '加载社交卡片失败');
     }
   }, [reqId]);
 
@@ -79,53 +84,62 @@ export function SocialRequestDetailPage() {
 
   const rerunMatch = useCallback(async () => {
     setBusy(true);
+    setError(null);
+    setInfo(null);
+
     try {
-      const r = await socialRequestsApi.runMatch(reqId, 5);
-      setCandidates(r.candidates);
-      setInfo('已为你重新计算候选人');
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '匹配失败');
+      const result = await socialRequestsApi.runMatch(reqId, 5);
+      setCandidates(result.candidates);
+      setInfo('已重新计算候选人');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '重新匹配失败');
     } finally {
       setBusy(false);
     }
   }, [reqId]);
 
   const sendInvite = useCallback(
-    async (cand: CandidateView, message: string) => {
+    async (candidate: CandidateView, message: string) => {
       setBusy(true);
       setError(null);
       setInfo(null);
+
       try {
-        const conv = await api.startConversation(cand.userId);
-        await api.sendMessage(conv.conversationId, message);
-        if (cand.candidateRecordId) {
+        const conversation = await api.startConversation(candidate.userId);
+        await api.sendMessage(conversation.conversationId, message);
+
+        if (candidate.candidateRecordId) {
           try {
             await socialRequestsApi.markCandidateMessaged(
               reqId,
-              cand.candidateRecordId,
+              candidate.candidateRecordId,
             );
-            setCandidates((prev) =>
-              prev.map((c) =>
-                c.candidateRecordId === cand.candidateRecordId
-                  ? { ...c, status: 'messaged' }
-                  : c,
+            setCandidates((current) =>
+              current.map((item) =>
+                item.candidateRecordId === candidate.candidateRecordId
+                  ? { ...item, status: 'messaged' }
+                  : item,
               ),
             );
           } catch {
-            // best-effort
+            // Candidate status sync is best effort; the message already went out.
           }
         }
+
         try {
           const updated = await socialRequestsApi.update(reqId, {
             status: 'chatting',
           });
           setSummary(updated);
         } catch {
-          // status update is best-effort
+          // Request status sync is best effort; chat is the important action.
         }
-        navigate(`/messages?conversationId=${encodeURIComponent(conv.conversationId)}`);
-      } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : '发送失败');
+
+        navigate(
+          `/messages?conversationId=${encodeURIComponent(conversation.conversationId)}`,
+        );
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : '发送消息失败');
       } finally {
         setBusy(false);
       }
@@ -134,39 +148,37 @@ export function SocialRequestDetailPage() {
   );
 
   const createActivity = useCallback(
-    async (cand: CandidateView) => {
+    async (candidate: CandidateView) => {
       if (!summary) return;
+
       setBusy(true);
       setError(null);
+      setInfo(null);
+
       try {
         const activity = await activitiesApi.create({
-          type:
-            (TYPE_TO_ACTIVITY[summary.type] as
-              | 'running'
-              | 'fitness'
-              | 'dog_walking'
-              | 'coffee_chat'
-              | 'city_walk'
-              | 'custom') ?? 'custom',
-          title: summary.title || `与 ${cand.nickname} 的活动`,
+          type: TYPE_TO_ACTIVITY[summary.type] ?? 'custom',
+          title: `和 ${candidate.nickname} 的${summary.title || '约练活动'}`,
           description: summary.description,
           city: summary.city,
           startTime: summary.timeStart ?? undefined,
           socialRequestId: summary.id,
-          matchedCandidateId: cand.candidateRecordId,
-          invitedUserId: cand.userId,
+          matchedCandidateId: candidate.candidateRecordId,
+          invitedUserId: candidate.userId,
         });
+
         try {
           const updated = await socialRequestsApi.update(summary.id, {
             status: 'activity_created',
           });
           setSummary(updated);
         } catch {
-          // status update is best-effort
+          // Activity creation succeeded; request status can be repaired later.
         }
+
         navigate(`/activity/${activity.id}`);
-      } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : '创建活动失败');
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : '创建约练活动失败');
       } finally {
         setBusy(false);
       }
@@ -181,21 +193,22 @@ export function SocialRequestDetailPage() {
 
   if (!Number.isFinite(reqId)) {
     return (
-      <div className="min-h-screen bg-[#0d0d0b] text-[#F4EFE6] p-8">
-        无效的社交任务 ID
+      <div className="min-h-screen bg-[#0d0d0b] p-8 text-[#F4EFE6]">
+        无效的社交卡片 ID
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-[#0d0d0b] text-[#F4EFE6]">
-      <div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
+      <div className="mx-auto max-w-3xl space-y-6 px-6 py-8">
         <div className="flex items-center justify-between">
           <button
+            type="button"
             onClick={() => navigate(-1)}
             className="text-xs text-[#8C8A6E] hover:text-[#C8FF80]"
           >
-            ← 返回
+            返回
           </button>
           <div className="text-[10px] uppercase tracking-[0.3em] text-[#8C8A6E]">
             STEP 2 / 7 · 候选人匹配
@@ -205,90 +218,94 @@ export function SocialRequestDetailPage() {
         {summary ? (
           <div className="space-y-3">
             {searchParams.get('published') === '1' && (
-              <div className="text-xs text-[#C8FF80] bg-[#C8FF80]/10 border border-[#C8FF80]/30 rounded-md px-3 py-2 space-y-1">
+              <div className="space-y-1 rounded-md border border-[#C8FF80]/30 bg-[#C8FF80]/10 px-3 py-2 text-xs text-[#C8FF80]">
                 <div>
                   发布成功
                   {searchParams.get('synced') === '1'
                     ? ' · 已同步到大厅'
-                    : ' · 同步大厅中…'}
+                    : ' · 大厅同步处理中'}
                   {searchParams.get('matched') !== null &&
-                    ` · 已开始匹配（候选 ${searchParams.get('matched') ?? 0} 位）`}
+                    ` · 已开始匹配，候选人 ${searchParams.get('matched') ?? 0} 位`}
                 </div>
                 <div className="text-[11px] text-[#C7C2B0]">
                   {autopilotHintShort}
                 </div>
               </div>
             )}
+
             <SocialRequestCard request={summary} />
-            <div className="flex items-center justify-between rounded-xl border border-[#26261d] bg-[#15150f] px-4 py-3 text-xs text-[#C7C2B0]">
-              <span>已同步到大厅</span>
+
+            <div className="flex items-center justify-between rounded-lg border border-[#26261d] bg-[#15150f] px-4 py-3 text-xs text-[#C7C2B0]">
+              <span>这张卡片已进入大厅和匹配池</span>
               <Link to="/hall" className="text-[#C8FF80] hover:text-[#b8ef70]">
-                查看大厅展示 →
+                查看大厅展示
               </Link>
             </div>
           </div>
         ) : (
-          <div className="text-xs text-[#8C8A6E]">加载任务卡...</div>
+          <div className="text-xs text-[#8C8A6E]">正在加载社交卡片...</div>
         )}
 
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm tracking-[0.2em] uppercase text-[#8C8A6E]">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-sm uppercase tracking-[0.2em] text-[#8C8A6E]">
             FitMeet 为你匹配到 {sortedCandidates.length} 位候选人
           </h2>
           <button
+            type="button"
             disabled={busy}
             onClick={rerunMatch}
-            className="text-xs px-3 py-1.5 rounded-md border border-[#26261d] text-[#C7C2B0] hover:border-[#C8FF80]/40 hover:text-[#C8FF80]"
+            className="rounded-md border border-[#26261d] px-3 py-1.5 text-xs text-[#C7C2B0] hover:border-[#C8FF80]/40 hover:text-[#C8FF80] disabled:opacity-50"
           >
             重新匹配
           </button>
         </div>
 
         {error && (
-          <div className="text-xs text-red-300 bg-red-900/20 border border-red-500/40 rounded-md px-3 py-2">
+          <div className="rounded-md border border-red-500/40 bg-red-900/20 px-3 py-2 text-xs text-red-300">
             {error}
           </div>
         )}
         {info && (
-          <div className="text-xs text-[#C8FF80] bg-[#C8FF80]/10 border border-[#C8FF80]/30 rounded-md px-3 py-2">
+          <div className="rounded-md border border-[#C8FF80]/30 bg-[#C8FF80]/10 px-3 py-2 text-xs text-[#C8FF80]">
             {info}
           </div>
         )}
 
         {sortedCandidates.length === 0 ? (
-          <div className="rounded-2xl border border-[#26261d] bg-[#15150f] p-8 text-center text-sm text-[#8C8A6E] space-y-3">
-            <div className="text-[#E7DFC9]">当前候选人不足。</div>
+          <div className="space-y-3 rounded-lg border border-[#26261d] bg-[#15150f] p-8 text-center text-sm text-[#8C8A6E]">
+            <div className="text-[#E7DFC9]">当前候选人不足</div>
             <div className="text-xs leading-6">{autopilotHintEmpty}</div>
             <button
+              type="button"
               onClick={rerunMatch}
-              className="text-xs px-3 py-1.5 rounded-md border border-[#C8FF80]/40 text-[#C8FF80]"
+              disabled={busy}
+              className="rounded-md border border-[#C8FF80]/40 px-3 py-1.5 text-xs text-[#C8FF80] disabled:opacity-50"
             >
               立即重新匹配
             </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4">
-            {sortedCandidates.map((c) => (
-              <div key={c.userId} className="space-y-2">
-                <CandidateMatchCard
-                  candidate={c}
-                  busy={busy}
-                  hasConversation={c.status === 'messaged'}
-                  onSendInvite={(msg) => sendInvite(c, msg)}
-                  onViewProfile={() => navigate(`/user/${c.userId}`)}
-                  onCreateActivity={() => createActivity(c)}
-                  onSkip={() =>
-                    setCandidates((arr) =>
-                      arr.filter((x) => x.userId !== c.userId),
-                    )
-                  }
-                />
-              </div>
+            {sortedCandidates.map((candidate) => (
+              <CandidateMatchCard
+                key={candidate.userId}
+                candidate={candidate}
+                busy={busy}
+                hasConversation={candidate.status === 'messaged'}
+                onSendInvite={(message) => sendInvite(candidate, message)}
+                onViewProfile={() => navigate(`/user/${candidate.userId}`)}
+                onCreateActivity={() => createActivity(candidate)}
+                onSkip={() =>
+                  setCandidates((current) =>
+                    current.filter((item) => item.userId !== candidate.userId),
+                  )
+                }
+              />
             ))}
           </div>
         )}
 
-        <div className="text-center text-[11px] text-[#5e5d4a] pt-4 space-x-3">
+        <div className="space-x-3 pt-4 text-center text-[11px] text-[#5e5d4a]">
           <Link to="/messages" className="hover:text-[#C8FF80]">
             站内消息
           </Link>

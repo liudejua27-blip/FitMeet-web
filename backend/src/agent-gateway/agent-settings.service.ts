@@ -60,9 +60,13 @@ export class AgentSettingsService {
       where: { userId, agentConnectionId: IsNull() },
     });
     if (!row) {
-      row = await this.repo.save(
-        this.repo.create({ userId, agentConnectionId: null }),
-      );
+      row = this.repo.create({
+        userId,
+        agentConnectionId: null,
+        mode: AgentSettingsMode.Open,
+      });
+      this.applyModeDefaults(row, AgentSettingsMode.Open);
+      row = await this.repo.save(row);
     }
     return row;
   }
@@ -146,11 +150,13 @@ export class AgentSettingsService {
       row.allowAutoReply = true;
       row.allowCreateActivity = true;
       row.allowJoinActivity = true;
-      row.allowContactExchange = false;
+      row.allowShareLocation = true;
+      row.allowUploadProof = true;
+      row.allowContactExchange = true;
       row.requireApprovalForAll = false;
       row.requireApprovalForFirstMessage = false;
       row.requireApprovalForOfflineMeeting = false;
-      row.requireApprovalForPhotoUpload = true;
+      row.requireApprovalForPhotoUpload = false;
     }
   }
 }

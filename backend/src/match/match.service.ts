@@ -25,12 +25,13 @@ import {
   AgentActionStatus,
   AgentActionType,
 } from '../agent-gateway/entities/agent-action-log.entity';
+import { CompatibilityScorerService } from './compatibility-scorer.service';
 
 /** Default time window when a request has no timeStart/timeEnd. */
 const DEFAULT_INACTIVE_DAYS = 30;
 const HARD_FILTER_USER_PAGE = 200;
 
-/** Coarse mapping from SocialRequestType → activity tag for category match. */
+/** Coarse mapping from SocialRequestType to activity tag for category match. */
 const TYPE_TO_TAG: Record<SocialRequestType, string> = {
   [SocialRequestType.RunningPartner]: 'running',
   [SocialRequestType.FitnessPartner]: 'fitness',
@@ -41,7 +42,7 @@ const TYPE_TO_TAG: Record<SocialRequestType, string> = {
   [SocialRequestType.Custom]: '',
 };
 
-/** "Adjacent" types — partial credit for activityType match. */
+/** Adjacent types give partial credit for activityType matches. */
 const RELATED_TYPES: Partial<Record<SocialRequestType, SocialRequestType[]>> = {
   [SocialRequestType.RunningPartner]: [
     SocialRequestType.FitnessPartner,
@@ -124,14 +125,15 @@ export class MatchService {
     private readonly safetyService: SafetyService,
     private readonly ai: AIService,
     private readonly actionLogs: AgentActionLogService,
+    private readonly compatibility: CompatibilityScorerService,
   ) {}
 
-  // ───────────────────────────────────────────────
+  // Public entry points
   //  PUBLIC ENTRY POINTS
-  // ───────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
 
   /**
-   * Quick "search nearby people" — does not persist candidates.
+   * Quick search nearby people; does not persist candidates.
    * Used by `POST /api/agent/nearby/search`.
    */
   async searchNearby(input: NearbySearchInput): Promise<MatchedCandidateView[]> {
@@ -292,6 +294,79 @@ export class MatchService {
       // templates when DEEPSEEK_API_KEY is unset, so this never breaks the
       // matching pipeline.
       try {
+        const aiScore = await this.ai.rescoreCompatibility({
+          baseScore: view.score,
+          request: {
+            title: request.title,
+            city: request.city,
+            activityType: request.activityType,
+            interestTags: request.interestTags ?? [],
+            timePreference:
+              typeof request.metadata?.timePreference === 'string'
+                ? request.metadata.timePreference
+                : '',
+            socialGoal:
+              typeof request.metadata?.socialGoal === 'string'
+                ? request.metadata.socialGoal
+                : '',
+            personalityPreference: Array.isArray(
+              request.metadata?.personalityPreference,
+            )
+              ? (request.metadata.personalityPreference as string[])
+              : [],
+          },
+          ownerProfile: ownerProfile
+            ? {
+                city: ownerProfile.city,
+                publicTags: [
+                  ...(ownerProfile.interestTags ?? []),
+                  ...(ownerProfile.fitnessGoals ?? []),
+                  ...(ownerProfile.traits ?? []),
+                ],
+                traits: ownerProfile.traits ?? [],
+                preferredTraits: ownerProfile.preferredTraits ?? [],
+                availability: ownerProfile.availableTimes ?? [],
+              }
+            : null,
+          candidate: {
+            nickname: c.user.name,
+            city: c.socialProfile?.city || c.user.city || '',
+            publicTags: [
+              ...(c.user.interestTags ?? []),
+              ...(c.socialProfile?.interestTags ?? []),
+              ...(c.socialProfile?.fitnessGoals ?? []),
+              ...(c.socialProfile?.lifestyleTags ?? []),
+              ...(c.socialProfile?.socialScenes ?? []),
+            ],
+            traits: c.socialProfile?.traits ?? [],
+            commonTags: view.commonTags,
+            verified: c.user.verified,
+            acceptsAgentMessages: c.pref?.acceptAgentMessages ?? null,
+          },
+          deterministicReasons: view.reasons,
+          scoreBreakdown: view.scoreBreakdown,
+        });
+        view.score = aiScore.score;
+        view.level = this.bandLevel(aiScore.score);
+        view.scoreBreakdown = {
+          ...view.scoreBreakdown,
+          aiSecondPass: aiScore.score - c.total,
+          aiConfidence: Math.round(aiScore.confidence * 100),
+        };
+        if (aiScore.publicReason && !view.reasons.includes(aiScore.publicReason)) {
+          view.reasons = [aiScore.publicReason, ...view.reasons];
+        }
+        if (aiScore.reasons.length > 0) {
+          view.reasons = Array.from(new Set([...view.reasons, ...aiScore.reasons]));
+        }
+        if (aiScore.riskWarnings.length > 0) {
+          view.risk = {
+            ...view.risk,
+            warnings: Array.from(
+              new Set([...view.risk.warnings, ...aiScore.riskWarnings]),
+            ),
+          };
+        }
         const aiMessage = await this.ai.generateInviteMessage(
           {
             title: request.title,
@@ -386,7 +461,7 @@ export class MatchService {
     };
   }
 
-  /** GET /api/social-requests/:id/candidates — owner only. */
+  /** GET /api/social-requests/:id/candidates, owner only. */
   async listCandidates(
     requestId: number,
     actingUserId: number,
@@ -419,7 +494,7 @@ export class MatchService {
 
   /**
    * Mark a candidate row as `messaged` after the owner sends them an invite.
-   * Owner-only. Idempotent: only advances suggested/approved → messaged.
+   * Owner-only. Idempotent: only advances suggested/approved to messaged.
    */
   async markCandidateMessaged(
     requestId: number,
@@ -469,9 +544,9 @@ export class MatchService {
     return { id: row.id, status: row.status };
   }
 
-  // ───────────────────────────────────────────────
+  // Candidate scoring
   //  HARD FILTERING
-  // ───────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
 
   private async fetchCandidatePool(input: {
     excludeUserIds: Set<number>;
@@ -518,9 +593,9 @@ export class MatchService {
     return new Map(profiles.map((p) => [p.userId, p]));
   }
 
-  // ───────────────────────────────────────────────
+  // Shared scorer inputs
   //  SCORING (100-point scale)
-  // ───────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
 
   private scoreCandidates(
     users: User[],
@@ -556,11 +631,13 @@ export class MatchService {
         ...(ctx.personalityPreference ?? []),
         ctx.socialGoal ?? '',
       ]
-        .map((t) => t.trim().toLowerCase())
+        .flatMap((tag) => this.expandMatchTag(tag))
         .filter(Boolean),
     );
     const typeTag = ctx.type ? TYPE_TO_TAG[ctx.type] : '';
-    if (typeTag) desiredTags.add(typeTag);
+    if (typeTag) {
+      this.expandMatchTag(typeTag).forEach((tag) => desiredTags.add(tag));
+    }
 
     const out: CandidateScore[] = [];
     for (const user of users) {
@@ -583,7 +660,7 @@ export class MatchService {
       const warnings: string[] = [];
       const candidateCity = (socialProfile?.city || user.city || '').trim();
 
-      // 1) Distance — 20
+      // 1) Distance, max 20
       const distanceKm = this.computeDistanceKm(
         ctx.ownerLat,
         ctx.ownerLng,
@@ -594,16 +671,16 @@ export class MatchService {
       const distScore = this.scoreDistance(distanceKm, ctx.radiusKm);
       breakdown.distance = distScore;
       if (distanceKm == null && ctx.ownerCity && candidateCity === ctx.ownerCity) {
-        reasons.push(`同在 ${candidateCity}，距离待补全`);
+        reasons.push(`Same city: ${candidateCity}. Distance needs coordinates.`);
       } else if (distanceKm != null) {
-        reasons.push(`距离 ${distanceKm.toFixed(1)}km，符合 ${ctx.radiusKm}km 范围`);
+        reasons.push(`Distance ${distanceKm.toFixed(1)}km within ${ctx.radiusKm}km preference.`);
       }
       if (
         ctx.locationPreference &&
         socialProfile?.nearbyArea &&
         ctx.locationPreference.includes(socialProfile.nearbyArea)
       ) {
-        reasons.push(`常活动区域匹配：${socialProfile.nearbyArea}`);
+        reasons.push(`Preferred nearby area matches: ${socialProfile.nearbyArea}.`);
       }
 
       // Hard filter: clearly out of radius and we have a real distance.
@@ -616,8 +693,8 @@ export class MatchService {
         continue;
       }
 
-      // 2) Time — 20
-      const timeScore = this.scoreTime(
+      // 2) Time, max 20
+      const rawTimeScore = this.scoreTime(
         ctx.timeStart,
         ctx.timeEnd,
         user,
@@ -625,73 +702,82 @@ export class MatchService {
         socialProfile,
         ctx.timePreference,
       );
+      const timeScore = Math.round(rawTimeScore * 0.75);
       breakdown.time = timeScore;
-      if (timeScore >= 20) {
-        reasons.push('时间窗口完全重合');
-      } else if (timeScore >= 12) {
-        reasons.push('时间窗口部分重合');
-      } else if (timeScore >= 6) {
-        reasons.push('当天有空');
+      if (rawTimeScore >= 20) {
+        reasons.push('Time window is a strong match.');
+      } else if (rawTimeScore >= 12) {
+        reasons.push('Time window partially matches.');
+      } else if (rawTimeScore >= 6) {
+        reasons.push('Candidate appears available around the requested time.');
       }
 
-      // 3) Interest tags — 20
-      const userTags = [
+      // 3) Interest tags, max 20
+      const publicUserTags = [
         ...(user.interestTags ?? []),
         ...(socialProfile?.interestTags ?? []),
         ...(socialProfile?.fitnessGoals ?? []),
-      ].map((t) => t.toLowerCase());
-      const overlap = userTags.filter((t) => desiredTags.has(t));
-      const tagScore = this.scoreInterest(overlap.length, desiredTags.size);
-      breakdown.interest = tagScore;
-      if (overlap.length > 0) {
-        reasons.push(`共同兴趣：${overlap.slice(0, 3).join('、')}`);
-      }
+        ...(socialProfile?.lifestyleTags ?? []),
+        ...(socialProfile?.socialScenes ?? []),
+        ...(socialProfile?.traits ?? []),
+      ];
+      const compatibility = this.compatibility.scoreRequestCandidate({
+        desiredTags: [...desiredTags],
+        candidatePublicTags: publicUserTags,
+        candidatePrivateTags: this.getConfirmedPrivateMatchTags(socialProfile),
+        candidateTraits: socialProfile?.traits ?? [],
+        ownerPreferredTraits: [
+          ...(ctx.ownerProfile?.preferredTraits ?? []),
+          ...(ctx.personalityPreference ?? []),
+        ],
+        candidatePreferredTraits: socialProfile?.preferredTraits ?? [],
+        ownerPublicTags: [
+          ...(ctx.ownerProfile?.interestTags ?? []),
+          ...(ctx.ownerProfile?.fitnessGoals ?? []),
+          ...(ctx.ownerProfile?.traits ?? []),
+        ],
+        candidateAvoidTraits: socialProfile?.avoidTraits ?? [],
+        agentAllowedRequired: ctx.agentAllowedRequired,
+        candidateAcceptsAgentMessages: pref?.acceptAgentMessages ?? null,
+      });
+      Object.assign(breakdown, compatibility.breakdown);
+      reasons.push(...compatibility.publicReasons);
+      reasons.push(...compatibility.privateReasons);
+      warnings.push(...compatibility.riskTips);
 
-      // 4) Activity type — 15
-      const actScore = this.scoreActivityType(ctx.type, ctx.activityType, user);
-      breakdown.activityType = actScore;
-      if (actScore >= 15) {
-        reasons.push('活动类型完全一致');
-      } else if (actScore >= 8) {
-        reasons.push('活动类型相近');
-      }
+      // 4) Activity type (10)
 
-      // 5) Personality / preference — 10
-      const persoScore = this.scorePersonality(
-        pref,
-        [...ctx.interestTags, ...(ctx.personalityPreference ?? [])],
-        user,
-        socialProfile,
+      const actScore = Math.round(
+        (this.scoreActivityType(ctx.type, ctx.activityType, user) / 15) * 10,
       );
-      breakdown.personality = persoScore;
+      breakdown.activityType = actScore;
+      if (actScore >= 10) {
+        reasons.push('Activity type is a strong match.');
+      } else if (actScore >= 5) {
+        reasons.push('Activity type is related.');
+      }
 
-      // 6) Safety — 10
+
+      // 6) Safety, max 10
       const { score: safeScore, warnings: safeWarn, level } = this.scoreSafety(
         user,
         ctx.safetyRequirement,
       );
       breakdown.safety = safeScore;
       warnings.push(...safeWarn);
-      if (user.verified) reasons.push('对方已完成认证');
+      if (user.verified) reasons.push('Candidate is verified.');
 
-      // 7) Agent acceptance — 5
-      const agentScore =
-        pref?.acceptAgentMessages === false
-          ? 0
-          : ctx.agentAllowedRequired || pref?.acceptAgentMessages
-            ? 5
-            : 3;
-      breakdown.agentAcceptance = agentScore;
-      if (pref?.acceptAgentMessages) reasons.push('对方接受 Agent 沟通');
+      if (pref?.acceptAgentMessages) reasons.push('Candidate accepts agent-mediated messages.');
 
       const total =
         distScore +
         timeScore +
-        tagScore +
+        compatibility.breakdown.interest +
         actScore +
-        persoScore +
+        compatibility.breakdown.personality +
+        compatibility.breakdown.bidirectionalIntent +
         safeScore +
-        agentScore;
+        compatibility.breakdown.agentAcceptance;
 
       out.push({
         user,
@@ -700,7 +786,7 @@ export class MatchService {
         total: Math.max(0, Math.min(100, Math.round(total))),
         breakdown,
         reasons,
-        commonTags: overlap,
+        commonTags: compatibility.commonTags,
         distanceKm,
         risk: { level, warnings },
       });
@@ -709,11 +795,11 @@ export class MatchService {
     return out.sort((a, b) => b.total - a.total);
   }
 
-  // ── individual scorers ──────────────────────
+  // Individual scorers
 
   private scoreDistance(distanceKm: number | null, radiusKm: number): number {
     if (distanceKm == null) {
-      // Same-city fallback (no coords available) — moderate score.
+      // Same-city fallback (no coords available): moderate score.
       return 12;
     }
     if (distanceKm <= 1) return 20;
@@ -722,6 +808,49 @@ export class MatchService {
     if (distanceKm <= 10) return 8;
     if (distanceKm <= radiusKm) return 4;
     return 0;
+  }
+
+  private getConfirmedPrivateMatchTags(
+    profile: UserSocialProfile | null,
+  ): string[] {
+    if (!profile) return [];
+    const signals = (profile.matchSignals ?? {}) as {
+      privatePreferenceTags?: string[];
+      sensitivePrivateTags?: string[];
+      matchKeywords?: string[];
+    };
+    const decisions = profile.sensitiveTagDecisions ?? {};
+    const confirmedSensitive = (signals.sensitivePrivateTags ?? []).filter(
+      (tag) => decisions[tag]?.status === 'confirmed',
+    );
+    return Array.from(
+      new Set([
+        ...confirmedSensitive,
+        ...(signals.matchKeywords ?? []).filter((tag) =>
+          confirmedSensitive.some((sensitive) =>
+            this.expandMatchTag(sensitive).some((normalized) =>
+              this.expandMatchTag(tag).includes(normalized),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  private expandMatchTag(value: string | null | undefined): string[] {
+    const normalized = (value ?? '').trim().toLowerCase();
+    if (!normalized) return [];
+    const tags = new Set([normalized]);
+    if (/(rich|wealth|money|income|salary|resource|resources|asset|net.?worth)/i.test(normalized)) {
+      tags.add('wealth_resource');
+    }
+    if (/(founder|entrepreneur|startup|business|ceo)/i.test(normalized)) {
+      tags.add('business_builder');
+    }
+    if (/(high.?status|elite|vip)/i.test(normalized)) {
+      tags.add('status_signal');
+    }
+    return Array.from(tags);
   }
 
   private scoreTime(
@@ -743,7 +872,7 @@ export class MatchService {
       return 20;
     }
     if (!start && !end && profileWindow.length > 0) return 14;
-    if (!start || !end) return 12; // no constraint → assume partial overlap
+    if (!start || !end) return 12; // no constraint: assume partial overlap
     // First version: no hard availability data. Read free-text from
     // pref.privacyBoundaries.availability if present.
     const availability = pref?.privacyBoundaries?.availability as
@@ -808,7 +937,7 @@ export class MatchService {
     const desired = (
       pref?.idealPartnerDescription ?? interestTags.join(' ')
     ).toLowerCase();
-    const tokens = desired.split(/\s+|,|，/).filter((t) => t.length > 1);
+    const tokens = desired.split(/\\s+|,|，/).filter((t) => t.length > 1);
     const hits = tokens.filter((t) => bio.includes(t)).length;
     if (hits >= 3) score = 10;
     else if (hits === 2) score = 7;
@@ -839,8 +968,8 @@ export class MatchService {
     const boundary = `${ctx.ownerProfile?.rejectRules ?? ''} ${ctx.ownerProfile?.privacyBoundary ?? ''} ${profile?.rejectRules ?? ''} ${profile?.privacyBoundary ?? ''}`.toLowerCase();
     const requestText = `${ctx.timePreference ?? ''} ${ctx.locationPreference ?? ''} ${ctx.socialGoal ?? ''}`.toLowerCase();
     if (!boundary) return false;
-    if (/不接受|拒绝|禁止/.test(boundary) && /夜间|深夜|凌晨|night|midnight/.test(requestText)) return true;
-    if (/不接受|拒绝|禁止/.test(boundary) && /私人|住址|家里|酒店|hotel|home/.test(requestText)) return true;
+    if (/(不接受|拒绝|禁止)/.test(boundary) && /(夜间|深夜|凌晨|night|midnight)/.test(requestText)) return true;
+    if (/(不接受|拒绝|禁止)/.test(boundary) && /(私人|住址|家里|酒店|hotel|home)/.test(requestText)) return true;
     return false;
   }
 
@@ -917,9 +1046,9 @@ export class MatchService {
     const warnings: string[] = [];
     let score = 0;
     if (user.verified) score += 5;
-    else warnings.push('对方未完成认证');
+    else warnings.push('Candidate is not verified.');
     if (user.bio && user.bio.length > 20) score += 2;
-    else warnings.push('对方资料不完整');
+    else warnings.push('Candidate profile is incomplete.');
     if (user.avatar) score += 1;
     if (user.singleCert) score += 2;
 
@@ -930,12 +1059,12 @@ export class MatchService {
       !user.verified
     ) {
       level = CandidateRiskLevel.High;
-      warnings.push('要求"仅认证用户"，但对方未认证');
+      warnings.push('Verified-only was requested, but the candidate is not verified.');
     }
     return { score: Math.min(score, 10), warnings, level };
   }
 
-  // ── distance ────────────────────────────────
+  // Distance helpers
 
   private computeDistanceKm(
     ownerLat: number | null,
@@ -956,16 +1085,16 @@ export class MatchService {
     }
     const city = candidateCity || user.city;
     if (ownerCity && city && city === ownerCity) {
-      // No coordinates on either side → return null so we fall back to the
+      // No coordinates on either side, so fall back to the same-city reason.
       // "same city" reason instead of fabricating a number.
       return null;
     }
     return null;
   }
 
-  // ───────────────────────────────────────────────
+  // Reasons and icebreakers
   //  REASONS + ICEBREAKER
-  // ───────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
 
   /**
    * Pluggable. First version is rule-based; later we'll route through an LLM
@@ -977,10 +1106,10 @@ export class MatchService {
   ): string[] {
     const reasons = [...cand.reasons];
     if (request?.activityType && cand.user.interestTags?.includes(request.activityType)) {
-      reasons.push(`都喜欢「${request.activityType}」`);
+      reasons.push(`Both like ${request.activityType}.`);
     }
     if (cand.commonTags.length === 0 && cand.breakdown.interest === 0) {
-      reasons.push('兴趣标签暂无重合，但其他维度匹配良好');
+      reasons.push('No shared interest tags yet, but other dimensions look compatible.');
     }
     return Array.from(new Set(reasons)).slice(0, 6);
   }
@@ -990,32 +1119,32 @@ export class MatchService {
     cand: CandidateScore,
     request?: UserSocialRequest,
   ): string {
-    const name = cand.user.name || '你好';
+    const name = cand.user.name || 'there';
     const activity =
       request?.activityType ||
       (request?.type ? TYPE_TO_TAG[request.type] : '') ||
-      '一起运动';
-    const where =
-      request?.city || cand.user.city ? `在${request?.city || cand.user.city}` : '';
+      'a shared activity';
+    const city = request?.city || cand.user.city || '';
+    const where = city ? ` in ${city}` : '';
     const when = request?.timeStart
       ? this.formatTimeWindow(request.timeStart, request.timeEnd)
-      : '近期';
-    const tags = cand.commonTags.slice(0, 2).join('、');
-    const tagPart = tags ? `我们都喜欢${tags}，` : '';
-    return `你好 ${name}，${tagPart}我${where}${when}想找个搭子${activity}，方便一起吗？`;
+      : 'recently';
+    const tags = cand.commonTags.slice(0, 2).join(', ');
+    const tagPart = tags ? ` We both like ${tags}.` : '';
+    return `Hi ${name},${tagPart} I am looking for someone to do ${activity}${where} ${when}. Would you like to chat on FitMeet first?`;
   }
 
   private formatTimeWindow(start: Date, end: Date | null): string {
     const s = new Date(start);
-    const dateStr = `${s.getMonth() + 1}月${s.getDate()}日 ${String(s.getHours()).padStart(2, '0')}:${String(s.getMinutes()).padStart(2, '0')}`;
+    const dateStr = `${s.getMonth() + 1}/${s.getDate()} ${String(s.getHours()).padStart(2, '0')}:${String(s.getMinutes()).padStart(2, '0')}`;
     if (!end) return dateStr;
     const e = new Date(end);
     return `${dateStr}-${String(e.getHours()).padStart(2, '0')}:${String(e.getMinutes()).padStart(2, '0')}`;
   }
 
-  // ───────────────────────────────────────────────
+  // View mapping
   //  VIEW MAPPING
-  // ───────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
 
   private toView(
     cand: CandidateScore,
@@ -1072,9 +1201,9 @@ export class MatchService {
     return CandidateMatchLevel.Low;
   }
 
-  // ───────────────────────────────────────────────
+  // Status transitions
   //  STATUS TRANSITIONS (used by social-requests / agent flows)
-  // ───────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
 
   async markCandidate(
     candidateRecordId: number,

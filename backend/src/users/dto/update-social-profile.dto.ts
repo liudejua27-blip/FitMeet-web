@@ -151,6 +151,10 @@ export class UpdateSocialProfileDto {
   agentCanStartChatAfterApproval?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  hideSensitiveTags?: boolean;
+
+  @IsOptional()
   @IsString()
   @MaxLength(1200)
   aiSummary?: string;

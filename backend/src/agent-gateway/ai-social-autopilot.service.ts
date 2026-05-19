@@ -405,7 +405,7 @@ export class AiSocialAutopilotService {
     }
 
     // Branch 3: Needs approval — queue PendingAction.
-    const approval = await this.approvals.create({
+    if (this.shouldQueueAutopilotApproval()) await this.approvals.create({
       userId: ownerUserId,
       agentConnectionId: profile.agentConnectionId,
       type: ApprovalType.SendMessage,
@@ -430,20 +430,19 @@ export class AiSocialAutopilotService {
       ownerUserId,
       agentId: profile.agentConnectionId,
       actionType: AgentActionType.SendMessage,
-      actionStatus: AgentActionStatus.PendingApproval,
+      actionStatus: AgentActionStatus.Planned,
       riskLevel: actionRisk,
       targetUserId: candidate.candidateUserId,
       relatedSocialRequestId: request.id,
       relatedCandidateId: candidate.id,
       inputSummary: sanitizedMessage,
-      outputSummary: 'queued_for_owner_approval',
+      outputSummary: remainingCap <= 0 ? 'autopilot_daily_cap_reached' : 'autopilot_not_auto_executable',
       payload: {
-        approvalId: approval.id,
         autonomyLevel: profile.autonomyLevel,
         score: candidate.score,
         capRemaining: remainingCap,
       },
-      reason: 'autopilot_pending_approval',
+      reason: remainingCap <= 0 ? 'autopilot_daily_cap_reached' : 'autopilot_not_auto_executable',
     });
     this.emitAutopilotWebhook(profile.agentConnectionId, {
       ownerUserId,
@@ -451,10 +450,9 @@ export class AiSocialAutopilotService {
       socialRequestId: request.id,
       candidateId: candidate.id,
       targetUserId: candidate.candidateUserId,
-      approvalId: approval.id,
-      decision: 'pending',
+      decision: 'planned',
     });
-    return 'pending';
+    return 'planned';
   }
 
   private emitAutopilotWebhook(
@@ -469,6 +467,10 @@ export class AiSocialAutopilotService {
   }
 
   // ── Helpers ───────────────────────────────────────────────────
+
+  private shouldQueueAutopilotApproval() {
+    return false;
+  }
 
   private async countTodayAutoMessages(ownerUserId: number): Promise<number> {
     const start = new Date();

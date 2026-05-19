@@ -11,7 +11,11 @@ import {
   AgentInboxEventType,
 } from './agent-inbox-event.schema';
 import { User } from '../users/user.entity';
-import { AgentConnection } from '../agent-gateway/entities/agent-connection.entity';
+import {
+  AgentConnection,
+  ConnectionStatus,
+  KnownAgent,
+} from '../agent-gateway/entities/agent-connection.entity';
 import {
   ActionResult,
   AgentActivityLog,
@@ -23,6 +27,8 @@ import {
   AgentActionStatus,
   AgentActionType,
 } from '../agent-gateway/entities/agent-action-log.entity';
+import { PublicSocialIntent } from '../agent-gateway/entities/public-social-intent.entity';
+import { UserSocialRequest } from '../social-requests/social-request.entity';
 
 type SendMessageOptions = {
   source?: MessageSource;
@@ -40,6 +46,14 @@ type SendMessageOptions = {
 type AgentInboxOptions = {
   limit?: number;
   unreadOnly?: boolean;
+  eventType?: string;
+};
+
+type AgentInboxAckResult = {
+  ok: true;
+  requested: number;
+  acknowledged: number;
+  eventIds: string[];
 };
 
 type StartConversationOptions = {
@@ -92,6 +106,10 @@ export class MessagesService {
     private readonly activityLogRepo: Repository<AgentActivityLog>,
     @InjectRepository(AgentActionLog)
     private readonly actionLogRepo: Repository<AgentActionLog>,
+    @InjectRepository(PublicSocialIntent)
+    private readonly publicIntentRepo: Repository<PublicSocialIntent>,
+    @InjectRepository(UserSocialRequest)
+    private readonly socialRequestRepo: Repository<UserSocialRequest>,
   ) {}
 
   async getConversations(userId: number) {
@@ -166,11 +184,37 @@ export class MessagesService {
       throw new NotFoundException('会话不存在');
     }
 
-    const agentConnectionId =
+    const otherId = conv.participantIds.find((id) => id !== Number(senderId));
+    const senderType = options.senderType ?? 'user';
+    let agentConnectionId =
       options.agentConnectionId ?? conv.agentConnectionId ?? null;
-    const ownerUserId =
+    let ownerUserId =
       options.ownerUserId ?? conv.ownerUserId ?? conv.actorUserId ?? null;
-    const actorUserId = options.actorUserId ?? conv.actorUserId ?? ownerUserId;
+    let actorUserId = options.actorUserId ?? conv.actorUserId ?? ownerUserId;
+    if (!agentConnectionId && otherId && senderType !== 'agent') {
+      const recipientConnection = await this.connectionRepo.findOne({
+        where: {
+          userId: otherId,
+          agentName: KnownAgent.OpenClaw,
+          status: ConnectionStatus.Active,
+        },
+        order: { updatedAt: 'DESC' },
+      });
+      if (recipientConnection) {
+        agentConnectionId = recipientConnection.id;
+        ownerUserId = otherId;
+        actorUserId = otherId;
+        await this.bindAgentConversation(oid, {
+          agentConnectionId,
+          ownerUserId,
+          actorUserId,
+          metadata: {
+            ...(options.metadata ?? {}),
+            source: 'auto_bound_openclaw_recipient',
+          },
+        });
+      }
+    }
     const metadata = this.withAgentMetadata(options.metadata, {
       agentConnectionId,
       ownerUserId,
@@ -182,7 +226,6 @@ export class MessagesService {
             ? 'openclaw'
             : undefined,
     });
-    const senderType = options.senderType ?? 'user';
     const receiverAgentId =
       options.receiverAgentId ??
       (agentConnectionId && senderType === 'user' ? agentConnectionId : null);
@@ -207,7 +250,6 @@ export class MessagesService {
       receiverAgentId,
     });
 
-    const otherId = conv.participantIds.find((id) => id !== Number(senderId));
     const update: Record<string, unknown> = {
       lastMessage: text,
       lastMessageTime: new Date(),
@@ -243,7 +285,7 @@ export class MessagesService {
       });
     }
 
-    if (shouldSyncAgentInbox && ownerUserId) {
+    if (shouldSyncAgentInbox && ownerUserId && agentConnectionId) {
       const unreadCount =
         (conv.unreadAgentCount?.[String(agentConnectionId)] ?? 0) +
         (inc[`unreadAgentCount.${agentConnectionId}`] ?? 0);
@@ -326,6 +368,60 @@ export class MessagesService {
     });
 
     return { conversationId: conv._id.toString(), preexisting: false };
+  }
+
+  async startPublicIntentConversation(
+    userId: number,
+    publicIntentId: string,
+    text?: string,
+  ) {
+    const intent = await this.publicIntentRepo.findOne({
+      where: { id: publicIntentId },
+    });
+    if (!intent?.userId) {
+      throw new NotFoundException('这条大厅内容暂时没有绑定可联系的站内用户');
+    }
+    if (intent.userId === userId) {
+      throw new BadRequestException('不能给自己发布的内容发消息');
+    }
+
+    const request = intent.linkedSocialRequestId
+      ? await this.socialRequestRepo.findOne({
+          where: { id: intent.linkedSocialRequestId },
+        })
+      : null;
+    const agentConnectionId =
+      request?.userId === intent.userId ? request.agentId : null;
+    const metadata = {
+      source: 'public_social_intent',
+      publicIntentId: intent.id,
+      linkedSocialRequestId: intent.linkedSocialRequestId,
+      agentConnectionId,
+    };
+    const options: StartConversationOptions = agentConnectionId
+      ? {
+          agentConnectionId,
+          ownerUserId: intent.userId,
+          actorUserId: intent.userId,
+          metadata,
+        }
+      : { metadata };
+
+    const result = await this.startConversation(userId, intent.userId, options);
+    const trimmed = text?.trim();
+    const message = trimmed
+      ? await this.sendMessage(result.conversationId, userId, trimmed, {
+          ...options,
+          metadata,
+        })
+      : null;
+
+    return {
+      ...result,
+      publicIntentId: intent.id,
+      agentConnectionId,
+      message,
+    };
   }
 
   async startAgentConversation(userId: number, agentId: number) {
@@ -498,10 +594,6 @@ export class MessagesService {
       { _id: oid },
       { $set: { [`unreadAgentCount.${agentId}`]: 0 } },
     );
-    await this.inboxEventModel.updateMany(
-      { agentConnectionId: agentId, conversationId: oid },
-      { $set: { unread: false } },
-    );
 
     const limit = this.normalizeLimit(options.limit, 50, 200);
     const messages = await this.msgModel
@@ -666,6 +758,7 @@ export class MessagesService {
     const limit = this.normalizeLimit(options.limit, 50, 100);
     const query: Record<string, unknown> = { agentConnectionId };
     if (options.unreadOnly) query.unread = true;
+    if (options.eventType) query.eventType = options.eventType;
 
     const events = await this.inboxEventModel
       .find(query)
@@ -673,6 +766,18 @@ export class MessagesService {
       .limit(limit)
       .lean()
       .exec();
+
+    const fromUserIds = [
+      ...new Set(
+        events
+          .map((event) => event.fromUserId)
+          .filter((id): id is number => typeof id === 'number' && id > 0),
+      ),
+    ];
+    const users = fromUserIds.length
+      ? await this.userRepo.find({ where: { id: In(fromUserIds) } })
+      : [];
+    const userMap = new Map(users.map((user) => [user.id, user]));
 
     return events.map((event) => ({
       id: String(event._id),
@@ -687,12 +792,61 @@ export class MessagesService {
       requestId: event.requestId ?? null,
       candidateRecordId: event.candidateRecordId ?? null,
       fromUserId: event.fromUserId ?? null,
+      fromUser: event.fromUserId
+        ? this.toSafeSenderCard(userMap.get(event.fromUserId) ?? null)
+        : null,
       contentPreview: event.contentPreview ?? '',
       unread: Boolean(event.unread),
-      metadata: event.metadata ?? {},
+      reportText: this.buildAgentReportText(
+        event.eventType,
+        event.contentPreview ?? '',
+        userMap.get(event.fromUserId ?? 0) ?? null,
+      ),
+      nextAction: this.nextAgentInboxAction(event.eventType),
+      metadata: this.safeEventMetadata(event.metadata ?? {}),
       createdAt: event.createdAt,
       updatedAt: event.updatedAt,
     }));
+  }
+
+  async ackAgentInboxEvents(
+    agentConnectionId: number,
+    eventIds: string[] = [],
+  ): Promise<AgentInboxAckResult> {
+    const normalized = Array.from(
+      new Set(
+        eventIds
+          .map((id) => (id ?? '').trim())
+          .filter(Boolean),
+      ),
+    ).slice(0, 100);
+    const ids = normalized.filter((id) => Types.ObjectId.isValid(id));
+    const stableIds = normalized.filter((id) => !Types.ObjectId.isValid(id));
+    if (normalized.length === 0) {
+      return { ok: true, requested: eventIds.length, acknowledged: 0, eventIds: [] };
+    }
+    const objectIds = ids.map((id) => new Types.ObjectId(id));
+    const or: Record<string, unknown>[] = [];
+    if (objectIds.length > 0) or.push({ _id: { $in: objectIds } });
+    if (stableIds.length > 0) {
+      or.push(
+        { dedupeKey: { $in: stableIds } },
+        { 'metadata.eventId': { $in: stableIds } },
+        { 'metadata.inboxEventId': { $in: stableIds } },
+      );
+    }
+    const result = await this.inboxEventModel
+      .updateMany(
+        { agentConnectionId, $or: or },
+        { $set: { unread: false } },
+      )
+      .exec();
+    return {
+      ok: true,
+      requested: eventIds.length,
+      acknowledged: result.modifiedCount ?? 0,
+      eventIds: normalized,
+    };
   }
 
   async createAgentInboxEvent(input: AgentInboxEventInput) {
@@ -828,15 +982,18 @@ export class MessagesService {
     unreadCount: number;
   }) {
     const contentPreview = this.preview(input.text);
+    const sender = await this.userRepo.findOne({ where: { id: input.fromUserId } });
     const data = {
       conversationId: input.conversationId,
       messageId: input.messageId,
       fromUserId: input.fromUserId,
+      fromUser: this.toSafeSenderCard(sender),
       contentPreview,
       unreadCount: input.unreadCount,
+      nextAction: 'report_to_owner_then_wait_for_instruction',
     };
 
-    await this.createAgentInboxEvent({
+    const receivedEvent = await this.createAgentInboxEvent({
       agentConnectionId: input.agentConnectionId,
       ownerUserId: input.ownerUserId,
       eventType: 'message.received',
@@ -847,7 +1004,7 @@ export class MessagesService {
       dedupeKey: `${input.agentConnectionId}:message.received:${input.messageId}`,
       metadata: data,
     });
-    await this.createAgentInboxEvent({
+    const updatedEvent = await this.createAgentInboxEvent({
       agentConnectionId: input.agentConnectionId,
       ownerUserId: input.ownerUserId,
       eventType: 'agent.inbox.updated',
@@ -858,12 +1015,28 @@ export class MessagesService {
       dedupeKey: `${input.agentConnectionId}:agent.inbox.updated:${input.messageId}`,
       metadata: data,
     });
+    const receivedEventId = receivedEvent?._id
+      ? String(receivedEvent._id)
+      : `${input.agentConnectionId}:message.received:${input.messageId}`;
+    const updatedEventId = updatedEvent?._id
+      ? String(updatedEvent._id)
+      : `${input.agentConnectionId}:agent.inbox.updated:${input.messageId}`;
 
-    await this.emitAgentWebhook(input.agentConnectionId, 'message.received', data);
+    await this.emitAgentWebhook(input.agentConnectionId, 'message.received', {
+      ...data,
+      eventId: receivedEventId,
+      inboxEventId: receivedEventId,
+      ackEventIds: [receivedEventId],
+    });
     await this.emitAgentWebhook(
       input.agentConnectionId,
       'agent.inbox.updated',
-      data,
+      {
+        ...data,
+        eventId: updatedEventId,
+        inboxEventId: updatedEventId,
+        ackEventIds: [updatedEventId],
+      },
     );
   }
 
@@ -888,7 +1061,7 @@ export class MessagesService {
 
     const payload: AgentWebhookPayload = {
       event,
-      event_id: `evt_${crypto.randomUUID()}`,
+      event_id: this.stableWebhookEventId(agentConnectionId, event, data),
       created_at: new Date().toISOString(),
       user_id: conn.userId,
       agent_connection_id: conn.id,
@@ -1038,6 +1211,103 @@ export class MessagesService {
       .createHmac('sha256', secret)
       .update(`${timestamp}.${body}`)
       .digest('hex')}`;
+  }
+
+  private stableWebhookEventId(
+    agentConnectionId: number,
+    event: string,
+    data: Record<string, unknown>,
+  ) {
+    const stable =
+      data.eventId ??
+      data.event_id ??
+      data.inboxEventId ??
+      data.messageId ??
+      data.conversationId;
+    if (!stable) return `evt_${crypto.randomUUID()}`;
+    const digest = crypto
+      .createHash('sha256')
+      .update(`${agentConnectionId}:${event}:${String(stable)}`)
+      .digest('hex')
+      .slice(0, 32);
+    return `evt_${digest}`;
+  }
+
+  private toSafeSenderCard(user: User | null) {
+    if (!user) return null;
+    return {
+      id: user.id,
+      name: user.name,
+      avatar: user.avatar,
+      color: user.color,
+      city: user.city,
+      verified: user.verified,
+    };
+  }
+
+  private buildAgentReportText(
+    eventType: string,
+    contentPreview: string,
+    sender: User | null,
+  ) {
+    if (eventType === 'message.received') {
+      const name = sender?.name ?? 'Someone';
+      return `${name} sent a FitMeet message: ${contentPreview}`;
+    }
+    if (eventType === 'profile.match.recommended') {
+      return `FitMeet found a profile recommendation: ${contentPreview}`;
+    }
+    if (eventType === 'social_request.match.recommended') {
+      return `FitMeet found request-card matches: ${contentPreview}`;
+    }
+    if (eventType === 'contact.request.received') {
+      const name = sender?.name ?? 'Someone';
+      return `${name} wants to add the owner on FitMeet: ${contentPreview}`;
+    }
+    if (eventType === 'contact.request.accepted') {
+      return `A FitMeet friend request was accepted: ${contentPreview}`;
+    }
+    if (eventType === 'contact.request.declined') {
+      return `A FitMeet friend request was declined: ${contentPreview}`;
+    }
+    return `${eventType}: ${contentPreview}`;
+  }
+
+  private nextAgentInboxAction(eventType: string) {
+    if (eventType === 'message.received') {
+      return 'report_to_owner_then_read_conversation_if_requested';
+    }
+    if (eventType === 'profile.match.recommended') {
+      return 'show_safe_profile_and_ask_owner_before_contact';
+    }
+    if (eventType === 'social_request.match.recommended') {
+      return 'show_request_card_matches_and_ask_owner_before_invite';
+    }
+    if (eventType === 'contact.request.received') {
+      return 'ask_owner_whether_to_accept_friend_request';
+    }
+    if (
+      eventType === 'contact.request.accepted' ||
+      eventType === 'contact.request.declined'
+    ) {
+      return 'report_contact_request_result_to_owner';
+    }
+    if (eventType === 'approval.created') {
+      return 'ask_owner_for_approval';
+    }
+    return 'review_event';
+  }
+
+  private safeEventMetadata(metadata: Record<string, unknown>) {
+    const {
+      privateReasons: _privateReasons,
+      privateReason: _privateReason,
+      rawProfile: _rawProfile,
+      rawText: _rawText,
+      sensitivePrivateTags: _sensitivePrivateTags,
+      ...safe
+    } = metadata ?? {};
+    return safe;
   }
 
   private normalizeLimit(

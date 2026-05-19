@@ -58,6 +58,68 @@ export interface AgentInboxEvent {
   createdAt?: string;
 }
 
+export interface OpenClawSetupStatus {
+  tokenConfigured: boolean;
+  activeTokenCount: number;
+  webhookConfigured: boolean;
+  heartbeatConfigured: boolean;
+  heartbeatLastSuccessAt: string | null;
+  connection: {
+    id: number;
+    agentName: string;
+    agentDisplayName: string;
+    permissionLevel: string;
+    status: string;
+    dailyActionLimit: number;
+    dailyActionsUsed: number;
+    webhookConfigured: boolean;
+    lastActiveAt: string | null;
+    createdAt: string;
+  } | null;
+  subconsciousLoop: {
+    enabled: boolean;
+    running: boolean;
+    intervalSeconds: number;
+    lastRunAt: string | null;
+    nextRunAt: string | null;
+    lastSummary: Record<string, unknown> | null;
+    env?: Record<string, string | null>;
+  } | null;
+}
+
+export interface MatchRequestItem {
+  id: number;
+  fromUserId: number;
+  toUserId: number;
+  direction: 'incoming' | 'outgoing';
+  displayName: string;
+  message: string;
+  status: 'pending' | 'accepted' | 'rejected' | 'expired';
+  createdAt: string;
+  respondedAt: string | null;
+}
+
+export interface ProfileRecommendationItem {
+  aiMatchSessionId: number;
+  targetUserId: number;
+  score: number;
+  status: string;
+  summary: string;
+  publicReasons: string[];
+  riskTips: string[];
+  nextStepSuggestions: string[];
+  safeProfile: {
+    id: number;
+    name: string;
+    avatar: string;
+    color: string;
+    city: string;
+    publicTags: string[];
+    summary: string;
+  };
+  createdAt?: string;
+}
+
 export const agentInboxApi = {
   conversations: (params?: {
     agentProfileId?: number;
@@ -131,6 +193,106 @@ export const agentInboxApi = {
       matchedCount: number;
       recommendations: unknown[];
     }>('/agents/profile-matches/run-once', { method: 'POST' }),
+
+  runSubconsciousLoopOnce: () =>
+    api.request<{
+      ok: boolean;
+      loop: 'subconscious';
+      summary: {
+        triggeredBy: 'cron' | 'manual';
+        skipped: boolean;
+        reason?: string;
+        scannedProfiles: number;
+        scannedRequests: number;
+        generatedRecommendations: number;
+        generatedRequestCandidates: number;
+        inboxEvents: number;
+        notificationsSent: number;
+        skippedDuplicates: number;
+        errors: number;
+      };
+    }>('/agents/subconscious-loop/run-once', { method: 'POST' }),
+
+  subconsciousLoopStatus: () =>
+    api.request<OpenClawSetupStatus['subconsciousLoop']>(
+      '/agents/subconscious-loop/status',
+    ),
+
+  openClawStatus: () =>
+    api.request<OpenClawSetupStatus>('/agents/openclaw/status'),
+
+  matchRequests: () =>
+    api.request<{ requests: MatchRequestItem[] }>('/match-requests'),
+
+  acceptMatchRequest: (id: number) =>
+    api.request<{ ok: boolean; status: string; conversationId?: string }>(
+      `/match-requests/${id}/accept`,
+      { method: 'POST' },
+    ),
+
+  rejectMatchRequest: (id: number) =>
+    api.request<{ ok: boolean; status: string }>(
+      `/match-requests/${id}/reject`,
+      { method: 'POST' },
+    ),
+
+  profileMatches: (limit = 30) =>
+    api.request<{ recommendations: ProfileRecommendationItem[] }>(
+      `/agents/profile-matches?limit=${limit}`,
+    ),
+
+  ignoreProfileMatch: (aiMatchSessionId: number) =>
+    api.request<{ ok: boolean; status: string }>(
+      `/agents/profile-matches/${aiMatchSessionId}/ignore`,
+      { method: 'POST' },
+    ),
+
+  favoriteProfileMatch: (aiMatchSessionId: number) =>
+    api.request<{ ok: boolean; status: string }>(
+      `/agents/profile-matches/${aiMatchSessionId}/favorite`,
+      { method: 'POST' },
+    ),
+
+  draftProfileMatchOpener: (aiMatchSessionId: number) =>
+    api.request<{
+      ok: boolean;
+      draft: { type: 'message'; tone: string; content: string };
+      requiresOwnerConfirmation: boolean;
+    }>(`/agents/profile-matches/${aiMatchSessionId}/draft-opener`, {
+      method: 'POST',
+      body: JSON.stringify({ tone: 'friendly' }),
+    }),
+
+  confirmProfileMatchContact: (aiMatchSessionId: number) =>
+    api.request<{
+      ok: boolean;
+      status: string;
+      contactRequestId: number;
+      requiresTargetConsent: boolean;
+    }>(`/agents/profile-matches/${aiMatchSessionId}/confirm-contact`, {
+      method: 'POST',
+      body: JSON.stringify({ note: 'Owner confirmed from Agent Inbox recommendation card.' }),
+    }),
+
+  requestContactExchange: (aiMatchSessionId: number) =>
+    api.request<{ ok: boolean; status: string; approvalId?: number }>(
+      `/agents/profile-matches/${aiMatchSessionId}/request-contact-exchange`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ note: 'Owner requested contact exchange from Agent Inbox.' }),
+      },
+    ),
+
+  sendIntro: (aiMatchSessionId: number, content: string) =>
+    api.request<{
+      ok: boolean;
+      status: string;
+      conversationId?: string;
+      messageId?: string;
+    }>(`/agents/profile-matches/${aiMatchSessionId}/send-intro`, {
+      method: 'POST',
+      body: JSON.stringify({ ownerConfirmed: true, text: content }),
+    }),
 
   events: (params?: { limit?: number; unreadOnly?: boolean }) => {
     const search = new URLSearchParams();

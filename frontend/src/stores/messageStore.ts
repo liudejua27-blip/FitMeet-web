@@ -75,9 +75,11 @@ export const useMessageStore = create<MessageState>()(
           set({ socket: null });
         }
 
-        const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
-        const wsBase =
-          import.meta.env.VITE_WS_BASE_URL || apiBase.replace(/\/api\/?$/, '');
+        const configuredWsBase = import.meta.env.VITE_WS_BASE_URL?.trim();
+        const wsBase = (
+          configuredWsBase ||
+          (typeof window !== 'undefined' ? window.location.origin : api.API_BASE_URL.replace(/\/api\/?$/, ''))
+        ).replace(/\/+$/, '');
 
         // Backend gateway uses the "messages" namespace.
         const socket = io(`${wsBase}/messages`, {

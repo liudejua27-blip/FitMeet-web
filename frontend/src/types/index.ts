@@ -381,6 +381,13 @@ export interface SocialRequest {
     filters: Record<string, unknown>;
     candidateUserIds: number[];
     matchedCount: number;
+    matchSignal?: {
+      score: number;
+      confidence?: 'low' | 'medium' | 'high' | string;
+      source?: string;
+      reasons?: string[];
+      updatedAt?: string;
+    };
     status: SocialRequestStatus;
     createdAt: string;
     updatedAt: string;
