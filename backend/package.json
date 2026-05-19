@@ -8,6 +8,11 @@
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "typeorm": "typeorm-ts-node-commonjs",
+    "migration:run": "typeorm-ts-node-commonjs migration:run -d src/database/data-source.ts",
+    "migration:run:prod": "typeorm -d dist/database/data-source.js migration:run",
+    "migration:generate": "typeorm-ts-node-commonjs migration:generate src/database/migrations/GeneratedMigration -d src/database/data-source.ts",
+    "migration:create": "typeorm migration:create src/database/migrations/ManualMigration",
     "start": "nest start",
     "start:dev": "nest start --watch --entryFile main.js",
     "start:debug": "nest start --debug --watch --entryFile main.js",

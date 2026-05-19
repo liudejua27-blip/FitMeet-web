@@ -27,22 +27,31 @@ else
   echo "No .git directory found; using uploaded project files in $APP_DIR"
 fi
 
-echo "[2/5] Build frontend for www.ourfitmeet.cn"
+echo "[2/5] Prepare frontend dist"
+BUILD_FRONTEND="${BUILD_FRONTEND:-auto}"
 corepack enable
 corepack prepare pnpm@10.30.3 --activate
-pnpm -C frontend install --frozen-lockfile
-VITE_API_BASE_URL=https://www.ourfitmeet.cn/api \
-VITE_WS_BASE_URL=https://www.ourfitmeet.cn \
-pnpm -C frontend build
+if [ "$BUILD_FRONTEND" = "false" ] || { [ "$BUILD_FRONTEND" = "auto" ] && [ -f "frontend/dist/index.html" ]; }; then
+  echo "Using existing frontend/dist. Set BUILD_FRONTEND=true to rebuild on this server."
+  pnpm -C frontend run check:prod-build
+else
+  echo "Building frontend with relative /api URLs. Low-memory servers should prefer uploading prebuilt dist."
+  pnpm -C frontend install --frozen-lockfile
+  NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1024}" \
+  VITE_API_BASE_URL=/api \
+  VITE_WS_BASE_URL= \
+  pnpm -C frontend build
+fi
 
 echo "[3/5] Build and restart production stack"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build
 
 echo "[4/5] Show service status"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps
 
 echo "[5/5] Check backend logs for migrations"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" logs --tail=120 backend
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" logs --tail=120 backend
 
 echo "[DONE] Run production verification from your local machine:"
 echo "powershell -ExecutionPolicy Bypass -File .\\scripts\\verify-production.ps1"
+echo "curl https://www.ourfitmeet.cn/api/health"

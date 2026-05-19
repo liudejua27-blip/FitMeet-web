@@ -1,0 +1,43 @@
+{
+  "files.watcherExclude": {
+    "**/.git/**": true,
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "**/build/**": true,
+    "**/coverage/**": true,
+    "**/.next/**": true,
+    "**/.turbo/**": true,
+    "**/logs/**": true,
+    "**/*.log": true,
+    "**/*.zip": true,
+    "**/*.tar.gz": true,
+    "**/fitmeet-backup*/**": true,
+    "**/fitmeet-old*/**": true,
+    "**/temp_output/**": true,
+    "**/scan_results/**": true,
+    "**/ui-verify-out/**": true
+  },
+  "search.exclude": {
+    "**/.git": true,
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/build": true,
+    "**/coverage": true,
+    "**/*.zip": true,
+    "**/*.tar.gz": true,
+    "**/*.log": true,
+    "**/fitmeet-backup*": true,
+    "**/fitmeet-old*": true,
+    "**/temp_output": true,
+    "**/scan_results": true,
+    "**/ui-verify-out": true
+  },
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/coverage": true,
+    "**/*.zip": true,
+    "**/*.tar.gz": true,
+    "**/*.log": true
+  }
+}

@@ -817,8 +817,10 @@ Events:
   "agent.inbox.updated",
   "message.created",
   "match.completed",
-  "contact_request.accepted",
-  "contact_request.rejected",
+  "contact.request.received",
+  "contact.request.accepted",
+  "contact.request.declined",
+  "social_request.match.recommended",
   "safety.blocked",
   "daily_limit.near_exhausted"
 ]
@@ -847,7 +849,7 @@ Security:
 - Timestamp tolerance: 5 minutes
 - Idempotency key: `event_id`
 - Retry: exponential backoff for 24 hours
-- Webhook delivery is realtime best effort. OpenClaw should still run the default 60-second `GET /api/agent/inbox/events?unreadOnly=true&limit=20` polling task and stay silent when no unread events are returned.
+- Webhook delivery is realtime best effort. OpenClaw should still run the default 30-60 second `GET /api/agent/inbox/events?unreadOnly=true&limit=20` heartbeat task and stay silent when no unread events are returned. After reporting returned events to the owner, call `POST /api/agent/inbox/events/ack` with their event ids so they are not reported again.
 
 ## 13. Error Codes
 
@@ -1021,7 +1023,7 @@ Next implementation steps:
 
 - Add `/api/agent/skills/manifest`
 - Add formal error codes
-- Keep webhook delivery, HMAC signing, and the 60-second inbox event poll documented together
+- Keep webhook delivery, HMAC signing, ack semantics, and the 30-60 second inbox event heartbeat documented together
 - Add target consent response for contact requests
 - Add per-target anti-spam throttles
 - Add precise geospatial search
