@@ -18,10 +18,7 @@ import {
   AgentSettings,
   AgentSettingsMode,
 } from './entities/agent-settings.entity';
-import {
-  AgentAutoActionType,
-  canAutoExecute,
-} from './agent-autonomy.policy';
+import { AgentAutoActionType, canAutoExecute } from './agent-autonomy.policy';
 import {
   AgentActivityLog,
   ActionResult,
@@ -171,21 +168,40 @@ export class AgentApprovalService {
         reasons.push('first_contact_with_stranger');
         break;
       case ApprovalType.ContactRequest:
+        bumpRisk(ApprovalRiskLevel.Medium);
+        if (
+          !canAutoExecute(actionType, settings.mode, ApprovalRiskLevel.Medium)
+        ) {
+          needs = true;
+          reasons.push('contact_request_requires_mode_approval');
+        }
+        break;
       case ApprovalType.ContactExchange:
         needs = true;
         bumpRisk(ApprovalRiskLevel.High);
-        reasons.push('contact_exchange_high_risk');
+        reasons.push('contact_exchange_requires_explicit_approval');
         break;
       case ApprovalType.CreateActivity:
+        bumpRisk(ApprovalRiskLevel.Medium);
+        if (
+          settings.requireApprovalForOfflineMeeting ||
+          !canAutoExecute(actionType, settings.mode, ApprovalRiskLevel.Medium)
+        ) {
+          needs = true;
+          reasons.push(
+            'activity_invite_requires_approval_or_permission_source',
+          );
+        }
+        break;
       case ApprovalType.OfflineMeeting:
         needs = true;
-        bumpRisk(ApprovalRiskLevel.Medium);
-        reasons.push('offline_meeting_requires_consent');
+        bumpRisk(ApprovalRiskLevel.High);
+        reasons.push('offline_meeting_requires_high_risk_review_or_audit');
         break;
       case ApprovalType.JoinActivity:
         needs = true;
         bumpRisk(ApprovalRiskLevel.Medium);
-        reasons.push('joining_offline_activity');
+        reasons.push('activity_invite_requires_approval_or_permission_source');
         break;
       case ApprovalType.ShareLocation:
         needs = true;
@@ -213,7 +229,7 @@ export class AgentApprovalService {
       case ApprovalType.Payment:
         needs = true;
         bumpRisk(ApprovalRiskLevel.High);
-        reasons.push('payment_action_blocked_by_policy');
+        reasons.push('payment_requires_payment_intent_and_audit');
         break;
       case ApprovalType.UnknownRisk:
         needs = true;
@@ -255,17 +271,19 @@ export class AgentApprovalService {
       reasons.push('user_requires_approval_for_all_actions');
     }
 
-    if (!canAutoExecute(actionType, settings.mode, risk)) {
+    if (!needs && !canAutoExecute(actionType, settings.mode, risk)) {
       needs = true;
       reasons.push(`${settings.mode}_requires_pending_${actionType}`);
     }
 
     return {
-      requiresApproval: false,
+      requiresApproval: needs,
       blocked: false,
       riskLevel: risk,
       summary: this.buildSummary(type, input.payload),
-      reasons: needs ? ['approval_disabled_by_open_agent_token', ...reasons] : reasons,
+      reasons: needs
+        ? ['approval_required_by_permission_engine', ...reasons]
+        : [`auto_execute_allowed_by_${settings.mode}`, ...reasons],
     };
   }
 
@@ -326,13 +344,17 @@ export class AgentApprovalService {
       case ApprovalType.FirstMessage:
         return 'send_message';
       case ApprovalType.ContactRequest:
-      case ApprovalType.ContactExchange:
         return 'add_friend';
+      case ApprovalType.ContactExchange:
+        return 'contact_exchange';
       case ApprovalType.CreateActivity:
-      case ApprovalType.OfflineMeeting:
         return 'create_activity';
+      case ApprovalType.OfflineMeeting:
+        return 'offline_meeting';
       case ApprovalType.JoinActivity:
         return 'invite_activity';
+      case ApprovalType.Payment:
+        return 'payment';
       case ApprovalType.PostPublish:
         return 'generate_suggestion';
       default:
@@ -350,9 +372,7 @@ export class AgentApprovalService {
       'Agent';
     const target =
       (payload._targetDisplayName as string) ||
-      (payload.toUserId !== undefined
-        ? `用户 #${payload.toUserId}`
-        : '对方');
+      (payload.toUserId !== undefined ? `用户 #${payload.toUserId}` : '对方');
     switch (type) {
       case ApprovalType.SendMessage:
       case ApprovalType.FirstMessage:
@@ -395,6 +415,7 @@ export class AgentApprovalService {
   async create(input: {
     userId: number;
     agentConnectionId: number | null;
+    agentTaskId?: number | null;
     type: ApprovalType;
     actionType?: string;
     skillName?: string;
@@ -410,26 +431,34 @@ export class AgentApprovalService {
     ttlMs?: number;
   }): Promise<AgentApprovalRequest> {
     const ttl = input.ttlMs ?? 24 * 60 * 60 * 1000;
+    const payloadAgentTaskId = numberOrNull(input.payload.agentTaskId);
+    const agentTaskId = input.agentTaskId ?? payloadAgentTaskId;
     const saved = await this.repo.save(
       this.repo.create({
         userId: input.userId,
         agentConnectionId: input.agentConnectionId,
+        agentTaskId,
         type: input.type,
         actionType: input.actionType ?? input.type,
         skillName: input.skillName ?? input.type,
-        payload: input.payload,
+        payload: agentTaskId
+          ? { ...input.payload, agentTaskId }
+          : input.payload,
         summary: input.summary,
         reason: input.reason ?? input.rationale ?? '',
         createdBy: input.createdBy ?? 'agent',
         relatedSocialRequestId:
           input.relatedSocialRequestId ??
-          ((input.payload.socialRequestId as number | undefined) ?? null),
+          (input.payload.socialRequestId as number | undefined) ??
+          null,
         relatedCandidateId:
           input.relatedCandidateId ??
-          ((input.payload.candidateRecordId as number | undefined) ?? null),
+          (input.payload.candidateRecordId as number | undefined) ??
+          null,
         relatedActivityId:
           input.relatedActivityId ??
-          ((input.payload.activityId as number | undefined) ?? null),
+          (input.payload.activityId as number | undefined) ??
+          null,
         riskLevel: input.riskLevel,
         agentRationale: input.rationale ?? '',
         expiresAt: new Date(Date.now() + ttl),
@@ -461,9 +490,7 @@ export class AgentApprovalService {
   async approve(
     id: number,
     userId: number,
-    dispatcher?: (
-      approval: AgentApprovalRequest,
-    ) => Promise<unknown> | unknown,
+    dispatcher?: (approval: AgentApprovalRequest) => Promise<unknown> | unknown,
   ): Promise<{
     approval: AgentApprovalRequest;
     dispatched: boolean;
@@ -494,8 +521,7 @@ export class AgentApprovalService {
         dispatchResult = await dispatcher(saved);
         dispatched = true;
       } catch (err) {
-        dispatchError =
-          err instanceof Error ? err.message : 'Dispatch failed';
+        dispatchError = err instanceof Error ? err.message : 'Dispatch failed';
         this.logger.warn(
           `Approval ${id} approved but dispatch failed: ${dispatchError}`,
         );
@@ -544,6 +570,7 @@ export class AgentApprovalService {
         relatedCandidateId: approval.relatedCandidateId,
         relatedActivityId: approval.relatedActivityId,
         ...extra,
+        agentTaskId: approval.agentTaskId,
       });
     } catch (err) {
       this.logger.warn(
@@ -564,6 +591,7 @@ export class AgentApprovalService {
           action: this.toLoggedAction(approval),
           payload: {
             approvalId: approval.id,
+            agentTaskId: approval.agentTaskId,
             actionType: approval.actionType,
             socialRequestId: approval.relatedSocialRequestId,
             candidateRecordId: approval.relatedCandidateId,
@@ -585,7 +613,8 @@ export class AgentApprovalService {
   }
 
   private toLoggedAction(approval: AgentApprovalRequest): LoggedAction {
-    if (approval.actionType === 'add_friend') return LoggedAction.ContactRequest;
+    if (approval.actionType === 'add_friend')
+      return LoggedAction.ContactRequest;
     switch (approval.type) {
       case ApprovalType.SendMessage:
       case ApprovalType.FirstMessage:
@@ -651,6 +680,15 @@ export function timeFieldIsNight(value?: string | Date | null): boolean {
   const d = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(d.getTime())) return false;
   return isNightHour(d);
+}
+
+function numberOrNull(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
 }
 
 interface AgentConnectionLike {

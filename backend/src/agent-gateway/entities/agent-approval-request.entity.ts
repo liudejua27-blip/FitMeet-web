@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -9,6 +10,7 @@ import {
 } from 'typeorm';
 import { User } from '../../users/user.entity';
 import { AgentConnection } from './agent-connection.entity';
+import { AgentTask } from './agent-task.entity';
 
 export enum ApprovalType {
   SendMessage = 'send_message',
@@ -43,6 +45,7 @@ export enum ApprovalRiskLevel {
 }
 
 @Entity('agent_approval_requests')
+@Index(['agentTaskId'])
 export class AgentApprovalRequest {
   @PrimaryGeneratedColumn()
   id: number;
@@ -53,6 +56,14 @@ export class AgentApprovalRequest {
 
   @Column({ type: 'int', nullable: true })
   agentConnectionId: number | null;
+
+  /** Canonical Agent Runtime task id (`agent_tasks.id`) when this approval was created by a task. */
+  @ManyToOne(() => AgentTask, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'agentTaskId' })
+  agentTask: AgentTask | null;
+
+  @Column({ type: 'int', nullable: true })
+  agentTaskId: number | null;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })

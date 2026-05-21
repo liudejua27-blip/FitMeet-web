@@ -1,9 +1,4 @@
-import {
-  Inject,
-  Injectable,
-  Logger,
-  forwardRef,
-} from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -138,6 +133,8 @@ export class AgentApprovalDispatcherService {
             messageType: p.messageType as string | undefined,
             socialRequestId: p.socialRequestId as number | undefined,
             activityId: p.activityId as number | undefined,
+            agentTaskId:
+              approval.agentTaskId ?? (p.agentTaskId as number | undefined),
             metadata: (p.metadata as Record<string, unknown>) ?? {
               source: 'approval_dispatch',
             },
@@ -151,13 +148,22 @@ export class AgentApprovalDispatcherService {
             approval,
             conn,
             LoggedAction.SendMessage,
-            { approvalId: approval.id, toUserId: dto.toUserId },
+            {
+              approvalId: approval.id,
+              agentTaskId: approval.agentTaskId,
+              toUserId: dto.toUserId,
+            },
             ActionResult.Success,
           );
-          await this.writeActionLog(approval, conn, AgentActionStatus.Executed, {
-            outputSummary: 'send_message_dispatched',
-            payload: { toUserId: dto.toUserId },
-          });
+          await this.writeActionLog(
+            approval,
+            conn,
+            AgentActionStatus.Executed,
+            {
+              outputSummary: 'send_message_dispatched',
+              payload: { toUserId: dto.toUserId },
+            },
+          );
           return { ok: true, result };
         }
 
@@ -174,7 +180,12 @@ export class AgentApprovalDispatcherService {
               approval,
               conn,
               LoggedAction.ContactRequest,
-              { approvalId: approval.id, targetUserId, actionType: 'add_friend' },
+              {
+                approvalId: approval.id,
+                agentTaskId: approval.agentTaskId,
+                targetUserId,
+                actionType: 'add_friend',
+              },
               ActionResult.Success,
             );
             await this.writeActionLog(
@@ -205,13 +216,22 @@ export class AgentApprovalDispatcherService {
             approval,
             conn,
             LoggedAction.ContactRequest,
-            { approvalId: approval.id, targetUserId },
+            {
+              approvalId: approval.id,
+              agentTaskId: approval.agentTaskId,
+              targetUserId,
+            },
             ActionResult.Success,
           );
-          await this.writeActionLog(approval, conn, AgentActionStatus.Executed, {
-            outputSummary: 'contact_request_dispatched',
-            payload: { targetUserId },
-          });
+          await this.writeActionLog(
+            approval,
+            conn,
+            AgentActionStatus.Executed,
+            {
+              outputSummary: 'contact_request_dispatched',
+              payload: { targetUserId },
+            },
+          );
           return { ok: true, result };
         }
 
@@ -221,21 +241,27 @@ export class AgentApprovalDispatcherService {
           if (!dto?.type) {
             throw new Error('CreateActivity payload missing `type` field');
           }
-          const activity = await this.activities.create(
-            approval.userId,
-            dto,
-          );
+          const activity = await this.activities.create(approval.userId, dto);
           await this.writeLog(
             approval,
             conn,
             LoggedAction.CreateActivity,
-            { approvalId: approval.id, activityId: activity.id },
+            {
+              approvalId: approval.id,
+              agentTaskId: approval.agentTaskId,
+              activityId: activity.id,
+            },
             ActionResult.Success,
           );
-          await this.writeActionLog(approval, conn, AgentActionStatus.Executed, {
-            outputSummary: 'create_activity_dispatched',
-            payload: { activityId: activity.id },
-          });
+          await this.writeActionLog(
+            approval,
+            conn,
+            AgentActionStatus.Executed,
+            {
+              outputSummary: 'create_activity_dispatched',
+              payload: { activityId: activity.id },
+            },
+          );
           return { ok: true, result: activity };
         }
 
@@ -253,13 +279,22 @@ export class AgentApprovalDispatcherService {
             approval,
             conn,
             LoggedAction.JoinActivity,
-            { approvalId: approval.id, activityId },
+            {
+              approvalId: approval.id,
+              agentTaskId: approval.agentTaskId,
+              activityId,
+            },
             ActionResult.Success,
           );
-          await this.writeActionLog(approval, conn, AgentActionStatus.Executed, {
-            outputSummary: 'join_activity_dispatched',
-            payload: { activityId },
-          });
+          await this.writeActionLog(
+            approval,
+            conn,
+            AgentActionStatus.Executed,
+            {
+              outputSummary: 'join_activity_dispatched',
+              payload: { activityId },
+            },
+          );
           return { ok: true, result: activity };
         }
 
@@ -268,17 +303,14 @@ export class AgentApprovalDispatcherService {
           const p = approval.payload as Record<string, unknown>;
           const activityId = p.activityId as number | undefined;
           if (!activityId) {
-            throw new Error(
-              'SubmitCompletionProof payload missing activityId',
-            );
+            throw new Error('SubmitCompletionProof payload missing activityId');
           }
           const dto: SubmitActivityProofDto = {
             proofType: p.proofType as SubmitActivityProofDto['proofType'],
             photoUrl: p.photoUrl as string | undefined,
             note: p.note as string | undefined,
             locationApprox: p.locationApprox as string | undefined,
-            privacyMode:
-              p.privacyMode as SubmitActivityProofDto['privacyMode'],
+            privacyMode: p.privacyMode as SubmitActivityProofDto['privacyMode'],
           };
           const proof = await this.activities.submitProof(
             activityId,
@@ -291,15 +323,21 @@ export class AgentApprovalDispatcherService {
             LoggedAction.SubmitCompletionProof,
             {
               approvalId: approval.id,
+              agentTaskId: approval.agentTaskId,
               activityId,
               proofId: proof.id,
             },
             ActionResult.Success,
           );
-          await this.writeActionLog(approval, conn, AgentActionStatus.Executed, {
-            outputSummary: 'submit_proof_dispatched',
-            payload: { activityId, proofId: proof.id },
-          });
+          await this.writeActionLog(
+            approval,
+            conn,
+            AgentActionStatus.Executed,
+            {
+              outputSummary: 'submit_proof_dispatched',
+              payload: { activityId, proofId: proof.id },
+            },
+          );
           return { ok: true, result: proof };
         }
 
@@ -313,6 +351,7 @@ export class AgentApprovalDispatcherService {
             LoggedAction.Intercepted,
             {
               approvalId: approval.id,
+              agentTaskId: approval.agentTaskId,
               type: approval.type,
               reason: 'no_dispatch_handler',
             },
@@ -338,6 +377,7 @@ export class AgentApprovalDispatcherService {
         LoggedAction.Intercepted,
         {
           approvalId: approval.id,
+          agentTaskId: approval.agentTaskId,
           type: approval.type,
           error: errorMessage,
         },
@@ -362,7 +402,9 @@ export class AgentApprovalDispatcherService {
     if (!toUserId || !content) {
       throw new Error('SendMessage approval payload missing toUserId/content');
     }
-    const sender = await this.userRepo.findOne({ where: { id: approval.userId } });
+    const sender = await this.userRepo.findOne({
+      where: { id: approval.userId },
+    });
     const { conversationId } = await this.messages.startConversation(
       approval.userId,
       toUserId,
@@ -381,6 +423,7 @@ export class AgentApprovalDispatcherService {
           actorUserId: approval.userId,
           agentConnectionId: approval.agentConnectionId,
           approvalRequestId: approval.id,
+          agentTaskId: approval.agentTaskId,
           socialRequestId: dto.socialRequestId,
         },
       },
@@ -425,7 +468,9 @@ export class AgentApprovalDispatcherService {
       where: { followerId, followingId },
     });
     if (!existing) {
-      await this.followRepo.save(this.followRepo.create({ followerId, followingId }));
+      await this.followRepo.save(
+        this.followRepo.create({ followerId, followingId }),
+      );
     }
   }
 
@@ -501,6 +546,7 @@ export class AgentApprovalDispatcherService {
       actionType: mapApprovalToActionType(approval),
       actionStatus: status,
       riskLevel: mapApprovalRiskLevel(approval.riskLevel),
+      agentTaskId: approval.agentTaskId,
       targetUserId,
       relatedSocialRequestId: approval.relatedSocialRequestId,
       relatedCandidateId: approval.relatedCandidateId,
@@ -509,6 +555,7 @@ export class AgentApprovalDispatcherService {
       outputSummary: extra.outputSummary ?? null,
       payload: {
         approvalId: approval.id,
+        agentTaskId: approval.agentTaskId,
         approvalType: approval.type,
         ...(extra.payload ?? {}),
       },

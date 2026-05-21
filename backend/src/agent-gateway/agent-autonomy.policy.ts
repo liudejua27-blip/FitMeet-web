@@ -10,9 +10,12 @@ export type AgentAutoActionType =
   | 'generate_invite'
   | 'send_message'
   | 'add_friend'
+  | 'contact_exchange'
   | 'invite_activity'
   | 'create_activity'
   | 'create_activity_draft'
+  | 'offline_meeting'
+  | 'payment'
   | 'agent_chat';
 
 export type AgentAutonomyLevel =
@@ -29,7 +32,12 @@ export type AgentAutonomyLevel =
   | 'open'
   | 'sandbox_internal';
 
-export type AgentRiskLevel = ApprovalRiskLevel | 'low' | 'medium' | 'high' | 'blocked';
+export type AgentRiskLevel =
+  | ApprovalRiskLevel
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'blocked';
 
 const ASSISTED_AUTO_ACTIONS = new Set<AgentAutoActionType>([
   'read_profile',
@@ -73,7 +81,10 @@ export function canAutoExecute(
     return risk !== 'high' && ASSISTED_AUTO_ACTIONS.has(actionType);
   }
 
-  if (mode === AgentSettingsMode.Normal || mode === AgentSettingsMode.Standard) {
+  if (
+    mode === AgentSettingsMode.Normal ||
+    mode === AgentSettingsMode.Standard
+  ) {
     return risk !== 'high' && NORMAL_AUTO_ACTIONS.has(actionType);
   }
 

@@ -186,6 +186,11 @@ export class SendMessageDto {
   @IsInt()
   activityId?: number;
 
+  /** Canonical Agent Runtime task id (`agent_tasks.id`) for audit traceability. */
+  @IsOptional()
+  @IsInt()
+  agentTaskId?: number;
+
   @IsOptional()
   metadata?: Record<string, unknown>;
 

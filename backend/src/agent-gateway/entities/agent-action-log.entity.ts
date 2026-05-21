@@ -27,7 +27,9 @@ export enum AgentActionType {
   AddFriend = 'add_friend',
   CreateActivity = 'create_activity',
   InviteActivity = 'invite_activity',
+  OfflineMeeting = 'offline_meeting',
   JoinActivity = 'join_activity',
+  Payment = 'payment',
   SubmitProof = 'submit_proof',
   ApproveAction = 'approve_action',
   RejectAction = 'reject_action',
@@ -50,6 +52,7 @@ export enum AgentActionRiskLevel {
 @Entity('agent_action_logs')
 @Index(['ownerUserId', 'createdAt'])
 @Index(['agentId', 'createdAt'])
+@Index(['agentTaskId', 'createdAt'])
 export class AgentActionLog {
   @PrimaryGeneratedColumn()
   id: number;
@@ -57,6 +60,10 @@ export class AgentActionLog {
   /** AgentConnection.id — the acting agent. Null for system-owned actions. */
   @Column({ type: 'int', nullable: true })
   agentId: number | null;
+
+  /** Canonical Agent Runtime task id (`agent_tasks.id`) when available. */
+  @Column({ type: 'int', nullable: true })
+  agentTaskId: number | null;
 
   /** The owner (real user) on whose behalf the agent acted. */
   @Column({ type: 'int' })

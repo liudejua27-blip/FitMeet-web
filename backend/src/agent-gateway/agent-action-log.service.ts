@@ -7,6 +7,10 @@ import {
   AgentActionStatus,
   AgentActionType,
 } from './entities/agent-action-log.entity';
+import {
+  cleanDisplayText,
+  sanitizeForDisplay,
+} from '../common/display-text.util';
 
 /**
  * Input passed to {@link AgentActionLogService.logAgentAction}.
@@ -20,6 +24,11 @@ export interface LogAgentActionInput {
   actionStatus?: AgentActionStatus;
   riskLevel?: AgentActionRiskLevel;
   agentId?: number | null;
+  agentTaskId?: number | null;
+  eventType?: string | null;
+  conversationId?: string | null;
+  messageId?: string | null;
+  status?: string | null;
   targetUserId?: number | null;
   targetAgentId?: number | null;
   relatedSocialRequestId?: number | null;
@@ -55,7 +64,9 @@ export class AgentActionLogService {
    * Best-effort: failures here must never block the underlying business
    * action. We catch and log so callers can `await` without try/catch.
    */
-  async logAgentAction(input: LogAgentActionInput): Promise<AgentActionLog | null> {
+  async logAgentAction(
+    input: LogAgentActionInput,
+  ): Promise<AgentActionLog | null> {
     try {
       const row = this.repo.create({
         ownerUserId: input.ownerUserId,
@@ -63,15 +74,29 @@ export class AgentActionLogService {
         actionStatus: input.actionStatus ?? AgentActionStatus.Executed,
         riskLevel: input.riskLevel ?? AgentActionRiskLevel.Low,
         agentId: input.agentId ?? null,
+        agentTaskId: input.agentTaskId ?? null,
+        eventType: truncate(input.eventType ?? null, 100),
+        conversationId: truncate(input.conversationId ?? null, 64),
+        messageId: truncate(input.messageId ?? null, 64),
+        status: truncate(input.status ?? null, 40),
         targetUserId: input.targetUserId ?? null,
         targetAgentId: input.targetAgentId ?? null,
         relatedSocialRequestId: input.relatedSocialRequestId ?? null,
         relatedCandidateId: input.relatedCandidateId ?? null,
         relatedActivityId: input.relatedActivityId ?? null,
-        inputSummary: truncate(input.inputSummary ?? null, 500),
-        outputSummary: truncate(input.outputSummary ?? null, 500),
-        payload: input.payload ?? {},
-        reason: input.reason ?? null,
+        inputSummary: truncate(
+          cleanDisplayText(input.inputSummary ?? null, ''),
+          500,
+        ),
+        outputSummary: truncate(
+          cleanDisplayText(input.outputSummary ?? null, ''),
+          500,
+        ),
+        payload: sanitizeForDisplay(input.payload ?? {}) as Record<
+          string,
+          unknown
+        >,
+        reason: cleanDisplayText(input.reason ?? null, '') || null,
       });
       return await this.repo.save(row);
     } catch (err) {
@@ -91,7 +116,8 @@ export class AgentActionLogService {
     const where: Record<string, unknown> = { ownerUserId: query.ownerUserId };
     if (query.agentId !== undefined) where.agentId = query.agentId;
     if (query.actionType !== undefined) where.actionType = query.actionType;
-    if (query.actionStatus !== undefined) where.actionStatus = query.actionStatus;
+    if (query.actionStatus !== undefined)
+      where.actionStatus = query.actionStatus;
 
     const [items, total] = await this.repo.findAndCount({
       where,
