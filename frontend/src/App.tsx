@@ -40,6 +40,9 @@ const AgentControlCenterPage = lazy(() =>
 const AgentInboxPage = lazy(() =>
   import('./pages/AgentInboxPage').then((m) => ({ default: m.AgentInboxPage })),
 );
+const SocialAgentConsolePage = lazy(() =>
+  import('./pages/SocialAgentConsolePage').then((m) => ({ default: m.SocialAgentConsolePage })),
+);
 const MatchConfirmationsPage = lazy(() =>
   import('./pages/MatchConfirmationsPage').then((m) => ({
     default: m.MatchConfirmationsPage,
@@ -207,6 +210,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <AgentControlCenterPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/social-agent"
+                element={
+                  <ProtectedRoute>
+                    <SocialAgentConsolePage />
                   </ProtectedRoute>
                 }
               />
