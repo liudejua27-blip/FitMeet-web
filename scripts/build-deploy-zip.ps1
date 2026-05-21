@@ -90,6 +90,8 @@ Invoke-Step "Create deploy zip" {
       $tempZip,
       "--exclude=.git",
       "--exclude=.github",
+      "--exclude=.deploy-staging",
+      "--exclude=.vscode",
       "--exclude=node_modules",
       "--exclude=backend/node_modules",
       "--exclude=frontend/node_modules",
@@ -100,6 +102,9 @@ Invoke-Step "Create deploy zip" {
       "--exclude=logs",
       "--exclude=*/logs",
       "--exclude=*.log",
+      "--exclude=.env*",
+      "--exclude=*/.env*",
+      "--exclude=*.zip",
       "--exclude=fitmeet-deploy.zip",
       "--exclude=fitmeet.zip",
       "--exclude=backend/.env",
@@ -107,6 +112,7 @@ Invoke-Step "Create deploy zip" {
       "--exclude=backend/public/uploads",
       "--exclude=frontend/playwright-report",
       "--exclude=frontend/test-results",
+      "--exclude=nginx/ssl",
       "--exclude=SOCIAL_SKILLS_OPENCLAW_SPEC.md",
       "--exclude=integrations/openclaw/social-skills",
       "--exclude=integrations/openclaw/fitmeet-social-skills.ts",
@@ -136,8 +142,12 @@ Invoke-Step "Scan deploy zip" {
     HasBackendSqlScripts = [bool]($entries | Where-Object { $_ -match '(^|/)backend/scripts/[^/]+\.sql$' })
     HasBackendDockerfile = [bool]($entries | Where-Object { $_ -match '(^|/)backend/Dockerfile\.prod$' })
     HasNginxConf = [bool]($entries | Where-Object { $_ -match '(^|/)nginx/nginx\.conf$' })
+    HasNginxSsl = [bool]($entries | Where-Object { $_ -match '(^|/)nginx/ssl(/|$)' })
     HasCompose = [bool]($entries | Where-Object { $_ -match '(^|/)docker-compose\.prod\.yml$' })
     HasSocialSkills = [bool]($entries | Select-String -Pattern '(^|/)(SOCIAL_SKILLS_OPENCLAW_SPEC\.md|integrations/openclaw/(social-skills|fitmeet-social-skills\.ts)|backend/scripts/test-social-skills-runtime-flow\.ts)(/|$)')
+    HasEnvFiles = [bool]($entries | Where-Object { $_ -match '(^|/)\.env[^/]*$|(^|/)[^/]*\.env(\.|$)' })
+    HasZipFiles = [bool]($entries | Where-Object { $_ -match '\.zip$' })
+    HasDeployStaging = [bool]($entries | Where-Object { $_ -match '(^|/)\.deploy-staging(/|$)' })
     HasNodeModules = [bool]($entries | Select-String -SimpleMatch 'node_modules')
     HasGit = [bool]($entries | Where-Object { $_ -match '(^|/)\.git(/|$)' })
     HasLogs = [bool]($entries | Where-Object { $_ -match '(^|/)logs(/|$)|\.log$' })
@@ -147,6 +157,10 @@ Invoke-Step "Scan deploy zip" {
   if (
     -not $scan.HasFrontendIndex -or
     -not $scan.HasFrontendAssets -or
+    $scan.HasEnvFiles -or
+    $scan.HasZipFiles -or
+    $scan.HasNginxSsl -or
+    $scan.HasDeployStaging -or
     $scan.HasSocialSkills -or
     $scan.HasNodeModules -or
     $scan.HasGit -or
