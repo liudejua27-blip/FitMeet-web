@@ -148,6 +148,17 @@ describe('ProfileMatchService', () => {
     const result = await service.runOnce(1);
 
     expect(result.matchedCount).toBe(1);
+    expect(result.recommendations[0]).toMatchObject({
+      candidateUserId: 2,
+      source: 'profile_pool',
+      scoreBreakdown: expect.any(Object),
+      matchedSignals: expect.any(Array),
+      publicReason: expect.any(String),
+      privateReason: expect.any(String),
+      riskWarning: expect.any(String),
+      suggestedOpener: expect.any(String),
+      nextAction: 'owner_confirmation_required',
+    });
     expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         agentConnectionId: 9,
@@ -196,7 +207,18 @@ describe('ProfileMatchService', () => {
       agentCanRecommendMe: true,
       interestTags: ['running'],
       wantToMeet: ['resources'],
-      matchSignals: { privatePreferenceTags: ['resources'] },
+      matchSignals: {
+        privatePreferenceTags: ['resources'],
+        sensitivePrivateTags: ['resources'],
+      },
+      sensitiveTagDecisions: {
+        resources: {
+          status: 'confirmed',
+          category: 'wealth',
+          source: 'self_declared',
+          visibility: 'match_only',
+        },
+      },
     });
     profileRepo.createQueryBuilder.mockReturnValue(
       qbReturning([
@@ -211,7 +233,12 @@ describe('ProfileMatchService', () => {
             sensitivePrivateTags: ['rich'],
           },
           sensitiveTagDecisions: {
-            rich: { status: 'confirmed', category: 'wealth' },
+            rich: {
+              status: 'confirmed',
+              category: 'wealth',
+              source: 'self_declared',
+              visibility: 'match_only',
+            },
           },
         },
       ]),

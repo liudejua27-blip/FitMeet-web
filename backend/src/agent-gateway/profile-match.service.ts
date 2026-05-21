@@ -48,10 +48,18 @@ type ProfileMatchSignals = {
 type ProfileRecommendation = {
   aiMatchSessionId: number;
   targetUserId: number;
+  candidateUserId: number;
+  source: 'profile_pool';
   score: number;
+  scoreBreakdown: Record<string, number>;
   status: string;
   summary: string;
   reasons: string[];
+  matchedSignals: string[];
+  publicReason: string;
+  privateReason: string;
+  riskWarning: string;
+  suggestedOpener: string;
   publicReasons: string[];
   privateReasons: string[];
   privateReasonAvailable: boolean;
@@ -774,7 +782,15 @@ export class ProfileMatchService {
       const metadata = {
         aiMatchSessionId: recommendation.aiMatchSessionId,
         targetUserId: recommendation.targetUserId,
+        candidateUserId: recommendation.candidateUserId,
+        source: recommendation.source,
         score: recommendation.score,
+        scoreBreakdown: recommendation.scoreBreakdown,
+        matchedSignals: recommendation.matchedSignals,
+        publicReason: recommendation.publicReason,
+        privateReason: recommendation.privateReason,
+        riskWarning: recommendation.riskWarning,
+        suggestedOpener: recommendation.suggestedOpener,
         reasons: recommendation.reasons,
         publicReasons: recommendation.publicReasons,
         privateReasonAvailable: recommendation.privateReasonAvailable,
@@ -833,13 +849,34 @@ export class ProfileMatchService {
     if (resolvedReasoner?.nextAction) {
       nextStepSuggestions.unshift(resolvedReasoner.nextAction);
     }
+    const safePublicTags = this.publicTags(profile).slice(0, 8);
+    const publicReason = this.sanitizePublicText(
+      resolvedReasoner?.publicReason || publicReasons[0] || session.summary,
+    );
+    const privateReason = resolvedReasoner?.privateReason
+      ? this.sanitizePublicText(resolvedReasoner.privateReason)
+      : privateReasons.length
+        ? '命中了仅本人和授权 Agent 可见的私密偏好，具体标签不会公开展示。'
+        : '';
+    const riskWarning = this.sanitizePublicText(riskTips.join(' '));
+    const suggestedOpener = this.sanitizePublicText(
+      resolvedReasoner?.suggestedOpener || '',
+    );
     return {
       aiMatchSessionId: session.id,
       targetUserId: session.targetUserId,
+      candidateUserId: session.targetUserId,
+      source: PROFILE_MATCH_SOURCE,
       score: session.score,
+      scoreBreakdown: this.extractScoreBreakdown(session),
       status: session.status,
-      summary: resolvedReasoner?.publicReason || session.summary,
+      summary: publicReason || session.summary,
       reasons: session.reasons ?? [],
+      matchedSignals: safePublicTags,
+      publicReason,
+      privateReason,
+      riskWarning,
+      suggestedOpener,
       publicReasons,
       privateReasons: [],
       privateReasonAvailable: privateReasons.length > 0,
@@ -853,7 +890,7 @@ export class ProfileMatchService {
         avatar: user.avatar,
         color: user.color,
         city: profile.city || user.city || '',
-        publicTags: this.publicTags(profile).slice(0, 8),
+        publicTags: safePublicTags,
         summary: this.sanitizePublicText(profile.aiSummary || user.bio || ''),
       },
       nextAction: 'owner_confirmation_required',
@@ -928,6 +965,36 @@ export class ProfileMatchService {
       return JSON.parse(entry.text) as MatchReasonerOutput;
     } catch {
       return undefined;
+    }
+  }
+
+  private extractScoreBreakdown(session: AiMatchSession): Record<string, number> {
+    const fallback = { score: session.score };
+    const entry = (session.transcript ?? []).find(
+      (item) => item.speaker === 'ai_score_second_pass',
+    );
+    if (!entry) return fallback;
+    try {
+      const parsed = JSON.parse(entry.text) as {
+        baseScore?: number;
+        score?: number;
+        confidence?: number;
+      };
+      return {
+        profileRuleScore:
+          typeof parsed.baseScore === 'number' ? parsed.baseScore : session.score,
+        aiSecondPass:
+          typeof parsed.score === 'number' && typeof parsed.baseScore === 'number'
+            ? parsed.score - parsed.baseScore
+            : 0,
+        aiConfidence:
+          typeof parsed.confidence === 'number'
+            ? Math.round(parsed.confidence * 100)
+            : 0,
+        score: session.score,
+      };
+    } catch {
+      return fallback;
     }
   }
 
@@ -1057,17 +1124,49 @@ export class ProfileMatchService {
 
   private privateTags(profile: UserSocialProfile): string[] {
     const signals = (profile.matchSignals ?? {}) as ProfileMatchSignals;
-    const decisions = profile.sensitiveTagDecisions ?? {};
-    const confirmedSensitive = (signals.sensitivePrivateTags ?? []).filter(
-      (tag) => decisions[tag]?.status === 'confirmed',
+    const confirmedSensitive = (signals.sensitivePrivateTags ?? []).filter((tag) =>
+      this.isConfirmedMatchOnlySensitiveTag(profile, tag),
     );
     return this.cleanTags([
-      ...(profile.wantToMeet ?? []),
-      ...(profile.preferredTraits ?? []),
-      ...(profile.relationshipGoals ?? []),
-      ...(signals.privatePreferenceTags ?? []),
+      ...(profile.wantToMeet ?? []).filter((tag) => !this.isSensitiveTag(tag)),
+      ...(profile.preferredTraits ?? []).filter((tag) => !this.isSensitiveTag(tag)),
+      ...(profile.relationshipGoals ?? []).filter((tag) => !this.isSensitiveTag(tag)),
+      ...(signals.privatePreferenceTags ?? []).filter(
+        (tag) => !this.isSensitiveTag(tag),
+      ),
       ...confirmedSensitive,
     ]);
+  }
+
+  private isConfirmedMatchOnlySensitiveTag(
+    profile: UserSocialProfile,
+    tag: string,
+  ) {
+    const decision = (profile.sensitiveTagDecisions ?? {})[tag] as
+      | {
+          status?: string;
+          source?: string;
+          visibility?: string;
+          scope?: string;
+          use?: string;
+        }
+      | undefined;
+    if (decision?.status !== 'confirmed') return false;
+    if (!this.isWealthOrResourceTag(tag)) return true;
+    const source = (decision.source ?? '').toLowerCase();
+    const scope = (
+      decision.scope ??
+      decision.visibility ??
+      decision.use ??
+      ''
+    ).toLowerCase();
+    return source === 'self_declared' && scope === 'match_only';
+  }
+
+  private isWealthOrResourceTag(tag: string) {
+    return /wealth_resource|rich|wealth|money|income|salary|resource|resources|asset|net.?worth|有钱|富|财富|收入|高薪|资源|资产|高消费/i.test(
+      tag,
+    );
   }
 
   private buildRiskTips(

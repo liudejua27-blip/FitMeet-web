@@ -74,6 +74,13 @@ export interface AiCompatibilityRescore {
   riskWarnings: string[];
 }
 
+export interface AiCandidateMatchContent {
+  source: 'deepseek' | 'fallback';
+  recommendationReasons: string[];
+  icebreakerMessage: string;
+  riskWarnings: string[];
+}
+
 /**
  * Pluggable AI capability surface used across FitMeet.
  *
@@ -131,7 +138,7 @@ export class AIService {
         : '';
     const fallback =
       `${input.candidateNickname} 你好！${tagPart}` +
-      `我在 FitMeet 发起了「${input.requestTitle}」，时间地点都灵活，有空一起？`;
+      `我在 FitMeet 发起了「${input.requestTitle}」，时间地点可以先商量，方便先站内聊聊吗？`;
     if (!this.isLlmEnabled()) return fallback;
     try {
       const out = await this.callDeepseek(
@@ -288,7 +295,7 @@ export class AIService {
       candidate.commonTags && candidate.commonTags.length > 0
         ? candidate.commonTags
         : request.interestTags ?? [];
-    const fallback = this.fallbackInvite(reqTitle, nickname, tags);
+    const fallback = this.fallbackInviteZh(reqTitle, request.activityType, nickname, tags);
     if (!this.isLlmEnabled()) return fallback;
     try {
       const out = await this.callDeepseek(
@@ -664,6 +671,74 @@ export class AIService {
     } catch (err) {
       this.logger.warn(
         `rescoreCompatibility fell back: ${(err as Error).message}`,
+      );
+      return fallback;
+    }
+  }
+
+  async generateCandidateMatchContent(input: {
+    request: {
+      title?: string | null;
+      city?: string | null;
+      activityType?: string | null;
+      interestTags?: string[] | null;
+      timePreference?: string | null;
+      socialGoal?: string | null;
+    };
+    candidate: {
+      nickname?: string | null;
+      city?: string | null;
+      commonTags?: string[] | null;
+      publicTags?: string[] | null;
+      distanceKm?: number | null;
+      verified?: boolean | null;
+    };
+    score?: number | null;
+    deterministicReasons?: string[];
+    riskWarnings?: string[];
+  }): Promise<AiCandidateMatchContent> {
+    const fallback = this.fallbackCandidateMatchContent(input);
+    if (!this.isLlmEnabled()) return fallback;
+
+    try {
+      const out = await this.callDeepseekJson(
+        [
+          '你是 FitMeet 的社交匹配内容生成器。',
+          '输入已经通过后端确定性匹配、权限检查和安全过滤。你的任务只负责生成用户可见文案，不得改变候选人、分数或权限结果。',
+          '只输出 JSON，不要 markdown，不要解释。',
+          '字段必须严格为：{"recommendationReasons":string[],"icebreakerMessage":string,"riskWarnings":string[]}',
+          '要求：',
+          '1. recommendationReasons 输出 2 到 4 条中文短句，每条不超过 42 字。',
+          '2. icebreakerMessage 输出 1 句中文开场白，不超过 70 字，语气自然、低压力、尊重边界。',
+          '3. riskWarnings 输出 1 到 3 条中文安全提示或边界提示，每条不超过 42 字。',
+          '4. 不要输出手机号、微信、QQ、邮箱、详细住址、收入、学校单位等敏感信息。',
+          '5. 不要承诺线下见面一定发生；涉及线下只建议公开地点、站内先沟通、用户确认。',
+        ].join('\n'),
+        JSON.stringify(input),
+      );
+      const parsed = this.safeJson<Partial<AiCandidateMatchContent>>(out);
+      if (!parsed) return fallback;
+      return {
+        source: 'deepseek',
+        recommendationReasons: sanitizeAiMatchList(
+          parsed.recommendationReasons,
+          fallback.recommendationReasons,
+          4,
+        ),
+        icebreakerMessage:
+          sanitizeAiMatchText(
+            parsed.icebreakerMessage || fallback.icebreakerMessage,
+            90,
+          ) || fallback.icebreakerMessage,
+        riskWarnings: sanitizeAiMatchList(
+          parsed.riskWarnings,
+          fallback.riskWarnings,
+          3,
+        ),
+      };
+    } catch (err) {
+      this.logger.warn(
+        `generateCandidateMatchContent fell back: ${(err as Error).message}`,
       );
       return fallback;
     }
@@ -1310,6 +1385,115 @@ export class AIService {
     };
   }
 
+  private fallbackCandidateMatchContent(input: {
+    request: {
+      title?: string | null;
+      city?: string | null;
+      activityType?: string | null;
+      interestTags?: string[] | null;
+    };
+    candidate: {
+      nickname?: string | null;
+      city?: string | null;
+      commonTags?: string[] | null;
+      distanceKm?: number | null;
+      verified?: boolean | null;
+    };
+    score?: number | null;
+    riskWarnings?: string[];
+  }): AiCandidateMatchContent {
+    const nickname = stringValue(input.candidate.nickname) || '这位用户';
+    const title =
+      stringValue(input.request.title) ||
+      stringValue(input.request.activityType) ||
+      '这次约练';
+    const city =
+      stringValue(input.request.city) || stringValue(input.candidate.city);
+    const commonTags = this.cleanStrings(
+      [
+        ...(input.candidate.commonTags ?? []),
+        ...(input.request.interestTags ?? []),
+      ],
+      4,
+    );
+    const reasons: string[] = [];
+    if (commonTags.length > 0) {
+      reasons.push(
+        `你们在 ${commonTags.slice(0, 3).join('、')} 上有共同兴趣，开场成本比较低。`,
+      );
+    }
+    if (city) {
+      reasons.push(`活动城市与 ${city} 相关，适合先从公开地点的轻量约练开始。`);
+    }
+    if (typeof input.candidate.distanceKm === 'number') {
+      reasons.push(
+        `距离约 ${input.candidate.distanceKm.toFixed(1)} 公里，线下安排更容易控制节奏。`,
+      );
+    }
+    if (typeof input.score === 'number') {
+      reasons.push(`综合匹配度 ${Math.round(input.score)}%，兴趣、时间和安全边界较接近。`);
+    }
+    if (input.candidate.verified) {
+      reasons.push('对方资料已有认证信号，适合优先尝试站内沟通。');
+    }
+    if (reasons.length === 0) {
+      reasons.push('对方画像与这次需求有基础重合，适合先用低压力方式了解。');
+    }
+
+    const riskWarnings = this.normalizeRiskWarningsZh(input.riskWarnings ?? []);
+    if (riskWarnings.length === 0) {
+      riskWarnings.push('先使用站内消息沟通，不交换手机号、微信或详细住址。');
+      riskWarnings.push('如需线下见面，建议选择白天或人流量大的公开地点。');
+    }
+
+    return {
+      source: 'fallback',
+      recommendationReasons: reasons.slice(0, 4),
+      icebreakerMessage: this.fallbackInviteZh(
+        title,
+        input.request.activityType,
+        nickname,
+        commonTags,
+        city,
+      ),
+      riskWarnings,
+    };
+  }
+
+  private normalizeRiskWarningsZh(values: string[]): string[] {
+    const mapped = values
+      .map((value) => {
+        const text = stringValue(value);
+        const lower = text.toLowerCase();
+        if (!text) return '';
+        if (lower.includes('not verified')) return '对方尚未完成认证，建议先通过站内消息确认基本信息。';
+        if (lower.includes('profile is incomplete')) return '对方资料还不完整，建议先了解活动边界和时间地点。';
+        if (lower.includes('verified-only')) return '本次偏好要求认证用户，请优先等待已认证候选人。';
+        if (lower.includes('privacy') || lower.includes('boundary')) {
+          return '双方隐私边界需要保留，避免交换联系方式或详细住址。';
+        }
+        return sanitizeAiMatchText(text, 60);
+      })
+      .filter(Boolean);
+    return Array.from(new Set(mapped)).slice(0, 3);
+  }
+
+  private fallbackInviteZh(
+    requestTitle: string | null | undefined,
+    activityType: string | null | undefined,
+    nickname: string,
+    commonTags: string[],
+    city?: string | null,
+  ): string {
+    const title = stringValue(requestTitle) || stringValue(activityType) || '这次约练';
+    const tagPart =
+      commonTags.length > 0
+        ? `我也对 ${commonTags.slice(0, 2).join('、')} 感兴趣，`
+        : '';
+    const cityPart = city ? `，再确认在${city}是否合适` : '';
+    return `${nickname} 你好，${tagPart}看到你和「${title}」比较匹配。方便先在 FitMeet 上聊聊${cityPart}吗？`;
+  }
+
   private fallbackInvite(
     requestTitle: string,
     nickname: string,
@@ -1321,7 +1505,7 @@ export class AIService {
         : '';
     return (
       `${nickname} 你好！${tagPart}` +
-      `我在 FitMeet 发起了「${requestTitle}」，时间地点都灵活，有空一起？`
+      `我在 FitMeet 发起了「${requestTitle}」，时间地点可以先商量，方便先站内聊聊吗？`
     );
   }
 
@@ -1430,13 +1614,15 @@ function boundedAiScore(value: number, baseScore: number): number {
 function sanitizeAiMatchList(
   value: unknown,
   fallback: string[],
+  limit = 4,
 ): string[] {
-  if (!Array.isArray(value)) return fallback.slice(0, 4);
+  if (!Array.isArray(value)) return fallback.slice(0, limit);
   const list = value
     .filter((item): item is string => typeof item === 'string')
     .map((item) => sanitizeAiMatchText(item, 120))
     .filter(Boolean);
-  return Array.from(new Set(list)).slice(0, 4);
+  const normalized = Array.from(new Set(list)).slice(0, limit);
+  return normalized.length > 0 ? normalized : fallback.slice(0, limit);
 }
 
 function sanitizeAiMatchText(value: string, max: number): string {
@@ -1445,9 +1631,9 @@ function sanitizeAiMatchText(value: string, max: number): string {
     .replace(/(?:\+?\d[\d\s-]{6,}\d)/g, '[已隐藏]')
     .replace(
       /(微信|wechat|qq|手机号|电话|地址|住址|门牌|收入|月薪|年薪)[:：]?\s*[^，。；;\n]{2,}/gi,
-      '$1已隐藏',
+      '$1[已隐藏]',
     )
     .replace(/\s+/g, ' ')
     .trim();
-  return redacted.length > max ? `${redacted.slice(0, max - 1)}…` : redacted;
+  return redacted.length > max ? `${redacted.slice(0, max - 1)}...` : redacted;
 }

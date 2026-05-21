@@ -6,7 +6,9 @@ import { UserSocialRequest } from '../social-requests/social-request.entity';
 import { UserPreference } from '../agent-gateway/entities/user-preference.entity';
 import { SocialRequestCandidate } from './social-request-candidate.entity';
 import { CompatibilityScorerService } from './compatibility-scorer.service';
+import { AiMatchReasonerService } from './ai-match-reasoner.service';
 import { MatchService } from './match.service';
+import { MatchPrivacySanitizer } from './match-privacy-sanitizer.service';
 import { MatchController } from './match.controller';
 import { AgentMatchController } from './agent-match.controller';
 import { SafetyModule } from '../safety/safety.module';
@@ -38,9 +40,17 @@ import { SafetyEvent } from '../agent-gateway/entities/safety-event.entity';
   providers: [
     MatchService,
     CompatibilityScorerService,
+    AiMatchReasonerService,
+    MatchPrivacySanitizer,
     AgentTokenGuard,
     AgentPermissionGuard,
   ],
-  exports: [MatchService, CompatibilityScorerService, TypeOrmModule],
+  exports: [
+    MatchService,
+    CompatibilityScorerService,
+    AiMatchReasonerService,
+    MatchPrivacySanitizer,
+    TypeOrmModule,
+  ],
 })
 export class MatchModule {}

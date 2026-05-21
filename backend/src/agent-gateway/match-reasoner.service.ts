@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { UserSocialProfile } from '../users/user-social-profile.entity';
+import { MatchPrivacySanitizer } from '../match/match-privacy-sanitizer.service';
 
 /**
  * AI Match Reasoner
@@ -114,7 +115,10 @@ const REDACTION_RULES: Array<[RegExp, string]> = [
 export class MatchReasonerService {
   private readonly logger = new Logger(MatchReasonerService.name);
 
-  constructor(@Optional() private readonly config?: ConfigService) {}
+  constructor(
+    @Optional() private readonly config?: ConfigService,
+    @Optional() private readonly sanitizer?: MatchPrivacySanitizer,
+  ) {}
 
   /**
    * Main entry point — always resolves. LLM failures fall back silently
@@ -622,20 +626,27 @@ export class MatchReasonerService {
 
   /** Strip out anything that could leak from the raw entity in prompts. */
   private shapeForPrompt(p: UserSocialProfile) {
+    const sanitized = this.sanitizer?.sanitizeProfileForAi(p);
+    if (sanitized) return sanitized;
     return {
-      nickname: p.nickname,
-      ageRange: p.ageRange,
-      city: p.city,
-      mbti: p.mbti,
-      zodiac: p.zodiac,
-      traits: p.traits ?? [],
-      interestTags: p.interestTags ?? [],
-      lifestyleTags: p.lifestyleTags ?? [],
-      socialScenes: p.socialScenes ?? [],
-      fitnessGoals: p.fitnessGoals ?? [],
-      socialStyle: p.socialStyle,
-      communicationStyle: p.communicationStyle,
-      privacyBoundary: p.privacyBoundary,
+      nickname: this.sanitizeText(p.nickname ?? ''),
+      ageRange: this.sanitizeText(p.ageRange ?? ''),
+      city: this.sanitizeText(p.city ?? ''),
+      mbti: this.sanitizeText(p.mbti ?? ''),
+      zodiac: this.sanitizeText(p.zodiac ?? ''),
+      traits: this.sanitizeList(p.traits ?? []),
+      interestTags: this.sanitizeList(p.interestTags ?? []),
+      lifestyleTags: this.sanitizeList(p.lifestyleTags ?? []),
+      socialScenes: this.sanitizeList(p.socialScenes ?? []),
+      fitnessGoals: this.sanitizeList(p.fitnessGoals ?? []),
+      relationshipGoals: this.sanitizeList(p.relationshipGoals ?? []),
+      availableTimes: this.sanitizeList(p.availableTimes ?? []),
+      socialStyle: this.sanitizeText(p.socialStyle ?? ''),
+      communicationStyle: this.sanitizeText(p.communicationStyle ?? ''),
+      privacyFlags: {
+        hasRejectRules: Boolean(p.rejectRules?.trim()),
+        hasPrivacyBoundary: Boolean(p.privacyBoundary?.trim()),
+      },
     };
   }
 }

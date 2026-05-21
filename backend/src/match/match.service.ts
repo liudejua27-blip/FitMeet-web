@@ -12,7 +12,6 @@ import {
 } from '../social-requests/social-request.entity';
 import { UserPreference } from '../agent-gateway/entities/user-preference.entity';
 import { SafetyService } from '../safety/safety.service';
-import { AIService } from '../ai/ai.service';
 import {
   CandidateMatchLevel,
   CandidateRiskLevel,
@@ -26,6 +25,11 @@ import {
   AgentActionType,
 } from '../agent-gateway/entities/agent-action-log.entity';
 import { CompatibilityScorerService } from './compatibility-scorer.service';
+import {
+  AiMatchReasonerService,
+  MatchResultSource,
+} from './ai-match-reasoner.service';
+import { isTestLikeText } from '../common/display-text.util';
 
 /** Default time window when a request has no timeStart/timeEnd. */
 const DEFAULT_INACTIVE_DAYS = 30;
@@ -93,6 +97,14 @@ export interface MatchedCandidateView {
   suggestedMessage: string;
   status?: SocialRequestCandidateStatus;
   candidateRecordId?: number;
+  candidateUserId: number;
+  source: MatchResultSource;
+  matchedSignals: string[];
+  publicReason: string;
+  privateReason: string;
+  riskWarning: string;
+  suggestedOpener: string;
+  nextAction: string;
 }
 
 interface CandidateScore {
@@ -123,7 +135,7 @@ export class MatchService {
     @InjectRepository(UserSocialProfile)
     private readonly socialProfileRepo: Repository<UserSocialProfile>,
     private readonly safetyService: SafetyService,
-    private readonly ai: AIService,
+    private readonly reasoner: AiMatchReasonerService,
     private readonly actionLogs: AgentActionLogService,
     private readonly compatibility: CompatibilityScorerService,
   ) {}
@@ -290,120 +302,38 @@ export class MatchService {
     const enrichedViews: MatchedCandidateView[] = [];
     for (const c of top) {
       const view = this.toView(c, request, undefined);
-      // Optional LLM enrichment. AIService falls back to deterministic
-      // templates when DEEPSEEK_API_KEY is unset, so this never breaks the
-      // matching pipeline.
-      try {
-        const aiScore = await this.ai.rescoreCompatibility({
-          baseScore: view.score,
-          request: {
-            title: request.title,
-            city: request.city,
-            activityType: request.activityType,
-            interestTags: request.interestTags ?? [],
-            timePreference:
-              typeof request.metadata?.timePreference === 'string'
-                ? request.metadata.timePreference
-                : '',
-            socialGoal:
-              typeof request.metadata?.socialGoal === 'string'
-                ? request.metadata.socialGoal
-                : '',
-            personalityPreference: Array.isArray(
-              request.metadata?.personalityPreference,
-            )
-              ? (request.metadata.personalityPreference as string[])
-              : [],
-          },
-          ownerProfile: ownerProfile
-            ? {
-                city: ownerProfile.city,
-                publicTags: [
-                  ...(ownerProfile.interestTags ?? []),
-                  ...(ownerProfile.fitnessGoals ?? []),
-                  ...(ownerProfile.traits ?? []),
-                ],
-                traits: ownerProfile.traits ?? [],
-                preferredTraits: ownerProfile.preferredTraits ?? [],
-                availability: ownerProfile.availableTimes ?? [],
-              }
-            : null,
-          candidate: {
-            nickname: c.user.name,
-            city: c.socialProfile?.city || c.user.city || '',
-            publicTags: [
-              ...(c.user.interestTags ?? []),
-              ...(c.socialProfile?.interestTags ?? []),
-              ...(c.socialProfile?.fitnessGoals ?? []),
-              ...(c.socialProfile?.lifestyleTags ?? []),
-              ...(c.socialProfile?.socialScenes ?? []),
-            ],
-            traits: c.socialProfile?.traits ?? [],
-            commonTags: view.commonTags,
-            verified: c.user.verified,
-            acceptsAgentMessages: c.pref?.acceptAgentMessages ?? null,
-          },
-          deterministicReasons: view.reasons,
-          scoreBreakdown: view.scoreBreakdown,
-        });
-        view.score = aiScore.score;
-        view.level = this.bandLevel(aiScore.score);
-        view.scoreBreakdown = {
-          ...view.scoreBreakdown,
-          aiSecondPass: aiScore.score - c.total,
-          aiConfidence: Math.round(aiScore.confidence * 100),
-        };
-        if (aiScore.publicReason && !view.reasons.includes(aiScore.publicReason)) {
-          view.reasons = [aiScore.publicReason, ...view.reasons];
-        }
-        if (aiScore.reasons.length > 0) {
-          view.reasons = Array.from(new Set([...view.reasons, ...aiScore.reasons]));
-        }
-        if (aiScore.riskWarnings.length > 0) {
-          view.risk = {
-            ...view.risk,
-            warnings: Array.from(
-              new Set([...view.risk.warnings, ...aiScore.riskWarnings]),
-            ),
-          };
-        }
-        const aiMessage = await this.ai.generateInviteMessage(
-          {
-            title: request.title,
-            activityType: request.activityType,
-            interestTags: request.interestTags ?? [],
-          },
-          {
-            nickname: c.user.name,
-            commonTags: view.commonTags,
-          },
-        );
-        if (aiMessage && aiMessage.trim().length > 0) {
-          view.suggestedMessage = aiMessage.trim();
-        }
-        if (this.ai.isLlmEnabled()) {
-          const explanation = await this.ai.explainMatchFor(
-            {
-              interestTags: request.interestTags ?? [],
-              city: request.city,
-              activityType: request.activityType,
-            },
-            {
-              nickname: c.user.name,
-              tags: c.user.interestTags ?? [],
-              distanceKm: view.distanceKm,
-            },
-            view.score,
-          );
-          if (explanation && !view.reasons.includes(explanation)) {
-            view.reasons = [explanation, ...view.reasons];
-          }
-        }
-      } catch (err) {
-        this.logger.warn(
-          `AI enrichment skipped for candidate ${c.user.id}: ${(err as Error).message}`,
-        );
-      }
+      const reasoning = await this.reasoner.explainSocialRequestCandidate({
+        request,
+        source: view.source,
+        ownerProfile,
+        candidateUser: c.user,
+        candidateProfile: c.socialProfile,
+        baseScore: c.total,
+        scoreBreakdown: view.scoreBreakdown,
+        deterministicReasons: view.reasons,
+        commonTags: view.commonTags,
+        riskWarnings: view.risk.warnings,
+        distanceKm: view.distanceKm,
+      });
+      view.score = reasoning.score;
+      view.level = this.bandLevel(reasoning.score);
+      view.scoreBreakdown = reasoning.scoreBreakdown;
+      view.matchedSignals = reasoning.matchedSignals;
+      view.publicReason = reasoning.publicReason;
+      view.privateReason = reasoning.privateReason;
+      view.riskWarning = reasoning.riskWarning;
+      view.suggestedOpener = reasoning.suggestedOpener;
+      view.nextAction = reasoning.nextAction;
+      view.suggestedMessage = reasoning.suggestedOpener;
+      view.reasons = Array.from(
+        new Set([reasoning.publicReason, ...view.reasons].filter(Boolean)),
+      ).slice(0, 6);
+      view.risk = {
+        ...view.risk,
+        warnings: Array.from(
+          new Set([...view.risk.warnings, ...reasoning.riskWarnings]),
+        ),
+      };
       const row = await this.candidateRepo.save(
         this.candidateRepo.create({
           socialRequestId: request.id,
@@ -563,6 +493,14 @@ export class MatchService {
       qb.andWhere('u.city ILIKE :city', { city: `%${input.city}%` });
     }
     qb.andWhere('u."acceptNearbyMatch" = true');
+    if (process.env.NODE_ENV === 'production') {
+      qb.andWhere('u.email NOT ILIKE :testEmailPattern', {
+        testEmailPattern: '%test%',
+      });
+      qb.andWhere('u.name !~* :testNamePattern', {
+        testNamePattern: '(test|mock|dummy|fake|seed|demo|测试|測試)',
+      });
+    }
     if (input.verifiedOnly) {
       qb.andWhere('u.verified = true');
     }
@@ -574,7 +512,18 @@ export class MatchService {
     qb.andWhere('u.updatedAt >= :cutoff', { cutoff });
 
     const users = await qb.take(HARD_FILTER_USER_PAGE).getMany();
-    return users.filter((u) => !input.excludeUserIds.has(u.id));
+    return users.filter(
+      (user) =>
+        !input.excludeUserIds.has(user.id) &&
+        !this.isProductionTestUser(user),
+    );
+  }
+
+  private isProductionTestUser(user: User): boolean {
+    if (process.env.NODE_ENV !== 'production') return false;
+    return [user.name, user.email, user.phone, user.bio].some((value) =>
+      isTestLikeText(value),
+    );
   }
 
   private async fetchPrefs(userIds: number[]) {
@@ -660,7 +609,7 @@ export class MatchService {
       const warnings: string[] = [];
       const candidateCity = (socialProfile?.city || user.city || '').trim();
 
-      // 1) Distance, max 20
+      // 1) Place / distance, max 25
       const distanceKm = this.computeDistanceKm(
         ctx.ownerLat,
         ctx.ownerLng,
@@ -702,7 +651,7 @@ export class MatchService {
         socialProfile,
         ctx.timePreference,
       );
-      const timeScore = Math.round(rawTimeScore * 0.75);
+      const timeScore = rawTimeScore;
       breakdown.time = timeScore;
       if (rawTimeScore >= 20) {
         reasons.push('Time window is a strong match.');
@@ -744,11 +693,20 @@ export class MatchService {
       reasons.push(...compatibility.publicReasons);
       reasons.push(...compatibility.privateReasons);
       warnings.push(...compatibility.riskTips);
+      const levelGoalScore = Math.min(
+        15,
+        Math.round(
+          compatibility.breakdown.interest * 0.55 +
+            compatibility.breakdown.bidirectionalIntent * 0.35 +
+            Math.min(compatibility.commonTags.length, 2),
+        ),
+      );
+      breakdown.levelAndGoal = levelGoalScore;
 
-      // 4) Activity type (10)
+      // 4) Activity type / sport category, max 20
 
       const actScore = Math.round(
-        (this.scoreActivityType(ctx.type, ctx.activityType, user) / 15) * 10,
+        (this.scoreActivityType(ctx.type, ctx.activityType, user) / 15) * 20,
       );
       breakdown.activityType = actScore;
       if (actScore >= 10) {
@@ -772,12 +730,10 @@ export class MatchService {
       const total =
         distScore +
         timeScore +
-        compatibility.breakdown.interest +
         actScore +
+        levelGoalScore +
         compatibility.breakdown.personality +
-        compatibility.breakdown.bidirectionalIntent +
-        safeScore +
-        compatibility.breakdown.agentAcceptance;
+        safeScore;
 
       out.push({
         user,
@@ -800,13 +756,13 @@ export class MatchService {
   private scoreDistance(distanceKm: number | null, radiusKm: number): number {
     if (distanceKm == null) {
       // Same-city fallback (no coords available): moderate score.
-      return 12;
+      return 15;
     }
-    if (distanceKm <= 1) return 20;
-    if (distanceKm <= 3) return 16;
-    if (distanceKm <= 5) return 12;
-    if (distanceKm <= 10) return 8;
-    if (distanceKm <= radiusKm) return 4;
+    if (distanceKm <= 1) return 25;
+    if (distanceKm <= 3) return 21;
+    if (distanceKm <= 5) return 17;
+    if (distanceKm <= 10) return 11;
+    if (distanceKm <= radiusKm) return 6;
     return 0;
   }
 
@@ -1153,9 +1109,14 @@ export class MatchService {
   ): MatchedCandidateView {
     const reasons = this.generateMatchReasons(cand, request);
     const suggestedMessage = this.generateIcebreakerMessage(cand, request);
+    const source: MatchResultSource =
+      request?.source === 'public' ? 'public_intent' : 'social_request';
+    const riskWarning = cand.risk.warnings.join(' ');
     return {
       targetType: 'user',
       userId: cand.user.id,
+      candidateUserId: cand.user.id,
+      source,
       nickname: cand.user.name,
       avatar: cand.user.avatar,
       color: cand.user.color,
@@ -1167,6 +1128,12 @@ export class MatchService {
       scoreBreakdown: cand.breakdown,
       risk: cand.risk,
       suggestedMessage,
+      matchedSignals: cand.commonTags,
+      publicReason: reasons[0] ?? '',
+      privateReason: '规则匹配结果，AI 仅可解释或生成话术。',
+      riskWarning,
+      suggestedOpener: suggestedMessage,
+      nextAction: 'owner_confirmation_required',
       status: row?.status,
       candidateRecordId: row?.id,
     };
@@ -1179,6 +1146,8 @@ export class MatchService {
     return {
       targetType: 'user',
       userId: user.id,
+      candidateUserId: user.id,
+      source: 'social_request',
       nickname: user.name,
       avatar: user.avatar,
       color: user.color,
@@ -1190,6 +1159,12 @@ export class MatchService {
       scoreBreakdown: row.scoreBreakdown ?? {},
       risk: { level: row.riskLevel, warnings: row.riskWarnings ?? [] },
       suggestedMessage: row.suggestedMessage,
+      matchedSignals: row.commonTags ?? [],
+      publicReason: row.reasons?.[0] ?? '',
+      privateReason: '候选来自已持久化的 MatchService 规则评分结果。',
+      riskWarning: (row.riskWarnings ?? []).join(' '),
+      suggestedOpener: row.suggestedMessage,
+      nextAction: 'owner_confirmation_required',
       status: row.status,
       candidateRecordId: row.id,
     };
