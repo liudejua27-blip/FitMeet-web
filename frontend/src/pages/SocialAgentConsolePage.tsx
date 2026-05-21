@@ -6,6 +6,7 @@ import {
   type SocialAgentChatCandidate,
   type SocialAgentChatRunResult,
   type SocialAgentPermissionMode,
+  type SocialAgentReplanResult,
   type SocialAgentStepStatus,
 } from '../api/socialAgentApi';
 import { cleanDisplayArray, cleanDisplayText } from '../lib/displayText';
@@ -65,6 +66,11 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     event.preventDefault();
     const goal = cleanDisplayText(input, '').trim();
     if (!goal || isRunning) return;
+
+    if (result?.taskId) {
+      await submitFollowUp(goal, result.taskId);
+      return;
+    }
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -140,6 +146,83 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     } finally {
       setIsRunning(false);
       abortRef.current = null;
+    }
+  };
+
+  const submitFollowUp = async (message: string, taskId: number) => {
+    setIsRunning(true);
+    setActionStatus('');
+    setStatuses([
+      {
+        id: 'follow_up_understand',
+        text: '正在理解你的补充要求',
+        state: 'done',
+      },
+      {
+        id: 'follow_up_replan',
+        text: '正在更新 Agent 执行计划',
+        state: 'running',
+      },
+    ]);
+    setMessages((items) => [
+      ...items,
+      { id: nextId('user'), role: 'user', content: message },
+      {
+        id: nextId('assistant'),
+        role: 'assistant',
+        content: '我会把这句补充写入当前任务的上下文，并重新规划下一步动作。',
+      },
+    ]);
+
+    try {
+      const replan = await socialAgentApi.replanTask(taskId, {
+        userMessage: message,
+        reason: 'user_follow_up',
+      });
+      setStatuses([
+        {
+          id: 'follow_up_understand',
+          text: '正在理解你的补充要求',
+          state: 'done',
+        },
+        {
+          id: 'follow_up_replan',
+          text: replan.source === 'deepseek'
+            ? '已调用 DeepSeek 更新 Agent 计划'
+            : '已使用本地策略更新 Agent 计划',
+          state: 'done',
+        },
+        {
+          id: 'follow_up_confirmation',
+          text: '已保留候选卡片，后续动作仍需你确认',
+          state: 'done',
+        },
+      ]);
+      setMessages((items) => [
+        ...items,
+        {
+          id: nextId('assistant'),
+          role: 'assistant',
+          content: replanAssistantMessage(replan),
+        },
+      ]);
+      setInput('');
+    } catch (error) {
+      setStatuses((items) =>
+        items.map((item) =>
+          item.id === 'follow_up_replan' ? { ...item, state: 'failed' } : item,
+        ),
+      );
+      setMessages((items) => [
+        ...items,
+        {
+          id: nextId('assistant'),
+          role: 'assistant',
+          content: `这次补充没有成功写入 Agent 计划。${errorMessage(error)}`,
+        },
+      ]);
+    } finally {
+      setIsRunning(false);
     }
   };
 
@@ -600,6 +683,16 @@ function assistantMessage(result: SocialAgentChatRunResult): string {
   }
   const first = result.candidates[0];
   return `我找到了 ${result.candidates.length} 位真实候选人，优先推荐 ${displayName(first)}，匹配度 ${Math.round(first.score)}%。`;
+}
+
+function replanAssistantMessage(result: SocialAgentReplanResult): string {
+  const actionCount = result.plan.length;
+  const confirmationCount = result.plan.filter((step) => step.requiresUserConfirmation).length;
+  const sourceText = result.source === 'deepseek' ? 'DeepSeek' : '本地安全策略';
+  if (actionCount === 0) {
+    return `我已经把你的补充写入 task #${result.taskId}，但当前权限下没有可执行的新动作。你可以继续补充条件，或手动确认已有候选卡片。`;
+  }
+  return `我已经根据你的补充重新规划 task #${result.taskId}。这次由${sourceText}生成 ${actionCount} 个下一步动作，其中 ${confirmationCount} 个需要你确认；已有候选人和约练草稿会继续保留，不会自动发送或发布。`;
 }
 
 function displayName(candidate: SocialAgentChatCandidate): string {

@@ -69,6 +69,29 @@ export interface SocialAgentChatRunResult {
   events: Array<Record<string, unknown>>;
 }
 
+export interface SocialAgentPlanStep {
+  id: string;
+  title: string;
+  action: string;
+  status: 'planned' | 'replanned';
+  requiresUserConfirmation: boolean;
+  riskLevel: 'low' | 'medium' | 'high';
+  toolName: string | null;
+  input: Record<string, unknown>;
+  rationale: string;
+}
+
+export interface SocialAgentReplanResult {
+  taskId: number;
+  permissionMode: SocialAgentPermissionMode;
+  allowedActions: string[];
+  plan: SocialAgentPlanStep[];
+  source: 'deepseek' | 'fallback';
+  fallbackReason: string | null;
+  reason: 'initial' | 'user_follow_up' | 'failure_recovery' | 'manual_replan';
+  replanAttempt: number;
+}
+
 export type SocialAgentChatStreamEvent =
   | { type: 'task'; taskId: number; status: SocialAgentTaskStatus }
   | {
@@ -82,6 +105,12 @@ type RunChatInput = {
   goal: string;
   permissionMode: SocialAgentPermissionMode;
   idempotencyKey?: string;
+};
+
+type ReplanChatInput = {
+  userMessage: string;
+  reason?: 'user_follow_up' | 'failure_recovery' | 'manual_replan';
+  failure?: Record<string, unknown> | null;
 };
 
 type SendCandidateMessageInput = {
@@ -159,6 +188,18 @@ export const socialAgentApi = {
           body: JSON.stringify(data),
         },
       )
+      .then(sanitizeSocialAgentResponse),
+
+  replanTask: (taskId: number, data: ReplanChatInput) =>
+    api
+      .request<SocialAgentReplanResult>(`/social-agent/tasks/${taskId}/replan`, {
+        method: 'POST',
+        body: JSON.stringify({
+          reason: data.reason ?? 'user_follow_up',
+          userMessage: data.userMessage,
+          failure: data.failure ?? null,
+        }),
+      })
       .then(sanitizeSocialAgentResponse),
 };
 
