@@ -157,11 +157,20 @@ export function AiProfileBuilderPage() {
     key: K,
     value: boolean,
   ) {
+    const enablingVisibility =
+      value === true &&
+      key !== 'hideSensitiveTags';
+    if (enablingVisibility && !confirmProfileAuthorization()) {
+      return;
+    }
     setPrivacySaving(key);
     setError('');
     setMessage('');
     try {
-      const next = await socialProfileApi.updatePrivacy({ [key]: value });
+      const next = await socialProfileApi.updatePrivacy({
+        [key]: value,
+        ...(enablingVisibility ? explicitProfileAuthorizationPayload() : {}),
+      });
       setPrivacy(next);
       setMessage(next.matchPoolEnabled ? '隐私设置已更新，画像匹配池保持开启。' : '隐私设置已更新，画像暂不进入匹配池。');
     } catch (err) {
@@ -340,6 +349,12 @@ export function AiProfileBuilderPage() {
       setError('请先确认敏感标签只用于私密匹配，不会公开展示。');
       return;
     }
+    const wantsMatching =
+      enableMatching &&
+      (draft.visibility.profileDiscoverable || draft.visibility.agentCanRecommendMe);
+    if (wantsMatching && !confirmProfileAuthorization()) {
+      return;
+    }
     setSaving(true);
     setError('');
     setMessage('');
@@ -348,6 +363,7 @@ export function AiProfileBuilderPage() {
       const result = await socialProfileApi.aiSave({
         profile: draft,
         enableMatching,
+        ...(wantsMatching ? explicitProfileAuthorizationPayload() : {}),
         sensitiveTagsConfirmed,
       });
       await reloadPrivacy();
@@ -373,6 +389,20 @@ export function AiProfileBuilderPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function confirmProfileAuthorization() {
+    return window.confirm(
+      '请确认：你同意 FitMeet 使用这份 AI 画像进入匹配池，并允许 Agent 在推荐场景中使用公开标签和私密偏好。敏感标签只会在你确认后用于私密匹配，不会公开展示。',
+    );
+  }
+
+  function explicitProfileAuthorizationPayload() {
+    return {
+      ownerConfirmed: true,
+      matchingConsent: true,
+      profileVisibilityConsent: true,
+    };
   }
 
   if (loading) {
@@ -416,6 +446,11 @@ export function AiProfileBuilderPage() {
                 <div className="text-xs font-bold text-[#c9c0b4]">画像完成度</div>
                 <div className="mt-2 flex items-end gap-2">
                   <span className="text-4xl font-black text-[#c8ff80]">{completion.percent}%</span>
+                  {completion.readinessLevel && (
+                    <span className="pb-1 text-xs font-bold text-[#c9c0b4]">
+                      {profileReadinessLabel(completion.readinessLevel)}
+                    </span>
+                  )}
                   <span className="pb-1 text-xs text-[#9b9184]">已回答 {answeredCount} 项</span>
                 </div>
               </div>
@@ -950,6 +985,20 @@ export function AiProfileBuilderPage() {
       </main>
     </div>
   );
+}
+
+function profileReadinessLabel(level: NonNullable<SocialProfileCompletion['readinessLevel']>) {
+  switch (level) {
+    case 'agent_ready':
+      return 'Agent 可稳定推荐';
+    case 'match_ready':
+      return '可进入匹配';
+    case 'basic':
+      return '基础画像';
+    case 'empty':
+    default:
+      return '待补全';
+  }
 }
 
 function TextField({

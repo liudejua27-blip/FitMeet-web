@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -23,8 +23,31 @@ type SensitiveTagSaveStatus = 'confirmed' | 'rejected' | 'hidden';
 type SaveAiDraftInput = {
   profile?: AiProfileBuilderCard;
   enableMatching?: boolean;
+  ownerConfirmed?: boolean;
+  matchingConsent?: boolean;
+  profileVisibilityConsent?: boolean;
   sensitiveTagsConfirmed?: boolean;
   sensitiveTagDecisions?: Record<string, SensitiveTagSaveStatus>;
+};
+
+type ProfileReadinessLevel =
+  | 'empty'
+  | 'basic'
+  | 'match_ready'
+  | 'agent_ready';
+
+type ProfileCompletionSection = {
+  key:
+    | 'basic'
+    | 'personality'
+    | 'fitness'
+    | 'preferences'
+    | 'availability'
+    | 'safety'
+    | 'privacy';
+  label: string;
+  fields: Array<keyof UserSocialProfile>;
+  weight: number;
 };
 
 type ProfileInterviewQuestion = {
@@ -230,6 +253,51 @@ const PROFILE_INTERVIEW_BANK: ProfileInterviewQuestion[] = [
   },
 ];
 
+const PROFILE_COMPLETION_SECTIONS: ProfileCompletionSection[] = [
+  {
+    key: 'basic',
+    label: '基础信息',
+    fields: ['nickname', 'ageRange', 'city', 'gender'],
+    weight: 18,
+  },
+  {
+    key: 'personality',
+    label: '社交风格',
+    fields: ['mbti', 'traits', 'socialStyle', 'communicationStyle'],
+    weight: 16,
+  },
+  {
+    key: 'fitness',
+    label: '运动与兴趣',
+    fields: ['nearbyArea', 'fitnessGoals', 'interestTags', 'lifestyleTags'],
+    weight: 16,
+  },
+  {
+    key: 'preferences',
+    label: '想认识谁',
+    fields: ['wantToMeet', 'preferredTraits', 'relationshipGoals'],
+    weight: 18,
+  },
+  {
+    key: 'availability',
+    label: '时间安排',
+    fields: ['availableTimes'],
+    weight: 10,
+  },
+  {
+    key: 'safety',
+    label: '安全边界',
+    fields: ['avoidTraits', 'rejectRules', 'privacyBoundary'],
+    weight: 16,
+  },
+  {
+    key: 'privacy',
+    label: '授权状态',
+    fields: ['profileDiscoverable', 'agentCanRecommendMe'],
+    weight: 6,
+  },
+];
+
 /**
  * 读 / upsert 当前登录用户的社交画像。最小可用版本：
  *   - 永远返回一份对象（未保存过则返回带默认空值的占位）
@@ -401,6 +469,12 @@ export class SocialProfileService {
   async saveAiDraft(userId: number, input: SaveAiDraftInput) {
     const card = input.profile;
     const dto = this.profileCardToDto(card);
+    const wantsMatching =
+      input.enableMatching !== false &&
+      (dto.profileDiscoverable === true || dto.agentCanRecommendMe === true);
+    if (wantsMatching) {
+      this.assertOwnerAuthorizedProfileVisibility(input);
+    }
     if (input.enableMatching === false) {
       dto.profileDiscoverable = false;
       dto.agentCanRecommendMe = false;
@@ -614,34 +688,131 @@ export class SocialProfileService {
   }
 
   private getCompletionFromProfile(profile: UserSocialProfile) {
-    const keys: Array<keyof UserSocialProfile> = [
-      'gender',
-      'nickname',
-      'ageRange',
-      'city',
-      'mbti',
-      'traits',
-      'socialStyle',
-      'communicationStyle',
-      'nearbyArea',
-      'fitnessGoals',
-      'interestTags',
-      'lifestyleTags',
-      'wantToMeet',
-      'preferredTraits',
-      'avoidTraits',
-      'relationshipGoals',
-      'availableTimes',
-      'socialPreference',
-      'rejectRules',
-      'privacyBoundary',
-    ];
+    const keys = PROFILE_COMPLETION_SECTIONS.flatMap(
+      (section) => section.fields,
+    );
     const filled = keys.filter((key) => this.hasValue(profile, key));
+    const sections = PROFILE_COMPLETION_SECTIONS.map((section) => {
+      const completedFields = section.fields.filter((key) =>
+        this.hasValue(profile, key),
+      );
+      const missingFields = section.fields.filter(
+        (key) => !completedFields.includes(key),
+      );
+      return {
+        key: section.key,
+        label: section.label,
+        completedFields,
+        missingFields,
+        percent: Math.round(
+          (completedFields.length / section.fields.length) * 100,
+        ),
+        weight: section.weight,
+      };
+    });
+    const weightedPercent = Math.round(
+      sections.reduce(
+        (sum, section) => sum + (section.percent * section.weight) / 100,
+        0,
+      ),
+    );
+    const hasMatchBasics =
+      this.hasValue(profile, 'city') &&
+      (this.hasValue(profile, 'fitnessGoals') ||
+        this.hasValue(profile, 'interestTags')) &&
+      this.hasValue(profile, 'wantToMeet') &&
+      (this.hasValue(profile, 'avoidTraits') ||
+        this.hasValue(profile, 'rejectRules')) &&
+      this.hasValue(profile, 'privacyBoundary');
+    const authorization = this.profileAuthorizationState(profile);
+    const readinessLevel: ProfileReadinessLevel =
+      weightedPercent >= 80 && authorization.matchPoolEnabled
+        ? 'agent_ready'
+        : weightedPercent >= 65 && hasMatchBasics
+          ? 'match_ready'
+          : weightedPercent >= 30
+            ? 'basic'
+            : 'empty';
+    const nextActions = this.profileNextActions(
+      sections,
+      authorization,
+      hasMatchBasics,
+    );
     return {
       completedFields: filled,
       missingFields: keys.filter((key) => !filled.includes(key)),
-      percent: Math.round((filled.length / keys.length) * 100),
+      percent: weightedPercent,
+      readinessLevel,
+      canEnterMatchPool: hasMatchBasics && weightedPercent >= 65,
+      authorizationRequired: !authorization.matchPoolEnabled,
+      authorization,
+      sections,
+      nextActions,
     };
+  }
+
+  private profileAuthorizationState(profile: UserSocialProfile) {
+    const matchPoolEnabled =
+      profile.profileDiscoverable || profile.agentCanRecommendMe;
+    return {
+      matchPoolEnabled,
+      profileDiscoverable: profile.profileDiscoverable,
+      agentCanRecommendMe: profile.agentCanRecommendMe,
+      agentCanStartChatAfterApproval: profile.agentCanStartChatAfterApproval,
+      hideSensitiveTags: profile.hideSensitiveTags,
+      requiresOwnerConfirmationToEnable:
+        !profile.profileDiscoverable && !profile.agentCanRecommendMe,
+      consentSource: matchPoolEnabled
+        ? 'owner_confirmed_profile_switch'
+        : 'not_enabled',
+    };
+  }
+
+  private profileNextActions(
+    sections: Array<{
+      key: string;
+      label: string;
+      missingFields: Array<keyof UserSocialProfile>;
+      percent: number;
+    }>,
+    authorization: ReturnType<SocialProfileService['profileAuthorizationState']>,
+    hasMatchBasics: boolean,
+  ): string[] {
+    const actions: string[] = [];
+    const weakest = sections
+      .filter((section) => section.percent < 100)
+      .sort((a, b) => a.percent - b.percent)
+      .slice(0, 2);
+    for (const section of weakest) {
+      actions.push(`补全${section.label}`);
+    }
+    if (!hasMatchBasics) {
+      actions.push('补充城市、运动兴趣、想认识的人和安全边界');
+    }
+    if (!authorization.matchPoolEnabled) {
+      actions.push('本人确认后开启匹配池授权');
+    }
+    return Array.from(new Set(actions)).slice(0, 4);
+  }
+
+  private assertOwnerAuthorizedProfileVisibility(input: SaveAiDraftInput) {
+    if (
+      input.ownerConfirmed === true &&
+      input.matchingConsent === true &&
+      input.profileVisibilityConsent === true
+    ) {
+      return;
+    }
+    throw new BadRequestException({
+      code: 'profile_visibility_owner_confirmation_required',
+      message:
+        'Enabling AI profile matching requires explicit owner confirmation.',
+      required: [
+        'ownerConfirmed',
+        'matchingConsent',
+        'profileVisibilityConsent',
+      ],
+    });
   }
 
   private normalizeAiAnswers(input: {
@@ -980,6 +1151,7 @@ export class SocialProfileService {
   /** GET /api/ai-profile/privacy payload. */
   async getPrivacy(userId: number) {
     const profile = await this.get(userId);
+    const completion = this.getCompletionFromProfile(profile);
     return {
       profileDiscoverable: profile.profileDiscoverable,
       agentCanRecommendMe: profile.agentCanRecommendMe,
@@ -988,6 +1160,8 @@ export class SocialProfileService {
       hideSensitiveTags: profile.hideSensitiveTags,
       matchPoolEnabled:
         profile.profileDiscoverable || profile.agentCanRecommendMe,
+      completion,
+      authorization: completion.authorization,
       sensitiveTagSummary: this.summarizeDecisions(
         profile.sensitiveTagDecisions ?? {},
       ),
@@ -1003,6 +1177,9 @@ export class SocialProfileService {
       allowAgentRecommend?: boolean;
       agentCanStartChatAfterApproval?: boolean;
       hideSensitiveTags?: boolean;
+      ownerConfirmed?: boolean;
+      matchingConsent?: boolean;
+      profileVisibilityConsent?: boolean;
     },
   ) {
     const dto: UpdateSocialProfileDto = {};
@@ -1018,8 +1195,19 @@ export class SocialProfileService {
       );
     if (body.hideSensitiveTags !== undefined)
       dto.hideSensitiveTags = Boolean(body.hideSensitiveTags);
+    if (this.enablesProfileVisibility(dto)) {
+      this.assertOwnerAuthorizedProfileVisibility(body);
+    }
     await this.upsert(userId, dto);
     return this.getPrivacy(userId);
+  }
+
+  private enablesProfileVisibility(dto: UpdateSocialProfileDto): boolean {
+    return (
+      dto.profileDiscoverable === true ||
+      dto.agentCanRecommendMe === true ||
+      dto.agentCanStartChatAfterApproval === true
+    );
   }
 
   /** GET /api/ai-profile/sensitive-tags/pending. */

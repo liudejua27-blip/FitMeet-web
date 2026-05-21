@@ -172,6 +172,31 @@ describe('SocialProfileService — privacy & sensitive tags', () => {
     );
   });
 
+  it('requires explicit owner confirmation when enabling privacy switches', async () => {
+    profileRepo.findOne.mockResolvedValue(
+      baseProfile({ profileDiscoverable: false, agentCanRecommendMe: false }),
+    );
+
+    await expect(
+      service.updatePrivacy(1, { profileDiscoverable: true }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'profile_visibility_owner_confirmation_required',
+      }),
+    });
+
+    await service.updatePrivacy(1, {
+      profileDiscoverable: true,
+      ownerConfirmed: true,
+      matchingConsent: true,
+      profileVisibilityConsent: true,
+    });
+
+    expect(profileRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ profileDiscoverable: true }),
+    );
+  });
+
   it('seeds pending decisions for new sensitive tags after upsert', async () => {
     profileRepo.findOne.mockResolvedValue(null);
 

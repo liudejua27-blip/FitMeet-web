@@ -16,8 +16,29 @@ import {
 } from './agent-permission.service';
 
 export type SocialAgentPlanSource = 'deepseek' | 'fallback';
-export type SocialAgentPlanStepStatus = 'planned';
+export type SocialAgentPlanStepStatus = 'planned' | 'replanned';
 export type SocialAgentPlanRiskLevel = 'low' | 'medium' | 'high';
+export type SocialAgentPlanReason =
+  | 'initial'
+  | 'user_follow_up'
+  | 'failure_recovery'
+  | 'manual_replan';
+
+export interface SocialAgentPlanFailureContext {
+  stepId?: string | null;
+  toolName?: string | null;
+  action?: SocialAgentAction | string | null;
+  status?: string | null;
+  code?: string | null;
+  message?: string | null;
+}
+
+export interface SocialAgentPlannerOptions {
+  reason?: SocialAgentPlanReason;
+  userMessage?: string | null;
+  failure?: SocialAgentPlanFailureContext | null;
+  maxReplanAttempts?: number;
+}
 
 export interface SocialAgentPlanStep extends Record<string, unknown> {
   id: string;
@@ -38,6 +59,8 @@ export interface SocialAgentPlannerResult {
   plan: SocialAgentPlanStep[];
   source: SocialAgentPlanSource;
   fallbackReason: string | null;
+  reason: SocialAgentPlanReason;
+  replanAttempt: number;
 }
 
 @Injectable()
@@ -53,24 +76,54 @@ export class SocialAgentPlannerService {
     private readonly permissions: AgentPermissionService,
   ) {}
 
-  async planTask(taskId: number): Promise<SocialAgentPlannerResult> {
+  async planTask(
+    taskId: number,
+    options: SocialAgentPlannerOptions = {},
+  ): Promise<SocialAgentPlannerResult> {
     const task = await this.taskRepo.findOne({ where: { id: taskId } });
     if (!task) throw new NotFoundException(`Agent task ${taskId} not found`);
-    return this.planExistingTask(task);
+    return this.planExistingTask(task, options);
   }
 
-  async planExistingTask(task: AgentTask): Promise<SocialAgentPlannerResult> {
+  async replanTask(
+    taskId: number,
+    options: SocialAgentPlannerOptions = {},
+  ): Promise<SocialAgentPlannerResult> {
+    const task = await this.taskRepo.findOne({ where: { id: taskId } });
+    if (!task) throw new NotFoundException(`Agent task ${taskId} not found`);
+    return this.planExistingTask(task, {
+      ...options,
+      reason: options.reason ?? 'failure_recovery',
+    });
+  }
+
+  async planExistingTask(
+    task: AgentTask,
+    options: SocialAgentPlannerOptions = {},
+  ): Promise<SocialAgentPlannerResult> {
     const permissionMode = task.permissionMode;
     const allowedActions = this.permissions.getAllowedActions(permissionMode);
+    const reason = options.reason ?? 'initial';
+    const brainMemory = this.buildBrainMemory(task, reason, options);
+    const isReplan = reason !== 'initial';
     let plan: SocialAgentPlanStep[] = [];
     let source: SocialAgentPlanSource = 'deepseek';
     let fallbackReason: string | null = null;
 
     try {
-      const responseText = await this.callDeepSeekPlan(task, allowedActions);
+      const responseText = await this.callDeepSeekPlan(
+        task,
+        allowedActions,
+        brainMemory,
+      );
       const parsed = this.parseJsonObject(responseText);
       const rawSteps = this.readSteps(parsed);
-      plan = this.normalizeSteps(rawSteps, allowedActions, permissionMode);
+      plan = this.normalizeSteps(
+        rawSteps,
+        allowedActions,
+        permissionMode,
+        isReplan,
+      );
       if (plan.length === 0) {
         fallbackReason = 'deepseek_plan_empty_after_permission_filter';
       }
@@ -91,10 +144,25 @@ export class SocialAgentPlannerService {
 
     if (fallbackReason) {
       source = 'fallback';
-      plan = this.buildFallbackPlan(task, allowedActions, fallbackReason);
+      plan = this.buildFallbackPlan(
+        task,
+        allowedActions,
+        fallbackReason,
+        brainMemory,
+        isReplan,
+      );
     }
 
     task.plan = plan;
+    task.memory = {
+      ...(task.memory ?? {}),
+      brain: {
+        ...brainMemory,
+        lastPlanSource: source,
+        lastPlanReason: reason,
+        lastPlannedAt: new Date().toISOString(),
+      },
+    };
     await this.taskRepo.save(task);
     await this.eventRepo.save(
       this.eventRepo.create({
@@ -106,9 +174,12 @@ export class SocialAgentPlannerService {
         payload: {
           source,
           fallbackReason,
+          reason,
           permissionMode,
           allowedActions,
           stepCount: plan.length,
+          replanAttempt: brainMemory.replanAttempt,
+          lastFailure: brainMemory.lastFailure ?? null,
         },
       }),
     );
@@ -120,12 +191,15 @@ export class SocialAgentPlannerService {
       plan,
       source,
       fallbackReason,
+      reason,
+      replanAttempt: this.numericValue(brainMemory.replanAttempt),
     };
   }
 
   private async callDeepSeekPlan(
     task: AgentTask,
     allowedActions: SocialAgentAction[],
+    brainMemory: Record<string, unknown>,
   ): Promise<string> {
     const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
     if (!apiKey) throw new Error('DEEPSEEK_API_KEY missing');
@@ -146,7 +220,10 @@ export class SocialAgentPlannerService {
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: this.buildSystemPrompt() },
-          { role: 'user', content: this.buildUserPrompt(task, allowedActions) },
+          {
+            role: 'user',
+            content: this.buildUserPrompt(task, allowedActions, brainMemory),
+          },
         ],
       }),
     });
@@ -175,6 +252,7 @@ export class SocialAgentPlannerService {
   private buildUserPrompt(
     task: AgentTask,
     allowedActions: SocialAgentAction[],
+    brainMemory: Record<string, unknown>,
   ): string {
     return JSON.stringify({
       taskId: task.id,
@@ -186,6 +264,16 @@ export class SocialAgentPlannerService {
       taskType: task.taskType,
       title: task.title,
       input: task.input ?? {},
+      priorPlan: Array.isArray(task.plan) ? task.plan.slice(-8) : [],
+      recentToolCalls: Array.isArray(task.toolCalls)
+        ? task.toolCalls.slice(-8)
+        : [],
+      brainMemory,
+      replanningRules: [
+        'If lastFailure exists, do not repeat the same failing tool unless there is a changed input or a safer alternative.',
+        'For blocked high-risk actions, move to drafting, inbox, or user confirmation instead of forcing execution.',
+        'Preserve the user goal and use the latest user follow-up as the strongest instruction.',
+      ],
       outputSchema: {
         steps: [
           {
@@ -227,6 +315,7 @@ export class SocialAgentPlannerService {
     rawSteps: unknown,
     allowedActions: SocialAgentAction[],
     permissionMode: AgentTaskPermissionMode,
+    isReplan = false,
   ): SocialAgentPlanStep[] {
     if (!Array.isArray(rawSteps)) return [];
 
@@ -245,7 +334,7 @@ export class SocialAgentPlannerService {
         title:
           this.optionalString(rawStep.title) || this.defaultTitleForAction(action),
         action,
-        status: 'planned',
+        status: isReplan ? 'replanned' : 'planned',
         requiresUserConfirmation: this.requiresUserConfirmation(
           permissionMode,
           rawStep.requiresUserConfirmation,
@@ -264,16 +353,21 @@ export class SocialAgentPlannerService {
     task: AgentTask,
     allowedActions: SocialAgentAction[],
     fallbackReason: string,
+    brainMemory: Record<string, unknown> = {},
+    isReplan = false,
   ): SocialAgentPlanStep[] {
     const goal = `${task.goal} ${task.title}`;
-    const preferred = this.preferredFallbackActions(task.permissionMode, goal);
+    const preferred = this.withoutRecentlyFailedAction(
+      this.preferredFallbackActions(task.permissionMode, goal),
+      brainMemory.lastFailure,
+    );
     return preferred
       .filter((action) => allowedActions.includes(action))
       .map((action, index) => ({
-        id: `fallback_${index + 1}`,
+        id: `${isReplan ? 'replan' : 'fallback'}_${index + 1}`,
         title: this.defaultTitleForAction(action),
         action,
-        status: 'planned' as const,
+        status: (isReplan ? 'replanned' : 'planned') as SocialAgentPlanStepStatus,
         requiresUserConfirmation: this.requiresUserConfirmation(
           task.permissionMode,
           undefined,
@@ -284,8 +378,112 @@ export class SocialAgentPlannerService {
           goal: task.goal,
           fallbackReason,
         },
-        rationale: 'Fallback plan generated without a valid DeepSeek JSON plan.',
+        rationale: isReplan
+          ? 'Fallback replan generated after a failed or blocked step.'
+          : 'Fallback plan generated without a valid DeepSeek JSON plan.',
       }));
+  }
+
+  private buildBrainMemory(
+    task: AgentTask,
+    reason: SocialAgentPlanReason,
+    options: SocialAgentPlannerOptions,
+  ): Record<string, unknown> {
+    const current = this.isRecord(task.memory?.brain)
+      ? task.memory.brain
+      : {};
+    const now = new Date().toISOString();
+    const priorTurns = Array.isArray(current.turns) ? current.turns : [];
+    const nextTurn = this.optionalString(options.userMessage)
+      ? [
+          ...priorTurns,
+          {
+            role: 'user',
+            text: this.optionalString(options.userMessage),
+            reason,
+            at: now,
+          },
+        ]
+      : priorTurns;
+    const inferredFailure =
+      options.failure ?? this.failureFromTaskState(task) ?? null;
+    const isReplan = reason !== 'initial';
+    const priorAttempt =
+      typeof current.replanAttempt === 'number' ? current.replanAttempt : 0;
+    const maxAttempts = Math.max(1, options.maxReplanAttempts ?? 3);
+    const replanAttempt = isReplan
+      ? Math.min(priorAttempt + 1, maxAttempts)
+      : priorAttempt;
+
+    return {
+      turns: nextTurn.slice(-20),
+      lastFailure: inferredFailure,
+      replanAttempt,
+      maxReplanAttempts: maxAttempts,
+      replanExhausted: isReplan && replanAttempt >= maxAttempts,
+      previousPlanSummary: Array.isArray(task.plan)
+        ? task.plan.slice(-8).map((step) => ({
+            id: this.optionalString(step.id),
+            action: this.optionalString(step.action),
+            status: this.optionalString(step.status),
+            toolName: this.optionalString(step.toolName),
+          }))
+        : [],
+      previousToolSummary: Array.isArray(task.toolCalls)
+        ? task.toolCalls.slice(-8).map((call) => ({
+            id: this.optionalString(call.id),
+            stepId: this.optionalString(call.stepId),
+            toolName: this.optionalString(call.toolName),
+            status: this.optionalString(call.status),
+            error: this.isRecord(call.error) ? call.error : null,
+          }))
+        : [],
+      updatedAt: now,
+    };
+  }
+
+  private failureFromTaskState(
+    task: AgentTask,
+  ): SocialAgentPlanFailureContext | null {
+    const lastCall = this.isRecord(task.result?.lastToolCall)
+      ? task.result.lastToolCall
+      : Array.isArray(task.toolCalls)
+        ? task.toolCalls
+            .slice()
+            .reverse()
+            .find((call) => {
+              const status = this.optionalString(call.status);
+              return status === 'failed' || status === 'blocked';
+            })
+        : null;
+    if (!this.isRecord(lastCall)) {
+      if (!this.isRecord(task.error)) return null;
+      return {
+        message: this.optionalString(task.error.message),
+        code: this.optionalString(task.error.code),
+      };
+    }
+    const error = this.isRecord(lastCall.error) ? lastCall.error : {};
+    return {
+      stepId: this.optionalString(lastCall.stepId),
+      toolName: this.optionalString(lastCall.toolName),
+      action: this.optionalString(lastCall.action),
+      status: this.optionalString(lastCall.status),
+      code: this.optionalString(error.code),
+      message: this.optionalString(error.message),
+    };
+  }
+
+  private withoutRecentlyFailedAction(
+    actions: SocialAgentAction[],
+    failure: unknown,
+  ): SocialAgentAction[] {
+    if (!this.isRecord(failure)) return actions;
+    const raw = this.optionalString(failure.action) ?? '';
+    const failedAction = this.permissions.normalizeAction(raw);
+    if (!failedAction) return actions;
+    const filtered = actions.filter((action) => action !== failedAction);
+    return filtered.length > 0 ? filtered : actions;
   }
 
   private preferredFallbackActions(
@@ -360,6 +558,10 @@ export class SocialAgentPlannerService {
 
   private optionalString(value: unknown): string | null {
     return typeof value === 'string' && value.trim() ? value.trim() : null;
+  }
+
+  private numericValue(value: unknown): number {
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

@@ -112,6 +112,27 @@ export interface SocialProfileCompletion {
   completedFields: string[];
   missingFields: string[];
   percent: number;
+  readinessLevel?: 'empty' | 'basic' | 'match_ready' | 'agent_ready';
+  canEnterMatchPool?: boolean;
+  authorizationRequired?: boolean;
+  authorization?: {
+    matchPoolEnabled: boolean;
+    profileDiscoverable: boolean;
+    agentCanRecommendMe: boolean;
+    agentCanStartChatAfterApproval: boolean;
+    hideSensitiveTags: boolean;
+    requiresOwnerConfirmationToEnable: boolean;
+    consentSource: string;
+  };
+  sections?: Array<{
+    key: string;
+    label: string;
+    completedFields: string[];
+    missingFields: string[];
+    percent: number;
+    weight: number;
+  }>;
+  nextActions?: string[];
 }
 
 export interface AiProfilePrivacyState {
@@ -121,6 +142,8 @@ export interface AiProfilePrivacyState {
   agentCanStartChatAfterApproval: boolean;
   hideSensitiveTags: boolean;
   matchPoolEnabled: boolean;
+  completion?: SocialProfileCompletion;
+  authorization?: SocialProfileCompletion['authorization'];
   sensitiveTagSummary: Record<'pending' | 'confirmed' | 'rejected' | 'hidden', number>;
 }
 
@@ -162,6 +185,9 @@ export const socialProfileApi = {
   aiSave: (data: {
     profile: AiProfileBuilderCard;
     enableMatching?: boolean;
+    ownerConfirmed?: boolean;
+    matchingConsent?: boolean;
+    profileVisibilityConsent?: boolean;
     sensitiveTagsConfirmed?: boolean;
     sensitiveTagDecisions?: Record<string, 'confirmed' | 'rejected' | 'hidden'>;
   }) =>
@@ -176,7 +202,11 @@ export const socialProfileApi = {
       body: JSON.stringify(data),
     }),
   privacy: () => api.request<AiProfilePrivacyState>('/ai-profile/privacy'),
-  updatePrivacy: (data: Partial<Pick<AiProfilePrivacyState, 'profileDiscoverable' | 'agentCanRecommendMe' | 'agentCanStartChatAfterApproval' | 'hideSensitiveTags'>>) =>
+  updatePrivacy: (data: Partial<Pick<AiProfilePrivacyState, 'profileDiscoverable' | 'agentCanRecommendMe' | 'agentCanStartChatAfterApproval' | 'hideSensitiveTags'>> & {
+    ownerConfirmed?: boolean;
+    matchingConsent?: boolean;
+    profileVisibilityConsent?: boolean;
+  }) =>
     api.request<AiProfilePrivacyState>('/ai-profile/privacy', {
       method: 'PATCH',
       body: JSON.stringify(data),

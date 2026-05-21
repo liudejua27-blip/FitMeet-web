@@ -114,6 +114,9 @@ describe('SocialProfileService', () => {
 
     const result = await service.saveAiDraft(1, {
       enableMatching: true,
+      ownerConfirmed: true,
+      matchingConsent: true,
+      profileVisibilityConsent: true,
       sensitiveTagsConfirmed: true,
       profile: {
         basic: {
@@ -163,6 +166,50 @@ describe('SocialProfileService', () => {
       category: 'wealth',
     });
     expect(result.matchingEnabled).toBe(true);
+  });
+
+  it('requires explicit owner authorization before AI draft enters matching pool', async () => {
+    profileRepo.findOne.mockResolvedValue(null);
+    delegateRepo.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.saveAiDraft(1, {
+        enableMatching: true,
+        profile: {
+          basic: {
+            nickname: 'Nova',
+            city: 'Shanghai',
+            ageRange: '25-34',
+            gender: '',
+            zodiac: '',
+          },
+          personality: {
+            mbti: '',
+            traits: [],
+            socialStyle: '',
+            communicationStyle: '',
+          },
+          interests: { sports: ['running'], lifestyle: [], socialScenes: [] },
+          preferences: { wantToMeet: ['runner'], preferredTraits: [], avoid: [] },
+          relationshipIntent: { goals: [], openness: '' },
+          availability: { weekdays: '', weekends: '' },
+          visibility: {
+            profileDiscoverable: true,
+            agentCanRecommendMe: true,
+            agentCanStartChatAfterApproval: false,
+          },
+          matchSignals: {
+            publicTags: ['running'],
+            privatePreferenceTags: [],
+            sensitivePrivateTags: [],
+            matchKeywords: ['running'],
+            confidence: 0.5,
+            source: 'fallback',
+          },
+          summary: '',
+        },
+      }),
+    ).rejects.toThrow('Enabling AI profile matching requires explicit owner confirmation.');
   });
 
   it('keeps a saved AI draft out of the matching pool when enableMatching is false', async () => {
@@ -235,6 +282,55 @@ describe('SocialProfileService', () => {
         }),
       ]),
     );
+  });
+
+  it('returns weighted completion, readiness, and authorization state', async () => {
+    profileRepo.findOne.mockResolvedValue({
+      userId: 1,
+      nickname: 'Nova',
+      gender: 'female',
+      ageRange: '25-34',
+      city: 'Qingdao',
+      mbti: 'ENFP',
+      traits: ['easygoing'],
+      socialStyle: 'low pressure',
+      communicationStyle: 'friendly',
+      nearbyArea: 'Shinan',
+      fitnessGoals: ['running'],
+      interestTags: ['running'],
+      lifestyleTags: ['coffee'],
+      wantToMeet: ['runner'],
+      preferredTraits: ['punctual'],
+      avoidTraits: ['pushy'],
+      relationshipGoals: ['workout partner'],
+      availableTimes: ['evening'],
+      socialPreference: '',
+      rejectRules: 'no private places',
+      privacyBoundary: 'no phone or WeChat before trust',
+      profileDiscoverable: true,
+      agentCanRecommendMe: true,
+      agentCanStartChatAfterApproval: false,
+      hideSensitiveTags: true,
+      aiSummary: '',
+      aiProfileCard: {},
+      matchSignals: {},
+      sensitiveTagDecisions: {},
+      openness: '',
+      zodiac: '',
+      socialScenes: [],
+      weekdayAvailability: '',
+      weekendAvailability: '',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as UserSocialProfile);
+
+    const completion = await service.getCompletion(1);
+
+    expect(completion.percent).toBeGreaterThanOrEqual(80);
+    expect(completion.readinessLevel).toBe('agent_ready');
+    expect(completion.canEnterMatchPool).toBe(true);
+    expect(completion.authorization.matchPoolEnabled).toBe(true);
+    expect(completion.sections.length).toBeGreaterThan(0);
   });
 
   it('maps interviewer aliases such as sports into canonical profile fields', async () => {

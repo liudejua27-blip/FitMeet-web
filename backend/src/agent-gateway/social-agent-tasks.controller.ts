@@ -27,6 +27,10 @@ import {
   AgentTaskStatus,
 } from './entities/agent-task.entity';
 import { SocialAgentPlannerService } from './social-agent-planner.service';
+import type {
+  SocialAgentPlanFailureContext,
+  SocialAgentPlanReason,
+} from './social-agent-planner.service';
 import {
   SocialAgentToolExecutorService,
   SocialAgentToolName,
@@ -52,6 +56,11 @@ type CreateSocialAgentTaskBody = {
 };
 
 type ActionBody = Record<string, unknown>;
+type ReplanBody = {
+  reason?: SocialAgentPlanReason;
+  userMessage?: string | null;
+  failure?: SocialAgentPlanFailureContext | null;
+};
 
 @Controller('social-agent/tasks')
 @UseGuards(AuthGuard('jwt'))
@@ -141,6 +150,22 @@ export class SocialAgentTasksController {
   ) {
     await this.assertTaskOwner(id, req.user.id);
     return this.planner.planTask(id);
+  }
+
+  /** POST /api/social-agent/tasks/:id/replan */
+  @Post(':id/replan')
+  @HttpCode(200)
+  async replanTask(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: ReplanBody,
+  ) {
+    await this.assertTaskOwner(id, req.user.id);
+    return this.planner.replanTask(id, {
+      reason: this.normalizeReplanReason(body.reason),
+      userMessage: optionalString(body.userMessage),
+      failure: isRecord(body.failure) ? body.failure : null,
+    });
   }
 
   /** POST /api/social-agent/tasks/:id/run-next */
@@ -309,6 +334,15 @@ export class SocialAgentTasksController {
     return mode && Object.values(AgentTaskPermissionMode).includes(mode)
       ? mode
       : AgentTaskPermissionMode.LimitedAuto;
+  }
+
+  private normalizeReplanReason(
+    reason: SocialAgentPlanReason | undefined,
+  ): SocialAgentPlanReason {
+    return reason &&
+      ['user_follow_up', 'failure_recovery', 'manual_replan'].includes(reason)
+      ? reason
+      : 'failure_recovery';
   }
 
   private serializeTask(task: AgentTask) {
