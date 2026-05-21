@@ -1,4 +1,5 @@
 import * as api from './client';
+import { sanitizeDisplayValue } from '../lib/displayText';
 
 export interface AgentInboxUser {
   id: number;
@@ -121,11 +122,7 @@ export interface ProfileRecommendationItem {
 }
 
 export const agentInboxApi = {
-  conversations: (params?: {
-    agentProfileId?: number;
-    limit?: number;
-    unreadOnly?: boolean;
-  }) => {
+  conversations: (params?: { agentProfileId?: number; limit?: number; unreadOnly?: boolean }) => {
     const search = new URLSearchParams();
     if (params?.agentProfileId) {
       search.set('agentProfileId', String(params.agentProfileId));
@@ -133,46 +130,46 @@ export const agentInboxApi = {
     if (params?.limit) search.set('limit', String(params.limit));
     if (params?.unreadOnly) search.set('unreadOnly', 'true');
     const qs = search.toString();
-    return api.request<{
-      agentProfileId: number | null;
-      agentName: string | null;
-      conversations: AgentInboxConversation[];
-    }>(`/agents/inbox/conversations${qs ? `?${qs}` : ''}`);
+    return api
+      .request<{
+        agentProfileId: number | null;
+        agentName: string | null;
+        conversations: AgentInboxConversation[];
+      }>(`/agents/inbox/conversations${qs ? `?${qs}` : ''}`)
+      .then(sanitizeAgentInboxResponse);
   },
 
-  messages: (
-    conversationId: string,
-    params?: { agentProfileId?: number; limit?: number },
-  ) => {
+  messages: (conversationId: string, params?: { agentProfileId?: number; limit?: number }) => {
     const search = new URLSearchParams();
     if (params?.agentProfileId) {
       search.set('agentProfileId', String(params.agentProfileId));
     }
     if (params?.limit) search.set('limit', String(params.limit));
     const qs = search.toString();
-    return api.request<{
-      agentProfileId: number | null;
-      agentName: string | null;
-      conversationId: string;
-      messages: AgentInboxMessage[];
-    }>(`/agents/inbox/conversations/${conversationId}/messages${qs ? `?${qs}` : ''}`);
+    return api
+      .request<{
+        agentProfileId: number | null;
+        agentName: string | null;
+        conversationId: string;
+        messages: AgentInboxMessage[];
+      }>(`/agents/inbox/conversations/${conversationId}/messages${qs ? `?${qs}` : ''}`)
+      .then(sanitizeAgentInboxResponse);
   },
 
-  reply: (
-    conversationId: string,
-    body: { agentProfileId?: number; content: string },
-  ) =>
-    api.request<{
-      status: 'sent';
-      agentProfileId: number | null;
-      agentName: string | null;
-      conversationId: string;
-      socketPushed: boolean;
-      message: AgentInboxMessage;
-    }>(`/agents/inbox/conversations/${conversationId}/reply`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
+  reply: (conversationId: string, body: { agentProfileId?: number; content: string }) =>
+    api
+      .request<{
+        status: 'sent';
+        agentProfileId: number | null;
+        agentName: string | null;
+        conversationId: string;
+        socketPushed: boolean;
+        message: AgentInboxMessage;
+      }>(`/agents/inbox/conversations/${conversationId}/reply`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      })
+      .then(sanitizeAgentInboxResponse),
 
   runAutopilotOnce: () =>
     api.request<{
@@ -194,10 +191,10 @@ export const agentInboxApi = {
       recommendations: unknown[];
     }>('/agents/profile-matches/run-once', { method: 'POST' }),
 
-  runSubconsciousLoopOnce: () =>
+  runProfileMatchAutopilotOnce: () =>
     api.request<{
       ok: boolean;
-      loop: 'subconscious';
+      autopilot: 'profile_match_autopilot';
       summary: {
         triggeredBy: 'cron' | 'manual';
         skipped: boolean;
@@ -211,18 +208,14 @@ export const agentInboxApi = {
         skippedDuplicates: number;
         errors: number;
       };
-    }>('/agents/subconscious-loop/run-once', { method: 'POST' }),
+    }>('/agents/profile-match/autopilot/run-once', { method: 'POST' }),
 
-  subconsciousLoopStatus: () =>
-    api.request<OpenClawSetupStatus['subconsciousLoop']>(
-      '/agents/subconscious-loop/status',
-    ),
+  profileMatchAutopilotStatus: () =>
+    api.request<OpenClawSetupStatus['subconsciousLoop']>('/agents/profile-match/autopilot/status'),
 
-  openClawStatus: () =>
-    api.request<OpenClawSetupStatus>('/agents/openclaw/status'),
+  openClawStatus: () => api.request<OpenClawSetupStatus>('/agents/openclaw/status'),
 
-  matchRequests: () =>
-    api.request<{ requests: MatchRequestItem[] }>('/match-requests'),
+  matchRequests: () => api.request<{ requests: MatchRequestItem[] }>('/match-requests'),
 
   acceptMatchRequest: (id: number) =>
     api.request<{ ok: boolean; status: string; conversationId?: string }>(
@@ -231,15 +224,16 @@ export const agentInboxApi = {
     ),
 
   rejectMatchRequest: (id: number) =>
-    api.request<{ ok: boolean; status: string }>(
-      `/match-requests/${id}/reject`,
-      { method: 'POST' },
-    ),
+    api.request<{ ok: boolean; status: string }>(`/match-requests/${id}/reject`, {
+      method: 'POST',
+    }),
 
   profileMatches: (limit = 30) =>
-    api.request<{ recommendations: ProfileRecommendationItem[] }>(
-      `/agents/profile-matches?limit=${limit}`,
-    ),
+    api
+      .request<{
+        recommendations: ProfileRecommendationItem[];
+      }>(`/agents/profile-matches?limit=${limit}`)
+      .then(sanitizeAgentInboxResponse),
 
   ignoreProfileMatch: (aiMatchSessionId: number) =>
     api.request<{ ok: boolean; status: string }>(
@@ -271,7 +265,10 @@ export const agentInboxApi = {
       requiresTargetConsent: boolean;
     }>(`/agents/profile-matches/${aiMatchSessionId}/confirm-contact`, {
       method: 'POST',
-      body: JSON.stringify({ note: 'Owner confirmed from Agent Inbox recommendation card.' }),
+      body: JSON.stringify({
+        ownerConfirmed: true,
+        note: 'Owner confirmed from Agent Inbox recommendation card.',
+      }),
     }),
 
   requestContactExchange: (aiMatchSessionId: number) =>
@@ -279,7 +276,10 @@ export const agentInboxApi = {
       `/agents/profile-matches/${aiMatchSessionId}/request-contact-exchange`,
       {
         method: 'POST',
-        body: JSON.stringify({ note: 'Owner requested contact exchange from Agent Inbox.' }),
+        body: JSON.stringify({
+          ownerConfirmed: true,
+          note: 'Owner requested contact exchange from Agent Inbox.',
+        }),
       },
     ),
 
@@ -299,8 +299,21 @@ export const agentInboxApi = {
     if (params?.limit) search.set('limit', String(params.limit));
     if (params?.unreadOnly) search.set('unreadOnly', 'true');
     const qs = search.toString();
-    return api.request<{ events: AgentInboxEvent[] }>(
-      `/agents/inbox/events${qs ? `?${qs}` : ''}`,
-    );
+    return api
+      .request<{ events: AgentInboxEvent[] }>(`/agents/inbox/events${qs ? `?${qs}` : ''}`)
+      .then(sanitizeAgentInboxResponse);
   },
+
+  ackEvents: (eventIds: string[], agentProfileId?: number) =>
+    api.request<{ ok: true; requested: number; acknowledged: number; eventIds: string[] }>(
+      '/agents/inbox/events/ack',
+      {
+        method: 'POST',
+        body: JSON.stringify({ eventIds, agentProfileId }),
+      },
+    ),
 };
+
+function sanitizeAgentInboxResponse<T>(value: T): T {
+  return sanitizeDisplayValue(value) as T;
+}

@@ -31,6 +31,7 @@ import {
   SocialAgentToolExecutorService,
   SocialAgentToolName,
 } from './social-agent-tool-executor.service';
+import { rememberSocialAgentShortTerm } from './social-agent-memory.util';
 import {
   cleanDisplayText,
   sanitizeForDisplay,
@@ -110,6 +111,23 @@ export class SocialAgentTasksController {
         idempotencyKey: idempotencyKey ?? null,
       }),
     );
+    rememberSocialAgentShortTerm(task, {
+      currentStep: {
+        id: 'task.created',
+        label: '已创建 Social Agent 任务',
+        status: 'done',
+        updatedAt: new Date().toISOString(),
+      },
+      steps: [
+        {
+          id: 'task.created',
+          label: '已创建 Social Agent 任务',
+          status: 'done',
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+    });
+    await this.taskRepo.save(task);
 
     return this.serializeTask(task);
   }

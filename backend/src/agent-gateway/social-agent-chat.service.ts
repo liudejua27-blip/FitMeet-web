@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 
 import { cleanDisplayText, sanitizeForDisplay } from '../common/display-text.util';
 import { MatchService, MatchedCandidateView } from '../match/match.service';
+import { MessagesService } from '../messages/messages.service';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
 import { UpdateSocialRequestDto } from '../social-requests/dto/update-social-request.dto';
 import {
@@ -35,6 +36,10 @@ import {
   SocialAgentToolExecutorService,
   SocialAgentToolName,
 } from './social-agent-tool-executor.service';
+import {
+  appendShortTermMemoryItem,
+  rememberSocialAgentShortTerm,
+} from './social-agent-memory.util';
 
 export interface SocialAgentVisibleStep {
   id: string;
@@ -106,6 +111,7 @@ export class SocialAgentChatService {
     private readonly socialProfiles: SocialProfileService,
     private readonly socialRequests: SocialRequestsService,
     private readonly matchService: MatchService,
+    private readonly messages: MessagesService,
   ) {}
 
   run(
@@ -141,6 +147,7 @@ export class SocialAgentChatService {
       permissionMode,
       idempotencyKey: idempotencyKey || null,
     });
+    this.rememberShortTermStep(task, 'task.created', '已创建 Social Agent 任务', 'done');
     await emit?.({ type: 'task', taskId: task.id, status: task.status });
 
     const done = async (
@@ -150,8 +157,10 @@ export class SocialAgentChatService {
       payload: Record<string, unknown> = {},
     ) => {
       await emit?.({ type: 'step', step: { id, label, status: 'running' } });
+      this.rememberShortTermStep(task, id, label, 'running');
       const step: SocialAgentVisibleStep = { id, label, status: 'done' };
       visibleSteps.push(step);
+      this.rememberShortTermStep(task, id, label, 'done');
       await this.writeEvent(task, eventType, label, payload);
       await emit?.({ type: 'step', step });
     };
@@ -229,6 +238,13 @@ export class SocialAgentChatService {
 
     task.status = AgentTaskStatus.AwaitingConfirmation;
     task.statusReason = 'recommendations_ready_waiting_user_confirmation';
+    this.rememberShortTermCandidates(task, draft, candidates);
+    this.rememberShortTermStep(
+      task,
+      'awaiting_confirmation',
+      '等待用户确认下一步动作',
+      'awaiting_confirmation',
+    );
     task.result = {
       ...(task.result ?? {}),
       chatRun: {
@@ -289,6 +305,12 @@ export class SocialAgentChatService {
     await this.writeEvent(task, AgentTaskEventType.ConfirmationReceived, '用户确认发布约练', {
       socialRequestId: request.id,
     });
+    this.rememberShortTermStep(task, 'publish_social_request', '用户确认发布约练', 'done');
+    rememberSocialAgentShortTerm(task, {
+      publishedSocialRequestId: request.id,
+      socialRequestId: request.id,
+    });
+    await this.taskRepo.save(task);
 
     return { taskId, socialRequest: sanitizeForDisplay(request) };
   }
@@ -351,6 +373,86 @@ export class SocialAgentChatService {
       },
       ownerUserId,
     );
+  }
+
+  async connectCandidate(
+    ownerUserId: number,
+    taskId: number,
+    body: {
+      targetUserId?: number | null;
+      candidateRecordId?: number | null;
+      socialRequestId?: number | null;
+      candidate?: Record<string, unknown>;
+    },
+  ): Promise<Record<string, unknown>> {
+    const task = await this.assertTaskOwner(taskId, ownerUserId);
+    const targetUserId = this.number(body.targetUserId);
+    if (!targetUserId) throw new BadRequestException('请选择要加好友的候选人');
+
+    const friendAction = await this.executor.executeToolAction(
+      taskId,
+      SocialAgentToolName.AddFriend,
+      {
+        targetUserId,
+        candidateRecordId: this.number(body.candidateRecordId),
+        socialRequestId: this.number(body.socialRequestId),
+        candidate: body.candidate ?? {},
+        metadata: {
+          confirmationSource: 'social_agent_chat',
+        },
+      },
+      ownerUserId,
+    );
+
+    if (friendAction.status !== 'succeeded') {
+      return {
+        taskId,
+        targetUserId,
+        status: friendAction.status,
+        friendAction,
+        conversationId: null,
+      };
+    }
+
+    const agent = await this.resolveAgentConnection(ownerUserId, task.agentConnectionId);
+    const conversation = await this.messages.startConversation(ownerUserId, targetUserId, {
+      agentConnectionId: agent?.id ?? null,
+      ownerUserId,
+      actorUserId: ownerUserId,
+      metadata: {
+        source: 'social_agent_chat',
+        agentTaskId: taskId,
+        targetUserId,
+        candidateRecordId: this.number(body.candidateRecordId),
+        socialRequestId: this.number(body.socialRequestId),
+      },
+    });
+
+    await this.writeEvent(task, AgentTaskEventType.ConfirmationReceived, '用户确认加好友并进入聊天', {
+      targetUserId,
+      conversationId: conversation.conversationId,
+      friendActionId: friendAction.id,
+    });
+    this.rememberShortTermStep(task, 'connect_candidate', '用户确认加好友并进入聊天', 'done');
+    rememberSocialAgentShortTerm(task, {
+      conversationId: conversation.conversationId,
+      targetUserId,
+      connectedCandidate: {
+        targetUserId,
+        candidateRecordId: this.number(body.candidateRecordId),
+        socialRequestId: this.number(body.socialRequestId),
+      },
+    });
+    await this.taskRepo.save(task);
+
+    return {
+      taskId,
+      targetUserId,
+      status: 'connected',
+      following: true,
+      conversationId: conversation.conversationId,
+      friendAction,
+    };
   }
 
   private async createOrReuseTask(input: {
@@ -597,6 +699,16 @@ export class SocialAgentChatService {
         candidateRecordId: candidate.candidateRecordId,
         targetUserId: candidate.userId,
       });
+      actions.push({
+        type: 'add_friend',
+        label: `加好友并聊天：${candidate.nickname}`,
+        riskLevel: 'medium',
+        requiresConfirmation: true,
+        agentTaskId: taskId,
+        socialRequestId: candidate.socialRequestId,
+        candidateRecordId: candidate.candidateRecordId,
+        targetUserId: candidate.userId,
+      });
     }
     return actions;
   }
@@ -626,6 +738,46 @@ export class SocialAgentChatService {
         payload: sanitizeForDisplay(payload) as Record<string, unknown>,
       }),
     );
+  }
+
+  private rememberShortTermStep(
+    task: AgentTask,
+    id: string,
+    label: string,
+    status: string,
+  ) {
+    const step = {
+      id,
+      label,
+      status,
+      updatedAt: new Date().toISOString(),
+    };
+    rememberSocialAgentShortTerm(task, {
+      currentStep: step,
+      steps: appendShortTermMemoryItem(task, 'steps', step, 40),
+    });
+  }
+
+  private rememberShortTermCandidates(
+    task: AgentTask,
+    draft: SocialAgentRequestDraft,
+    candidates: SocialAgentChatCandidate[],
+  ) {
+    rememberSocialAgentShortTerm(task, {
+      socialRequestId: draft.socialRequestId ?? null,
+      socialRequestDraft: this.safeDraftForEvent(draft),
+      candidates: candidates.map((candidate) => ({
+        userId: candidate.userId,
+        nickname: candidate.nickname,
+        score: candidate.score,
+        socialRequestId: candidate.socialRequestId,
+        candidateRecordId: candidate.candidateRecordId,
+        commonTags: candidate.commonTags,
+        reasons: candidate.reasons,
+        suggestedMessage: candidate.suggestedMessage,
+        status: candidate.status ?? null,
+      })),
+    });
   }
 
   private toEventDto(event: AgentTaskEvent): Record<string, unknown> {

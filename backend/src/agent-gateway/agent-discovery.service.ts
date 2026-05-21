@@ -546,14 +546,24 @@ export class AgentDiscoveryService {
         order: { updatedAt: 'DESC' },
       });
       if (!conn) {
+        const events = await this.messages.getAgentInboxEventsForOwner(
+          ownerUserId,
+          {
+            limit: opts.limit,
+            unreadOnly: opts.unreadOnly,
+            eventType: opts.eventType,
+          },
+        );
         return {
           agentProfileId: null,
-          agentConnectionId: null,
-          agentName: null,
+          agentConnectionId: 0,
+          agentName: 'FitMeet Autopilot',
           conversations: [],
-          events: [],
+          events,
           total: 0,
-          reason: 'no_active_agent_connection',
+          reason: events.length
+            ? 'builtin_profile_match_autopilot'
+            : 'no_active_agent_connection',
         };
       }
       const [conversations, events] = await Promise.all([
@@ -650,6 +660,28 @@ export class AgentDiscoveryService {
       total: Array.isArray(inbox.events) ? inbox.events.length : 0,
       reason: 'reason' in inbox ? inbox.reason : undefined,
     };
+  }
+
+  async ackInboxEventsForOwner(
+    ownerUserId: number,
+    dto: { agentProfileId?: number; eventIds?: string[] },
+  ) {
+    if (dto.agentProfileId) {
+      const profile = await this.getOwnedInboxAgent(ownerUserId, dto.agentProfileId);
+      return this.messages.ackAgentInboxEvents(profile.id, dto.eventIds ?? []);
+    }
+    const conn = await this.connectionRepo.findOne({
+      where: {
+        userId: ownerUserId,
+        agentName: KnownAgent.OpenClaw,
+        status: ConnectionStatus.Active,
+      },
+      order: { updatedAt: 'DESC' },
+    });
+    if (!conn) {
+      return this.messages.ackAgentInboxEventsForOwner(ownerUserId, dto.eventIds ?? []);
+    }
+    return this.messages.ackAgentInboxEvents(conn.id, dto.eventIds ?? []);
   }
 
   async listInboxMessagesForOwner(

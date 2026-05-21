@@ -183,6 +183,23 @@ describe('SocialAgentToolExecutorService', () => {
         lastMessageId: 'msg_1',
         lastAgentMessageId: 'msg_1',
       },
+      shortTerm: {
+        taskId: 100,
+        currentGoal: '帮我找一个跑步搭子',
+        permissionMode: AgentTaskPermissionMode.Assist,
+        conversationId: 'conv_1',
+        targetUserId: 2,
+        currentStatus: AgentTaskStatus.WaitingReply,
+        sentMessages: [
+          expect.objectContaining({
+            id: 'msg_1',
+            conversationId: 'conv_1',
+            targetUserId: 2,
+            textPreview: '你好，一起跑步吗？',
+            toolName: SocialAgentToolName.SendMessage,
+          }),
+        ],
+      },
     });
     expect(actionLogs.logAgentAction).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -306,6 +323,29 @@ describe('SocialAgentToolExecutorService', () => {
         lastReceivedMessageId: 'msg_2',
         lastReadMessageId: 'msg_2',
         lastAgentMessageId: 'msg_3',
+      },
+      shortTerm: {
+        taskId: 100,
+        conversationId: 'conv_1',
+        targetUserId: 2,
+        currentStatus: AgentTaskStatus.WaitingReply,
+        receivedReplies: [
+          expect.objectContaining({
+            id: 'msg_2',
+            fromUserId: 2,
+            textPreview: '可以，我想先确认路线和集合点。',
+          }),
+        ],
+        sentMessages: [
+          expect.objectContaining({
+            id: 'msg_3',
+            conversationId: 'conv_1',
+            targetUserId: 2,
+            toolName: SocialAgentToolName.ReplyMessage,
+          }),
+        ],
+        replySummary: expect.any(Object),
+        nextActionDecision: expect.any(Object),
       },
     });
   });

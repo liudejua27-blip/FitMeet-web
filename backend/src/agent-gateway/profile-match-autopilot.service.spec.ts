@@ -131,6 +131,7 @@ describe('ProfileMatchAutopilotService', () => {
 
   it('cron does nothing when ENABLE_PROFILE_MATCH_AUTOPILOT is not set', async () => {
     delete process.env.ENABLE_PROFILE_MATCH_AUTOPILOT;
+    delete process.env.ENABLE_SUBCONSCIOUS_LOOP;
     await service.onCron();
     expect(profileMatch.runOnce).not.toHaveBeenCalled();
   });
@@ -154,8 +155,22 @@ describe('ProfileMatchAutopilotService', () => {
     const summary = await service.runOnce('manual');
 
     expect(profileMatch.runOnce).toHaveBeenCalledTimes(2);
-    expect(profileMatch.runOnce).toHaveBeenCalledWith(1, expect.any(Number));
-    expect(profileMatch.runOnce).toHaveBeenCalledWith(2, expect.any(Number));
+    expect(profileMatch.runOnce).toHaveBeenCalledWith(
+      1,
+      expect.any(Number),
+      expect.objectContaining({
+        autoEnableProfilePool: false,
+        initiatedBy: 'profile_match_autopilot',
+      }),
+    );
+    expect(profileMatch.runOnce).toHaveBeenCalledWith(
+      2,
+      expect.any(Number),
+      expect.objectContaining({
+        autoEnableProfilePool: false,
+        initiatedBy: 'profile_match_autopilot',
+      }),
+    );
     expect(summary).toMatchObject({
       triggeredBy: 'manual',
       skipped: false,
@@ -225,10 +240,17 @@ describe('ProfileMatchAutopilotService', () => {
 
     await service.runOnce('manual');
 
-    expect(profileMatch.runOnce).toHaveBeenCalledWith(7, 10);
+    expect(profileMatch.runOnce).toHaveBeenCalledWith(
+      7,
+      10,
+      expect.objectContaining({
+        autoEnableProfilePool: false,
+        initiatedBy: 'profile_match_autopilot',
+      }),
+    );
   });
 
-  it('runs request-card matches and notifies both sides through the subconscious loop', async () => {
+  it('runs request-card matches and notifies both sides through Profile Match Autopilot', async () => {
     socialProfileRepo.createQueryBuilder.mockReturnValue(
       qbReturning([{ userId: 7 }]),
     );
@@ -291,10 +313,10 @@ describe('ProfileMatchAutopilotService', () => {
       expect.objectContaining({ socialRequestId: 55 }),
     );
     expect(notifications.create).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 7, type: 'subconscious_loop.request_match' }),
+      expect.objectContaining({ userId: 7, type: 'profile_match_autopilot.request_match' }),
     );
     expect(notifications.create).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 8, type: 'subconscious_loop.request_match' }),
+      expect.objectContaining({ userId: 8, type: 'profile_match_autopilot.request_match' }),
     );
     expect(summary.generatedRequestCandidates).toBe(1);
     expect(summary.inboxEvents).toBe(1);

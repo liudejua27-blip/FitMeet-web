@@ -38,6 +38,13 @@ type SaveCandidateBody = {
   candidate?: Record<string, unknown>;
 };
 
+type ConnectCandidateBody = {
+  targetUserId?: number | null;
+  candidateRecordId?: number | null;
+  socialRequestId?: number | null;
+  candidate?: Record<string, unknown>;
+};
+
 @Controller('social-agent/chat')
 @UseGuards(AuthGuard('jwt'))
 export class SocialAgentChatController {
@@ -104,5 +111,14 @@ export class SocialAgentChatController {
     @Body() body: SendMessageBody,
   ) {
     return this.chat.sendCandidateMessage(req.user.id, id, body ?? {});
+  }
+
+  @Post('tasks/:id/connect-candidate')
+  connectCandidate(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: ConnectCandidateBody,
+  ) {
+    return this.chat.connectCandidate(req.user.id, id, body ?? {});
   }
 }

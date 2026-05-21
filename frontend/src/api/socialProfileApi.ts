@@ -114,6 +114,21 @@ export interface SocialProfileCompletion {
   percent: number;
 }
 
+export interface AiProfilePrivacyState {
+  profileDiscoverable: boolean;
+  agentCanRecommendMe: boolean;
+  allowAgentRecommend?: boolean;
+  agentCanStartChatAfterApproval: boolean;
+  hideSensitiveTags: boolean;
+  matchPoolEnabled: boolean;
+  sensitiveTagSummary: Record<'pending' | 'confirmed' | 'rejected' | 'hidden', number>;
+}
+
+export interface PendingSensitiveTag {
+  tag: string;
+  category: string;
+}
+
 export type UpdateUserSocialProfilePayload = Partial<
   Omit<UserSocialProfile, 'userId' | 'createdAt' | 'updatedAt'>
 >;
@@ -159,5 +174,25 @@ export const socialProfileApi = {
     }>('/users/me/social-profile/ai-save', {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+  privacy: () => api.request<AiProfilePrivacyState>('/ai-profile/privacy'),
+  updatePrivacy: (data: Partial<Pick<AiProfilePrivacyState, 'profileDiscoverable' | 'agentCanRecommendMe' | 'agentCanStartChatAfterApproval' | 'hideSensitiveTags'>>) =>
+    api.request<AiProfilePrivacyState>('/ai-profile/privacy', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  pendingSensitiveTags: () =>
+    api.request<{ pending: PendingSensitiveTag[]; total: number }>(
+      '/ai-profile/sensitive-tags/pending',
+    ),
+  confirmSensitiveTag: (tag: string) =>
+    api.request<{ ok: boolean; tag: string; status: string }>('/ai-profile/sensitive-tags/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ tag }),
+    }),
+  rejectSensitiveTag: (tag: string) =>
+    api.request<{ ok: boolean; tag: string; status: string }>('/ai-profile/sensitive-tags/reject', {
+      method: 'POST',
+      body: JSON.stringify({ tag }),
     }),
 };

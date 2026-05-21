@@ -330,7 +330,13 @@ export class AgentUserController {
       'manual',
       req.user.id,
     );
-    return { ok: true, summary };
+    return { ok: true, autopilot: 'profile_match_autopilot', summary };
+  }
+
+  /** GET /api/agents/profile-match/autopilot/status */
+  @Get('profile-match/autopilot/status')
+  getProfileMatchAutopilotStatus() {
+    return this.profileMatchAutopilot.getStatus();
   }
 
   /** POST /api/agents/subconscious-loop/run-once */
@@ -341,7 +347,7 @@ export class AgentUserController {
       'manual',
       req.user.id,
     );
-    return { ok: true, loop: 'subconscious', summary };
+    return { ok: true, autopilot: 'profile_match_autopilot', summary };
   }
 
   /** GET /api/agents/subconscious-loop/status */
@@ -444,11 +450,7 @@ export class AgentUserController {
     @Param('id', ParseIntPipe) id: number,
     @Body() body: { text?: string; ownerConfirmed?: boolean },
   ) {
-    if (body?.ownerConfirmed !== true) {
-      // still allow approval creation path; service handles ownerConfirmed=false
-      return this.profileMatches.sendIntro(req.user.id, id, body ?? {});
-    }
-    return this.profileMatches.sendIntro(req.user.id, id, body);
+    return this.profileMatches.sendIntro(req.user.id, id, body ?? {});
   }
 
   /** Aliases under /api/agents/recommendations/:id/* for cards UI */
@@ -558,6 +560,16 @@ export class AgentUserController {
       limit: limit ? Number(limit) : undefined,
       unreadOnly: unreadOnly === 'true',
     });
+  }
+
+  /** POST /api/agents/inbox/events/ack */
+  @Post('inbox/events/ack')
+  @HttpCode(200)
+  ackOwnedAgentInboxEvents(
+    @Req() req: FitMeetRequest,
+    @Body() body: { agentProfileId?: number; eventIds?: string[] },
+  ) {
+    return this.discovery.ackInboxEventsForOwner(req.user.id, body ?? {});
   }
 
   /** POST /api/agents/inbox/conversations/:conversationId/reply */
@@ -964,6 +976,7 @@ export class AgentApiController {
     body: {
       profileDiscoverable?: boolean;
       agentCanRecommendMe?: boolean;
+      allowAgentRecommend?: boolean;
       agentCanStartChatAfterApproval?: boolean;
       ownerConfirmed?: boolean;
     },
@@ -974,7 +987,8 @@ export class AgentApiController {
     const conn = req[AGENT_CONNECTION_KEY];
     return this.socialProfiles.upsert(conn.userId, {
       profileDiscoverable: body.profileDiscoverable,
-      agentCanRecommendMe: body.agentCanRecommendMe,
+      agentCanRecommendMe:
+        body.agentCanRecommendMe ?? body.allowAgentRecommend,
       agentCanStartChatAfterApproval: body.agentCanStartChatAfterApproval,
     });
   }
@@ -1067,7 +1081,14 @@ export class AgentApiController {
       'manual',
       conn.userId,
     );
-    return { ok: true, summary };
+    return { ok: true, autopilot: 'profile_match_autopilot', summary };
+  }
+
+  /** GET /api/agent/profile-match/autopilot/status */
+  @Get('profile-match/autopilot/status')
+  @RequirePermission(AgentAction.SearchProfiles)
+  getOwnerProfileMatchAutopilotStatus() {
+    return this.profileMatchAutopilot.getStatus();
   }
 
   /** POST /api/agent/subconscious-loop/run-once */
@@ -1080,7 +1101,7 @@ export class AgentApiController {
       'manual',
       conn.userId,
     );
-    return { ok: true, loop: 'subconscious', summary };
+    return { ok: true, autopilot: 'profile_match_autopilot', summary };
   }
 
   @Get('owner/profile-matches')

@@ -76,7 +76,17 @@ export class SocialAgentPlannerService {
       }
     } catch (error) {
       fallbackReason = this.toFallbackReason(error);
-      this.logger.warn(`Social planner fallback for task ${task.id}: ${fallbackReason}`);
+      this.logger.warn(
+        JSON.stringify({
+          event: 'deepseek.call_failed',
+          purpose: 'social_agent_plan',
+          taskId: task.id,
+          ownerUserId: task.ownerUserId,
+          permissionMode,
+          fallbackReason,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
     }
 
     if (fallbackReason) {

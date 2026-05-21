@@ -265,21 +265,35 @@ export class MessagesService {
       senderType !== 'agent' &&
       Number(senderId) !== Number(ownerUserId);
 
-    const msg = await this.msgModel.create({
-      conversationId: oid,
-      agentConnectionId,
-      ownerUserId,
-      actorUserId,
-      senderId: Number(senderId),
-      text,
-      source: options.source ?? 'user',
-      card: options.card ?? null,
-      metadata,
-      senderType,
-      receiverType: options.receiverType ?? 'user',
-      senderAgentId: options.senderAgentId ?? null,
-      receiverAgentId,
-    });
+    let msg: Message;
+    try {
+      msg = await this.msgModel.create({
+        conversationId: oid,
+        agentConnectionId,
+        ownerUserId,
+        actorUserId,
+        senderId: Number(senderId),
+        text,
+        source: options.source ?? 'user',
+        card: options.card ?? null,
+        metadata,
+        senderType,
+        receiverType: options.receiverType ?? 'user',
+        senderAgentId: options.senderAgentId ?? null,
+        receiverAgentId,
+      });
+    } catch (error) {
+      this.logMessageSendFailure(error, {
+        stage: 'message_create',
+        conversationId: conv._id.toString(),
+        senderId: Number(senderId),
+        senderType,
+        agentConnectionId,
+        ownerUserId,
+        source: options.source ?? 'user',
+      });
+      throw error;
+    }
 
     const safeText = cleanDisplayText(text, '消息内容已隐藏');
     const update: Record<string, unknown> = {
@@ -296,12 +310,26 @@ export class MessagesService {
       inc[`unreadAgentCount.${agentConnectionId}`] =
         (inc[`unreadAgentCount.${agentConnectionId}`] ?? 0) + 1;
     }
-    await this.convModel.updateOne(
-      { _id: oid },
-      Object.keys(inc).length > 0
-        ? { $set: update, $inc: inc }
-        : { $set: update },
-    );
+    try {
+      await this.convModel.updateOne(
+        { _id: oid },
+        Object.keys(inc).length > 0
+          ? { $set: update, $inc: inc }
+          : { $set: update },
+      );
+    } catch (error) {
+      this.logMessageSendFailure(error, {
+        stage: 'conversation_update',
+        conversationId: conv._id.toString(),
+        messageId: msg._id.toString(),
+        senderId: Number(senderId),
+        senderType,
+        agentConnectionId,
+        ownerUserId,
+        source: options.source ?? 'user',
+      });
+      throw error;
+    }
 
     if (senderType === 'agent' && agentConnectionId && ownerUserId) {
       await this.logAgentActivityEvent({
@@ -702,32 +730,60 @@ export class MessagesService {
       actorUserId: ownerUserId,
       source: 'openclaw',
     });
-    const msg = await this.msgModel.create({
-      conversationId: oid,
-      agentConnectionId: agentId,
-      ownerUserId,
-      actorUserId: ownerUserId,
-      senderId,
-      text: content,
-      source: 'ai_delegate',
-      card: null,
-      metadata: {
-        ...(metadata ?? {}),
-        agentInboxReply: true,
-      },
-      senderType: 'agent',
-      receiverType: 'user',
-      senderAgentId: agentId,
-      receiverAgentId: null,
-    });
+    let msg: Message;
+    try {
+      msg = await this.msgModel.create({
+        conversationId: oid,
+        agentConnectionId: agentId,
+        ownerUserId,
+        actorUserId: ownerUserId,
+        senderId,
+        text: content,
+        source: 'ai_delegate',
+        card: null,
+        metadata: {
+          ...(metadata ?? {}),
+          agentInboxReply: true,
+        },
+        senderType: 'agent',
+        receiverType: 'user',
+        senderAgentId: agentId,
+        receiverAgentId: null,
+      });
+    } catch (error) {
+      this.logMessageSendFailure(error, {
+        stage: 'agent_reply_create',
+        conversationId,
+        senderId,
+        senderType: 'agent',
+        agentConnectionId: agentId,
+        ownerUserId,
+        source: 'ai_delegate',
+      });
+      throw error;
+    }
 
-    await this.convModel.updateOne(
-      { _id: oid },
-      {
-        $set: { lastMessage: content, lastMessageTime: new Date() },
-        $inc: { [`unreadCount.${recipientUserId}`]: 1 },
-      },
-    );
+    try {
+      await this.convModel.updateOne(
+        { _id: oid },
+        {
+          $set: { lastMessage: content, lastMessageTime: new Date() },
+          $inc: { [`unreadCount.${recipientUserId}`]: 1 },
+        },
+      );
+    } catch (error) {
+      this.logMessageSendFailure(error, {
+        stage: 'agent_reply_conversation_update',
+        conversationId,
+        messageId: msg._id.toString(),
+        senderId,
+        senderType: 'agent',
+        agentConnectionId: agentId,
+        ownerUserId,
+        source: 'ai_delegate',
+      });
+      throw error;
+    }
 
     await this.logAgentActivityEvent({
       agentConnectionId: agentId,
@@ -836,6 +892,26 @@ export class MessagesService {
     if (options.unreadOnly) query.unread = true;
     if (options.eventType) query.eventType = options.eventType;
 
+    return this.findAgentInboxEvents(query, limit);
+  }
+
+  async getAgentInboxEventsForOwner(
+    ownerUserId: number,
+    options: AgentInboxOptions = {},
+  ) {
+    const limit = this.normalizeLimit(options.limit, 50, 100);
+    const query: Record<string, unknown> = { ownerUserId };
+    if (options.unreadOnly) query.unread = true;
+    if (options.eventType) query.eventType = options.eventType;
+
+    return this.findAgentInboxEvents(query, limit);
+  }
+
+  private async findAgentInboxEvents(
+    query: Record<string, unknown>,
+    limit: number,
+  ) {
+
     const events = await this.inboxEventModel
       .find(query)
       .sort({ createdAt: -1 })
@@ -885,8 +961,22 @@ export class MessagesService {
     }));
   }
 
+  async ackAgentInboxEventsForOwner(
+    ownerUserId: number,
+    eventIds: string[] = [],
+  ): Promise<AgentInboxAckResult> {
+    return this.ackAgentInboxEventsByQuery({ ownerUserId }, eventIds);
+  }
+
   async ackAgentInboxEvents(
     agentConnectionId: number,
+    eventIds: string[] = [],
+  ): Promise<AgentInboxAckResult> {
+    return this.ackAgentInboxEventsByQuery({ agentConnectionId }, eventIds);
+  }
+
+  private async ackAgentInboxEventsByQuery(
+    baseQuery: Record<string, unknown>,
     eventIds: string[] = [],
   ): Promise<AgentInboxAckResult> {
     const normalized = Array.from(
@@ -913,7 +1003,7 @@ export class MessagesService {
       );
     }
     const result = await this.inboxEventModel
-      .updateMany({ agentConnectionId, $or: or }, { $set: { unread: false } })
+      .updateMany({ ...baseQuery, $or: or }, { $set: { unread: false } })
       .exec();
     return {
       ok: true,
@@ -1165,6 +1255,18 @@ export class MessagesService {
         body,
       });
       if (!response.ok) {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'webhook.failed',
+            source: 'messages_service',
+            agentConnectionId,
+            ownerUserId: conn.userId,
+            webhookEvent: event,
+            eventId: payload.event_id,
+            httpStatus: response.status,
+            reason: 'http_error',
+          }),
+        );
         await this.logAgentActivityEvent({
           agentConnectionId,
           ownerUserId: conn.userId,
@@ -1186,6 +1288,18 @@ export class MessagesService {
         metadata: { event, eventId: payload.event_id },
       });
     } catch (err) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'webhook.failed',
+          source: 'messages_service',
+          agentConnectionId,
+          ownerUserId: conn.userId,
+          webhookEvent: event,
+          eventId: payload.event_id,
+          reason: 'network_error',
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
       await this.logAgentActivityEvent({
         agentConnectionId,
         ownerUserId: conn.userId,
@@ -1266,6 +1380,29 @@ export class MessagesService {
         }`,
       );
     }
+  }
+
+  private logMessageSendFailure(
+    error: unknown,
+    context: {
+      stage: string;
+      conversationId: string;
+      messageId?: string;
+      senderId: number;
+      senderType: MessageParticipantType;
+      agentConnectionId?: number | null;
+      ownerUserId?: number | null;
+      source?: MessageSource;
+    },
+  ) {
+    this.logger.error(
+      JSON.stringify({
+        event: 'message.send_failed',
+        ...context,
+        message: error instanceof Error ? error.message : String(error),
+      }),
+      error instanceof Error ? error.stack : undefined,
+    );
   }
 
   private withAgentMetadata(

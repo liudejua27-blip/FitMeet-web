@@ -17,6 +17,7 @@ import { AgentActionLogService } from './agent-action-log.service';
 import { AgentApprovalService } from './agent-approval.service';
 import { CompatibilityScorerService } from '../match/compatibility-scorer.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AgentTask, AgentTaskEvent } from './entities/agent-task.entity';
 
 const mockRepo = () => ({
   create: jest.fn((data) => data),
@@ -46,6 +47,8 @@ describe('ProfileMatchService', () => {
   let sessionRepo: ReturnType<typeof mockRepo>;
   let connectionRepo: ReturnType<typeof mockRepo>;
   let contactRepo: ReturnType<typeof mockRepo>;
+  let taskRepo: ReturnType<typeof mockRepo>;
+  let taskEventRepo: ReturnType<typeof mockRepo>;
   let messages: {
     createAgentInboxEvent: jest.Mock;
     startConversation: jest.Mock;
@@ -64,6 +67,8 @@ describe('ProfileMatchService', () => {
     sessionRepo.find.mockResolvedValue([]);
     connectionRepo = mockRepo();
     contactRepo = mockRepo();
+    taskRepo = mockRepo();
+    taskEventRepo = mockRepo();
     messages = {
       createAgentInboxEvent: jest.fn(),
       startConversation: jest.fn().mockResolvedValue({ conversationId: 'conv-1' }),
@@ -85,6 +90,8 @@ describe('ProfileMatchService', () => {
         { provide: getRepositoryToken(AiMatchSession), useValue: sessionRepo },
         { provide: getRepositoryToken(AgentConnection), useValue: connectionRepo },
         { provide: getRepositoryToken(ContactRequest), useValue: contactRepo },
+        { provide: getRepositoryToken(AgentTask), useValue: taskRepo },
+        { provide: getRepositoryToken(AgentTaskEvent), useValue: taskEventRepo },
         { provide: SafetyService, useValue: safety },
         { provide: MessagesService, useValue: messages },
         { provide: AgentWebhookService, useValue: webhooks },
@@ -199,6 +206,72 @@ describe('ProfileMatchService', () => {
     expect(messages.createAgentInboxEvent).not.toHaveBeenCalled();
   });
 
+  it('does not auto-enable the profile match pool by default', async () => {
+    profileRepo.findOne.mockResolvedValue({
+      userId: 1,
+      profileDiscoverable: false,
+      agentCanRecommendMe: false,
+      interestTags: ['running'],
+      traits: ['focused'],
+    });
+
+    await expect(service.runOnce(1)).rejects.toThrow(
+      'Please enable AI continuous recommendations before running profile matches.',
+    );
+
+    expect(profileRepo.save).not.toHaveBeenCalled();
+    expect(profileRepo.createQueryBuilder).not.toHaveBeenCalled();
+  });
+
+  it('writes profile recommendations to the built-in Agent Inbox without an active connection', async () => {
+    profileRepo.findOne.mockResolvedValue({
+      userId: 1,
+      city: 'Shanghai',
+      profileDiscoverable: true,
+      agentCanRecommendMe: true,
+      interestTags: ['running'],
+      traits: ['focused'],
+      preferredTraits: ['focused'],
+    });
+    profileRepo.createQueryBuilder.mockReturnValue(
+      qbReturning([
+        {
+          userId: 2,
+          city: 'Shanghai',
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+          interestTags: ['running'],
+          traits: ['focused'],
+          aiSummary: 'Safe public candidate summary.',
+          matchSignals: { publicTags: ['running'] },
+        },
+      ]),
+    );
+    sessionRepo.find.mockResolvedValue([]);
+    userRepo.find.mockResolvedValue([
+      {
+        id: 2,
+        name: 'Candidate',
+        avatar: 'C',
+        color: '#16C784',
+        city: 'Shanghai',
+      },
+    ]);
+    connectionRepo.find.mockResolvedValue([]);
+
+    const result = await service.runOnce(1);
+
+    expect(result.inboxEvents).toBe(1);
+    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentConnectionId: 0,
+        ownerUserId: 1,
+        eventType: 'profile.match.recommended',
+      }),
+    );
+    expect(webhooks.emitToConnection).not.toHaveBeenCalled();
+  });
+
   it('matches confirmed private wealth/resource signals semantically without public leakage', async () => {
     profileRepo.findOne.mockResolvedValue({
       userId: 1,
@@ -289,7 +362,9 @@ describe('ProfileMatchService', () => {
       status: ConnectionStatus.Active,
     });
 
-    const result = await service.confirmContact(1, 300, '手机号 13800000000');
+    const result = await service.confirmContact(1, 300, '手机号 13800000000', {
+      ownerConfirmed: true,
+    });
 
     expect(contactRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -362,7 +437,31 @@ describe('ProfileMatchService', () => {
     );
   });
 
-  it('send-intro sends directly under open-token mode', async () => {
+  it('send-intro requires owner confirmation before sending', async () => {
+    sessionRepo.findOne.mockResolvedValue({
+      id: 300,
+      ownerId: 1,
+      targetUserId: 2,
+      score: 70,
+      status: 'review',
+      source: 'profile_pool',
+      transcript: [],
+      reasons: [],
+      summary: '',
+      createdAt: new Date(),
+    });
+
+    await expect(
+      service.sendIntro(1, 300, {
+        ownerConfirmed: false,
+        text: 'hello',
+      }),
+    ).rejects.toThrow('Owner confirmation is required before sending an intro');
+    expect(messages.startConversation).not.toHaveBeenCalled();
+    expect(messages.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('send-intro sends after owner confirmation', async () => {
     sessionRepo.findOne.mockResolvedValue({
       id: 300,
       ownerId: 1,
@@ -383,7 +482,7 @@ describe('ProfileMatchService', () => {
     });
 
     const result = await service.sendIntro(1, 300, {
-      ownerConfirmed: false,
+      ownerConfirmed: true,
       text: 'hello',
     });
 

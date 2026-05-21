@@ -33,6 +33,8 @@ PATCH_FILE="${PATCH_FILE:-$SCRIPT_DIR/production-schema-patch-20260511.sql}"
 ROUND3_PATCH_FILE="${ROUND3_PATCH_FILE:-$SCRIPT_DIR/agent-social-runtime-schema-patch-20260511.sql}"
 DRIFT_FIX_FILE="${DRIFT_FIX_FILE:-$SCRIPT_DIR/agent-schema-drift-fix-20260513.sql}"
 AGENT_LOG_FIELDS_FIX_FILE="${AGENT_LOG_FIELDS_FIX_FILE:-$SCRIPT_DIR/fix-agent-log-fields-20260514.sql}"
+AGENT_TASK_RUNTIME_PATCH_FILE="${AGENT_TASK_RUNTIME_PATCH_FILE:-$SCRIPT_DIR/agent-task-runtime-schema-patch-20260519.sql}"
+SOCIAL_AGENT_FINAL_PATCH_FILE="${SOCIAL_AGENT_FINAL_PATCH_FILE:-$SCRIPT_DIR/social-agent-final-schema-patch-20260519.sql}"
 BACKUP_DIR="${BACKUP_DIR:-/opt/fitmeet-db-backup}"
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-fitness-postgres}"
 
@@ -77,7 +79,7 @@ echo "      patch applied successfully."
 # -- 3a. Apply follow-up patches --------------------------------------------
 #       These are idempotent (IF NOT EXISTS / pg_enum guards) and safe to
 #       run on a DB that has been fully migrated by the base patch above.
-for FOLLOWUP in "$ROUND3_PATCH_FILE" "$DRIFT_FIX_FILE" "$AGENT_LOG_FIELDS_FIX_FILE"; do
+for FOLLOWUP in "$ROUND3_PATCH_FILE" "$DRIFT_FIX_FILE" "$AGENT_LOG_FIELDS_FIX_FILE" "$AGENT_TASK_RUNTIME_PATCH_FILE" "$SOCIAL_AGENT_FINAL_PATCH_FILE"; do
   if [[ -f "$FOLLOWUP" ]]; then
     echo "      Applying follow-up: $(basename "$FOLLOWUP")"
     docker exec -i "$POSTGRES_CONTAINER" \
@@ -99,6 +101,7 @@ TABLES=(
   contact_requests match_candidates safety_events
   user_preferences social_requests public_social_intents
   ai_delegate_profiles ai_match_sessions
+  agent_tasks agent_task_events payment_intents
 )
 MISSING_TABLES=()
 for t in "${TABLES[@]}"; do
@@ -118,6 +121,9 @@ declare -A COLUMNS=(
   [agent_approval_requests]="actionType reason createdBy relatedSocialRequestId relatedCandidateId relatedActivityId"
   [agent_action_logs]="ownerUserId actionType actionStatus riskLevel relatedActivityId relatedSocialRequestId relatedCandidateId payload eventType conversationId messageId status metadata"
   [agent_activity_logs]="ownerUserId agentConnectionId eventType conversationId messageId status metadata"
+  [agent_tasks]="ownerUserId agentConnectionId taskType title goal input plan toolCalls result memory status permissionMode riskLevel idempotencyKey statusReason error startedAt awaitingConfirmationAt completedAt"
+  [agent_task_events]="taskId ownerUserId eventType actor summary payload stepId toolCallId"
+  [payment_intents]="ownerUserId agentConnectionId agentTaskId stepId targetUserId amount currency description status provider providerReference metadata"
 )
 MISSING_COLUMNS=()
 for tbl in "${!COLUMNS[@]}"; do

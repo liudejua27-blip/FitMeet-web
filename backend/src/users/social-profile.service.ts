@@ -983,6 +983,7 @@ export class SocialProfileService {
     return {
       profileDiscoverable: profile.profileDiscoverable,
       agentCanRecommendMe: profile.agentCanRecommendMe,
+      allowAgentRecommend: profile.agentCanRecommendMe,
       agentCanStartChatAfterApproval: profile.agentCanStartChatAfterApproval,
       hideSensitiveTags: profile.hideSensitiveTags,
       matchPoolEnabled:
@@ -999,6 +1000,7 @@ export class SocialProfileService {
     body: {
       profileDiscoverable?: boolean;
       agentCanRecommendMe?: boolean;
+      allowAgentRecommend?: boolean;
       agentCanStartChatAfterApproval?: boolean;
       hideSensitiveTags?: boolean;
     },
@@ -1006,8 +1008,10 @@ export class SocialProfileService {
     const dto: UpdateSocialProfileDto = {};
     if (body.profileDiscoverable !== undefined)
       dto.profileDiscoverable = Boolean(body.profileDiscoverable);
-    if (body.agentCanRecommendMe !== undefined)
-      dto.agentCanRecommendMe = Boolean(body.agentCanRecommendMe);
+    const agentCanRecommendMe =
+      body.agentCanRecommendMe ?? body.allowAgentRecommend;
+    if (agentCanRecommendMe !== undefined)
+      dto.agentCanRecommendMe = Boolean(agentCanRecommendMe);
     if (body.agentCanStartChatAfterApproval !== undefined)
       dto.agentCanStartChatAfterApproval = Boolean(
         body.agentCanStartChatAfterApproval,

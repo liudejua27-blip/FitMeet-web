@@ -77,7 +77,16 @@ export class AgentWebhookService {
       });
       if (!response.ok) {
         this.logger.warn(
-          `Webhook ${event} for connection ${conn.id} returned ${response.status}`,
+          JSON.stringify({
+            event: 'webhook.failed',
+            source: 'agent_webhook_service',
+            agentConnectionId: conn.id,
+            ownerUserId: conn.userId,
+            webhookEvent: event,
+            eventId: payload.event_id,
+            httpStatus: response.status,
+            reason: 'http_error',
+          }),
         );
         await this.logWebhookEvent(conn.id, conn.userId, {
           event,
@@ -101,7 +110,16 @@ export class AgentWebhookService {
       return { delivered: true, eventId: payload.event_id };
     } catch (err) {
       this.logger.warn(
-        `Webhook ${event} for connection ${conn.id} failed: ${(err as Error).message}`,
+        JSON.stringify({
+          event: 'webhook.failed',
+          source: 'agent_webhook_service',
+          agentConnectionId: conn.id,
+          ownerUserId: conn.userId,
+          webhookEvent: event,
+          eventId: payload.event_id,
+          reason: 'network_error',
+          message: err instanceof Error ? err.message : String(err),
+        }),
       );
       await this.logWebhookEvent(conn.id, conn.userId, {
         event,

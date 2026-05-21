@@ -163,7 +163,7 @@ export const MessagesPage = () => {
                               : 'bg-lime/15 text-lime',
                           )}
                         >
-                          AI托管代发
+                          Agent 代发
                         </div>
                       )}
                       <p>{msg.text}</p>

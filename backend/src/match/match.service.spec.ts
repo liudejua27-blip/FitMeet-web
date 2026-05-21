@@ -206,6 +206,7 @@ function makeHarness(rows: User[] = [user()]) {
     userRepo,
     requestRepo,
     candidateRepo,
+    profileRepo,
     reasoner,
     actionLogs,
   };
@@ -262,6 +263,29 @@ describe('MatchService social request matching', () => {
     expect(reasoner.explainSocialRequestCandidate).toHaveBeenCalledWith(
       expect.objectContaining({
         candidateUser: expect.objectContaining({ id: 22 }),
+      }),
+    );
+  });
+
+  it('honors AI profile discovery and agent recommendation opt-outs', async () => {
+    const visible = user({ id: 21, email: 'visible@example.com', name: 'Visible Runner' });
+    const hidden = user({ id: 22, email: 'hidden@example.com', name: 'Hidden Runner' });
+    const agentOptOut = user({ id: 23, email: 'agent-opt-out@example.com', name: 'Quiet Runner' });
+    const { service, profileRepo, reasoner } = makeHarness([visible, hidden, agentOptOut]);
+    profileRepo.find.mockResolvedValue([
+      profile({ userId: 21, profileDiscoverable: true, agentCanRecommendMe: true }),
+      profile({ userId: 22, profileDiscoverable: false, agentCanRecommendMe: false }),
+      profile({ userId: 23, profileDiscoverable: true, agentCanRecommendMe: false }),
+    ]);
+
+    const result = await service.runMatch(301, 10, { limit: 10 });
+
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0].candidateUserId).toBe(21);
+    expect(reasoner.explainSocialRequestCandidate).toHaveBeenCalledTimes(1);
+    expect(reasoner.explainSocialRequestCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        candidateUser: expect.objectContaining({ id: 21 }),
       }),
     );
   });

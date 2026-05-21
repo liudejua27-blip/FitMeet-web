@@ -36,6 +36,7 @@ describe('AgentPermissionService', () => {
 
   it('allows only Confirm Mode actions', () => {
     expect(service.getAllowedActions(AgentTaskPermissionMode.Confirm)).toEqual([
+      SocialAgentAction.AddFriend,
       SocialAgentAction.SearchProfiles,
       SocialAgentAction.GenerateContent,
       SocialAgentAction.DraftMessage,
@@ -54,7 +55,7 @@ describe('AgentPermissionService', () => {
         AgentTaskPermissionMode.Confirm,
         SocialAgentAction.AddFriend,
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       service.canExecute(
         AgentTaskPermissionMode.Confirm,

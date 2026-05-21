@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -48,6 +49,11 @@ import {
   AgentPermissionService,
   SocialAgentAction,
 } from './agent-permission.service';
+import {
+  appendShortTermMemoryItem,
+  rememberSocialAgentShortTerm,
+  shortTermMemoryList,
+} from './social-agent-memory.util';
 
 export enum SocialAgentToolName {
   GetAiProfile = 'get_ai_profile',
@@ -144,6 +150,8 @@ const HIGH_RISK_TOOL_DAILY_LIMITS: Partial<
 
 @Injectable()
 export class SocialAgentToolExecutorService {
+  private readonly logger = new Logger(SocialAgentToolExecutorService.name);
+
   constructor(
     @InjectRepository(AgentTask)
     private readonly taskRepo: Repository<AgentTask>,
@@ -211,6 +219,7 @@ export class SocialAgentToolExecutorService {
         );
         task.error = call.error;
         await this.taskRepo.save(task);
+        this.logTaskFailure(task, call);
         if (stopOnError) break;
       } else {
         await this.taskRepo.save(task);
@@ -238,6 +247,7 @@ export class SocialAgentToolExecutorService {
         task.status = AgentTaskStatus.Succeeded;
         task.completedAt = new Date();
       }
+      rememberSocialAgentShortTerm(task, {});
       await this.taskRepo.save(task);
       if (task.status === AgentTaskStatus.Succeeded) {
         await this.createTaskEvent(task, AgentTaskEventType.TaskSucceeded, {
@@ -289,6 +299,7 @@ export class SocialAgentToolExecutorService {
     task.status = AgentTaskStatus.Executing;
     task.statusReason = null;
     task.startedAt = task.startedAt ?? new Date();
+    rememberSocialAgentShortTerm(task, {});
     await this.taskRepo.save(task);
 
     const calls: SocialAgentToolCallRecord[] = [];
@@ -305,6 +316,7 @@ export class SocialAgentToolExecutorService {
       task.status = AgentTaskStatus.WaitingReply;
       task.statusReason =
         newMessages.length === 0 ? 'no_new_reply' : 'reply_read_failed';
+      rememberSocialAgentShortTerm(task, {});
       await this.taskRepo.save(task);
       return this.runNextResult(task, calls, false, null);
     }
@@ -320,6 +332,7 @@ export class SocialAgentToolExecutorService {
     if (summaryCall.status !== 'succeeded') {
       task.status = AgentTaskStatus.WaitingReply;
       task.statusReason = 'reply_summary_failed';
+      rememberSocialAgentShortTerm(task, {});
       await this.taskRepo.save(task);
       return this.runNextResult(task, calls, true, null);
     }
@@ -340,6 +353,7 @@ export class SocialAgentToolExecutorService {
     if (nextAction === 'stop') {
       task.status = AgentTaskStatus.WaitingReply;
       task.statusReason = 'next_action_stop';
+      rememberSocialAgentShortTerm(task, {});
       await this.taskRepo.save(task);
       return this.runNextResult(task, calls, true, decision ?? null);
     }
@@ -348,6 +362,7 @@ export class SocialAgentToolExecutorService {
     if (decisionCall.status !== 'succeeded' || !nextToolName) {
       task.status = AgentTaskStatus.WaitingReply;
       task.statusReason = 'next_action_not_executable';
+      rememberSocialAgentShortTerm(task, {});
       await this.taskRepo.save(task);
       return this.runNextResult(task, calls, true, decision ?? null);
     }
@@ -369,6 +384,7 @@ export class SocialAgentToolExecutorService {
       actionCall.status === 'succeeded'
         ? 'next_action_executed_waiting_reply'
         : 'next_action_needs_attention';
+    rememberSocialAgentShortTerm(task, {});
     await this.taskRepo.save(task);
     return this.runNextResult(task, calls, true, decision);
   }
@@ -393,6 +409,7 @@ export class SocialAgentToolExecutorService {
       lastToolCall: call,
       updatedAt: new Date().toISOString(),
     };
+    rememberSocialAgentShortTerm(task, {});
     await this.taskRepo.save(task);
     return call;
   }
@@ -433,6 +450,7 @@ export class SocialAgentToolExecutorService {
       task.statusReason = String(call.error?.message ?? call.status);
       task.error = call.error;
     }
+    rememberSocialAgentShortTerm(task, {});
     await this.taskRepo.save(task);
     return call;
   }
@@ -507,6 +525,7 @@ export class SocialAgentToolExecutorService {
         error: this.errorPayload(error),
         startedAt,
       });
+      this.logToolFailure(task, toolName, stepId, call, error);
       try {
         await this.recordActionSideEffects(task, toolName, input, call);
       } catch (sideEffectError) {
@@ -562,7 +581,7 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.ReadInbox:
         return this.readInbox(task, input);
       case SocialAgentToolName.ReadTaskConversationMessages:
-        return this.readTaskConversationMessages(task, input);
+        return this.readTaskConversationMessages(task, input, stepId);
       case SocialAgentToolName.SummarizeReply:
         return this.summarizeReply(task, input);
       case SocialAgentToolName.DecideNextSocialAction:
@@ -780,6 +799,14 @@ export class SocialAgentToolExecutorService {
       ),
       sourceTool: SocialAgentToolName.SendMessage,
     });
+    this.rememberSentMessage(task, {
+      id: this.string(output.id ?? output.messageId),
+      conversationId,
+      targetUserId: targetUserId ?? this.memoryTargetUserId(task),
+      textPreview: this.preview(text),
+      toolName: SocialAgentToolName.SendMessage,
+      stepId,
+    });
     return message;
   }
 
@@ -926,6 +953,14 @@ export class SocialAgentToolExecutorService {
       sourceTool: SocialAgentToolName.OfflineMeeting,
       activityId: activity.id,
     });
+    this.rememberSentMessage(task, {
+      id: this.string(messageRecord.id ?? messageRecord.messageId),
+      conversationId,
+      targetUserId,
+      textPreview: this.preview(text),
+      toolName: SocialAgentToolName.OfflineMeeting,
+      stepId,
+    });
     return { ...this.asRecord(message), conversationId };
   }
 
@@ -1022,6 +1057,7 @@ export class SocialAgentToolExecutorService {
   private async readTaskConversationMessages(
     task: AgentTask,
     input: Record<string, unknown>,
+    stepId: string,
   ): Promise<unknown> {
     const agentConnectionId =
       task.agentConnectionId ?? this.number(input.agentConnectionId);
@@ -1074,6 +1110,9 @@ export class SocialAgentToolExecutorService {
       ),
       sourceTool: SocialAgentToolName.ReadTaskConversationMessages,
     });
+    if (newMessages.length > 0) {
+      this.rememberReceivedReplies(task, newMessages, stepId);
+    }
 
     if (latest) {
       await this.createTaskEvent(task, AgentTaskEventType.FeedbackReceived, {
@@ -1132,6 +1171,10 @@ export class SocialAgentToolExecutorService {
       replySummary: summary,
       sourceTool: SocialAgentToolName.SummarizeReply,
     });
+    rememberSocialAgentShortTerm(task, {
+      replySummary: summary,
+      currentStep: this.shortTermStep('summarize_reply', '已总结对方回复', 'done'),
+    });
 
     await this.writeSocialAgentInboxEvent(
       task,
@@ -1172,6 +1215,10 @@ export class SocialAgentToolExecutorService {
     this.rememberConversation(task, {
       nextActionDecision: safeDecision,
       sourceTool: SocialAgentToolName.DecideNextSocialAction,
+    });
+    rememberSocialAgentShortTerm(task, {
+      nextActionDecision: safeDecision,
+      currentStep: this.shortTermStep('decide_next_social_action', '已决定下一步社交动作', 'done'),
     });
 
     await this.writeSocialAgentInboxEvent(
@@ -1245,6 +1292,14 @@ export class SocialAgentToolExecutorService {
         duplicateKey,
       ),
       sourceTool: SocialAgentToolName.ReplyMessage,
+    });
+    this.rememberSentMessage(task, {
+      id: this.string(output.id ?? output.messageId),
+      conversationId,
+      targetUserId,
+      textPreview: this.preview(text),
+      toolName: SocialAgentToolName.ReplyMessage,
+      stepId,
     });
     await this.writeSocialAgentInboxEvent(task, 'social_agent.reply.sent', {
       conversationId,
@@ -1416,6 +1471,78 @@ export class SocialAgentToolExecutorService {
     task.memory = {
       ...memory,
       socialLoop: next,
+    };
+    rememberSocialAgentShortTerm(task, {
+      conversationId: next.conversationId ?? null,
+      targetUserId: next.targetUserId ?? null,
+      lastMessageId: next.lastMessageId ?? null,
+      lastAgentMessageId: next.lastAgentMessageId ?? null,
+      lastReceivedMessageId: next.lastReceivedMessageId ?? null,
+      lastReadMessageId: next.lastReadMessageId ?? null,
+    });
+  }
+
+  private rememberSentMessage(
+    task: AgentTask,
+    input: {
+      id?: string | null;
+      conversationId: string;
+      targetUserId?: number | null;
+      textPreview: string;
+      toolName: SocialAgentToolName;
+      stepId: string;
+    },
+  ): void {
+    const message = {
+      id: input.id ?? `${input.stepId}:${Date.now()}`,
+      conversationId: input.conversationId,
+      targetUserId: input.targetUserId ?? null,
+      textPreview: input.textPreview,
+      toolName: input.toolName,
+      stepId: input.stepId,
+      sentAt: new Date().toISOString(),
+    };
+    rememberSocialAgentShortTerm(task, {
+      conversationId: input.conversationId,
+      targetUserId: input.targetUserId ?? null,
+      currentStep: this.shortTermStep(input.stepId, `已执行 ${input.toolName}`, 'done'),
+      sentMessages: appendShortTermMemoryItem(task, 'sentMessages', message, 30),
+    });
+  }
+
+  private rememberReceivedReplies(
+    task: AgentTask,
+    messages: AgentMessageRecord[],
+    stepId: string,
+  ): void {
+    let receivedReplies = shortTermMemoryList<Record<string, unknown>>(
+      task,
+      'receivedReplies',
+    );
+    for (const message of messages) {
+      const id = this.string(message.id) ?? `${stepId}:${receivedReplies.length}`;
+      const reply = {
+        id,
+        conversationId:
+          this.string(message.conversationId) ?? this.socialLoopMemory(task).conversationId ?? null,
+        fromUserId: this.number(message.senderId) ?? null,
+        textPreview: this.preview(message.text),
+        receivedAt: new Date().toISOString(),
+      };
+      receivedReplies = [...receivedReplies.filter((item) => item.id !== id), reply].slice(-30);
+    }
+    rememberSocialAgentShortTerm(task, {
+      receivedReplies,
+      currentStep: this.shortTermStep(stepId, '已读取对方回复', 'done'),
+    });
+  }
+
+  private shortTermStep(id: string, label: string, status: string) {
+    return {
+      id,
+      label,
+      status,
+      updatedAt: new Date().toISOString(),
     };
   }
 
@@ -1601,7 +1728,16 @@ export class SocialAgentToolExecutorService {
     fallback: () => Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
-    if (!apiKey) return fallback();
+    if (!apiKey) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'deepseek.call_skipped',
+          purpose,
+          reason: 'DEEPSEEK_API_KEY missing',
+        }),
+      );
+      return fallback();
+    }
 
     try {
       const baseUrl =
@@ -1632,7 +1768,17 @@ export class SocialAgentToolExecutorService {
           }),
         },
       );
-      if (!res.ok) return fallback();
+      if (!res.ok) {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'deepseek.call_failed',
+            purpose,
+            httpStatus: res.status,
+            reason: 'http_error',
+          }),
+        );
+        return fallback();
+      }
       const data = (await res.json()) as {
         choices?: { message?: { content?: string } }[];
       };
@@ -1643,7 +1789,15 @@ export class SocialAgentToolExecutorService {
         source: 'deepseek',
         purpose,
       };
-    } catch {
+    } catch (error) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'deepseek.call_failed',
+          purpose,
+          reason: 'exception',
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
       return fallback();
     }
   }
@@ -2596,6 +2750,51 @@ export class SocialAgentToolExecutorService {
           : 'tool_execution_failed',
       message: error instanceof Error ? error.message : String(error),
     };
+  }
+
+  private logToolFailure(
+    task: AgentTask,
+    toolName: SocialAgentToolName,
+    stepId: string,
+    call: SocialAgentToolCallRecord,
+    error: unknown,
+  ): void {
+    this.logger.error(
+      JSON.stringify({
+        event: 'agent.task.tool_failed',
+        taskId: task.id,
+        ownerUserId: task.ownerUserId,
+        agentConnectionId: task.agentConnectionId,
+        permissionMode: task.permissionMode,
+        stepId,
+        toolCallId: call.id,
+        toolName,
+        status: call.status,
+        error: call.error,
+      }),
+      error instanceof Error ? error.stack : undefined,
+    );
+  }
+
+  private logTaskFailure(
+    task: AgentTask,
+    call: SocialAgentToolCallRecord,
+  ): void {
+    this.logger.error(
+      JSON.stringify({
+        event: 'agent.task.failed',
+        taskId: task.id,
+        ownerUserId: task.ownerUserId,
+        agentConnectionId: task.agentConnectionId,
+        permissionMode: task.permissionMode,
+        statusReason: task.statusReason,
+        failedToolCallId: call.id,
+        failedStepId: call.stepId,
+        failedToolName: call.toolName,
+        failedStatus: call.status,
+        error: call.error,
+      }),
+    );
   }
 
   private string(value: unknown): string | undefined {

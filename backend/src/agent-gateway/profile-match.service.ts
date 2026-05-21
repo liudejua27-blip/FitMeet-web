@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { AiMatchSession } from '../ai-match/ai-match-session.entity';
+import {
+  AiMatchSession,
+  AiMatchSessionInitiator,
+} from '../ai-match/ai-match-session.entity';
 import { MessagesService } from '../messages/messages.service';
 import { SafetyService } from '../safety/safety.service';
 import { UserSocialProfile } from '../users/user-social-profile.entity';
@@ -32,9 +35,23 @@ import {
   AgentActionStatus,
   AgentActionType,
 } from './entities/agent-action-log.entity';
+import {
+  AgentTask,
+  AgentTaskEvent,
+  AgentTaskEventActor,
+  AgentTaskEventType,
+  AgentTaskPermissionMode,
+  AgentTaskRiskLevel,
+  AgentTaskStatus,
+} from './entities/agent-task.entity';
 
 const PROFILE_MATCH_SOURCE = 'profile_pool';
 const PROFILE_MATCH_THRESHOLD = 55;
+
+type ProfileMatchRunOptions = {
+  autoEnableProfilePool?: boolean;
+  initiatedBy?: AiMatchSessionInitiator;
+};
 
 type ProfileMatchSignals = {
   publicTags?: string[];
@@ -93,6 +110,10 @@ export class ProfileMatchService {
     private readonly connectionRepo: Repository<AgentConnection>,
     @InjectRepository(ContactRequest)
     private readonly contactRepo: Repository<ContactRequest>,
+    @InjectRepository(AgentTask)
+    private readonly taskRepo: Repository<AgentTask>,
+    @InjectRepository(AgentTaskEvent)
+    private readonly taskEventRepo: Repository<AgentTaskEvent>,
     private readonly safety: SafetyService,
     private readonly messages: MessagesService,
     private readonly webhooks: AgentWebhookService,
@@ -105,7 +126,8 @@ export class ProfileMatchService {
   /**
    * Recommendation-card action dispatch helper.
    *
-   * Writes to `agent_action_logs`, emits an Agent Inbox event with the
+  * Writes to `agent_tasks`, `agent_task_events`, `agent_action_logs`, and
+  * emits an Agent Inbox event with the
    * standard metadata shape ({ recommendationId, targetUserId, action,
    * status, requiresOwnerConfirmation, approvalId, conversationId,
    * messageId, ...extra }) and fire-and-forgets a webhook per action.
@@ -161,10 +183,22 @@ export class ProfileMatchService {
       messageId: extra.messageId ?? null,
       ...(extra.payload ?? {}),
     };
+    const task = await this.createActionTask({
+      ownerUserId,
+      action,
+      session,
+      status,
+      metadata,
+      riskLevel: riskMap[action],
+      requiresOwnerConfirmation: extra.requiresOwnerConfirmation ?? false,
+      contentPreview: extra.contentPreview ?? action,
+    });
 
     try {
       await this.actionLog.logAgentAction({
         ownerUserId,
+        agentId: task?.agentConnectionId ?? null,
+        agentTaskId: task?.id ?? null,
         actionType: actionTypeMap[action],
         actionStatus:
           action === 'approval.created'
@@ -209,7 +243,11 @@ export class ProfileMatchService {
     }
   }
 
-  async runOnce(ownerUserId: number, limit = 8) {
+  async runOnce(
+    ownerUserId: number,
+    limit = 8,
+    options: ProfileMatchRunOptions = {},
+  ) {
     let ownerProfile = await this.socialProfileRepo.findOne({
       where: { userId: ownerUserId },
     });
@@ -219,9 +257,12 @@ export class ProfileMatchService {
       );
     }
     if (!this.isProfilePoolEnabled(ownerProfile)) {
-      if (!this.hasMatchableProfileSignals(ownerProfile)) {
+      if (
+        options.autoEnableProfilePool !== true ||
+        !this.hasMatchableProfileSignals(ownerProfile)
+      ) {
         throw new BadRequestException(
-          'Please complete your AI profile before running profile matches.',
+          'Please enable AI continuous recommendations before running profile matches.',
         );
       }
       ownerProfile.profileDiscoverable = true;
@@ -313,7 +354,7 @@ export class ProfileMatchService {
           targetUserId: item.profile.userId,
           score: aiScore.score,
           status: 'review',
-          initiatedBy: 'autopilot',
+          initiatedBy: options.initiatedBy ?? 'profile_match_autopilot',
           source: PROFILE_MATCH_SOURCE,
           summary:
             aiScore.publicReason || reasoner.publicReason || item.score.summary,
@@ -489,6 +530,9 @@ export class ProfileMatchService {
     if (blocked.has(session.targetUserId)) {
       throw new ForbiddenException('Contact is blocked by safety settings');
     }
+    if (options.ownerConfirmed !== true) {
+      throw new BadRequestException('Owner confirmation is required before requesting contact');
+    }
 
     const existing = await this.contactRepo.findOne({
       where: {
@@ -577,7 +621,7 @@ export class ProfileMatchService {
     }
 
     return this.confirmContact(ownerUserId, aiMatchSessionId, body.note, {
-      ownerConfirmed: true,
+      ownerConfirmed: body.ownerConfirmed === true,
     });
   }
 
@@ -686,6 +730,9 @@ export class ProfileMatchService {
     if (!text) {
       throw new BadRequestException('Intro text is required');
     }
+    if (body.ownerConfirmed !== true) {
+      throw new BadRequestException('Owner confirmation is required before sending an intro');
+    }
 
     const connection = await this.connectionRepo.findOne({
       where: { userId: ownerUserId, status: ConnectionStatus.Active },
@@ -778,7 +825,18 @@ export class ProfileMatchService {
       take: 20,
     });
     let inboxEvents = 0;
-    for (const conn of connections) {
+    const deliveryConnections = connections.length
+      ? connections
+      : [
+          {
+            id: 0,
+            userId: ownerUserId,
+            status: ConnectionStatus.Active,
+            agentName: 'fitmeet_autopilot',
+            agentDisplayName: 'FitMeet Autopilot',
+          } as AgentConnection,
+        ];
+    for (const conn of deliveryConnections) {
       const metadata = {
         aiMatchSessionId: recommendation.aiMatchSessionId,
         targetUserId: recommendation.targetUserId,
@@ -801,6 +859,38 @@ export class ProfileMatchService {
         nextAction: recommendation.nextAction,
         reasoner: recommendation.reasoner ?? null,
       };
+      const task = await this.createActionTask({
+        ownerUserId,
+        action: 'profile.match.recommended',
+        sessionId: recommendation.aiMatchSessionId,
+        targetUserId: recommendation.targetUserId,
+        status: 'pending_owner_confirmation',
+        metadata: { ...metadata, requiresOwnerConfirmation: true },
+        riskLevel: AgentActionRiskLevel.Medium,
+        requiresOwnerConfirmation: true,
+        contentPreview: recommendation.summary,
+      });
+      try {
+        await this.actionLog.logAgentAction({
+          ownerUserId,
+          agentId: task?.agentConnectionId ?? null,
+          agentTaskId: task?.id ?? null,
+          eventType: 'profile.match.recommended',
+          actionType: AgentActionType.AgentEvent,
+          actionStatus: AgentActionStatus.PendingApproval,
+          riskLevel: AgentActionRiskLevel.Medium,
+          targetUserId: recommendation.targetUserId,
+          relatedCandidateId: recommendation.aiMatchSessionId,
+          inputSummary: 'profile.match.recommended',
+          outputSummary: recommendation.summary,
+          payload: {
+            ...metadata,
+            requiresOwnerConfirmation: true,
+          },
+        });
+      } catch {
+        /* recommendation audit must not block matching */
+      }
       await this.messages.createAgentInboxEvent({
         agentConnectionId: conn.id,
         ownerUserId,
@@ -810,13 +900,143 @@ export class ProfileMatchService {
         metadata,
       });
       inboxEvents += 1;
-      void this.webhooks.emitToConnection(
-        conn.id,
-        'profile.match.recommended',
-        metadata,
-      );
+      if (conn.id > 0) {
+        void this.webhooks.emitToConnection(
+          conn.id,
+          'profile.match.recommended',
+          metadata,
+        );
+      }
     }
     return inboxEvents;
+  }
+
+  private async createActionTask(input: {
+    ownerUserId: number;
+    action: string;
+    status: string;
+    metadata: Record<string, unknown>;
+    riskLevel: AgentActionRiskLevel;
+    requiresOwnerConfirmation: boolean;
+    contentPreview: string;
+    session?: AiMatchSession;
+    sessionId?: number;
+    targetUserId?: number;
+  }): Promise<AgentTask | null> {
+    try {
+      const connection = await this.connectionRepo.findOne({
+        where: { userId: input.ownerUserId, status: ConnectionStatus.Active },
+        order: { createdAt: 'DESC' },
+      });
+      const sessionId = input.session?.id ?? input.sessionId ?? null;
+      const targetUserId = input.session?.targetUserId ?? input.targetUserId ?? null;
+      const taskStatus = this.taskStatusForAction(input.action, input.status, input.requiresOwnerConfirmation);
+      const task = await this.taskRepo.save(
+        this.taskRepo.create({
+          ownerUserId: input.ownerUserId,
+          agentConnectionId: connection?.id ?? null,
+          taskType: 'profile_match_action',
+          title: `Profile match ${input.action}`,
+          goal: 'Review and execute a profile-match recommendation action through owner confirmation.',
+          input: {
+            source: 'profile_match',
+            action: input.action,
+            recommendationId: sessionId,
+            targetUserId,
+            requiresOwnerConfirmation: input.requiresOwnerConfirmation,
+          },
+          plan: [],
+          toolCalls: [],
+          result: {
+            action: input.action,
+            status: input.status,
+            contentPreview: input.contentPreview,
+          },
+          memory: { metadata: input.metadata },
+          status: taskStatus,
+          permissionMode: AgentTaskPermissionMode.Confirm,
+          riskLevel: this.toTaskRiskLevel(input.riskLevel),
+          idempotencyKey: null,
+        }),
+      );
+
+      await this.writeTaskEvent(task, AgentTaskEventType.TaskCreated, '已创建画像推荐动作任务', input.metadata);
+      if (input.requiresOwnerConfirmation) {
+        await this.writeTaskEvent(
+          task,
+          AgentTaskEventType.ConfirmationRequested,
+          '等待用户确认画像推荐动作',
+          input.metadata,
+        );
+      } else if (this.isOutboundAction(input.action)) {
+        await this.writeTaskEvent(
+          task,
+          AgentTaskEventType.ConfirmationReceived,
+          '用户已确认画像推荐出站动作',
+          input.metadata,
+          AgentTaskEventActor.User,
+        );
+      }
+      await this.writeTaskEvent(
+        task,
+        AgentTaskEventType.ToolReturned,
+        `画像推荐动作状态：${input.status}`,
+        input.metadata,
+      );
+      if (task.status === AgentTaskStatus.Succeeded) {
+        await this.writeTaskEvent(
+          task,
+          AgentTaskEventType.TaskSucceeded,
+          '画像推荐动作已完成',
+          input.metadata,
+        );
+      }
+
+      return task;
+    } catch {
+      return null;
+    }
+  }
+
+  private async writeTaskEvent(
+    task: AgentTask,
+    eventType: AgentTaskEventType,
+    summary: string,
+    payload: Record<string, unknown>,
+    actor: AgentTaskEventActor = AgentTaskEventActor.Agent,
+  ) {
+    await this.taskEventRepo.save(
+      this.taskEventRepo.create({
+        taskId: task.id,
+        ownerUserId: task.ownerUserId,
+        eventType,
+        actor,
+        summary: this.sanitizePublicText(summary),
+        payload,
+      }),
+    );
+  }
+
+  private taskStatusForAction(
+    action: string,
+    status: string,
+    requiresOwnerConfirmation: boolean,
+  ): AgentTaskStatus {
+    if (requiresOwnerConfirmation) return AgentTaskStatus.AwaitingConfirmation;
+    if (status.includes('pending_target_consent')) return AgentTaskStatus.AwaitingFeedback;
+    if (status.includes('failed')) return AgentTaskStatus.Failed;
+    if (this.isOutboundAction(action)) return AgentTaskStatus.WaitingResult;
+    return AgentTaskStatus.Succeeded;
+  }
+
+  private isOutboundAction(action: string) {
+    return ['contact.confirmed', 'contact.exchange_requested', 'intro.sent'].includes(action);
+  }
+
+  private toTaskRiskLevel(risk: AgentActionRiskLevel): AgentTaskRiskLevel {
+    if (risk === AgentActionRiskLevel.High) return AgentTaskRiskLevel.High;
+    if (risk === AgentActionRiskLevel.Medium) return AgentTaskRiskLevel.Medium;
+    return AgentTaskRiskLevel.Low;
   }
 
   private toRecommendation(

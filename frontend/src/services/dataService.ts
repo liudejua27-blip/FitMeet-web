@@ -10,11 +10,6 @@ import type {
   MeetRecord,
   Post,
   UserProfile,
-  AiMatchCandidate,
-  AiMatchSession,
-  AiDelegateProfile,
-  AiAutopilotHistoryItem,
-  AiAutopilotRunResult,
   SocialCandidate,
   SocialRequest,
 } from '../types';
@@ -29,38 +24,6 @@ export function login(data: { email: string; password: string }) {
 
 export function getProfile() {
   return api.getProfile();
-}
-
-export type UpsertAiDelegateProfileInput = api.UpsertAiDelegateProfileInput;
-
-export function getAiDelegateProfile(): Promise<AiDelegateProfile> {
-  return api.getAiDelegateProfile();
-}
-
-export function saveAiDelegateProfile(
-  data: UpsertAiDelegateProfileInput,
-): Promise<AiDelegateProfile> {
-  return api.saveAiDelegateProfile(data);
-}
-
-export function getAiMatchCandidates(): Promise<AiMatchCandidate[]> {
-  return api.getAiMatchCandidates();
-}
-
-export function simulateAiMatch(targetUserId: number): Promise<AiMatchSession> {
-  return api.simulateAiMatch(targetUserId);
-}
-
-export function approveAiMatchFriend(sessionId: number) {
-  return api.approveAiMatchFriend(sessionId);
-}
-
-export function runAiAutopilot(): Promise<AiAutopilotRunResult> {
-  return api.runAiAutopilot();
-}
-
-export function getAiAutopilotHistory(): Promise<AiAutopilotHistoryItem[]> {
-  return api.getAiAutopilotHistory();
 }
 
 export type CreateSocialRequestInput = api.CreateSocialRequestInput;

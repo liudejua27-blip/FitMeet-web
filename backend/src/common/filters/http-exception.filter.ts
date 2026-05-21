@@ -38,19 +38,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
         ? exception.getResponse()
         : 'Internal server error';
 
-    if (status >= 500) {
-      this.logger.error(
-        `${request.method} ${request.url}`,
-        exception instanceof Error ? exception.stack : exception,
-      );
-    } else {
-      this.logger.warn(
-        `${request.method} ${request.url} - ${status} - ${JSON.stringify(
-          exceptionResponse,
-        )}`,
-      );
-    }
-
     const message = this.resolveMessage(exceptionResponse, status);
     const descriptor = this.resolveErrorDescriptor(
       status,
@@ -58,6 +45,32 @@ export class HttpExceptionFilter implements ExceptionFilter {
       message,
       exceptionResponse,
     );
+
+    if (status >= 500) {
+      this.logger.error(
+        JSON.stringify({
+          event: 'backend.error',
+          method: request.method,
+          path: request.url,
+          status,
+          code: descriptor.code,
+          userId: this.requestUserId(request),
+        }),
+        exception instanceof Error ? exception.stack : exception,
+      );
+    } else {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'backend.request_failed',
+          method: request.method,
+          path: request.url,
+          status,
+          code: descriptor.code,
+          userId: this.requestUserId(request),
+          response: exceptionResponse,
+        }),
+      );
+    }
 
     response.status(status).json({
       statusCode: status,
@@ -144,5 +157,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
       status >= 500 ||
       code === 'OWNER_CONFIRMATION_REQUIRED'
     );
+  }
+
+  private requestUserId(request: Request): number | null {
+    const user = (request as Request & { user?: { id?: number } }).user;
+    return typeof user?.id === 'number' ? user.id : null;
   }
 }

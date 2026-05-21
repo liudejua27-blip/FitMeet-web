@@ -97,6 +97,17 @@ type SaveCandidateInput = {
   candidate?: Record<string, unknown>;
 };
 
+type ConnectCandidateInput = SaveCandidateInput;
+
+export interface SocialAgentConnectCandidateResult {
+  taskId: number;
+  targetUserId: number;
+  status: string;
+  following?: boolean;
+  conversationId: string | null;
+  friendAction: SocialAgentToolCall;
+}
+
 export const socialAgentApi = {
   runChat: (data: RunChatInput) =>
     api
@@ -137,6 +148,17 @@ export const socialAgentApi = {
         method: 'POST',
         body: JSON.stringify(data),
       })
+      .then(sanitizeSocialAgentResponse),
+
+  connectCandidate: (taskId: number, data: ConnectCandidateInput) =>
+    api
+      .request<SocialAgentConnectCandidateResult>(
+        `/social-agent/chat/tasks/${taskId}/connect-candidate`,
+        {
+          method: 'POST',
+          body: JSON.stringify(data),
+        },
+      )
       .then(sanitizeSocialAgentResponse),
 };
 

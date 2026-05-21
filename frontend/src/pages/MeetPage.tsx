@@ -45,7 +45,7 @@ export const MeetPage = () => {
       const fallback = withMockMeets([]);
       setMeetData(fallback);
       setSelectedMeetId((current) => current ?? fallback[0]?.id ?? null);
-      setError('约练列表加载失败，已展示示例内容');
+      setError('约练列表加载失败，请稍后重试');
     } finally {
       setIsLoading(false);
     }

@@ -51,7 +51,7 @@ export const MatchConfirmationsPage = memo(function MatchConfirmationsPage() {
       if (decision === 'accept') {
         const result = await agentInboxApi.acceptMatchRequest(id);
         if (result.conversationId) {
-          navigate('/messages');
+          navigate(`/messages?conversationId=${encodeURIComponent(result.conversationId)}`);
           return;
         }
       } else {

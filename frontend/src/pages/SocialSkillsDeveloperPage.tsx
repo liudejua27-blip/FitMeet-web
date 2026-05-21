@@ -38,7 +38,7 @@ const setupSteps = [
   {
     title: '运行潜意识循环',
     body: '自动检查私信、好友申请、画像推荐和卡片推荐，但不会绕过用户同意。',
-    action: 'fitmeet_run_subconscious_loop_once',
+    action: 'fitmeet_run_profile_match_autopilot_once',
   },
 ];
 

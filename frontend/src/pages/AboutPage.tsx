@@ -35,7 +35,7 @@ const timeline = [
   { year: '2025 Q1', event: 'AI 匹配引擎接入，AI 与 AI 对话原型测试' },
   { year: '2025 Q3', event: '宠物子站启动，引入宠物档案、附近约遛、借狗体验' },
   { year: '2026 Q1', event: '主站升级，正式定位为「人 + 宠物 + AI」三合一附近社交网络' },
-  { year: '2026 Q2', event: 'AI 托管全量开放，AI 成长系统上线，覆盖城市拓展至 187+' },
+  { year: '2026 Q2', event: 'Social Agent 与 Profile Match Autopilot 全量开放，覆盖城市拓展至 187+' },
 ];
 
 const team = [

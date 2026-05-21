@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as dataService from '../services/dataService';
 import { meetToFeedPost, withMockPosts } from '../data/mockContent';
+import { cleanDisplayArray, cleanDisplayText, isDisplayableRecordText } from '../lib/displayText';
 import { useAuthStore } from '../stores';
 import type { Meet, Post, PublicSocialIntent } from '../types';
 
@@ -40,43 +41,6 @@ const sceneLabel: Record<string, string> = {
   photo_partner: '拍照搭子',
 };
 
-const seedItems: HallItem[] = [
-  {
-    id: 'seed-openclaw-gym',
-    agent: 'OpenClaw',
-    owner: 'Aiden 的代理',
-    title: '今晚 20:00 找力量训练搭子',
-    body: '用户想在附近找一位动作规范、愿意互相保护的训练搭子。FitMeet 会按距离、实名认证、训练偏好和安全风险排序。',
-    city: '上海',
-    scene: '同城约练',
-    status: '示例意图',
-    intent: 'social_intent.match',
-    tags: ['力量训练', '3km 内', '实名优先'],
-    signal: 92,
-    signalLabel: '示例信号 92%',
-    signalReasons: ['同城', '兴趣明确', '实名优先'],
-    accent: '#ff6a00',
-    createdAt: '刚刚',
-  },
-  {
-    id: 'seed-qclaw-dog',
-    agent: 'QClaw',
-    owner: 'Luna 的代理',
-    title: '周末找滨江遛狗搭子',
-    body: '代理提交了宠物社交需求，希望找到性格稳定、时间相近、同区域的用户。联系方式交换需要双方同意。',
-    city: '杭州',
-    scene: '遛狗搭子',
-    status: '示例意图',
-    intent: 'pet_buddy.nearby',
-    tags: ['宠物友好', '周末', '滨江'],
-    signal: 86,
-    signalLabel: '示例信号 86%',
-    signalReasons: ['城市明确', '时间明确', '场景低压'],
-    accent: '#18b98f',
-    createdAt: '2 分钟前',
-  },
-];
-
 function clampSignal(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
@@ -104,14 +68,14 @@ function postToHallItem(post: Post): HallItem {
   return {
     id: `post-${post.id}`,
     agent: post.mock ? 'FitMeet 内置 Agent' : '用户 / Agent',
-    owner: post.username,
-    title: post.title || `${type}需求`,
-    body: post.text,
-    city: post.city || '全局',
+    owner: cleanDisplayText(post.username, 'FitMeet 用户'),
+    title: cleanDisplayText(post.title, `${type}需求`),
+    body: cleanDisplayText(post.text, '这条内容包含异常字符，已隐藏正文。'),
+    city: cleanDisplayText(post.city, '全局'),
     scene: type,
     status: post.type === 'meet' ? '开放加入' : '正在流转',
     intent: post.type === 'meet' ? 'meet.joinable' : 'feed.intent',
-    tags: post.tags.slice(0, 4),
+    tags: cleanDisplayArray(post.tags).slice(0, 4),
     signal,
     signalLabel: `内容信号 ${signal}%`,
     signalReasons: ['来自公开内容', post.city ? '城市明确' : '城市待补充'],
@@ -122,41 +86,42 @@ function postToHallItem(post: Post): HallItem {
 }
 
 function publicIntentToHallItem(intent: PublicSocialIntent): HallItem {
-  const interests = Array.isArray(intent.interestTags)
+  const rawInterests = Array.isArray(intent.interestTags)
     ? intent.interestTags
     : Array.isArray(intent.filters?.interests)
       ? (intent.filters.interests as string[])
       : Array.isArray(intent.filters?.interestTags)
         ? (intent.filters.interestTags as string[])
         : [];
+  const interests = cleanDisplayArray(rawInterests);
   const locationPreference = intent.locationPreference || intent.loc;
   const score =
-    typeof intent.matchSignal?.score === 'number'
-      ? clampSignal(intent.matchSignal.score)
-      : null;
+    typeof intent.matchSignal?.score === 'number' ? clampSignal(intent.matchSignal.score) : null;
   const confidence = intent.matchSignal?.confidence;
   return {
     id: intent.id,
     publicIntentId: intent.id,
     agent: intent.source?.includes('public') ? 'OpenClaw / Public' : 'Agent',
     owner: '公开 Agent 发布',
-    title: intent.title,
-    body: intent.description,
-    city: intent.city || '全局',
+    title: cleanDisplayText(intent.title, '公开社交意图'),
+    body: cleanDisplayText(intent.description, '这条内容包含异常字符，已隐藏正文。'),
+    city: cleanDisplayText(intent.city, '全局'),
     scene: sceneLabel[intent.requestType] ?? '公开社交意图',
     status: intent.status === 'matched' ? `候选 ${intent.matchedCount} 人` : '匹配中',
     intent: `public.${intent.requestType}`,
     tags: [
       intent.riskLevel === 'high' ? '高风险确认' : '站内确认',
-      ...(locationPreference ? [locationPreference] : []),
+      ...(locationPreference ? [cleanDisplayText(locationPreference, '站内确认')] : []),
       ...interests,
-    ].slice(0, 4),
+    ]
+      .filter(Boolean)
+      .slice(0, 4),
     signal: score,
     signalLabel:
       score == null
         ? 'AI 评分待生成'
         : `AI 动态评分 ${score}%${confidence ? ` · ${confidence}` : ''}`,
-    signalReasons: intent.matchSignal?.reasons ?? [],
+    signalReasons: cleanDisplayArray(intent.matchSignal?.reasons),
     accent: '#22d3ee',
     userId: intent.userId ?? null,
     createdAt: formatTime(intent.createdAt),
@@ -166,7 +131,7 @@ function publicIntentToHallItem(intent: PublicSocialIntent): HallItem {
 export const FitMeetHallPage = memo(function FitMeetHallPage() {
   const navigate = useNavigate();
   const { user, openLogin } = useAuthStore();
-  const [items, setItems] = useState<HallItem[]>(seedItems);
+  const [items, setItems] = useState<HallItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [contactingId, setContactingId] = useState<string | null>(null);
   const [contactNotice, setContactNotice] = useState('');
@@ -195,8 +160,22 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
             (item, index, array) =>
               array.findIndex((candidate) => candidate.id === item.id) === index,
           );
-        const publicItems = publicIntents.map(publicIntentToHallItem);
-        setItems([...publicItems, ...seedItems, ...merged]);
+        const publicItems = publicIntents
+          .filter((intent) =>
+            isDisplayableRecordText([intent.title, intent.description, intent.city, intent.source]),
+          )
+          .map(publicIntentToHallItem);
+        const displayableItems = [...publicItems, ...merged].filter((item) =>
+          isDisplayableRecordText([
+            item.owner,
+            item.title,
+            item.body,
+            item.city,
+            item.scene,
+            ...item.tags,
+          ]),
+        );
+        setItems(displayableItems);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -237,19 +216,14 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
       try {
         const opener = `你好，我在 FitMeet 大厅看到你发布的「${item.title}」，想先在站内聊聊。`;
         const result = item.publicIntentId
-          ? await dataService.startPublicIntentConversation(
-              item.publicIntentId,
-              opener,
-            )
+          ? await dataService.startPublicIntentConversation(item.publicIntentId, opener)
           : await dataService.startConversation(item.userId);
         if (!item.publicIntentId) {
           await dataService.sendMessage(result.conversationId, opener);
         }
         navigate(`/messages?conversationId=${encodeURIComponent(result.conversationId)}`);
       } catch (err) {
-        setContactNotice(
-          err instanceof Error ? err.message : '发起聊天失败，请稍后重试。',
-        );
+        setContactNotice(err instanceof Error ? err.message : '发起聊天失败，请稍后重试。');
       } finally {
         setContactingId(null);
       }
@@ -277,14 +251,12 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
             </div>
             <h1 className="max-w-4xl text-3xl font-black leading-tight text-white sm:text-5xl">
               FitMeet 大厅
-              <span className="block text-[#ff8a1f]">
-                所有智能体发布的社交意图在这里流动
-              </span>
+              <span className="block text-[#ff8a1f]">所有智能体发布的社交意图在这里流动</span>
             </h1>
             <p className="mt-5 max-w-3xl text-sm leading-8 text-[#c9b9a7] sm:text-base">
               约练、遛狗、旅行、同店聊天都可以被 AI 画像和卡片需求动态评分。
-              你可以点击任意可联系卡片发起站内消息，对方如果是 OpenClaw 代理会通过
-              Agent Inbox 收到实时通知。
+              你可以点击任意可联系卡片发起站内消息，对方如果是 OpenClaw 代理会通过 Agent Inbox
+              收到实时通知。
             </p>
             <div className="mt-7 flex flex-wrap gap-3">
               <button
@@ -308,12 +280,8 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
                 key={item.label}
                 className="rounded-lg border border-white/10 bg-white/[0.04] p-4"
               >
-                <div className="text-xs font-bold text-[#9c8f82]">
-                  {item.label}
-                </div>
-                <div className="mt-1 text-xl font-black text-white">
-                  {item.value}
-                </div>
+                <div className="text-xs font-bold text-[#9c8f82]">{item.label}</div>
+                <div className="mt-1 text-xl font-black text-white">{item.value}</div>
               </div>
             ))}
           </div>
@@ -321,10 +289,7 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
       </section>
 
       <section className="overflow-hidden border-b border-white/10 bg-[#0f1113] py-4">
-        <div
-          className="flex w-max gap-3"
-          style={{ animation: 'hallRail 34s linear infinite' }}
-        >
+        <div className="flex w-max gap-3" style={{ animation: 'hallRail 34s linear infinite' }}>
           {[...items, ...items].map((item, index) => (
             <div
               key={`${item.id}-${index}`}
@@ -337,9 +302,7 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
                 {item.agent[0]}
               </span>
               <div className="min-w-0">
-                <div className="truncate text-sm font-black text-white">
-                  {item.title}
-                </div>
+                <div className="truncate text-sm font-black text-white">{item.title}</div>
                 <div className="truncate text-xs text-[#a99b8d]">
                   {item.agent} · {item.city} · {item.status}
                 </div>
@@ -377,9 +340,7 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
                 来自用户、OpenClaw、企业 Agent 和 FitMeet 内置 Agent 的公开发布。
               </p>
             </div>
-            {loading && (
-              <span className="text-xs font-bold text-[#ffb36e]">同步中...</span>
-            )}
+            {loading && <span className="text-xs font-bold text-[#ffb36e]">同步中...</span>}
           </div>
 
           {contactNotice && (
@@ -468,11 +429,7 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
                       void handleOpenConversation(item);
                     }}
                   >
-                    {contactingId === item.id
-                      ? '打开中...'
-                      : item.userId
-                        ? '发消息'
-                        : '查看连接'}
+                    {contactingId === item.id ? '打开中...' : item.userId ? '发消息' : '查看连接'}
                   </button>
                 </div>
               </article>

@@ -9,7 +9,10 @@ import {
 import { User } from '../users/user.entity';
 
 export type AiMatchSessionStatus = 'review' | 'approved' | 'rejected';
-export type AiMatchSessionInitiator = 'manual' | 'autopilot';
+export type AiMatchSessionInitiator =
+  | 'manual'
+  | 'autopilot'
+  | 'profile_match_autopilot';
 
 @Entity('ai_match_sessions')
 export class AiMatchSession {

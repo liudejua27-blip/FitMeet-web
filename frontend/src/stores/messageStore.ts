@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { io, Socket } from 'socket.io-client';
 import * as dataService from '../services/dataService';
 import * as api from '../api/client';
+import { cleanDisplayText, isDisplayableRecordText } from '../lib/displayText';
 import { STORAGE_KEYS, migrateLocalStorageKey } from '../lib/storageKeys';
 
 migrateLocalStorageKey(STORAGE_KEYS.legacyMessagesStore, STORAGE_KEYS.messagesStore);
@@ -71,14 +72,20 @@ export const useMessageStore = create<MessageState>()(
         if (existingSocket) {
           if (existingSocket.connected) return;
           // If a stale instance exists (e.g. after logout/login), tear it down first
-          try { existingSocket.disconnect(); } catch { /* noop */ }
+          try {
+            existingSocket.disconnect();
+          } catch {
+            /* noop */
+          }
           set({ socket: null });
         }
 
         const configuredWsBase = import.meta.env.VITE_WS_BASE_URL?.trim();
         const wsBase = (
           configuredWsBase ||
-          (typeof window !== 'undefined' ? window.location.origin : api.API_BASE_URL.replace(/\/api\/?$/, ''))
+          (typeof window !== 'undefined'
+            ? window.location.origin
+            : api.API_BASE_URL.replace(/\/api\/?$/, ''))
         ).replace(/\/+$/, '');
 
         // Backend gateway uses the "messages" namespace.
@@ -121,42 +128,43 @@ export const useMessageStore = create<MessageState>()(
             // payload: { id, text, senderId, conversationId, time }
             const state = get();
             // Conversation ID is now used directly as ID
-            const conv = state.conversations.find(
-              (c) => c.id === payload.conversationId,
-            );
+            const conv = state.conversations.find((c) => c.id === payload.conversationId);
 
             if (!conv) {
               get().loadConversations(); // Reload if new conv
               return;
-           }
+            }
 
-           const newMsg: ChatMessage = {
-             id: payload.id,
-             text: payload.text,
-             time: payload.time || new Date().toLocaleTimeString(),
-             isMine: false,
-             source: payload.source ?? 'user',
-             card: payload.card ?? null,
-           };
+            const newMsg: ChatMessage = {
+              id: payload.id,
+              text: cleanDisplayText(payload.text, '消息内容已隐藏'),
+              time: cleanDisplayText(payload.time, '刚刚'),
+              isMine: false,
+              source: payload.source ?? 'user',
+              card: payload.card ?? null,
+            };
 
-           const isCurrent = state.activeConvId === conv.id;
+            const isCurrent = state.activeConvId === conv.id;
 
-           set(s => ({
-             messages: {
-               ...s.messages,
-               [conv!.id]: [...(s.messages[conv!.id] || []), newMsg]
-             },
-             conversations: s.conversations.map(c =>
-               c.id === conv!.id ? {
-                 ...c,
-                 lastMessage: newMsg.text,
-                 time: '刚刚',
-                 unread: isCurrent ? 0 : c.unread + 1
-               } : c
-             ),
-             totalUnread: isCurrent ? s.totalUnread : s.totalUnread + 1
-           }));
-        });
+            set((s) => ({
+              messages: {
+                ...s.messages,
+                [conv!.id]: [...(s.messages[conv!.id] || []), newMsg],
+              },
+              conversations: s.conversations.map((c) =>
+                c.id === conv!.id
+                  ? {
+                      ...c,
+                      lastMessage: cleanDisplayText(newMsg.text, '消息内容已隐藏'),
+                      time: '刚刚',
+                      unread: isCurrent ? 0 : c.unread + 1,
+                    }
+                  : c,
+              ),
+              totalUnread: isCurrent ? s.totalUnread : s.totalUnread + 1,
+            }));
+          },
+        );
 
         set({ socket });
       },
@@ -175,17 +183,19 @@ export const useMessageStore = create<MessageState>()(
           const apiConvs = (await dataService.getConversations()) as any[];
           if (!apiConvs) return;
 
-          const convs: Conversation[] = apiConvs.map((c) => ({
-            id: c.id,
-            userId: c.userId,
-            username: c.username,
-            avatar: c.avatar,
-            color: c.color,
-            lastMessage: c.lastMessage || '',
-            time: c.time || '',
-            unread: c.unread || 0,
-            online: c.online || false,
-          }));
+          const convs: Conversation[] = apiConvs
+            .filter((c) => isDisplayableRecordText([c.username, c.lastMessage, c.time]))
+            .map((c) => ({
+              id: c.id,
+              userId: c.userId,
+              username: cleanDisplayText(c.username, 'FitMeet 用户'),
+              avatar: cleanDisplayText(c.avatar, 'F'),
+              color: c.color,
+              lastMessage: cleanDisplayText(c.lastMessage),
+              time: cleanDisplayText(c.time),
+              unread: c.unread || 0,
+              online: c.online || false,
+            }));
 
           set({
             conversations: convs,
@@ -204,34 +214,37 @@ export const useMessageStore = create<MessageState>()(
 
           const msgs: ChatMessage[] = texts.map((m) => ({
             id: m.id,
-            text: m.text,
+            text: cleanDisplayText(m.text, '消息内容已隐藏'),
             // Backend already formats time as "HH:MM" (zh-CN).
-            time: m.time || new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+            time:
+              cleanDisplayText(m.time) ||
+              new Date().toLocaleTimeString('zh-CN', {
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
             isMine: m.isMine,
             source: m.source ?? 'user',
             card: m.card ?? null,
           }));
 
           set((state) => ({
-             messages: {
-               ...state.messages,
-               [convId]: msgs
-             }
-           }));
-         } catch (e) {
-           console.error(e);
-         }
+            messages: {
+              ...state.messages,
+              [convId]: msgs,
+            },
+          }));
+        } catch (e) {
+          console.error(e);
+        }
       },
 
       selectConv: (id) => {
         set((state) => ({
           activeConvId: id,
-          conversations: state.conversations.map((c) =>
-            c.id === id ? { ...c, unread: 0 } : c
-          ),
+          conversations: state.conversations.map((c) => (c.id === id ? { ...c, unread: 0 } : c)),
           totalUnread: state.conversations.reduce(
             (sum, c) => sum + (c.id === id ? 0 : c.unread),
-            0
+            0,
           ),
         }));
         get().loadMessages(id);
@@ -256,7 +269,7 @@ export const useMessageStore = create<MessageState>()(
             [convId]: [...(state.messages[convId] || []), newMsg],
           },
           conversations: state.conversations.map((c) =>
-            c.id === convId ? { ...c, lastMessage: text, time: '刚刚' } : c
+            c.id === convId ? { ...c, lastMessage: cleanDisplayText(text), time: '刚刚' } : c,
           ),
         }));
 
@@ -279,9 +292,7 @@ export const useMessageStore = create<MessageState>()(
               get()
                 .loadConversations()
                 .then(() => {
-                  const refreshed = get().conversations.find(
-                    (c) => c.userId === userId,
-                  );
+                  const refreshed = get().conversations.find((c) => c.userId === userId);
                   if (refreshed) {
                     set({ activeConvId: refreshed.id });
                   } else if (res?.conversationId) {

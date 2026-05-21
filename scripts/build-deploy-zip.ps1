@@ -1,5 +1,5 @@
 param(
-  [string]$Output = "fitmeet-deploy.zip"
+  [string]$Output = "fitmeet.zip"
 )
 
 $ErrorActionPreference = "Stop"
@@ -101,6 +101,7 @@ Invoke-Step "Create deploy zip" {
       "--exclude=*/logs",
       "--exclude=*.log",
       "--exclude=fitmeet-deploy.zip",
+      "--exclude=fitmeet.zip",
       "--exclude=backend/.env",
       "--exclude=frontend/.env.development.local",
       "--exclude=backend/public/uploads",

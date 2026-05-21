@@ -147,6 +147,9 @@ function makeHarness() {
       ],
     }),
   };
+  const messages = {
+    startConversation: jest.fn().mockResolvedValue({ conversationId: 'conv-22' }),
+  };
 
   const service = new SocialAgentChatService(
     taskRepo as never,
@@ -157,15 +160,18 @@ function makeHarness() {
     socialProfiles as never,
     socialRequests as never,
     matchService as never,
+    messages as never,
   );
 
   return {
     service,
     savedEvents,
     taskRepo,
+    connectionRepo,
     executor,
     socialRequests,
     matchService,
+    messages,
   };
 }
 
@@ -216,12 +222,36 @@ describe('SocialAgentChatService', () => {
       expect.arrayContaining([
         expect.objectContaining({ type: 'save_candidate', candidateRecordId: 501 }),
         expect.objectContaining({ type: 'send_message', targetUserId: 22 }),
+        expect.objectContaining({ type: 'add_friend', targetUserId: 22 }),
         expect.objectContaining({ type: 'publish_social_request', socialRequestId: 301 }),
       ]),
     );
     expect(savedEvents.map((event) => event.eventType)).toContain(
       AgentTaskEventType.TaskCreated,
     );
+    const finalSavedTask = taskRepo.save.mock.calls.at(-1)?.[0] as AgentTask;
+    expect(finalSavedTask.memory.shortTerm).toMatchObject({
+      taskId: 101,
+      currentGoal: '帮我找一个今晚在青岛可以轻松跑步的人',
+      permissionMode: AgentTaskPermissionMode.Confirm,
+      currentStatus: AgentTaskStatus.AwaitingConfirmation,
+      socialRequestId: 301,
+    });
+    expect(finalSavedTask.memory.shortTerm.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'understand', status: 'done' }),
+        expect.objectContaining({ id: 'search', status: 'done' }),
+        expect.objectContaining({ id: 'awaiting_confirmation' }),
+      ]),
+    );
+    expect(finalSavedTask.memory.shortTerm.candidates).toEqual([
+      expect.objectContaining({
+        userId: 22,
+        nickname: '小林',
+        candidateRecordId: 501,
+        score: 87,
+      }),
+    ]);
   });
 
   it('streams visible steps before returning the final result', async () => {
@@ -292,5 +322,35 @@ describe('SocialAgentChatService', () => {
       }),
       7,
     );
+  });
+
+  it('connects a candidate through AddFriend and opens a real conversation', async () => {
+    const { service, taskRepo, executor, messages, connectionRepo } = makeHarness();
+    taskRepo.findOne.mockResolvedValue(makeTask({ agentConnectionId: 9 }));
+    connectionRepo.findOne.mockResolvedValue({ id: 9, userId: 7 });
+
+    const result = await service.connectCandidate(7, 101, {
+      socialRequestId: 301,
+      candidateRecordId: 501,
+      targetUserId: 22,
+    });
+
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.AddFriend,
+      expect.objectContaining({ targetUserId: 22, candidateRecordId: 501 }),
+      7,
+    );
+    expect(messages.startConversation).toHaveBeenCalledWith(
+      7,
+      22,
+      expect.objectContaining({ agentConnectionId: 9, ownerUserId: 7 }),
+    );
+    expect(result).toMatchObject({
+      taskId: 101,
+      targetUserId: 22,
+      following: true,
+      conversationId: 'conv-22',
+    });
   });
 });

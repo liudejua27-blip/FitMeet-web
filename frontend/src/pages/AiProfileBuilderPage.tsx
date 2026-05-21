@@ -3,10 +3,13 @@ import { Link } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import {
   socialProfileApi,
+  type AiProfilePrivacyState,
   type AiProfileBuilderCard,
   type AiProfileQuestion,
+  type PendingSensitiveTag,
   type SocialProfileCompletion,
 } from '../api/socialProfileApi';
+import { cleanDisplayText, sanitizeDisplayValue } from '../lib/displayText';
 
 const fallbackQuestions: AiProfileQuestion[] = [
   { key: 'sports', question: '你平时喜欢什么运动？' },
@@ -90,16 +93,31 @@ export function AiProfileBuilderPage() {
     missingFields: string[];
   } | null>(null);
   const [sensitiveTagsConfirmed, setSensitiveTagsConfirmed] = useState(false);
+  const [privacy, setPrivacy] = useState<AiProfilePrivacyState | null>(null);
+  const [pendingSensitiveTags, setPendingSensitiveTags] = useState<PendingSensitiveTag[]>([]);
+  const [privacySaving, setPrivacySaving] = useState<string | null>(null);
+  const [tagDecisionPending, setTagDecisionPending] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const result = await socialProfileApi.questions();
+        const [result, privacyState, pendingTags] = await Promise.all([
+          socialProfileApi.questions(),
+          socialProfileApi.privacy(),
+          socialProfileApi.pendingSensitiveTags(),
+        ]);
         if (cancelled) return;
-        const nextQuestions = result.questions.length ? result.questions : fallbackQuestions;
+        const nextQuestions = (result.questions.length ? result.questions : fallbackQuestions).map(
+          (question) => ({
+            ...question,
+            question: cleanDisplayText(question.question, '请补充一个真实偏好。'),
+          }),
+        );
         setQuestions(nextQuestions.slice(0, 12));
         setCompletion(result.completion);
+        setPrivacy(privacyState);
+        setPendingSensitiveTags(pendingTags.pending);
       } catch {
         if (!cancelled) setQuestions(fallbackQuestions);
       } finally {
@@ -126,6 +144,49 @@ export function AiProfileBuilderPage() {
 
   const hasSensitiveTags = Boolean(draft?.matchSignals?.sensitivePrivateTags?.length);
 
+  async function reloadPrivacy() {
+    const [privacyState, pendingTags] = await Promise.all([
+      socialProfileApi.privacy(),
+      socialProfileApi.pendingSensitiveTags(),
+    ]);
+    setPrivacy(privacyState);
+    setPendingSensitiveTags(pendingTags.pending);
+  }
+
+  async function updatePrivacySwitch<K extends keyof Pick<AiProfilePrivacyState, 'profileDiscoverable' | 'agentCanRecommendMe' | 'agentCanStartChatAfterApproval' | 'hideSensitiveTags'>>(
+    key: K,
+    value: boolean,
+  ) {
+    setPrivacySaving(key);
+    setError('');
+    setMessage('');
+    try {
+      const next = await socialProfileApi.updatePrivacy({ [key]: value });
+      setPrivacy(next);
+      setMessage(next.matchPoolEnabled ? '隐私设置已更新，画像匹配池保持开启。' : '隐私设置已更新，画像暂不进入匹配池。');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '隐私设置保存失败');
+    } finally {
+      setPrivacySaving(null);
+    }
+  }
+
+  async function decideSensitiveTag(tag: string, action: 'confirm' | 'reject') {
+    setTagDecisionPending(`${tag}:${action}`);
+    setError('');
+    setMessage('');
+    try {
+      if (action === 'confirm') await socialProfileApi.confirmSensitiveTag(tag);
+      else await socialProfileApi.rejectSensitiveTag(tag);
+      await reloadPrivacy();
+      setMessage(action === 'confirm' ? '敏感标签已允许参与私密匹配。' : '敏感标签已排除出匹配。');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '敏感标签处理失败');
+    } finally {
+      setTagDecisionPending(null);
+    }
+  }
+
   function updateAnswer(key: string, value: string) {
     setAnswers((current) => ({ ...current, [key]: value }));
   }
@@ -151,9 +212,7 @@ export function AiProfileBuilderPage() {
     value: AiProfileBuilderCard['personality'][K],
   ) {
     setDraft((current) =>
-      current
-        ? { ...current, personality: { ...current.personality, [key]: value } }
-        : current,
+      current ? { ...current, personality: { ...current.personality, [key]: value } } : current,
     );
   }
 
@@ -171,9 +230,7 @@ export function AiProfileBuilderPage() {
     value: AiProfileBuilderCard['preferences'][K],
   ) {
     setDraft((current) =>
-      current
-        ? { ...current, preferences: { ...current.preferences, [key]: value } }
-        : current,
+      current ? { ...current, preferences: { ...current.preferences, [key]: value } } : current,
     );
   }
 
@@ -196,9 +253,7 @@ export function AiProfileBuilderPage() {
     value: AiProfileBuilderCard['availability'][K],
   ) {
     setDraft((current) =>
-      current
-        ? { ...current, availability: { ...current.availability, [key]: value } }
-        : current,
+      current ? { ...current, availability: { ...current.availability, [key]: value } } : current,
     );
   }
 
@@ -207,9 +262,7 @@ export function AiProfileBuilderPage() {
     value: AiProfileBuilderCard['visibility'][K],
   ) {
     setDraft((current) =>
-      current
-        ? { ...current, visibility: { ...current.visibility, [key]: value } }
-        : current,
+      current ? { ...current, visibility: { ...current.visibility, [key]: value } } : current,
     );
   }
 
@@ -255,9 +308,10 @@ export function AiProfileBuilderPage() {
         rawText,
         source: 'fitmeet_ai_profile_builder',
       });
+      const safeDraft = sanitizeDisplayValue(result.draft) as AiProfileBuilderCard;
       setDraft({
-        ...result.draft,
-        matchSignals: { ...defaultMatchSignals(), ...result.draft.matchSignals },
+        ...safeDraft,
+        matchSignals: { ...defaultMatchSignals(), ...safeDraft.matchSignals },
       });
       setSensitiveTagsConfirmed(false);
       setCompletion(result.completion);
@@ -296,6 +350,7 @@ export function AiProfileBuilderPage() {
         enableMatching,
         sensitiveTagsConfirmed,
       });
+      await reloadPrivacy();
       setCompletion(result.completion);
       setSavedResult({
         matchingEnabled: result.matchingEnabled,
@@ -340,7 +395,8 @@ export function AiProfileBuilderPage() {
               让 AI 了解我，并开启长期画像匹配
             </h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[#c9c0b4]">
-              从自然语言访谈开始，DeepSeek 会生成公开画像、私密偏好、敏感标签和匹配关键词；你确认后才会进入画像匹配池。
+              从自然语言访谈开始，DeepSeek
+              会生成公开画像、私密偏好、敏感标签和匹配关键词；你确认后才会进入画像匹配池。
             </p>
             <div className="mt-4 grid gap-3 md:grid-cols-3">
               {aiModuleLayers.map((layer) => (
@@ -395,6 +451,83 @@ export function AiProfileBuilderPage() {
                 );
               })}
             </div>
+            {privacy && (
+              <div className="mt-5 space-y-3 border-t border-[#c8ff80]/15 pt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-bold text-[#c9c0b4]">AI 画像隐私</div>
+                    <div className="mt-1 text-sm font-black text-white">
+                      {privacy.matchPoolEnabled ? '匹配池已开启' : '匹配池未开启'}
+                    </div>
+                  </div>
+                  <span className="rounded-md border border-white/10 px-2 py-1 text-[10px] font-black text-[#c8ff80]">
+                    待确认 {privacy.sensitiveTagSummary.pending}
+                  </span>
+                </div>
+                <div className="grid gap-2">
+                  <PrivacySwitch
+                    label="进入发现池"
+                    checked={privacy.profileDiscoverable}
+                    disabled={privacySaving === 'profileDiscoverable'}
+                    onChange={(value) => void updatePrivacySwitch('profileDiscoverable', value)}
+                  />
+                  <PrivacySwitch
+                    label="AI 持续推荐"
+                    checked={privacy.agentCanRecommendMe}
+                    disabled={privacySaving === 'agentCanRecommendMe'}
+                    onChange={(value) => void updatePrivacySwitch('agentCanRecommendMe', value)}
+                  />
+                  <PrivacySwitch
+                    label="确认后开聊"
+                    checked={privacy.agentCanStartChatAfterApproval}
+                    disabled={privacySaving === 'agentCanStartChatAfterApproval'}
+                    onChange={(value) =>
+                      void updatePrivacySwitch('agentCanStartChatAfterApproval', value)
+                    }
+                  />
+                  <PrivacySwitch
+                    label="隐藏敏感标签"
+                    checked={privacy.hideSensitiveTags}
+                    disabled={privacySaving === 'hideSensitiveTags'}
+                    onChange={(value) => void updatePrivacySwitch('hideSensitiveTags', value)}
+                  />
+                </div>
+                {pendingSensitiveTags.length > 0 && (
+                  <div className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-3">
+                    <div className="text-xs font-black text-amber-100">敏感标签确认</div>
+                    <div className="mt-2 space-y-2">
+                      {pendingSensitiveTags.slice(0, 4).map((item) => (
+                        <div
+                          key={item.tag}
+                          className="flex items-center justify-between gap-2 rounded-md border border-amber-200/10 bg-black/20 px-2 py-2"
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate text-xs font-black text-white">{item.tag}</div>
+                            <div className="text-[10px] text-amber-100/60">{item.category}</div>
+                          </div>
+                          <div className="flex shrink-0 gap-1">
+                            <button
+                              onClick={() => void decideSensitiveTag(item.tag, 'confirm')}
+                              disabled={Boolean(tagDecisionPending)}
+                              className="rounded-md bg-[#c8ff80] px-2 py-1 text-[10px] font-black text-[#11160b] disabled:opacity-50"
+                            >
+                              {tagDecisionPending === `${item.tag}:confirm` ? '处理中' : '允许'}
+                            </button>
+                            <button
+                              onClick={() => void decideSensitiveTag(item.tag, 'reject')}
+                              disabled={Boolean(tagDecisionPending)}
+                              className="rounded-md border border-white/10 px-2 py-1 text-[10px] font-black text-amber-100 disabled:opacity-50"
+                            >
+                              {tagDecisionPending === `${item.tag}:reject` ? '处理中' : '排除'}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -435,7 +568,7 @@ export function AiProfileBuilderPage() {
               {questions.map((question, index) => (
                 <label key={question.key} className="block">
                   <span className="text-sm font-bold text-[#f6efe5]">
-                    {index + 1}. {question.question}
+                    {index + 1}. {cleanDisplayText(question.question, '请补充一个真实偏好。')}
                   </span>
                   <textarea
                     value={answers[question.key] || ''}
@@ -491,7 +624,9 @@ export function AiProfileBuilderPage() {
                   : 'border-amber-300/20 bg-amber-300/5'
               }`}
             >
-              <div className={`font-black ${savedResult.matchingEnabled ? 'text-[#c8ff80]' : 'text-amber-200'}`}>
+              <div
+                className={`font-black ${savedResult.matchingEnabled ? 'text-[#c8ff80]' : 'text-amber-200'}`}
+              >
                 {savedResult.matchingEnabled ? '✓ 已进入画像匹配池' : '⚑ 未进入画像匹配池'}
               </div>
               {savedResult.missingFields.length > 0 && (
@@ -502,7 +637,8 @@ export function AiProfileBuilderPage() {
                       .slice(0, 5)
                       .map((field) => missingFieldLabels[field] ?? field)
                       .join('、')}
-                    {savedResult.missingFields.length > 5 && ` 等 ${savedResult.missingFields.length} 项`}
+                    {savedResult.missingFields.length > 5 &&
+                      ` 等 ${savedResult.missingFields.length} 项`}
                   </span>
                 </div>
               )}
@@ -539,7 +675,7 @@ export function AiProfileBuilderPage() {
                 <label className="mt-4 block">
                   <span className="text-sm font-bold text-[#c9c0b4]">一句话摘要</span>
                   <textarea
-                    value={draft.summary}
+                    value={cleanDisplayText(draft.summary)}
                     onChange={(event) =>
                       setDraft((current) =>
                         current ? { ...current, summary: event.target.value } : current,
@@ -551,37 +687,113 @@ export function AiProfileBuilderPage() {
                 </label>
 
                 <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                  <TextField label="昵称" value={draft.basic.nickname} onChange={(value) => updateBasic('nickname', value)} />
-                  <TextField label="城市" value={draft.basic.city} onChange={(value) => updateBasic('city', value)} />
-                  <TextField label="年龄段" value={draft.basic.ageRange} onChange={(value) => updateBasic('ageRange', value)} />
-                  <TextField label="性别" value={draft.basic.gender} onChange={(value) => updateBasic('gender', value)} />
-                  <TextField label="星座" value={draft.basic.zodiac} onChange={(value) => updateBasic('zodiac', value)} />
-                  <TextField label="MBTI" value={draft.personality.mbti} onChange={(value) => updatePersonality('mbti', value)} />
+                  <TextField
+                    label="昵称"
+                    value={draft.basic.nickname}
+                    onChange={(value) => updateBasic('nickname', value)}
+                  />
+                  <TextField
+                    label="城市"
+                    value={draft.basic.city}
+                    onChange={(value) => updateBasic('city', value)}
+                  />
+                  <TextField
+                    label="年龄段"
+                    value={draft.basic.ageRange}
+                    onChange={(value) => updateBasic('ageRange', value)}
+                  />
+                  <TextField
+                    label="性别"
+                    value={draft.basic.gender}
+                    onChange={(value) => updateBasic('gender', value)}
+                  />
+                  <TextField
+                    label="星座"
+                    value={draft.basic.zodiac}
+                    onChange={(value) => updateBasic('zodiac', value)}
+                  />
+                  <TextField
+                    label="MBTI"
+                    value={draft.personality.mbti}
+                    onChange={(value) => updatePersonality('mbti', value)}
+                  />
                 </div>
               </div>
 
               <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
                 <h3 className="text-base font-black text-white">性格与兴趣</h3>
                 <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                  <TextField label="社交风格" value={draft.personality.socialStyle} onChange={(value) => updatePersonality('socialStyle', value)} />
-                  <TextField label="沟通风格" value={draft.personality.communicationStyle} onChange={(value) => updatePersonality('communicationStyle', value)} />
-                  <TextField label="性格标签" value={draft.personality.traits.join('、')} onChange={(value) => updatePersonality('traits', parseList(value))} />
-                  <TextField label="运动" value={draft.interests.sports.join('、')} onChange={(value) => updateInterests('sports', parseList(value))} />
-                  <TextField label="生活方式" value={draft.interests.lifestyle.join('、')} onChange={(value) => updateInterests('lifestyle', parseList(value))} />
-                  <TextField label="社交场景" value={draft.interests.socialScenes.join('、')} onChange={(value) => updateInterests('socialScenes', parseList(value))} />
+                  <TextField
+                    label="社交风格"
+                    value={draft.personality.socialStyle}
+                    onChange={(value) => updatePersonality('socialStyle', value)}
+                  />
+                  <TextField
+                    label="沟通风格"
+                    value={draft.personality.communicationStyle}
+                    onChange={(value) => updatePersonality('communicationStyle', value)}
+                  />
+                  <TextField
+                    label="性格标签"
+                    value={draft.personality.traits.join('、')}
+                    onChange={(value) => updatePersonality('traits', parseList(value))}
+                  />
+                  <TextField
+                    label="运动"
+                    value={draft.interests.sports.join('、')}
+                    onChange={(value) => updateInterests('sports', parseList(value))}
+                  />
+                  <TextField
+                    label="生活方式"
+                    value={draft.interests.lifestyle.join('、')}
+                    onChange={(value) => updateInterests('lifestyle', parseList(value))}
+                  />
+                  <TextField
+                    label="社交场景"
+                    value={draft.interests.socialScenes.join('、')}
+                    onChange={(value) => updateInterests('socialScenes', parseList(value))}
+                  />
                 </div>
               </div>
 
               <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
                 <h3 className="text-base font-black text-white">匹配偏好</h3>
                 <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                  <TextField label="想认识" value={draft.preferences.wantToMeet.join('、')} onChange={(value) => updatePreferences('wantToMeet', parseList(value))} />
-                  <TextField label="偏好特质" value={draft.preferences.preferredTraits.join('、')} onChange={(value) => updatePreferences('preferredTraits', parseList(value))} />
-                  <TextField label="避开行为" value={draft.preferences.avoid.join('、')} onChange={(value) => updatePreferences('avoid', parseList(value))} />
-                  <TextField label="关系目标" value={draft.relationshipIntent.goals.join('、')} onChange={(value) => updateRelationship('goals', parseList(value))} />
-                  <TextField label="开放度" value={draft.relationshipIntent.openness} onChange={(value) => updateRelationship('openness', value)} />
-                  <TextField label="工作日" value={draft.availability.weekdays} onChange={(value) => updateAvailability('weekdays', value)} />
-                  <TextField label="周末" value={draft.availability.weekends} onChange={(value) => updateAvailability('weekends', value)} />
+                  <TextField
+                    label="想认识"
+                    value={draft.preferences.wantToMeet.join('、')}
+                    onChange={(value) => updatePreferences('wantToMeet', parseList(value))}
+                  />
+                  <TextField
+                    label="偏好特质"
+                    value={draft.preferences.preferredTraits.join('、')}
+                    onChange={(value) => updatePreferences('preferredTraits', parseList(value))}
+                  />
+                  <TextField
+                    label="避开行为"
+                    value={draft.preferences.avoid.join('、')}
+                    onChange={(value) => updatePreferences('avoid', parseList(value))}
+                  />
+                  <TextField
+                    label="关系目标"
+                    value={draft.relationshipIntent.goals.join('、')}
+                    onChange={(value) => updateRelationship('goals', parseList(value))}
+                  />
+                  <TextField
+                    label="开放度"
+                    value={draft.relationshipIntent.openness}
+                    onChange={(value) => updateRelationship('openness', value)}
+                  />
+                  <TextField
+                    label="工作日"
+                    value={draft.availability.weekdays}
+                    onChange={(value) => updateAvailability('weekdays', value)}
+                  />
+                  <TextField
+                    label="周末"
+                    value={draft.availability.weekends}
+                    onChange={(value) => updateAvailability('weekends', value)}
+                  />
                 </div>
               </div>
 
@@ -590,7 +802,9 @@ export function AiProfileBuilderPage() {
                 <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h4 className="text-sm font-black text-white">确认公开标签 / 私密偏好 / 敏感标签</h4>
+                      <h4 className="text-sm font-black text-white">
+                        确认公开标签 / 私密偏好 / 敏感标签
+                      </h4>
                       <p className="mt-1 text-xs leading-5 text-[#b8afa2]">
                         公开标签可被其他用户预览；私密和敏感标签仅用于算法匹配，不对外展示。
                       </p>
@@ -611,12 +825,16 @@ export function AiProfileBuilderPage() {
                     <TextField
                       label="私密匹配偏好（不展示）"
                       value={(draft.matchSignals?.privatePreferenceTags ?? []).join(', ')}
-                      onChange={(value) => updateMatchSignals('privatePreferenceTags', parseList(value))}
+                      onChange={(value) =>
+                        updateMatchSignals('privatePreferenceTags', parseList(value))
+                      }
                     />
                     <TextField
                       label="敏感私密标签（需确认）"
                       value={(draft.matchSignals?.sensitivePrivateTags ?? []).join(', ')}
-                      onChange={(value) => updateMatchSignals('sensitivePrivateTags', parseList(value))}
+                      onChange={(value) =>
+                        updateMatchSignals('sensitivePrivateTags', parseList(value))
+                      }
                     />
                     <TextField
                       label="匹配关键词"
@@ -626,9 +844,7 @@ export function AiProfileBuilderPage() {
                   </div>
                   <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-xs leading-5 text-amber-100">
                     <div className="font-black text-amber-200">敏感标签说明</div>
-                    <p className="mt-1">
-                      以下类型的标签不会公开展示，只有在你确认后才会参与匹配：
-                    </p>
+                    <p className="mt-1">以下类型的标签不会公开展示，只有在你确认后才会参与匹配：</p>
                     <ul className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-amber-100/80">
                       <li>• 财富 / 收入</li>
                       <li>• 颜值 / 外貌</li>
@@ -649,7 +865,8 @@ export function AiProfileBuilderPage() {
                           className="mt-0.5 h-4 w-4 shrink-0 accent-[#c8ff80]"
                         />
                         <span className="text-xs font-bold leading-5 text-amber-100">
-                          我已确认这些敏感标签只用于私密匹配，不会在公开画像、推荐卡或 OpenClaw 公开读取接口中展示。
+                          我已确认这些敏感标签只用于私密匹配，不会在公开画像、推荐卡或 OpenClaw
+                          公开读取接口中展示。
                         </span>
                       </label>
                     )}
@@ -684,9 +901,12 @@ export function AiProfileBuilderPage() {
                     className="mt-0.5 h-4 w-4 shrink-0 accent-[#c8ff80]"
                   />
                   <span>
-                    <span className="block text-sm font-bold text-[#f6efe5]">保存后同步进入 AI 匹配池</span>
+                    <span className="block text-sm font-bold text-[#f6efe5]">
+                      保存后同步进入 AI 匹配池
+                    </span>
                     <span className="mt-0.5 block text-xs leading-5 text-[#9b9184]">
-                      开启后，即使你没有发布社交卡片，FitMeet 也会根据 MBTI、性格、星座、地区、兴趣和匹配要求生成 review 状态推荐。
+                      开启后，即使你没有发布社交卡片，FitMeet 也会根据
+                      MBTI、性格、星座、地区、兴趣和匹配要求生成 review 状态推荐。
                     </span>
                   </span>
                 </label>
@@ -717,10 +937,10 @@ export function AiProfileBuilderPage() {
                     查看推荐
                   </Link>
                   <Link
-                    to="/ai-match"
+                    to="/social-agent"
                     className="rounded-lg border border-white/10 px-5 py-3 text-sm font-black text-[#f6efe5] transition hover:border-[#c8ff80]/40 hover:text-[#c8ff80]"
                   >
-                    AI 匹配
+                    问 Social Agent 匹配
                   </Link>
                 </div>
               </div>
@@ -744,7 +964,11 @@ function TextField({
   return (
     <label className="block">
       <span className="text-sm font-bold text-[#c9c0b4]">{label}</span>
-      <input value={value} onChange={(event) => onChange(event.target.value)} className="field mt-2" />
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="field mt-2"
+      />
     </label>
   );
 }
@@ -781,10 +1005,33 @@ function Toggle({
       />
       <div>
         <span className="text-sm font-bold text-[#f6efe5]">{label}</span>
-        {description && (
-          <p className="mt-0.5 text-xs leading-5 text-[#9b9184]">{description}</p>
-        )}
+        {description && <p className="mt-0.5 text-xs leading-5 text-[#9b9184]">{description}</p>}
       </div>
+    </label>
+  );
+}
+
+function PrivacySwitch({
+  label,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+      <span className="text-xs font-bold text-[#f6efe5]">{label}</span>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="h-4 w-4 shrink-0 accent-[#c8ff80] disabled:cursor-not-allowed disabled:opacity-50"
+      />
     </label>
   );
 }

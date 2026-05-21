@@ -96,7 +96,7 @@ The server deploy script defaults to using an existing `frontend/dist`. Set
 Build and scan a zip locally before upload:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build-deploy-zip.ps1 -Output fitmeet-deploy.zip
+powershell -ExecutionPolicy Bypass -File .\scripts\build-deploy-zip.ps1 -Output fitmeet.zip
 ```
 
 Zip upload flow:
@@ -104,7 +104,7 @@ Zip upload flow:
 ```bash
 mkdir -p /opt/fitmeet-new
 cd /opt/fitmeet-new
-unzip -o /path/to/fitmeet-deploy.zip
+unzip -o /path/to/fitmeet.zip
 cp /opt/fitness-app/.env.production /opt/fitmeet-new/.env.production
 # IMPORTANT: if .env.production was edited on Windows it may contain CRLF
 # line endings, which `docker compose --env-file` silently treats as part of

@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import { memo, useRef, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   socialAgentApi,
   type SocialAgentChatCandidate,
@@ -41,6 +42,7 @@ const modeLabels: Record<SocialAgentPermissionMode, string> = {
 };
 
 export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
+  const navigate = useNavigate();
   const [mode, setMode] = useState<SocialAgentPermissionMode>('confirm');
   const [input, setInput] = useState(defaultPrompt);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -51,6 +53,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
   const [savingCandidateId, setSavingCandidateId] = useState<number | null>(null);
   const [savedCandidateIds, setSavedCandidateIds] = useState<number[]>([]);
   const [sendingUserId, setSendingUserId] = useState<number | null>(null);
+  const [connectingUserId, setConnectingUserId] = useState<number | null>(null);
   const [actionStatus, setActionStatus] = useState('');
   const abortRef = useRef<AbortController | null>(null);
 
@@ -72,6 +75,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     setSavingCandidateId(null);
     setSavedCandidateIds([]);
     setSendingUserId(null);
+    setConnectingUserId(null);
     setResult(null);
     setActionStatus('');
     setStatuses([]);
@@ -217,6 +221,36 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     }
   };
 
+  const connectCandidate = async (candidate: SocialAgentChatCandidate) => {
+    if (!result?.taskId || connectingUserId) return;
+    setConnectingUserId(candidate.userId);
+    setActionStatus(`正在添加 ${displayName(candidate)} 为好友，并创建站内会话...`);
+
+    try {
+      const connection = await socialAgentApi.connectCandidate(result.taskId, {
+        candidateRecordId: candidate.candidateRecordId,
+        socialRequestId: candidate.socialRequestId ?? draft?.socialRequestId ?? null,
+        targetUserId: candidate.userId,
+        candidate: {
+          userId: candidate.userId,
+          nickname: candidate.nickname,
+          score: candidate.score,
+          reasons: candidate.reasons,
+        },
+      });
+      if (connection.conversationId) {
+        setActionStatus(`${displayName(candidate)} 已加为好友，正在进入聊天。`);
+        navigate(`/messages?conversationId=${encodeURIComponent(connection.conversationId)}`);
+        return;
+      }
+      setActionStatus(`${displayName(candidate)} 好友动作已提交，但暂未创建会话。`);
+    } catch (error) {
+      setActionStatus(errorMessage(error, '加好友失败，请稍后再试。'));
+    } finally {
+      setConnectingUserId(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#f8f8f6] text-[#202124]">
       <div className="mx-auto flex min-h-screen w-full max-w-4xl flex-col px-4 pb-40 pt-10 sm:px-6">
@@ -261,8 +295,10 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
                       isSaved={savedCandidateIds.includes(candidate.userId)}
                       isSaving={savingCandidateId === candidate.userId}
                       isSending={sendingUserId === candidate.userId}
+                      isConnecting={connectingUserId === candidate.userId}
                       onSave={saveCandidate}
                       onSendMessage={sendMessage}
+                      onConnect={connectCandidate}
                     />
                   ))}
                 </div>
@@ -430,15 +466,19 @@ function CandidateCard({
   isSaved,
   isSaving,
   isSending,
+  isConnecting,
   onSave,
   onSendMessage,
+  onConnect,
 }: {
   candidate: SocialAgentChatCandidate;
   isSaved: boolean;
   isSaving: boolean;
   isSending: boolean;
+  isConnecting: boolean;
   onSave: (candidate: SocialAgentChatCandidate) => void;
   onSendMessage: (candidate: SocialAgentChatCandidate) => void;
+  onConnect: (candidate: SocialAgentChatCandidate) => void;
 }) {
   const name = displayName(candidate);
   const avatar = cleanDisplayText(candidate.avatar, '');
@@ -525,6 +565,14 @@ function CandidateCard({
           className="rounded-full bg-[#202124] px-4 py-2 text-sm font-black text-white transition hover:bg-[#343633] disabled:cursor-not-allowed disabled:bg-[#d2d2cc]"
         >
           {isSending ? '正在发送...' : '确认发送'}
+        </button>
+        <button
+          type="button"
+          onClick={() => onConnect(candidate)}
+          disabled={isConnecting || !candidate.userId}
+          className="rounded-full border border-[#202124] px-4 py-2 text-sm font-black text-[#202124] transition hover:bg-[#f1f1ee] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isConnecting ? '连接中...' : '加好友并聊天'}
         </button>
       </div>
     </article>

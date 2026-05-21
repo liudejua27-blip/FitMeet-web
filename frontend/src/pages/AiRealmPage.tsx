@@ -5,8 +5,8 @@ import { Link } from 'react-router-dom';
  * AiRealmPage — AI 界 / AI Realm Showroom
  *
  * 一个面向公众的、视觉极致的 AI 代理界入口页。
- * 与 AiMatchPage(功能页) 互补:这里负责"哲学+震撼",
- * 那里负责"配置+使用"。
+ * 与 Social Agent / Agent Inbox 互补:这里负责"哲学+震撼",
+ * 那里负责"执行+确认"。
  */
 
 const capabilities = [

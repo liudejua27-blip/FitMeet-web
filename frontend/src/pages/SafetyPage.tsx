@@ -177,20 +177,20 @@ export const SafetyPage = memo(function SafetyPage() {
         <div className="grid gap-8 rounded-3xl border border-aiBright/30 bg-gradient-to-br from-aiDeep/30 via-[#0e0a1c] to-[#0a0a14] p-10 lg:grid-cols-[1fr_1.2fr] lg:p-14">
           <div>
             <span className="inline-flex items-center gap-2 rounded-full border border-aiBright/40 bg-aiBright/10 px-3 py-1 text-xs font-bold text-aiBright">
-              AI HOSTING · 边界
+              SOCIAL AGENT · 边界
             </span>
             <h2 className="mt-4 font-display text-3xl font-black leading-tight text-white">
-              AI 托管也有边界
+              Social Agent 也有边界
             </h2>
             <p className="mt-4 text-sm leading-7 text-textMuted">
               AI 不是黑箱。它能做什么、不能做什么，我们都写明白。
               你可以随时暂停、随时纠正、随时销毁。
             </p>
             <Link
-              to="/ai-hosting"
+              to="/social-agent"
               className="mt-6 inline-flex items-center gap-2 rounded-xl bg-ai-grad px-6 py-3 text-sm font-black text-white shadow-aiGlow transition hover:-translate-y-0.5"
             >
-              查看完整 AI 边界 →
+              去 Social Agent 查看 →
             </Link>
           </div>
           <ul className="space-y-3">

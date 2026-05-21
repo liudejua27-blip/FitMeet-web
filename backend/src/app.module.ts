@@ -6,7 +6,6 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AIModule } from './ai/ai.module';
-import { AiMatchModule } from './ai-match/ai-match.module';
 import { AgentGatewayModule } from './agent-gateway/agent-gateway.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -136,7 +135,6 @@ import { UsersModule } from './users/users.module';
     ModerationModule,
     SafetyModule,
     ClubsModule,
-    AiMatchModule,
     AIModule,
     AgentGatewayModule,
     SocialRequestsModule,

@@ -9,7 +9,6 @@ const navItems = [
   { to: '/ai', label: 'Agent 宇宙' },
   { to: '/social-agent', label: 'Social Agent' },
   { to: '/ai-profile', label: 'AI 画像' },
-  { to: '/ai-hosting', label: 'AI 托管' },
   { to: '/agent-inbox', label: 'Agent Inbox' },
   { to: '/match-confirmations', label: '确认中心' },
   { to: '/developers/social-skills', label: 'Social Skills' },
@@ -266,7 +265,7 @@ const Footer = () => (
       <nav className="flex flex-wrap justify-center gap-5" aria-label="合规链接">
         <Link className="transition hover:text-lime" to="/hall">FitMeet 大厅</Link>
         <Link className="transition hover:text-lime" to="/ai">Agent 宇宙</Link>
-        <Link className="transition hover:text-lime" to="/ai-hosting">AI 托管</Link>
+        <Link className="transition hover:text-lime" to="/social-agent">Social Agent</Link>
         <Link className="transition hover:text-lime" to="/developers/social-skills">Social Skills</Link>
         <Link className="transition hover:text-lime" to="/safety">安全</Link>
         <Link className="transition hover:text-lime" to="/terms">用户协议</Link>

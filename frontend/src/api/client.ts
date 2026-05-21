@@ -10,11 +10,6 @@ import type {
   MeetRecord,
   Comment,
   Review,
-  AiDelegateProfile,
-  AiMatchCandidate,
-  AiMatchSession,
-  AiAutopilotHistoryItem,
-  AiAutopilotRunResult,
   SocialCandidate,
   SocialRequest,
   PublicSocialIntent,
@@ -214,54 +209,6 @@ export function refreshToken(token: string): Promise<AuthResult> {
 
 export function getProfile(): Promise<UserProfile> {
   return request<UserProfile>('/auth/profile');
-}
-
-export type UpsertAiDelegateProfileInput = Partial<
-  Omit<AiDelegateProfile, 'id' | 'userId'>
->;
-
-export function getAiDelegateProfile(): Promise<AiDelegateProfile> {
-  return request<AiDelegateProfile>('/ai-match/profile');
-}
-
-export function saveAiDelegateProfile(
-  data: UpsertAiDelegateProfileInput,
-): Promise<AiDelegateProfile> {
-  return request<AiDelegateProfile>('/ai-match/profile', {
-    method: 'PUT',
-    body: JSON.stringify(data),
-  });
-}
-
-export function getAiMatchCandidates(): Promise<AiMatchCandidate[]> {
-  return request<AiMatchCandidate[]>('/ai-match/candidates');
-}
-
-export function simulateAiMatch(targetUserId: number): Promise<AiMatchSession> {
-  return request<AiMatchSession>('/ai-match/simulate', {
-    method: 'POST',
-    body: JSON.stringify({ targetUserId }),
-  });
-}
-
-export function approveAiMatchFriend(sessionId: number): Promise<{
-  following: boolean;
-  targetUserId: number;
-  message: string;
-}> {
-  return request(`/ai-match/sessions/${sessionId}/approve-friend`, {
-    method: 'POST',
-  });
-}
-
-export function runAiAutopilot(): Promise<AiAutopilotRunResult> {
-  return request<AiAutopilotRunResult>('/ai-match/autopilot/run', {
-    method: 'POST',
-  });
-}
-
-export function getAiAutopilotHistory(): Promise<AiAutopilotHistoryItem[]> {
-  return request<AiAutopilotHistoryItem[]>('/ai-match/autopilot/history');
 }
 
 export interface CreateSocialRequestInput {

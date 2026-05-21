@@ -188,6 +188,22 @@ export class MatchService {
       agentAllowedRequired: input.agentAllowedRequired ?? false,
     });
 
+    if (ranked.length === 0) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'match.empty',
+          source: 'search_nearby',
+          userId: input.userId,
+          city: city || null,
+          radiusKm: input.radiusKm ?? 5,
+          activityType: input.activityType ?? null,
+          interestTags: input.interestTags ?? [],
+          agentAllowedRequired: input.agentAllowedRequired ?? false,
+          candidatePoolSize: users.length,
+        }),
+      );
+    }
+
     return ranked
       .slice(0, input.limit ?? 10)
       .map((c) => this.toView(c, undefined, undefined));
@@ -298,6 +314,25 @@ export class MatchService {
     });
 
     const top = ranked.slice(0, limit);
+    if (top.length === 0) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'match.empty',
+          source: 'run_match',
+          socialRequestId: request.id,
+          ownerUserId: request.userId,
+          actingUserId,
+          city: matchCity || null,
+          radiusKm: request.radiusKm,
+          activityType: request.activityType || null,
+          interestTags: this.mergeRequestTags(request),
+          safetyRequirement: request.safetyRequirement,
+          agentAllowedRequired: request.agentAllowed,
+          candidatePoolSize: users.length,
+          rankedCount: ranked.length,
+        }),
+      );
+    }
     const persisted: SocialRequestCandidate[] = [];
     const enrichedViews: MatchedCandidateView[] = [];
     for (const c of top) {
@@ -592,6 +627,12 @@ export class MatchService {
     for (const user of users) {
       const pref = prefs.get(user.id) ?? null;
       const socialProfile = ctx.profiles.get(user.id) ?? null;
+
+      if (ctx.agentAllowedRequired === true) {
+        if (socialProfile?.agentCanRecommendMe === false) continue;
+      } else if (socialProfile?.profileDiscoverable === false) {
+        continue;
+      }
 
       // Hard filter: when the request is authored by (or routed through) an
       // agent, drop candidates who explicitly opted out of agent contact.

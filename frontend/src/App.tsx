@@ -17,9 +17,6 @@ const DiscoverPage = lazy(() =>
 );
 const MeetPage = lazy(() => import('./pages/MeetPage').then((m) => ({ default: m.MeetPage })));
 const CoachPage = lazy(() => import('./pages/CoachPage').then((m) => ({ default: m.CoachPage })));
-const AiMatchPage = lazy(() =>
-  import('./pages/AiMatchPage').then((m) => ({ default: m.AiMatchPage })),
-);
 const AiProfileBuilderPage = lazy(() =>
   import('./pages/AiProfileBuilderPage').then((m) => ({ default: m.AiProfileBuilderPage })),
 );
@@ -102,9 +99,6 @@ const PetPage = lazy(() => import('./pages/PetPage').then((m) => ({ default: m.P
 const AiRealmPage = lazy(() =>
   import('./pages/AiRealmPage').then((m) => ({ default: m.AiRealmPage })),
 );
-const AiHostingPage = lazy(() =>
-  import('./pages/AiHostingPage').then((m) => ({ default: m.AiHostingPage })),
-);
 const CitiesPage = lazy(() =>
   import('./pages/CitiesPage').then((m) => ({ default: m.CitiesPage })),
 );
@@ -164,14 +158,7 @@ function App() {
               <Route path="/coach" element={<CoachPage />} />
               <Route path="/pet" element={<PetPage />} />
               <Route path="/ai" element={<AiRealmPage />} />
-              <Route
-                path="/ai-match"
-                element={
-                  <ProtectedRoute>
-                    <AiMatchPage />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="/ai-match" element={<Navigate to="/social-agent" replace />} />
               <Route
                 path="/ai-profile"
                 element={
@@ -319,7 +306,7 @@ function App() {
               <Route path="/guides/:slug" element={<GeoLandingPage />} />
               <Route path="/about" element={<AboutPage />} />
               <Route path="/safety" element={<SafetyPage />} />
-              <Route path="/ai-hosting" element={<AiHostingPage />} />
+              <Route path="/ai-hosting" element={<Navigate to="/social-agent" replace />} />
               <Route path="/developers/social-skills" element={<SocialSkillsDeveloperPage />} />
               <Route path="/press" element={<GeoLandingPage />} />
               <Route

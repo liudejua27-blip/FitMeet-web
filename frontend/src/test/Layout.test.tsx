@@ -26,7 +26,7 @@ describe('Layout', () => {
     const nav = screen.getByRole('navigation', { name: '主导航' });
     expect(within(nav).getByText('FitMeet 大厅')).toHaveAttribute('href', '/hall');
     expect(within(nav).getByText('Agent 宇宙')).toHaveAttribute('href', '/ai');
-    expect(within(nav).getByText('AI 托管')).toHaveAttribute('href', '/ai-hosting');
+    expect(within(nav).getByText('Social Agent')).toHaveAttribute('href', '/social-agent');
     expect(within(nav).getByText('Social Skills')).toHaveAttribute('href', '/developers/social-skills');
     expect(within(nav).getByText('安全')).toHaveAttribute('href', '/safety');
     expect(within(nav).queryByText('Agent 接入')).not.toBeInTheDocument();

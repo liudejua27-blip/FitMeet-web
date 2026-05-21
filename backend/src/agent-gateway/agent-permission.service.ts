@@ -44,6 +44,7 @@ const ACTIONS_BY_MODE: Record<
     SocialAgentAction.SendMessage,
   ],
   [AgentTaskPermissionMode.Confirm]: [
+    SocialAgentAction.AddFriend,
     SocialAgentAction.SearchProfiles,
     SocialAgentAction.GenerateContent,
     SocialAgentAction.DraftMessage,

@@ -9,7 +9,7 @@ import {
 import { useAuthStore } from '../stores';
 import * as dataService from '../services/dataService';
 import type { Meet, Post } from '../types';
-import { mockMeets, mockPosts, withMockMeets, withMockPosts } from '../data/mockContent';
+import { withMockMeets, withMockPosts } from '../data/mockContent';
 import { UniversePortal } from '../components/portal/UniversePortal';
 
 const featuredOutdoor = SPORT_TAXONOMY.find((item) => item.id === 'outdoor')!;
@@ -67,8 +67,8 @@ export const HomePage = memo(function HomePage() {
   useEffect(() => {
     let active = true;
     Promise.all([
-      dataService.getFeed({ page: 1, pageSize: 4 }).catch(() => mockPosts),
-      dataService.getMeets().catch(() => mockMeets),
+      dataService.getFeed({ page: 1, pageSize: 4 }).catch(() => [] as Post[]),
+      dataService.getMeets().catch(() => [] as Meet[]),
     ]).then(([posts, meets]) => {
       if (!active) return;
       setLatestPosts(withMockPosts(posts, 4));

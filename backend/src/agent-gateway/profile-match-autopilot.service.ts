@@ -30,15 +30,15 @@ import { ProfileMatchService } from './profile-match.service';
 import { AgentWebhookService } from './agent-webhook.service';
 
 /**
- * FitMeet "Subconscious Loop".
+ * FitMeet "Profile Match Autopilot".
  *
  * This background sweep looks for newly completed profile signals and newly
  * posted request cards, then stages safe recommendations without an explicit
  * command. It never auto-friends, auto-contacts, or schedules an offline meet;
  * it only asks both sides whether they want to connect.
  *
- * Enable with `ENABLE_SUBCONSCIOUS_LOOP=true`. Legacy
- * `ENABLE_PROFILE_MATCH_AUTOPILOT=true` is still honored.
+ * Enable with `ENABLE_PROFILE_MATCH_AUTOPILOT=true`. Legacy
+ * `ENABLE_SUBCONSCIOUS_LOOP=true` is still honored.
  */
 @Injectable()
 export class ProfileMatchAutopilotService {
@@ -85,7 +85,7 @@ export class ProfileMatchAutopilotService {
       await this.runOnce('cron');
     } catch (err) {
       this.logger.error(
-        `Subconscious loop cron failed: ${
+        `Profile Match Autopilot cron failed: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -97,7 +97,7 @@ export class ProfileMatchAutopilotService {
     ownerUserId?: number,
   ): Promise<ProfileMatchAutopilotSummary> {
     if (this.running) {
-      this.logger.warn('Subconscious loop sweep already in progress, skipping');
+      this.logger.warn('Profile Match Autopilot sweep already in progress, skipping');
       const skipped = emptySummary(triggeredBy, 'already_running');
       this.lastSummary = skipped;
       return skipped;
@@ -121,7 +121,10 @@ export class ProfileMatchAutopilotService {
       const limit = perOwnerLimit();
       for (const userId of ownerIds) {
         try {
-          const profileResult = await this.profileMatch.runOnce(userId, limit);
+          const profileResult = await this.profileMatch.runOnce(userId, limit, {
+            autoEnableProfilePool: false,
+            initiatedBy: 'profile_match_autopilot',
+          });
           summary.generatedRecommendations += profileResult.matchedCount ?? 0;
           summary.inboxEvents += profileResult.inboxEvents ?? 0;
           summary.skippedDuplicates += profileResult.skippedDuplicates ?? 0;
@@ -139,7 +142,7 @@ export class ProfileMatchAutopilotService {
         } catch (err) {
           summary.errors += 1;
           this.logger.warn(
-            `Subconscious loop failed for owner=${userId}: ${
+            `Profile Match Autopilot failed for owner=${userId}: ${
               err instanceof Error ? err.message : String(err)
             }`,
           );
@@ -148,7 +151,7 @@ export class ProfileMatchAutopilotService {
     } catch (err) {
       summary.errors += 1;
       this.logger.error(
-        `Subconscious loop sweep crashed: ${
+        `Profile Match Autopilot sweep crashed: ${
           err instanceof Error ? err.stack || err.message : String(err)
         }`,
       );
@@ -157,7 +160,7 @@ export class ProfileMatchAutopilotService {
     }
 
     this.logger.log(
-      `Subconscious loop done (${triggeredBy}): profiles=${summary.scannedProfiles} requests=${summary.scannedRequests} profileRecommendations=${summary.generatedRecommendations} requestCandidates=${summary.generatedRequestCandidates} inboxEvents=${summary.inboxEvents} notifications=${summary.notificationsSent} duplicates=${summary.skippedDuplicates} errors=${summary.errors}`,
+      `Profile Match Autopilot done (${triggeredBy}): profiles=${summary.scannedProfiles} requests=${summary.scannedRequests} profileRecommendations=${summary.generatedRecommendations} requestCandidates=${summary.generatedRequestCandidates} inboxEvents=${summary.inboxEvents} notifications=${summary.notificationsSent} duplicates=${summary.skippedDuplicates} errors=${summary.errors}`,
     );
     this.lastSummary = summary;
     return summary;
@@ -241,7 +244,7 @@ export class ProfileMatchAutopilotService {
       } catch (err) {
         summary.errors += 1;
         this.logger.warn(
-          `Subconscious loop request-card match failed for owner=${ownerUserId}, request=${request.id}: ${
+            `Profile Match Autopilot request-card match failed for owner=${ownerUserId}, request=${request.id}: ${
             err instanceof Error ? err.message : String(err)
           }`,
         );
@@ -257,8 +260,8 @@ export class ProfileMatchAutopilotService {
     for (const recommendation of recommendations) {
       await this.safeNotify({
         userId: ownerUserId,
-        type: 'subconscious_loop.profile_match',
-        text: `Subconscious Loop found a profile match with ${
+        type: 'profile_match_autopilot.profile_match',
+        text: `Profile Match Autopilot found a profile match with ${
           recommendation.safeProfile?.name ?? 'someone'
         }. Confirm before any friend request or offline plan.`,
         targetId: recommendation.aiMatchSessionId,
@@ -267,8 +270,8 @@ export class ProfileMatchAutopilotService {
 
       await this.safeNotify({
         userId: recommendation.targetUserId,
-        type: 'subconscious_loop.profile_match',
-        text: 'Subconscious Loop found a possible profile match. Both people must agree before any friend request.',
+        type: 'profile_match_autopilot.profile_match',
+        text: 'Profile Match Autopilot found a possible profile match. Both people must agree before any friend request.',
         targetId: recommendation.aiMatchSessionId,
       });
       sent += 1;
@@ -283,8 +286,8 @@ export class ProfileMatchAutopilotService {
   ): Promise<number> {
     await this.safeNotify({
       userId: ownerUserId,
-      type: 'subconscious_loop.request_match',
-      text: `Subconscious Loop found ${candidates.length} candidate(s) for "${
+      type: 'profile_match_autopilot.request_match',
+      text: `Profile Match Autopilot found ${candidates.length} candidate(s) for "${
         request.title || request.activityType || 'your request'
       }". Confirm before sending an invite.`,
       targetId: request.id,
@@ -294,8 +297,8 @@ export class ProfileMatchAutopilotService {
     for (const candidate of candidates.slice(0, MAX_CANDIDATE_NOTIFICATIONS)) {
       await this.safeNotify({
         userId: candidate.userId,
-        type: 'subconscious_loop.request_match',
-        text: 'Subconscious Loop found a possible request-card match. Both people must agree before becoming friends.',
+        type: 'profile_match_autopilot.request_match',
+        text: 'Profile Match Autopilot found a possible request-card match. Both people must agree before becoming friends.',
         targetId: candidate.candidateRecordId ?? request.id,
       });
       sent += 1;
@@ -332,21 +335,35 @@ export class ProfileMatchAutopilotService {
       nextAction: 'ask_owner_to_confirm_before_invite_or_friend_request',
     };
 
-    for (const conn of ownerConnections) {
+    const deliveryConnections = ownerConnections.length
+      ? ownerConnections
+      : [
+          {
+            id: 0,
+            userId: ownerUserId,
+            status: ConnectionStatus.Active,
+            agentName: 'fitmeet_autopilot',
+            agentDisplayName: 'FitMeet Autopilot',
+          } as AgentConnection,
+        ];
+
+    for (const conn of deliveryConnections) {
       await this.messages.createAgentInboxEvent({
         agentConnectionId: conn.id,
         ownerUserId,
         eventType: 'social_request.match.recommended',
-        contentPreview: `Subconscious Loop found ${candidates.length} candidate(s) for "${
+        contentPreview: `Profile Match Autopilot found ${candidates.length} candidate(s) for "${
           request.title || request.activityType || 'your request'
         }".`,
         dedupeKey: `${conn.id}:social_request.match.recommended:${request.id}`,
         requestId: request.id,
         metadata,
       });
-      void this.webhooks
-        .emitToConnection(conn.id, 'social_request.match.recommended', metadata)
-        .catch(() => undefined);
+      if (conn.id > 0) {
+        void this.webhooks
+          .emitToConnection(conn.id, 'social_request.match.recommended', metadata)
+          .catch(() => undefined);
+      }
       events += 1;
     }
     return events;
@@ -547,16 +564,15 @@ function emptySummary(
 }
 
 function isEnabled(): boolean {
-  return (
-    (process.env.ENABLE_SUBCONSCIOUS_LOOP ?? '').toLowerCase() === 'true' ||
-    (process.env.ENABLE_PROFILE_MATCH_AUTOPILOT ?? '').toLowerCase() === 'true'
-  );
+  const primary = process.env.ENABLE_PROFILE_MATCH_AUTOPILOT;
+  if (primary !== undefined) return isTruthyEnv(primary);
+  return isTruthyEnv(process.env.ENABLE_SUBCONSCIOUS_LOOP);
 }
 
 function configuredIntervalMs(): number {
   const raw = Number(
-    process.env.SUBCONSCIOUS_LOOP_INTERVAL_SECONDS ??
-      process.env.PROFILE_MATCH_AUTOPILOT_INTERVAL_SECONDS,
+    process.env.PROFILE_MATCH_AUTOPILOT_INTERVAL_SECONDS ??
+      process.env.SUBCONSCIOUS_LOOP_INTERVAL_SECONDS,
   );
   const seconds = Number.isFinite(raw) && raw > 0 ? raw : 60;
   return seconds * 1000;
@@ -564,11 +580,15 @@ function configuredIntervalMs(): number {
 
 function perOwnerLimit(): number {
   const raw = Number(
-    process.env.SUBCONSCIOUS_LOOP_PER_OWNER_LIMIT ??
-      process.env.PROFILE_MATCH_AUTOPILOT_PER_OWNER_LIMIT,
+    process.env.PROFILE_MATCH_AUTOPILOT_PER_OWNER_LIMIT ??
+      process.env.SUBCONSCIOUS_LOOP_PER_OWNER_LIMIT,
   );
   if (!Number.isFinite(raw) || raw <= 0) return 3;
   return Math.min(Math.floor(raw), 10);
+}
+
+function isTruthyEnv(value: string | undefined): boolean {
+  return ['true', '1', 'yes', 'on'].includes(String(value ?? '').toLowerCase());
 }
 
 function groupConnectionsByOwner(connections: AgentConnection[]) {

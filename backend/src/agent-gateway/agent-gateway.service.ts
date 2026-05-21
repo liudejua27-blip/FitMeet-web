@@ -1090,14 +1090,14 @@ export class AgentGatewayService {
             },
           },
         },
-        '/agent/subconscious-loop/run-once': {
+        '/agent/profile-match/autopilot/run-once': {
           post: {
             tags: ['profiles', 'agent-inbox'],
             summary:
-              'Run one Subconscious Loop sweep for profile and request-card matches',
+              'Run one Profile Match Autopilot sweep for profile and request-card matches',
             responses: {
               200: {
-                description: 'Subconscious Loop summary',
+                description: 'Profile Match Autopilot summary',
                 content: json(objectSchema),
               },
               401: authError,
@@ -1812,8 +1812,8 @@ export class AgentGatewayService {
         },
         {
           id: 'run_match_loop',
-          title: 'Run one Subconscious Loop match sweep',
-          tool: 'fitmeet_run_subconscious_loop_once',
+          title: 'Run one Profile Match Autopilot sweep',
+          tool: 'fitmeet_run_profile_match_autopilot_once',
           success:
             'Profile and request-card recommendations are written to Agent Inbox events.',
         },
@@ -1865,10 +1865,10 @@ export class AgentGatewayService {
             'Keep polling enabled even when webhook delivery is configured.',
         },
         {
-          name: 'fitmeet_subconscious_loop',
+          name: 'fitmeet_profile_match_autopilot',
           enabledByDefault: true,
           intervalSeconds: 900,
-          tool: 'fitmeet_run_subconscious_loop_once',
+          tool: 'fitmeet_run_profile_match_autopilot_once',
           args: {},
           silentWhenEmpty: true,
           notifyOnEvents: [
@@ -1876,7 +1876,7 @@ export class AgentGatewayService {
             'social_request.match.recommended',
           ],
           fallback:
-            'If OpenClaw cannot run background tasks, call this tool when the owner asks to refresh AI matches.',
+            'If OpenClaw cannot run background tasks, call this tool when the owner asks to refresh profile or request-card matches.',
         },
       ],
       pushNotifications: {
@@ -2052,11 +2052,11 @@ export class AgentGatewayService {
           risk_level: 'low',
         },
         {
-          name: 'fitmeet_run_subconscious_loop_once',
+          name: 'fitmeet_run_profile_match_autopilot_once',
           method: 'POST',
-          path: '/api/agent/subconscious-loop/run-once',
+          path: '/api/agent/profile-match/autopilot/run-once',
           description:
-            'Run one Subconscious Loop sweep: scan completed persona profiles and active request cards, create safe recommendations, notify both sides to confirm, and write agent inbox events. Does not auto-friend or auto-contact.',
+            'Run one Profile Match Autopilot sweep: scan authorized persona profiles and active request cards, use MatchService hard filters and scoring, create safe LLM-explained recommendations, notify both sides to confirm, and write agent inbox events. Does not auto-friend or auto-contact.',
           permission: AgentAction.SearchProfiles,
           requires_user_confirmation: false,
           risk_level: 'low',
