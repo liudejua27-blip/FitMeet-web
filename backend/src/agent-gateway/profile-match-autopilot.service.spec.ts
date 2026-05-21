@@ -37,6 +37,32 @@ function qbReturning(rows: unknown[]) {
   };
 }
 
+function inspectableQbReturning(rows: unknown[]) {
+  const calls = {
+    where: [] as unknown[][],
+    andWhere: [] as unknown[][],
+    orderBy: [] as unknown[][],
+  };
+  const qb = {
+    where: jest.fn((...args: unknown[]) => {
+      calls.where.push(args);
+      return qb;
+    }),
+    andWhere: jest.fn((...args: unknown[]) => {
+      calls.andWhere.push(args);
+      return qb;
+    }),
+    orderBy: jest.fn((...args: unknown[]) => {
+      calls.orderBy.push(args);
+      return qb;
+    }),
+    take: jest.fn().mockReturnThis(),
+    getMany: jest.fn().mockResolvedValue(rows),
+    calls,
+  };
+  return qb;
+}
+
 describe('ProfileMatchAutopilotService', () => {
   let service: ProfileMatchAutopilotService;
   let socialProfileRepo: ReturnType<typeof mockRepo>;
@@ -180,6 +206,54 @@ describe('ProfileMatchAutopilotService', () => {
       skippedDuplicates: 0,
       errors: 0,
     });
+  });
+
+  it('uses stable QueryBuilder aliases when collecting authorized profile owners', async () => {
+    const socialProfileQb = inspectableQbReturning([{ userId: 42 }]);
+    const aiProfileQb = inspectableQbReturning([{ userId: 99 }]);
+    const requestQb = qbReturning([]);
+    const preferenceQb = qbReturning([]);
+    socialProfileRepo.createQueryBuilder.mockReturnValue(socialProfileQb);
+    aiProfileRepo.createQueryBuilder.mockReturnValue(aiProfileQb);
+    requestRepo.createQueryBuilder.mockReturnValue(requestQb);
+    preferenceRepo.createQueryBuilder.mockReturnValue(preferenceQb);
+    connectionRepo.find.mockResolvedValue([]);
+    socialProfileRepo.find.mockResolvedValue([{ userId: 99 }]);
+    profileMatch.runOnce.mockResolvedValue({
+      ok: true,
+      matchedCount: 0,
+      recommendations: [],
+    });
+
+    await service.runOnce('manual');
+
+    expect(socialProfileRepo.createQueryBuilder).toHaveBeenCalledWith('profile');
+    expect(aiProfileRepo.createQueryBuilder).toHaveBeenCalledWith('ai_profile');
+
+    const profileSql = [
+      ...socialProfileQb.calls.where,
+      ...socialProfileQb.calls.andWhere,
+      ...socialProfileQb.calls.orderBy,
+    ]
+      .flat()
+      .filter((value): value is string => typeof value === 'string')
+      .join('\n');
+    expect(profileSql).toContain('profile."profileDiscoverable"');
+    expect(profileSql).toContain('profile."agentCanRecommendMe"');
+
+    const aiProfileSql = [
+      ...aiProfileQb.calls.where,
+      ...aiProfileQb.calls.andWhere,
+      ...aiProfileQb.calls.orderBy,
+    ]
+      .flat()
+      .filter((value): value is string => typeof value === 'string')
+      .join('\n');
+    expect(aiProfileSql).toContain('ai_profile."updatedAt"');
+    expect(aiProfileSql).toContain('ai_profile."enabled"');
+    expect(aiProfileSql).toContain('ai_profile."privacyConsent"');
+    expect(aiProfileSql).not.toContain('aiProfile');
+    expect(aiProfileSql).not.toContain('aiprofile');
   });
 
   it('aggregates per-owner recommendation counts and survives per-owner errors', async () => {

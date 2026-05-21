@@ -393,17 +393,23 @@ export class ProfileMatchAutopilotService {
   ): Promise<number[]> {
     const ownerIds = new Set<number>();
     const cutoff = new Date(Date.now() - RECENT_SOURCE_WINDOW_MS);
+    const profileAlias = 'profile';
+    const aiProfileAlias = 'ai_profile';
 
+    // `allowAgentRecommend` is an API compatibility name; the persisted
+    // authorization column is `agentCanRecommendMe`.
     const profileQuery = this.socialProfileRepo
-      .createQueryBuilder('profile')
+      .createQueryBuilder(profileAlias)
       .where(
-        '(profile."profileDiscoverable" = true OR profile."agentCanRecommendMe" = true)',
+        `(${profileAlias}."profileDiscoverable" = true OR ${profileAlias}."agentCanRecommendMe" = true)`,
       );
     if (ownerUserId != null) {
-      profileQuery.andWhere('profile."userId" = :ownerUserId', { ownerUserId });
+      profileQuery.andWhere(`${profileAlias}."userId" = :ownerUserId`, {
+        ownerUserId,
+      });
     }
     const profiles = await profileQuery
-      .orderBy('profile."updatedAt"', 'DESC')
+      .orderBy(`${profileAlias}."updatedAt"`, 'DESC')
       .take(MAX_OWNERS_PER_SWEEP)
       .getMany();
     summary.scannedProfiles = profiles.length;
@@ -411,18 +417,18 @@ export class ProfileMatchAutopilotService {
     profiles.forEach((profile) => ownerIds.add(profile.userId));
 
     const aiProfileQuery = this.aiProfileRepo
-      .createQueryBuilder('aiProfile')
-      .where('aiProfile."updatedAt" >= :cutoff', { cutoff })
+      .createQueryBuilder(aiProfileAlias)
+      .where(`${aiProfileAlias}."updatedAt" >= :cutoff`, { cutoff })
       .andWhere(
-        '(aiProfile."enabled" = true OR aiProfile."privacyConsent" = true)',
+        `(${aiProfileAlias}."enabled" = true OR ${aiProfileAlias}."privacyConsent" = true)`,
       );
     if (ownerUserId != null) {
-      aiProfileQuery.andWhere('aiProfile."userId" = :ownerUserId', {
+      aiProfileQuery.andWhere(`${aiProfileAlias}."userId" = :ownerUserId`, {
         ownerUserId,
       });
     }
     const aiProfiles = await aiProfileQuery
-      .orderBy('aiProfile."updatedAt"', 'DESC')
+      .orderBy(`${aiProfileAlias}."updatedAt"`, 'DESC')
       .take(MAX_RECENT_SOURCE_ROWS)
       .getMany();
     aiProfiles.forEach((profile) => ownerIds.add(profile.userId));
