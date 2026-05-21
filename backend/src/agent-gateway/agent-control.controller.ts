@@ -10,9 +10,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import {
-  AgentApprovalService,
-} from './agent-approval.service';
+import { AgentApprovalService } from './agent-approval.service';
 import { AgentApprovalDispatcherService } from './agent-approval-dispatcher.service';
 import { AgentActionLogService } from './agent-action-log.service';
 import {
@@ -21,9 +19,7 @@ import {
 } from './approval-action-mapper';
 import { AgentActionStatus } from './entities/agent-action-log.entity';
 import { AgentSettingsService } from './agent-settings.service';
-import {
-  AGENT_CONNECTION_KEY,
-} from './guards/agent-token.guard';
+import { AGENT_CONNECTION_KEY } from './guards/agent-token.guard';
 import { AgentOwnerOrTokenGuard } from './guards/agent-owner-or-token.guard';
 import {
   CreateApprovalDto,
@@ -110,7 +106,8 @@ export class AgentControlController {
     }
     const row = await this.approvals.create({
       userId: actor.userId,
-      agentConnectionId: actor.agentConnectionId ?? dto.agentConnectionId ?? null,
+      agentConnectionId:
+        actor.agentConnectionId ?? dto.agentConnectionId ?? null,
       type: dto.type,
       skillName: dto.skillName,
       payload: dto.payload,
@@ -130,18 +127,18 @@ export class AgentControlController {
 
   /** POST /api/agent/approvals/:id/approve */
   @Post('approvals/:id/approve')
-  async approve(
-    @Req() req: JwtReq,
-    @Param('id', ParseIntPipe) id: number,
-  ) {
+  async approve(@Req() req: JwtReq, @Param('id', ParseIntPipe) id: number) {
     const actor = this.resolveActor(req);
-    const result = await this.approvals.approve(
-      id,
-      actor.userId,
-      (approval) => this.dispatcher.dispatch(approval),
+    const result = await this.approvals.approve(id, actor.userId, (approval) =>
+      this.dispatcher.dispatch(approval),
     );
     const out = result.dispatchResult as
-      | { ok: boolean; skipped?: boolean; result?: unknown; errorMessage?: string }
+      | {
+          ok: boolean;
+          skipped?: boolean;
+          result?: unknown;
+          errorMessage?: string;
+        }
       | undefined;
     const dispatched = out?.ok === true;
     const skipped = out?.skipped === true;
@@ -151,6 +148,7 @@ export class AgentControlController {
     await this.actionLogs.logAgentAction({
       ownerUserId: actor.userId,
       agentId: approval.agentConnectionId ?? actor.agentConnectionId ?? null,
+      agentTaskId: approval.agentTaskId,
       actionType: mapApprovalToActionType(approval),
       actionStatus: dispatchError
         ? AgentActionStatus.Failed
@@ -171,6 +169,7 @@ export class AgentControlController {
           : 'approved_and_dispatched',
       payload: {
         approvalId: approval.id,
+        agentTaskId: approval.agentTaskId,
         approvalType: approval.type,
         dispatched,
         skipped,
@@ -197,6 +196,7 @@ export class AgentControlController {
     await this.actionLogs.logAgentAction({
       ownerUserId: actor.userId,
       agentId: row.agentConnectionId ?? actor.agentConnectionId ?? null,
+      agentTaskId: row.agentTaskId,
       actionType: mapApprovalToActionType(row),
       actionStatus: AgentActionStatus.Rejected,
       riskLevel: mapApprovalRiskLevel(row.riskLevel),
@@ -209,7 +209,11 @@ export class AgentControlController {
       relatedActivityId: row.relatedActivityId,
       inputSummary: row.summary,
       outputSummary: 'rejected_by_user',
-      payload: { approvalId: row.id, approvalType: row.type },
+      payload: {
+        approvalId: row.id,
+        agentTaskId: row.agentTaskId,
+        approvalType: row.type,
+      },
       reason: 'user_rejected_pending_action',
     });
     return { ok: true, approvalId: id, status: row.status };
@@ -229,6 +233,8 @@ export class AgentControlController {
     if (req.user?.id) {
       return { userId: req.user.id, agentConnectionId: null };
     }
-    throw new UnauthorizedException('Missing authenticated user or agent token');
+    throw new UnauthorizedException(
+      'Missing authenticated user or agent token',
+    );
   }
 }

@@ -28,6 +28,7 @@ import { AgentDiscoveryService } from './agent-discovery.service';
 import { AgentProfileQAService } from './agent-profile-qa.service';
 import { ProfileMatchService } from './profile-match.service';
 import { ProfileMatchAutopilotService } from './profile-match-autopilot.service';
+import { SocialAgentToolExecutorService } from './social-agent-tool-executor.service';
 import { AgentType } from './entities/agent-profile.entity';
 import {
   AgentActionRiskLevel,
@@ -91,6 +92,7 @@ export class AgentUserController {
     private readonly autopilot: AiSocialAutopilotService,
     private readonly profileMatches: ProfileMatchService,
     private readonly profileMatchAutopilot: ProfileMatchAutopilotService,
+    private readonly socialAgentExecutor: SocialAgentToolExecutorService,
   ) {}
   /** GET /api/agents */
   @Get()
@@ -137,6 +139,16 @@ export class AgentUserController {
   @Get('connections')
   listConnections(@Req() req: FitMeetRequest) {
     return this.svc.listConnections(req.user.id);
+  }
+
+  /** POST /api/agents/social-agent/tasks/:id/run-next */
+  @Post('social-agent/tasks/:id/run-next')
+  @HttpCode(200)
+  runSocialAgentNext(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.socialAgentExecutor.runNext(id, req.user.id);
   }
 
   /** DELETE /api/agents/connections/:id - revoke an agent */
@@ -557,7 +569,11 @@ export class AgentUserController {
     @Body()
     body: { agentProfileId?: number; content?: string; text?: string },
   ) {
-    return this.discovery.replyToInboxForOwner(req.user.id, conversationId, body);
+    return this.discovery.replyToInboxForOwner(
+      req.user.id,
+      conversationId,
+      body,
+    );
   }
 
   @Get('search')
@@ -925,7 +941,10 @@ export class AgentApiController {
         agentCanStartChatAfterApproval: profile.agentCanStartChatAfterApproval,
       },
       matchingPoolEnabled,
-      nextStep: completion.percent >= 80 ? 'review_or_confirm_profile' : 'ask_more_questions',
+      nextStep:
+        completion.percent >= 80
+          ? 'review_or_confirm_profile'
+          : 'ask_more_questions',
     };
   }
 
@@ -1006,13 +1025,17 @@ export class AgentApiController {
       enableMatching?: boolean;
       ownerConfirmed?: boolean;
       sensitiveTagsConfirmed?: boolean;
-      sensitiveTagDecisions?: Record<string, 'confirmed' | 'rejected' | 'hidden'>;
+      sensitiveTagDecisions?: Record<
+        string,
+        'confirmed' | 'rejected' | 'hidden'
+      >;
     },
   ) {
     if (body?.ownerConfirmed !== true) {
       throw new BadRequestException('ownerConfirmed=true is required');
     }
-    const sensitiveTags = body.profile?.matchSignals?.sensitivePrivateTags ?? [];
+    const sensitiveTags =
+      body.profile?.matchSignals?.sensitivePrivateTags ?? [];
     if (sensitiveTags.length > 0 && body.sensitiveTagsConfirmed !== true) {
       throw new BadRequestException('sensitiveTagsConfirmed=true is required');
     }
@@ -1262,7 +1285,11 @@ export class AgentApiController {
     const result = await this.approvals.approve(id, conn.userId, (approval) =>
       this.dispatcher.dispatch(approval),
     );
-    return { ok: true, status: result.approval.status, result: result.dispatchResult };
+    return {
+      ok: true,
+      status: result.approval.status,
+      result: result.dispatchResult,
+    };
   }
 
   @Post('owner/approvals/:id/reject')
@@ -1476,6 +1503,7 @@ export class AgentApiController {
     await this.actionLogs.logAgentAction({
       ownerUserId: conn.userId,
       agentId: result.approval.agentConnectionId ?? conn.id,
+      agentTaskId: result.approval.agentTaskId,
       actionType: mapApprovalToActionType(result.approval),
       actionStatus:
         result.dispatchError !== undefined
@@ -1495,6 +1523,7 @@ export class AgentApiController {
         : 'approved_and_dispatched',
       payload: {
         approvalId: result.approval.id,
+        agentTaskId: result.approval.agentTaskId,
         approvalType: result.approval.type,
         dispatched: result.dispatched,
       },
@@ -1526,6 +1555,7 @@ export class AgentApiController {
     await this.actionLogs.logAgentAction({
       ownerUserId: conn.userId,
       agentId: row.agentConnectionId ?? conn.id,
+      agentTaskId: row.agentTaskId,
       actionType: mapApprovalToActionType(row),
       actionStatus: AgentActionStatus.Rejected,
       riskLevel: mapRiskLevel(row.riskLevel),
@@ -1540,6 +1570,7 @@ export class AgentApiController {
       outputSummary: 'rejected_no_action_taken',
       payload: {
         approvalId: row.id,
+        agentTaskId: row.agentTaskId,
         approvalType: row.type,
       },
       reason: body.reason ?? 'user_rejected_pending_action',

@@ -1,0 +1,187 @@
+import { ConfigService } from '@nestjs/config';
+
+import { AgentPermissionService, SocialAgentAction } from './agent-permission.service';
+import {
+  AgentTask,
+  AgentTaskEventActor,
+  AgentTaskEventType,
+  AgentTaskPermissionMode,
+} from './entities/agent-task.entity';
+import { SocialAgentPlannerService } from './social-agent-planner.service';
+
+const taskRepo = () => ({
+  findOne: jest.fn(),
+  save: jest.fn().mockResolvedValue({}),
+});
+
+const eventRepo = () => ({
+  create: jest.fn((input) => input),
+  save: jest.fn().mockResolvedValue({}),
+});
+
+function makeConfig(values: Record<string, string | undefined>): ConfigService {
+  return {
+    get: jest.fn((key: string) => values[key]),
+  } as unknown as ConfigService;
+}
+
+function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
+  return {
+    id: 10,
+    ownerUserId: 1,
+    agentConnectionId: 2,
+    taskType: 'social_goal',
+    title: 'Find a running buddy',
+    goal: '帮我找一个周末跑步搭子',
+    input: {},
+    plan: [],
+    toolCalls: [],
+    result: {},
+    permissionMode: AgentTaskPermissionMode.Confirm,
+    statusReason: null,
+    error: null,
+    startedAt: null,
+    awaitingConfirmationAt: null,
+    completedAt: null,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+    ...overrides,
+  } as AgentTask;
+}
+
+function serviceWith(config: ConfigService) {
+  const tasks = taskRepo();
+  const events = eventRepo();
+  const service = new SocialAgentPlannerService(
+    tasks as never,
+    events as never,
+    config,
+    new AgentPermissionService(),
+  );
+  return { service, tasks, events };
+}
+
+describe('SocialAgentPlannerService', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  it('calls DeepSeek, filters disallowed actions, writes task plan and event', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                steps: [
+                  { id: 'blocked', action: 'search_profiles', title: 'Search' },
+                  {
+                    id: 'allowed',
+                    action: 'send_message',
+                    title: 'Say hello',
+                    input: { text: 'hi' },
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+    } as never);
+
+    const { service, tasks, events } = serviceWith(
+      makeConfig({ DEEPSEEK_API_KEY: 'key' }),
+    );
+    tasks.findOne.mockResolvedValue(
+      makeTask({ permissionMode: AgentTaskPermissionMode.Assist }),
+    );
+
+    const result = await service.planTask(10);
+
+    expect(result.source).toBe('deepseek');
+    expect(result.plan).toHaveLength(1);
+    expect(result.plan[0]).toMatchObject({
+      id: 'allowed',
+      action: SocialAgentAction.SendMessage,
+      status: 'planned',
+    });
+    expect(tasks.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 10, plan: result.plan }),
+    );
+    expect(events.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 10,
+        ownerUserId: 1,
+        eventType: AgentTaskEventType.PlanGenerated,
+        actor: AgentTaskEventActor.Agent,
+        payload: expect.objectContaining({
+          source: 'deepseek',
+          permissionMode: AgentTaskPermissionMode.Assist,
+          stepCount: 1,
+        }),
+      }),
+    );
+    expect(events.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses fallback plan when DeepSeek JSON parse fails', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        choices: [{ message: { content: 'not-json' } }],
+      }),
+    } as never);
+
+    const { service, tasks } = serviceWith(makeConfig({ DEEPSEEK_API_KEY: 'key' }));
+    tasks.findOne.mockResolvedValue(
+      makeTask({ permissionMode: AgentTaskPermissionMode.Confirm }),
+    );
+
+    const result = await service.planTask(10);
+
+    expect(result.source).toBe('fallback');
+    expect(result.fallbackReason).toBe('deepseek_json_parse_failed');
+    expect(result.plan.map((step) => step.action)).toEqual([
+      SocialAgentAction.SearchProfiles,
+      SocialAgentAction.GenerateContent,
+      SocialAgentAction.DraftMessage,
+      SocialAgentAction.SendMessage,
+      SocialAgentAction.SendInvite,
+    ]);
+    expect(
+      result.plan.every((step) =>
+        result.allowedActions.includes(step.action),
+      ),
+    ).toBe(true);
+  });
+
+  it('uses current task permission mode for fallback compatibility', async () => {
+    const { service, tasks } = serviceWith(makeConfig({}));
+    tasks.findOne.mockResolvedValue(
+      makeTask({
+        permissionMode: AgentTaskPermissionMode.LimitedAuto,
+        goal: '帮我安排线下约练并支付场地费',
+      }),
+    );
+
+    const result = await service.planTask(10);
+
+    expect(result.source).toBe('fallback');
+    expect(result.plan.map((step) => step.action)).toContain(
+      SocialAgentAction.OfflineMeet,
+    );
+    expect(result.plan.map((step) => step.action)).toContain(
+      SocialAgentAction.Payment,
+    );
+    expect(result.plan.every((step) => step.requiresUserConfirmation)).toBe(false);
+    expect(
+      result.plan.every((step) =>
+        result.allowedActions.includes(step.action),
+      ),
+    ).toBe(true);
+  });
+});

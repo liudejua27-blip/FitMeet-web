@@ -12,6 +12,16 @@ import { User } from '../../users/user.entity';
 import { AgentApprovalRequest } from './agent-approval-request.entity';
 import { AgentConnection } from './agent-connection.entity';
 
+/**
+ * @deprecated Legacy fine-grained runtime schema.
+ *
+ * Canonical Agent Runtime writes now go to `agent_tasks` and
+ * `agent_task_events` (`agent-task.entity.ts`). These entities are kept only
+ * so old deployments can read historical `agent_runtime_*` rows if needed.
+ * Do not inject repositories for these classes into new services, and do not
+ * add new write paths against these tables.
+ */
+
 export enum AgentRuntimePermissionMode {
   Assist = 'assist',
   Confirm = 'confirm',
@@ -91,10 +101,7 @@ export enum AgentRuntimeLogLevel {
   'status',
   'updatedAt',
 ])
-@Index('idx_agent_runtime_tasks_agent_status', [
-  'agentConnectionId',
-  'status',
-])
+@Index('idx_agent_runtime_tasks_agent_status', ['agentConnectionId', 'status'])
 @Index('uniq_agent_runtime_tasks_idempotency_key', ['idempotencyKey'], {
   unique: true,
   where: '"idempotencyKey" IS NOT NULL',

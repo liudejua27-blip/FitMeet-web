@@ -1,11 +1,21 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import * as crypto from 'crypto';
 import { Conversation } from './conversation.schema';
-import { Message, MessageCard, MessageParticipantType, MessageSource } from './message.schema';
+import {
+  Message,
+  MessageCard,
+  MessageParticipantType,
+  MessageSource,
+} from './message.schema';
 import {
   AgentInboxEvent,
   AgentInboxEventType,
@@ -29,6 +39,11 @@ import {
 } from '../agent-gateway/entities/agent-action-log.entity';
 import { PublicSocialIntent } from '../agent-gateway/entities/public-social-intent.entity';
 import { UserSocialRequest } from '../social-requests/social-request.entity';
+import {
+  cleanDisplayText,
+  isDisplayableText,
+  sanitizeForDisplay,
+} from '../common/display-text.util';
 
 type SendMessageOptions = {
   source?: MessageSource;
@@ -87,6 +102,17 @@ type AgentWebhookPayload = {
   data: Record<string, unknown>;
 };
 
+export type RecentAgentConversationSignal = {
+  conversationId: string;
+  messageId: string;
+  agentConnectionId: number;
+  ownerUserId: number;
+  fromUserId: number;
+  text: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: Date | string;
+};
+
 @Injectable()
 export class MessagesService {
   private readonly logger = new Logger(MessagesService.name);
@@ -125,21 +151,26 @@ export class MessagesService {
     const users = await this.userRepo.find({ where: { id: In(allUserIds) } });
     const userMap = new Map(users.map((u) => [u.id, u]));
 
-    return conversations.map((conv) => {
-      const otherId = conv.participantIds.find((id) => id !== userId) ?? userId;
-      const other = userMap.get(otherId);
-      return {
-        id: conv._id.toString(),
-        userId: otherId,
-        username: other?.name || '未知用户',
-        avatar: other?.avatar || '?',
-        color: other?.color || '#38BDF8',
-        lastMessage: conv.lastMessage || '',
-        time: this.formatTime(conv.lastMessageTime),
-        unread: conv.unreadCount?.[String(userId)] || 0,
-        online: true,
-      };
-    });
+    return conversations
+      .map((conv) => {
+        const otherId =
+          conv.participantIds.find((id) => id !== userId) ?? userId;
+        const other = userMap.get(otherId);
+        return {
+          id: conv._id.toString(),
+          userId: otherId,
+          username: cleanDisplayText(other?.name, '未知用户'),
+          avatar: cleanDisplayText(other?.avatar, '?'),
+          color: other?.color || '#38BDF8',
+          lastMessage: cleanDisplayText(conv.lastMessage, ''),
+          time: this.formatTime(conv.lastMessageTime),
+          unread: conv.unreadCount?.[String(userId)] || 0,
+          online: true,
+        };
+      })
+      .filter((conv) =>
+        [conv.username, conv.lastMessage].every(isDisplayableText),
+      );
   }
 
   async getMessages(conversationId: string, userId: number) {
@@ -158,7 +189,7 @@ export class MessagesService {
 
     return messages.map((message) => ({
       id: message._id.toString(),
-      text: message.text,
+      text: cleanDisplayText(message.text, '消息内容已隐藏'),
       source: message.source ?? 'user',
       card: message.card ?? null,
       time: new Date(message.createdAt as Date | string).toLocaleTimeString(
@@ -250,8 +281,9 @@ export class MessagesService {
       receiverAgentId,
     });
 
+    const safeText = cleanDisplayText(text, '消息内容已隐藏');
     const update: Record<string, unknown> = {
-      lastMessage: text,
+      lastMessage: safeText,
       lastMessageTime: new Date(),
     };
 
@@ -266,7 +298,9 @@ export class MessagesService {
     }
     await this.convModel.updateOne(
       { _id: oid },
-      Object.keys(inc).length > 0 ? { $set: update, $inc: inc } : { $set: update },
+      Object.keys(inc).length > 0
+        ? { $set: update, $inc: inc }
+        : { $set: update },
     );
 
     if (senderType === 'agent' && agentConnectionId && ownerUserId) {
@@ -279,7 +313,7 @@ export class MessagesService {
         status: 'success',
         metadata: {
           senderId,
-          preview: this.preview(text),
+          preview: this.preview(safeText),
           messageSource: options.source ?? 'user',
         },
       });
@@ -296,7 +330,7 @@ export class MessagesService {
           conversationId: conv._id.toString(),
           messageId: msg._id.toString(),
           fromUserId: Number(senderId),
-          text,
+          text: safeText,
           unreadCount,
         });
       } catch (err) {
@@ -310,7 +344,7 @@ export class MessagesService {
 
     return {
       id: msg._id.toString(),
-      text: msg.text,
+      text: cleanDisplayText(msg.text, '消息内容已隐藏'),
       source: msg.source ?? 'user',
       card: msg.card ?? null,
       senderId,
@@ -483,7 +517,9 @@ export class MessagesService {
         $or: [
           { agentConnectionId: agentId },
           { participantAgentIds: agentId },
-          ...(conversationIds.length > 0 ? [{ _id: { $in: conversationIds } }] : []),
+          ...(conversationIds.length > 0
+            ? [{ _id: { $in: conversationIds } }]
+            : []),
         ],
       })
       .sort({ lastMessageTime: -1 })
@@ -561,8 +597,8 @@ export class MessagesService {
             const user = userMap.get(id);
             return {
               id,
-              name: user?.name ?? `用户 #${id}`,
-              avatar: user?.avatar ?? '?',
+              name: cleanDisplayText(user?.name, `用户 #${id}`),
+              avatar: cleanDisplayText(user?.avatar, '?'),
               color: user?.color ?? '#38BDF8',
             };
           }),
@@ -574,7 +610,7 @@ export class MessagesService {
               agentType: 'agent_connection',
             };
           }),
-          lastMessage: conv.lastMessage || '',
+          lastMessage: cleanDisplayText(conv.lastMessage, ''),
           lastMessageTime: conv.lastMessageTime ?? null,
           time: this.formatTime(conv.lastMessageTime),
           unread,
@@ -606,7 +642,7 @@ export class MessagesService {
     return messages.reverse().map((message) => ({
       id: String(message._id),
       conversationId,
-      text: message.text,
+      text: cleanDisplayText(message.text, '消息内容已隐藏'),
       source: message.source ?? 'user',
       card: message.card ?? null,
       metadata: message.metadata ?? null,
@@ -618,7 +654,8 @@ export class MessagesService {
       senderId: message.senderId,
       senderAgentId: message.senderAgentId ?? null,
       receiverAgentId: message.receiverAgentId ?? null,
-      isMine: message.senderType === 'agent' && message.senderAgentId === agentId,
+      isMine:
+        message.senderType === 'agent' && message.senderAgentId === agentId,
       createdAt: message.createdAt,
       time: new Date(message.createdAt as Date | string).toLocaleTimeString(
         'zh-CN',
@@ -631,9 +668,12 @@ export class MessagesService {
     conversationId: string,
     agentId: number,
     text: string,
-    options: { ownerUserId?: number | null; metadata?: Record<string, unknown> } = {},
+    options: {
+      ownerUserId?: number | null;
+      metadata?: Record<string, unknown>;
+    } = {},
   ) {
-    const content = (text ?? '').trim();
+    const content = cleanDisplayText(text, '').trim();
     if (!content) throw new BadRequestException('content is required');
 
     const oid = new Types.ObjectId(conversationId);
@@ -646,7 +686,8 @@ export class MessagesService {
     });
     const participantIds = conv.participantIds ?? [];
     const recipientUserId =
-      options.ownerUserId != null && participantIds.includes(options.ownerUserId)
+      options.ownerUserId != null &&
+      participantIds.includes(options.ownerUserId)
         ? participantIds.find((id) => id !== options.ownerUserId)
         : participantIds[0];
     if (!recipientUserId) {
@@ -703,7 +744,7 @@ export class MessagesService {
 
     return {
       id: msg._id.toString(),
-      text: msg.text,
+      text: cleanDisplayText(msg.text, '消息内容已隐藏'),
       source: msg.source ?? 'ai_delegate',
       card: msg.card ?? null,
       senderId,
@@ -728,6 +769,41 @@ export class MessagesService {
       .exec();
     if (!conv) return null;
     return { conversationId: conv._id.toString() };
+  }
+
+  async getRecentAgentConversationSignals(options: {
+    since: Date;
+    limit?: number;
+    ownerUserId?: number;
+  }): Promise<RecentAgentConversationSignal[]> {
+    const limit = this.normalizeLimit(options.limit, 50, 200);
+    const query: Record<string, unknown> = {
+      agentConnectionId: { $ne: null },
+      ownerUserId: { $ne: null },
+      senderType: { $ne: 'agent' },
+      createdAt: { $gte: options.since },
+    };
+    if (options.ownerUserId != null) query.ownerUserId = options.ownerUserId;
+
+    const messages = await this.msgModel
+      .find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean()
+      .exec();
+
+    return messages
+      .filter((message) => message.agentConnectionId && message.ownerUserId)
+      .map((message) => ({
+        conversationId: String(message.conversationId),
+        messageId: String(message._id),
+        agentConnectionId: Number(message.agentConnectionId),
+        ownerUserId: Number(message.ownerUserId),
+        fromUserId: Number(message.senderId),
+        text: cleanDisplayText(message.text, '消息内容已隐藏'),
+        metadata: message.metadata ?? null,
+        createdAt: message.createdAt,
+      }));
   }
 
   async getUnreadCount(userId: number) {
@@ -795,7 +871,7 @@ export class MessagesService {
       fromUser: event.fromUserId
         ? this.toSafeSenderCard(userMap.get(event.fromUserId) ?? null)
         : null,
-      contentPreview: event.contentPreview ?? '',
+      contentPreview: cleanDisplayText(event.contentPreview, ''),
       unread: Boolean(event.unread),
       reportText: this.buildAgentReportText(
         event.eventType,
@@ -814,16 +890,17 @@ export class MessagesService {
     eventIds: string[] = [],
   ): Promise<AgentInboxAckResult> {
     const normalized = Array.from(
-      new Set(
-        eventIds
-          .map((id) => (id ?? '').trim())
-          .filter(Boolean),
-      ),
+      new Set(eventIds.map((id) => (id ?? '').trim()).filter(Boolean)),
     ).slice(0, 100);
     const ids = normalized.filter((id) => Types.ObjectId.isValid(id));
     const stableIds = normalized.filter((id) => !Types.ObjectId.isValid(id));
     if (normalized.length === 0) {
-      return { ok: true, requested: eventIds.length, acknowledged: 0, eventIds: [] };
+      return {
+        ok: true,
+        requested: eventIds.length,
+        acknowledged: 0,
+        eventIds: [],
+      };
     }
     const objectIds = ids.map((id) => new Types.ObjectId(id));
     const or: Record<string, unknown>[] = [];
@@ -836,10 +913,7 @@ export class MessagesService {
       );
     }
     const result = await this.inboxEventModel
-      .updateMany(
-        { agentConnectionId, $or: or },
-        { $set: { unread: false } },
-      )
+      .updateMany({ agentConnectionId, $or: or }, { $set: { unread: false } })
       .exec();
     return {
       ok: true,
@@ -878,10 +952,10 @@ export class MessagesService {
               requestId: input.requestId ?? null,
               candidateRecordId: input.candidateRecordId ?? null,
               fromUserId: input.fromUserId ?? null,
-              contentPreview: input.contentPreview ?? '',
+              contentPreview: cleanDisplayText(input.contentPreview, ''),
               unread: input.unread ?? true,
               dedupeKey,
-              metadata: input.metadata ?? {},
+              metadata: sanitizeForDisplay(input.metadata ?? {}),
             },
           },
           { upsert: true, new: true, setDefaultsOnInsert: true },
@@ -902,7 +976,10 @@ export class MessagesService {
           requestId: input.requestId ?? null,
           candidateRecordId: input.candidateRecordId ?? null,
           fromUserId: input.fromUserId ?? null,
-          ...(input.metadata ?? {}),
+          ...(sanitizeForDisplay(input.metadata ?? {}) as Record<
+            string,
+            unknown
+          >),
         },
       });
 
@@ -981,8 +1058,12 @@ export class MessagesService {
     text: string;
     unreadCount: number;
   }) {
-    const contentPreview = this.preview(input.text);
-    const sender = await this.userRepo.findOne({ where: { id: input.fromUserId } });
+    const contentPreview = this.preview(
+      cleanDisplayText(input.text, '消息内容已隐藏'),
+    );
+    const sender = await this.userRepo.findOne({
+      where: { id: input.fromUserId },
+    });
     const data = {
       conversationId: input.conversationId,
       messageId: input.messageId,
@@ -1089,7 +1170,11 @@ export class MessagesService {
           ownerUserId: conn.userId,
           eventType: 'webhook.failed',
           status: 'failed',
-          metadata: { event, eventId: payload.event_id, status: response.status },
+          metadata: {
+            event,
+            eventId: payload.event_id,
+            status: response.status,
+          },
         });
         return;
       }
@@ -1136,11 +1221,19 @@ export class MessagesService {
           conversationId: input.conversationId ?? null,
           messageId: input.messageId ?? null,
           status: input.status,
-          payload: input.metadata ?? {},
+          payload: sanitizeForDisplay(input.metadata ?? {}) as Record<
+            string,
+            unknown
+          >,
           result:
-            input.status === 'failed' ? ActionResult.Error : ActionResult.Success,
+            input.status === 'failed'
+              ? ActionResult.Error
+              : ActionResult.Success,
           riskScore: 0,
-          metadata: input.metadata ?? {},
+          metadata: sanitizeForDisplay(input.metadata ?? {}) as Record<
+            string,
+            unknown
+          >,
         }),
       );
       await this.actionLogRepo.save(
@@ -1159,7 +1252,10 @@ export class MessagesService {
           status: input.status,
           inputSummary: input.eventType,
           outputSummary: input.status,
-          payload: input.metadata ?? {},
+          payload: sanitizeForDisplay(input.metadata ?? {}) as Record<
+            string,
+            unknown
+          >,
           reason: input.status,
         }),
       );
@@ -1192,7 +1288,9 @@ export class MessagesService {
   }
 
   private preview(text: string): string {
-    const normalized = (text ?? '').replace(/\s+/g, ' ').trim();
+    const normalized = cleanDisplayText(text, '内容已隐藏')
+      .replace(/\s+/g, ' ')
+      .trim();
     return normalized.length > 160
       ? `${normalized.slice(0, 157)}...`
       : normalized;
@@ -1237,10 +1335,10 @@ export class MessagesService {
     if (!user) return null;
     return {
       id: user.id,
-      name: user.name,
-      avatar: user.avatar,
+      name: cleanDisplayText(user.name, 'FitMeet 用户'),
+      avatar: cleanDisplayText(user.avatar, '?'),
       color: user.color,
-      city: user.city,
+      city: cleanDisplayText(user.city, ''),
       verified: user.verified,
     };
   }
@@ -1307,7 +1405,7 @@ export class MessagesService {
       sensitivePrivateTags: _sensitivePrivateTags,
       ...safe
     } = metadata ?? {};
-    return safe;
+    return sanitizeForDisplay(safe) as Record<string, unknown>;
   }
 
   private normalizeLimit(

@@ -22,8 +22,9 @@ import { AgentConnection } from './agent-connection.entity';
  * `agent_task_events` is the append-only timeline used for replay, audit, and
  * driving UI (Agent Inbox / activity feed).
  *
- * This is a NEW, deliberately simple layer; the older fine-grained
- * `agent_runtime_*` tables remain untouched.
+ * This is the canonical Agent Runtime write model. The older fine-grained
+ * `agent_runtime_*` tables are deprecated/read-only compatibility tables and
+ * must not receive new social-agent writes.
  */
 
 export enum AgentTaskStatus {
@@ -31,6 +32,8 @@ export enum AgentTaskStatus {
   Planning = 'planning',
   AwaitingConfirmation = 'awaiting_confirmation',
   Executing = 'executing',
+  WaitingResult = 'waiting_result',
+  WaitingReply = 'waiting_reply',
   AwaitingFeedback = 'awaiting_feedback',
   Succeeded = 'succeeded',
   Failed = 'failed',
@@ -140,6 +143,10 @@ export class AgentTask {
   /** Final (or latest partial) result payload. */
   @Column({ type: 'jsonb', default: () => "'{}'" })
   result: Record<string, unknown>;
+
+  /** Runtime memory: bound conversations, cursors, reply summaries, decisions. */
+  @Column({ type: 'jsonb', default: () => "'{}'" })
+  memory: Record<string, unknown>;
 
   @Column({
     type: 'enum',

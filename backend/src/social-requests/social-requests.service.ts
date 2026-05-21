@@ -12,6 +12,7 @@ import { UpdateSocialRequestDto } from './dto/update-social-request.dto';
 import {
   SocialRequestSource,
   SocialRequestType,
+  SocialRequestVisibility,
   UserSocialRequest,
   UserSocialRequestStatus,
 } from './social-request.entity';
@@ -165,9 +166,11 @@ export class SocialRequestsService {
 
     const saved = await this.repo.save(entity);
     await this.syncPublicIntent(saved);
+    const agentTaskId = this.numberOrNull(saved.metadata?.agentTaskId);
     await this.actionLogs.logAgentAction({
       ownerUserId: userId,
       agentId: agent?.id ?? null,
+      agentTaskId,
       actionType: AgentActionType.CreateSocialRequest,
       actionStatus: AgentActionStatus.Executed,
       riskLevel: OFFLINE_TYPES.has(type)
@@ -176,6 +179,12 @@ export class SocialRequestsService {
       relatedSocialRequestId: saved.id,
       inputSummary: `type=${type}, title=${title}`,
       outputSummary: `requireUserConfirmation=${requireUserConfirmation}, source=${source}`,
+      payload: {
+        agentTaskId,
+        visibility: saved.visibility,
+        status: saved.status,
+        source,
+      },
     });
     return saved;
   }
@@ -457,14 +466,21 @@ export class SocialRequestsService {
   async syncPublicIntentById(id: number, userId: number) {
     const item = await this.findOne(id, userId);
     const intent = await this.syncPublicIntent(item);
+    const agentTaskId = this.numberOrNull(item.metadata?.agentTaskId);
     await this.actionLogs.logAgentAction({
       ownerUserId: userId,
       agentId: item.agentId ?? null,
+      agentTaskId,
       actionType: AgentActionType.SyncToHall,
       actionStatus: AgentActionStatus.Executed,
       riskLevel: AgentActionRiskLevel.Low,
       relatedSocialRequestId: item.id,
       outputSummary: `publicIntent=${intent.id}, status=${intent.status}`,
+      payload: {
+        agentTaskId,
+        publicIntentId: intent.id,
+        publicIntentStatus: intent.status,
+      },
     });
     return intent;
   }
@@ -507,7 +523,12 @@ export class SocialRequestsService {
     const metadata = request.metadata ?? {};
     const id = `social_request_${request.id}`;
     const existing = await this.publicIntentRepo.findOne({ where: { id } });
-    const status = this.toPublicStatus(request.status);
+    const publiclyVisible =
+      request.visibility === SocialRequestVisibility.Public &&
+      request.status !== UserSocialRequestStatus.Draft;
+    const status = publiclyVisible
+      ? this.toPublicStatus(request.status)
+      : PublicSocialIntentStatus.Inactive;
     const intent = existing ?? this.publicIntentRepo.create({ id });
 
     Object.assign(intent, {
@@ -518,7 +539,7 @@ export class SocialRequestsService {
         request.source === SocialRequestSource.Manual
           ? 'ai_social_request'
           : request.source,
-      mode: 'public',
+      mode: publiclyVisible ? 'public' : 'private_draft',
       requestType: request.activityType || request.type,
       title: request.title,
       description: request.description,
@@ -552,6 +573,8 @@ export class SocialRequestsService {
         ...metadata,
         source: 'ai_social_request',
         linkedSocialRequestId: request.id,
+        visibility: request.visibility,
+        publiclyVisible,
       },
     });
 
@@ -611,5 +634,14 @@ export class SocialRequestsService {
     if (item.userId !== userId) {
       throw new ForbiddenException('Not your social request');
     }
+  }
+
+  private numberOrNull(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
   }
 }

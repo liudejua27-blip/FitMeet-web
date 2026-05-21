@@ -454,7 +454,10 @@ export class AgentGatewayService {
     if (connections.length) {
       await Promise.all(
         connections.map(async (connection) => {
-          const dailyActionLimit = Math.max(connection.dailyActionLimit ?? 0, 500);
+          const dailyActionLimit = Math.max(
+            connection.dailyActionLimit ?? 0,
+            500,
+          );
           if (
             connection.permissionLevel !== AgentPermissionLevel.Open ||
             connection.dailyActionLimit !== dailyActionLimit
@@ -494,10 +497,9 @@ export class AgentGatewayService {
       verified: user.verified,
       canIssueToken: user.verified && connections.length === 0,
       activeTokenCount: connections.length,
-      blockReason:
-        !user.verified
-          ? 'Real-name verification is required before issuing a personal agent token'
-          : connections.length > 0
+      blockReason: !user.verified
+        ? 'Real-name verification is required before issuing a personal agent token'
+        : connections.length > 0
           ? 'An active personal agent token already exists. Revoke it before generating a new one.'
           : null,
       latestToken: connections[0]
@@ -869,22 +871,35 @@ export class AgentGatewayService {
           get: {
             tags: ['skills'],
             summary: 'Read the FitMeet social-skills manifest',
-            responses: { 200: { description: 'Manifest', content: json(objectSchema) }, 401: authError },
+            responses: {
+              200: { description: 'Manifest', content: json(objectSchema) },
+              401: authError,
+            },
           },
         },
         '/agent/skills/openapi.json': {
           get: {
             tags: ['skills'],
             summary: 'Read this OpenAPI contract',
-            responses: { 200: { description: 'OpenAPI JSON', content: json(objectSchema) } },
+            responses: {
+              200: { description: 'OpenAPI JSON', content: json(objectSchema) },
+            },
           },
         },
         '/agent/owner/social-profile/status': {
           get: {
             tags: ['profiles'],
             operationId: 'fitmeet_get_profile_status',
-            summary: 'Read the token owner profile status, completion and matching-pool visibility',
-            responses: { 200: { description: 'Owner profile status', content: json(objectSchema) }, 401: authError, 403: authError },
+            summary:
+              'Read the token owner profile status, completion and matching-pool visibility',
+            responses: {
+              200: {
+                description: 'Owner profile status',
+                content: json(objectSchema),
+              },
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/owner/social-profile': {
@@ -892,14 +907,28 @@ export class AgentGatewayService {
             tags: ['profiles'],
             operationId: 'fitmeet_get_my_profile',
             summary: 'Read the token owner social profile only',
-            responses: { 200: { description: 'Owner social profile', content: json(objectSchema) }, 401: authError, 403: authError },
+            responses: {
+              200: {
+                description: 'Owner social profile',
+                content: json(objectSchema),
+              },
+              401: authError,
+              403: authError,
+            },
           },
           patch: {
             tags: ['profiles'],
             operationId: 'fitmeet_update_my_social_profile',
             summary: 'Patch token owner social profile fields only',
             requestBody: { required: true, content: json(objectSchema) },
-            responses: { 200: { description: 'Updated owner social profile', content: json(objectSchema) }, 401: authError, 403: authError },
+            responses: {
+              200: {
+                description: 'Updated owner social profile',
+                content: json(objectSchema),
+              },
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/owner/social-profile/questions': {
@@ -907,7 +936,14 @@ export class AgentGatewayService {
             tags: ['profiles'],
             operationId: 'fitmeet_generate_profile_questions',
             summary: 'Generate interview questions for the token owner profile',
-            responses: { 200: { description: 'Profile questions and completion', content: json(objectSchema) }, 401: authError, 403: authError },
+            responses: {
+              200: {
+                description: 'Profile questions and completion',
+                content: json(objectSchema),
+              },
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/owner/social-profile/answers': {
@@ -916,63 +952,157 @@ export class AgentGatewayService {
             operationId: 'fitmeet_save_profile_answer',
             summary: 'Save one owner-confirmed profile interview answer',
             'x-requires-user-confirmation': true,
-            requestBody: { required: true, content: json({ type: 'object', required: ['key', 'answer'], properties: { key: { type: 'string' }, answer: { type: 'string' } } }) },
-            responses: { 201: { description: 'Updated profile and completion', content: json(objectSchema) }, 401: authError, 403: authError },
+            requestBody: {
+              required: true,
+              content: json({
+                type: 'object',
+                required: ['key', 'answer'],
+                properties: {
+                  key: { type: 'string' },
+                  answer: { type: 'string' },
+                },
+              }),
+            },
+            responses: {
+              201: {
+                description: 'Updated profile and completion',
+                content: json(objectSchema),
+              },
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/owner/social-profile/visibility': {
           patch: {
             tags: ['profiles'],
             operationId: 'fitmeet_update_profile_visibility',
-            summary: 'Update owner-confirmed profile visibility and matching-pool switches',
+            summary:
+              'Update owner-confirmed profile visibility and matching-pool switches',
             'x-requires-user-confirmation': true,
-            requestBody: { required: true, content: json({ type: 'object', required: ['ownerConfirmed'], properties: { ownerConfirmed: { type: 'boolean', const: true }, profileDiscoverable: { type: 'boolean' }, agentCanRecommendMe: { type: 'boolean' }, agentCanStartChatAfterApproval: { type: 'boolean' } } }) },
-            responses: { 200: { description: 'Updated profile visibility', content: json(objectSchema) }, 400: authError, 401: authError, 403: authError },
+            requestBody: {
+              required: true,
+              content: json({
+                type: 'object',
+                required: ['ownerConfirmed'],
+                properties: {
+                  ownerConfirmed: { type: 'boolean', const: true },
+                  profileDiscoverable: { type: 'boolean' },
+                  agentCanRecommendMe: { type: 'boolean' },
+                  agentCanStartChatAfterApproval: { type: 'boolean' },
+                },
+              }),
+            },
+            responses: {
+              200: {
+                description: 'Updated profile visibility',
+                content: json(objectSchema),
+              },
+              400: authError,
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/owner/social-profile/ai-draft': {
           post: {
             tags: ['profiles'],
             operationId: 'fitmeet_generate_profile_draft',
-            summary: 'Generate an AI persona profile draft from owner interview answers',
+            summary:
+              'Generate an AI persona profile draft from owner interview answers',
             requestBody: { required: true, content: json(objectSchema) },
-            responses: { 201: { description: 'AI profile draft', content: json(objectSchema) }, 401: authError, 403: authError },
+            responses: {
+              201: {
+                description: 'AI profile draft',
+                content: json(objectSchema),
+              },
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/owner/social-profile/ai-save': {
           post: {
             tags: ['profiles'],
             operationId: 'fitmeet_confirm_profile',
-            summary: 'Save an owner-confirmed AI persona profile and optionally enter matching pool',
+            summary:
+              'Save an owner-confirmed AI persona profile and optionally enter matching pool',
             'x-requires-user-confirmation': true,
-            requestBody: { required: true, content: json({ type: 'object', required: ['profile', 'ownerConfirmed'], properties: { profile: objectSchema, enableMatching: { type: 'boolean' }, ownerConfirmed: { type: 'boolean', const: true }, sensitiveTagsConfirmed: { type: 'boolean' } } }) },
-            responses: { 201: { description: 'Saved profile and matching status', content: json(objectSchema) }, 400: authError, 401: authError, 403: authError },
+            requestBody: {
+              required: true,
+              content: json({
+                type: 'object',
+                required: ['profile', 'ownerConfirmed'],
+                properties: {
+                  profile: objectSchema,
+                  enableMatching: { type: 'boolean' },
+                  ownerConfirmed: { type: 'boolean', const: true },
+                  sensitiveTagsConfirmed: { type: 'boolean' },
+                },
+              }),
+            },
+            responses: {
+              201: {
+                description: 'Saved profile and matching status',
+                content: json(objectSchema),
+              },
+              400: authError,
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/owner/profile-recommendations/events': {
           get: {
             tags: ['profiles', 'agent-inbox'],
             operationId: 'fitmeet_get_profile_recommendations',
-            summary: 'Read profile.match.recommended events for the token owner Agent Inbox',
+            summary:
+              'Read profile.match.recommended events for the token owner Agent Inbox',
             parameters: [
-              { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
+              {
+                name: 'limit',
+                in: 'query',
+                schema: { type: 'integer', minimum: 1, maximum: 100 },
+              },
               { name: 'unreadOnly', in: 'query', schema: { type: 'boolean' } },
             ],
-            responses: { 200: { description: 'Profile recommendation events', content: json(objectSchema) }, 401: authError, 403: authError },
+            responses: {
+              200: {
+                description: 'Profile recommendation events',
+                content: json(objectSchema),
+              },
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/owner/profile-matches/run-once': {
           post: {
             tags: ['profiles'],
             summary: 'Run one review-only profile-pool recommendation scan',
-            responses: { 200: { description: 'Profile recommendations', content: json(objectSchema) }, 401: authError, 403: authError },
+            responses: {
+              200: {
+                description: 'Profile recommendations',
+                content: json(objectSchema),
+              },
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/subconscious-loop/run-once': {
           post: {
             tags: ['profiles', 'agent-inbox'],
-            summary: 'Run one Subconscious Loop sweep for profile and request-card matches',
-            responses: { 200: { description: 'Subconscious Loop summary', content: json(objectSchema) }, 401: authError, 403: authError },
+            summary:
+              'Run one Subconscious Loop sweep for profile and request-card matches',
+            responses: {
+              200: {
+                description: 'Subconscious Loop summary',
+                content: json(objectSchema),
+              },
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/owner/profile-matches': {
@@ -980,68 +1110,191 @@ export class AgentGatewayService {
             tags: ['profiles'],
             summary: 'List review-only profile-pool recommendations',
             parameters: [
-              { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
+              {
+                name: 'limit',
+                in: 'query',
+                schema: { type: 'integer', minimum: 1, maximum: 100 },
+              },
             ],
-            responses: { 200: { description: 'Profile recommendations', content: json(objectSchema) }, 401: authError, 403: authError },
+            responses: {
+              200: {
+                description: 'Profile recommendations',
+                content: json(objectSchema),
+              },
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/owner/profile-matches/{id}/ignore': {
           post: {
             tags: ['profiles'],
-            summary: 'Reject a profile-pool recommendation without contacting the candidate',
-            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
-            responses: { 200: { description: 'Ignored recommendation', content: json(objectSchema) }, 401: authError, 403: authError },
+            summary:
+              'Reject a profile-pool recommendation without contacting the candidate',
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'integer' },
+              },
+            ],
+            responses: {
+              200: {
+                description: 'Ignored recommendation',
+                content: json(objectSchema),
+              },
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/owner/profile-matches/{id}/favorite': {
           post: {
             tags: ['profiles'],
             summary: 'Save a profile-pool recommendation for later review',
-            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
-            responses: { 200: { description: 'Saved recommendation', content: json(objectSchema) }, 401: authError, 403: authError },
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'integer' },
+              },
+            ],
+            responses: {
+              200: {
+                description: 'Saved recommendation',
+                content: json(objectSchema),
+              },
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/owner/profile-matches/{id}/draft-opener': {
           post: {
             tags: ['profiles', 'messages'],
             summary: 'Draft a safe opener for owner review without sending it',
-            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'integer' },
+              },
+            ],
             requestBody: { required: false, content: json(objectSchema) },
-            responses: { 200: { description: 'Message draft', content: json(objectSchema) }, 401: authError, 403: authError },
+            responses: {
+              200: {
+                description: 'Message draft',
+                content: json(objectSchema),
+              },
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/owner/profile-matches/{id}/confirm-contact': {
           post: {
             tags: ['profiles', 'messages'],
-            summary: 'Owner-confirmed request to start contact; still requires target consent',
-            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
-            requestBody: { required: true, content: json({ type: 'object', required: ['ownerConfirmed'], properties: { ownerConfirmed: { type: 'boolean', const: true }, note: { type: 'string' } } }) },
-            responses: { 200: { description: 'Pending target consent', content: json(objectSchema) }, 400: authError, 401: authError, 403: authError },
+            summary:
+              'Owner-confirmed request to start contact; still requires target consent',
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'integer' },
+              },
+            ],
+            requestBody: {
+              required: true,
+              content: json({
+                type: 'object',
+                required: ['ownerConfirmed'],
+                properties: {
+                  ownerConfirmed: { type: 'boolean', const: true },
+                  note: { type: 'string' },
+                },
+              }),
+            },
+            responses: {
+              200: {
+                description: 'Pending target consent',
+                content: json(objectSchema),
+              },
+              400: authError,
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/social-intents': {
           post: {
             tags: ['social-intents'],
             summary: 'Submit a user social intent for FitMeet matching',
-            requestBody: { required: true, content: json({ $ref: '#/components/schemas/SocialIntentInput' }) },
-            responses: { 201: { description: 'Social request and candidates', content: json(objectSchema) }, 401: authError, 403: authError },
+            requestBody: {
+              required: true,
+              content: json({ $ref: '#/components/schemas/SocialIntentInput' }),
+            },
+            responses: {
+              201: {
+                description: 'Social request and candidates',
+                content: json(objectSchema),
+              },
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/social-requests/{id}/matches': {
           get: {
             tags: ['matches'],
             summary: 'Read FitMeet-ranked matches for a social request',
-            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
-            responses: { 200: { description: 'Match results', content: json(objectSchema) }, 404: authError },
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'integer' },
+              },
+            ],
+            responses: {
+              200: {
+                description: 'Match results',
+                content: json(objectSchema),
+              },
+              404: authError,
+            },
           },
         },
         '/agent/social-requests/{id}/candidates/decision': {
           post: {
             tags: ['matches'],
-            summary: 'Confirm or reject a candidate and optionally send an intro',
-            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
-            requestBody: { required: true, content: json({ $ref: '#/components/schemas/CandidateDecisionInput' }) },
-            responses: { 200: { description: 'Candidate decision result', content: json(objectSchema) }, 400: authError, 403: authError },
+            summary:
+              'Confirm or reject a candidate and optionally send an intro',
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'integer' },
+              },
+            ],
+            requestBody: {
+              required: true,
+              content: json({
+                $ref: '#/components/schemas/CandidateDecisionInput',
+              }),
+            },
+            responses: {
+              200: {
+                description: 'Candidate decision result',
+                content: json(objectSchema),
+              },
+              400: authError,
+              403: authError,
+            },
           },
         },
         '/agent/messages/draft': {
@@ -1049,7 +1302,10 @@ export class AgentGatewayService {
             tags: ['messages'],
             summary: 'Generate an LLM-assisted message draft',
             requestBody: { required: true, content: json(objectSchema) },
-            responses: { 201: { description: 'Draft', content: json(objectSchema) }, 403: authError },
+            responses: {
+              201: { description: 'Draft', content: json(objectSchema) },
+              403: authError,
+            },
           },
         },
         '/agent/messages/send': {
@@ -1057,25 +1313,45 @@ export class AgentGatewayService {
             tags: ['messages'],
             summary: 'Send or queue an approved private message',
             requestBody: { required: true, content: json(objectSchema) },
-            responses: { 201: { description: 'Message result', content: json(objectSchema) }, 403: authError },
+            responses: {
+              201: {
+                description: 'Message result',
+                content: json(objectSchema),
+              },
+              403: authError,
+            },
           },
         },
         '/agent/inbox/conversations': {
           get: {
             tags: ['agent-inbox'],
             summary: 'OpenClaw token reads its agent inbox',
-            responses: { 200: { description: 'Inbox conversations', content: json(objectSchema) }, 401: authError },
+            responses: {
+              200: {
+                description: 'Inbox conversations',
+                content: json(objectSchema),
+              },
+              401: authError,
+            },
           },
         },
         '/agent/inbox/events': {
           get: {
             tags: ['agent-inbox'],
-            summary: 'Lightweight unread Agent Inbox event poll for OpenClaw background tasks',
+            summary:
+              'Lightweight unread Agent Inbox event poll for OpenClaw background tasks',
             parameters: [
-              { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
+              {
+                name: 'limit',
+                in: 'query',
+                schema: { type: 'integer', minimum: 1, maximum: 100 },
+              },
               { name: 'unreadOnly', in: 'query', schema: { type: 'boolean' } },
             ],
-            responses: { 200: { description: 'Inbox events', content: json(objectSchema) }, 401: authError },
+            responses: {
+              200: { description: 'Inbox events', content: json(objectSchema) },
+              401: authError,
+            },
           },
         },
         '/agent/inbox/events/ack': {
@@ -1083,27 +1359,57 @@ export class AgentGatewayService {
             tags: ['agent-inbox'],
             summary: 'Acknowledge processed Agent Inbox events',
             requestBody: { required: true, content: json(objectSchema) },
-            responses: { 200: { description: 'Ack result', content: json(objectSchema) }, 401: authError },
+            responses: {
+              200: { description: 'Ack result', content: json(objectSchema) },
+              401: authError,
+            },
           },
         },
         '/agent/inbox/conversations/{conversationId}/messages': {
           get: {
             tags: ['agent-inbox'],
-            summary: 'OpenClaw token reads messages from one inbox conversation',
+            summary:
+              'OpenClaw token reads messages from one inbox conversation',
             parameters: [
-              { name: 'conversationId', in: 'path', required: true, schema: { type: 'string' } },
-              { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 200 } },
+              {
+                name: 'conversationId',
+                in: 'path',
+                required: true,
+                schema: { type: 'string' },
+              },
+              {
+                name: 'limit',
+                in: 'query',
+                schema: { type: 'integer', minimum: 1, maximum: 200 },
+              },
             ],
-            responses: { 200: { description: 'Inbox messages', content: json(objectSchema) }, 401: authError, 403: authError },
+            responses: {
+              200: {
+                description: 'Inbox messages',
+                content: json(objectSchema),
+              },
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agent/inbox/conversations/{conversationId}/reply': {
           post: {
             tags: ['agent-inbox'],
             summary: 'OpenClaw token replies from its agent inbox',
-            parameters: [{ name: 'conversationId', in: 'path', required: true, schema: { type: 'string' } }],
+            parameters: [
+              {
+                name: 'conversationId',
+                in: 'path',
+                required: true,
+                schema: { type: 'string' },
+              },
+            ],
             requestBody: { required: true, content: json(objectSchema) },
-            responses: { 200: { description: 'Reply sent', content: json(objectSchema) }, 403: authError },
+            responses: {
+              200: { description: 'Reply sent', content: json(objectSchema) },
+              403: authError,
+            },
           },
         },
         '/agent/a2a/search': {
@@ -1113,42 +1419,100 @@ export class AgentGatewayService {
             parameters: [
               { name: 'q', in: 'query', schema: { type: 'string' } },
               { name: 'type', in: 'query', schema: { type: 'string' } },
-              { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
+              {
+                name: 'limit',
+                in: 'query',
+                schema: { type: 'integer', minimum: 1, maximum: 100 },
+              },
             ],
-            responses: { 200: { description: 'Agent cards', content: json({ type: 'array', items: objectSchema }) }, 401: authError },
+            responses: {
+              200: {
+                description: 'Agent cards',
+                content: json({ type: 'array', items: objectSchema }),
+              },
+              401: authError,
+            },
           },
         },
         '/agent/a2a/agents/{id}': {
           get: {
             tags: ['agent-to-agent'],
             summary: 'Read one discoverable agent with an Agent Token',
-            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
-            responses: { 200: { description: 'Agent profile', content: json(objectSchema) }, 404: authError },
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'integer' },
+              },
+            ],
+            responses: {
+              200: {
+                description: 'Agent profile',
+                content: json(objectSchema),
+              },
+              404: authError,
+            },
           },
         },
         '/agent/a2a/agents/{id}/message': {
           post: {
             tags: ['agent-to-agent'],
             summary: 'Send an A2A message with an Agent Token',
-            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'integer' },
+              },
+            ],
             requestBody: { required: true, content: json(objectSchema) },
-            responses: { 200: { description: 'Message dispatch result', content: json(objectSchema) }, 400: authError, 403: authError },
+            responses: {
+              200: {
+                description: 'Message dispatch result',
+                content: json(objectSchema),
+              },
+              400: authError,
+              403: authError,
+            },
           },
         },
         '/agent/a2a/agents/{id}/invite': {
           post: {
             tags: ['agent-to-agent'],
             summary: 'Invite a target agent to an activity with an Agent Token',
-            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'integer' },
+              },
+            ],
             requestBody: { required: true, content: json(objectSchema) },
-            responses: { 200: { description: 'Invitation result', content: json(objectSchema) }, 400: authError, 403: authError },
+            responses: {
+              200: {
+                description: 'Invitation result',
+                content: json(objectSchema),
+              },
+              400: authError,
+              403: authError,
+            },
           },
         },
         '/agent/autopilot/run-once': {
           post: {
             tags: ['agent-inbox'],
-            summary: 'Manually run one scoped Autopilot sweep for the Agent Token owner',
-            responses: { 200: { description: 'Autopilot summary', content: json(objectSchema) }, 401: authError },
+            summary:
+              'Manually run one scoped Autopilot sweep for the Agent Token owner',
+            responses: {
+              200: {
+                description: 'Autopilot summary',
+                content: json(objectSchema),
+              },
+              401: authError,
+            },
           },
         },
         '/public/social-intents': {
@@ -1156,16 +1520,32 @@ export class AgentGatewayService {
             tags: ['social-intents'],
             security: [],
             summary: 'Public no-token social intent submission',
-            requestBody: { required: true, content: json({ $ref: '#/components/schemas/SocialIntentInput' }) },
-            responses: { 201: { description: 'Public social intent', content: json(objectSchema) } },
+            requestBody: {
+              required: true,
+              content: json({ $ref: '#/components/schemas/SocialIntentInput' }),
+            },
+            responses: {
+              201: {
+                description: 'Public social intent',
+                content: json(objectSchema),
+              },
+            },
           },
         },
         '/agents/personal-token': {
           post: {
             tags: ['skills'],
             security: [{ userJwt: [] }],
-            summary: 'Create an OpenClaw binding token after user authentication',
-            responses: { 201: { description: 'Agent token result', content: json(objectSchema) }, 401: authError, 403: authError },
+            summary:
+              'Create an OpenClaw binding token after user authentication',
+            responses: {
+              201: {
+                description: 'Agent token result',
+                content: json(objectSchema),
+              },
+              401: authError,
+              403: authError,
+            },
           },
         },
         '/agents/search': {
@@ -1178,7 +1558,13 @@ export class AgentGatewayService {
               { name: 'type', in: 'query', schema: { type: 'string' } },
               { name: 'limit', in: 'query', schema: { type: 'integer' } },
             ],
-            responses: { 200: { description: 'Agent cards', content: json({ type: 'array', items: objectSchema }) }, 401: authError },
+            responses: {
+              200: {
+                description: 'Agent cards',
+                content: json({ type: 'array', items: objectSchema }),
+              },
+              401: authError,
+            },
           },
         },
         '/agents/{id}': {
@@ -1186,8 +1572,21 @@ export class AgentGatewayService {
             tags: ['agent-inbox'],
             security: [{ userJwt: [] }],
             summary: 'Fetch a single agent profile',
-            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
-            responses: { 200: { description: 'Agent profile', content: json(objectSchema) }, 404: authError },
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'integer' },
+              },
+            ],
+            responses: {
+              200: {
+                description: 'Agent profile',
+                content: json(objectSchema),
+              },
+              404: authError,
+            },
           },
         },
         '/agents/{id}/message': {
@@ -1195,9 +1594,23 @@ export class AgentGatewayService {
             tags: ['agent-inbox'],
             security: [{ userJwt: [] }],
             summary: 'Send a message to a target agent (A2A)',
-            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'integer' },
+              },
+            ],
             requestBody: { required: true, content: json(objectSchema) },
-            responses: { 200: { description: 'Message dispatch result', content: json(objectSchema) }, 400: authError, 403: authError },
+            responses: {
+              200: {
+                description: 'Message dispatch result',
+                content: json(objectSchema),
+              },
+              400: authError,
+              403: authError,
+            },
           },
         },
       },
@@ -1266,7 +1679,10 @@ export class AgentGatewayService {
             type: 'object',
             properties: {
               q: { type: 'string' },
-              type: { type: 'string', enum: ['user_agent', 'platform_agent', 'external_agent'] },
+              type: {
+                type: 'string',
+                enum: ['user_agent', 'platform_agent', 'external_agent'],
+              },
               limit: { type: 'integer', minimum: 1, maximum: 100 },
             },
           },
@@ -1377,7 +1793,8 @@ export class AgentGatewayService {
           id: 'configure_token',
           title: 'Paste FITMEET_AGENT_TOKEN',
           tool: 'fitmeet_get_agent_permissions',
-          success: 'The token resolves to the owner and permission mode is open.',
+          success:
+            'The token resolves to the owner and permission mode is open.',
         },
         {
           id: 'enable_heartbeat',
@@ -1489,8 +1906,7 @@ export class AgentGatewayService {
       permissions: ['basic', 'standard', 'open'],
       userAuth: {
         type: 'fitmeet_user_jwt',
-        rule:
-          'OpenClaw may call these endpoints only with explicit user consent and user-provided credentials. It must not store passwords or bypass real-name verification.',
+        rule: 'OpenClaw may call these endpoints only with explicit user consent and user-provided credentials. It must not store passwords or bypass real-name verification.',
         endpoints: [
           {
             name: 'register_user',
@@ -1788,7 +2204,11 @@ export class AgentGatewayService {
         path: '/api/agent/owner/social-profile/status',
         auth: bearer,
         input_schema: obj({}),
-        output_schema: obj({ profile: 'object', completion: 'object', visibility: 'object' }),
+        output_schema: obj({
+          profile: 'object',
+          completion: 'object',
+          visibility: 'object',
+        }),
         requires_user_confirmation: false,
         risk_level: 'low',
       },
@@ -1847,14 +2267,17 @@ export class AgentGatewayService {
           },
           ['ownerConfirmed'],
         ),
-        output_schema: obj({ profileDiscoverable: 'boolean', agentCanRecommendMe: 'boolean' }),
+        output_schema: obj({
+          profileDiscoverable: 'boolean',
+          agentCanRecommendMe: 'boolean',
+        }),
         requires_user_confirmation: true,
         risk_level: 'medium',
       },
       {
         name: 'fitmeet_generate_profile_questions',
         description:
-          "Return the canonical question set the agent should ask the owner in order to complete the social profile.",
+          'Return the canonical question set the agent should ask the owner in order to complete the social profile.',
         method: 'GET',
         path: '/api/agent/owner/social-profile/questions',
         auth: bearer,
@@ -1866,14 +2289,14 @@ export class AgentGatewayService {
       {
         name: 'fitmeet_save_profile_answer',
         description:
-          "Save a single answer to a profile question (key + answer). The agent calls this once per turn during the onboarding interview.",
+          'Save a single answer to a profile question (key + answer). The agent calls this once per turn during the onboarding interview.',
         method: 'POST',
         path: '/api/agent/owner/social-profile/answers',
         auth: bearer,
-        input_schema: obj(
-          { key: 'string', answer: 'string' },
-          ['key', 'answer'],
-        ),
+        input_schema: obj({ key: 'string', answer: 'string' }, [
+          'key',
+          'answer',
+        ]),
         output_schema: obj({ ok: 'boolean', completion: 'number' }),
         requires_user_confirmation: true,
         risk_level: 'low',
@@ -1885,8 +2308,16 @@ export class AgentGatewayService {
         method: 'POST',
         path: '/api/agent/owner/social-profile/ai-draft',
         auth: bearer,
-        input_schema: obj({ answers: 'array', rawText: 'string', source: 'string' }),
-        output_schema: obj({ draft: 'object', mode: 'string', completion: 'object' }),
+        input_schema: obj({
+          answers: 'array',
+          rawText: 'string',
+          source: 'string',
+        }),
+        output_schema: obj({
+          draft: 'object',
+          mode: 'string',
+          completion: 'object',
+        }),
         requires_user_confirmation: false,
         risk_level: 'low',
       },
@@ -1930,7 +2361,10 @@ export class AgentGatewayService {
         path: '/api/agent/owner/profile-matches/run-once',
         auth: bearer,
         input_schema: obj({}),
-        output_schema: obj({ matchedCount: 'number', recommendations: 'array' }),
+        output_schema: obj({
+          matchedCount: 'number',
+          recommendations: 'array',
+        }),
         requires_user_confirmation: false,
         risk_level: 'low',
       },
@@ -1978,7 +2412,10 @@ export class AgentGatewayService {
         path: '/api/agent/owner/profile-matches/:id/draft-opener',
         auth: bearer,
         input_schema: obj({ id: 'integer', tone: 'string' }, ['id']),
-        output_schema: obj({ draft: 'object', requiresOwnerConfirmation: 'boolean' }),
+        output_schema: obj({
+          draft: 'object',
+          requiresOwnerConfirmation: 'boolean',
+        }),
         requires_user_confirmation: false,
         risk_level: 'low',
       },
@@ -2000,7 +2437,7 @@ export class AgentGatewayService {
       {
         name: 'fitmeet_create_ai_social_request',
         description:
-          "Create a structured social request (running partner, coffee chat, dog walk, ...) on behalf of the owner. Returns the persisted request and an initial candidate list.",
+          'Create a structured social request (running partner, coffee chat, dog walk, ...) on behalf of the owner. Returns the persisted request and an initial candidate list.',
         method: 'POST',
         path: '/api/agent/social-requests',
         auth: bearer,
@@ -2050,7 +2487,7 @@ export class AgentGatewayService {
       {
         name: 'fitmeet_publish_ai_social_request',
         description:
-          "Publish an existing social request to the public hall (sync as a PublicSocialIntent) so other users / agents in the network can discover it.",
+          'Publish an existing social request to the public hall (sync as a PublicSocialIntent) so other users / agents in the network can discover it.',
         method: 'POST',
         path: '/api/agent/social-requests/:id/publish',
         auth: bearer,
@@ -2062,7 +2499,7 @@ export class AgentGatewayService {
       {
         name: 'fitmeet_run_match',
         description:
-          "Recompute the top-K candidate list for a given social request. Idempotent; replaces previous suggestions.",
+          'Recompute the top-K candidate list for a given social request. Idempotent; replaces previous suggestions.',
         method: 'POST',
         path: '/api/agent/social-requests/:id/match',
         auth: bearer,
@@ -2077,7 +2514,7 @@ export class AgentGatewayService {
       {
         name: 'fitmeet_get_candidates',
         description:
-          "Read the persisted candidate list for a social request, ordered by score DESC.",
+          'Read the persisted candidate list for a social request, ordered by score DESC.',
         method: 'GET',
         path: '/api/agent/social-requests/:id/candidates',
         auth: bearer,
@@ -2092,7 +2529,7 @@ export class AgentGatewayService {
       {
         name: 'fitmeet_get_matches',
         description:
-          "Refresh/read FitMeet-produced matches for a social request.",
+          'Refresh/read FitMeet-produced matches for a social request.',
         method: 'GET',
         path: '/api/agent/social-requests/:id/matches',
         auth: bearer,
@@ -2158,14 +2595,14 @@ export class AgentGatewayService {
       {
         name: 'fitmeet_mark_candidate_messaged',
         description:
-          "Mark a candidate as `messaged` after the agent has sent the first message through some other channel (idempotent).",
+          'Mark a candidate as `messaged` after the agent has sent the first message through some other channel (idempotent).',
         method: 'POST',
         path: '/api/agent/social-requests/:id/candidates/:candidateId/mark-messaged',
         auth: bearer,
-        input_schema: obj(
-          { id: 'integer', candidateId: 'integer' },
-          ['id', 'candidateId'],
-        ),
+        input_schema: obj({ id: 'integer', candidateId: 'integer' }, [
+          'id',
+          'candidateId',
+        ]),
         output_schema: obj({ id: 'integer', status: 'string' }),
         requires_user_confirmation: false,
         risk_level: 'low',
@@ -2286,7 +2723,7 @@ export class AgentGatewayService {
       {
         name: 'fitmeet_run_ai_social_autopilot_once',
         description:
-          "Run one autopilot tick for the owner: pick the next under-served social request, rerun match, and queue any high-risk action into the approval queue. Used by OpenClaw to drive the loop forward when allowed.",
+          'Run one autopilot tick for the owner: pick the next under-served social request, rerun match, and queue any high-risk action into the approval queue. Used by OpenClaw to drive the loop forward when allowed.',
         method: 'POST',
         path: '/api/agent/social-autopilot/run-once',
         auth: bearer,
@@ -2314,7 +2751,7 @@ export class AgentGatewayService {
       {
         name: 'fitmeet_approve_action',
         description:
-          "Approve a pending agent action by its approval id. Triggers automatic dispatch of the underlying action.",
+          'Approve a pending agent action by its approval id. Triggers automatic dispatch of the underlying action.',
         method: 'POST',
         path: '/api/agent/owner/approvals/:id/approve',
         auth: bearer,
@@ -2326,7 +2763,7 @@ export class AgentGatewayService {
       {
         name: 'fitmeet_reject_action',
         description:
-          "Reject a pending agent action by its approval id. The action will not be dispatched.",
+          'Reject a pending agent action by its approval id. The action will not be dispatched.',
         method: 'POST',
         path: '/api/agent/owner/approvals/:id/reject',
         auth: bearer,
@@ -2930,8 +3367,12 @@ export class AgentGatewayService {
     //    the DTO are optional individually.
     const targetUserId = dto.toUserId ?? dto.recipientUserId;
     const content = (dto.content ?? dto.text ?? '').trim();
+    const agentTaskId =
+      dto.agentTaskId ?? numberOrNull(dto.metadata?.agentTaskId) ?? null;
     if (!targetUserId) {
-      throw new BadRequestException('toUserId (or recipientUserId) is required');
+      throw new BadRequestException(
+        'toUserId (or recipientUserId) is required',
+      );
     }
     if (!content) {
       throw new BadRequestException('content (or text) is required');
@@ -2952,7 +3393,9 @@ export class AgentGatewayService {
     }
     const senderStatus = (sender as unknown as { status?: string }).status;
     if (senderStatus === 'banned' || senderStatus === 'suspended') {
-      throw new ForbiddenException('Delegating user is not allowed to send messages');
+      throw new ForbiddenException(
+        'Delegating user is not allowed to send messages',
+      );
     }
 
     // 4. Recipient must exist.
@@ -2964,9 +3407,8 @@ export class AgentGatewayService {
     }
 
     // 5. Block check: if recipient blocked the sender, intercept.
-    const blockedByRecipient = await this.safetyService.getBlockedUserIds(
-      targetUserId,
-    );
+    const blockedByRecipient =
+      await this.safetyService.getBlockedUserIds(targetUserId);
     if (blockedByRecipient.includes(conn.userId)) {
       await this.writeSafety(
         conn,
@@ -3113,6 +3555,7 @@ export class AgentGatewayService {
           inputSummary: content,
           outputSummary: `blocked_by_policy: ${verdict.blockedReason ?? 'policy'}`,
           payload: {
+            agentTaskId,
             messageType: dto.messageType ?? 'text',
             reasons: verdict.reasons,
             isFirstContact,
@@ -3128,6 +3571,7 @@ export class AgentGatewayService {
         const req = await this.approvalService.create({
           userId: conn.userId,
           agentConnectionId: conn.id,
+          agentTaskId,
           type: isFirstContact
             ? ApprovalType.FirstMessage
             : ApprovalType.SendMessage,
@@ -3139,6 +3583,7 @@ export class AgentGatewayService {
             messageType: dto.messageType ?? 'text',
             socialRequestId: dto.socialRequestId,
             activityId: dto.activityId,
+            agentTaskId,
             metadata: dto.metadata,
           },
           summary: verdict.summary,
@@ -3157,6 +3602,7 @@ export class AgentGatewayService {
           LoggedAction.SendMessage,
           {
             targetUserId,
+            agentTaskId,
             reason: verdict.reasons.join(','),
             approvalId: req.id,
             riskLevel: verdict.riskLevel,
@@ -3167,6 +3613,7 @@ export class AgentGatewayService {
           ownerUserId: conn.userId,
           actionType: AgentActionType.SendMessage,
           actionStatus: AgentActionStatus.PendingApproval,
+          agentTaskId,
           riskLevel: mapApprovalRiskToActionRisk(
             verdict.riskLevel as ApprovalRiskLevel,
           ),
@@ -3177,6 +3624,7 @@ export class AgentGatewayService {
           outputSummary: `pending_approval: ${req.summary}`,
           payload: {
             approvalId: req.id,
+            agentTaskId,
             approvalType: isFirstContact
               ? ApprovalType.FirstMessage
               : ApprovalType.SendMessage,
@@ -3208,6 +3656,7 @@ export class AgentGatewayService {
         actorUserId: conn.userId,
         metadata: {
           source: dto.metadata?.source ?? conn.agentName,
+          agentTaskId,
           socialRequestId: dto.socialRequestId ?? null,
           activityId: dto.activityId ?? null,
         },
@@ -3230,6 +3679,7 @@ export class AgentGatewayService {
           actorUserId: conn.userId,
           ownerUserId: conn.userId,
           agentConnectionId: conn.id,
+          agentTaskId,
           requestId: dto.socialRequestId ?? null,
           candidateRecordId: dto.metadata?.candidateRecordId ?? null,
           socialRequestId: dto.socialRequestId ?? null,
@@ -3274,6 +3724,7 @@ export class AgentGatewayService {
         source: dto.metadata?.source ?? conn.agentName,
         socialRequestId: dto.socialRequestId,
         activityId: dto.activityId,
+        agentTaskId,
         socketPushed,
         notificationCreated,
       },
@@ -3285,10 +3736,9 @@ export class AgentGatewayService {
       ownerUserId: conn.userId,
       actionType: AgentActionType.SendMessage,
       actionStatus: AgentActionStatus.Executed,
+      agentTaskId,
       riskLevel:
-        risk >= 0.4
-          ? AgentActionRiskLevel.Medium
-          : AgentActionRiskLevel.Low,
+        risk >= 0.4 ? AgentActionRiskLevel.Medium : AgentActionRiskLevel.Low,
       targetUserId,
       relatedSocialRequestId: dto.socialRequestId ?? null,
       relatedActivityId: dto.activityId ?? null,
@@ -3298,6 +3748,7 @@ export class AgentGatewayService {
         messageId: message.id,
         conversationId,
         messageType: dto.messageType ?? 'text',
+        agentTaskId,
         socketPushed,
         notificationCreated,
         approvalRequestId: dto.approvalRequestId ?? null,
@@ -3378,9 +3829,7 @@ export class AgentGatewayService {
       actionType: AgentActionType.AddFriend,
       actionStatus: AgentActionStatus.PendingApproval,
       riskLevel:
-        risk >= 0.3
-          ? AgentActionRiskLevel.Medium
-          : AgentActionRiskLevel.Low,
+        risk >= 0.3 ? AgentActionRiskLevel.Medium : AgentActionRiskLevel.Low,
       targetUserId: dto.targetUserId,
       inputSummary: dto.note ?? null,
       outputSummary: `contact_request_pending: id=${cr.id}`,
@@ -3685,10 +4134,9 @@ export class AgentGatewayService {
         // bio mentions the same window). No hard filter — availability is
         // not modelled per user yet.
         if (timeTokens.length) {
-          const haystack = `${user.bio ?? ''} ${userTags.join(' ')}`.toLowerCase();
-          const matchedWindow = timeTokens.find((t) =>
-            haystack.includes(t),
-          );
+          const haystack =
+            `${user.bio ?? ''} ${userTags.join(' ')}`.toLowerCase();
+          const matchedWindow = timeTokens.find((t) => haystack.includes(t));
           if (matchedWindow) {
             score += 5;
             reasonTags.push(`time_${matchedWindow}`);
@@ -3707,9 +4155,7 @@ export class AgentGatewayService {
             verified: user.verified,
             interestTags: user.interestTags ?? [],
             distanceKm:
-              distanceKm != null
-                ? Math.round(distanceKm * 100) / 100
-                : null,
+              distanceKm != null ? Math.round(distanceKm * 100) / 100 : null,
           },
           score: Math.min(Math.max(score, 0), 98),
           reasonTags,
@@ -3901,21 +4347,27 @@ export class AgentGatewayService {
     const score = Math.round(
       Math.max(
         28,
-        Math.min(98, topScore > 0 ? topScore * 0.7 + averageTop * 0.3 : fallbackScore),
+        Math.min(
+          98,
+          topScore > 0 ? topScore * 0.7 + averageTop * 0.3 : fallbackScore,
+        ),
       ),
     );
     const reasons = [
       dto.city ? `城市信号：${dto.city}` : '',
       dto.timePreference ? `时间偏好：${dto.timePreference}` : '',
-      (dto.interests ?? []).length ? `兴趣重合：${(dto.interests ?? []).slice(0, 3).join('、')}` : '',
+      (dto.interests ?? []).length
+        ? `兴趣重合：${(dto.interests ?? []).slice(0, 3).join('、')}`
+        : '',
       dto.verifiedOnly ? '优先实名认证用户' : '',
-      matchedCount > 0 ? `已找到 ${matchedCount} 个候选` : '候选池仍在等待画像信号',
+      matchedCount > 0
+        ? `已找到 ${matchedCount} 个候选`
+        : '候选池仍在等待画像信号',
     ].filter(Boolean);
 
     return {
       score,
-      confidence:
-        matchedCount > 0 ? (score >= 75 ? 'high' : 'medium') : 'low',
+      confidence: matchedCount > 0 ? (score >= 75 ? 'high' : 'medium') : 'low',
       source:
         process.env.DEEPSEEK_API_KEY || process.env.ENABLE_MATCH_REASONER_LLM
           ? 'ai_dynamic_with_deterministic_fallback'
@@ -4181,4 +4633,13 @@ function haversineKm(
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function numberOrNull(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
 }

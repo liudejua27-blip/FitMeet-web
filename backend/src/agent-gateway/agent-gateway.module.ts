@@ -4,6 +4,9 @@ import { AgentGatewayService } from './agent-gateway.service';
 import { AgentProfileService } from './agent-profile.service';
 import { AgentApprovalDispatcherService } from './agent-approval-dispatcher.service';
 import { ActivitiesModule } from '../activities/activities.module';
+import { SocialAgentAutopilotController } from './social-agent-autopilot.controller';
+import { SocialAgentChatController } from './social-agent-chat.controller';
+import { SocialAgentTasksController } from './social-agent-tasks.controller';
 import {
   AgentUserController,
   AgentApiController,
@@ -23,17 +26,14 @@ import { UserPreference } from './entities/user-preference.entity';
 import { MatchCandidate } from './entities/match-candidate.entity';
 import { AgentActivityLog } from './entities/agent-activity-log.entity';
 import { AgentActionLog } from './entities/agent-action-log.entity';
-import {
-  AgentRuntimeGoal,
-  AgentRuntimeLog,
-  AgentRuntimePlan,
-  AgentRuntimeResult,
-  AgentRuntimeStep,
-  AgentRuntimeTask,
-  AgentRuntimeToolCall,
-} from './entities/agent-runtime.entity';
+import { PaymentIntent } from './entities/payment-intent.entity';
 import { AgentTask, AgentTaskEvent } from './entities/agent-task.entity';
 import { AgentActionLogService } from './agent-action-log.service';
+import { AgentPermissionService } from './agent-permission.service';
+import { SocialAgentPlannerService } from './social-agent-planner.service';
+import { SocialAgentToolExecutorService } from './social-agent-tool-executor.service';
+import { SocialAgentAutopilotService } from './social-agent-autopilot.service';
+import { SocialAgentChatService } from './social-agent-chat.service';
 import { AgentWebhookService } from './agent-webhook.service';
 import { AiSocialAutopilotService } from './ai-social-autopilot.service';
 import { AgentDiscoveryService } from './agent-discovery.service';
@@ -85,13 +85,7 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
       MatchCandidate,
       AgentActivityLog,
       AgentActionLog,
-      AgentRuntimeTask,
-      AgentRuntimeGoal,
-      AgentRuntimePlan,
-      AgentRuntimeStep,
-      AgentRuntimeToolCall,
-      AgentRuntimeResult,
-      AgentRuntimeLog,
+      PaymentIntent,
       AgentTask,
       AgentTaskEvent,
       AgentApprovalRequest,
@@ -116,6 +110,11 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
     AgentApprovalDispatcherService,
     AgentSettingsService,
     AgentActionLogService,
+    AgentPermissionService,
+    SocialAgentPlannerService,
+    SocialAgentAutopilotService,
+    SocialAgentChatService,
+    SocialAgentToolExecutorService,
     AgentWebhookService,
     AiSocialAutopilotService,
     AgentDiscoveryService,
@@ -136,6 +135,9 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
     AgentControlController,
     PublicSocialIntentController,
     PublicSocialSkillsController,
+    SocialAgentAutopilotController,
+    SocialAgentChatController,
+    SocialAgentTasksController,
   ],
   exports: [
     AgentGatewayService,
@@ -144,6 +146,11 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
     AgentApprovalDispatcherService,
     AgentSettingsService,
     AgentActionLogService,
+    AgentPermissionService,
+    SocialAgentPlannerService,
+    SocialAgentAutopilotService,
+    SocialAgentChatService,
+    SocialAgentToolExecutorService,
     AgentWebhookService,
     AiSocialAutopilotService,
     ProfileMatchService,
