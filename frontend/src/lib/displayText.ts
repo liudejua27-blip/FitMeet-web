@@ -1,11 +1,26 @@
-const MOJIBAKE_RE =
-  /[�]|(?:[閿燂拷鐢ㄦ垜浣犵殑绀句氦闇€姹傚湪鍙戦€佹秷鎭敹钘忓尮閰嶇‘璁ら檮杩戠湡瀹炲€欓€夌粌鑽夌]|鈫|鉁|锛|銆|€)/u;
+const MOJIBAKE_TOKENS = [
+  '锟',
+  '鍐',
+  '鍙',
+  '鍦',
+  '鍏',
+  '鎴',
+  '鐢',
+  '閰',
+  '閿',
+  '鈥',
+  '鈧',
+  '�',
+];
 
 const TEST_TEXT_RE =
-  /(?:^|\b)(?:e2e|test|mock|dummy|fake|seed|demo-user|asdf|qwer|lorem)(?:\b|$)|测试|乱码|脏数据|免费约练测试|一周三点|[甲乙丙丁]\d{3,}/iu;
+  /(?:^|\b)(?:e2e|test|mock|dummy|fake|seed|demo-user|asdf|qwer|lorem)(?:\b|$)|测试|乱码|脏数据|免费约练测试|一周三点|一周三炮|[甲乙丙丁]\d{3,}|(?:^|\s)[\u4e00-\u9fa5]{1,2}\d{2,6}(?:\s|$)/iu;
+
+const SANITIZED_TEXT_FALLBACK = '内容已隐藏';
 
 export function looksGarbled(value: unknown): boolean {
-  return typeof value === 'string' && MOJIBAKE_RE.test(value);
+  if (typeof value !== 'string') return false;
+  return MOJIBAKE_TOKENS.some((token) => value.includes(token));
 }
 
 export function isTestLikeText(value: unknown): boolean {
@@ -40,11 +55,11 @@ export function isDisplayableRecordText(values: unknown[]): boolean {
 }
 
 export function sanitizeDisplayValue(value: unknown): unknown {
-  if (typeof value === 'string') return cleanDisplayText(value, '内容已隐藏');
+  if (typeof value === 'string') return cleanDisplayText(value, SANITIZED_TEXT_FALLBACK);
   if (Array.isArray(value)) {
     return value
       .map(sanitizeDisplayValue)
-      .filter((item) => !(typeof item === 'string' && item === '内容已隐藏'));
+      .filter((item) => !(typeof item === 'string' && item === SANITIZED_TEXT_FALLBACK));
   }
   if (value && typeof value === 'object') {
     return Object.fromEntries(
