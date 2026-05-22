@@ -4,9 +4,9 @@ import { useNavigate } from 'react-router-dom';
 import {
   socialAgentApi,
   type SocialAgentChatCandidate,
+  type SocialAgentChatReplanRunResult,
   type SocialAgentChatRunResult,
   type SocialAgentPermissionMode,
-  type SocialAgentReplanResult,
   type SocialAgentStepStatus,
 } from '../api/socialAgentApi';
 import { cleanDisplayArray, cleanDisplayText } from '../lib/displayText';
@@ -21,6 +21,34 @@ type StatusStep = {
   id: string;
   text: string;
   state: SocialAgentStepStatus;
+};
+
+type DraftPublishState = {
+  status: 'idle' | 'publishing' | 'published' | 'failed';
+  socialRequestId?: number | null;
+  publicIntentId?: string | null;
+  error?: string | null;
+};
+
+type CandidateActionState =
+  | 'idle'
+  | 'saving'
+  | 'saved'
+  | 'sending'
+  | 'sent'
+  | 'connecting'
+  | 'connected'
+  | 'pendingApproval'
+  | 'failed';
+
+type CandidateActionSnapshot = {
+  save: CandidateActionState;
+  send: CandidateActionState;
+  connect: CandidateActionState;
+  error?: string | null;
+  conversationId?: string | null;
+  messageId?: string | null;
+  friendRequestId?: string | null;
 };
 
 const defaultPrompt = '帮我找一个今晚在青岛可以一起轻松跑步的人，公开地点，低压力。';
@@ -51,10 +79,8 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
   const [result, setResult] = useState<SocialAgentChatRunResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
-  const [savingCandidateId, setSavingCandidateId] = useState<number | null>(null);
-  const [savedCandidateIds, setSavedCandidateIds] = useState<number[]>([]);
-  const [sendingUserId, setSendingUserId] = useState<number | null>(null);
-  const [connectingUserId, setConnectingUserId] = useState<number | null>(null);
+  const [draftPublish, setDraftPublish] = useState<DraftPublishState>({ status: 'idle' });
+  const [candidateStates, setCandidateStates] = useState<Record<number, CandidateActionSnapshot>>({});
   const [actionStatus, setActionStatus] = useState('');
   const abortRef = useRef<AbortController | null>(null);
 
@@ -78,10 +104,8 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
 
     setIsRunning(true);
     setIsPublishing(false);
-    setSavingCandidateId(null);
-    setSavedCandidateIds([]);
-    setSendingUserId(null);
-    setConnectingUserId(null);
+    setDraftPublish({ status: 'idle' });
+    setCandidateStates({});
     setResult(null);
     setActionStatus('');
     setStatuses([]);
@@ -163,6 +187,11 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
         text: '正在更新 Agent 执行计划',
         state: 'running',
       },
+      {
+        id: 'follow_up_refresh',
+        text: '等待计划更新后刷新草稿和候选人',
+        state: 'pending',
+      },
     ]);
     setMessages((items) => [
       ...items,
@@ -175,10 +204,13 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     ]);
 
     try {
-      const replan = await socialAgentApi.replanTask(taskId, {
+      const refreshed = await socialAgentApi.replanAndRunTask(taskId, {
         userMessage: message,
         reason: 'user_follow_up',
       });
+      setResult(refreshed);
+      setCandidateStates({});
+      setDraftPublish({ status: 'idle' });
       setStatuses([
         {
           id: 'follow_up_understand',
@@ -187,14 +219,19 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
         },
         {
           id: 'follow_up_replan',
-          text: replan.source === 'deepseek'
+          text: refreshed.replan.source === 'deepseek'
             ? '已调用 DeepSeek 更新 Agent 计划'
             : '已使用本地策略更新 Agent 计划',
           state: 'done',
         },
         {
+          id: 'follow_up_refresh',
+          text: `已刷新约练草稿和 ${refreshed.candidates.length} 位候选人`,
+          state: 'done',
+        },
+        {
           id: 'follow_up_confirmation',
-          text: '已保留候选卡片，后续动作仍需你确认',
+          text: '后续发布、收藏、发送和加好友仍需你确认',
           state: 'done',
         },
       ]);
@@ -203,7 +240,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
         {
           id: nextId('assistant'),
           role: 'assistant',
-          content: replanAssistantMessage(replan),
+          content: replanAssistantMessage(refreshed),
         },
       ]);
       setInput('');
@@ -234,24 +271,73 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     });
   };
 
+  const setCandidateAction = (
+    userId: number,
+    patch: Partial<CandidateActionSnapshot>,
+  ) => {
+    setCandidateStates((current) => ({
+      ...current,
+      [userId]: {
+        ...emptyCandidateActionState(),
+        ...(current[userId] ?? {}),
+        ...patch,
+      },
+    }));
+  };
+
   const publishDraft = async () => {
     if (!result?.taskId || !draft || isPublishing) return;
+    if (draftPublish.status === 'published') {
+      navigate('/hall');
+      return;
+    }
     setIsPublishing(true);
+    setDraftPublish((current) => ({ ...current, status: 'publishing', error: null }));
     setActionStatus('正在发布约练，并写入 Agent 审计记录...');
 
     try {
-      await socialAgentApi.publishSocialRequest(result.taskId, draft);
-      setActionStatus(`约练已发布。后续匹配、消息和候选动作都会关联 task #${result.taskId}。`);
+      const published = await socialAgentApi.publishSocialRequest(result.taskId, draft);
+      setDraftPublish({
+        status: 'published',
+        socialRequestId: published.socialRequestId,
+        publicIntentId: published.publicIntentId,
+        error: null,
+      });
+      setResult((current) =>
+        current
+          ? {
+              ...current,
+              status: published.taskStatus,
+              socialRequestDraft: current.socialRequestDraft
+                ? {
+                    ...current.socialRequestDraft,
+                    socialRequestId: published.socialRequestId,
+                    publicIntentId: published.publicIntentId,
+                    status: published.status,
+                    synced: published.synced,
+                  }
+                : current.socialRequestDraft,
+              candidates: current.candidates.map((candidate) => ({
+                ...candidate,
+                socialRequestId: candidate.socialRequestId ?? published.socialRequestId,
+              })),
+            }
+          : current,
+      );
+      setActionStatus(`约练已发布，已同步到大厅。后续匹配、消息和候选动作都会关联 task #${result.taskId}。`);
     } catch (error) {
-      setActionStatus(errorMessage(error, '发布失败，请稍后再试。'));
+      const message = errorMessage(error, '发布失败，请稍后再试。');
+      setDraftPublish((current) => ({ ...current, status: 'failed', error: message }));
+      setActionStatus(message);
     } finally {
       setIsPublishing(false);
     }
   };
 
   const saveCandidate = async (candidate: SocialAgentChatCandidate) => {
-    if (!result?.taskId || savingCandidateId) return;
-    setSavingCandidateId(candidate.userId);
+    const state = candidateStates[candidate.userId];
+    if (!result?.taskId || state?.save === 'saving') return;
+    setCandidateAction(candidate.userId, { save: 'saving', error: null });
     setActionStatus(`正在收藏 ${displayName(candidate)}，并通过 SaveCandidate 写入候选记录...`);
 
     try {
@@ -266,27 +352,30 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
           reasons: candidate.reasons,
         },
       });
-      setSavedCandidateIds((ids) =>
-        ids.includes(candidate.userId) ? ids : [...ids, candidate.userId],
-      );
+      setCandidateAction(candidate.userId, { save: 'saved', error: null });
       setActionStatus(`${displayName(candidate)} 已收藏，候选状态已持久化并关联 task #${result.taskId}。`);
     } catch (error) {
-      setActionStatus(errorMessage(error, '收藏失败，请稍后再试。'));
-    } finally {
-      setSavingCandidateId(null);
+      const message = errorMessage(error, '收藏失败，请稍后再试。');
+      setCandidateAction(candidate.userId, { save: 'failed', error: message });
+      setActionStatus(message);
     }
   };
 
   const sendMessage = async (candidate: SocialAgentChatCandidate) => {
     const message = cleanDisplayText(candidate.suggestedMessage, '').trim();
-    if (!result?.taskId || !message || sendingUserId) return;
-    setSendingUserId(candidate.userId);
+    const state = candidateStates[candidate.userId];
+    if (!result?.taskId || !message || state?.send === 'sending') return;
+    setCandidateAction(candidate.userId, { send: 'sending', error: null });
     setActionStatus(`正在发送给 ${displayName(candidate)}，并记录确认事件...`);
 
     try {
-      await socialAgentApi.sendCandidateMessage(result.taskId, {
+      const sent = await socialAgentApi.sendCandidateMessage(result.taskId, {
+        candidateUserId: candidate.userId,
         targetUserId: candidate.userId,
         message,
+        suggestedOpener: message,
+        candidateRecordId: candidate.candidateRecordId,
+        socialRequestId: candidate.socialRequestId ?? draft?.socialRequestId ?? null,
         candidate: {
           userId: candidate.userId,
           nickname: candidate.nickname,
@@ -296,21 +385,48 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
           socialRequestId: candidate.socialRequestId,
         },
       });
-      setActionStatus(`已发送给 ${displayName(candidate)}，消息已关联 task #${result.taskId}。`);
+      if (!sent.success || sent.status === 'failed') {
+        throw new Error('发送失败，请稍后再试。');
+      }
+      setCandidateAction(candidate.userId, {
+        send: sent.status === 'pending' || sent.status === 'pending_approval' ? 'pendingApproval' : 'sent',
+        error: null,
+        conversationId: sent.conversationId,
+        messageId: sent.messageId,
+      });
+      setResult((current) =>
+        current
+          ? {
+              ...current,
+              candidates: current.candidates.map((item) =>
+                item.userId === candidate.userId
+                  ? { ...item, status: sent.candidateStatus ?? 'messaged' }
+                  : item,
+              ),
+            }
+          : current,
+      );
+      setActionStatus(
+        sent.conversationId
+          ? `已发送给 ${displayName(candidate)}，可前往消息查看。`
+          : `已发送给 ${displayName(candidate)}，消息已关联 task #${result.taskId}。`,
+      );
     } catch (error) {
-      setActionStatus(errorMessage(error, '发送失败，请稍后再试。'));
-    } finally {
-      setSendingUserId(null);
+      const messageText = errorMessage(error, '发送失败，请稍后再试。');
+      setCandidateAction(candidate.userId, { send: 'failed', error: messageText });
+      setActionStatus(messageText);
     }
   };
 
   const connectCandidate = async (candidate: SocialAgentChatCandidate) => {
-    if (!result?.taskId || connectingUserId) return;
-    setConnectingUserId(candidate.userId);
+    const state = candidateStates[candidate.userId];
+    if (!result?.taskId || state?.connect === 'connecting') return;
+    setCandidateAction(candidate.userId, { connect: 'connecting', error: null });
     setActionStatus(`正在添加 ${displayName(candidate)} 为好友，并创建站内会话...`);
 
     try {
       const connection = await socialAgentApi.connectCandidate(result.taskId, {
+        candidateUserId: candidate.userId,
         candidateRecordId: candidate.candidateRecordId,
         socialRequestId: candidate.socialRequestId ?? draft?.socialRequestId ?? null,
         targetUserId: candidate.userId,
@@ -321,16 +437,35 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
           reasons: candidate.reasons,
         },
       });
+      if (!connection.success || connection.status === 'failed') {
+        throw new Error('加好友失败，请稍后再试。');
+      }
       if (connection.conversationId) {
+        setCandidateAction(candidate.userId, {
+          connect: 'connected',
+          error: null,
+          conversationId: connection.conversationId,
+          friendRequestId: connection.friendRequestId,
+        });
         setActionStatus(`${displayName(candidate)} 已加为好友，正在进入聊天。`);
         navigate(`/messages?conversationId=${encodeURIComponent(connection.conversationId)}`);
         return;
       }
-      setActionStatus(`${displayName(candidate)} 好友动作已提交，但暂未创建会话。`);
+      const pending = connection.status === 'pending' || connection.status === 'requested';
+      setCandidateAction(candidate.userId, {
+        connect: pending ? 'pendingApproval' : 'connected',
+        error: null,
+        friendRequestId: connection.friendRequestId,
+      });
+      setActionStatus(
+        pending
+          ? '好友申请已发送，等待对方确认。'
+          : `${displayName(candidate)} 好友动作已提交，但暂未创建会话。`,
+      );
     } catch (error) {
-      setActionStatus(errorMessage(error, '加好友失败，请稍后再试。'));
-    } finally {
-      setConnectingUserId(null);
+      const message = errorMessage(error, '加好友失败，请稍后再试。');
+      setCandidateAction(candidate.userId, { connect: 'failed', error: message });
+      setActionStatus(message);
     }
   };
 
@@ -364,7 +499,12 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
               ))}
 
               {draft ? (
-                <DraftCard draft={draft} isPublishing={isPublishing} onPublish={publishDraft} />
+                <DraftCard
+                  draft={draft}
+                  publishState={draftPublish}
+                  isPublishing={isPublishing}
+                  onPublish={publishDraft}
+                />
               ) : null}
 
               {result && candidates.length === 0 ? (
@@ -375,10 +515,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
                     <CandidateCard
                       key={`${candidate.userId}:${candidate.candidateRecordId ?? 'candidate'}`}
                       candidate={candidate}
-                      isSaved={savedCandidateIds.includes(candidate.userId)}
-                      isSaving={savingCandidateId === candidate.userId}
-                      isSending={sendingUserId === candidate.userId}
-                      isConnecting={connectingUserId === candidate.userId}
+                      state={candidateStates[candidate.userId] ?? emptyCandidateActionState()}
                       onSave={saveCandidate}
                       onSendMessage={sendMessage}
                       onConnect={connectCandidate}
@@ -496,14 +633,17 @@ function StatusIcon({ state }: { state: SocialAgentStepStatus }) {
 
 function DraftCard({
   draft,
+  publishState,
   isPublishing,
   onPublish,
 }: {
   draft: NonNullable<SocialAgentChatRunResult['socialRequestDraft']>;
+  publishState: DraftPublishState;
   isPublishing: boolean;
   onPublish: () => void;
 }) {
   const tags = cleanDisplayArray(draft.interestTags);
+  const isPublished = publishState.status === 'published';
   return (
     <article className="rounded-2xl border border-[#e6e6df] bg-white p-4 shadow-[0_8px_24px_rgba(32,33,36,0.06)]">
       <div className="flex items-start justify-between gap-4">
@@ -513,10 +653,18 @@ function DraftCard({
             {cleanDisplayText(draft.title, '待确认约练')}
           </h2>
         </div>
-        <span className="rounded-full bg-[#fff6df] px-3 py-1 text-xs font-black text-[#8a5a00]">
-          待确认
+        <span
+          className={clsx(
+            'rounded-full px-3 py-1 text-xs font-black',
+            isPublished ? 'bg-[#e7f7ed] text-[#168a55]' : 'bg-[#fff6df] text-[#8a5a00]',
+          )}
+        >
+          {isPublished ? '已发布' : '待确认'}
         </span>
       </div>
+      {isPublished ? (
+        <div className="mt-2 text-xs font-black text-[#168a55]">已同步到大厅</div>
+      ) : null}
       <p className="mt-3 text-sm leading-6 text-[#555650]">
         {cleanDisplayText(draft.description, cleanDisplayText(draft.rawText, 'AI 已生成约练草稿。'))}
       </p>
@@ -538,27 +686,26 @@ function DraftCard({
         disabled={isPublishing}
         className="mt-4 rounded-full bg-[#202124] px-4 py-2 text-sm font-black text-white transition hover:bg-[#343633] disabled:cursor-not-allowed disabled:bg-[#d2d2cc]"
       >
-        {isPublishing ? '正在发布...' : '确认发布约练'}
+        {isPublished ? '查看大厅展示' : isPublishing ? '发布中...' : '确认发布约练'}
       </button>
+      {publishState.status === 'failed' && publishState.error ? (
+        <div className="mt-3 rounded-xl bg-[#fff0ed] px-3 py-2 text-xs font-bold text-[#b42318]">
+          {publishState.error}
+        </div>
+      ) : null}
     </article>
   );
 }
 
 function CandidateCard({
   candidate,
-  isSaved,
-  isSaving,
-  isSending,
-  isConnecting,
+  state,
   onSave,
   onSendMessage,
   onConnect,
 }: {
   candidate: SocialAgentChatCandidate;
-  isSaved: boolean;
-  isSaving: boolean;
-  isSending: boolean;
-  isConnecting: boolean;
+  state: CandidateActionSnapshot;
   onSave: (candidate: SocialAgentChatCandidate) => void;
   onSendMessage: (candidate: SocialAgentChatCandidate) => void;
   onConnect: (candidate: SocialAgentChatCandidate) => void;
@@ -570,6 +717,15 @@ function CandidateCard({
   const warnings = cleanDisplayArray(candidate.risk?.warnings);
   const opener = cleanDisplayText(candidate.suggestedMessage, '');
   const canSave = Boolean(candidate.candidateRecordId || (candidate.socialRequestId && candidate.userId));
+  const isSaved = state.save === 'saved' || candidate.status === 'approved';
+  const isSaving = state.save === 'saving';
+  const isSending = state.send === 'sending';
+  const isSent = state.send === 'sent' || candidate.status === 'messaged';
+  const isSendPending = state.send === 'pendingApproval';
+  const isConnecting = state.connect === 'connecting';
+  const isConnected = state.connect === 'connected';
+  const isConnectPending = state.connect === 'pendingApproval';
+  const hasStatusNotice = isSent || isConnected || isSendPending || isConnectPending || Boolean(state.error);
 
   return (
     <article className="rounded-2xl border border-[#e6e6df] bg-white p-4 shadow-[0_8px_24px_rgba(32,33,36,0.06)]">
@@ -632,6 +788,20 @@ function CandidateCard({
         </p>
       ) : null}
 
+      {hasStatusNotice && (
+        <div
+          className={clsx(
+            'mt-3 rounded-xl px-3 py-2 text-xs font-bold leading-5',
+            state.error
+              ? 'bg-[#fff0ed] text-[#b42318]'
+              : 'bg-[#edf7ef] text-[#168a55]',
+          )}
+          role={state.error ? 'alert' : 'status'}
+        >
+          {state.error ?? candidateActionText(state)}
+        </div>
+      )}
+
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
@@ -644,18 +814,18 @@ function CandidateCard({
         <button
           type="button"
           onClick={() => onSendMessage(candidate)}
-          disabled={!opener || isSending}
+          disabled={!opener || isSending || isSent || isSendPending}
           className="rounded-full bg-[#202124] px-4 py-2 text-sm font-black text-white transition hover:bg-[#343633] disabled:cursor-not-allowed disabled:bg-[#d2d2cc]"
         >
-          {isSending ? '正在发送...' : '确认发送'}
+          {isSent ? '已发送' : isSendPending ? '等待确认' : isSending ? '发送中...' : '确认发送'}
         </button>
         <button
           type="button"
           onClick={() => onConnect(candidate)}
-          disabled={isConnecting || !candidate.userId}
+          disabled={isConnecting || isConnected || isConnectPending || !candidate.userId}
           className="rounded-full border border-[#202124] px-4 py-2 text-sm font-black text-[#202124] transition hover:bg-[#f1f1ee] disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {isConnecting ? '连接中...' : '加好友并聊天'}
+          {isConnected ? '已连接' : isConnectPending ? '等待确认' : isConnecting ? '连接中...' : '加好友并聊天'}
         </button>
       </div>
     </article>
@@ -668,6 +838,21 @@ function EmptyResult() {
       暂时没有找到符合条件的真实候选人。可以放宽城市、时间、距离或兴趣条件后重新搜索。
     </div>
   );
+}
+
+function emptyCandidateActionState(): CandidateActionSnapshot {
+  return { save: 'idle', send: 'idle', connect: 'idle', error: null };
+}
+
+function candidateActionText(state: CandidateActionSnapshot): string {
+  if (state.connect === 'connected') return '已连接，正在打开消息页。';
+  if (state.connect === 'pendingApproval') return '好友申请已发送，等待对方确认。';
+  if (state.send === 'sent') {
+    return state.conversationId ? '已发送，可前往消息查看。' : '已发送。';
+  }
+  if (state.send === 'pendingApproval') return '消息已进入待确认队列。';
+  if (state.save === 'saved') return '已收藏。';
+  return '操作已完成。';
 }
 
 function statusText(id: string, fallback: string, mode: SocialAgentPermissionMode): string {
@@ -685,14 +870,18 @@ function assistantMessage(result: SocialAgentChatRunResult): string {
   return `我找到了 ${result.candidates.length} 位真实候选人，优先推荐 ${displayName(first)}，匹配度 ${Math.round(first.score)}%。`;
 }
 
-function replanAssistantMessage(result: SocialAgentReplanResult): string {
-  const actionCount = result.plan.length;
-  const confirmationCount = result.plan.filter((step) => step.requiresUserConfirmation).length;
-  const sourceText = result.source === 'deepseek' ? 'DeepSeek' : '本地安全策略';
+function replanAssistantMessage(result: SocialAgentChatReplanRunResult): string {
+  const replan = result.replan;
+  const actionCount = replan.plan.length;
+  const confirmationCount = replan.plan.filter((step) => step.requiresUserConfirmation).length;
+  const sourceText = replan.source === 'deepseek' ? 'DeepSeek' : '本地安全策略';
+  const candidateText = result.candidates.length
+    ? `并刷新出 ${result.candidates.length} 位候选人`
+    : '但这次没有找到新的真实候选人';
   if (actionCount === 0) {
-    return `我已经把你的补充写入 task #${result.taskId}，但当前权限下没有可执行的新动作。你可以继续补充条件，或手动确认已有候选卡片。`;
+    return `我已经把你的补充写入 task #${result.taskId}，${candidateText}。当前权限下没有可执行的新动作，发布、收藏和发送仍不会自动发生。`;
   }
-  return `我已经根据你的补充重新规划 task #${result.taskId}。这次由${sourceText}生成 ${actionCount} 个下一步动作，其中 ${confirmationCount} 个需要你确认；已有候选人和约练草稿会继续保留，不会自动发送或发布。`;
+  return `我已经根据你的补充重新规划 task #${result.taskId}，${candidateText}。这次由${sourceText}生成 ${actionCount} 个下一步动作，其中 ${confirmationCount} 个需要你确认；不会自动发送或发布。`;
 }
 
 function displayName(candidate: SocialAgentChatCandidate): string {

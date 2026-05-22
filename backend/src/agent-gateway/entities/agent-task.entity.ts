@@ -78,6 +78,17 @@ export enum AgentTaskEventActor {
   Tool = 'tool',
 }
 
+export type AgentTaskShortTermMemory = Record<string, unknown> & {
+  steps?: Record<string, unknown>[];
+  candidates?: Record<string, unknown>[];
+  sentMessages?: Record<string, unknown>[];
+  receivedReplies?: Record<string, unknown>[];
+};
+
+export type AgentTaskMemory = Record<string, unknown> & {
+  shortTerm?: AgentTaskShortTermMemory;
+};
+
 @Entity('agent_tasks')
 @Index('idx_agent_tasks_owner_status_updated', [
   'ownerUserId',
@@ -91,38 +102,38 @@ export enum AgentTaskEventActor {
 })
 export class AgentTask {
   @PrimaryGeneratedColumn()
-  id: number;
+  id!: number;
 
   /** The real user on whose behalf the agent is acting. */
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'ownerUserId' })
-  ownerUser: User;
+  ownerUser!: User;
 
   @Column({ type: 'int' })
-  ownerUserId: number;
+  ownerUserId!: number;
 
   /** Acting agent connection (nullable for system-issued tasks). */
   @ManyToOne(() => AgentConnection, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'agentConnectionId' })
-  agentConnection: AgentConnection | null;
+  agentConnection!: AgentConnection | null;
 
   @Column({ type: 'int', nullable: true })
-  agentConnectionId: number | null;
+  agentConnectionId!: number | null;
 
   /** High-level task category, e.g. 'social_match', 'meet_invite', 'profile_refresh'. */
   @Column({ type: 'varchar', length: 80, default: 'social_goal' })
-  taskType: string;
+  taskType!: string;
 
   @Column({ type: 'varchar', length: 200, default: '' })
-  title: string;
+  title!: string;
 
   /** Natural-language goal the agent is trying to achieve. */
   @Column({ type: 'text', default: '' })
-  goal: string;
+  goal!: string;
 
   /** Initial input / structured context the agent was given. */
   @Column({ type: 'jsonb', default: () => "'{}'" })
-  input: Record<string, unknown>;
+  input!: Record<string, unknown>;
 
   /**
    * Current plan as an ordered list of steps. Each entry is an opaque
@@ -131,22 +142,22 @@ export class AgentTask {
    * without migrations.
    */
   @Column({ type: 'jsonb', default: () => "'[]'" })
-  plan: Record<string, unknown>[];
+  plan!: Record<string, unknown>[];
 
   /**
    * Append-only list of tool invocations made for this task. Mirror copy for
    * fast read-back; the canonical event stream lives in `agent_task_events`.
    */
   @Column({ type: 'jsonb', default: () => "'[]'" })
-  toolCalls: Record<string, unknown>[];
+  toolCalls!: Record<string, unknown>[];
 
   /** Final (or latest partial) result payload. */
   @Column({ type: 'jsonb', default: () => "'{}'" })
-  result: Record<string, unknown>;
+  result!: Record<string, unknown>;
 
   /** Runtime memory: bound conversations, cursors, reply summaries, decisions. */
   @Column({ type: 'jsonb', default: () => "'{}'" })
-  memory: Record<string, unknown>;
+  memory!: AgentTaskMemory;
 
   @Column({
     type: 'enum',
@@ -154,7 +165,7 @@ export class AgentTask {
     enumName: 'agent_task_status_enum',
     default: AgentTaskStatus.Pending,
   })
-  status: AgentTaskStatus;
+  status!: AgentTaskStatus;
 
   @Column({
     type: 'enum',
@@ -162,7 +173,7 @@ export class AgentTask {
     enumName: 'agent_task_permission_mode_enum',
     default: AgentTaskPermissionMode.Confirm,
   })
-  permissionMode: AgentTaskPermissionMode;
+  permissionMode!: AgentTaskPermissionMode;
 
   @Column({
     type: 'enum',
@@ -170,34 +181,34 @@ export class AgentTask {
     enumName: 'agent_task_risk_level_enum',
     default: AgentTaskRiskLevel.Low,
   })
-  riskLevel: AgentTaskRiskLevel;
+  riskLevel!: AgentTaskRiskLevel;
 
   /** Optional caller-supplied key for de-duplicating task creation. */
   @Column({ type: 'varchar', length: 120, nullable: true })
-  idempotencyKey: string | null;
+  idempotencyKey!: string | null;
 
   /** Reason for the current status (block reason / failure note / cancel note). */
   @Column({ type: 'text', nullable: true })
-  statusReason: string | null;
+  statusReason!: string | null;
 
   /** Structured error info when status = failed. */
   @Column({ type: 'jsonb', nullable: true })
-  error: Record<string, unknown> | null;
+  error!: Record<string, unknown> | null;
 
   @Column({ type: 'timestamptz', nullable: true })
-  startedAt: Date | null;
+  startedAt!: Date | null;
 
   @Column({ type: 'timestamptz', nullable: true })
-  awaitingConfirmationAt: Date | null;
+  awaitingConfirmationAt!: Date | null;
 
   @Column({ type: 'timestamptz', nullable: true })
-  completedAt: Date | null;
+  completedAt!: Date | null;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }
 
 @Entity('agent_task_events')
@@ -209,28 +220,28 @@ export class AgentTask {
 ])
 export class AgentTaskEvent {
   @PrimaryGeneratedColumn()
-  id: number;
+  id!: number;
 
   @ManyToOne(() => AgentTask, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'taskId' })
-  task: AgentTask;
+  task!: AgentTask;
 
   @Column({ type: 'int' })
-  taskId: number;
+  taskId!: number;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'ownerUserId' })
-  ownerUser: User;
+  ownerUser!: User;
 
   @Column({ type: 'int' })
-  ownerUserId: number;
+  ownerUserId!: number;
 
   @Column({
     type: 'enum',
     enum: AgentTaskEventType,
     enumName: 'agent_task_event_type_enum',
   })
-  eventType: AgentTaskEventType;
+  eventType!: AgentTaskEventType;
 
   @Column({
     type: 'enum',
@@ -238,24 +249,24 @@ export class AgentTaskEvent {
     enumName: 'agent_task_event_actor_enum',
     default: AgentTaskEventActor.Agent,
   })
-  actor: AgentTaskEventActor;
+  actor!: AgentTaskEventActor;
 
   /** Short human-readable summary, PII-stripped, safe to show in UI. */
   @Column({ type: 'varchar', length: 500, default: '' })
-  summary: string;
+  summary!: string;
 
   /** Structured machine-readable payload (plan diff, tool args, result, etc). */
   @Column({ type: 'jsonb', default: () => "'{}'" })
-  payload: Record<string, unknown>;
+  payload!: Record<string, unknown>;
 
   /** Optional reference to a plan step id (matches plan[].id on the task). */
   @Column({ type: 'varchar', length: 80, nullable: true })
-  stepId: string | null;
+  stepId!: string | null;
 
   /** Optional reference to a tool-call id (matches toolCalls[].id on the task). */
   @Column({ type: 'varchar', length: 80, nullable: true })
-  toolCallId: string | null;
+  toolCallId!: string | null;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 }

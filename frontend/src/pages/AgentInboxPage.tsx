@@ -23,6 +23,12 @@ type EventIntent = 'pending' | 'reply' | 'completed' | 'risk' | 'info';
 const eventTypeLabels: Record<string, string> = {
   'profile.match.recommended': '画像推荐',
   'social_request.match.recommended': '约练候选',
+  'agent.action.succeeded': 'Agent 动作完成',
+  'agent.action.failed': 'Agent 动作失败',
+  'agent.action.blocked': 'Agent 动作被拦截',
+  'social_agent.message.received': '收到用户回复',
+  'social_agent.reply.summarized': '已总结回复',
+  'social_agent.next_action.decided': '已决定下一步',
   'social_agent.action.result': '动作结果',
   'social_agent.reply.received': '收到回复',
   'social_agent.reply.sent': '已发送回复',
@@ -88,18 +94,27 @@ function eventLabel(event: AgentInboxEvent) {
 
 function eventIntent(event: AgentInboxEvent): EventIntent {
   const toolName = asText(event.metadata?.toolName);
+  const eventType = cleanDisplayText(event.eventType, '');
   const status = asText(event.metadata?.status).toLowerCase();
-  if (toolName === 'payment' || toolName === 'offline_meeting') return 'risk';
-  if (event.eventType.includes('reply') || event.conversationId || event.messageId) return 'reply';
   if (
-    event.eventType === 'profile.match.recommended' ||
-    event.eventType === 'social_request.match.recommended' ||
+    eventType === 'message.received' ||
+    eventType === 'social_agent.message.received' ||
+    eventType === 'social_agent.reply.received' ||
+    eventType.endsWith('.reply.received')
+  ) {
+    return 'reply';
+  }
+  if (toolName === 'payment' || toolName === 'offline_meeting') return 'risk';
+  if (
+    eventType === 'profile.match.recommended' ||
+    eventType === 'social_request.match.recommended' ||
     status.includes('pending') ||
     status.includes('approval')
   ) {
     return 'pending';
   }
   if (!event.unread) return 'completed';
+  if (eventType.startsWith('agent.action.') || eventType.startsWith('social_agent.')) return 'completed';
   return 'info';
 }
 
@@ -465,7 +480,7 @@ export const AgentInboxPage = memo(function AgentInboxPage() {
             helper="推荐、加好友、联系方式、线下见面与支付都会停在这里"
           />
           <SummaryCard
-            label="Agent 已完成"
+            label="Agent 做了什么"
             value={completedEvents.length}
             helper={`当前展示最近 ${events.length} 条可审计事件`}
           />
@@ -583,7 +598,7 @@ export const AgentInboxPage = memo(function AgentInboxPage() {
             </Panel>
 
             <Panel
-              title="Agent 已完成"
+              title="Agent 做了什么"
               subtitle="可审计的推荐、工具调用、Inbox 写入和结果记录。"
               empty={completedEvents.length === 0 ? '暂无已完成事件。' : undefined}
             >
@@ -1089,6 +1104,8 @@ function ProfileRecommendationCard({
         </div>
       )}
 
+      <TraceMeta event={event} metadata={metadata} />
+
       {!hasDraft && suggestedOpener && (
         <div className="mt-3 rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2">
           <div className="text-[10px] font-black uppercase tracking-[0.14em] text-[#8C8A6E]">
@@ -1213,6 +1230,7 @@ function RequestRecommendationCard({ event }: { event: AgentInboxEvent }) {
           {cleanDisplayText(event.contentPreview, '推荐摘要已隐藏')}
         </p>
       )}
+      <TraceMeta event={event} metadata={metadata} />
       {candidates.length > 0 && (
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {candidates.slice(0, 4).map((candidate, index) => (
@@ -1244,6 +1262,35 @@ function RequestRecommendationCard({ event }: { event: AgentInboxEvent }) {
         </div>
       )}
     </article>
+  );
+}
+
+function TraceMeta({
+  event,
+  metadata,
+}: {
+  event: AgentInboxEvent;
+  metadata: Record<string, unknown>;
+}) {
+  const taskId = asDisplay(metadata.agentTaskId ?? metadata.taskId);
+  const requestId = asDisplay(event.requestId ?? metadata.requestId ?? metadata.socialRequestId);
+  const candidateRecordId = asDisplay(event.candidateRecordId ?? metadata.candidateRecordId);
+  const toolName = asText(metadata.toolName);
+  const items = [
+    taskId ? `Task #${taskId}` : '',
+    requestId ? `Request #${requestId}` : '',
+    candidateRecordId ? `Candidate #${candidateRecordId}` : '',
+    toolName ? `Tool ${toolLabels[toolName] || toolName}` : '',
+  ].filter(Boolean);
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-3 flex flex-wrap gap-1.5 text-[10px] font-bold text-[#5e5d4e]">
+      {items.map((item) => (
+        <span key={item} className="rounded-md border border-white/[0.06] bg-white/[0.03] px-2 py-1">
+          {item}
+        </span>
+      ))}
+    </div>
   );
 }
 

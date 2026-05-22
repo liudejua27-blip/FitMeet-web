@@ -168,9 +168,7 @@ export class MessagesService {
           online: true,
         };
       })
-      .filter((conv) =>
-        [conv.username, conv.lastMessage].every(isDisplayableText),
-      );
+      .filter((conv) => isDisplayableText(conv.username));
   }
 
   async getMessages(conversationId: string, userId: number) {

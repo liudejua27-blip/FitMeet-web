@@ -92,6 +92,10 @@ export interface SocialAgentReplanResult {
   replanAttempt: number;
 }
 
+export interface SocialAgentChatReplanRunResult extends SocialAgentChatRunResult {
+  replan: SocialAgentReplanResult;
+}
+
 export type SocialAgentChatStreamEvent =
   | { type: 'task'; taskId: number; status: SocialAgentTaskStatus }
   | {
@@ -114,25 +118,55 @@ type ReplanChatInput = {
 };
 
 type SendCandidateMessageInput = {
+  candidateUserId?: number;
   targetUserId: number;
   message: string;
+  suggestedOpener?: string;
   candidate?: Record<string, unknown>;
+  candidateRecordId?: number | null;
+  socialRequestId?: number | null;
 };
 
 type SaveCandidateInput = {
   candidateRecordId?: number | null;
   socialRequestId?: number | null;
+  candidateUserId?: number | null;
   targetUserId?: number | null;
   candidate?: Record<string, unknown>;
 };
 
 type ConnectCandidateInput = SaveCandidateInput;
 
-export interface SocialAgentConnectCandidateResult {
+export interface SocialAgentPublishResult {
+  success: boolean;
+  taskId: number;
+  socialRequestId: number;
+  publicIntentId: string | null;
+  status: 'published' | 'synced' | 'completed' | string;
+  taskStatus: SocialAgentTaskStatus;
+  synced: boolean;
+  toolCallId?: string;
+  socialRequest: Record<string, unknown>;
+}
+
+export interface SocialAgentSendCandidateMessageResult {
+  success: boolean;
   taskId: number;
   targetUserId: number;
-  status: string;
+  status: 'sent' | 'failed' | string;
+  messageId: string | null;
+  conversationId: string | null;
+  candidateStatus?: string | null;
+  messageAction: SocialAgentToolCall;
+}
+
+export interface SocialAgentConnectCandidateResult {
+  success: boolean;
+  taskId: number;
+  targetUserId: number;
+  status: 'connected' | 'pending' | 'requested' | string;
   following?: boolean;
+  friendRequestId: string | null;
   conversationId: string | null;
   friendAction: SocialAgentToolCall;
 }
@@ -140,7 +174,7 @@ export interface SocialAgentConnectCandidateResult {
 export const socialAgentApi = {
   runChat: (data: RunChatInput) =>
     api
-      .request<SocialAgentChatRunResult>('/social-agent/chat/run', {
+      .requestProtected<SocialAgentChatRunResult>('/social-agent/chat/run', {
         method: 'POST',
         body: JSON.stringify(data),
       })
@@ -154,7 +188,7 @@ export const socialAgentApi = {
 
   publishSocialRequest: (taskId: number, draft: Record<string, unknown>) =>
     api
-      .request<{ taskId: number; socialRequest: Record<string, unknown> }>(
+      .requestProtected<SocialAgentPublishResult>(
         `/social-agent/chat/tasks/${taskId}/publish-social-request`,
         {
           method: 'POST',
@@ -165,7 +199,7 @@ export const socialAgentApi = {
 
   saveCandidate: (taskId: number, data: SaveCandidateInput) =>
     api
-      .request<SocialAgentToolCall>(`/social-agent/chat/tasks/${taskId}/save-candidate`, {
+      .requestProtected<SocialAgentToolCall>(`/social-agent/chat/tasks/${taskId}/save-candidate`, {
         method: 'POST',
         body: JSON.stringify(data),
       })
@@ -173,7 +207,7 @@ export const socialAgentApi = {
 
   sendCandidateMessage: (taskId: number, data: SendCandidateMessageInput) =>
     api
-      .request<SocialAgentToolCall>(`/social-agent/chat/tasks/${taskId}/send-message`, {
+      .requestProtected<SocialAgentSendCandidateMessageResult>(`/social-agent/chat/tasks/${taskId}/send-message`, {
         method: 'POST',
         body: JSON.stringify(data),
       })
@@ -181,7 +215,7 @@ export const socialAgentApi = {
 
   connectCandidate: (taskId: number, data: ConnectCandidateInput) =>
     api
-      .request<SocialAgentConnectCandidateResult>(
+      .requestProtected<SocialAgentConnectCandidateResult>(
         `/social-agent/chat/tasks/${taskId}/connect-candidate`,
         {
           method: 'POST',
@@ -192,7 +226,19 @@ export const socialAgentApi = {
 
   replanTask: (taskId: number, data: ReplanChatInput) =>
     api
-      .request<SocialAgentReplanResult>(`/social-agent/tasks/${taskId}/replan`, {
+      .requestProtected<SocialAgentReplanResult>(`/social-agent/tasks/${taskId}/replan`, {
+        method: 'POST',
+        body: JSON.stringify({
+          reason: data.reason ?? 'user_follow_up',
+          userMessage: data.userMessage,
+          failure: data.failure ?? null,
+        }),
+      })
+      .then(sanitizeSocialAgentResponse),
+
+  replanAndRunTask: (taskId: number, data: ReplanChatInput) =>
+    api
+      .requestProtected<SocialAgentChatReplanRunResult>(`/social-agent/chat/tasks/${taskId}/replan-run`, {
         method: 'POST',
         body: JSON.stringify({
           reason: data.reason ?? 'user_follow_up',
@@ -212,14 +258,9 @@ async function runSocialAgentStream(
   onEvent: (event: SocialAgentChatStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<SocialAgentChatRunResult> {
-  const token = api.getToken();
-  const response = await fetch(`${api.API_BASE_URL}/social-agent/chat/stream`, {
+  const response = await api.fetchWithAuth('/social-agent/chat/stream', {
     method: 'POST',
     signal,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
     body: JSON.stringify(data),
   });
 
@@ -269,6 +310,7 @@ async function runSocialAgentStream(
 }
 
 async function resolveStreamError(response: Response): Promise<string> {
+  if (response.status === 401) return api.AUTH_EXPIRED_MESSAGE;
   const body = await response.text().catch(() => '');
   if (!body.trim()) return response.statusText || 'Social Agent 请求失败。';
 

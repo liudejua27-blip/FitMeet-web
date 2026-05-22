@@ -13,6 +13,10 @@ import type { Request, Response } from 'express';
 
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
 import { AgentTaskPermissionMode } from './entities/agent-task.entity';
+import type {
+  SocialAgentPlanFailureContext,
+  SocialAgentPlanReason,
+} from './social-agent-planner.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
 
 type FitMeetRequest = Request & {
@@ -25,9 +29,19 @@ type RunBody = {
   idempotencyKey?: string | null;
 };
 
+type ReplanRunBody = {
+  userMessage?: string | null;
+  reason?: SocialAgentPlanReason;
+  failure?: SocialAgentPlanFailureContext | null;
+};
+
 type SendMessageBody = {
   targetUserId?: number;
+  candidateUserId?: number;
   message?: string;
+  suggestedOpener?: string;
+  candidateRecordId?: number | null;
+  socialRequestId?: number | null;
   candidate?: Record<string, unknown>;
 };
 
@@ -40,6 +54,7 @@ type SaveCandidateBody = {
 
 type ConnectCandidateBody = {
   targetUserId?: number | null;
+  candidateUserId?: number | null;
   candidateRecordId?: number | null;
   socialRequestId?: number | null;
   candidate?: Record<string, unknown>;
@@ -93,6 +108,15 @@ export class SocialAgentChatController {
     @Body() body: CreateSocialRequestDto & { socialRequestId?: number | null },
   ) {
     return this.chat.publishDraft(req.user.id, id, body);
+  }
+
+  @Post('tasks/:id/replan-run')
+  replanAndRefresh(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: ReplanRunBody,
+  ) {
+    return this.chat.replanAndRefresh(req.user.id, id, body ?? {});
   }
 
   @Post('tasks/:id/save-candidate')

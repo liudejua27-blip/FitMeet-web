@@ -18,6 +18,7 @@ export const MessagesPage = () => {
     selectConv,
     closeConv,
     sendMessage,
+    loadConversations,
   } = useMessageStore();
   const [inputText, setInputText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -33,8 +34,16 @@ export const MessagesPage = () => {
     const fromQuery =
       searchParams.get('conversationId') ?? searchParams.get('conversation');
     if (!fromQuery || activeConvId === fromQuery) return;
-    selectConv(fromQuery);
-  }, [activeConvId, searchParams, selectConv]);
+    let cancelled = false;
+    loadConversations()
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) selectConv(fromQuery);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConvId, loadConversations, searchParams, selectConv]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

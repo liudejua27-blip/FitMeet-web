@@ -33,10 +33,11 @@ export class FriendsService {
     });
 
     if (!existing) {
-      await this.followRepo.save({ followerId, followingId });
+      const saved = await this.followRepo.save({ followerId, followingId });
+      return { following: true, followId: saved.id };
     }
 
-    return { following: true };
+    return { following: true, followId: existing.id };
   }
 
   async isFollowing(followerId: number, followingId: number) {

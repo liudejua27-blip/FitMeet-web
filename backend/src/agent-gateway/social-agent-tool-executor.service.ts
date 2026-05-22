@@ -22,6 +22,7 @@ import {
 } from '../match/social-request-candidate.entity';
 import { MessagesService } from '../messages/messages.service';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
+import { UpdateSocialRequestDto } from '../social-requests/dto/update-social-request.dto';
 import { SocialRequestType } from '../social-requests/social-request.entity';
 import { SocialRequestsService } from '../social-requests/social-requests.service';
 import { SocialProfileService } from '../users/social-profile.service';
@@ -54,6 +55,7 @@ import {
   rememberSocialAgentShortTerm,
   shortTermMemoryList,
 } from './social-agent-memory.util';
+import { sanitizeCity } from '../common/city.util';
 
 export enum SocialAgentToolName {
   GetAiProfile = 'get_ai_profile',
@@ -570,7 +572,7 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.SendMessage:
         return this.sendMessage(task, input, stepId);
       case SocialAgentToolName.AddFriend:
-        return this.addFriend(task, input);
+        return this.addFriend(task, input, stepId);
       case SocialAgentToolName.InviteActivity:
       case SocialAgentToolName.OfflineMeeting:
         return this.createActivity(task, input, toolName, stepId);
@@ -639,8 +641,18 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<unknown> {
-    const rawText = this.string(input.rawText ?? input.goal ?? task.goal);
+    const mode = this.string(input.mode ?? input.intent);
+    const rawText = this.string(input.rawText ?? input.goal ?? task.goal) ?? task.goal;
     const agent = await this.loadAgentConnection(task.agentConnectionId);
+
+    if (mode === 'ai_draft' || mode === 'draft_only') {
+      return this.socialRequests.aiDraft(task.ownerUserId, rawText, {
+        agentTaskId: task.id,
+        agentId: task.agentConnectionId,
+        source: 'social_agent_tool_executor',
+      });
+    }
+
     if (!this.string(input.type) && rawText) {
       return this.socialRequests.createFromNaturalLanguage(
         rawText,
@@ -655,7 +667,8 @@ export class SocialAgentToolExecutorService {
       rawText,
       title: this.string(input.title ?? task.title),
       description: this.string(input.description ?? task.goal),
-      city: this.string(input.city),
+      city: sanitizeCity(input.city),
+      radiusKm: this.number(input.radiusKm) ?? undefined,
       activityType: this.string(input.activityType),
       interestTags: this.stringArray(input.interestTags ?? input.tags),
       metadata: {
@@ -663,7 +676,39 @@ export class SocialAgentToolExecutorService {
         agentTaskId: task.id,
       },
     };
-    return this.socialRequests.create(task.ownerUserId, dto, { agent });
+    const socialRequestId = this.number(input.socialRequestId ?? input.requestId);
+    const request = socialRequestId
+      ? await this.socialRequests.update(
+          socialRequestId,
+          task.ownerUserId,
+          dto as UpdateSocialRequestDto,
+          agent,
+        )
+      : await this.socialRequests.create(task.ownerUserId, dto, { agent });
+
+    const shouldSyncPublicIntent =
+      mode === 'publish' || this.bool(input.publish) === true || this.bool(input.syncPublicIntent) === true;
+    if (!shouldSyncPublicIntent) {
+      return {
+        ...this.asRecord(request),
+        socialRequest: request,
+        socialRequestId: request.id,
+      };
+    }
+
+    const publicIntent = await this.socialRequests.syncPublicIntentById(
+      request.id,
+      task.ownerUserId,
+    );
+    return {
+      ...this.asRecord(request),
+      socialRequest: request,
+      socialRequestId: request.id,
+      publicIntent,
+      publicIntentId: publicIntent.id,
+      publicIntentStatus: publicIntent.status,
+      synced: true,
+    };
   }
 
   private async searchMatches(
@@ -680,7 +725,7 @@ export class SocialAgentToolExecutorService {
     }
     return this.matchService.searchNearby({
       userId: task.ownerUserId,
-      city: this.string(input.city),
+      city: sanitizeCity(input.city),
       radiusKm: this.number(input.radiusKm) ?? undefined,
       activityType: this.string(input.activityType),
       interestTags: this.stringArray(input.interestTags ?? input.tags),
@@ -787,6 +832,29 @@ export class SocialAgentToolExecutorService {
       },
     );
     const output = this.asRecord(message);
+    const candidateInput = this.isRecord(input.candidate) ? input.candidate : {};
+    const candidateRecordId = this.number(
+      input.candidateRecordId ?? input.candidateId ?? candidateInput.candidateRecordId,
+    );
+    const socialRequestId = this.number(
+      input.socialRequestId ?? input.requestId ?? candidateInput.socialRequestId,
+    );
+    let candidate: { id: number; status: SocialRequestCandidateStatus } | null = null;
+    if (candidateRecordId && socialRequestId) {
+      try {
+        candidate = await this.matchService.markCandidateMessaged(
+          socialRequestId,
+          candidateRecordId,
+          task.ownerUserId,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `markCandidateMessaged failed for task=${task.id}, candidate=${candidateRecordId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
     this.rememberConversation(task, {
       conversationId,
       targetUserId: targetUserId ?? this.memoryTargetUserId(task),
@@ -807,19 +875,47 @@ export class SocialAgentToolExecutorService {
       toolName: SocialAgentToolName.SendMessage,
       stepId,
     });
-    return message;
+    return candidate ? { ...output, candidate } : output;
   }
 
   private async addFriend(
     task: AgentTask,
     input: Record<string, unknown>,
+    stepId: string,
   ): Promise<unknown> {
     const targetUserId = this.number(
       input.targetUserId ?? input.userId ?? input.followingId,
     );
     if (!targetUserId)
       throw new BadRequestException('targetUserId is required');
-    return this.friends.ensureFollowing(task.ownerUserId, targetUserId);
+    const friend = await this.friends.ensureFollowing(task.ownerUserId, targetUserId);
+    const friendRecord = this.asRecord(friend);
+    if (this.bool(input.openConversation) !== true) return friendRecord;
+
+    const conversation = await this.messages.startConversation(
+      task.ownerUserId,
+      targetUserId,
+      this.messageConversationOptions(task, stepId, {
+        ...(this.isRecord(input.metadata) ? input.metadata : {}),
+        toolName: SocialAgentToolName.AddFriend,
+        targetUserId,
+        candidateRecordId: this.number(input.candidateRecordId),
+        socialRequestId: this.number(input.socialRequestId ?? input.requestId),
+      }),
+    );
+    const conversationId = this.string(conversation.conversationId);
+    if (conversationId) {
+      this.rememberConversation(task, {
+        conversationId,
+        targetUserId,
+        sourceTool: SocialAgentToolName.AddFriend,
+      });
+    }
+    return {
+      ...friendRecord,
+      conversationId: conversationId ?? null,
+      targetUserId,
+    };
   }
 
   private async createActivity(
@@ -845,7 +941,7 @@ export class SocialAgentToolExecutorService {
       title:
         this.string(input.title ?? task.title) || this.activityTitle(toolName),
       description: this.string(input.description ?? input.note ?? task.goal),
-      city: this.string(input.city),
+      city: sanitizeCity(input.city),
       locationName: this.string(input.locationName ?? input.location),
       startTime: this.string(input.startTime ?? input.timeStart),
       durationMinutes: this.number(input.durationMinutes) ?? undefined,
@@ -2216,8 +2312,16 @@ export class SocialAgentToolExecutorService {
       throw new Error(`Failed to write agent_action_logs for ${toolName}`);
     }
 
-    if (this.shouldWriteActionResultInbox(toolName)) {
-      await this.writeActionResultInbox(task, toolName, call);
+    if (this.shouldWriteActionResultInbox(toolName) && task.agentConnectionId) {
+      try {
+        await this.writeActionResultInbox(task, toolName, call);
+      } catch (error) {
+        this.logger.warn(
+          `Failed to write action result inbox for task=${task.id}, tool=${toolName}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     }
   }
 
@@ -2270,12 +2374,8 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     toolName: SocialAgentToolName,
   ): void {
-    if (!this.shouldWriteActionResultInbox(toolName)) return;
-    if (!task.agentConnectionId) {
-      throw new BadRequestException(
-        `${toolName} requires agentConnectionId so messages, action logs, and Agent Inbox stay bound to the acting agent`,
-      );
-    }
+    void task;
+    void toolName;
   }
 
   private shouldWriteActionResultInbox(toolName: SocialAgentToolName): boolean {

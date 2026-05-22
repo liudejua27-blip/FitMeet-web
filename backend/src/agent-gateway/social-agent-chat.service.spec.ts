@@ -44,11 +44,13 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
 
 function makeHarness() {
   const savedEvents: Array<Record<string, unknown>> = [];
+  let latestTask: AgentTask | null = null;
   const taskRepo = {
     create: jest.fn((input) => input),
-    findOne: jest.fn().mockResolvedValue(null),
+    findOne: jest.fn(async () => latestTask),
     save: jest.fn(async (input) => {
       if (!input.id) input.id = 101;
+      latestTask = input as AgentTask;
       return input;
     }),
   };
@@ -87,14 +89,129 @@ function makeHarness() {
         fallbackReason: 'DEEPSEEK_API_KEY missing',
       };
     }),
+    replanTask: jest.fn(async (taskId: number, options: Record<string, unknown>) => ({
+      taskId,
+      permissionMode: AgentTaskPermissionMode.Confirm,
+      allowedActions: [SocialAgentAction.SearchProfiles],
+      plan: [
+        {
+          id: 'replan_search',
+          action: SocialAgentAction.SearchProfiles,
+          status: 'replanned',
+          requiresUserConfirmation: false,
+          riskLevel: 'low',
+          toolName: SocialAgentToolName.SearchMatches,
+          input: {},
+          rationale: 'follow-up refresh',
+        },
+      ],
+      source: 'fallback',
+      fallbackReason: 'DEEPSEEK_API_KEY missing',
+      reason: options.reason ?? 'user_follow_up',
+      replanAttempt: 1,
+    })),
   };
   const executor = {
-    executeToolAction: jest.fn().mockResolvedValue({
-      id: 'action_save_candidate_1',
-      toolName: SocialAgentToolName.SaveCandidate,
-      status: 'succeeded',
-      output: { id: 501, status: 'approved' },
-    }),
+    executeToolAction: jest.fn(
+      async (_taskId: number, toolName: SocialAgentToolName, input: Record<string, unknown>) => {
+      if (toolName === SocialAgentToolName.CreateSocialRequest && input.mode === 'ai_draft') {
+        return {
+          id: 'action_create_social_request_draft_1',
+          toolName,
+          status: 'succeeded',
+          output: {
+            draft: {
+              type: SocialRequestType.RunningPartner,
+              rawText: input.rawText,
+              title: '今晚青岛轻松跑步',
+              description: '公开地点，低压力，一起轻松跑。',
+              city: '青岛',
+              activityType: 'running',
+              interestTags: ['跑步', '低压力'],
+              radiusKm: 5,
+              safetyRequirement: SocialRequestSafety.LowRiskOnly,
+            },
+            card: { title: '今晚青岛轻松跑步' },
+            profileUsed: { city: '青岛' },
+          },
+          error: null,
+        };
+      }
+      if (toolName === SocialAgentToolName.CreateSocialRequest && input.mode === 'publish') {
+        return {
+          id: 'action_create_social_request_publish_1',
+          toolName,
+          status: 'succeeded',
+          output: {
+            id: 301,
+            socialRequestId: 301,
+            publicIntentId: 'social_request_301',
+            synced: true,
+            socialRequest: { id: 301, status: UserSocialRequestStatus.Matching },
+          },
+          error: null,
+        };
+      }
+      if (toolName === SocialAgentToolName.CreateSocialRequest) {
+        return {
+          id: 'action_create_social_request_private_1',
+          toolName,
+          status: 'succeeded',
+          output: { id: 301, socialRequestId: 301, status: UserSocialRequestStatus.Draft },
+          error: null,
+        };
+      }
+      if (toolName === SocialAgentToolName.SearchMatches) {
+        return {
+          id: 'action_search_matches_1',
+          toolName,
+          status: 'succeeded',
+          output: {
+            socialRequestId: 301,
+            candidates: [
+              {
+                userId: 22,
+                candidateRecordId: 501,
+                nickname: '小林',
+                avatar: '',
+                color: '#168a55',
+                score: 87.4,
+                level: 'high',
+                distanceKm: 2.1,
+                commonTags: ['跑步', '低压力'],
+                reasons: ['同城且时间匹配', '都偏好低压力运动'],
+                risk: { level: 'low', warnings: [] },
+                suggestedMessage: '今晚想在公开地点轻松跑一段吗？',
+                status: 'suggested',
+              },
+            ],
+          },
+          error: null,
+        };
+      }
+      if (toolName === SocialAgentToolName.AddFriend) {
+        return {
+          id: 'action_add_friend_1',
+          toolName,
+          status: 'succeeded',
+          output: {
+            id: 601,
+            followId: 601,
+            status: 'following',
+            conversationId: input.openConversation ? 'conv-22' : null,
+          },
+          error: null,
+        };
+      }
+      return {
+        id: 'action_save_candidate_1',
+        toolName,
+        status: 'succeeded',
+        output: { id: 501, status: 'approved' },
+        error: null,
+      };
+      },
+    ),
   };
   const socialProfiles = {
     get: jest.fn().mockResolvedValue({
@@ -105,51 +222,6 @@ function makeHarness() {
       agentCanRecommendMe: true,
     }),
   };
-  const socialRequests = {
-    aiDraft: jest.fn().mockResolvedValue({
-      draft: {
-        type: SocialRequestType.RunningPartner,
-        rawText: '今晚青岛轻松跑步',
-        title: '今晚青岛轻松跑步',
-        description: '公开地点，低压力，一起轻松跑。',
-        city: '青岛',
-        activityType: 'running',
-        interestTags: ['跑步', '低压力'],
-        radiusKm: 5,
-        safetyRequirement: SocialRequestSafety.LowRiskOnly,
-      },
-      card: { title: '今晚青岛轻松跑步' },
-      profileUsed: { city: '青岛' },
-    }),
-    create: jest.fn().mockResolvedValue({ id: 301, status: UserSocialRequestStatus.Draft }),
-    update: jest.fn().mockResolvedValue({ id: 301, status: UserSocialRequestStatus.Matching }),
-  };
-  const matchService = {
-    searchNearby: jest.fn(),
-    runMatch: jest.fn().mockResolvedValue({
-      socialRequestId: 301,
-      candidates: [
-        {
-          userId: 22,
-          candidateRecordId: 501,
-          nickname: '小林',
-          avatar: '',
-          color: '#168a55',
-          score: 87.4,
-          level: 'high',
-          distanceKm: 2.1,
-          commonTags: ['跑步', '低压力'],
-          reasons: ['同城且时间匹配', '都偏好低压力运动'],
-          risk: { level: 'low', warnings: [] },
-          suggestedMessage: '今晚想在公开地点轻松跑一段吗？',
-          status: 'suggested',
-        },
-      ],
-    }),
-  };
-  const messages = {
-    startConversation: jest.fn().mockResolvedValue({ conversationId: 'conv-22' }),
-  };
 
   const service = new SocialAgentChatService(
     taskRepo as never,
@@ -158,9 +230,6 @@ function makeHarness() {
     planner as never,
     executor as never,
     socialProfiles as never,
-    socialRequests as never,
-    matchService as never,
-    messages as never,
   );
 
   return {
@@ -168,16 +237,14 @@ function makeHarness() {
     savedEvents,
     taskRepo,
     connectionRepo,
+    planner,
     executor,
-    socialRequests,
-    matchService,
-    messages,
   };
 }
 
 describe('SocialAgentChatService', () => {
   it('creates a private draft request, persists candidates, and returns confirmation actions', async () => {
-    const { service, taskRepo, savedEvents, socialRequests, matchService } = makeHarness();
+    const { service, taskRepo, savedEvents, executor } = makeHarness();
 
     const result = await service.run(7, {
       goal: '帮我找一个今晚在青岛可以轻松跑步的人',
@@ -191,16 +258,22 @@ describe('SocialAgentChatService', () => {
         permissionMode: AgentTaskPermissionMode.Confirm,
       }),
     );
-    expect(socialRequests.create).toHaveBeenCalledWith(
-      7,
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.CreateSocialRequest,
       expect.objectContaining({
         visibility: SocialRequestVisibility.Private,
         status: UserSocialRequestStatus.Draft,
         requireUserConfirmation: true,
       }),
-      { agent: null },
+      7,
     );
-    expect(matchService.runMatch).toHaveBeenCalledWith(301, 7, { limit: 10 });
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.SearchMatches,
+      expect.objectContaining({ socialRequestId: 301, limit: 10 }),
+      7,
+    );
     expect(result.status).toBe(AgentTaskStatus.AwaitingConfirmation);
     expect(result.socialRequestDraft).toMatchObject({
       agentTaskId: 101,
@@ -230,21 +303,22 @@ describe('SocialAgentChatService', () => {
       AgentTaskEventType.TaskCreated,
     );
     const finalSavedTask = taskRepo.save.mock.calls.at(-1)?.[0] as AgentTask;
-    expect(finalSavedTask.memory.shortTerm).toMatchObject({
+    const shortTermMemory = finalSavedTask.memory.shortTerm;
+    expect(shortTermMemory).toMatchObject({
       taskId: 101,
       currentGoal: '帮我找一个今晚在青岛可以轻松跑步的人',
       permissionMode: AgentTaskPermissionMode.Confirm,
       currentStatus: AgentTaskStatus.AwaitingConfirmation,
       socialRequestId: 301,
     });
-    expect(finalSavedTask.memory.shortTerm.steps).toEqual(
+    expect(shortTermMemory?.steps).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'understand', status: 'done' }),
         expect.objectContaining({ id: 'search', status: 'done' }),
         expect.objectContaining({ id: 'awaiting_confirmation' }),
       ]),
     );
-    expect(finalSavedTask.memory.shortTerm.candidates).toEqual([
+    expect(shortTermMemory?.candidates).toEqual([
       expect.objectContaining({
         userId: 22,
         nickname: '小林',
@@ -264,7 +338,9 @@ describe('SocialAgentChatService', () => {
         goal: '今晚青岛轻松跑步',
         permissionMode: AgentTaskPermissionMode.Confirm,
       },
-      (event) => events.push(event),
+      (event) => {
+        events.push(event);
+      },
     );
 
     expect(events.map((event) => event.type)).toContain('step');
@@ -273,7 +349,7 @@ describe('SocialAgentChatService', () => {
   });
 
   it('publishes the staged draft only after explicit user confirmation', async () => {
-    const { service, taskRepo, socialRequests } = makeHarness();
+    const { service, taskRepo, executor } = makeHarness();
     taskRepo.findOne.mockResolvedValue(makeTask());
 
     const result = await service.publishDraft(7, 101, {
@@ -285,10 +361,13 @@ describe('SocialAgentChatService', () => {
       status: UserSocialRequestStatus.Draft,
     });
 
-    expect(socialRequests.update).toHaveBeenCalledWith(
-      301,
-      7,
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.CreateSocialRequest,
       expect.objectContaining({
+        socialRequestId: 301,
+        mode: 'publish',
+        publish: true,
         visibility: SocialRequestVisibility.Public,
         status: UserSocialRequestStatus.Matching,
         requireUserConfirmation: true,
@@ -297,9 +376,55 @@ describe('SocialAgentChatService', () => {
           confirmationSource: 'social_agent_chat',
         }),
       }),
-      null,
+      7,
     );
     expect(result.socialRequest).toMatchObject({ id: 301 });
+    expect(result).toMatchObject({
+      taskId: 101,
+      socialRequestId: 301,
+      publicIntentId: 'social_request_301',
+      toolCallId: 'action_create_social_request_publish_1',
+    });
+  });
+
+  it('replans a follow-up and refreshes the draft plus candidates through tools', async () => {
+    const { service, taskRepo, planner, executor } = makeHarness();
+    taskRepo.findOne.mockResolvedValue(makeTask({ goal: '今晚青岛轻松跑步' }));
+
+    const result = await service.replanAndRefresh(7, 101, {
+      userMessage: '改成明天杭州瑜伽搭子，先生成草稿，不要直接发',
+      reason: 'user_follow_up',
+    });
+
+    expect(planner.replanTask).toHaveBeenCalledWith(
+      101,
+      expect.objectContaining({
+        reason: 'user_follow_up',
+        userMessage: '改成明天杭州瑜伽搭子，先生成草稿，不要直接发',
+      }),
+    );
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.CreateSocialRequest,
+      expect.objectContaining({
+        mode: 'ai_draft',
+        rawText: expect.stringContaining('用户补充：改成明天杭州瑜伽搭子'),
+      }),
+      7,
+    );
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.SearchMatches,
+      expect.objectContaining({ socialRequestId: 301, limit: 10 }),
+      7,
+    );
+    expect(result.replan.replanAttempt).toBe(1);
+    expect(result.socialRequestDraft).toMatchObject({
+      agentTaskId: 101,
+      socialRequestId: 301,
+      mode: 'draft',
+    });
+    expect(result.candidates).toHaveLength(1);
   });
 
   it('saves a persisted candidate through the SaveCandidate tool', async () => {
@@ -325,7 +450,7 @@ describe('SocialAgentChatService', () => {
   });
 
   it('connects a candidate through AddFriend and opens a real conversation', async () => {
-    const { service, taskRepo, executor, messages, connectionRepo } = makeHarness();
+    const { service, taskRepo, executor, connectionRepo } = makeHarness();
     taskRepo.findOne.mockResolvedValue(makeTask({ agentConnectionId: 9 }));
     connectionRepo.findOne.mockResolvedValue({ id: 9, userId: 7 });
 
@@ -338,13 +463,12 @@ describe('SocialAgentChatService', () => {
     expect(executor.executeToolAction).toHaveBeenCalledWith(
       101,
       SocialAgentToolName.AddFriend,
-      expect.objectContaining({ targetUserId: 22, candidateRecordId: 501 }),
+      expect.objectContaining({
+        targetUserId: 22,
+        candidateRecordId: 501,
+        openConversation: true,
+      }),
       7,
-    );
-    expect(messages.startConversation).toHaveBeenCalledWith(
-      7,
-      22,
-      expect.objectContaining({ agentConnectionId: 9, ownerUserId: 7 }),
     );
     expect(result).toMatchObject({
       taskId: 101,

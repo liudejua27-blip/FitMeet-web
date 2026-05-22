@@ -3,8 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { cleanDisplayText, sanitizeForDisplay } from '../common/display-text.util';
-import { MatchService, MatchedCandidateView } from '../match/match.service';
-import { MessagesService } from '../messages/messages.service';
+import { sanitizeCity } from '../common/city.util';
+import type { MatchedCandidateView } from '../match/match.service';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
 import { UpdateSocialRequestDto } from '../social-requests/dto/update-social-request.dto';
 import {
@@ -12,10 +12,8 @@ import {
   SocialRequestSource,
   SocialRequestType,
   SocialRequestVisibility,
-  UserSocialRequest,
   UserSocialRequestStatus,
 } from '../social-requests/social-request.entity';
-import { SocialRequestsService } from '../social-requests/social-requests.service';
 import { SocialProfileService } from '../users/social-profile.service';
 import {
   AgentConnection,
@@ -30,7 +28,12 @@ import {
   AgentTaskRiskLevel,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
-import { SocialAgentPlannerService } from './social-agent-planner.service';
+import {
+  SocialAgentPlanFailureContext,
+  SocialAgentPlanReason,
+  SocialAgentPlannerResult,
+  SocialAgentPlannerService,
+} from './social-agent-planner.service';
 import {
   SocialAgentToolCallRecord,
   SocialAgentToolExecutorService,
@@ -95,7 +98,16 @@ type SocialAgentChatRunBody = {
   permissionMode?: AgentTaskPermissionMode;
   idempotencyKey?: string | null;
 };
+type SocialAgentChatReplanRunBody = {
+  userMessage?: string | null;
+  reason?: SocialAgentPlanReason;
+  failure?: SocialAgentPlanFailureContext | null;
+};
 type StreamEmit = (event: SocialAgentChatStreamEvent) => void | Promise<void>;
+
+export interface SocialAgentChatReplanRunResult extends SocialAgentChatRunResult {
+  replan: SocialAgentPlannerResult;
+}
 
 @Injectable()
 export class SocialAgentChatService {
@@ -109,9 +121,6 @@ export class SocialAgentChatService {
     private readonly planner: SocialAgentPlannerService,
     private readonly executor: SocialAgentToolExecutorService,
     private readonly socialProfiles: SocialProfileService,
-    private readonly socialRequests: SocialRequestsService,
-    private readonly matchService: MatchService,
-    private readonly messages: MessagesService,
   ) {}
 
   run(
@@ -129,6 +138,133 @@ export class SocialAgentChatService {
     return this.runInternal(ownerUserId, body, emit);
   }
 
+  async replanAndRefresh(
+    ownerUserId: number,
+    taskId: number,
+    body: SocialAgentChatReplanRunBody,
+  ): Promise<SocialAgentChatReplanRunResult> {
+    let task = await this.assertTaskOwner(taskId, ownerUserId);
+    const userMessage = cleanDisplayText(body.userMessage, '').trim();
+    if (!userMessage) throw new BadRequestException('请输入补充要求');
+
+    const previousGoal = cleanDisplayText(task.goal, '');
+    const refreshedGoal = this.composeFollowUpGoal(previousGoal, userMessage);
+    task.goal = refreshedGoal;
+    task.status = AgentTaskStatus.Planning;
+    task.statusReason = 'user_follow_up_replan_refresh';
+    task.result = {
+      ...(task.result ?? {}),
+      latestFollowUp: {
+        userMessage,
+        previousGoal,
+        refreshedGoal,
+        receivedAt: new Date().toISOString(),
+      },
+    };
+    rememberSocialAgentShortTerm(task, {
+      latestUserFollowUp: userMessage,
+      previousGoal,
+      currentGoal: refreshedGoal,
+    });
+    await this.taskRepo.save(task);
+    await this.writeEvent(
+      task,
+      AgentTaskEventType.FeedbackReceived,
+      '用户补充了社交需求',
+      { userMessage, previousGoal, refreshedGoal },
+      AgentTaskEventActor.User,
+    );
+
+    const visibleSteps: SocialAgentVisibleStep[] = [];
+    const done = async (
+      id: string,
+      label: string,
+      eventType: AgentTaskEventType,
+      payload: Record<string, unknown> = {},
+    ) => {
+      this.rememberShortTermStep(task, id, label, 'running');
+      const step: SocialAgentVisibleStep = { id, label, status: 'done' };
+      visibleSteps.push(step);
+      this.rememberShortTermStep(task, id, label, 'done');
+      await this.writeEvent(task, eventType, label, payload);
+    };
+
+    await done(
+      'follow_up_understand',
+      '正在理解你的补充要求',
+      AgentTaskEventType.GoalUnderstood,
+      { userMessage, refreshedGoal },
+    );
+
+    const replan = await this.planner.replanTask(taskId, {
+      reason: body.reason ?? 'user_follow_up',
+      userMessage,
+      failure: body.failure ?? null,
+    });
+    task = await this.assertTaskOwner(taskId, ownerUserId);
+    await done(
+      'follow_up_replan',
+      replan.source === 'fallback'
+        ? '已使用本地策略更新 Agent 计划'
+        : '已调用 DeepSeek 更新 Agent 计划',
+      AgentTaskEventType.PlanUpdated,
+      {
+        planSource: replan.source,
+        fallbackReason: replan.fallbackReason,
+        replanAttempt: replan.replanAttempt,
+        planStepCount: replan.plan.length,
+      },
+    );
+
+    const draftResult = await this.generateDraftWithTool(task, refreshedGoal);
+    task = await this.assertTaskOwner(taskId, ownerUserId);
+    const draft = this.buildDraft(
+      task.id,
+      draftResult.draft,
+      draftResult.card,
+      draftResult.profileUsed,
+    );
+    draft.socialRequestId = await this.createPrivateDraftRequest(task, draft);
+    task = await this.assertTaskOwner(taskId, ownerUserId);
+    await done('draft', '已重新生成约练草稿', AgentTaskEventType.ToolReturned, {
+      toolName: SocialAgentToolName.CreateSocialRequest,
+      draft: this.safeDraftForEvent(draft),
+    });
+
+    const candidates = await this.searchCandidates(task, draft);
+    task = await this.assertTaskOwner(taskId, ownerUserId);
+    await done('search', '已重新检索附近候选人', AgentTaskEventType.ToolReturned, {
+      toolName: SocialAgentToolName.SearchMatches,
+      socialRequestId: draft.socialRequestId,
+      candidateCount: candidates.length,
+    });
+    await done(
+      'rank',
+      '已根据新的时间、地点、兴趣和安全边界排序',
+      AgentTaskEventType.StepCompleted,
+      { candidateCount: candidates.length },
+    );
+    await done('reason', '已刷新推荐理由', AgentTaskEventType.ToolReturned, {
+      toolName: SocialAgentToolName.ExplainMatches,
+      topCandidateUserId: candidates[0]?.userId ?? null,
+    });
+    await done('done', '已根据补充要求刷新结果', AgentTaskEventType.TaskSucceeded, {
+      candidateCount: candidates.length,
+      requiresConfirmation: true,
+      replanAttempt: replan.replanAttempt,
+    });
+
+    const result = await this.completeRecommendationResult(
+      ownerUserId,
+      task,
+      visibleSteps,
+      draft,
+      candidates,
+      'follow_up_replan_refreshed',
+    );
+    return { ...result, replan };
+  }
+
   private async runInternal(
     ownerUserId: number,
     body: SocialAgentChatRunBody,
@@ -141,7 +277,7 @@ export class SocialAgentChatService {
     const idempotencyKey = cleanDisplayText(body.idempotencyKey, '');
     const visibleSteps: SocialAgentVisibleStep[] = [];
 
-    const task = await this.createOrReuseTask({
+    let task = await this.createOrReuseTask({
       ownerUserId,
       goal,
       permissionMode,
@@ -196,7 +332,8 @@ export class SocialAgentChatService {
       },
     );
 
-    const draftResult = await this.socialRequests.aiDraft(ownerUserId, goal);
+    const draftResult = await this.generateDraftWithTool(task, goal);
+    task = await this.assertTaskOwner(task.id, ownerUserId);
     const draft = this.buildDraft(
       task.id,
       draftResult.draft,
@@ -204,13 +341,14 @@ export class SocialAgentChatService {
       draftResult.profileUsed,
     );
 
-    const stagedRequest = await this.createPrivateDraftRequest(ownerUserId, task, draft);
-    draft.socialRequestId = stagedRequest.id;
+    draft.socialRequestId = await this.createPrivateDraftRequest(task, draft);
+    task = await this.assertTaskOwner(task.id, ownerUserId);
 
-    const candidates = await this.searchCandidates(ownerUserId, draft);
+    const candidates = await this.searchCandidates(task, draft);
+    task = await this.assertTaskOwner(task.id, ownerUserId);
     await done('search', '正在检索附近候选人', AgentTaskEventType.ToolReturned, {
       toolName: SocialAgentToolName.SearchMatches,
-      socialRequestId: stagedRequest.id,
+      socialRequestId: draft.socialRequestId,
       candidateCount: candidates.length,
     });
 
@@ -236,57 +374,15 @@ export class SocialAgentChatService {
       requiresConfirmation: true,
     });
 
-    task.status = AgentTaskStatus.AwaitingConfirmation;
-    task.statusReason = 'recommendations_ready_waiting_user_confirmation';
-    this.rememberShortTermCandidates(task, draft, candidates);
-    this.rememberShortTermStep(
+    return this.completeRecommendationResult(
+      ownerUserId,
       task,
-      'awaiting_confirmation',
-      '等待用户确认下一步动作',
-      'awaiting_confirmation',
-    );
-    task.result = {
-      ...(task.result ?? {}),
-      chatRun: {
-        socialRequestId: draft.socialRequestId ?? null,
-        socialRequestDraft: this.safeDraftForEvent(draft),
-        candidateCount: candidates.length,
-        topCandidateUserId: candidates[0]?.userId ?? null,
-      },
-    };
-    task.memory = {
-      ...(task.memory ?? {}),
-      socialAgentChat: {
-        socialRequestId: draft.socialRequestId ?? null,
-        socialRequestDraft: this.safeDraftForEvent(draft),
-        candidates: candidates.map((candidate) => ({
-          userId: candidate.userId,
-          socialRequestId: candidate.socialRequestId,
-          candidateRecordId: candidate.candidateRecordId,
-          score: candidate.score,
-        })),
-      },
-    };
-    await this.taskRepo.save(task);
-
-    const events = await this.eventRepo.find({
-      where: { taskId: task.id, ownerUserId },
-      order: { createdAt: 'ASC', id: 'ASC' },
-      take: 500,
-    });
-
-    const result = {
-      taskId: task.id,
-      status: task.status,
       visibleSteps,
-      assistantMessage: this.assistantMessage(candidates),
-      socialRequestDraft: draft,
+      draft,
       candidates,
-      approvalRequiredActions: this.approvalActions(task.id, draft, candidates),
-      events: events.map((event) => this.toEventDto(event)),
-    };
-    await emit?.({ type: 'result', result });
-    return result;
+      'recommendations_ready_waiting_user_confirmation',
+      emit,
+    );
   }
 
   async publishDraft(
@@ -294,25 +390,80 @@ export class SocialAgentChatService {
     taskId: number,
     draft: CreateSocialRequestDto & { socialRequestId?: number | null },
   ) {
-    const task = await this.assertTaskOwner(taskId, ownerUserId);
-    const agent = await this.resolveAgentConnection(ownerUserId, task.agentConnectionId);
+    let task = await this.assertTaskOwner(taskId, ownerUserId);
     const requestId = this.number(draft.socialRequestId ?? draft.metadata?.socialRequestId);
     const dto = this.toPublishDto(task, draft);
-    const request = requestId
-      ? await this.socialRequests.update(requestId, ownerUserId, dto, agent)
-      : await this.socialRequests.create(ownerUserId, dto, { agent });
+    const publishAction = await this.executor.executeToolAction(
+      taskId,
+      SocialAgentToolName.CreateSocialRequest,
+      {
+        ...dto,
+        socialRequestId: requestId,
+        mode: 'publish',
+        publish: true,
+        syncPublicIntent: true,
+        metadata: {
+          ...(dto.metadata ?? {}),
+          confirmationSource: 'social_agent_chat',
+        },
+      },
+      ownerUserId,
+    );
+    if (publishAction.status !== 'succeeded') {
+      throw new BadRequestException(
+        cleanDisplayText(publishAction.error?.message, '发布约练失败'),
+      );
+    }
+
+    task = await this.assertTaskOwner(taskId, ownerUserId);
+    const output = this.isRecord(publishAction.output) ? publishAction.output : {};
+    const socialRequestId = this.number(output.socialRequestId ?? output.id ?? requestId);
+    if (!socialRequestId) throw new BadRequestException('发布约练缺少 socialRequestId');
+    const publicIntent = this.isRecord(output.publicIntent) ? output.publicIntent : {};
+    const publicIntentId =
+      cleanDisplayText(output.publicIntentId ?? publicIntent.id, '') || null;
+    const socialRequest = this.isRecord(output.socialRequest) ? output.socialRequest : output;
 
     await this.writeEvent(task, AgentTaskEventType.ConfirmationReceived, '用户确认发布约练', {
-      socialRequestId: request.id,
+      socialRequestId,
+      publicIntentId,
+      status: 'published',
+      toolName: SocialAgentToolName.CreateSocialRequest,
+      toolCallId: publishAction.id,
     });
     this.rememberShortTermStep(task, 'publish_social_request', '用户确认发布约练', 'done');
     rememberSocialAgentShortTerm(task, {
-      publishedSocialRequestId: request.id,
-      socialRequestId: request.id,
+      publishedSocialRequestId: socialRequestId,
+      publicIntentId,
+      socialRequestId,
+      publishStatus: 'published',
     });
+    task.status = AgentTaskStatus.Succeeded;
+    task.statusReason = 'social_request_published_and_synced';
+    task.completedAt = new Date();
+    task.result = {
+      ...(task.result ?? {}),
+      publishSocialRequest: {
+        socialRequestId,
+        publicIntentId,
+        status: 'published',
+        synced: true,
+        toolCallId: publishAction.id,
+      },
+    };
     await this.taskRepo.save(task);
 
-    return { taskId, socialRequest: sanitizeForDisplay(request) };
+    return {
+      success: true,
+      taskId,
+      socialRequestId,
+      publicIntentId,
+      status: 'published',
+      taskStatus: task.status,
+      synced: true,
+      toolCallId: publishAction.id,
+      socialRequest: sanitizeForDisplay(socialRequest),
+    };
   }
 
   async saveCandidate(
@@ -352,20 +503,40 @@ export class SocialAgentChatService {
   async sendCandidateMessage(
     ownerUserId: number,
     taskId: number,
-    body: { targetUserId?: number; message?: string; candidate?: Record<string, unknown> },
-  ): Promise<SocialAgentToolCallRecord> {
+    body: {
+      targetUserId?: number;
+      candidateUserId?: number;
+      message?: string;
+      suggestedOpener?: string;
+      candidateRecordId?: number | null;
+      socialRequestId?: number | null;
+      candidate?: Record<string, unknown>;
+    },
+  ): Promise<Record<string, unknown>> {
     await this.assertTaskOwner(taskId, ownerUserId);
-    const text = cleanDisplayText(body.message, '').trim();
-    if (!body.targetUserId || !text) {
+    const targetUserId = this.number(body.targetUserId ?? body.candidateUserId);
+    const text = cleanDisplayText(body.message ?? body.suggestedOpener, '').trim();
+    if (!targetUserId || !text) {
       throw new BadRequestException('请选择候选人并填写要发送的消息');
     }
+    const candidateRecordId = this.number(
+      body.candidateRecordId ?? body.candidate?.candidateRecordId,
+    );
+    const socialRequestId = this.number(
+      body.socialRequestId ?? body.candidate?.socialRequestId,
+    );
 
-    return this.executor.executeToolAction(
+    const messageAction = await this.executor.executeToolAction(
       taskId,
       SocialAgentToolName.SendMessage,
       {
-        targetUserId: body.targetUserId,
+        targetUserId,
+        candidateUserId: targetUserId,
         text,
+        message: text,
+        suggestedOpener: text,
+        candidateRecordId,
+        socialRequestId,
         candidate: body.candidate ?? {},
         metadata: {
           confirmationSource: 'social_agent_chat',
@@ -373,6 +544,21 @@ export class SocialAgentChatService {
       },
       ownerUserId,
     );
+    const output = this.isRecord(messageAction.output) ? messageAction.output : {};
+    const messageId = cleanDisplayText(output.id ?? output.messageId, '') || null;
+    const conversationId = cleanDisplayText(output.conversationId, '') || null;
+    const candidate = this.isRecord(output.candidate) ? output.candidate : null;
+
+    return {
+      success: messageAction.status === 'succeeded',
+      taskId,
+      targetUserId,
+      status: messageAction.status === 'succeeded' ? 'sent' : 'failed',
+      messageId,
+      conversationId,
+      candidateStatus: cleanDisplayText(candidate?.status, '') || null,
+      messageAction,
+    };
   }
 
   async connectCandidate(
@@ -380,13 +566,14 @@ export class SocialAgentChatService {
     taskId: number,
     body: {
       targetUserId?: number | null;
+      candidateUserId?: number | null;
       candidateRecordId?: number | null;
       socialRequestId?: number | null;
       candidate?: Record<string, unknown>;
     },
   ): Promise<Record<string, unknown>> {
-    const task = await this.assertTaskOwner(taskId, ownerUserId);
-    const targetUserId = this.number(body.targetUserId);
+    let task = await this.assertTaskOwner(taskId, ownerUserId);
+    const targetUserId = this.number(body.targetUserId ?? body.candidateUserId);
     if (!targetUserId) throw new BadRequestException('请选择要加好友的候选人');
 
     const friendAction = await this.executor.executeToolAction(
@@ -396,6 +583,7 @@ export class SocialAgentChatService {
         targetUserId,
         candidateRecordId: this.number(body.candidateRecordId),
         socialRequestId: this.number(body.socialRequestId),
+        openConversation: true,
         candidate: body.candidate ?? {},
         metadata: {
           confirmationSource: 'social_agent_chat',
@@ -408,34 +596,30 @@ export class SocialAgentChatService {
       return {
         taskId,
         targetUserId,
+        success: false,
         status: friendAction.status,
         friendAction,
+        friendRequestId: null,
         conversationId: null,
       };
     }
 
-    const agent = await this.resolveAgentConnection(ownerUserId, task.agentConnectionId);
-    const conversation = await this.messages.startConversation(ownerUserId, targetUserId, {
-      agentConnectionId: agent?.id ?? null,
-      ownerUserId,
-      actorUserId: ownerUserId,
-      metadata: {
-        source: 'social_agent_chat',
-        agentTaskId: taskId,
-        targetUserId,
-        candidateRecordId: this.number(body.candidateRecordId),
-        socialRequestId: this.number(body.socialRequestId),
-      },
-    });
+    const friendOutput = this.isRecord(friendAction.output) ? friendAction.output : {};
+    const friendRequestId = cleanDisplayText(
+      friendOutput.friendRequestId ?? friendOutput.followId ?? friendOutput.id,
+      '',
+    ) || null;
+    task = await this.assertTaskOwner(taskId, ownerUserId);
+    const conversationId = cleanDisplayText(friendOutput.conversationId, '') || null;
 
     await this.writeEvent(task, AgentTaskEventType.ConfirmationReceived, '用户确认加好友并进入聊天', {
       targetUserId,
-      conversationId: conversation.conversationId,
+      conversationId,
       friendActionId: friendAction.id,
     });
     this.rememberShortTermStep(task, 'connect_candidate', '用户确认加好友并进入聊天', 'done');
     rememberSocialAgentShortTerm(task, {
-      conversationId: conversation.conversationId,
+      conversationId,
       targetUserId,
       connectedCandidate: {
         targetUserId,
@@ -448,9 +632,11 @@ export class SocialAgentChatService {
     return {
       taskId,
       targetUserId,
+      success: true,
       status: 'connected',
       following: true,
-      conversationId: conversation.conversationId,
+      friendRequestId,
+      conversationId,
       friendAction,
     };
   }
@@ -496,16 +682,54 @@ export class SocialAgentChatService {
     return task;
   }
 
+  private async generateDraftWithTool(
+    task: AgentTask,
+    goal: string,
+  ): Promise<{
+    draft: CreateSocialRequestDto;
+    card: unknown;
+    profileUsed: unknown;
+  }> {
+    const call = await this.executor.executeToolAction(
+      task.id,
+      SocialAgentToolName.CreateSocialRequest,
+      {
+        mode: 'ai_draft',
+        rawText: goal,
+        goal,
+        metadata: {
+          agentTaskId: task.id,
+          source: 'social_agent_chat',
+        },
+      },
+      task.ownerUserId,
+    );
+    if (call.status !== 'succeeded') {
+      throw new BadRequestException(
+        cleanDisplayText(call.error?.message, '生成约练草稿失败'),
+      );
+    }
+    const output = this.isRecord(call.output) ? call.output : {};
+    if (!this.isRecord(output.draft)) {
+      throw new BadRequestException('生成约练草稿失败：缺少 draft');
+    }
+    return {
+      draft: output.draft as unknown as CreateSocialRequestDto,
+      card: output.card,
+      profileUsed: output.profileUsed,
+    };
+  }
+
   private async createPrivateDraftRequest(
-    ownerUserId: number,
     task: AgentTask,
     draft: SocialAgentRequestDraft,
-  ): Promise<UserSocialRequest> {
-    const agent = await this.resolveAgentConnection(ownerUserId, task.agentConnectionId);
-    return this.socialRequests.create(
-      ownerUserId,
+  ): Promise<number> {
+    const call = await this.executor.executeToolAction(
+      task.id,
+      SocialAgentToolName.CreateSocialRequest,
       {
         ...this.toDraftDto(draft),
+        mode: 'private_draft',
         metadata: {
           ...(draft.metadata ?? {}),
           agentTaskId: task.id,
@@ -513,15 +737,26 @@ export class SocialAgentChatService {
           publishPolicy: 'requires_user_confirmation',
         },
       },
-      { agent },
+      task.ownerUserId,
     );
+    if (call.status !== 'succeeded') {
+      throw new BadRequestException(
+        cleanDisplayText(call.error?.message, '创建私有约练草稿失败'),
+      );
+    }
+    const output = this.isRecord(call.output) ? call.output : {};
+    const socialRequestId = this.number(output.socialRequestId ?? output.id);
+    if (!socialRequestId) {
+      throw new BadRequestException('创建私有约练草稿失败：缺少 socialRequestId');
+    }
+    return socialRequestId;
   }
 
   private async readProfileSummary(ownerUserId: number): Promise<Record<string, unknown> | null> {
     try {
       const profile = await this.socialProfiles.get(ownerUserId);
       return {
-        city: profile.city ?? '',
+        city: sanitizeCity(profile.city),
         interestTags: profile.interestTags ?? [],
         availableTimes: profile.availableTimes ?? [],
         profileDiscoverable: profile.profileDiscoverable,
@@ -533,29 +768,113 @@ export class SocialAgentChatService {
   }
 
   private async searchCandidates(
-    ownerUserId: number,
+    task: AgentTask,
     draft: SocialAgentRequestDraft,
   ): Promise<SocialAgentChatCandidate[]> {
+    const input = draft.socialRequestId
+      ? { socialRequestId: draft.socialRequestId, limit: 10 }
+      : {
+          city: sanitizeCity(draft.city),
+          activityType: cleanDisplayText(draft.activityType, ''),
+          interestTags: Array.isArray(draft.interestTags) ? draft.interestTags : [],
+          radiusKm: typeof draft.radiusKm === 'number' ? draft.radiusKm : 5,
+          safetyRequirement: draft.safetyRequirement,
+          limit: 10,
+        };
+    const call = await this.executor.executeToolAction(
+      task.id,
+      SocialAgentToolName.SearchMatches,
+      input,
+      task.ownerUserId,
+    );
+    if (call.status !== 'succeeded') {
+      throw new BadRequestException(
+        cleanDisplayText(call.error?.message, '检索候选人失败'),
+      );
+    }
+    const matchedCandidates = this.readMatchedCandidates(call.output);
     if (draft.socialRequestId) {
-      const match = await this.matchService.runMatch(draft.socialRequestId, ownerUserId, {
-        limit: 10,
-      });
-      return match.candidates.map((candidate) =>
+      return matchedCandidates.map((candidate) =>
         this.toChatCandidate(draft.agentTaskId, draft.socialRequestId ?? null, candidate),
       );
     }
+    return matchedCandidates.map((candidate) =>
+      this.toChatCandidate(draft.agentTaskId, null, candidate),
+    );
+  }
 
-    const candidates = await this.matchService.searchNearby({
-      userId: ownerUserId,
-      city: cleanDisplayText(draft.city, ''),
-      activityType: cleanDisplayText(draft.activityType, ''),
-      interestTags: Array.isArray(draft.interestTags) ? draft.interestTags : [],
-      radiusKm: typeof draft.radiusKm === 'number' ? draft.radiusKm : 5,
-      safetyRequirement: draft.safetyRequirement,
-      agentAllowedRequired: true,
-      limit: 10,
+  private readMatchedCandidates(output: unknown): MatchedCandidateView[] {
+    const record = this.isRecord(output) ? output : {};
+    const candidates = Array.isArray(record.candidates)
+      ? record.candidates
+      : Array.isArray(record.value)
+        ? record.value
+        : [];
+      return candidates.filter(this.isRecord) as unknown as MatchedCandidateView[];
+  }
+
+  private async completeRecommendationResult(
+    ownerUserId: number,
+    task: AgentTask,
+    visibleSteps: SocialAgentVisibleStep[],
+    draft: SocialAgentRequestDraft,
+    candidates: SocialAgentChatCandidate[],
+    statusReason: string,
+    emit?: StreamEmit,
+  ): Promise<SocialAgentChatRunResult> {
+    task.status = AgentTaskStatus.AwaitingConfirmation;
+    task.statusReason = statusReason;
+    this.rememberShortTermCandidates(task, draft, candidates);
+    this.rememberShortTermStep(
+      task,
+      'awaiting_confirmation',
+      '等待用户确认下一步动作',
+      'awaiting_confirmation',
+    );
+    task.result = {
+      ...(task.result ?? {}),
+      chatRun: {
+        socialRequestId: draft.socialRequestId ?? null,
+        socialRequestDraft: this.safeDraftForEvent(draft),
+        candidateCount: candidates.length,
+        topCandidateUserId: candidates[0]?.userId ?? null,
+        refreshedAt: new Date().toISOString(),
+        statusReason,
+      },
+    };
+    task.memory = {
+      ...(task.memory ?? {}),
+      socialAgentChat: {
+        socialRequestId: draft.socialRequestId ?? null,
+        socialRequestDraft: this.safeDraftForEvent(draft),
+        candidates: candidates.map((candidate) => ({
+          userId: candidate.userId,
+          socialRequestId: candidate.socialRequestId,
+          candidateRecordId: candidate.candidateRecordId,
+          score: candidate.score,
+        })),
+      },
+    };
+    await this.taskRepo.save(task);
+
+    const events = await this.eventRepo.find({
+      where: { taskId: task.id, ownerUserId },
+      order: { createdAt: 'ASC', id: 'ASC' },
+      take: 500,
     });
-    return candidates.map((candidate) => this.toChatCandidate(draft.agentTaskId, null, candidate));
+
+    const result = {
+      taskId: task.id,
+      status: task.status,
+      visibleSteps,
+      assistantMessage: this.assistantMessage(candidates),
+      socialRequestDraft: draft,
+      candidates,
+      approvalRequiredActions: this.approvalActions(task.id, draft, candidates),
+      events: events.map((event) => this.toEventDto(event)),
+    };
+    await emit?.({ type: 'result', result });
+    return result;
   }
 
   private toChatCandidate(
@@ -604,7 +923,7 @@ export class SocialAgentChatService {
       rawText: cleanDisplayText(draft.rawText, ''),
       title: cleanDisplayText(draft.title, '约练草稿'),
       description: cleanDisplayText(draft.description, cleanDisplayText(draft.rawText, '')),
-      city: cleanDisplayText(draft.city, ''),
+      city: sanitizeCity(draft.city),
       radiusKm: typeof draft.radiusKm === 'number' ? draft.radiusKm : 5,
       interestTags: Array.isArray(draft.interestTags) ? draft.interestTags : [],
       activityType: cleanDisplayText(draft.activityType, ''),
@@ -631,6 +950,7 @@ export class SocialAgentChatService {
     return {
       ...draft,
       type: this.normalizeSocialRequestType(draft.type),
+      city: sanitizeCity(draft.city),
       status: UserSocialRequestStatus.Draft,
       visibility: SocialRequestVisibility.Private,
       requireUserConfirmation: true,
@@ -722,18 +1042,30 @@ export class SocialAgentChatService {
     return `我找到了 ${candidates.length} 位真实候选人。优先推荐 ${first.nickname}，匹配度 ${first.score}%，原因是 ${reason}。`;
   }
 
+  private composeFollowUpGoal(previousGoal: string, userMessage: string): string {
+    const prior = cleanDisplayText(previousGoal, '').trim();
+    const followUp = cleanDisplayText(userMessage, '').trim();
+    if (!prior) return followUp;
+    return [
+      '当前社交需求如下。用户补充拥有最高优先级；如果补充里出现“改成、换成、不要、先、明天、城市、活动类型”等约束，请覆盖原需求中的冲突字段。',
+      `原需求：${prior}`,
+      `用户补充：${followUp}`,
+    ].join('\n');
+  }
+
   private async writeEvent(
     task: AgentTask,
     eventType: AgentTaskEventType,
     summary: string,
     payload: Record<string, unknown> = {},
+    actor: AgentTaskEventActor = AgentTaskEventActor.Agent,
   ) {
     await this.eventRepo.save(
       this.eventRepo.create({
         taskId: task.id,
         ownerUserId: task.ownerUserId,
         eventType,
-        actor: AgentTaskEventActor.Agent,
+        actor,
         summary,
         payload: sanitizeForDisplay(payload) as Record<string, unknown>,
       }),

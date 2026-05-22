@@ -191,7 +191,7 @@ export const useMessageStore = create<MessageState>()(
               username: cleanDisplayText(c.username, 'FitMeet 用户'),
               avatar: cleanDisplayText(c.avatar, 'F'),
               color: c.color,
-              lastMessage: cleanDisplayText(c.lastMessage),
+              lastMessage: cleanDisplayText(c.lastMessage, '还没有消息'),
               time: cleanDisplayText(c.time),
               unread: c.unread || 0,
               online: c.online || false,
