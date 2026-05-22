@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { UserSocialProfile } from '../users/user-social-profile.entity';
 import { MatchPrivacySanitizer } from '../match/match-privacy-sanitizer.service';
+import { resolveDeepSeekModel } from '../common/deepseek.util';
 
 /**
  * AI Match Reasoner
@@ -354,8 +355,9 @@ export class MatchReasonerService {
     const baseUrl =
       this.config?.get<string>('DEEPSEEK_BASE_URL') ||
       'https://api.deepseek.com';
-    const model =
-      this.config?.get<string>('DEEPSEEK_MODEL') || 'deepseek-chat';
+    const model = resolveDeepSeekModel(
+      this.config?.get<string>('DEEPSEEK_MODEL'),
+    );
 
     const system = [
       '你是 FitMeet 的 AI 匹配解释器。',
@@ -461,8 +463,9 @@ export class MatchReasonerService {
     const baseUrl =
       this.config?.get<string>('DEEPSEEK_BASE_URL') ||
       'https://api.deepseek.com';
-    const model =
-      this.config?.get<string>('DEEPSEEK_MODEL') || 'deepseek-chat';
+    const model = resolveDeepSeekModel(
+      this.config?.get<string>('DEEPSEEK_MODEL'),
+    );
     const system = [
       '你是 FitMeet 的画像匹配二次评分器。',
       '确定性 CompatibilityScorerService 已经完成硬过滤、隐私过滤和基础评分。',

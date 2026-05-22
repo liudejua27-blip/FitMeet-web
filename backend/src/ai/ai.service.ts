@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { sanitizeCity } from '../common/city.util';
+import { resolveDeepSeekModel } from '../common/deepseek.util';
 
 /** 完整的社交需求草稿卡输出结构（用于站内 AI 助手页面）。 */
 export interface SocialRequestCard {
@@ -1299,8 +1300,9 @@ export class AIService {
     const baseUrl =
       this.config.get<string>('DEEPSEEK_BASE_URL') ||
       'https://api.deepseek.com';
-    const model =
-      this.config.get<string>('DEEPSEEK_MODEL') || 'deepseek-chat';
+    const model = resolveDeepSeekModel(
+      this.config.get<string>('DEEPSEEK_MODEL'),
+    );
 
     const res = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
       method: 'POST',
@@ -1570,8 +1572,9 @@ export class AIService {
     const baseUrl =
       this.config.get<string>('DEEPSEEK_BASE_URL') ||
       'https://api.deepseek.com';
-    const model =
-      this.config.get<string>('DEEPSEEK_MODEL') || 'deepseek-chat';
+    const model = resolveDeepSeekModel(
+      this.config.get<string>('DEEPSEEK_MODEL'),
+    );
 
     const res = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
       method: 'POST',

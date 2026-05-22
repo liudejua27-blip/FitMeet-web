@@ -14,6 +14,7 @@ import {
   AgentPermissionService,
   SocialAgentAction,
 } from './agent-permission.service';
+import { resolveDeepSeekModel } from '../common/deepseek.util';
 
 export type SocialAgentPlanSource = 'deepseek' | 'fallback';
 export type SocialAgentPlanStepStatus = 'planned' | 'replanned';
@@ -206,7 +207,9 @@ export class SocialAgentPlannerService {
 
     const baseUrl =
       this.config.get<string>('DEEPSEEK_BASE_URL') || 'https://api.deepseek.com';
-    const model = this.config.get<string>('DEEPSEEK_MODEL') || 'deepseek-chat';
+    const model = resolveDeepSeekModel(
+      this.config.get<string>('DEEPSEEK_MODEL'),
+    );
 
     const res = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
       method: 'POST',

@@ -55,6 +55,7 @@ import {
   rememberSocialAgentShortTerm,
   shortTermMemoryList,
 } from './social-agent-memory.util';
+import { resolveDeepSeekModel } from '../common/deepseek.util';
 import { sanitizeCity } from '../common/city.util';
 
 export enum SocialAgentToolName {
@@ -1839,8 +1840,9 @@ export class SocialAgentToolExecutorService {
       const baseUrl =
         this.config.get<string>('DEEPSEEK_BASE_URL') ||
         'https://api.deepseek.com';
-      const model =
-        this.config.get<string>('DEEPSEEK_MODEL') || 'deepseek-chat';
+      const model = resolveDeepSeekModel(
+        this.config.get<string>('DEEPSEEK_MODEL'),
+      );
       const res = await fetch(
         `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
         {
