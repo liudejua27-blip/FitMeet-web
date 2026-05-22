@@ -64,7 +64,7 @@ import { UsersModule } from './users/users.module';
           migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
           migrationsRun:
             nodeEnv === 'production' &&
-            configService.get<string>('DB_MIGRATIONS_RUN', 'true') !== 'false',
+            configService.get<string>('DB_MIGRATIONS_RUN', 'false') === 'true',
           synchronize:
             configService.get<string>('DB_SYNCHRONIZE', defaultSynchronize) ===
             'true',

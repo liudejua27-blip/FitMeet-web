@@ -24,9 +24,33 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+load_env_file() {
+  local env_file="$1"
+  local line key value bom line_number
+  bom=$'\xef\xbb\xbf'
+  line_number=0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line_number=$((line_number + 1))
+    line="${line#"$bom"}"
+    line="${line%$'\r'}"
+
+    if [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# ]]; then
+      continue
+    fi
+
+    if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      value="${BASH_REMATCH[2]}"
+      export "$key=$value"
+    else
+      echo "[WARN] Ignoring invalid env line $line_number in $env_file" >&2
+    fi
+  done < "$env_file"
+}
+
 if [[ -f "$REPO_ROOT/.env.production" ]]; then
-  # shellcheck disable=SC1090
-  set -a; source "$REPO_ROOT/.env.production"; set +a
+  load_env_file "$REPO_ROOT/.env.production"
 fi
 
 PATCH_FILE="${PATCH_FILE:-$SCRIPT_DIR/production-schema-patch-20260511.sql}"

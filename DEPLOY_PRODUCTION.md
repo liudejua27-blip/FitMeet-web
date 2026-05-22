@@ -7,7 +7,8 @@ This project is prepared for a single-server Docker Compose deployment:
 - Nginx serves `frontend/dist`
 - Nginx proxies `/api/` to the Nest backend container
 - The backend connects to Postgres, Redis, MongoDB, and Kafka on the Compose network
-- In production, TypeORM runs migrations automatically unless `DB_MIGRATIONS_RUN=false`
+- In production, TypeORM automatic migrations are disabled; schema changes are
+  applied manually through the SQL patch scripts in `backend/scripts/`
 
 ## 1. Server Prerequisites
 
@@ -157,20 +158,27 @@ Watch logs:
 docker compose -f docker-compose.prod.yml --env-file .env.production logs -f backend
 ```
 
-The backend should log Nest startup and TypeORM migrations. Production config uses:
+The backend should log Nest startup. Production disables TypeORM automatic
+migrations and synchronize mode to avoid migration transaction mode conflicts:
 
 ```text
 NODE_ENV=production
+DB_MIGRATIONS_RUN=false
+DB_SYNCHRONIZE=false
 synchronize=false
-migrationsRun=true
+migrationsRun=false
 ```
 
-Keep `DB_MIGRATIONS_RUN` unset or set to `true` for this release.
+Keep exactly one `DB_MIGRATIONS_RUN=false` entry in `.env.production`; remove
+older duplicate entries before deploying. `docker-compose.prod.yml` also pins
+the backend container to `DB_MIGRATIONS_RUN=false` and `DB_SYNCHRONIZE=false`.
 
-Manual migration commands are available if you need to run them explicitly:
+Do not run TypeORM migrations automatically in production. Apply schema changes
+through the reviewed SQL patch files under `backend/scripts/*.sql`, preferably via
+the unified script in Section 10:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.production exec backend pnpm run migration:run:prod
+bash backend/scripts/apply-production-schema-patch.sh
 ```
 
 The canonical production services are:
@@ -182,6 +190,10 @@ postgres
 mongo
 redis
 ```
+
+The production Nginx container healthcheck validates the loaded Nginx
+configuration with `nginx -t`; it does not request `/health` from Nginx. Use
+the public API health check below to verify backend routing through Nginx.
 
 ## 6. Confirm Agent Tables Exist
 
@@ -288,14 +300,20 @@ bash backend/scripts/apply-production-schema-patch.sh
 
 What the script does:
 
-1. Reads `DB_USERNAME` / `DB_DATABASE` from `.env.production`.
+1. Reads only valid `KEY=VALUE` entries from `.env.production`, skipping blank
+  lines and comment lines. Values are loaded literally, so special characters
+  like `#`, `$`, quotes, semicolons, and `=` inside the value are not executed.
+  At minimum, define `DB_USERNAME` and `DB_DATABASE` there or export them in
+  the shell before running the script.
 2. Runs `pg_dump` inside `fitness-postgres` and writes a gzipped backup to
    `/opt/fitmeet-db-backup/<db>-pre-patch-<timestamp>.sql.gz`.
 3. Pipes `backend/scripts/production-schema-patch-20260511.sql` into `psql`
    with `ON_ERROR_STOP=1`, then applies the idempotent follow-up patches:
    `agent-social-runtime-schema-patch-20260511.sql`,
-   `agent-schema-drift-fix-20260513.sql`, and
-   `fix-agent-log-fields-20260514.sql`. The SQL uses only
+  `agent-schema-drift-fix-20260513.sql`,
+  `fix-agent-log-fields-20260514.sql`,
+  `agent-task-runtime-schema-patch-20260519.sql`, and
+  `social-agent-final-schema-patch-20260519.sql`. The SQL uses only
    `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` /
    `CREATE INDEX IF NOT EXISTS` and is safe to re-run.
 4. Verifies that all required tables and columns now exist; exits non-zero and
@@ -381,6 +399,8 @@ The unified script includes:
 2. `agent-social-runtime-schema-patch-20260511.sql`
 3. `agent-schema-drift-fix-20260513.sql`
 4. `fix-agent-log-fields-20260514.sql`
+5. `agent-task-runtime-schema-patch-20260519.sql`
+6. `social-agent-final-schema-patch-20260519.sql`
 
 For an emergency one-off fix, run only this SQL after taking a database backup:
 
