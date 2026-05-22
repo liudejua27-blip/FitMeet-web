@@ -80,6 +80,12 @@ export class AgentControlController {
     return this.approvals.getPending(actor.userId);
   }
 
+  /** GET /api/agent/owner/pending-approvals */
+  @Get('owner/pending-approvals')
+  async ownerPending(@Req() req: JwtReq) {
+    return this.pending(req);
+  }
+
   /**
    * POST /api/agent/approvals
    * Manual creation entry point — used by tests, by the agent SDK
@@ -187,6 +193,12 @@ export class AgentControlController {
     };
   }
 
+  /** POST /api/agent/owner/approvals/:id/approve */
+  @Post('owner/approvals/:id/approve')
+  async approveOwner(@Req() req: JwtReq, @Param('id', ParseIntPipe) id: number) {
+    return this.approve(req, id);
+  }
+
   /** POST /api/agent/approvals/:id/reject */
   @Post('approvals/:id/reject')
   async reject(@Req() req: JwtReq, @Param('id', ParseIntPipe) id: number) {
@@ -217,6 +229,12 @@ export class AgentControlController {
       reason: 'user_rejected_pending_action',
     });
     return { ok: true, approvalId: id, status: row.status };
+  }
+
+  /** POST /api/agent/owner/approvals/:id/reject */
+  @Post('owner/approvals/:id/reject')
+  async rejectOwner(@Req() req: JwtReq, @Param('id', ParseIntPipe) id: number) {
+    return this.reject(req, id);
   }
 
   /** GET /api/agent/approvals/:id */

@@ -149,7 +149,7 @@ export const AgentControlCenterPage = memo(function AgentControlCenterPage() {
     try {
       const [s, a] = await Promise.all([
         api.request<AgentSettings>('/agent/permissions'),
-        api.request<ApprovalRequest[]>('/agent/approvals/pending'),
+        api.requestProtected<ApprovalRequest[]>('/agent/owner/pending-approvals'),
       ]);
       setSettings(s);
       setApprovals(a);

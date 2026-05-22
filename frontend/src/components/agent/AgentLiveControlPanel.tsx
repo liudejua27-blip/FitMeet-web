@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import * as api from '@/api/client';
 import { ApiError } from '@/api/client';
+import { agentApprovalsApi } from '@/api/agentApprovalsApi';
+import { useAuthStore } from '@/stores';
 import { AgentStatusBadge } from './AgentStatusBadge';
 
 type ConnectionSummary = {
@@ -35,7 +37,7 @@ type ApprovalRequest = {
   agentRationale?: string;
   payload?: Record<string, unknown>;
   riskLevel: string;
-  expiresAt: string;
+  expiresAt?: string;
   createdAt: string;
 };
 
@@ -125,6 +127,7 @@ function autopilotEnabled(p: AgentPermissions | null): boolean {
 }
 
 export function AgentLiveControlPanel() {
+  const openLogin = useAuthStore((state) => state.openLogin);
   const [connections, setConnections] = useState<ConnectionSummary[]>([]);
   const [activity, setActivity] = useState<ActivityLog[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
@@ -136,13 +139,23 @@ export function AgentLiveControlPanel() {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
+    if (!api.getToken()) {
+      setConnections([]);
+      setActivity([]);
+      setApprovals([]);
+      setPermissions(null);
+      setError('登录已过期，请重新登录。');
+      setLoading(false);
+      return;
+    }
+
     try {
       // 单个接口失败不应让整面板空白：分别 catch，落地空值，并把第一条非空
       // 错误暴露给用户。
       const [connsR, actR, pendingR, permR] = await Promise.allSettled([
         api.request<ConnectionSummary[]>('/agents/connections'),
         api.request<{ items?: ActivityLog[] }>('/agents/activity?page=1&limit=20'),
-        api.request<ApprovalRequest[]>('/agent/approvals/pending'),
+        agentApprovalsApi.pending(),
         api.request<AgentPermissions>('/agent/permissions'),
       ]);
       setConnections(connsR.status === 'fulfilled' ? connsR.value ?? [] : []);
@@ -186,9 +199,8 @@ export function AgentLiveControlPanel() {
   const handleApproval = async (id: number, decision: 'approve' | 'reject') => {
     setBusyApproval(id);
     try {
-      await api.request(`/agent/approvals/${id}/${decision}`, {
-        method: 'POST',
-      });
+      if (decision === 'approve') await agentApprovalsApi.approve(id);
+      else await agentApprovalsApi.reject(id);
       await refresh();
     } catch (e) {
       setError(
@@ -210,6 +222,11 @@ export function AgentLiveControlPanel() {
         <div className="agent-reserved-banner" role="alert">
           <span>ERROR</span>
           <p>{error}</p>
+          {error.includes('登录') && (
+            <button type="button" className="agent-action agent-action--primary" onClick={openLogin}>
+              重新登录
+            </button>
+          )}
         </div>
       )}
 

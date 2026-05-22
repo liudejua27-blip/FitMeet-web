@@ -128,11 +128,11 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
   ],
   controllers: [
     AgentUserController,
+    AgentControlController,
     AgentApiController,
     AgentProfileQAController,
     AgentSkillsController,
     MiniProgramController,
-    AgentControlController,
     PublicSocialIntentController,
     PublicSocialSkillsController,
     SocialAgentAutopilotController,

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { gatewayOverviewMetrics } from '@/data/agentMockData';
 import { AgentStatusBadge } from './AgentStatusBadge';
 import * as api from '@/api/client';
+import { agentApprovalsApi } from '@/api/agentApprovalsApi';
 
 type Metric = {
   labelZh: string;
@@ -30,12 +31,14 @@ export function AgentGatewayOverview() {
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      if (!api.getToken()) return;
+
       const [connsR, activityR, pendingR] = await Promise.allSettled([
         api.request<unknown[]>('/agents/connections'),
         api.request<{ items?: { createdAt?: string }[] }>(
           '/agents/activity?page=1&limit=50',
         ),
-        api.request<unknown[]>('/agent/approvals/pending'),
+        agentApprovalsApi.pending(),
       ]);
       if (cancelled) return;
 

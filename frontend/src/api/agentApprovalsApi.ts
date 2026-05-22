@@ -24,16 +24,16 @@ export interface ApprovalRequest {
 }
 
 export const agentApprovalsApi = {
-  pending: () => api.request<ApprovalRequest[]>('/agent/approvals/pending'),
-  get: (id: number) => api.request<ApprovalRequest>(`/agent/approvals/${id}`),
+  pending: () => api.requestProtected<ApprovalRequest[]>('/agent/owner/pending-approvals'),
+  get: (id: number) => api.requestProtected<ApprovalRequest>(`/agent/approvals/${id}`),
   approve: (id: number) =>
-    api.request<{ ok: boolean; status: ApprovalStatus; dispatched?: boolean }>(
-      `/agent/approvals/${id}/approve`,
+    api.requestProtected<{ ok: boolean; status: ApprovalStatus; dispatched?: boolean }>(
+      `/agent/owner/approvals/${id}/approve`,
       { method: 'POST' },
     ),
   reject: (id: number) =>
-    api.request<{ ok: boolean; status: ApprovalStatus }>(
-      `/agent/approvals/${id}/reject`,
+    api.requestProtected<{ ok: boolean; status: ApprovalStatus }>(
+      `/agent/owner/approvals/${id}/reject`,
       { method: 'POST' },
     ),
 };
