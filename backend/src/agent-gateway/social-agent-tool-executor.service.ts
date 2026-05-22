@@ -2374,8 +2374,18 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     toolName: SocialAgentToolName,
   ): void {
-    void task;
-    void toolName;
+    const requiresAgentConnection = [
+      SocialAgentToolName.SendMessage,
+      SocialAgentToolName.ReplyMessage,
+      SocialAgentToolName.AddFriend,
+      SocialAgentToolName.InviteActivity,
+      SocialAgentToolName.OfflineMeeting,
+      SocialAgentToolName.Payment,
+    ].includes(toolName);
+    if (!requiresAgentConnection || task.agentConnectionId) return;
+    throw new BadRequestException(
+      `agentConnectionId is required for ${toolName}`,
+    );
   }
 
   private shouldWriteActionResultInbox(toolName: SocialAgentToolName): boolean {
