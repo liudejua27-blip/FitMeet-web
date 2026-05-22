@@ -95,6 +95,7 @@ import { SafetyService } from '../safety/safety.service';
 import { RedisService } from '../redis/redis.service';
 import { AgentSocialRequestAdapter } from '../social-requests/agent-social-request.adapter';
 import { UserSocialRequest } from '../social-requests/social-request.entity';
+import { sanitizeCity } from '../common/city.util';
 
 // Permission-level capability map
 const LEVEL_CAPABILITIES: Record<AgentPermissionLevel, AgentAction[]> = {
@@ -2817,17 +2818,21 @@ export class AgentGatewayService {
     dto: CreateSocialRequestDto,
     meta: PublicSocialIntentMeta,
   ) {
-    await this.enforcePublicSocialIntentAbuseControls(dto, meta);
+    const sanitizedDto: CreateSocialRequestDto = {
+      ...dto,
+      city: sanitizeCity(dto.city),
+    };
+    await this.enforcePublicSocialIntentAbuseControls(sanitizedDto, meta);
 
     const candidates = await this.searchSocialCandidates(0, {
-      ...dto,
-      verifiedOnly: dto.verifiedOnly ?? true,
+      ...sanitizedDto,
+      verifiedOnly: sanitizedDto.verifiedOnly ?? true,
       visibility: 'matched_users_only',
-      limit: Math.min(dto.limit ?? 5, 5),
+      limit: Math.min(sanitizedDto.limit ?? 5, 5),
     });
-    const riskLevel = this.classifySocialRisk(dto);
+    const riskLevel = this.classifySocialRisk(sanitizedDto);
     const matchSignal = this.buildPublicIntentMatchSignalFromRequest(
-      dto,
+      sanitizedDto,
       candidates,
     );
     const intent = await this.publicIntentRepo.save(
@@ -2836,23 +2841,25 @@ export class AgentGatewayService {
         userId: null,
         linkedSocialRequestId: null,
         source: 'public_social_skills',
-        requestType: dto.requestType.trim(),
-        title: dto.title?.trim() || this.buildSocialRequestTitle(dto),
-        description: dto.description.trim(),
-        interestTags: dto.interests ?? [],
-        city: dto.city?.trim() || '',
-        loc: dto.loc?.trim() || '',
-        lat: dto.lat ?? null,
-        lng: dto.lng ?? null,
-        radiusKm: dto.radiusKm ?? 5,
-        timePreference: dto.timePreference?.trim() || '',
-        locationPreference: dto.loc?.trim() || '',
-        socialGoal: dto.requestType.trim(),
+        requestType: sanitizedDto.requestType.trim(),
+        title:
+          sanitizedDto.title?.trim() ||
+          this.buildSocialRequestTitle(sanitizedDto),
+        description: sanitizedDto.description.trim(),
+        interestTags: sanitizedDto.interests ?? [],
+        city: sanitizedDto.city || '',
+        loc: sanitizedDto.loc?.trim() || '',
+        lat: sanitizedDto.lat ?? null,
+        lng: sanitizedDto.lng ?? null,
+        radiusKm: sanitizedDto.radiusKm ?? 5,
+        timePreference: sanitizedDto.timePreference?.trim() || '',
+        locationPreference: sanitizedDto.loc?.trim() || '',
+        socialGoal: sanitizedDto.requestType.trim(),
         riskLevel,
         requiresUserConfirmation: true,
         filters: {
-          verifiedOnly: dto.verifiedOnly ?? true,
-          interests: dto.interests ?? [],
+          verifiedOnly: sanitizedDto.verifiedOnly ?? true,
+          interests: sanitizedDto.interests ?? [],
         },
         candidateUserIds: candidates.map((candidate) => candidate.profile.id),
         matchedCount: candidates.length,
@@ -2918,7 +2925,7 @@ export class AgentGatewayService {
       .take(take)
       .skip(skip);
 
-    const city = filters.city?.trim();
+    const city = sanitizeCity(filters.city);
     if (city) {
       query.andWhere('LOWER(intent.city) LIKE LOWER(:city)', {
         city: `%${city}%`,
@@ -3262,7 +3269,9 @@ export class AgentGatewayService {
       .createQueryBuilder('u')
       .where('u.id != :uid', { uid: conn.userId });
 
-    if (dto.city) qb.andWhere('u.city ILIKE :city', { city: `%${dto.city}%` });
+    const requestedCity = sanitizeCity(dto.city);
+    if (requestedCity)
+      qb.andWhere('u.city ILIKE :city', { city: `%${requestedCity}%` });
     if (dto.ageMin) qb.andWhere('u.age >= :ageMin', { ageMin: dto.ageMin });
     if (dto.ageMax) qb.andWhere('u.age <= :ageMax', { ageMax: dto.ageMax });
 
@@ -4023,7 +4032,7 @@ export class AgentGatewayService {
 
     if (dto.verifiedOnly) qb.andWhere('u.verified = true');
 
-    const city = dto.city?.trim() || owner?.city || '';
+    const city = sanitizeCity(dto.city, sanitizeCity(owner?.city));
     if (haveOrigin) {
       // Geo-bbox prefilter: ~1° lat ≈ 111km. Pad by 25% to keep haversine
       // edge cases inside the candidate pool.

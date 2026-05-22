@@ -27,6 +27,7 @@ import {
   ActionResult,
 } from '../agent-gateway/entities/agent-activity-log.entity';
 import { MessagesService } from '../messages/messages.service';
+import { sanitizeCity } from '../common/city.util';
 
 /**
  * Bridges the legacy agent-gateway social-request surface (which used
@@ -236,7 +237,7 @@ export class AgentSocialRequestAdapter {
       title: dto.title ?? this.autoTitle(type, dto.description),
       description: dto.description ?? '',
       rawText: dto.description ?? '',
-      city: dto.city,
+      city: sanitizeCity(dto.city),
       lat: dto.lat,
       lng: dto.lng,
       radiusKm: dto.radiusKm,

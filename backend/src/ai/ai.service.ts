@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { sanitizeCity } from '../common/city.util';
 
 /** 完整的社交需求草稿卡输出结构（用于站内 AI 助手页面）。 */
 export interface SocialRequestCard {
@@ -824,7 +825,7 @@ export class AIService {
     return {
       basic: {
         nickname,
-        city,
+        city: sanitizeCity(city),
         ageRange,
         gender,
         zodiac: stringValue(existing.zodiac),
@@ -1407,8 +1408,9 @@ export class AIService {
       stringValue(input.request.title) ||
       stringValue(input.request.activityType) ||
       '这次约练';
-    const city =
-      stringValue(input.request.city) || stringValue(input.candidate.city);
+    const city = sanitizeCity(
+      stringValue(input.request.city) || stringValue(input.candidate.city),
+    );
     const commonTags = this.cleanStrings(
       [
         ...(input.candidate.commonTags ?? []),

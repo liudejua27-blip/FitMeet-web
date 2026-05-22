@@ -36,6 +36,7 @@ import {
   AgentActionStatus,
   AgentActionType,
 } from '../agent-gateway/entities/agent-action-log.entity';
+import { extractKnownCity, sanitizeCity } from '../common/city.util';
 
 /**
  * Activity types considered "offline / in-person" — for these we always
@@ -127,7 +128,7 @@ export class SocialRequestsService {
       title,
       description: dto.description ?? '',
       rawText: dto.rawText ?? '',
-      city: dto.city ?? '',
+      city: sanitizeCity(dto.city),
       lat: dto.lat ?? null,
       lng: dto.lng ?? null,
       radiusKm: dto.radiusKm ?? 5,
@@ -233,7 +234,15 @@ export class SocialRequestsService {
    * privacyNotes / timePreference / personalityPreference for display only —
    * those are NOT persisted by `create()`).
    */
-  async aiDraft(userId: number, rawText: string): Promise<{
+  async aiDraft(
+    userId: number,
+    rawText: string,
+    trace: {
+      agentTaskId?: number | null;
+      agentId?: number | null;
+      source?: string | null;
+    } = {},
+  ): Promise<{
     draft: CreateSocialRequestDto;
     card: SocialRequestCard;
     suggestedTitle: string;
@@ -256,8 +265,11 @@ export class SocialRequestsService {
     });
 
     // 社交画像优先，未填则回落到 user 表上的 city / interestTags。
-    const profileCity =
-      (socialProfile?.city || '').trim() || user?.city || '';
+    const textCity = extractKnownCity(text);
+    const profileCity = sanitizeCity(
+      socialProfile?.city,
+      sanitizeCity(user?.city, textCity),
+    );
     const profileTags =
       socialProfile?.interestTags && socialProfile.interestTags.length > 0
         ? socialProfile.interestTags.filter(Boolean)
@@ -307,11 +319,17 @@ export class SocialRequestsService {
 
     await this.actionLogs.logAgentAction({
       ownerUserId: userId,
+      agentId: trace.agentId ?? null,
+      agentTaskId: trace.agentTaskId ?? null,
       actionType: AgentActionType.CreateSocialRequest,
       actionStatus: AgentActionStatus.Planned,
       riskLevel: AgentActionRiskLevel.Low,
       inputSummary: `aiDraft: ${text.slice(0, 120)}`,
       outputSummary: `type=${ruleBased.type}, mode=${mode}, tags=${(card.interestTags ?? []).length}`,
+      payload: {
+        agentTaskId: trace.agentTaskId ?? null,
+        source: trace.source ?? 'social_requests.ai_draft',
+      },
     });
 
     return {
@@ -346,14 +364,15 @@ export class SocialRequestsService {
     else if (/(自习|学习|study)/.test(text))
       type = SocialRequestType.StudyPartner;
 
-    return { type, rawText };
+    return { type, rawText, city: extractKnownCity(rawText) };
   }
 
   async findOwn(userId: number, q: SearchSocialRequestDto = {}) {
     const where: Record<string, unknown> = { userId };
     if (q.status) where.status = q.status;
     if (q.type) where.type = q.type;
-    if (q.city) where.city = q.city;
+    const city = sanitizeCity(q.city);
+    if (city) where.city = city;
 
     const [items, total] = await this.repo.findAndCount({
       where,
@@ -387,7 +406,7 @@ export class SocialRequestsService {
     if (dto.title !== undefined) patch.title = dto.title;
     if (dto.description !== undefined) patch.description = dto.description;
     if (dto.rawText !== undefined) patch.rawText = dto.rawText;
-    if (dto.city !== undefined) patch.city = dto.city;
+    if (dto.city !== undefined) patch.city = sanitizeCity(dto.city);
     if (dto.lat !== undefined) patch.lat = dto.lat;
     if (dto.lng !== undefined) patch.lng = dto.lng;
     if (dto.radiusKm !== undefined) patch.radiusKm = dto.radiusKm;
@@ -544,7 +563,7 @@ export class SocialRequestsService {
       title: request.title,
       description: request.description,
       interestTags: request.interestTags ?? [],
-      city: request.city ?? '',
+      city: sanitizeCity(request.city),
       loc:
         (metadata.locationPreference as string | undefined) ??
         (metadata.nearbyArea as string | undefined) ??
