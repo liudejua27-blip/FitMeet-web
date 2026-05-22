@@ -62,6 +62,7 @@ import { UsersModule } from './users/users.module';
           database: configService.get<string>('DB_DATABASE'),
           entities: [__dirname + '/**/*.entity{.ts,.js}'],
           migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
+          migrationsTransactionMode: 'each',
           migrationsRun:
             nodeEnv === 'production' &&
             configService.get<string>('DB_MIGRATIONS_RUN', 'false') === 'true',
