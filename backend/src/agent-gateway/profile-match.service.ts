@@ -51,6 +51,44 @@ const PROFILE_MATCH_THRESHOLD = 55;
 type ProfileMatchRunOptions = {
   autoEnableProfilePool?: boolean;
   initiatedBy?: AiMatchSessionInitiator;
+  debug?: boolean;
+};
+
+export const PROFILE_MATCH_SKIPPED_REASON_KEYS = [
+  'noEligibleProfiles',
+  'noEligibleCandidates',
+  'duplicateRecommendation',
+  'scoreBelowThreshold',
+  'privacyDisabled',
+  'blockedUser',
+] as const;
+
+export type ProfileMatchSkippedReason =
+  (typeof PROFILE_MATCH_SKIPPED_REASON_KEYS)[number];
+
+export type ProfileMatchSkippedReasons = Record<
+  ProfileMatchSkippedReason,
+  number
+>;
+
+export type ProfileMatchDebugEvent = {
+  scope: 'profile_pool';
+  ownerUserId: number;
+  candidateUserId?: number;
+  reason: ProfileMatchSkippedReason;
+  stage?: string;
+  score?: number;
+  threshold?: number;
+};
+
+export type ProfileMatchRunResult = {
+  ok: true;
+  matchedCount: number;
+  inboxEvents: number;
+  skippedDuplicates: number;
+  skippedReasons: ProfileMatchSkippedReasons;
+  recommendations: ProfileRecommendation[];
+  debugEvents?: ProfileMatchDebugEvent[];
 };
 
 type ProfileMatchSignals = {
@@ -247,7 +285,24 @@ export class ProfileMatchService {
     ownerUserId: number,
     limit = 8,
     options: ProfileMatchRunOptions = {},
-  ) {
+  ): Promise<ProfileMatchRunResult> {
+    const skippedReasons = createEmptyProfileMatchSkippedReasons();
+    const debugEvents: ProfileMatchDebugEvent[] = [];
+    const recordSkip = (
+      reason: ProfileMatchSkippedReason,
+      event: Omit<ProfileMatchDebugEvent, 'scope' | 'ownerUserId' | 'reason'> = {},
+    ) => {
+      incrementProfileMatchSkippedReason(skippedReasons, reason);
+      if (options.debug === true) {
+        debugEvents.push({
+          scope: 'profile_pool',
+          ownerUserId,
+          reason,
+          ...event,
+        });
+      }
+    };
+
     let ownerProfile = await this.socialProfileRepo.findOne({
       where: { userId: ownerUserId },
     });
@@ -281,9 +336,21 @@ export class ProfileMatchService {
       )
       .take(200)
       .getMany();
-    const filtered = candidates.filter(
-      (profile) => !blocked.has(profile.userId),
-    );
+    if (candidates.length === 0) {
+      recordSkip('noEligibleCandidates', { stage: 'profile_pool_query' });
+    }
+
+    const filtered: UserSocialProfile[] = [];
+    for (const profile of candidates) {
+      if (blocked.has(profile.userId)) {
+        recordSkip('blockedUser', {
+          candidateUserId: profile.userId,
+          stage: 'mutual_block',
+        });
+      } else {
+        filtered.push(profile);
+      }
+    }
     const filteredTargetIds = filtered.map((profile) => profile.userId);
     const existing = filteredTargetIds.length
       ? await this.sessionRepo.find({
@@ -297,18 +364,39 @@ export class ProfileMatchService {
     const alreadyRecommended = new Set(
       existing.map((session) => session.targetUserId),
     );
-    const skippedDuplicates = filtered.filter((profile) =>
-      alreadyRecommended.has(profile.userId),
-    ).length;
-    const userMap = await this.fetchUsers(filtered.map((profile) => profile.userId));
+    const freshProfiles: UserSocialProfile[] = [];
+    for (const profile of filtered) {
+      if (alreadyRecommended.has(profile.userId)) {
+        recordSkip('duplicateRecommendation', {
+          candidateUserId: profile.userId,
+          stage: 'profile_pool_existing_session',
+        });
+      } else {
+        freshProfiles.push(profile);
+      }
+    }
+    const userMap = await this.fetchUsers(
+      freshProfiles.map((profile) => profile.userId),
+    );
 
-    const ranked = filtered
-      .filter((profile) => !alreadyRecommended.has(profile.userId))
-      .map((profile) => ({
-        profile,
-        user: userMap.get(profile.userId),
-        score: this.scoreProfilePair(owner, profile),
-      }))
+    const ranked = freshProfiles
+      .map((profile) => {
+        const user = userMap.get(profile.userId);
+        const score = this.scoreProfilePair(owner, profile);
+        if (!user) {
+          recordSkip('noEligibleCandidates', {
+            candidateUserId: profile.userId,
+            stage: 'missing_user_record',
+          });
+        } else if (score.score < PROFILE_MATCH_THRESHOLD) {
+          recordSkip('scoreBelowThreshold', {
+            candidateUserId: profile.userId,
+            score: score.score,
+            threshold: PROFILE_MATCH_THRESHOLD,
+          });
+        }
+        return { profile, user, score };
+      })
       .filter((item) => item.user && item.score.score >= PROFILE_MATCH_THRESHOLD)
       .sort((a, b) => b.score.score - a.score.score)
       .slice(0, Math.max(1, Math.min(limit, 20)));
@@ -376,8 +464,10 @@ export class ProfileMatchService {
       ok: true,
       matchedCount: recommendations.length,
       inboxEvents,
-      skippedDuplicates,
+      skippedDuplicates: skippedReasons.duplicateRecommendation,
+      skippedReasons,
       recommendations,
+      ...(options.debug === true ? { debugEvents } : {}),
     };
   }
 
@@ -1479,5 +1569,30 @@ export class ProfileMatchService {
     return /rich|money|wealth|income|salary|handsome|beautiful|good-looking|resources|status|有钱|富|收入|高薪|颜值|帅|美|资源|身份/i.test(
       tag,
     );
+  }
+}
+
+export function createEmptyProfileMatchSkippedReasons(): ProfileMatchSkippedReasons {
+  return PROFILE_MATCH_SKIPPED_REASON_KEYS.reduce(
+    (acc, key) => ({ ...acc, [key]: 0 }),
+    {} as ProfileMatchSkippedReasons,
+  );
+}
+
+export function incrementProfileMatchSkippedReason(
+  skippedReasons: ProfileMatchSkippedReasons,
+  reason: ProfileMatchSkippedReason,
+  count = 1,
+) {
+  skippedReasons[reason] += count;
+}
+
+export function mergeProfileMatchSkippedReasons(
+  target: ProfileMatchSkippedReasons,
+  source: Partial<ProfileMatchSkippedReasons> | undefined,
+) {
+  if (!source) return;
+  for (const reason of PROFILE_MATCH_SKIPPED_REASON_KEYS) {
+    target[reason] += source[reason] ?? 0;
   }
 }

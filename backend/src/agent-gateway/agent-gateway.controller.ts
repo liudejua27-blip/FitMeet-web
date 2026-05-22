@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   Logger,
@@ -339,6 +340,17 @@ export class AgentUserController {
     return this.profileMatchAutopilot.getStatus();
   }
 
+  /** GET /api/agents/profile-match/autopilot/debug */
+  @Get('profile-match/autopilot/debug')
+  getProfileMatchAutopilotDebug(@Req() req: FitMeetRequest) {
+    this.assertAdmin(req.user.id);
+    return {
+      ok: true,
+      autopilot: 'profile_match_autopilot',
+      debug: this.profileMatchAutopilot.getDebugSnapshot(),
+    };
+  }
+
   /** POST /api/agents/subconscious-loop/run-once */
   @Post('subconscious-loop/run-once')
   @HttpCode(200)
@@ -363,6 +375,17 @@ export class AgentUserController {
       req.user.id,
       this.profileMatchAutopilot.getStatus(),
     );
+  }
+
+  private assertAdmin(userId: number) {
+    const ids = (process.env.ADMIN_USER_IDS ?? '')
+      .split(',')
+      .map((id) => Number(id.trim()))
+      .filter(Number.isFinite);
+    const isDevAdmin = process.env.NODE_ENV !== 'production' && userId === 1;
+    if (!ids.includes(userId) && !isDevAdmin) {
+      throw new ForbiddenException('Admin permission required');
+    }
   }
 
   /** GET /api/agents/profile-matches?limit=30 */

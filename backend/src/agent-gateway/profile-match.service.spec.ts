@@ -203,6 +203,71 @@ describe('ProfileMatchService', () => {
     const result = await service.runOnce(1);
 
     expect(result.matchedCount).toBe(0);
+    expect(result.skippedReasons.blockedUser).toBe(1);
+    expect(messages.createAgentInboxEvent).not.toHaveBeenCalled();
+  });
+
+  it('reports duplicate and below-threshold profile skips without leaking private tags', async () => {
+    profileRepo.findOne.mockResolvedValue({
+      userId: 1,
+      city: 'Shanghai',
+      profileDiscoverable: true,
+      agentCanRecommendMe: true,
+      interestTags: ['running'],
+    });
+    profileRepo.createQueryBuilder.mockReturnValue(
+      qbReturning([
+        {
+          userId: 2,
+          city: 'Shanghai',
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+          interestTags: ['running'],
+          matchSignals: { sensitivePrivateTags: ['rich'] },
+        },
+        {
+          userId: 3,
+          city: 'Beijing',
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+          interestTags: [],
+          matchSignals: { sensitivePrivateTags: ['income'] },
+        },
+      ]),
+    );
+    sessionRepo.find.mockResolvedValue([{ targetUserId: 2 }]);
+    userRepo.find.mockResolvedValue([
+      {
+        id: 3,
+        name: 'Low Score Candidate',
+        avatar: 'L',
+        color: '#64748B',
+        city: 'Beijing',
+      },
+    ]);
+
+    const result = await service.runOnce(1, 8, { debug: true });
+
+    expect(result.matchedCount).toBe(0);
+    expect(result.skippedDuplicates).toBe(1);
+    expect(result.skippedReasons).toMatchObject({
+      duplicateRecommendation: 1,
+      scoreBelowThreshold: 1,
+    });
+    expect(result.debugEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          candidateUserId: 2,
+          reason: 'duplicateRecommendation',
+        }),
+        expect.objectContaining({
+          candidateUserId: 3,
+          reason: 'scoreBelowThreshold',
+          threshold: expect.any(Number),
+        }),
+      ]),
+    );
+    expect(JSON.stringify(result.debugEvents)).not.toMatch(/rich|income/i);
     expect(messages.createAgentInboxEvent).not.toHaveBeenCalled();
   });
 

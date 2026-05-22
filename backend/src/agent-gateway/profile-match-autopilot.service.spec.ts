@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 
@@ -19,7 +20,10 @@ import {
 import { MatchCandidate } from './entities/match-candidate.entity';
 import { UserPreference } from './entities/user-preference.entity';
 import { ProfileMatchAutopilotService } from './profile-match-autopilot.service';
-import { ProfileMatchService } from './profile-match.service';
+import {
+  ProfileMatchService,
+  createEmptyProfileMatchSkippedReasons,
+} from './profile-match.service';
 import { AgentWebhookService } from './agent-webhook.service';
 
 const mockRepo = () => ({
@@ -280,6 +284,147 @@ describe('ProfileMatchAutopilotService', () => {
       generatedRecommendations: 2,
       errors: 1,
     });
+  });
+
+  it('aggregates profile skipped reasons into summary, logs, and debug snapshot', async () => {
+    const logSpy = jest
+      .spyOn(Logger.prototype, 'log')
+      .mockImplementation(() => undefined);
+    try {
+      const skippedReasons = createEmptyProfileMatchSkippedReasons();
+      skippedReasons.duplicateRecommendation = 2;
+      skippedReasons.scoreBelowThreshold = 1;
+
+      socialProfileRepo.createQueryBuilder.mockReturnValue(
+        qbReturning([{ userId: 7 }]),
+      );
+      connectionRepo.find.mockResolvedValue([]);
+      profileMatch.runOnce.mockResolvedValue({
+        ok: true,
+        matchedCount: 0,
+        inboxEvents: 0,
+        skippedDuplicates: 2,
+        skippedReasons,
+        recommendations: [],
+        debugEvents: [
+          {
+            scope: 'profile_pool',
+            ownerUserId: 7,
+            candidateUserId: 8,
+            reason: 'duplicateRecommendation',
+            stage: 'profile_pool_existing_session',
+          },
+          {
+            scope: 'profile_pool',
+            ownerUserId: 7,
+            candidateUserId: 9,
+            reason: 'scoreBelowThreshold',
+            score: 42,
+            threshold: 55,
+          },
+        ],
+      });
+
+      const summary = await service.runOnce('manual');
+
+      expect(summary.skippedReasons).toMatchObject({
+        duplicateRecommendation: 2,
+        scoreBelowThreshold: 1,
+      });
+      expect(summary.skippedDuplicates).toBe(2);
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'skippedReasons=duplicateRecommendation=2,scoreBelowThreshold=1',
+        ),
+      );
+
+      const debug = service.getDebugSnapshot();
+      expect(debug?.entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            ownerUserId: 7,
+            candidateUserId: 8,
+            reason: 'duplicateRecommendation',
+          }),
+          expect.objectContaining({
+            ownerUserId: 7,
+            candidateUserId: 9,
+            reason: 'scoreBelowThreshold',
+            score: 42,
+            threshold: 55,
+          }),
+        ]),
+      );
+      expect(JSON.stringify(debug)).not.toMatch(/rich|income|privateTag/i);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('records request-card duplicate and no-candidate skip reasons', async () => {
+    socialProfileRepo.createQueryBuilder.mockReturnValue(
+      qbReturning([{ userId: 7 }]),
+    );
+    connectionRepo.find.mockResolvedValue([
+      { id: 99, userId: 7, status: ConnectionStatus.Active },
+    ]);
+    profileMatch.runOnce.mockResolvedValue({
+      ok: true,
+      matchedCount: 0,
+      inboxEvents: 0,
+      skippedDuplicates: 0,
+      skippedReasons: createEmptyProfileMatchSkippedReasons(),
+      recommendations: [],
+      debugEvents: [],
+    });
+    requestRepo.find.mockResolvedValue([
+      {
+        id: 55,
+        userId: 7,
+        agentAllowed: true,
+        status: UserSocialRequestStatus.Matching,
+        title: 'Weekend run',
+        activityType: 'running',
+      },
+      {
+        id: 56,
+        userId: 7,
+        agentAllowed: true,
+        status: UserSocialRequestStatus.Matching,
+        title: 'Coffee chat',
+        activityType: 'coffee',
+      },
+    ]);
+    socialRequestCandidateRepo.find
+      .mockResolvedValueOnce([{ id: 501 }])
+      .mockResolvedValueOnce([]);
+    matchService.runMatch.mockResolvedValue({
+      socialRequestId: 56,
+      candidates: [],
+    });
+
+    const summary = await service.runOnce('manual');
+
+    expect(summary.skippedReasons).toMatchObject({
+      duplicateRecommendation: 1,
+      noEligibleCandidates: 1,
+    });
+    expect(summary.skippedDuplicates).toBe(1);
+    expect(matchService.runMatch).toHaveBeenCalledTimes(1);
+    expect(service.getDebugSnapshot()?.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          scope: 'request_card',
+          requestId: 55,
+          reason: 'duplicateRecommendation',
+        }),
+        expect.objectContaining({
+          scope: 'request_card',
+          requestId: 56,
+          reason: 'noEligibleCandidates',
+        }),
+      ]),
+    );
   });
 
   it('returns skipped summary when a sweep is already running', async () => {
