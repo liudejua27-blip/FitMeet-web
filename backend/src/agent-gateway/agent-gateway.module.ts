@@ -127,6 +127,7 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
     SocialAgentRagService,
     SocialAgentToolExecutorService,
     AgentWebhookService,
+    AiSocialAutopilotService,
     AgentProfileQAService,
     ProfileMatchService,
     ProfileMatchAutopilotService,
