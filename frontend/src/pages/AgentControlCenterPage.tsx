@@ -10,6 +10,7 @@ import { Link } from 'react-router-dom';
 import { useAuthStore } from '../stores';
 import * as api from '../api/client';
 import { ApiError } from '../api/client';
+import { agentApprovalsApi } from '../api/agentApprovalsApi';
 
 // ── Types kept narrow & local: this page owns the schema ─────────────
 type AgentMode = 'assisted' | 'basic' | 'normal' | 'standard' | 'open';
@@ -41,9 +42,10 @@ interface AgentSettings {
 
 interface ApprovalRequest {
   id: number;
+  agentConnectionId?: number | null;
   type: string;
   actionType?: string;
-  skillName: string;
+  skillName?: string;
   payload: Record<string, unknown>;
   summary: string;
   reason?: string;
@@ -52,8 +54,8 @@ interface ApprovalRequest {
   relatedCandidateId?: number | null;
   riskLevel: RiskLevel;
   status: ApprovalStatus;
-  agentRationale: string;
-  expiresAt: string;
+  agentRationale?: string;
+  expiresAt?: string;
   createdAt: string;
 }
 
@@ -148,8 +150,8 @@ export const AgentControlCenterPage = memo(function AgentControlCenterPage() {
     setAuthExpired(false);
     try {
       const [s, a] = await Promise.all([
-        api.request<AgentSettings>('/agent/permissions'),
-        api.requestProtected<ApprovalRequest[]>('/agent/owner/pending-approvals'),
+        api.requestProtected<AgentSettings>('/agent/permissions'),
+        agentApprovalsApi.pending() as Promise<ApprovalRequest[]>,
       ]);
       setSettings(s);
       setApprovals(a);
@@ -173,7 +175,7 @@ export const AgentControlCenterPage = memo(function AgentControlCenterPage() {
       setSaving(true);
       setError(null);
       try {
-        const next = await api.request<AgentSettings>('/agent/permissions', {
+        const next = await api.requestProtected<AgentSettings>('/agent/permissions', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(patch),
@@ -191,12 +193,7 @@ export const AgentControlCenterPage = memo(function AgentControlCenterPage() {
 
   const handleApprove = useCallback(async (id: number) => {
     try {
-      const res = await api.request<{
-        ok: boolean;
-        status: string;
-        dispatched?: boolean;
-        dispatchError?: string;
-      }>(`/agent/approvals/${id}/approve`, { method: 'POST' });
+      const res = await agentApprovalsApi.approve(id);
       setApprovals((prev) => prev.filter((r) => r.id !== id));
       if (res?.dispatched === false && res?.dispatchError) {
         setError(`已批准但执行失败：${res.dispatchError}`);
@@ -209,7 +206,7 @@ export const AgentControlCenterPage = memo(function AgentControlCenterPage() {
 
   const handleReject = useCallback(async (id: number) => {
     try {
-      await api.request(`/agent/approvals/${id}/reject`, { method: 'POST' });
+      await agentApprovalsApi.reject(id);
       setApprovals((prev) => prev.filter((r) => r.id !== id));
     } catch (e: unknown) {
       if (isAuthError(e)) setAuthExpired(true);
@@ -441,7 +438,7 @@ function ApprovalCard({
               {approval.actionType || approval.skillName || approval.type}
             </span>
             <span className="text-[11px] text-[#5e5d4e]">
-              {timeUntil(approval.expiresAt)}
+              {approval.expiresAt ? timeUntil(approval.expiresAt) : '无过期时间'}
             </span>
           </div>
           <p className="mt-2 text-sm leading-6 text-[#F4EFE6]">

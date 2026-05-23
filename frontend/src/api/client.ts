@@ -190,6 +190,7 @@ function resolveApiErrorMessage(
   statusText: string,
   status: number,
 ): string {
+  if (status === 504) return '请求超时，但你的补充信息已保存。请稍后重试。';
   const message = payload?.message;
   if (Array.isArray(message)) return message.join('；');
   if (typeof message === 'string' && message.trim()) {
@@ -202,6 +203,7 @@ function resolveApiErrorMessage(
   }
   if (status === 401) return AUTH_EXPIRED_MESSAGE;
   if (payload?.error) return payload.error;
+  if (/^\s*</.test(rawBody)) return '服务器返回了不可读的错误页面，请稍后重试。';
   if (rawBody.trim()) return rawBody;
   return statusText || '请求失败';
 }

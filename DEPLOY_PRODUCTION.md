@@ -313,7 +313,8 @@ What the script does:
   `agent-schema-drift-fix-20260513.sql`,
   `fix-agent-log-fields-20260514.sql`,
   `agent-task-runtime-schema-patch-20260519.sql`, and
-  `social-agent-final-schema-patch-20260519.sql`. The SQL uses only
+  `social-agent-final-schema-patch-20260519.sql`. The final Social Agent patch
+  also links action logs and approval requests to `agent_tasks`. The SQL uses only
    `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` /
    `CREATE INDEX IF NOT EXISTS` and is safe to re-run.
 4. Verifies that all required tables and columns now exist; exits non-zero and

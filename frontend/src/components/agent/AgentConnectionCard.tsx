@@ -105,10 +105,10 @@ export function AgentConnectionCard({
             Connect
           </button>
         )}
-        <a className="agent-action" href="/agent-connect/permissions" onClick={handleButtonClick}>
+        <a className="agent-action" href="/agent-control" onClick={handleButtonClick}>
           Configure
         </a>
-        <a className="agent-action" href="/agent-connect/activity" onClick={handleButtonClick}>
+        <a className="agent-action" href="/agent-activity" onClick={handleButtonClick}>
           View Activity
         </a>
         <button type="button" className="agent-action agent-action--ghost" onClick={(event) => {

@@ -643,6 +643,7 @@ export class MatchService {
         continue;
       }
       if (this.violatesPrivacyBoundary(socialProfile, ctx)) continue;
+      if (this.violatesOwnerBoundary(user, socialProfile, ctx)) continue;
       if (this.violatesDemographicPreference(user, socialProfile, ctx)) continue;
 
       const breakdown: Record<string, number> = {};
@@ -967,6 +968,44 @@ export class MatchService {
     if (!boundary) return false;
     if (/(不接受|拒绝|禁止)/.test(boundary) && /(夜间|深夜|凌晨|night|midnight)/.test(requestText)) return true;
     if (/(不接受|拒绝|禁止)/.test(boundary) && /(私人|住址|家里|酒店|hotel|home)/.test(requestText)) return true;
+    return false;
+  }
+
+  /**
+   * Owner-side hard filters extracted from `ownerProfile.privacyBoundary` /
+   * `rejectRules` / `avoidTraits`. Honors "不要推荐男生/女生" and
+   * "不要夜间见面" style declarations even when the current request does not
+   * carry an explicit genderPreference / time filter.
+   */
+  private violatesOwnerBoundary(
+    user: User,
+    profile: UserSocialProfile | null,
+    ctx: {
+      ownerProfile?: UserSocialProfile | null;
+      timePreference?: string;
+      locationPreference?: string;
+      socialGoal?: string;
+    },
+  ): boolean {
+    const owner = ctx.ownerProfile;
+    if (!owner) return false;
+    const boundary = `${owner.rejectRules ?? ''} ${owner.privacyBoundary ?? ''} ${(owner.avoidTraits ?? []).join(' ')}`.toLowerCase();
+    if (!boundary) return false;
+    const candidateGender = this.normalizeGender(profile?.gender || user.gender || '');
+    if (candidateGender === 'male' && /(不要男|拒绝男|不推荐男|不接受男|别推荐男)/.test(boundary)) {
+      return true;
+    }
+    if (candidateGender === 'female' && /(不要女|拒绝女|不推荐女|不接受女|别推荐女)/.test(boundary)) {
+      return true;
+    }
+    // Night meeting boundary: filter candidates whose declared availability is
+    // exclusively night-time when the owner refused night meetings.
+    if (/(不要夜|不接受夜|拒绝夜|不夜间|不晚上|别夜间|别晚上)/.test(boundary)) {
+      const times = (profile?.availableTimes ?? []).join(' ').toLowerCase();
+      if (times && /(夜|night|凌晨|深夜|midnight)/.test(times) && !/(白天|day|下午|上午|周末|weekend)/.test(times)) {
+        return true;
+      }
+    }
     return false;
   }
 

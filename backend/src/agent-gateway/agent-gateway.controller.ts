@@ -94,6 +94,7 @@ export class AgentUserController {
     private readonly profileMatches: ProfileMatchService,
     private readonly profileMatchAutopilot: ProfileMatchAutopilotService,
     private readonly socialAgentExecutor: SocialAgentToolExecutorService,
+    private readonly actionLogs: AgentActionLogService,
   ) {}
   /** GET /api/agents */
   @Get()
@@ -200,14 +201,22 @@ export class AgentUserController {
 
   // ── Activity & Approvals ──────────────────────────────────────
 
-  /** GET /api/agents/activity?page=1&limit=20 */
+  /** GET /api/agents/activity?page=1&limit=20 - user audit page, backed by agent_action_logs */
   @Get('activity')
   getActivity(
     @Req() req: FitMeetRequest,
     @Query('page', ParseIntPipe) page = 1,
     @Query('limit', ParseIntPipe) limit = 20,
+    @Query('actionType') actionType?: AgentActionType,
+    @Query('actionStatus') actionStatus?: AgentActionStatus,
   ) {
-    return this.svc.getActivity(req.user.id, page, limit);
+    return this.actionLogs.list({
+      ownerUserId: req.user.id,
+      actionType,
+      actionStatus,
+      page,
+      limit,
+    });
   }
 
   /** GET /api/agents/approvals/pending */

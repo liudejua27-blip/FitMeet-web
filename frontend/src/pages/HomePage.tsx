@@ -79,18 +79,6 @@ export const HomePage = memo(function HomePage() {
                 ✨ AI 帮我发布需求 →
               </Link>
               <Link
-                to="/demo/investor"
-                className="px-6 py-3 rounded-full border border-[#C8FF80]/40 text-[#C8FF80] text-sm hover:bg-[#C8FF80]/10"
-              >
-                投资人完整闭环 Demo
-              </Link>
-              <Link
-                to="/demo/agent-social-loop"
-                className="px-6 py-3 rounded-full border border-[#C8FF80]/40 text-[#C8FF80] text-sm hover:bg-[#C8FF80]/10"
-              >
-                体验 AI 社交闭环（7 步）
-              </Link>
-              <Link
                 to="/social-request/new"
                 className="px-6 py-3 rounded-full border border-[#C8FF80]/40 text-[#C8FF80] text-sm hover:bg-[#C8FF80]/10"
               >

@@ -68,6 +68,12 @@ export enum AgentTaskEventType {
   TaskSucceeded = 'task.succeeded',
   TaskFailed = 'task.failed',
   TaskCancelled = 'task.cancelled',
+  SocialAgentContextAppended = 'social_agent.context.appended',
+  SocialAgentReplanQueued = 'social_agent.replan.queued',
+  SocialAgentReplanStarted = 'social_agent.replan.started',
+  SocialAgentReplanCompleted = 'social_agent.replan.completed',
+  SocialAgentReplanFailed = 'social_agent.replan.failed',
+  SocialAgentLlmTimeout = 'social_agent.llm.timeout',
   Note = 'note',
 }
 

@@ -19,10 +19,10 @@ type ConnectionSummary = {
 
 type ActivityLog = {
   id: number;
-  agentConnectionId: number | null;
-  action: string;
-  result: string;
-  riskScore: number;
+  agentId: number | null;
+  actionType: string;
+  actionStatus: string;
+  riskLevel: string | null;
   createdAt: string;
 };
 
@@ -268,7 +268,7 @@ export function AgentLiveControlPanel() {
             const limitText = `${conn.dailyActionsUsed}/${conn.dailyActionLimit}`;
             const isExpanded = expandedId === conn.id;
             const logsForAgent = activity.filter(
-              (a) => a.agentConnectionId === conn.id,
+              (a) => a.agentId === conn.id,
             );
             const statusBadge =
               conn.status === 'active'
@@ -391,10 +391,8 @@ export function AgentLiveControlPanel() {
                             }}
                           >
                             <span>
-                              <strong>{log.action}</strong> · {log.result}
-                              {log.riskScore > 0
-                                ? ` · risk ${log.riskScore.toFixed(2)}`
-                                : ''}
+                              <strong>{log.actionType}</strong> · {log.actionStatus || 'unknown'} · risk{' '}
+                              {log.riskLevel ?? 'unknown'}
                             </span>
                             <span style={{ opacity: 0.6 }}>
                               {formatTime(log.createdAt)}

@@ -1,6 +1,8 @@
 import {
   Body,
   Controller,
+  Get,
+  HttpCode,
   Param,
   ParseIntPipe,
   Post,
@@ -33,6 +35,12 @@ type ReplanRunBody = {
   userMessage?: string | null;
   reason?: SocialAgentPlanReason;
   failure?: SocialAgentPlanFailureContext | null;
+};
+
+type RouteMessageBody = {
+  message?: string | null;
+  taskId?: number | null;
+  hasCandidates?: boolean;
 };
 
 type SendMessageBody = {
@@ -68,6 +76,34 @@ export class SocialAgentChatController {
   @Post('run')
   run(@Req() req: FitMeetRequest, @Body() body: RunBody) {
     return this.chat.run(req.user.id, body ?? {});
+  }
+
+  @Post('run-async')
+  @HttpCode(202)
+  runQueued(@Req() req: FitMeetRequest, @Body() body: RunBody) {
+    return this.chat.runQueued(req.user.id, body ?? {});
+  }
+
+  @Post('route-message')
+  @HttpCode(200)
+  routeMessage(@Req() req: FitMeetRequest, @Body() body: RouteMessageBody) {
+    return this.chat.routeMessage(req.user.id, body ?? {});
+  }
+
+  @Post('messages')
+  @HttpCode(200)
+  handleMessage(@Req() req: FitMeetRequest, @Body() body: RouteMessageBody) {
+    return this.chat.handleMessage(req.user.id, body ?? {});
+  }
+
+  @Post('tasks/:id/messages')
+  @HttpCode(200)
+  handleTaskMessage(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: RouteMessageBody,
+  ) {
+    return this.chat.handleMessage(req.user.id, { ...(body ?? {}), taskId: id });
   }
 
   @Post('stream')
@@ -111,12 +147,31 @@ export class SocialAgentChatController {
   }
 
   @Post('tasks/:id/replan-run')
+  @HttpCode(202)
   replanAndRefresh(
     @Req() req: FitMeetRequest,
     @Param('id', ParseIntPipe) id: number,
     @Body() body: ReplanRunBody,
   ) {
     return this.chat.replanAndRefresh(req.user.id, id, body ?? {});
+  }
+
+  @Post('tasks/:id/append-context')
+  appendContext(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: ReplanRunBody,
+  ) {
+    return this.chat.appendContext(req.user.id, id, body ?? {});
+  }
+
+  @Get('tasks/:id/runs/:runId')
+  getRunStatus(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('runId') runId: string,
+  ) {
+    return this.chat.getRunStatus(req.user.id, id, runId);
   }
 
   @Post('tasks/:id/save-candidate')

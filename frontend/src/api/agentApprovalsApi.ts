@@ -27,7 +27,12 @@ export const agentApprovalsApi = {
   pending: () => api.requestProtected<ApprovalRequest[]>('/agent/owner/pending-approvals'),
   get: (id: number) => api.requestProtected<ApprovalRequest>(`/agent/approvals/${id}`),
   approve: (id: number) =>
-    api.requestProtected<{ ok: boolean; status: ApprovalStatus; dispatched?: boolean }>(
+    api.requestProtected<{
+      ok: boolean;
+      status: ApprovalStatus;
+      dispatched?: boolean;
+      dispatchError?: string;
+    }>(
       `/agent/owner/approvals/${id}/approve`,
       { method: 'POST' },
     ),

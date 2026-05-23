@@ -69,6 +69,8 @@ const DemoAgentSocialLoopPage = lazy(() =>
 const DemoInvestorPage = lazy(() =>
   import('./pages/DemoInvestorPage').then((m) => ({ default: m.DemoInvestorPage })),
 );
+
+const ENABLE_DEMO_ROUTES = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO_ROUTES === 'true';
 const ProfilePage = lazy(() =>
   import('./pages/ProfilePage').then((m) => ({ default: m.ProfilePage })),
 );
@@ -175,14 +177,7 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="/agent-token"
-                element={
-                  <ProtectedRoute>
-                    <AgentHubPage />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="/agent-token" element={<Navigate to="/agent-hub" replace />} />
               <Route
                 path="/agent-hub"
                 element={
@@ -191,7 +186,12 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              <Route path="/agent-connect/*" element={<AgentConnectPage />} />
+              <Route path="/agent-connect" element={<AgentConnectPage />} />
+              <Route path="/agent-connect/permissions" element={<Navigate to="/agent-control" replace />} />
+              <Route path="/agent-connect/preferences" element={<Navigate to="/ai-profile" replace />} />
+              <Route path="/agent-connect/activity" element={<Navigate to="/agent-activity" replace />} />
+              <Route path="/agent-connect/social-hall" element={<Navigate to="/hall" replace />} />
+              <Route path="/agent-connect/*" element={<Navigate to="/agent-connect" replace />} />
               <Route
                 path="/agent-control"
                 element={
@@ -265,8 +265,14 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              <Route path="/demo/agent-social-loop" element={<DemoAgentSocialLoopPage />} />
-              <Route path="/demo/investor" element={<DemoInvestorPage />} />
+              {ENABLE_DEMO_ROUTES ? (
+                <>
+                  <Route path="/demo/agent-social-loop" element={<DemoAgentSocialLoopPage />} />
+                  <Route path="/demo/investor" element={<DemoInvestorPage />} />
+                </>
+              ) : (
+                <Route path="/demo/*" element={<Navigate to="/" replace />} />
+              )}
               <Route
                 path="/profile"
                 element={

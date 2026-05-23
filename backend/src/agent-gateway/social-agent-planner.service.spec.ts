@@ -160,6 +160,38 @@ describe('SocialAgentPlannerService', () => {
     ).toBe(true);
   });
 
+  it('falls back and writes a timeout event when DeepSeek planning aborts', async () => {
+    const abortError = Object.assign(new Error('aborted'), { name: 'AbortError' });
+    global.fetch = jest.fn().mockRejectedValue(abortError);
+
+    const { service, tasks, events } = serviceWith(
+      makeConfig({
+        DEEPSEEK_API_KEY: 'key',
+        SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS: '20000',
+      }),
+    );
+    tasks.findOne.mockResolvedValue(
+      makeTask({ permissionMode: AgentTaskPermissionMode.Confirm }),
+    );
+
+    const result = await service.replanTask(10, {
+      reason: 'user_follow_up',
+      userMessage: '那青岛拍照搭子有吗',
+    });
+
+    expect(result.source).toBe('fallback');
+    expect(result.fallbackReason).toBe('deepseek_timeout');
+    expect(events.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: AgentTaskEventType.SocialAgentLlmTimeout,
+        payload: expect.objectContaining({
+          timeoutMs: 15000,
+          fallbackMessage: '已收到补充信息，当前先基于规则匹配继续搜索。',
+        }),
+      }),
+    );
+  });
+
   it('uses current task permission mode for fallback compatibility', async () => {
     const { service, tasks } = serviceWith(makeConfig({}));
     tasks.findOne.mockResolvedValue(

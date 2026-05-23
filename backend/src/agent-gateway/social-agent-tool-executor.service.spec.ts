@@ -770,4 +770,35 @@ describe('SocialAgentToolExecutorService', () => {
       agent,
     );
   });
+
+  it('does not fail a completed social action when its audit log is unavailable', async () => {
+    const {
+      service,
+      taskRepo,
+      connectionRepo,
+      actionLogs,
+      socialRequests,
+    } = makeService();
+    const task = makeTask({
+      permissionMode: AgentTaskPermissionMode.Confirm,
+      plan: [
+        {
+          id: 'step_1',
+          toolName: SocialAgentToolName.CreateSocialRequest,
+          action: 'send_invite',
+          status: 'planned',
+          input: { rawText: 'Find a running partner tonight' },
+        },
+      ],
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    connectionRepo.findOne.mockResolvedValue({ id: 7, userId: 1 });
+    socialRequests.createFromNaturalLanguage.mockResolvedValue({ id: 55 });
+    actionLogs.logAgentAction.mockResolvedValue(null);
+
+    const result = await service.executeTask(100);
+
+    expect(result).toMatchObject({ succeededSteps: 1, failedSteps: 0 });
+    expect(task.status).toBe(AgentTaskStatus.Succeeded);
+  });
 });

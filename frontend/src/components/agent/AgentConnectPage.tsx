@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { agentConnections } from '@/data/agentMockData';
 import type { AgentConnection } from '@/types/agent';
@@ -7,58 +7,22 @@ import { AgentConnectionCard } from './AgentConnectionCard';
 import { AgentGatewayOverview } from './AgentGatewayOverview';
 import { AgentLiveControlPanel } from './AgentLiveControlPanel';
 import { AgentMiniGatewayVisual } from './AgentMiniGatewayVisual';
-import { AgentPermissionControlPage } from './AgentPermissionControlPage';
-import { AgentPreferenceStudioPage } from './AgentPreferenceStudioPage';
 import { AgentSafetyPanel } from './AgentSafetyPanel';
 
 const navLinks = [
   { href: '/', label: '返回首页', en: 'HOME' },
-  { href: '/agent-connect/permissions', label: '权限控制', en: 'PERMISSIONS' },
-  { href: '/agent-connect/preferences', label: '偏好工作室', en: 'PREFERENCES' },
-  { href: '/agent-connect/activity', label: '行为日志', en: 'ACTIVITY' },
-  { href: '/agent-connect/social-hall', label: '会议大厅', en: 'SOCIAL HALL' },
+  { href: '/agent-control', label: '权限控制', en: 'PERMISSIONS' },
+  { href: '/ai-profile', label: '偏好画像', en: 'PREFERENCES' },
+  { href: '/agent-activity', label: '行为日志', en: 'ACTIVITY' },
+  { href: '/hall', label: '社交大厅', en: 'SOCIAL HALL' },
 ] as const;
-
-const reservedCopy: Record<string, string> = {
-  '/agent-connect/social-hall': 'Agent Social 会议大厅已预留。下一轮会展开 Agent-to-Agent 实验交流空间。',
-};
 
 export function AgentConnectPage() {
   const location = useLocation();
-  const reservedMessage = reservedCopy[location.pathname];
 
   useEffect(() => {
-    const titleByPath: Record<string, string> = {
-      '/agent-connect/permissions': 'FitMeet Permission Control',
-      '/agent-connect/preferences': 'FitMeet Preference Studio',
-      '/agent-connect/activity': 'FitMeet Agent Activity',
-      '/agent-connect/social-hall': 'FitMeet Agent Social Hall',
-    };
-    document.title = titleByPath[location.pathname] ?? 'FitMeet Agent Connect';
-  }, [location.pathname]);
-
-  let content: ReactNode = <AgentConnectHome />;
-  if (location.pathname === '/agent-connect/permissions') content = <AgentPermissionControlPage />;
-  if (location.pathname === '/agent-connect/preferences') content = <AgentPreferenceStudioPage />;
-  if (location.pathname === '/agent-connect/activity') {
-    content = (
-      <>
-        <AgentGatewayOverview />
-        <AgentLiveControlPanel />
-      </>
-    );
-  }
-  if (reservedMessage) {
-    content = (
-      <>
-        <div className="agent-reserved-banner">
-          <span>RESERVED ENTRY</span>
-          <p>{reservedMessage}</p>
-        </div>
-        <AgentConnectHome compact />
-      </>
-    );
-  }
+    document.title = 'FitMeet Agent Connect';
+  }, []);
 
   return (
     <div className="agent-connect-page">
@@ -89,12 +53,14 @@ export function AgentConnectPage() {
         </div>
       </header>
 
-      <main>{content}</main>
+      <main>
+        <AgentConnectHome />
+      </main>
     </div>
   );
 }
 
-function AgentConnectHome({ compact = false }: { compact?: boolean }) {
+function AgentConnectHome() {
   const [agents, setAgents] = useState<AgentConnection[]>(agentConnections);
   const [selectedAgentId, setSelectedAgentId] = useState(agentConnections[0]?.id ?? '');
   const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
@@ -149,7 +115,7 @@ function AgentConnectHome({ compact = false }: { compact?: boolean }) {
 
   return (
     <>
-      <section className={`agent-connect-hero ${compact ? 'agent-connect-hero--compact' : ''}`}>
+      <section className="agent-connect-hero">
         <motion.div
           className="agent-connect-hero__copy"
           initial={{ opacity: 0, y: 24 }}
@@ -218,10 +184,10 @@ function AgentConnectHome({ compact = false }: { compact?: boolean }) {
               Human-led, AI-assisted, permission-based 原则。
             </p>
             <div className="agent-selected-panel__links">
-              <a href="/agent-connect/permissions">权限设置</a>
-              <a href="/agent-connect/preferences">偏好工作室</a>
-              <a href="/agent-connect/activity">行为日志</a>
-              <a href="/agent-connect/social-hall">会议大厅</a>
+              <a href="/agent-control">权限设置</a>
+              <a href="/ai-profile">偏好画像</a>
+              <a href="/agent-activity">行为日志</a>
+              <a href="/hall">社交大厅</a>
             </div>
             {showCustomGuide && (
               <div className="agent-custom-guide">

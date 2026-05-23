@@ -12,6 +12,7 @@ import {
 } from './entities/agent-task.entity';
 import { SocialAgentAction } from './agent-permission.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
+import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
@@ -221,6 +222,62 @@ function makeHarness() {
       profileDiscoverable: true,
       agentCanRecommendMe: true,
     }),
+    saveAnswer: jest.fn().mockResolvedValue({ id: 1 }),
+  };
+  const messages = {
+    createAgentInboxEvent: jest.fn().mockResolvedValue({ id: 'inbox-event-1' }),
+  };
+  const approvals = {
+    create: jest.fn().mockImplementation(async (input: Record<string, unknown>) => ({
+      id: 9001,
+      type: input.type,
+      actionType: input.actionType ?? input.type,
+      summary: input.summary,
+      riskLevel: input.riskLevel,
+      payload: input.payload,
+      expiresAt: new Date(Date.now() + 60_000),
+    })),
+  };
+  const publicIntentRepo = {
+    createQueryBuilder: jest.fn().mockReturnValue({
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([]),
+    }),
+  };
+  const metrics = {
+    recordIntent: jest.fn(),
+    recordAction: jest.fn(),
+    recordQueuedRun: jest.fn(),
+    recordApproval: jest.fn(),
+    recordActivitySearch: jest.fn(),
+    recordError: jest.fn(),
+    recordFallback: jest.fn(),
+    recordLatency: jest.fn(),
+    observeRouteLatency: jest.fn(),
+    snapshot: jest.fn().mockReturnValue({}),
+  };
+  const intentRouter = new SocialAgentIntentRouterService({
+    get: jest.fn().mockReturnValue(undefined),
+  } as never);
+
+  const longTermMemory = {
+    summarizeTask: jest.fn().mockResolvedValue(null),
+    readSnapshot: jest.fn().mockResolvedValue(null),
+  };
+
+  const rag = {
+    retrieve: jest.fn().mockResolvedValue({
+      intent: 'casual_chat',
+      retrievedKinds: [],
+      safetySop: [],
+      openingTemplates: [],
+      activitySop: [],
+      successfulMatchCases: [],
+      userMemorySummary: null,
+    }),
   };
 
   const service = new SocialAgentChatService(
@@ -228,8 +285,15 @@ function makeHarness() {
     eventRepo as never,
     connectionRepo as never,
     planner as never,
+    intentRouter,
     executor as never,
     socialProfiles as never,
+    messages as never,
+    approvals as never,
+    publicIntentRepo as never,
+    metrics as never,
+    longTermMemory as never,
+    rag as never,
   );
 
   return {
@@ -239,10 +303,182 @@ function makeHarness() {
     connectionRepo,
     planner,
     executor,
+    socialProfiles,
+    messages,
+    approvals,
+    publicIntentRepo,
+    metrics,
+    longTermMemory,
+    rag,
   };
 }
 
+async function flushAsync(times = 8): Promise<void> {
+  for (let iteration = 0; iteration < times; iteration += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 describe('SocialAgentChatService', () => {
+  it('routes casual chat without running tools', async () => {
+    const { service, executor, socialProfiles, savedEvents } = makeHarness();
+
+    const result = await service.routeMessage(7, { message: '你好，你能做什么？' });
+
+    expect(result).toMatchObject({
+      intent: 'casual_chat',
+      action: 'reply',
+      shouldQueueRun: false,
+      taskId: 101,
+    });
+    expect(result.assistantMessage).toContain('正常聊天');
+    expect(savedEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ summary: '用户发送 Social Agent 消息' }),
+        expect.objectContaining({ summary: 'Social Agent 已完成意图路由' }),
+        expect.objectContaining({ summary: 'Social Agent 回复消息' }),
+      ]),
+    );
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+    expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
+  });
+
+  it('routes profile updates into profile storage and context memory', async () => {
+    const { service, executor, socialProfiles, savedEvents } = makeHarness();
+
+    const result = await service.routeMessage(7, { message: '我喜欢拍照和跑步' });
+
+    expect(result).toMatchObject({
+      intent: 'profile_update',
+      action: 'save_context',
+      shouldQueueRun: false,
+      savedContext: true,
+      profileUpdated: true,
+      taskId: 101,
+    });
+    expect(socialProfiles.saveAnswer).toHaveBeenCalledWith(7, 'interestTags', '我喜欢拍照和跑步');
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+    expect(savedEvents.map((event) => event.eventType)).toContain(
+      AgentTaskEventType.SocialAgentContextAppended,
+    );
+  });
+
+  it('routes safety boundaries into profile storage without searching', async () => {
+    const { service, executor, socialProfiles } = makeHarness();
+
+    const result = await service.routeMessage(7, { message: '不要夜间见面，也别自动发消息' });
+
+    expect(result).toMatchObject({
+      intent: 'safety_or_boundary',
+      action: 'save_context',
+      shouldQueueRun: false,
+      profileUpdated: true,
+    });
+    expect(socialProfiles.saveAnswer).toHaveBeenCalledWith(7, 'avoidTraits', '不要夜间见面，也别自动发消息');
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+  });
+
+  it('routes social searches to the async search path', async () => {
+    const { service } = makeHarness();
+
+    const result = await service.routeMessage(7, { message: '帮我找青岛附近的跑步搭子' });
+
+    expect(result).toMatchObject({
+      intent: 'social_search',
+      action: 'queue_search',
+      shouldQueueRun: true,
+      runMode: 'initial',
+      taskId: 101,
+      queuedRun: expect.objectContaining({ status: 'queued', taskId: 101 }),
+    });
+  });
+
+  it('routes gendered search requests as searches rather than boundaries', async () => {
+    const { service } = makeHarness();
+
+    const result = await service.routeMessage(7, { message: '帮我找青岛附近女生拍照搭子' });
+
+    expect(result).toMatchObject({
+      intent: 'social_search',
+      action: 'queue_search',
+      shouldQueueRun: true,
+    });
+  });
+
+  it('routes action requests to explicit confirmation instead of execution', async () => {
+    const { service, executor, taskRepo } = makeHarness();
+    taskRepo.findOne.mockResolvedValue(makeTask({
+      memory: {
+        shortTerm: {
+          candidates: [
+            {
+              userId: 22,
+              nickname: '小林',
+              candidateRecordId: 501,
+              score: 87,
+            },
+          ],
+        },
+      },
+    }));
+
+    const result = await service.routeMessage(7, { message: '帮我发消息给第一个人', taskId: 101 });
+
+    expect(result).toMatchObject({
+      intent: 'action_request',
+      action: 'await_confirmation',
+      shouldQueueRun: false,
+      taskId: 101,
+    });
+    expect(result.assistantMessage).toContain('不会自动执行');
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+  });
+
+  it('answers candidate follow-up from existing candidates without full search', async () => {
+    const { service, executor, taskRepo } = makeHarness();
+    taskRepo.findOne.mockResolvedValue(makeTask({
+      memory: {
+        shortTerm: {
+          candidates: [
+            {
+              userId: 22,
+              nickname: '小林',
+              candidateRecordId: 501,
+              score: 87,
+              reasons: ['同城且时间匹配', '都喜欢拍照'],
+              risk: { warnings: [] },
+            },
+          ],
+        },
+      },
+    }));
+
+    const result = await service.handleMessage(7, { message: '第一个人为什么匹配', taskId: 101 });
+
+    expect(result).toMatchObject({
+      intent: 'candidate_followup',
+      action: 'reply',
+      shouldQueueRun: false,
+      taskId: 101,
+    });
+    expect(result.assistantMessage).toContain('同城且时间匹配');
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+  });
+
+  it('asks a clarification question for unknown intent', async () => {
+    const { service, executor } = makeHarness();
+
+    const result = await service.routeMessage(7, { message: '这个情况有点复杂' });
+
+    expect(result).toMatchObject({
+      intent: 'unknown',
+      action: 'clarify',
+      shouldQueueRun: false,
+    });
+    expect(result.assistantMessage).toContain('还不确定');
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+  });
+
   it('creates a private draft request, persists candidates, and returns confirmation actions', async () => {
     const { service, taskRepo, savedEvents, executor } = makeHarness();
 
@@ -387,14 +623,24 @@ describe('SocialAgentChatService', () => {
     });
   });
 
-  it('replans a follow-up and refreshes the draft plus candidates through tools', async () => {
+  it('queues a follow-up replan and refreshes the draft plus candidates in the background', async () => {
     const { service, taskRepo, planner, executor } = makeHarness();
     taskRepo.findOne.mockResolvedValue(makeTask({ goal: '今晚青岛轻松跑步' }));
 
-    const result = await service.replanAndRefresh(7, 101, {
+    const queued = await service.replanAndRefresh(7, 101, {
       userMessage: '改成明天杭州瑜伽搭子，先生成草稿，不要直接发',
       reason: 'user_follow_up',
     });
+
+    expect(queued).toMatchObject({
+      taskId: 101,
+      status: 'queued',
+      phase: 'queued',
+    });
+
+    await flushAsync();
+
+    const result = await service.getRunStatus(7, 101, queued.runId);
 
     expect(planner.replanTask).toHaveBeenCalledWith(
       101,
@@ -418,13 +664,14 @@ describe('SocialAgentChatService', () => {
       expect.objectContaining({ socialRequestId: 301, limit: 10 }),
       7,
     );
-    expect(result.replan.replanAttempt).toBe(1);
-    expect(result.socialRequestDraft).toMatchObject({
+    expect(result.status).toBe('completed');
+    expect(result.result?.replan.replanAttempt).toBe(1);
+    expect(result.result?.socialRequestDraft).toMatchObject({
       agentTaskId: 101,
       socialRequestId: 301,
       mode: 'draft',
     });
-    expect(result.candidates).toHaveLength(1);
+    expect(result.result?.candidates).toHaveLength(1);
   });
 
   it('saves a persisted candidate through the SaveCandidate tool', async () => {
@@ -475,6 +722,101 @@ describe('SocialAgentChatService', () => {
       targetUserId: 22,
       following: true,
       conversationId: 'conv-22',
+    });
+  });
+
+  describe('short-term task memory', () => {
+    function readTaskMemory(taskRepo: { save: jest.Mock }): Record<string, unknown> {
+      const lastCall = taskRepo.save.mock.calls.at(-1);
+      const saved = lastCall?.[0] as { memory?: { taskMemory?: Record<string, unknown> } };
+      return saved?.memory?.taskMemory ?? {};
+    }
+
+    it('appends every routed user message into lastUserMessages with a cap', async () => {
+      const { service, taskRepo } = makeHarness();
+      await service.routeMessage(7, { message: '你好，你能做什么？' });
+      const memory = readTaskMemory(taskRepo) as { lastUserMessages: Array<{ text: string; intent: string }> };
+      expect(memory.lastUserMessages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ text: '你好，你能做什么？', intent: 'casual_chat' }),
+        ]),
+      );
+      expect(memory.lastUserMessages.length).toBeLessThanOrEqual(20);
+    });
+
+    it('writes preferences when the intent is profile_update', async () => {
+      const { service, taskRepo } = makeHarness();
+      await service.routeMessage(7, { message: '我喜欢拍照和跑步，比较慢热' });
+      const memory = readTaskMemory(taskRepo) as { preferences: { interests: string[]; socialStyle: string } };
+      expect(memory.preferences.interests).toEqual(expect.arrayContaining(['拍照', '跑步']));
+      expect(memory.preferences.socialStyle).toBe('slow_warm');
+    });
+
+    it('writes boundaries when the intent is safety_or_boundary', async () => {
+      const { service, taskRepo } = makeHarness();
+      await service.routeMessage(7, { message: '不要夜间见面，也别自动发消息，请只在公开场所见面' });
+      const memory = readTaskMemory(taskRepo) as { boundaries: Record<string, unknown> };
+      expect(memory.boundaries).toMatchObject({
+        noNightMeet: true,
+        noAutoMessage: true,
+        publicPlaceOnly: true,
+      });
+    });
+
+    it('writes currentGoal and activeEntities for social_search intents', async () => {
+      const { service, taskRepo } = makeHarness();
+      await service.routeMessage(7, { message: '帮我找青岛附近的跑步搭子' });
+      const memory = readTaskMemory(taskRepo) as {
+        currentGoal: string;
+        activeEntities: { city: string; activityType: string };
+      };
+      expect(memory.currentGoal).toContain('青岛');
+      expect(memory.activeEntities.city).toBe('青岛');
+      expect(memory.activeEntities.activityType).toBeTruthy();
+    });
+
+    it('records a pending action when an action_request creates an approval', async () => {
+      const { service, taskRepo } = makeHarness();
+      taskRepo.findOne.mockResolvedValue(makeTask({
+        memory: {
+          shortTerm: {
+            candidates: [{ userId: 22, nickname: '小林', candidateRecordId: 501, score: 87 }],
+          },
+        },
+      }));
+
+      await service.handleMessage(7, { message: '帮我发消息给第一个人', taskId: 101 });
+
+      const memory = readTaskMemory(taskRepo) as { pendingActions: Array<Record<string, unknown>> };
+      expect(memory.pendingActions.length).toBeGreaterThan(0);
+      expect(memory.pendingActions.at(-1)).toMatchObject({
+        id: 9001,
+        actionType: 'send_candidate_message',
+      });
+    });
+
+    it('reads existing recommendedIds and moves them to rejectedIds when the user asks for a fresh batch', async () => {
+      const { service, taskRepo } = makeHarness();
+      taskRepo.findOne.mockResolvedValue(makeTask({
+        memory: {
+          shortTerm: {
+            candidates: [{ userId: 22, nickname: '小林', candidateRecordId: 501, score: 87 }],
+          },
+          taskMemory: {
+            currentGoal: '青岛跑步搭子',
+            activeEntities: { city: '青岛', activityType: 'running' },
+            candidateState: { recommendedIds: [22, 33], savedIds: [], messagedIds: [], rejectedIds: [] },
+          },
+        },
+      }));
+
+      await service.handleMessage(7, { message: '换一批人', taskId: 101 });
+
+      const memory = readTaskMemory(taskRepo) as {
+        candidateState: { recommendedIds: number[]; rejectedIds: number[] };
+      };
+      expect(memory.candidateState.recommendedIds).toEqual([]);
+      expect(memory.candidateState.rejectedIds).toEqual(expect.arrayContaining([22, 33]));
     });
   });
 });

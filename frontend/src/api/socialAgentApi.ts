@@ -96,6 +96,135 @@ export interface SocialAgentChatReplanRunResult extends SocialAgentChatRunResult
   replan: SocialAgentReplanResult;
 }
 
+export type SocialAgentAsyncRunStatus = 'queued' | 'running' | 'completed' | 'failed';
+
+export interface SocialAgentAsyncRunResult {
+  taskId: number;
+  runId: string;
+  status: SocialAgentAsyncRunStatus;
+  phase: string;
+  message: string;
+  visibleSteps: Array<{ id: string; label: string; status: SocialAgentStepStatus }>;
+  queuedAt: string;
+  startedAt: string | null;
+  updatedAt: string;
+  completedAt: string | null;
+  failedAt: string | null;
+  pollAfterMs: number;
+  taskStatus?: SocialAgentTaskStatus;
+  error?: Record<string, unknown> | null;
+  replan?: SocialAgentReplanResult | null;
+  result?: SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null;
+}
+
+export interface SocialAgentAppendContextResult {
+  taskId: number;
+  saved: true;
+  eventType: 'social_agent.context.appended';
+  userMessage: string;
+  previousGoal: string;
+  refreshedGoal: string;
+  appendedAt: string;
+}
+
+export interface SocialAgentTaskEvent {
+  id: number;
+  taskId: number;
+  eventType: string;
+  actor: string;
+  summary: string;
+  payload: Record<string, unknown>;
+  stepId: string | null;
+  toolCallId: string | null;
+  createdAt: string;
+}
+
+export interface SocialAgentTaskEventsResult {
+  taskId: number;
+  events: SocialAgentTaskEvent[];
+}
+
+export type SocialAgentIntentType =
+  | 'casual_chat'
+  | 'profile_update'
+  | 'social_search'
+  | 'activity_search'
+  | 'candidate_followup'
+  | 'action_request'
+  | 'safety_or_boundary'
+  | 'unknown';
+
+export type SocialAgentIntentAction =
+  | 'reply'
+  | 'save_context'
+  | 'queue_search'
+  | 'queue_replan'
+  | 'await_confirmation'
+  | 'clarify';
+
+export type SocialAgentReplyStrategy =
+  | 'direct_reply'
+  | 'ask_clarifying_question'
+  | 'append_context'
+  | 'search_candidates'
+  | 'search_activities'
+  | 'execute_action';
+
+export interface SocialAgentIntentEntities {
+  city: string;
+  activityType: string;
+  targetGender: string;
+  timePreference: string;
+  locationPreference: string;
+}
+
+export interface SocialAgentIntentRouteResult {
+  intent: SocialAgentIntentType;
+  action: SocialAgentIntentAction;
+  confidence: number;
+  entities: SocialAgentIntentEntities;
+  shouldSearch: boolean;
+  shouldReplan: boolean;
+  shouldUpdateProfile: boolean;
+  shouldExecuteAction: boolean;
+  replyStrategy: SocialAgentReplyStrategy;
+  source: 'rules' | 'deepseek';
+  taskId: number | null;
+  assistantMessage: string;
+  savedContext: boolean;
+  profileUpdated: boolean;
+  shouldQueueRun: boolean;
+  runMode: 'initial' | 'follow_up' | null;
+  queuedRun?: SocialAgentAsyncRunResult | null;
+  pendingApproval?: SocialAgentPendingApproval | null;
+  activityResults?: SocialAgentActivityResult[];
+}
+
+export interface SocialAgentPendingApproval {
+  id: number;
+  type: string;
+  actionType: string;
+  summary: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  payload: Record<string, unknown>;
+  expiresAt: string | null;
+}
+
+export interface SocialAgentActivityResult {
+  id: string;
+  source: 'public_intent';
+  title: string;
+  description: string;
+  city: string;
+  loc: string;
+  requestType: string;
+  interestTags: string[];
+  timePreference: string;
+  ownerUserId: number | null;
+  status: string;
+  createdAt: string | null;
+}
+
 export type SocialAgentChatStreamEvent =
   | { type: 'task'; taskId: number; status: SocialAgentTaskStatus }
   | {
@@ -115,6 +244,12 @@ type ReplanChatInput = {
   userMessage: string;
   reason?: 'user_follow_up' | 'failure_recovery' | 'manual_replan';
   failure?: Record<string, unknown> | null;
+};
+
+type RouteMessageInput = {
+  message: string;
+  taskId?: number | null;
+  hasCandidates?: boolean;
 };
 
 type SendCandidateMessageInput = {
@@ -180,6 +315,35 @@ export const socialAgentApi = {
       })
       .then(sanitizeSocialAgentResponse),
 
+  runChatQueued: (data: RunChatInput) =>
+    api
+      .requestProtected<SocialAgentAsyncRunResult>('/social-agent/chat/run-async', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+      .then(sanitizeSocialAgentResponse),
+
+  routeMessage: (data: RouteMessageInput) =>
+    api
+      .requestProtected<SocialAgentIntentRouteResult>('/social-agent/chat/route-message', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+      .then(sanitizeSocialAgentResponse),
+
+  handleMessage: (data: RouteMessageInput) => {
+    const taskId = data.taskId ?? null;
+    const path = taskId
+      ? `/social-agent/chat/tasks/${taskId}/messages`
+      : '/social-agent/chat/messages';
+    return api
+      .requestProtected<SocialAgentIntentRouteResult>(path, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+      .then(sanitizeSocialAgentResponse);
+  },
+
   runChatStream: (
     data: RunChatInput,
     onEvent: (event: SocialAgentChatStreamEvent) => void,
@@ -238,7 +402,7 @@ export const socialAgentApi = {
 
   replanAndRunTask: (taskId: number, data: ReplanChatInput) =>
     api
-      .requestProtected<SocialAgentChatReplanRunResult>(`/social-agent/chat/tasks/${taskId}/replan-run`, {
+      .requestProtected<SocialAgentAsyncRunResult>(`/social-agent/chat/tasks/${taskId}/replan-run`, {
         method: 'POST',
         body: JSON.stringify({
           reason: data.reason ?? 'user_follow_up',
@@ -246,6 +410,30 @@ export const socialAgentApi = {
           failure: data.failure ?? null,
         }),
       })
+      .then(sanitizeSocialAgentResponse),
+
+  appendContext: (taskId: number, data: ReplanChatInput) =>
+    api
+      .requestProtected<SocialAgentAppendContextResult>(`/social-agent/chat/tasks/${taskId}/append-context`, {
+        method: 'POST',
+        body: JSON.stringify({
+          reason: data.reason ?? 'user_follow_up',
+          userMessage: data.userMessage,
+          failure: data.failure ?? null,
+        }),
+      })
+      .then(sanitizeSocialAgentResponse),
+
+  getRunStatus: (taskId: number, runId: string) =>
+    api
+      .requestProtected<SocialAgentAsyncRunResult>(
+        `/social-agent/chat/tasks/${taskId}/runs/${encodeURIComponent(runId)}`,
+      )
+      .then(sanitizeSocialAgentResponse),
+
+  getTaskEvents: (taskId: number) =>
+    api
+      .requestProtected<SocialAgentTaskEventsResult>(`/social-agent/tasks/${taskId}/events`)
       .then(sanitizeSocialAgentResponse),
 };
 
@@ -275,44 +463,53 @@ async function runSocialAgentStream(
   const decoder = new TextDecoder();
   let buffer = '';
   let finalResult: SocialAgentChatRunResult | null = null;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split(/\r?\n\r?\n/);
+      buffer = chunks.pop() ?? '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const chunks = buffer.split(/\r?\n\r?\n/);
-    buffer = chunks.pop() ?? '';
+      for (const chunk of chunks) {
+        const event = parseSseChunk(chunk);
+        if (!event) continue;
+        const sanitized = sanitizeSocialAgentResponse(event);
+        onEvent(sanitized);
+        if (sanitized.type === 'result') finalResult = sanitized.result;
+        if (sanitized.type === 'error') throw new Error(sanitized.message);
+      }
+    }
 
-    for (const chunk of chunks) {
-      const event = parseSseChunk(chunk);
-      if (!event) continue;
-      const sanitized = sanitizeSocialAgentResponse(event);
-      onEvent(sanitized);
-      if (sanitized.type === 'result') finalResult = sanitized.result;
-      if (sanitized.type === 'error') throw new Error(sanitized.message);
+    if (buffer.trim()) {
+      const event = parseSseChunk(buffer);
+      if (event) {
+        const sanitized = sanitizeSocialAgentResponse(event);
+        onEvent(sanitized);
+        if (sanitized.type === 'result') finalResult = sanitized.result;
+        if (sanitized.type === 'error') throw new Error(sanitized.message);
+      }
+    }
+
+    if (!finalResult) {
+      throw new Error('Social Agent 没有返回最终结果，请稍后再试。');
+    }
+    return finalResult;
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // Best-effort cleanup: cancel may reject if the stream already errored or aborted.
     }
   }
-
-  if (buffer.trim()) {
-    const event = parseSseChunk(buffer);
-    if (event) {
-      const sanitized = sanitizeSocialAgentResponse(event);
-      onEvent(sanitized);
-      if (sanitized.type === 'result') finalResult = sanitized.result;
-      if (sanitized.type === 'error') throw new Error(sanitized.message);
-    }
-  }
-
-  if (!finalResult) {
-    throw new Error('Social Agent 没有返回最终结果，请稍后再试。');
-  }
-  return finalResult;
 }
 
 async function resolveStreamError(response: Response): Promise<string> {
   if (response.status === 401) return api.AUTH_EXPIRED_MESSAGE;
+  if (response.status === 504) return '请求超时，但你的补充信息已保存。请稍后重试。';
   const body = await response.text().catch(() => '');
   if (!body.trim()) return response.statusText || 'Social Agent 请求失败。';
+  if (/^\s*</.test(body)) return '服务器返回了不可读的错误页面，请稍后重试。';
 
   try {
     const parsed = JSON.parse(body) as { message?: unknown; error?: unknown };

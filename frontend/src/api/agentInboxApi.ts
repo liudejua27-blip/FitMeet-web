@@ -172,7 +172,7 @@ export const agentInboxApi = {
       .then(sanitizeAgentInboxResponse),
 
   runAutopilotOnce: () =>
-    api.request<{
+    api.requestProtected<{
       ok: boolean;
       summary: {
         triggeredBy: 'cron' | 'manual';
@@ -185,14 +185,14 @@ export const agentInboxApi = {
     }>('/agents/autopilot/run-once', { method: 'POST' }),
 
   runProfileMatchesOnce: () =>
-    api.request<{
+    api.requestProtected<{
       ok: boolean;
       matchedCount: number;
       recommendations: unknown[];
     }>('/agents/profile-matches/run-once', { method: 'POST' }),
 
   runProfileMatchAutopilotOnce: () =>
-    api.request<{
+    api.requestProtected<{
       ok: boolean;
       autopilot: 'profile_match_autopilot';
       summary: {
@@ -211,20 +211,20 @@ export const agentInboxApi = {
     }>('/agents/profile-match/autopilot/run-once', { method: 'POST' }),
 
   profileMatchAutopilotStatus: () =>
-    api.request<OpenClawSetupStatus['subconsciousLoop']>('/agents/profile-match/autopilot/status'),
+    api.requestProtected<OpenClawSetupStatus['subconsciousLoop']>('/agents/profile-match/autopilot/status'),
 
-  openClawStatus: () => api.request<OpenClawSetupStatus>('/agents/openclaw/status'),
+  openClawStatus: () => api.requestProtected<OpenClawSetupStatus>('/agents/openclaw/status'),
 
-  matchRequests: () => api.request<{ requests: MatchRequestItem[] }>('/match-requests'),
+  matchRequests: () => api.requestProtected<{ requests: MatchRequestItem[] }>('/match-requests'),
 
   acceptMatchRequest: (id: number) =>
-    api.request<{ ok: boolean; status: string; conversationId?: string }>(
+    api.requestProtected<{ ok: boolean; status: string; conversationId?: string }>(
       `/match-requests/${id}/accept`,
       { method: 'POST' },
     ),
 
   rejectMatchRequest: (id: number) =>
-    api.request<{ ok: boolean; status: string }>(`/match-requests/${id}/reject`, {
+    api.requestProtected<{ ok: boolean; status: string }>(`/match-requests/${id}/reject`, {
       method: 'POST',
     }),
 
@@ -236,19 +236,19 @@ export const agentInboxApi = {
       .then(sanitizeAgentInboxResponse),
 
   ignoreProfileMatch: (aiMatchSessionId: number) =>
-    api.request<{ ok: boolean; status: string }>(
+    api.requestProtected<{ ok: boolean; status: string }>(
       `/agents/profile-matches/${aiMatchSessionId}/ignore`,
       { method: 'POST' },
     ),
 
   favoriteProfileMatch: (aiMatchSessionId: number) =>
-    api.request<{ ok: boolean; status: string }>(
+    api.requestProtected<{ ok: boolean; status: string }>(
       `/agents/profile-matches/${aiMatchSessionId}/favorite`,
       { method: 'POST' },
     ),
 
   draftProfileMatchOpener: (aiMatchSessionId: number) =>
-    api.request<{
+    api.requestProtected<{
       ok: boolean;
       draft: { type: 'message'; tone: string; content: string };
       requiresOwnerConfirmation: boolean;
@@ -258,7 +258,7 @@ export const agentInboxApi = {
     }),
 
   confirmProfileMatchContact: (aiMatchSessionId: number) =>
-    api.request<{
+    api.requestProtected<{
       ok: boolean;
       status: string;
       contactRequestId: number;
@@ -272,7 +272,7 @@ export const agentInboxApi = {
     }),
 
   requestContactExchange: (aiMatchSessionId: number) =>
-    api.request<{ ok: boolean; status: string; approvalId?: number }>(
+    api.requestProtected<{ ok: boolean; status: string; approvalId?: number }>(
       `/agents/profile-matches/${aiMatchSessionId}/request-contact-exchange`,
       {
         method: 'POST',
@@ -284,7 +284,7 @@ export const agentInboxApi = {
     ),
 
   sendIntro: (aiMatchSessionId: number, content: string) =>
-    api.request<{
+    api.requestProtected<{
       ok: boolean;
       status: string;
       conversationId?: string;
@@ -305,7 +305,7 @@ export const agentInboxApi = {
   },
 
   ackEvents: (eventIds: string[], agentProfileId?: number) =>
-    api.request<{ ok: true; requested: number; acknowledged: number; eventIds: string[] }>(
+    api.requestProtected<{ ok: true; requested: number; acknowledged: number; eventIds: string[] }>(
       '/agents/inbox/events/ack',
       {
         method: 'POST',

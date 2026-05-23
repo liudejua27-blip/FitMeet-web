@@ -31,9 +31,15 @@ import { AgentTask, AgentTaskEvent } from './entities/agent-task.entity';
 import { AgentActionLogService } from './agent-action-log.service';
 import { AgentPermissionService } from './agent-permission.service';
 import { SocialAgentPlannerService } from './social-agent-planner.service';
+import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentToolExecutorService } from './social-agent-tool-executor.service';
 import { SocialAgentAutopilotService } from './social-agent-autopilot.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
+import { SocialAgentMetricsService } from './social-agent-metrics.service';
+import { SocialAgentMetricsController } from './social-agent-metrics.controller';
+import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
+import { SocialAgentLongTermMemory } from './entities/social-agent-long-term-memory.entity';
+import { SocialAgentRagService } from './social-agent-rag.service';
 import { AgentWebhookService } from './agent-webhook.service';
 import { AiSocialAutopilotService } from './ai-social-autopilot.service';
 import { AgentDiscoveryService } from './agent-discovery.service';
@@ -100,6 +106,7 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
       AiDelegateProfile,
       AiMatchSession,
       UserSocialProfile,
+      SocialAgentLongTermMemory,
       User,
     ]),
   ],
@@ -112,12 +119,14 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
     AgentActionLogService,
     AgentPermissionService,
     SocialAgentPlannerService,
+    SocialAgentIntentRouterService,
     SocialAgentAutopilotService,
     SocialAgentChatService,
+    SocialAgentMetricsService,
+    SocialAgentLongTermMemoryService,
+    SocialAgentRagService,
     SocialAgentToolExecutorService,
     AgentWebhookService,
-    AiSocialAutopilotService,
-    AgentDiscoveryService,
     AgentProfileQAService,
     ProfileMatchService,
     ProfileMatchAutopilotService,
@@ -137,6 +146,7 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
     PublicSocialSkillsController,
     SocialAgentAutopilotController,
     SocialAgentChatController,
+    SocialAgentMetricsController,
     SocialAgentTasksController,
   ],
   exports: [
@@ -148,8 +158,11 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
     AgentActionLogService,
     AgentPermissionService,
     SocialAgentPlannerService,
+    SocialAgentIntentRouterService,
     SocialAgentAutopilotService,
     SocialAgentChatService,
+    SocialAgentLongTermMemoryService,
+    SocialAgentRagService,
     SocialAgentToolExecutorService,
     AgentWebhookService,
     AiSocialAutopilotService,

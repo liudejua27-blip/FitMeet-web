@@ -83,7 +83,7 @@ export const SocialSkillsDeveloperPage = memo(
                 FitMeet 的 AI 与安全机制统一控制。
               </p>
               <div className="mt-7 flex flex-wrap gap-3">
-                <Link className="rounded-lg bg-[#ff6a00] px-5 py-3 text-sm font-black text-white transition hover:bg-[#ff8128]" to="/agent-token">
+                <Link className="rounded-lg bg-[#ff6a00] px-5 py-3 text-sm font-black text-white transition hover:bg-[#ff8128]" to="/agent-hub">
                   获取 Agent Token
                 </Link>
                 <Link className="rounded-lg border border-white/15 px-5 py-3 text-sm font-black text-[#f6efe5] transition hover:border-[#18b98f]/50 hover:text-[#8ff0d1]" to="/ai-profile">

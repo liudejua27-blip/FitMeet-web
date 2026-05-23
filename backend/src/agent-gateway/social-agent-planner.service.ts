@@ -154,6 +154,23 @@ export class SocialAgentPlannerService {
       );
     }
 
+    if (fallbackReason === 'deepseek_timeout') {
+      await this.eventRepo.save(
+        this.eventRepo.create({
+          taskId: task.id,
+          ownerUserId: task.ownerUserId,
+          eventType: AgentTaskEventType.SocialAgentLlmTimeout,
+          actor: AgentTaskEventActor.Agent,
+          summary: 'AI 分析超时，已使用规则匹配继续执行。',
+          payload: {
+            reason,
+            timeoutMs: this.deepSeekTimeoutMs(),
+            fallbackMessage: '已收到补充信息，当前先基于规则匹配继续搜索。',
+          },
+        }),
+      );
+    }
+
     task.plan = plan;
     task.memory = {
       ...(task.memory ?? {}),
@@ -210,26 +227,37 @@ export class SocialAgentPlannerService {
     const model = resolveDeepSeekModel(
       this.config.get<string>('DEEPSEEK_MODEL'),
     );
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.deepSeekTimeoutMs());
 
-    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.2,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: this.buildSystemPrompt() },
-          {
-            role: 'user',
-            content: this.buildUserPrompt(task, allowedActions, brainMemory),
-          },
-        ],
-      }),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.2,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: this.buildSystemPrompt() },
+            {
+              role: 'user',
+              content: this.buildUserPrompt(task, allowedActions, brainMemory),
+            },
+          ],
+        }),
+      });
+    } catch (error) {
+      if (this.isAbortError(error)) throw new Error('deepseek_timeout');
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!res.ok) throw new Error(`DeepSeek HTTP ${res.status}`);
 
@@ -572,8 +600,27 @@ export class SocialAgentPlannerService {
   }
 
   private toFallbackReason(error: unknown): string {
+    if (this.isAbortError(error)) return 'deepseek_timeout';
+    if (error instanceof Error && error.message === 'deepseek_timeout') {
+      return 'deepseek_timeout';
+    }
     if (error instanceof SyntaxError) return 'deepseek_json_parse_failed';
     if (error instanceof Error) return error.message;
     return 'unknown_planner_error';
+  }
+
+  private deepSeekTimeoutMs(): number {
+    const configured = Number(
+      this.config.get<string>('SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS') ??
+        this.config.get<string>('DEEPSEEK_TIMEOUT_MS'),
+    );
+    if (Number.isFinite(configured) && configured > 0) {
+      return Math.min(configured, 15_000);
+    }
+    return 15_000;
+  }
+
+  private isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === 'AbortError';
   }
 }

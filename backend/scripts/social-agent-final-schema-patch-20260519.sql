@@ -2,8 +2,8 @@
 -- social-agent-final-schema-patch-20260519.sql
 --
 -- Idempotent production patch for final Social Agent productization.
--- Adds reply-loop status values, agent_tasks.memory, payment intents, and
--- action-log enum values used by offline meeting/payment/autopilot flows.
+-- Adds reply-loop status values, task links, agent_tasks.memory, payment intents,
+-- and action-log enum values used by offline meeting/payment/autopilot flows.
 -- =============================================================================
 
 DO $$ BEGIN
@@ -68,6 +68,40 @@ END $$;
 
 ALTER TABLE "agent_tasks"
   ADD COLUMN IF NOT EXISTS "memory" jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+ALTER TABLE "agent_approval_requests"
+  ADD COLUMN IF NOT EXISTS "agentTaskId" integer;
+
+ALTER TABLE "agent_action_logs"
+  ADD COLUMN IF NOT EXISTS "agentTaskId" integer;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_agent_approval_requests_task'
+  ) THEN
+    ALTER TABLE "agent_approval_requests"
+      ADD CONSTRAINT "fk_agent_approval_requests_task"
+      FOREIGN KEY ("agentTaskId") REFERENCES "agent_tasks"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_agent_action_logs_task'
+  ) THEN
+    ALTER TABLE "agent_action_logs"
+      ADD CONSTRAINT "fk_agent_action_logs_task"
+      FOREIGN KEY ("agentTaskId") REFERENCES "agent_tasks"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS "idx_agent_approval_requests_task"
+  ON "agent_approval_requests" ("agentTaskId");
+
+CREATE INDEX IF NOT EXISTS "idx_agent_action_logs_task_created"
+  ON "agent_action_logs" ("agentTaskId", "createdAt");
 
 DO $$ BEGIN
   CREATE TYPE "payment_intents_status_enum" AS ENUM (

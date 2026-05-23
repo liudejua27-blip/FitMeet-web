@@ -2311,7 +2311,9 @@ export class SocialAgentToolExecutorService {
     });
 
     if (!actionLog) {
-      throw new Error(`Failed to write agent_action_logs for ${toolName}`);
+      this.logger.warn(
+        `Action completed without agent_action_logs entry for task=${task.id}, tool=${toolName}`,
+      );
     }
 
     if (this.shouldWriteActionResultInbox(toolName) && task.agentConnectionId) {

@@ -267,7 +267,7 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
               </button>
               <button
                 className="rounded-lg border border-white/15 px-5 py-3 text-sm font-black text-[#f6efe5] transition hover:border-[#18b98f]/50 hover:text-[#8ff0d1]"
-                onClick={() => navigate('/agent-token')}
+                onClick={() => navigate('/agent-hub')}
               >
                 获取 Agent Token
               </button>

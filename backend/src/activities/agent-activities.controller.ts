@@ -9,10 +9,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { ActivitiesService } from './activities.service';
-import {
-  CreateActivityDto,
-  SubmitActivityProofDto,
-} from './dto/activity.dto';
+import { CreateActivityDto, SubmitActivityProofDto } from './dto/activity.dto';
 import {
   AGENT_CONNECTION_KEY,
   AgentTokenGuard,
@@ -74,6 +71,7 @@ export class AgentActivitiesController {
     );
     await this.actionLogs.logAgentAction({
       ownerUserId: conn.userId,
+      agentId: conn.id,
       actionType: AgentActionType.CreateActivity,
       actionStatus: AgentActionStatus.Executed,
       riskLevel: AgentActionRiskLevel.Medium,
@@ -99,6 +97,7 @@ export class AgentActivitiesController {
     );
     await this.actionLogs.logAgentAction({
       ownerUserId: conn.userId,
+      agentId: conn.id,
       actionType: AgentActionType.JoinActivity,
       actionStatus: AgentActionStatus.Executed,
       riskLevel: AgentActionRiskLevel.Low,
@@ -135,6 +134,7 @@ export class AgentActivitiesController {
     );
     await this.actionLogs.logAgentAction({
       ownerUserId: conn.userId,
+      agentId: conn.id,
       actionType: AgentActionType.SubmitProof,
       actionStatus: AgentActionStatus.PendingApproval,
       riskLevel: AgentActionRiskLevel.Medium,
