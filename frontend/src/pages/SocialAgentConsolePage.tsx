@@ -12,9 +12,12 @@ import {
   type SocialAgentPendingApproval,
   type SocialAgentStepStatus,
   type SocialAgentTaskEvent,
+  type SocialAgentTaskTimelineSnapshot,
+  type SocialAgentTimelineMessage,
   type SocialAgentToolCall,
 } from '../api/socialAgentApi';
 import { cleanDisplayArray, cleanDisplayText } from '../lib/displayText';
+import { messageUrlWithSocialAgentReturn } from '../lib/socialAgentReturnUrl';
 
 type MessageKind = 'text' | 'risk' | 'approval';
 
@@ -114,6 +117,7 @@ const initialStepOrder = [
 ] as const;
 
 const CONFIRM_PERMISSION_MODE_LABEL = 'Confirm Mode';
+const SOCIAL_AGENT_CURRENT_TASK_STORAGE_KEY = 'fitmeet-social-agent-current-task-id';
 
 export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
   const navigate = useNavigate();
@@ -130,13 +134,115 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
   );
   const [actionStatus, setActionStatus] = useState('');
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
+  const [taskSummary, setTaskSummary] = useState<SocialAgentTaskTimelineSnapshot['task'] | null>(
+    null,
+  );
+  const [taskMemory, setTaskMemory] = useState<Record<string, unknown>>({});
+  const [restoredAt, setRestoredAt] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(true);
+  const [restoreError, setRestoreError] = useState('');
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const started = messages.length > 0;
+  const started = isRestoring || messages.length > 0 || Boolean(result) || Boolean(activeTaskId);
   const draft = result?.socialRequestDraft ?? null;
   const candidates = result?.candidates ?? [];
   const publicIntentCards = candidates.filter(isPublicIntentCandidate);
   const realCandidateCards = candidates.filter((candidate) => !isPublicIntentCandidate(candidate));
+
+  const applyTimelineSnapshot = (snapshot: SocialAgentTaskTimelineSnapshot | null) => {
+    if (!snapshot) {
+      setActiveTaskId(null);
+      setMessages([]);
+      setStatuses([]);
+      setToolCalls([]);
+      setResult(null);
+      setCandidateStates({});
+      setDraftPublish({ status: 'idle' });
+      setTaskSummary(null);
+      setTaskMemory({});
+      setRestoredAt(null);
+      setActionStatus('');
+      return;
+    }
+
+    const restoredResult = snapshot.result ?? null;
+    const restoredEvents = snapshot.events
+      .map(normalizeTaskEvent)
+      .filter((event): event is SocialAgentTaskEvent => !!event);
+    const restoredToolCalls = toolCallsFromEvents(restoredEvents);
+    const fallbackToolCalls = restoredResult ? toolCallsFromRunResult(restoredResult) : [];
+    const nextToolCalls = restoredToolCalls.length > 0 ? restoredToolCalls : fallbackToolCalls;
+    const latestRun = snapshot.latestRun;
+    const runMode =
+      latestRun?.result && isReplanRunResult(latestRun.result) ? 'follow_up' : 'initial';
+
+    setActiveTaskId(snapshot.taskId);
+  setTaskSummary(snapshot.task);
+  setTaskMemory(snapshot.memory ?? {});
+  setRestoredAt(snapshot.restoredAt ?? null);
+    rememberCurrentTaskId(snapshot.taskId);
+    replaceSocialAgentTaskUrl(snapshot.taskId);
+    setMessages(
+      snapshot.messages
+        .map(messageFromTimeline)
+        .filter((message): message is Message => !!message),
+    );
+    setResult(restoredResult);
+    setToolCalls(nextToolCalls);
+    setCandidateStates(
+      candidateStatesFromSession(
+        restoredResult?.candidates ?? [],
+        snapshot.candidateActions ?? {},
+        snapshot.pendingApprovals ?? [],
+      ),
+    );
+    setDraftPublish(draftPublishFromSession(restoredResult));
+    setStatuses(
+      latestRun
+        ? statusesFromRun(latestRun, eventsForRun(restoredEvents, latestRun), runMode)
+        : restoredResult?.visibleSteps.length
+          ? statusesFromVisibleSteps(restoredResult.visibleSteps)
+          : [],
+    );
+    setActionStatus(
+      restoredResult || snapshot.messages.length > 0
+        ? `已恢复 task #${snapshot.taskId} 的聊天和工具执行上下文。`
+        : '',
+    );
+  };
+
+  useEffect(() => {
+    let ignore = false;
+    const restore = async () => {
+      setIsRestoring(true);
+      setRestoreError('');
+      try {
+        const requestedTaskId = readTaskIdFromUrl();
+        const currentTask = requestedTaskId ? null : await socialAgentApi.getCurrentTask();
+        const taskId = requestedTaskId ?? currentTask?.taskId ?? readRememberedTaskId();
+        if (!taskId) {
+          if (!ignore) applyTimelineSnapshot(null);
+          return;
+        }
+        const snapshot = await socialAgentApi.getTaskTimeline(taskId);
+        if (!ignore) applyTimelineSnapshot(snapshot);
+      } catch (error) {
+        if (!ignore) {
+          const message = errorMessage(error, '会话恢复失败，请刷新后重试。');
+          clearRememberedTaskId();
+          setRestoreError(message);
+          setActionStatus(message);
+        }
+      } finally {
+        if (!ignore) setIsRestoring(false);
+      }
+    };
+    void restore();
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -146,6 +252,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     setIsRunning(true);
     setIsPublishing(false);
     setActionStatus('');
+    setRestoreError('');
     setStatuses([]);
     setToolCalls([]);
     const taskId = result?.taskId ?? activeTaskId;
@@ -163,7 +270,11 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
         taskId,
         hasCandidates: candidates.length > 0,
       });
-      if (handled.taskId) setActiveTaskId(handled.taskId);
+      if (handled.taskId) {
+        setActiveTaskId(handled.taskId);
+        rememberCurrentTaskId(handled.taskId);
+        replaceSocialAgentTaskUrl(handled.taskId);
+      }
 
       if (!handled.shouldQueueRun || !handled.queuedRun) {
         if (handled.savedContext) {
@@ -387,18 +498,27 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     const actionKey = candidateActionKey(candidate);
     const state = candidateStates[actionKey];
     const targetUserId = candidateTargetUserId(candidate);
-    if (!result?.taskId || !targetUserId || state?.save === 'saving') return;
+    if (!result?.taskId || state?.save === 'saving') return;
+    if (!targetUserId) {
+      const message = '这个候选缺少目标用户，无法操作。';
+      setCandidateAction(actionKey, { save: 'failed', error: message });
+      setActionStatus(message);
+      return;
+    }
     setCandidateAction(actionKey, { save: 'saving', error: null });
     setActionStatus(`正在收藏 ${displayName(candidate)}，并通过 SaveCandidate 写入候选记录...`);
 
     try {
       const saved = await socialAgentApi.saveCandidate(result.taskId, {
         candidateRecordId: candidate.candidateRecordId,
+        publicIntentId: candidate.publicIntentId,
         socialRequestId: candidate.socialRequestId ?? draft?.socialRequestId ?? null,
         targetUserId,
         candidate: {
+          targetUserId,
           userId: candidate.userId,
           candidateUserId: targetUserId,
+          publicIntentId: candidate.publicIntentId,
           nickname: candidate.nickname,
           score: candidate.score,
           reasons: candidate.reasons,
@@ -424,7 +544,13 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     const actionKey = candidateActionKey(candidate);
     const state = candidateStates[actionKey];
     const targetUserId = candidateTargetUserId(candidate);
-    if (!result?.taskId || !targetUserId || !message || state?.send === 'sending') return;
+    if (!result?.taskId || !message || state?.send === 'sending') return;
+    if (!targetUserId) {
+      const messageText = '这个候选缺少目标用户，无法操作。';
+      setCandidateAction(actionKey, { send: 'failed', error: messageText });
+      setActionStatus(messageText);
+      return;
+    }
     setCandidateAction(actionKey, { send: 'sending', error: null });
     setActionStatus(`正在发送给 ${displayName(candidate)}，并记录确认事件...`);
 
@@ -435,10 +561,13 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
         message,
         suggestedOpener: message,
         candidateRecordId: candidate.candidateRecordId,
+        publicIntentId: candidate.publicIntentId,
         socialRequestId: candidate.socialRequestId ?? draft?.socialRequestId ?? null,
         candidate: {
+          targetUserId,
           userId: candidate.userId,
           candidateUserId: targetUserId,
+          publicIntentId: candidate.publicIntentId,
           nickname: candidate.nickname,
           score: candidate.score,
           reasons: candidate.reasons,
@@ -449,11 +578,12 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
       const pending = isPendingActionStatus(sent.status);
       const messageAction = sent.messageAction;
       if (isFailedCandidateAction(sent.success, sent.status, messageAction, pending)) {
-        throw new Error(toolActionErrorMessage(messageAction, '发送失败，请稍后再试。'));
+        throw new Error(toolActionErrorMessage(sent.toolCall, '发送失败，请稍后再试。'));
       }
-      if (messageAction) {
+      const messageToolCall = sent.toolCall;
+      if (messageToolCall) {
         setToolCalls((current) =>
-          upsertToolCallView(current, toolCallViewFromRecord(messageAction)),
+          upsertToolCallView(current, toolCallViewFromRecord(messageToolCall)),
         );
       }
       setCandidateAction(actionKey, {
@@ -467,7 +597,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
           ? {
               ...current,
               candidates: current.candidates.map((item) =>
-                item.userId === candidate.userId
+                candidateActionKey(item) === actionKey
                   ? { ...item, status: sent.candidateStatus ?? 'messaged' }
                   : item,
               ),
@@ -475,12 +605,16 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
           : current,
       );
       setActionStatus(
-        sent.conversationId
-          ? `已发送给 ${displayName(candidate)}，可前往消息查看。`
-          : `已发送给 ${displayName(candidate)}，消息已关联 task #${result.taskId}。`,
+        pending
+          ? '待确认'
+          : sent.conversationId
+            ? `已发送给 ${displayName(candidate)}，可前往消息查看。`
+            : `已发送给 ${displayName(candidate)}，消息已关联 task #${result.taskId}。`,
       );
     } catch (error) {
-      const messageText = errorMessage(error, '发送失败，请稍后再试。');
+      const messageText = isServerError(error)
+        ? '发送失败，请稍后重试。'
+        : errorMessage(error, '发送失败，请稍后重试。');
       setCandidateAction(actionKey, { send: 'failed', error: messageText });
       setActionStatus(messageText);
     }
@@ -490,7 +624,13 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     const actionKey = candidateActionKey(candidate);
     const state = candidateStates[actionKey];
     const targetUserId = candidateTargetUserId(candidate);
-    if (!result?.taskId || !targetUserId || state?.connect === 'connecting') return;
+    if (!result?.taskId || state?.connect === 'connecting') return;
+    if (!targetUserId) {
+      const message = '这个候选缺少目标用户，无法操作。';
+      setCandidateAction(actionKey, { connect: 'failed', error: message });
+      setActionStatus(message);
+      return;
+    }
     setCandidateAction(actionKey, { connect: 'connecting', error: null });
     setActionStatus(`正在添加 ${displayName(candidate)} 为好友，并创建站内会话...`);
 
@@ -498,11 +638,14 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
       const connection = await socialAgentApi.connectCandidate(result.taskId, {
         candidateUserId: targetUserId,
         candidateRecordId: candidate.candidateRecordId,
+        publicIntentId: candidate.publicIntentId,
         socialRequestId: candidate.socialRequestId ?? draft?.socialRequestId ?? null,
         targetUserId,
         candidate: {
+          targetUserId,
           userId: candidate.userId,
           candidateUserId: targetUserId,
+          publicIntentId: candidate.publicIntentId,
           nickname: candidate.nickname,
           score: candidate.score,
           reasons: candidate.reasons,
@@ -513,14 +656,16 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
       if (
         isFailedCandidateAction(connection.success, connection.status, friendAction, pending)
       ) {
-        throw new Error(toolActionErrorMessage(friendAction, '加好友失败，请稍后再试。'));
+        throw new Error(toolActionErrorMessage(connection.toolCall, '加好友失败，请稍后再试。'));
       }
-      if (friendAction) {
+      const friendToolCall = connection.toolCall;
+      if (friendToolCall) {
         setToolCalls((current) =>
-          upsertToolCallView(current, toolCallViewFromRecord(friendAction)),
+          upsertToolCallView(current, toolCallViewFromRecord(friendToolCall)),
         );
       }
       if (connection.conversationId) {
+        const returnTaskId = result.taskId ?? activeTaskId;
         setCandidateAction(actionKey, {
           connect: 'connected',
           error: null,
@@ -528,7 +673,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
           friendRequestId: connection.friendRequestId,
         });
         setActionStatus(`${displayName(candidate)} 已加为好友，正在进入聊天。`);
-        navigate(`/messages?conversationId=${encodeURIComponent(connection.conversationId)}`);
+        navigate(messageUrlWithSocialAgentReturn(connection.conversationId, returnTaskId));
         return;
       }
       setCandidateAction(actionKey, {
@@ -546,6 +691,29 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
       setCandidateAction(actionKey, { connect: 'failed', error: message });
       setActionStatus(message);
     }
+  };
+
+  const startNewTask = () => {
+    setInput('');
+    setMessages([]);
+    setStatuses([]);
+    setToolCalls([]);
+    setResult(null);
+    setDraftPublish({ status: 'idle' });
+    setCandidateStates({});
+    setActionStatus('');
+    setRestoreError('');
+    setActiveTaskId(null);
+    setTaskSummary(null);
+    setTaskMemory({});
+    setRestoredAt(null);
+    clearRememberedTaskId();
+    replaceSocialAgentTaskUrl(null);
+  };
+
+  const queuePrompt = (text: string) => {
+    setInput(text);
+    window.setTimeout(() => inputRef.current?.focus(), 0);
   };
 
   const pendingApprovalsCount = messages.filter(
@@ -582,6 +750,8 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
         agentState={agentState}
         currentGoal={currentGoal}
         pendingApprovals={pendingApprovalsCount}
+        activeTaskId={activeTaskId}
+        onNewTask={startNewTask}
       />
       <div
         className={clsx(
@@ -593,16 +763,32 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
       >
         <section className="mx-auto mt-4 flex w-full max-w-3xl flex-1 flex-col">
           {!started ? (
-            <div className="flex flex-1 items-center justify-center pb-20">
-              <h1 className="text-center text-3xl font-normal text-[#2f302d] sm:text-5xl">
-                你想认识什么样的人？
-              </h1>
-            </div>
+            <AgentWelcome onPrompt={queuePrompt} />
           ) : (
             <div className="space-y-5">
+              {isRestoring ? <RestoringState /> : null}
+
+              {!isRestoring ? (
+                <AgentOverviewStrip
+                  activeTaskId={activeTaskId}
+                  taskStatus={taskSummary?.status ?? result?.status ?? null}
+                  toolCalls={toolCalls}
+                  candidateCount={realCandidateCards.length}
+                  publicIntentCount={publicIntentCards.length}
+                  pendingApprovals={pendingApprovalsCount}
+                  restoredAt={restoredAt}
+                />
+              ) : null}
+
               {messages.map((message) => (
                 <ChatMessage key={message.id} message={message} />
               ))}
+
+              {restoreError && !isRestoring ? (
+                <div className="rounded-2xl border border-[#f3e3b3] bg-[#fffaeb] px-4 py-3 text-sm font-bold text-[#7a5a12]">
+                  {restoreError}
+                </div>
+              ) : null}
 
               {statuses.length > 0 || toolCalls.length > 0 ? (
                 <StatusStream
@@ -662,7 +848,19 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
         </section>
         {started ? (
           <aside className="mt-5 lg:sticky lg:top-20 lg:mt-4 lg:self-start">
-            <ToolCallPanel toolCalls={toolCalls} />
+            <AgentWorkbench
+              activeTaskId={activeTaskId}
+              taskSummary={taskSummary}
+              taskMemory={taskMemory}
+              toolCalls={toolCalls}
+              result={result}
+              statuses={statuses}
+              pendingApprovals={pendingApprovalsCount}
+              candidateCount={realCandidateCards.length}
+              publicIntentCount={publicIntentCards.length}
+              draftStatus={draftPublish.status}
+              onPrompt={queuePrompt}
+            />
           </aside>
         ) : null}
       </div>
@@ -671,11 +869,14 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
         onSubmit={submit}
         className="fixed bottom-0 left-0 right-0 z-40 bg-gradient-to-t from-[#f8f8f6] via-[#f8f8f6] to-transparent px-4 pb-5 pt-8"
       >
+        <PromptRail started={started} onPrompt={queuePrompt} />
         <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-[28px] border border-[#deded8] bg-white p-2 shadow-[0_12px_36px_rgba(32,33,36,0.12)]">
           {!started ? <ConfirmModeBadge className="mb-1 hidden sm:flex" /> : null}
           <textarea
+            ref={inputRef}
             value={input}
             onChange={(event) => setInput(event.target.value)}
+            disabled={isRestoring}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
@@ -692,11 +893,11 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
           />
           <button
             type="submit"
-            disabled={isRunning || !cleanDisplayText(input, '').trim()}
+            disabled={isRestoring || isRunning || !cleanDisplayText(input, '').trim()}
             className="mb-1 flex h-10 shrink-0 items-center justify-center rounded-full bg-[#202124] px-4 text-sm font-black text-white transition hover:bg-[#343633] disabled:cursor-not-allowed disabled:bg-[#d2d2cc]"
             aria-label="发送"
           >
-            {isRunning ? '处理中' : '发送'}
+            {isRestoring ? '恢复中' : isRunning ? '处理中' : '发送'}
           </button>
         </div>
         {!started ? (
@@ -748,10 +949,14 @@ function TopStatusBar({
   agentState,
   currentGoal,
   pendingApprovals,
+  activeTaskId,
+  onNewTask,
 }: {
   agentState: AgentState;
   currentGoal: string;
   pendingApprovals: number;
+  activeTaskId: number | null;
+  onNewTask: () => void;
 }) {
   const isLive = agentState === 'analyzing' || agentState === 'searching';
   return (
@@ -794,6 +999,15 @@ function TopStatusBar({
             {pendingApprovals} 个待确认
           </div>
         ) : null}
+        {activeTaskId ? (
+          <button
+            type="button"
+            onClick={onNewTask}
+            className="h-8 shrink-0 rounded-full border border-[#deded8] bg-white px-3 text-[12px] font-black text-[#3f403b] transition hover:border-[#202124]"
+          >
+            开启新任务
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -809,6 +1023,353 @@ function ConfirmModeBadge({ className }: { className?: string }) {
       aria-label="权限模式"
     >
       {CONFIRM_PERMISSION_MODE_LABEL}
+    </div>
+  );
+}
+
+const starterPrompts = [
+  '帮我找青岛拍照搭子，优先真实用户和公开约练卡片',
+  '读取我的人物画像，告诉我怎么提高匹配质量',
+  '帮我生成一张周末约练卡，并匹配合适的人',
+  '查看当前待确认动作，再建议下一步',
+] as const;
+
+const activePrompts = [
+  '继续扩大搜索范围',
+  '只保留真实用户画像',
+  '换成公开地点和白天时间',
+  '总结当前候选并推荐下一步',
+] as const;
+
+function AgentWelcome({ onPrompt }: { onPrompt: (text: string) => void }) {
+  return (
+    <div className="flex flex-1 flex-col justify-center pb-24">
+      <div className="mx-auto w-full max-w-3xl">
+        <div className="text-center">
+          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-[#dfe5ef] bg-[#f4f8ff] text-2xl font-black text-[#315fa8]">
+            AI
+          </div>
+          <h1 className="text-3xl font-normal text-[#2f302d] sm:text-5xl">
+            你想认识什么样的人？
+          </h1>
+        </div>
+        <div className="mt-7 grid gap-2 sm:grid-cols-2">
+          {starterPrompts.map((prompt) => (
+            <button
+              key={prompt}
+              type="button"
+              onClick={() => onPrompt(prompt)}
+              className="min-h-12 rounded-2xl border border-[#e2e5df] bg-white px-4 py-3 text-left text-sm font-bold leading-5 text-[#3f403b] shadow-[0_8px_22px_rgba(32,33,36,0.04)] transition hover:border-[#98b7e8] hover:bg-[#f7fbff]"
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PromptRail({
+  started,
+  onPrompt,
+}: {
+  started: boolean;
+  onPrompt: (text: string) => void;
+}) {
+  if (!started) return null;
+  return (
+    <div className="mx-auto mb-2 flex max-w-3xl gap-2 overflow-x-auto pb-1">
+      {activePrompts.map((prompt) => (
+        <button
+          key={prompt}
+          type="button"
+          onClick={() => onPrompt(prompt)}
+          className="h-8 shrink-0 rounded-full border border-[#e2e5df] bg-white/90 px-3 text-xs font-bold text-[#555650] shadow-[0_6px_16px_rgba(32,33,36,0.05)] transition hover:border-[#98b7e8] hover:text-[#315fa8]"
+        >
+          {prompt}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function AgentOverviewStrip({
+  activeTaskId,
+  taskStatus,
+  toolCalls,
+  candidateCount,
+  publicIntentCount,
+  pendingApprovals,
+  restoredAt,
+}: {
+  activeTaskId: number | null;
+  taskStatus: string | null;
+  toolCalls: ToolCallView[];
+  candidateCount: number;
+  publicIntentCount: number;
+  pendingApprovals: number;
+  restoredAt: string | null;
+}) {
+  const successfulTools = toolCalls.filter((call) => call.status === 'success').length;
+  const runningTools = toolCalls.filter((call) => call.status === 'running').length;
+  const items = [
+    { label: 'Task', value: activeTaskId ? `#${activeTaskId}` : '新任务' },
+    { label: '状态', value: taskStatus ? taskStatusText(taskStatus) : '待输入' },
+    { label: '工具', value: runningTools > 0 ? `${runningTools} running` : `${successfulTools}/${toolCalls.length}` },
+    { label: '候选', value: `${candidateCount} 人 / ${publicIntentCount} 卡片` },
+    { label: '确认', value: pendingApprovals > 0 ? `${pendingApprovals} 个` : '无' },
+  ];
+  return (
+    <div className="rounded-2xl border border-[#e2e8f0] bg-[linear-gradient(135deg,#ffffff_0%,#f8fbff_52%,#f7fbf6_100%)] p-3 shadow-[0_10px_26px_rgba(32,33,36,0.05)]">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        {items.map((item) => (
+          <div key={item.label} className="min-w-0 rounded-xl bg-white/70 px-3 py-2">
+            <div className="text-[10px] font-black uppercase tracking-[0.14em] text-[#8c8d88]">
+              {item.label}
+            </div>
+            <div className="mt-1 truncate text-sm font-black text-[#202124]">{item.value}</div>
+          </div>
+        ))}
+      </div>
+      {restoredAt ? (
+        <div className="mt-2 px-1 text-[11px] font-bold text-[#777872]">
+          已从后端 timeline 恢复：{new Date(restoredAt).toLocaleString()}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AgentWorkbench({
+  activeTaskId,
+  taskSummary,
+  taskMemory,
+  toolCalls,
+  result,
+  statuses,
+  pendingApprovals,
+  candidateCount,
+  publicIntentCount,
+  draftStatus,
+  onPrompt,
+}: {
+  activeTaskId: number | null;
+  taskSummary: SocialAgentTaskTimelineSnapshot['task'] | null;
+  taskMemory: Record<string, unknown>;
+  toolCalls: ToolCallView[];
+  result: SocialAgentChatRunResult | null;
+  statuses: StatusStep[];
+  pendingApprovals: number;
+  candidateCount: number;
+  publicIntentCount: number;
+  draftStatus: DraftPublishState['status'];
+  onPrompt: (text: string) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <TaskRunPanel
+        activeTaskId={activeTaskId}
+        taskSummary={taskSummary}
+        statuses={statuses}
+        result={result}
+        pendingApprovals={pendingApprovals}
+        candidateCount={candidateCount}
+        publicIntentCount={publicIntentCount}
+        draftStatus={draftStatus}
+      />
+      <CapabilityDock toolCalls={toolCalls} onPrompt={onPrompt} />
+      <ToolCallPanel toolCalls={toolCalls} />
+      <MemoryPanel taskMemory={taskMemory} currentGoal={taskSummary?.goal ?? result?.assistantMessage ?? ''} />
+    </div>
+  );
+}
+
+function TaskRunPanel({
+  activeTaskId,
+  taskSummary,
+  statuses,
+  result,
+  pendingApprovals,
+  candidateCount,
+  publicIntentCount,
+  draftStatus,
+}: {
+  activeTaskId: number | null;
+  taskSummary: SocialAgentTaskTimelineSnapshot['task'] | null;
+  statuses: StatusStep[];
+  result: SocialAgentChatRunResult | null;
+  pendingApprovals: number;
+  candidateCount: number;
+  publicIntentCount: number;
+  draftStatus: DraftPublishState['status'];
+}) {
+  const activeStep = [...statuses].reverse().find((step) => step.state === 'running') ?? null;
+  const doneSteps = statuses.filter((step) => step.state === 'done').length;
+  return (
+    <section className="rounded-2xl border border-[#e2e8f0] bg-white p-4 shadow-[0_10px_26px_rgba(32,33,36,0.05)]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#8c8d88]">
+            Agent Run
+          </div>
+          <h2 className="mt-1 truncate text-sm font-black text-[#202124]">
+            {activeTaskId ? `Task #${activeTaskId}` : '新任务'}
+          </h2>
+        </div>
+        <span className="rounded-full bg-[#eef6ff] px-2.5 py-1 text-[11px] font-black text-[#315fa8]">
+          {taskStatusText(taskSummary?.status ?? result?.status ?? 'pending')}
+        </span>
+      </div>
+      <div className="mt-3 space-y-2 text-xs font-bold text-[#555650]">
+        <div className="flex justify-between gap-3">
+          <span>当前步骤</span>
+          <span className="truncate text-right text-[#202124]">
+            {activeStep?.text ?? (result ? '结果已整理完成' : '等待输入')}
+          </span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span>完成步骤</span>
+          <span className="text-[#202124]">{doneSteps}/{Math.max(statuses.length, doneSteps)}</span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span>候选资产</span>
+          <span className="text-[#202124]">{candidateCount} 人 · {publicIntentCount} 卡</span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span>动作队列</span>
+          <span className="text-[#202124]">
+            {pendingApprovals > 0 ? `${pendingApprovals} 待确认` : draftStatusText(draftStatus)}
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const capabilityGroups = [
+  {
+    id: 'profile',
+    title: '画像',
+    prompt: '读取我的人物画像，并指出影响匹配质量的三项信息',
+    tools: ['get_my_profile', 'get_ai_profile', 'read_long_term_memory'],
+  },
+  {
+    id: 'search',
+    title: '搜索',
+    prompt: '搜索真实用户画像和公开约练卡片，给我一组高质量候选',
+    tools: ['search_matches', 'search_real_candidates', 'search_public_intents', 'search_activities'],
+  },
+  {
+    id: 'card',
+    title: '卡片',
+    prompt: '生成一张可以发布的约练卡片，并说明为什么这样写',
+    tools: ['create_social_request', 'publish_social_request'],
+  },
+  {
+    id: 'message',
+    title: '消息',
+    prompt: '为候选人生成低压力开场白，先不要自动发送',
+    tools: ['draft_opener', 'send_message', 'send_message_to_candidate', 'connect_candidate', 'add_friend'],
+  },
+  {
+    id: 'approval',
+    title: '确认',
+    prompt: '查看当前待确认动作，并按风险从低到高排序',
+    tools: ['get_pending_approvals', 'approve_action', 'reject_action'],
+  },
+] as const;
+
+function CapabilityDock({
+  toolCalls,
+  onPrompt,
+}: {
+  toolCalls: ToolCallView[];
+  onPrompt: (text: string) => void;
+}) {
+  return (
+    <section className="rounded-2xl border border-[#e7e7e0] bg-white p-4 shadow-[0_10px_26px_rgba(32,33,36,0.05)]">
+      <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#8c8d88]">
+        FitMeet Tools
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        {capabilityGroups.map((group) => {
+          const state = capabilityState(group.tools, toolCalls);
+          return (
+            <button
+              key={group.id}
+              type="button"
+              onClick={() => onPrompt(group.prompt)}
+              className="min-h-16 rounded-2xl border border-[#edf0e9] bg-[#fbfbf8] px-3 py-2 text-left transition hover:border-[#98b7e8] hover:bg-[#f7fbff]"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-black text-[#202124]">{group.title}</span>
+                <span
+                  className={clsx(
+                    'h-2 w-2 rounded-full',
+                    state === 'running' && 'animate-pulse bg-[#3a72d6]',
+                    state === 'done' && 'bg-[#168a55]',
+                    state === 'failed' && 'bg-[#c24135]',
+                    state === 'idle' && 'bg-[#cfd3cb]',
+                  )}
+                />
+              </div>
+              <div className="mt-1 text-[11px] font-bold text-[#777872]">
+                {capabilityLabel(state)}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function MemoryPanel({
+  taskMemory,
+  currentGoal,
+}: {
+  taskMemory: Record<string, unknown>;
+  currentGoal: string;
+}) {
+  const highlights = memoryHighlights(taskMemory, currentGoal);
+  return (
+    <section className="rounded-2xl border border-[#e7e7e0] bg-white p-4 shadow-[0_10px_26px_rgba(32,33,36,0.05)]">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#8c8d88]">
+          Task Memory
+        </div>
+        <span className="rounded-full bg-[#f3f3ef] px-2 py-0.5 text-[10px] font-black text-[#686963]">
+          后端
+        </span>
+      </div>
+      {highlights.length > 0 ? (
+        <div className="mt-3 space-y-2">
+          {highlights.map((item) => (
+            <div key={item.label} className="rounded-xl bg-[#fbfbf8] px-3 py-2">
+              <div className="text-[10px] font-black text-[#8c8d88]">{item.label}</div>
+              <div className="mt-1 line-clamp-2 text-xs font-bold leading-5 text-[#3f403b]">
+                {item.value}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-3 rounded-xl border border-dashed border-[#ecece6] bg-[#fbfbf8] px-3 py-4 text-xs text-[#8c8d88]">
+          暂无 task memory。
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RestoringState() {
+  return (
+    <div className="flex justify-start">
+      <div className="inline-flex max-w-[82%] items-center gap-3 rounded-[22px] border border-[#ecece8] bg-[#f5f5f3] px-4 py-3 text-[#666762] shadow-[0_10px_28px_rgba(32,33,36,0.06)]">
+        <ThinkingMark state="running" />
+        <span className="text-[15px] font-black leading-6">正在恢复上次会话</span>
+      </div>
     </div>
   );
 }
@@ -1294,7 +1855,7 @@ function CandidateCard({
           {isSent
             ? '已发送'
             : isSendPending
-              ? '等待确认'
+              ? '待确认'
               : isSending
                 ? '发送中'
                 : isSendFailed
@@ -1304,7 +1865,7 @@ function CandidateCard({
         <button
           type="button"
           onClick={() => onConnect(candidate)}
-          disabled={isConnecting || isConnected || isConnectPending || !targetUserId}
+          disabled={isConnecting || isConnected || isConnectPending}
           className={clsx(
             'rounded-full border px-4 py-2 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-60',
             isConnectFailed
@@ -1355,7 +1916,7 @@ function CandidateResultGroup({
       <div className="space-y-3">
         {candidates.map((candidate) => (
           <CandidateCard
-            key={`${candidate.userId}:${candidate.candidateRecordId ?? candidate.publicIntentId ?? 'candidate'}`}
+            key={`${candidate.source ?? 'candidate'}:${candidateTargetUserId(candidate) ?? 'missing'}:${candidate.publicIntentId ?? candidate.candidateRecordId ?? candidate.socialRequestId ?? 'transient'}`}
             candidate={candidate}
             state={candidateStates[candidateActionKey(candidate)] ?? emptyCandidateActionState()}
             onSave={onSave}
@@ -1403,13 +1964,254 @@ function emptyCandidateActionState(): CandidateActionSnapshot {
   return { save: 'idle', send: 'idle', connect: 'idle', error: null };
 }
 
+function taskStatusText(status: string): string {
+  const labels: Record<string, string> = {
+    pending: '待处理',
+    planning: '规划中',
+    awaiting_confirmation: '待确认',
+    executing: '执行中',
+    waiting_result: '等结果',
+    waiting_reply: '等回复',
+    awaiting_feedback: '可继续聊',
+    succeeded: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+  };
+  return labels[status] ?? status;
+}
+
+function draftStatusText(status: DraftPublishState['status']): string {
+  const labels: Record<DraftPublishState['status'], string> = {
+    idle: '草稿待确认',
+    publishing: '发布中',
+    published: '已发布',
+    failed: '发布失败',
+  };
+  return labels[status];
+}
+
+type CapabilityState = 'idle' | 'running' | 'done' | 'failed';
+
+function capabilityState(
+  toolNames: readonly string[],
+  toolCalls: ToolCallView[],
+): CapabilityState {
+  const related = toolCalls.filter((call) => toolNames.includes(call.toolName));
+  if (related.some((call) => call.status === 'running')) return 'running';
+  if (related.some((call) => call.status === 'failed' || call.status === 'blocked')) return 'failed';
+  if (related.some((call) => call.status === 'success')) return 'done';
+  return 'idle';
+}
+
+function capabilityLabel(state: CapabilityState): string {
+  const labels: Record<CapabilityState, string> = {
+    idle: 'ready',
+    running: 'running',
+    done: 'used',
+    failed: 'attention',
+  };
+  return labels[state];
+}
+
+function memoryHighlights(
+  taskMemory: Record<string, unknown>,
+  currentGoal: string,
+): Array<{ label: string; value: string }> {
+  const shortTerm = isRecord(taskMemory.shortTerm) ? taskMemory.shortTerm : {};
+  const chat = isRecord(taskMemory.socialAgentChat) ? taskMemory.socialAgentChat : {};
+  const values = [
+    {
+      label: '当前目标',
+      value: stringValue(shortTerm.currentGoal) ?? cleanDisplayText(currentGoal, ''),
+    },
+    {
+      label: '补充要求',
+      value: stringValue(shortTerm.latestUserFollowUp),
+    },
+    {
+      label: '候选缓存',
+      value: memoryCountText(shortTerm.candidates ?? chat.candidates, '个候选'),
+    },
+    {
+      label: '待确认',
+      value: memoryCountText(shortTerm.pendingActions, '个动作'),
+    },
+    {
+      label: '安全边界',
+      value: memorySummary(shortTerm.boundaries ?? taskMemory.boundaries),
+    },
+  ];
+  return values
+    .map((item) => ({ label: item.label, value: cleanDisplayText(item.value, '') }))
+    .filter((item) => item.value)
+    .slice(0, 5);
+}
+
+function memoryCountText(value: unknown, unit: string): string {
+  const count = arrayLength(value);
+  return count && count > 0 ? `${count} ${unit}` : '';
+}
+
+function memorySummary(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map((item) => cleanDisplayText(item, '')).filter(Boolean).slice(0, 4).join('，');
+  }
+  if (isRecord(value)) {
+    return Object.values(value)
+      .map((item) => cleanDisplayText(item, ''))
+      .filter(Boolean)
+      .slice(0, 4)
+      .join('，');
+  }
+  return cleanDisplayText(value, '');
+}
+
+function readTaskIdFromUrl(): number | null {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  return numberValue(params.get('taskId'));
+}
+
+function readRememberedTaskId(): number | null {
+  if (typeof window === 'undefined') return null;
+  const raw = window.localStorage.getItem(SOCIAL_AGENT_CURRENT_TASK_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return numberValue(parsed.currentTaskId);
+  } catch {
+    return numberValue(raw);
+  }
+}
+
+function rememberCurrentTaskId(taskId: number): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(
+    SOCIAL_AGENT_CURRENT_TASK_STORAGE_KEY,
+    JSON.stringify({ currentTaskId: taskId, lastOpenedAt: new Date().toISOString() }),
+  );
+}
+
+function clearRememberedTaskId(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(SOCIAL_AGENT_CURRENT_TASK_STORAGE_KEY);
+}
+
+function replaceSocialAgentTaskUrl(taskId: number | null): void {
+  if (typeof window === 'undefined') return;
+  const nextUrl = taskId ? `/social-agent?taskId=${encodeURIComponent(taskId)}` : '/social-agent';
+  window.history.replaceState(window.history.state, '', nextUrl);
+}
+
+function messageFromTimeline(message: SocialAgentTimelineMessage): Message | null {
+  if (message.role !== 'user' && message.role !== 'assistant') return null;
+  if (message.kind === 'status' || message.kind === 'tool' || message.kind === 'candidates') {
+    return null;
+  }
+  return {
+    id: cleanDisplayText(message.id, nextId('restored')),
+    role: message.role,
+    kind: message.kind === 'text' || message.kind === 'activityResults' ? undefined : message.kind,
+    content: cleanDisplayText(message.text, ''),
+    activityResults: message.activityResults,
+    pendingApproval: message.pendingApproval,
+  };
+}
+
+function draftPublishFromSession(
+  result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null,
+): DraftPublishState {
+  const draft = result?.socialRequestDraft;
+  if (!draft) return { status: 'idle' };
+  const record = draft as Record<string, unknown>;
+  const published = record.status === 'published' || record.synced === true;
+  return {
+    status: published ? 'published' : 'idle',
+    socialRequestId: numberValue(record.socialRequestId),
+    publicIntentId: stringValue(record.publicIntentId),
+    error: null,
+  };
+}
+
+function statusesFromVisibleSteps(
+  steps: SocialAgentChatRunResult['visibleSteps'],
+): StatusStep[] {
+  return steps.map((step) => ({
+    id: step.id,
+    text: runStepText(normalizeRunStepId(step.id, 'initial') ?? 'done', step.label, step.status),
+    state: step.status,
+  }));
+}
+
+function candidateStatesFromSession(
+  candidates: SocialAgentChatCandidate[],
+  candidateActions: Record<string, Record<string, unknown>>,
+  pendingApprovals: SocialAgentPendingApproval[],
+): Record<string, CandidateActionSnapshot> {
+  const states: Record<string, CandidateActionSnapshot> = {};
+  for (const candidate of candidates) {
+    const targetUserId = candidateTargetUserId(candidate);
+    const action = targetUserId ? candidateActions[String(targetUserId)] : undefined;
+    const state = emptyCandidateActionState();
+    if (candidate.status === 'approved') state.save = 'saved';
+    if (candidate.status === 'messaged') state.send = 'sent';
+    if (action) {
+      state.save = normalizeCandidateActionState(action.save, state.save);
+      state.send = normalizeCandidateActionState(action.send, state.send);
+      state.connect = normalizeCandidateActionState(action.connect, state.connect);
+      state.conversationId = stringValue(action.conversationId);
+      state.messageId = stringValue(action.messageId);
+      state.friendRequestId = stringValue(action.friendRequestId);
+      state.error = stringValue(action.error);
+    }
+    states[candidateActionKey(candidate)] = state;
+  }
+
+  for (const approval of pendingApprovals) {
+    const payload = isRecord(approval.payload) ? approval.payload : {};
+    const targetUserId = numberValue(
+      payload.targetUserId ?? payload.candidateUserId ?? payload.userId,
+    );
+    const candidate = candidates.find((item) => candidateTargetUserId(item) === targetUserId);
+    if (!candidate) continue;
+    const key = candidateActionKey(candidate);
+    const state = states[key] ?? emptyCandidateActionState();
+    if (/send|message/i.test(approval.actionType)) state.send = 'pendingApproval';
+    if (/connect|friend|contact/i.test(approval.actionType)) state.connect = 'pendingApproval';
+    states[key] = state;
+  }
+
+  return states;
+}
+
+function normalizeCandidateActionState(
+  value: unknown,
+  fallback: CandidateActionState,
+): CandidateActionState {
+  const text = stringValue(value);
+  if (
+    text === 'idle' ||
+    text === 'saving' ||
+    text === 'saved' ||
+    text === 'sending' ||
+    text === 'sent' ||
+    text === 'connecting' ||
+    text === 'connected' ||
+    text === 'pendingApproval' ||
+    text === 'failed'
+  ) {
+    return text;
+  }
+  return fallback;
+}
+
 function candidateActionText(state: CandidateActionSnapshot): string {
   if (state.connect === 'connected') return '已连接，正在打开消息页。';
   if (state.connect === 'pendingApproval') return '好友申请已发送，等待对方确认。';
   if (state.send === 'sent') {
     return state.conversationId ? '已发送，可前往消息查看。' : '已发送。';
   }
-  if (state.send === 'pendingApproval') return '消息已进入待确认队列。';
+  if (state.send === 'pendingApproval') return '待确认。';
   if (state.save === 'saved') return '已收藏。';
   return '操作已完成。';
 }
@@ -1421,7 +2223,7 @@ function isPendingActionStatus(status: string | null | undefined): boolean {
 function isFailedCandidateAction(
   success: boolean,
   status: string | null | undefined,
-  action: SocialAgentToolCall | null | undefined,
+  action: { status?: string | null } | null | undefined,
   pending: boolean,
 ): boolean {
   if (pending) return false;
@@ -1524,7 +2326,13 @@ function toolCallsFromRunResult(
 function toolCallsFromEvents(events: SocialAgentTaskEvent[]): ToolCallView[] {
   const calls = new Map<string, ToolCallView>();
   for (const event of events) {
-    if (event.eventType !== 'tool.called' && event.eventType !== 'tool.returned') continue;
+    if (
+      event.eventType !== 'tool.called' &&
+      event.eventType !== 'tool.returned' &&
+      event.eventType !== 'tool.failed'
+    ) {
+      continue;
+    }
     const payload = isRecord(event.payload) ? event.payload : {};
     const toolName = stringValue(payload.toolName ?? payload.tool);
     if (!toolName) continue;
@@ -1544,7 +2352,13 @@ function toolCallsFromEvents(events: SocialAgentTaskEvent[]): ToolCallView[] {
       continue;
     }
 
-    const rawStatus = payload.status ?? (event.eventType === 'tool.returned' ? 'succeeded' : null);
+    const rawStatus =
+      payload.status ??
+      (event.eventType === 'tool.failed'
+        ? 'failed'
+        : event.eventType === 'tool.returned'
+          ? 'succeeded'
+          : null);
     const status = toolCallStatusFromRaw(rawStatus);
     const output = isRecord(payload.output) ? payload.output : null;
     const error = isRecord(payload.error) ? payload.error : null;
@@ -1922,15 +2736,20 @@ function displayName(candidate: SocialAgentChatCandidate): string {
 }
 
 function candidateActionKey(candidate: SocialAgentChatCandidate): string {
+  const targetUserId = candidateTargetUserId(candidate) ?? 'missing';
   return [
     candidate.source ?? 'candidate',
-    candidate.candidateUserId ?? candidate.userId,
-    candidate.candidateRecordId ?? candidate.publicIntentId ?? candidate.activityId ?? 'transient',
+    targetUserId,
+    candidate.publicIntentId ??
+      candidate.candidateRecordId ??
+      candidate.socialRequestId ??
+      candidate.activityId ??
+      'transient',
   ].join(':');
 }
 
 function candidateTargetUserId(candidate: SocialAgentChatCandidate): number | null {
-  const id = candidate.candidateUserId ?? candidate.userId;
+  const id = candidate.targetUserId ?? candidate.candidateUserId ?? candidate.userId;
   return Number.isFinite(id) && id > 0 ? id : null;
 }
 
@@ -1955,6 +2774,16 @@ function errorMessage(error: unknown, fallback = '请稍后再试。'): string {
     return '请求超时，但你的补充信息已保存。请稍后重试。';
   }
   return message;
+}
+
+function isServerError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    typeof (error as { status?: unknown }).status === 'number' &&
+    ((error as { status: number }).status >= 500)
+  );
 }
 
 function nextId(prefix: string): string {

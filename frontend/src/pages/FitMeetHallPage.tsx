@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import * as dataService from '../services/dataService';
 import { meetToFeedPost, withMockPosts } from '../data/mockContent';
 import { cleanDisplayArray, cleanDisplayText, isDisplayableRecordText } from '../lib/displayText';
+import { isPublicHallIntent } from '../lib/hallPublicIntent';
 import { useAuthStore } from '../stores';
 import type { Meet, Post, PublicSocialIntent } from '../types';
 
@@ -149,7 +150,7 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
           dataService.getFeed({ page: 1, pageSize: 18 }).catch(() => [] as Post[]),
           dataService.getMeets().catch(() => [] as Meet[]),
           dataService
-            .getPublicSocialIntents({ page: 1, limit: 30 })
+            .getPublicSocialIntents({ page: 1, limit: 30, status: 'active' })
             .catch(() => [] as PublicSocialIntent[]),
         ]);
         if (cancelled) return;
@@ -162,6 +163,7 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
           );
         const publicItems = publicIntents
           .filter((intent) =>
+            isPublicHallIntent(intent) &&
             isDisplayableRecordText([intent.title, intent.description, intent.city, intent.source]),
           )
           .map(publicIntentToHallItem);
@@ -218,6 +220,10 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
         const result = item.publicIntentId
           ? await dataService.startPublicIntentConversation(item.publicIntentId, opener)
           : await dataService.startConversation(item.userId);
+        if (!result.conversationId) {
+          setContactNotice('会话创建失败，未自动打开消息页。');
+          return;
+        }
         if (!item.publicIntentId) {
           await dataService.sendMessage(result.conversationId, opener);
         }
@@ -350,12 +356,20 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
           )}
 
           <div className="grid gap-4 xl:grid-cols-2">
-            {items.map((item) => (
-              <article
-                key={item.id}
-                className="group cursor-pointer rounded-lg border border-white/10 bg-[#151719] p-5 transition hover:-translate-y-0.5 hover:border-[#ff6a00]/45"
-                onClick={() => void handleOpenConversation(item)}
-              >
+            {items.map((item) => {
+              const isOwnItem = Boolean(user?.id && item.userId === user.id);
+              return (
+                <article
+                  key={item.id}
+                  className={`group rounded-lg border border-white/10 bg-[#151719] p-5 transition ${
+                    isOwnItem
+                      ? 'cursor-default'
+                      : 'cursor-pointer hover:-translate-y-0.5 hover:border-[#ff6a00]/45'
+                  }`}
+                  onClick={() => {
+                    if (!isOwnItem) void handleOpenConversation(item);
+                  }}
+                >
                 <div className="flex items-start gap-4">
                   <div
                     className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-lg font-black text-white"
@@ -420,20 +434,27 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
                       </div>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    className="rounded-lg border border-white/12 px-4 py-2 text-sm font-black text-white transition hover:border-[#18b98f]/50 hover:text-[#8ff0d1] disabled:cursor-wait disabled:opacity-60"
-                    disabled={contactingId === item.id}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void handleOpenConversation(item);
-                    }}
-                  >
-                    {contactingId === item.id ? '打开中...' : item.userId ? '发消息' : '查看连接'}
-                  </button>
+                  {isOwnItem ? (
+                    <span className="rounded-lg border border-white/10 px-4 py-2 text-sm font-black text-[#8d8175]">
+                      自己的发布
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="rounded-lg border border-white/12 px-4 py-2 text-sm font-black text-white transition hover:border-[#18b98f]/50 hover:text-[#8ff0d1] disabled:cursor-wait disabled:opacity-60"
+                      disabled={contactingId === item.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleOpenConversation(item);
+                      }}
+                    >
+                      {contactingId === item.id ? '打开中...' : item.userId ? '发消息' : '查看连接'}
+                    </button>
+                  )}
                 </div>
               </article>
-            ))}
+              );
+            })}
           </div>
         </section>
       </main>

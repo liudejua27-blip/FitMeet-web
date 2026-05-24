@@ -115,6 +115,22 @@ function makeHarness() {
     ),
   };
   const executor = {
+    resolveCandidateTargetUser: jest.fn(
+      async (input: Record<string, unknown>) => {
+        const candidate =
+          typeof input.candidate === 'object' && input.candidate !== null
+            ? (input.candidate as Record<string, unknown>)
+            : {};
+        return Number(
+          input.targetUserId ??
+            input.candidateUserId ??
+            input.userId ??
+            candidate.targetUserId ??
+            candidate.candidateUserId ??
+            candidate.userId,
+        );
+      },
+    ),
     executeToolAction: jest.fn(
       async (
         _taskId: number,
@@ -209,6 +225,26 @@ function makeHarness() {
             error: null,
           };
         }
+        if (toolName === SocialAgentToolName.SendMessage) {
+          return {
+            id: 'action_send_message_1',
+            stepId: 'action_send_message',
+            toolName,
+            status: 'succeeded',
+            input,
+            output: {
+              id: 'msg-22',
+              messageId: 'msg-22',
+              conversationId: 'conv-22',
+              status: 'sent',
+              candidate: { status: 'messaged' },
+            },
+            error: null,
+            startedAt: new Date(0).toISOString(),
+            completedAt: new Date(1).toISOString(),
+            durationMs: 1,
+          };
+        }
         if (toolName === SocialAgentToolName.AddFriend) {
           return {
             id: 'action_add_friend_1',
@@ -258,6 +294,7 @@ function makeHarness() {
         payload: input.payload,
         expiresAt: new Date(Date.now() + 60_000),
       })),
+      getPendingForTask: jest.fn().mockResolvedValue([]),
   };
   const publicIntentRepo = {
     createQueryBuilder: jest.fn().mockReturnValue({
@@ -369,13 +406,135 @@ describe('SocialAgentChatService', () => {
     expect(result.assistantMessage).toContain('正常聊天');
     expect(savedEvents).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ summary: '用户发送 Social Agent 消息' }),
+        expect.objectContaining({
+          eventType: AgentTaskEventType.SocialAgentMessageUser,
+          summary: '用户发送 Social Agent 消息',
+          payload: expect.objectContaining({ message: '你好，你能做什么？' }),
+        }),
         expect.objectContaining({ summary: 'Social Agent 已完成意图路由' }),
-        expect.objectContaining({ summary: 'Social Agent 回复消息' }),
+        expect.objectContaining({
+          eventType: AgentTaskEventType.SocialAgentMessageAssistant,
+          summary: 'Social Agent 回复消息',
+        }),
       ]),
     );
     expect(executor.executeToolAction).not.toHaveBeenCalled();
     expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
+  });
+
+  it('restores the latest social agent task session from persisted task memory and events', async () => {
+    const { service, approvals } = makeHarness();
+
+    await service.routeMessage(7, {
+      message: '你好，你能做什么？',
+    });
+
+    const snapshot = await service.getLatestSession(7);
+
+    expect(snapshot).toMatchObject({
+      hasSession: true,
+      activeTaskId: 101,
+      task: expect.objectContaining({ id: 101 }),
+    });
+    expect(snapshot.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'user', content: '你好，你能做什么？' }),
+        expect.objectContaining({ role: 'assistant' }),
+      ]),
+    );
+    expect(snapshot.events.length).toBeGreaterThan(0);
+    expect(approvals.getPendingForTask).toHaveBeenCalledWith(7, 101);
+  });
+
+  it('returns current task and timeline from persisted events, result, and memory', async () => {
+    const { service, approvals } = makeHarness();
+
+    const routed = await service.routeMessage(7, {
+      message: '帮我找青岛附近的跑步搭子',
+    });
+    expect(routed.queuedRun?.taskId).toBe(101);
+
+    await flushAsync();
+
+    const current = await service.getCurrentTask(7);
+    expect(current).toMatchObject({
+      taskId: 101,
+      taskType: 'social_agent_chat',
+      goal: '帮我找青岛附近的跑步搭子',
+    });
+
+    const timeline = await service.getTaskTimeline(7, 101);
+
+    expect(timeline).toMatchObject({
+      taskId: 101,
+      task: expect.objectContaining({ id: 101 }),
+      memory: expect.any(Object),
+      result: expect.objectContaining({ taskId: 101 }),
+      events: expect.any(Array),
+    });
+    expect(timeline.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'user',
+          kind: 'text',
+          text: '帮我找青岛附近的跑步搭子',
+        }),
+        expect.objectContaining({
+          role: 'assistant',
+          kind: 'candidates',
+          candidates: expect.arrayContaining([
+            expect.objectContaining({ targetUserId: 22 }),
+          ]),
+        }),
+      ]),
+    );
+    expect(timeline.result?.candidates).toEqual(
+      expect.arrayContaining([expect.objectContaining({ targetUserId: 22 })]),
+    );
+    expect(timeline.events.map((event) => event.eventType)).toEqual(
+      expect.arrayContaining([
+        AgentTaskEventType.SocialAgentMessageUser,
+        AgentTaskEventType.SocialAgentMessageAssistant,
+        AgentTaskEventType.SocialAgentCandidatesReturned,
+      ]),
+    );
+    expect(approvals.getPendingForTask).toHaveBeenCalledWith(7, 101);
+  });
+
+  it('blocks timeline reads for tasks owned by another user', async () => {
+    const { service, taskRepo } = makeHarness();
+    taskRepo.findOne.mockImplementation(async (options: { where?: { ownerUserId?: number } }) => {
+      if (options.where?.ownerUserId !== 7) return null;
+      return makeTask();
+    });
+
+    await expect(service.getTaskTimeline(8, 101)).rejects.toThrow(
+      'Social agent task 101 not found',
+    );
+  });
+
+  it('safe truncates long social agent timeline event summaries', async () => {
+    const { service, savedEvents } = makeHarness();
+    await (
+      service as unknown as {
+        writeEvent: (
+          task: AgentTask,
+          eventType: AgentTaskEventType,
+          summary: string,
+          payload: Record<string, unknown>,
+        ) => Promise<void>;
+      }
+    ).writeEvent(
+      makeTask(),
+      AgentTaskEventType.SocialAgentMessageAssistant,
+      'summary_'.repeat(100),
+      { message: '完整内容放在 payload 里' },
+    );
+
+    expect(String(savedEvents[0].summary).length).toBeLessThanOrEqual(500);
+    expect(savedEvents[0].payload).toMatchObject({
+      message: '完整内容放在 payload 里',
+    });
   });
 
   it('routes profile updates into profile storage and context memory', async () => {
@@ -457,6 +616,29 @@ describe('SocialAgentChatService', () => {
       runMode: 'initial',
     });
     expect(result.queuedRun?.taskId).toBe(result.taskId);
+  });
+
+  it('routes no-send candidate searches without creating send-message approvals', async () => {
+    const { service, approvals, executor } = makeHarness();
+
+    const result = await service.routeMessage(7, {
+      message: '帮我找青岛今晚一起跑步的真实用户，推荐几个人，先不要自动发消息',
+    });
+
+    expect(result).toMatchObject({
+      intent: 'social_search',
+      action: 'queue_search',
+      shouldQueueRun: true,
+      runMode: 'initial',
+      pendingApproval: null,
+    });
+    expect(result.queuedRun?.taskId).toBe(result.taskId);
+    expect(approvals.create).not.toHaveBeenCalled();
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.SendMessage,
+      expect.any(Object),
+    );
   });
 
   it('routes social searches to the async search path', async () => {
@@ -840,11 +1022,51 @@ describe('SocialAgentChatService', () => {
       7,
     );
     expect(result).toMatchObject({
+      success: true,
       taskId: 101,
       targetUserId: 22,
+      candidateUserId: 22,
+      status: 'connected',
       following: true,
+      friendRequestId: '601',
       conversationId: 'conv-22',
+      friendAction: {
+        success: true,
+        status: 'connected',
+        targetUserId: 22,
+        candidateUserId: 22,
+        following: true,
+        conversationId: 'conv-22',
+        friendRequestId: '601',
+      },
+      toolCall: expect.objectContaining({
+        toolName: SocialAgentToolName.AddFriend,
+        status: 'succeeded',
+      }),
     });
+  });
+
+  it('resolves nested candidate user ids when connecting from a candidate card', async () => {
+    const { service, taskRepo, executor } = makeHarness();
+    taskRepo.findOne.mockResolvedValue(makeTask({ agentConnectionId: 9 }));
+
+    await service.connectCandidate(7, 101, {
+      socialRequestId: 301,
+      candidateRecordId: 501,
+      candidate: { candidateUserId: 23 },
+    });
+
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.AddFriend,
+      expect.objectContaining({
+        targetUserId: 23,
+        candidateRecordId: 501,
+        socialRequestId: 301,
+        openConversation: true,
+      }),
+      7,
+    );
   });
 
   it('surfaces send-message tool failures to callers', async () => {
@@ -864,6 +1086,44 @@ describe('SocialAgentChatService', () => {
         message: '你好，今晚一起跑步吗？',
       }),
     ).rejects.toThrow('Mongo conversation write failed');
+  });
+
+  it('returns normalized send candidate message success details', async () => {
+    const { service, taskRepo } = makeHarness();
+    taskRepo.findOne.mockResolvedValue(makeTask({ agentConnectionId: 9 }));
+
+    const result = await service.sendCandidateMessage(7, 101, {
+      targetUserId: 22,
+      candidateUserId: 22,
+      message: 'hello, run tonight?',
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      taskId: 101,
+      targetUserId: 22,
+      candidateUserId: 22,
+      messageId: 'msg-22',
+      conversationId: 'conv-22',
+      status: 'sent',
+      candidateStatus: 'messaged',
+      messageAction: {
+        status: 'sent',
+        conversationId: 'conv-22',
+        messageId: 'msg-22',
+      },
+      toolCall: expect.objectContaining({
+        id: 'action_send_message_1',
+        status: 'succeeded',
+      }),
+    });
+
+    const snapshot = await service.getTaskSession(7, 101);
+    expect(snapshot.candidateActions['22']).toMatchObject({
+      send: 'sent',
+      conversationId: 'conv-22',
+      messageId: 'msg-22',
+    });
   });
 
   describe('short-term task memory', () => {

@@ -117,6 +117,11 @@ export class SocialAgentIntentRouterService {
       /(活动|局|约练活动|羽毛球局|跑团|课程|场地|报名|参加约练|附近有什么|有没有.*局|有什么.*活动)/i.test(
         text,
       );
+    const hasCandidateDiscoveryCue = this.hasCandidateDiscoveryCue(
+      text,
+      wantsSocialSearch,
+    );
+    const explicitlyAvoidsSending = this.explicitlyAvoidsSending(text);
 
     if (
       /(你好|hello|hi|嗨|你能做什么|你可以做什么|怎么找搭子|该怎么找|怎么聊天自然|聊天自然|你觉得怎么|建议|聊聊)/i.test(
@@ -125,6 +130,14 @@ export class SocialAgentIntentRouterService {
     ) {
       return this.result('casual_chat', 0.9, entities, {
         replyStrategy: 'direct_reply',
+      });
+    }
+
+    if (hasCandidateDiscoveryCue && explicitlyAvoidsSending) {
+      return this.result('social_search', 0.93, entities, {
+        shouldSearch: true,
+        shouldReplan: hasTask,
+        replyStrategy: 'search_candidates',
       });
     }
 
@@ -203,6 +216,29 @@ export class SocialAgentIntentRouterService {
       replyStrategy: 'ask_clarifying_question',
     });
   }
+
+  private hasCandidateDiscoveryCue(
+    text: string,
+    wantsSocialSearch: boolean,
+  ): boolean {
+    return (
+      wantsSocialSearch ||
+      /(找|搜索|搜|候选人|候选|列表|人选|真实用户|搭子)/i.test(text) ||
+      /推荐(?!我)/i.test(text)
+    );
+  }
+
+  private explicitlyAvoidsSending(text: string): boolean {
+    return (
+      /(?:不要|先不要|暂时不要|别|先别|不用|无需|不需要).{0,16}(?:自动)?(?:发消息|发送消息|发|发送|联系|私信|打招呼)/i.test(
+        text,
+      ) ||
+      /(?:不要|先不要|暂时不要|别|先别|不用|无需|不需要).{0,16}(?:创建|生成).{0,16}(?:待确认|确认动作|approval)/i.test(
+        text,
+      )
+    );
+  }
+
   private result(
     intent: SocialAgentIntentType,
     confidence: number,

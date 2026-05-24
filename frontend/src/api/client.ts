@@ -622,6 +622,8 @@ export interface ApiMessage {
 
 export interface StartConversationResponse {
   conversationId: string;
+  targetUserId?: number;
+  preexisting?: boolean;
 }
 
 export function getConversations(): Promise<ApiConversation[]> {

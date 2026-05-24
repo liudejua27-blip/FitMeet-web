@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Follow } from './follow.entity';
@@ -14,6 +18,8 @@ export class FriendsService {
   ) {}
 
   async toggleFollow(followerId: number, followingId: number) {
+    await this.assertFollowTarget(followerId, followingId);
+
     const existing = await this.followRepo.findOne({
       where: { followerId, followingId },
     });
@@ -28,6 +34,8 @@ export class FriendsService {
   }
 
   async ensureFollowing(followerId: number, followingId: number) {
+    await this.assertFollowTarget(followerId, followingId);
+
     const existing = await this.followRepo.findOne({
       where: { followerId, followingId },
     });
@@ -38,6 +46,17 @@ export class FriendsService {
     }
 
     return { following: true, followId: existing.id };
+  }
+
+  private async assertFollowTarget(followerId: number, followingId: number) {
+    if (!Number.isFinite(followingId) || followingId <= 0) {
+      throw new BadRequestException('请选择要添加的用户');
+    }
+    if (followerId === followingId) {
+      throw new BadRequestException('不能添加自己为好友');
+    }
+    const target = await this.userRepo.findOne({ where: { id: followingId } });
+    if (!target) throw new NotFoundException('目标用户不存在');
   }
 
   async isFollowing(followerId: number, followingId: number) {

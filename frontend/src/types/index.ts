@@ -312,7 +312,14 @@ export interface AiAutopilotRunResult {
 }
 
 export type SocialRequestRiskLevel = 'low' | 'medium' | 'high';
-export type SocialRequestStatus = 'searching' | 'matched' | 'closed' | 'cancelled';
+export type SocialRequestStatus =
+  | 'active'
+  | 'searching'
+  | 'matched'
+  | 'inactive'
+  | 'completed'
+  | 'closed'
+  | 'cancelled';
 
 export interface SocialRequest {
   id: number;
@@ -363,7 +370,7 @@ export interface SocialRequest {
     userId?: number | null;
     linkedSocialRequestId?: number | null;
     source?: string;
-    mode: 'public';
+    mode: string;
     requestType: string;
     title: string;
     description: string;

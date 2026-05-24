@@ -153,12 +153,30 @@ export class MessagesService {
 
     return conversations
       .map((conv) => {
-        const otherId =
-          conv.participantIds.find((id) => id !== userId) ?? userId;
-        const other = userMap.get(otherId);
+        const otherId = conv.participantIds.find((id) => id !== userId);
+        const isAgentOnlyConversation =
+          !otherId &&
+          (Boolean(conv.agentConnectionId) ||
+            (Array.isArray(conv.participantAgentIds) &&
+              conv.participantAgentIds.length > 0));
+        if (isAgentOnlyConversation) {
+          return {
+            id: conv._id.toString(),
+            userId: 0,
+            username: 'OpenClaw Agent',
+            avatar: 'AI',
+            color: '#22d3ee',
+            lastMessage: cleanDisplayText(conv.lastMessage, ''),
+            time: this.formatTime(conv.lastMessageTime),
+            unread: conv.unreadCount?.[String(userId)] || 0,
+            online: true,
+          };
+        }
+        const peerUserId = otherId ?? userId;
+        const other = userMap.get(peerUserId);
         return {
           id: conv._id.toString(),
-          userId: otherId,
+          userId: peerUserId,
           username: cleanDisplayText(other?.name, '未知用户'),
           avatar: cleanDisplayText(other?.avatar, '?'),
           color: other?.color || '#38BDF8',
@@ -393,15 +411,43 @@ export class MessagesService {
     otherUserId: number,
     options: StartConversationOptions = {},
   ) {
+    const ownerId = Number(userId);
+    const targetId = Number(otherUserId);
+    if (!Number.isFinite(ownerId) || ownerId <= 0) {
+      throw new BadRequestException('当前用户无效');
+    }
+    if (!Number.isFinite(targetId) || targetId <= 0) {
+      throw new BadRequestException('请选择要联系的用户');
+    }
+    if (ownerId === targetId) {
+      throw new BadRequestException('不能给自己发起会话');
+    }
+
+    const participantIds = this.directParticipantIds(ownerId, targetId);
+    const directKey = this.directConversationKey(ownerId, targetId);
     const existing = await this.convModel.findOne({
-      participantIds: { $all: [userId, otherUserId] },
+      $or: [
+        { directKey },
+        { participantIds: { $all: participantIds, $size: 2 } },
+      ],
     });
 
     if (existing) {
+      if (existing.directKey !== directKey) {
+        existing.directKey = directKey;
+        existing.participantIds = participantIds;
+      }
       if (options.agentConnectionId) {
         await this.bindAgentConversation(existing._id, options);
       }
-      return { conversationId: existing._id.toString(), preexisting: true };
+      if (existing.isModified()) {
+        await existing.save();
+      }
+      return {
+        conversationId: existing._id.toString(),
+        preexisting: true,
+        targetUserId: targetId,
+      };
     }
 
     const metadata = this.withAgentMetadata(options.metadata, {
@@ -411,7 +457,8 @@ export class MessagesService {
       source: options.agentConnectionId ? 'openclaw' : undefined,
     });
     const conv = await this.convModel.create({
-      participantIds: [userId, otherUserId],
+      directKey,
+      participantIds,
       participantAgentIds: options.agentConnectionId
         ? [options.agentConnectionId]
         : [],
@@ -421,13 +468,17 @@ export class MessagesService {
       metadata,
       lastMessage: '',
       lastMessageTime: new Date(),
-      unreadCount: { [String(userId)]: 0, [String(otherUserId)]: 0 },
+      unreadCount: { [String(ownerId)]: 0, [String(targetId)]: 0 },
       unreadAgentCount: options.agentConnectionId
         ? { [String(options.agentConnectionId)]: 0 }
         : {},
     });
 
-    return { conversationId: conv._id.toString(), preexisting: false };
+    return {
+      conversationId: conv._id.toString(),
+      preexisting: false,
+      targetUserId: targetId,
+    };
   }
 
   async startPublicIntentConversation(
@@ -817,12 +868,28 @@ export class MessagesService {
   }
 
   async findConversationBetween(userA: number, userB: number) {
+    const directKey = this.directConversationKey(userA, userB);
+    const participantIds = this.directParticipantIds(userA, userB);
     const conv = await this.convModel
-      .findOne({ participantIds: { $all: [userA, userB] } })
+      .findOne({
+        $or: [
+          { directKey },
+          { participantIds: { $all: participantIds, $size: 2 } },
+        ],
+      })
       .lean()
       .exec();
     if (!conv) return null;
     return { conversationId: conv._id.toString() };
+  }
+
+  private directParticipantIds(userA: number, userB: number): number[] {
+    return [Number(userA), Number(userB)].sort((a, b) => a - b);
+  }
+
+  private directConversationKey(userA: number, userB: number): string {
+    const [minUserId, maxUserId] = this.directParticipantIds(userA, userB);
+    return `direct:${minUserId}:${maxUserId}`;
   }
 
   async getRecentAgentConversationSignals(options: {

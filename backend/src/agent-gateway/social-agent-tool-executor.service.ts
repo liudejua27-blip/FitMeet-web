@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -23,9 +24,14 @@ import {
 import { MessagesService } from '../messages/messages.service';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
 import { UpdateSocialRequestDto } from '../social-requests/dto/update-social-request.dto';
-import { SocialRequestType } from '../social-requests/social-request.entity';
+import {
+  SocialRequestType,
+  UserSocialRequest,
+} from '../social-requests/social-request.entity';
 import { SocialRequestsService } from '../social-requests/social-requests.service';
 import { SocialProfileService } from '../users/social-profile.service';
+import { User } from '../users/user.entity';
+import { SafetyService } from '../safety/safety.service';
 import { AgentActionLogService } from './agent-action-log.service';
 import {
   AgentActionRiskLevel,
@@ -63,6 +69,7 @@ import { resolveDeepSeekModel } from '../common/deepseek.util';
 import { sanitizeCity } from '../common/city.util';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
+import { PublicSocialIntent } from './entities/public-social-intent.entity';
 
 export enum SocialAgentToolName {
   GetMyProfile = 'get_my_profile',
@@ -191,6 +198,7 @@ const HIGH_RISK_TOOL_DAILY_LIMITS: Partial<
 @Injectable()
 export class SocialAgentToolExecutorService {
   private readonly logger = new Logger(SocialAgentToolExecutorService.name);
+  private toolCallSequence = 0;
 
   constructor(
     @InjectRepository(AgentTask)
@@ -201,6 +209,12 @@ export class SocialAgentToolExecutorService {
     private readonly connectionRepo: Repository<AgentConnection>,
     @InjectRepository(SocialRequestCandidate)
     private readonly candidateRepo: Repository<SocialRequestCandidate>,
+    @InjectRepository(PublicSocialIntent)
+    private readonly publicIntentRepo: Repository<PublicSocialIntent>,
+    @InjectRepository(UserSocialRequest)
+    private readonly userSocialRequestRepo: Repository<UserSocialRequest>,
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
     @InjectRepository(PaymentIntent)
     private readonly paymentIntentRepo: Repository<PaymentIntent>,
     private readonly config: ConfigService,
@@ -219,6 +233,7 @@ export class SocialAgentToolExecutorService {
     private readonly messages: MessagesService,
     private readonly friends: FriendsService,
     private readonly activities: ActivitiesService,
+    private readonly safety: SafetyService,
   ) {}
 
   async executeTask(
@@ -481,12 +496,17 @@ export class SocialAgentToolExecutorService {
       throw new BadRequestException(`Unknown tool ${String(toolName)}`);
     }
 
+    const actionInput = this.withAdhocConfirmationMetadata(
+      normalizedToolName,
+      input,
+      ownerUserId,
+    );
     const stepId = `action_${normalizedToolName}_${Date.now()}`;
     const call = await this.executeAdhocStep(task, {
       id: stepId,
       toolName: normalizedToolName,
       status: 'planned',
-      input,
+      input: actionInput,
     });
 
     if (call.status === 'succeeded') {
@@ -515,7 +535,7 @@ export class SocialAgentToolExecutorService {
     const toolName = this.resolveToolName(step);
     const input = this.stepInput(step);
     const startedAt = new Date();
-    const callId = `${stepId}:${toolName}:${startedAt.getTime()}`;
+    const callId = this.safeToolCallId(task.id, toolName, startedAt);
 
     await this.createTaskEvent(task, AgentTaskEventType.StepStarted, {
       summary: `Started ${toolName}`,
@@ -555,7 +575,13 @@ export class SocialAgentToolExecutorService {
         summary: `${toolName} succeeded`,
         stepId,
         toolCallId: callId,
-        payload: { status: call.status, output: call.output },
+        payload: {
+          toolName,
+          inputSummary: this.preview(this.safeUnknownText(input), 240),
+          status: call.status,
+          output: call.output,
+          error: null,
+        },
       });
       await this.createTaskEvent(task, AgentTaskEventType.StepCompleted, {
         summary: `Completed ${toolName}`,
@@ -585,11 +611,17 @@ export class SocialAgentToolExecutorService {
           sideEffectError: this.errorPayload(sideEffectError),
         };
       }
-      await this.createTaskEvent(task, AgentTaskEventType.ToolReturned, {
+      await this.createTaskEvent(task, AgentTaskEventType.ToolFailed, {
         summary: `${toolName} ${call.status}`,
         stepId,
         toolCallId: callId,
-        payload: { status: call.status, error: call.error },
+        payload: {
+          toolName,
+          inputSummary: this.preview(this.safeUnknownText(input), 240),
+          status: call.status,
+          output: null,
+          error: call.error,
+        },
       });
       return call;
     }
@@ -928,30 +960,145 @@ export class SocialAgentToolExecutorService {
     return { message };
   }
 
+  async resolveCandidateTargetUser(
+    input: Record<string, unknown>,
+    ownerUserId: number,
+  ): Promise<number> {
+    const candidateInput = this.isRecord(input.candidate)
+      ? input.candidate
+      : {};
+    const publicIntentId =
+      this.string(input.publicIntentId ?? candidateInput.publicIntentId) ??
+      null;
+    const socialRequestId = this.number(
+      input.socialRequestId ??
+        input.requestId ??
+        candidateInput.socialRequestId ??
+        candidateInput.requestId,
+    );
+    const candidateRecordId = this.number(
+      input.candidateRecordId ??
+        input.candidateId ??
+        candidateInput.candidateRecordId ??
+        candidateInput.candidateId,
+    );
+
+    let targetUserId = this.number(
+      input.targetUserId ??
+        candidateInput.targetUserId ??
+        input.candidateUserId ??
+        candidateInput.candidateUserId ??
+        input.userId ??
+        candidateInput.userId ??
+        input.toUserId ??
+        candidateInput.toUserId ??
+        input.recipientUserId ??
+        candidateInput.recipientUserId ??
+        input.recipientId ??
+        candidateInput.recipientId ??
+        input.receiverId ??
+        candidateInput.receiverId ??
+        input.followingId ??
+        candidateInput.followingId,
+    );
+
+    if (publicIntentId) {
+      const publicIntent = await this.publicIntentRepo.findOne({
+        where: { id: publicIntentId },
+      });
+      const publicIntentUserId = this.number(publicIntent?.userId);
+      if (targetUserId && publicIntentUserId && targetUserId !== publicIntentUserId) {
+        throw this.targetBadRequest(
+          'MISSING_TARGET_USER',
+          '公开约练卡片目标用户不一致',
+        );
+      }
+      targetUserId = targetUserId ?? publicIntentUserId;
+    }
+
+    if (!targetUserId && socialRequestId) {
+      const socialRequest = await this.userSocialRequestRepo.findOne({
+        where: { id: socialRequestId },
+      });
+      targetUserId = this.number(socialRequest?.userId);
+    }
+
+    if ((!targetUserId || targetUserId === ownerUserId) && candidateRecordId) {
+      const candidate = await this.candidateRepo.findOne({
+        where: { id: candidateRecordId },
+      });
+      targetUserId = this.number(candidate?.candidateUserId) ?? targetUserId;
+    }
+
+    if (!targetUserId) {
+      throw this.targetBadRequest(
+        'MISSING_TARGET_USER',
+        '这个候选缺少目标用户，无法操作。',
+      );
+    }
+    if (targetUserId === ownerUserId) {
+      throw this.targetBadRequest('TARGET_IS_SELF', '不能把自己作为目标用户');
+    }
+
+    const targetUser = await this.userRepo.findOne({
+      where: { id: targetUserId },
+    });
+    if (!targetUser) {
+      throw this.targetBadRequest('MISSING_TARGET_USER', '目标用户不存在');
+    }
+
+    const blockedUserIds = await this.safety.getMutualBlockUserIds(ownerUserId);
+    if (blockedUserIds.has(targetUserId)) {
+      throw new ForbiddenException({
+        success: false,
+        code: 'TARGET_BLOCKED',
+        message: '你和该用户之间存在拉黑关系，无法操作。',
+      });
+    }
+
+    return targetUserId;
+  }
+
+  private targetBadRequest(code: string, message: string): BadRequestException {
+    return new BadRequestException({ success: false, code, message });
+  }
+
   private async sendMessageToCandidate(
     task: AgentTask,
     input: Record<string, unknown>,
     stepId: string,
   ): Promise<unknown> {
-    const candidateInput = this.isRecord(input.candidate)
-      ? input.candidate
-      : {};
-    const targetUserId =
-      this.number(
-        input.candidateUserId ??
-          input.targetUserId ??
-          input.toUserId ??
-          candidateInput.candidateUserId ??
-          candidateInput.userId,
-      ) ?? undefined;
-    return this.sendMessage(
-      task,
-      {
-        ...input,
-        targetUserId,
-      },
-      stepId,
+    const targetUserId = await this.resolveCandidateTargetUser(
+      input,
+      task.ownerUserId,
     );
+    const output = this.asRecord(
+      await this.sendMessage(
+        task,
+        {
+          ...input,
+          targetUserId,
+        },
+        stepId,
+      ),
+    );
+    const messageId = this.string(output.id ?? output.messageId) ?? null;
+    const conversationId = this.string(output.conversationId) ?? null;
+    return {
+      ...output,
+      success: true,
+      taskId: task.id,
+      targetUserId,
+      candidateUserId: targetUserId,
+      messageId,
+      conversationId,
+      status: output.skipped ? 'skipped' : 'sent',
+      messageAction: {
+        status: output.skipped ? 'skipped' : 'sent',
+        messageId,
+        conversationId,
+      },
+    };
   }
 
   private async sendMessage(
@@ -1055,17 +1202,42 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     stepId: string,
   ): Promise<unknown> {
-    const targetUserId = this.number(
-      input.targetUserId ?? input.userId ?? input.followingId,
+    const targetUserId = await this.resolveCandidateTargetUser(
+      input,
+      task.ownerUserId,
     );
-    if (!targetUserId)
-      throw new BadRequestException('targetUserId is required');
     const friend = await this.friends.ensureFollowing(
       task.ownerUserId,
       targetUserId,
     );
     const friendRecord = this.asRecord(friend);
-    if (this.bool(input.openConversation) !== true) return friendRecord;
+    const rawFriendRequestId =
+      friendRecord.friendRequestId ?? friendRecord.followId ?? friendRecord.id;
+    const numericFriendRequestId = this.number(rawFriendRequestId);
+    const friendRequestId =
+      this.string(rawFriendRequestId) ??
+      (numericFriendRequestId != null ? String(numericFriendRequestId) : null);
+    if (this.bool(input.openConversation) !== true) {
+      return {
+        ...friendRecord,
+        success: true,
+        taskId: task.id,
+        targetUserId,
+        candidateUserId: targetUserId,
+        friendRequestId,
+        conversationId: null,
+        status: 'connected',
+        friendAction: {
+          success: true,
+          status: 'connected',
+          targetUserId,
+          candidateUserId: targetUserId,
+          following: true,
+          conversationId: null,
+          friendRequestId,
+        },
+      };
+    }
 
     const conversation = await this.messages.startConversation(
       task.ownerUserId,
@@ -1088,8 +1260,22 @@ export class SocialAgentToolExecutorService {
     }
     return {
       ...friendRecord,
+      success: true,
+      taskId: task.id,
       conversationId: conversationId ?? null,
       targetUserId,
+      candidateUserId: targetUserId,
+      friendRequestId,
+      status: 'connected',
+      friendAction: {
+        success: true,
+        status: 'connected',
+        targetUserId,
+        candidateUserId: targetUserId,
+        following: true,
+        conversationId: conversationId ?? null,
+        friendRequestId,
+      },
     };
   }
 
@@ -1098,15 +1284,9 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     stepId: string,
   ): Promise<unknown> {
-    const candidateInput = this.isRecord(input.candidate)
-      ? input.candidate
-      : {};
-    const targetUserId = this.number(
-      input.candidateUserId ??
-        input.targetUserId ??
-        input.userId ??
-        candidateInput.candidateUserId ??
-        candidateInput.userId,
+    const targetUserId = await this.resolveCandidateTargetUser(
+      input,
+      task.ownerUserId,
     );
     return this.addFriend(
       task,
@@ -2905,6 +3085,33 @@ export class SocialAgentToolExecutorService {
     return this.string(metadata.confirmationSource) === 'social_agent_chat';
   }
 
+  private withAdhocConfirmationMetadata(
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+    ownerUserId?: number,
+  ): Record<string, unknown> {
+    if (!ownerUserId) return input;
+    if (!this.isUserConfirmedCandidateAction(toolName)) return input;
+    const metadata = this.isRecord(input.metadata) ? input.metadata : {};
+    if (this.string(metadata.confirmationSource)) return input;
+    return {
+      ...input,
+      metadata: {
+        ...metadata,
+        confirmationSource: 'social_agent_chat',
+      },
+    };
+  }
+
+  private isUserConfirmedCandidateAction(toolName: SocialAgentToolName): boolean {
+    return [
+      SocialAgentToolName.SendMessage,
+      SocialAgentToolName.SendMessageToCandidate,
+      SocialAgentToolName.AddFriend,
+      SocialAgentToolName.ConnectCandidate,
+    ].includes(toolName);
+  }
+
   private shouldWriteActionResultInbox(toolName: SocialAgentToolName): boolean {
     return [
       SocialAgentToolName.SendMessage,
@@ -3024,16 +3231,29 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     output: Record<string, unknown> | null,
   ): number | null {
+    const candidate = this.isRecord(input.candidate) ? input.candidate : {};
     return (
       this.number(
-        input.targetUserId ??
+        input.candidateUserId ??
+          input.targetUserId ??
           input.toUserId ??
-          input.candidateUserId ??
+          input.recipientUserId ??
+          input.recipientId ??
+          input.receiverId ??
           input.payeeUserId ??
           input.userId ??
           input.followingId ??
-          input.invitedUserId,
+          input.invitedUserId ??
+          candidate.candidateUserId ??
+          candidate.targetUserId ??
+          candidate.toUserId ??
+          candidate.recipientUserId ??
+          candidate.recipientId ??
+          candidate.receiverId ??
+          candidate.userId,
       ) ??
+      this.number(output?.targetUserId) ??
+      this.number(output?.candidateUserId) ??
       this.number(output?.recipientUserId) ??
       null
     );
@@ -3352,20 +3572,71 @@ export class SocialAgentToolExecutorService {
       toolCallId?: string | null;
     },
   ): Promise<void> {
-    await this.eventRepo.save(
-      this.eventRepo.create({
-        taskId: task.id,
-        ownerUserId: task.ownerUserId,
-        eventType: type,
-        actor:
-          type === AgentTaskEventType.ToolReturned
-            ? AgentTaskEventActor.Tool
-            : AgentTaskEventActor.Agent,
-        summary: input.summary.slice(0, 500),
-        payload: input.payload ?? {},
-        stepId: input.stepId ?? null,
-        toolCallId: input.toolCallId ?? null,
-      }),
+    try {
+      const actor =
+        type === AgentTaskEventType.ToolReturned ||
+        type === AgentTaskEventType.ToolFailed
+          ? AgentTaskEventActor.Tool
+          : AgentTaskEventActor.Agent;
+      await this.eventRepo.save(
+        this.eventRepo.create({
+          taskId: task.id,
+          ownerUserId: task.ownerUserId,
+          eventType: this.safeVarchar(type, 80) as AgentTaskEventType,
+          actor: this.safeVarchar(actor, 80) as AgentTaskEventActor,
+          summary: this.safeVarchar(input.summary, 500),
+          payload: input.payload ?? {},
+          stepId:
+            input.stepId == null ? null : this.safeVarchar(input.stepId, 80),
+          toolCallId:
+            input.toolCallId == null
+              ? null
+              : this.safeVarchar(input.toolCallId, 80),
+        }),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `[SocialAgentToolExecutor] failed to write task event: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  private safeVarchar(value: unknown, max = 80): string {
+    let text: string;
+    if (value == null) {
+      text = '';
+    } else if (typeof value === 'string') {
+      text = value;
+    } else if (typeof value === 'object') {
+      try {
+        text = JSON.stringify(value) ?? '';
+      } catch {
+        text = '[unserializable]';
+      }
+    } else {
+      text = String(value);
+    }
+
+    if (max <= 0) return '';
+    return text.length > max ? `${text.slice(0, Math.max(0, max - 1))}…` : text;
+  }
+
+  private safeToolCallId(
+    taskId: number,
+    toolName: SocialAgentToolName,
+    startedAt: Date,
+  ): string {
+    this.toolCallSequence = (this.toolCallSequence + 1) % 1_000_000;
+    const alias = toolName
+      .split('_')
+      .map((part) => part[0] ?? '')
+      .join('')
+      .slice(0, 12);
+    return this.safeVarchar(
+      `${alias || 'tool'}_${taskId}_${startedAt.getTime().toString(36)}_${this.toolCallSequence.toString(36)}`,
+      80,
     );
   }
 
@@ -3484,6 +3755,21 @@ export class SocialAgentToolExecutorService {
   }
 
   private errorPayload(error: unknown): Record<string, unknown> {
+    if (error instanceof HttpException) {
+      const response = error.getResponse();
+      const responseRecord = this.isRecord(response) ? response : {};
+      return {
+        code:
+          this.string(responseRecord.code) ??
+          (error instanceof ForbiddenException
+            ? 'tool_permission_blocked'
+            : 'TOOL_EXECUTION_FAILED'),
+        message:
+          this.string(responseRecord.message) ??
+          (error instanceof Error ? error.message : String(error)),
+        statusCode: error.getStatus(),
+      };
+    }
     return {
       code:
         error instanceof ForbiddenException

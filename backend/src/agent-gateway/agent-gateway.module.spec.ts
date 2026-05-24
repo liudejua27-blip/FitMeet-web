@@ -1,3 +1,4 @@
+import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
 
@@ -68,6 +69,16 @@ import { AgentDiscoveryService } from './agent-discovery.service';
 import { AgentGatewayModule } from './agent-gateway.module';
 import { AgentUserController } from './agent-gateway.controller';
 
+type RouteInfo = { method: string; path: string };
+
+type ExpressRouteLayer = {
+  route?: {
+    path?: string;
+    methods?: Record<string, boolean>;
+  };
+  handle?: { stack?: ExpressRouteLayer[] };
+};
+
 function createRepositoryMock() {
   const queryBuilder = {
     andWhere: jest.fn().mockReturnThis(),
@@ -115,6 +126,56 @@ function createGenericMock() {
   );
 }
 
+function collectRoutes(app: INestApplication): RouteInfo[] {
+  const instance = app.getHttpAdapter().getInstance() as {
+    _router?: { stack?: ExpressRouteLayer[] };
+    router?: { stack?: ExpressRouteLayer[] };
+  };
+  const stack = instance._router?.stack ?? instance.router?.stack ?? [];
+
+  return collectRouteStack(stack);
+}
+
+function collectRouteStack(stack: ExpressRouteLayer[]): RouteInfo[] {
+  const routes: RouteInfo[] = [];
+
+  for (const layer of stack) {
+    if (layer.route?.path && layer.route.methods) {
+      for (const [method, enabled] of Object.entries(layer.route.methods)) {
+        if (enabled) {
+          routes.push({ method: method.toUpperCase(), path: layer.route.path });
+        }
+      }
+    }
+
+    if (layer.handle?.stack) {
+      routes.push(...collectRouteStack(layer.handle.stack));
+    }
+  }
+
+  return routes;
+}
+
+function requireRouteIndex(
+  routes: RouteInfo[],
+  method: string,
+  pathSuffix: string,
+): number {
+  const index = routes.findIndex(
+    (route) => route.method === method && route.path.endsWith(pathSuffix),
+  );
+
+  if (index === -1) {
+    throw new Error(
+      `Expected ${method} ${pathSuffix}. Registered routes: ${routes
+        .map((route) => `${route.method} ${route.path}`)
+        .join(', ')}`,
+    );
+  }
+
+  return index;
+}
+
 describe('AgentGatewayModule startup', () => {
   let moduleRef: TestingModule | undefined;
 
@@ -140,6 +201,55 @@ describe('AgentGatewayModule startup', () => {
       AgentDiscoveryService,
     );
     expect(app.get(AgentUserController)).toBeInstanceOf(AgentUserController);
+
+    await app.close();
+  });
+
+  it('registers social agent restore routes before the generic task route', async () => {
+    moduleRef = await Test.createTestingModule({
+      imports: [AgentGatewayModule],
+    })
+      .useMocker((token) => {
+        if (token === DataSource) return createDataSourceMock();
+        return createGenericMock();
+      })
+      .compile();
+
+    const app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api');
+    await app.init();
+
+    const routes = collectRoutes(app);
+    const currentRoute = requireRouteIndex(
+      routes,
+      'GET',
+      '/social-agent/tasks/current',
+    );
+    const timelineRoute = requireRouteIndex(
+      routes,
+      'GET',
+      '/social-agent/tasks/:id/timeline',
+    );
+    const eventsRoute = requireRouteIndex(
+      routes,
+      'GET',
+      '/social-agent/tasks/:id/events',
+    );
+    const genericTaskRoute = requireRouteIndex(
+      routes,
+      'GET',
+      '/social-agent/tasks/:id',
+    );
+
+    expect(currentRoute).toBeLessThan(genericTaskRoute);
+    expect(timelineRoute).toBeLessThan(genericTaskRoute);
+    expect(eventsRoute).toBeLessThan(genericTaskRoute);
+    expect(
+      requireRouteIndex(routes, 'GET', '/social-agent/chat/session'),
+    ).toBeGreaterThanOrEqual(0);
+    expect(
+      requireRouteIndex(routes, 'GET', '/social-agent/chat/tasks/:id/session'),
+    ).toBeGreaterThanOrEqual(0);
 
     await app.close();
   });

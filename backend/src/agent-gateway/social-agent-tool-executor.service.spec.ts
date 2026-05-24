@@ -1,6 +1,7 @@
 import { AgentPermissionService } from './agent-permission.service';
 import {
   AgentTask,
+  AgentTaskEventType,
   AgentTaskPermissionMode,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
@@ -54,6 +55,14 @@ function makeService() {
     debugCandidatePool: jest.fn(),
   };
   const candidateRepo = repo();
+  const publicIntentRepo = repo();
+  const userSocialRequestRepo = repo();
+  const userRepo = {
+    ...repo(),
+    findOne: jest.fn(async (options?: { where?: { id?: number } }) =>
+      options?.where?.id ? { id: options.where.id } : null,
+    ),
+  };
   const paymentIntentRepo = repo();
   const config = { get: jest.fn().mockReturnValue(undefined) };
   const actionLogs = {
@@ -93,6 +102,9 @@ function makeService() {
   };
   const friends = { ensureFollowing: jest.fn() };
   const activities = { create: jest.fn(), join: jest.fn() };
+  const safety = {
+    getMutualBlockUserIds: jest.fn().mockResolvedValue(new Set<number>()),
+  };
   const approvals = {
     getPending: jest.fn(),
     approve: jest.fn(),
@@ -109,6 +121,9 @@ function makeService() {
     eventRepo as never,
     connectionRepo as never,
     candidateRepo as never,
+    publicIntentRepo as never,
+    userSocialRequestRepo as never,
+    userRepo as never,
     paymentIntentRepo as never,
     config as never,
     actionLogs as never,
@@ -126,6 +141,7 @@ function makeService() {
     messages as never,
     friends as never,
     activities as never,
+    safety as never,
   );
 
   return {
@@ -134,6 +150,9 @@ function makeService() {
     eventRepo,
     connectionRepo,
     candidateRepo,
+    publicIntentRepo,
+    userSocialRequestRepo,
+    userRepo,
     paymentIntentRepo,
     config,
     actionLogs,
@@ -146,6 +165,7 @@ function makeService() {
     messages,
     friends,
     activities,
+    safety,
     approvals,
     approvalDispatcher,
     longTermMemory,
@@ -481,6 +501,7 @@ describe('SocialAgentToolExecutorService', () => {
       approvals,
       approvalDispatcher,
       actionLogs,
+      eventRepo,
     } = makeService();
     const task = makeTask({
       permissionMode: AgentTaskPermissionMode.LimitedAuto,
@@ -566,6 +587,17 @@ describe('SocialAgentToolExecutorService', () => {
     expect(activities.join).toHaveBeenCalledWith(9, 1);
     expect(approvals.approve).toHaveBeenCalledWith(12, 1, expect.any(Function));
     expect(approvals.reject).toHaveBeenCalledWith(13, 1);
+    const toolEvents = eventRepo.save.mock.calls
+      .map(([event]) => event as Record<string, unknown>)
+      .filter((event) => event.toolCallId != null);
+    expect(toolEvents.length).toBeGreaterThan(0);
+    for (const event of toolEvents) {
+      expect(String(event.toolCallId).length).toBeLessThanOrEqual(80);
+      expect(String(event.toolCallId)).not.toContain(':');
+      expect(String(event.toolCallId)).not.toContain(
+        'action_create_social_request',
+      );
+    }
     const auditInputs = actionLogs.logAgentAction.mock.calls.map(
       ([input]) => input,
     );
@@ -866,6 +898,171 @@ describe('SocialAgentToolExecutorService', () => {
     );
   });
 
+  it('safely truncates long task event varchar fields while keeping full payload', async () => {
+    const { service, eventRepo } = makeService();
+    const task = makeTask();
+    const longSummary = 'summary_'.repeat(90);
+    const longStepId = 'step_'.repeat(40);
+    const longToolCallId = 'send_message_to_candidate_20260524104548_candidate_123_public_intent_'.repeat(
+      2,
+    );
+    const fullPayload = { message: 'hello_'.repeat(200) };
+
+    await expect(
+      (
+        service as unknown as {
+          createTaskEvent: (
+            task: AgentTask,
+            type: AgentTaskEventType,
+            input: {
+              summary: string;
+              payload: Record<string, unknown>;
+              stepId: string;
+              toolCallId: string;
+            },
+          ) => Promise<void>;
+        }
+      ).createTaskEvent(task, AgentTaskEventType.ToolReturned, {
+        summary: longSummary,
+        payload: fullPayload,
+        stepId: longStepId,
+        toolCallId: longToolCallId,
+      }),
+    ).resolves.toBeUndefined();
+
+    const saved = eventRepo.save.mock.calls[0][0] as Record<string, unknown>;
+    expect(String(saved.summary).length).toBeLessThanOrEqual(500);
+    expect(String(saved.stepId).length).toBeLessThanOrEqual(80);
+    expect(String(saved.toolCallId).length).toBeLessThanOrEqual(80);
+    expect(saved.stepId).toEqual(expect.stringContaining('…'));
+    expect(saved.toolCallId).toEqual(expect.stringContaining('…'));
+    expect(saved.payload).toBe(fullPayload);
+  });
+
+  it('does not fail executeToolAction when task event writes fail', async () => {
+    const { service, taskRepo, eventRepo, messages, actionLogs } = makeService();
+    const task = makeTask({
+      agentConnectionId: null,
+      permissionMode: AgentTaskPermissionMode.Confirm,
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    eventRepo.save.mockRejectedValue(
+      new Error('value too long for type character varying(80)'),
+    );
+    messages.startConversation.mockResolvedValue({ conversationId: 'conv_user' });
+    messages.sendMessage.mockResolvedValue({
+      id: 'msg_user',
+      conversationId: 'conv_user',
+    });
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.SendMessageToCandidate,
+      {
+        targetUserId: 2,
+        text: 'hello',
+        metadata: { confirmationSource: 'social_agent_chat' },
+      },
+      1,
+    );
+
+    expect(call.status).toBe('succeeded');
+    expect(call.output).toMatchObject({
+      success: true,
+      taskId: 100,
+      targetUserId: 2,
+      candidateUserId: 2,
+      messageId: 'msg_user',
+      conversationId: 'conv_user',
+      status: 'sent',
+      messageAction: {
+        status: 'sent',
+        messageId: 'msg_user',
+        conversationId: 'conv_user',
+      },
+    });
+    expect(actionLogs.logAgentAction).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'succeeded' }),
+    );
+  });
+
+  it('keeps connect_candidate successful when task event writes fail', async () => {
+    const { service, taskRepo, eventRepo, friends, messages } = makeService();
+    const task = makeTask({
+      agentConnectionId: null,
+      permissionMode: AgentTaskPermissionMode.Confirm,
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    eventRepo.save.mockRejectedValue(
+      new Error('value too long for type character varying(80)'),
+    );
+    friends.ensureFollowing.mockResolvedValue({ id: 31, followingId: 2 });
+    messages.startConversation.mockResolvedValue({ conversationId: 'conv_user' });
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.ConnectCandidate,
+      {
+        targetUserId: 2,
+        openConversation: true,
+        metadata: { confirmationSource: 'social_agent_chat' },
+      },
+      1,
+    );
+
+    expect(call.status).toBe('succeeded');
+    expect(call.output).toMatchObject({
+      id: 31,
+      targetUserId: 2,
+      conversationId: 'conv_user',
+    });
+  });
+
+  it('keeps long message content out of task event varchar fields', async () => {
+    const { service, taskRepo, eventRepo, messages } = makeService();
+    const task = makeTask({
+      agentConnectionId: null,
+      permissionMode: AgentTaskPermissionMode.Confirm,
+    });
+    const longMessage = 'long message '.repeat(100);
+    taskRepo.findOne.mockResolvedValue(task);
+    messages.startConversation.mockResolvedValue({ conversationId: 'conv_user' });
+    messages.sendMessage.mockResolvedValue({
+      id: 'msg_user',
+      conversationId: 'conv_user',
+    });
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.SendMessageToCandidate,
+      {
+        targetUserId: 2,
+        text: longMessage,
+        metadata: { confirmationSource: 'social_agent_chat' },
+      },
+      1,
+    );
+
+    expect(call.status).toBe('succeeded');
+    const savedEvents = eventRepo.save.mock.calls.map(
+      ([event]) => event as Record<string, unknown>,
+    );
+    expect(savedEvents.length).toBeGreaterThan(0);
+    for (const event of savedEvents) {
+      expect(String(event.summary).length).toBeLessThanOrEqual(500);
+      if (event.stepId != null) {
+        expect(String(event.stepId).length).toBeLessThanOrEqual(80);
+      }
+      if (event.toolCallId != null) {
+        expect(String(event.toolCallId).length).toBeLessThanOrEqual(80);
+      }
+    }
+    const calledPayload = savedEvents.find(
+      (event) => event.eventType === AgentTaskEventType.ToolCalled,
+    )?.payload as Record<string, unknown> | undefined;
+    expect(calledPayload?.input).toMatchObject({ text: longMessage });
+  });
+
   it('connects user-confirmed candidates as the user when no agent connection is bound', async () => {
     const { service, taskRepo, friends, messages, actionLogs } = makeService();
     const task = makeTask({
@@ -904,6 +1101,203 @@ describe('SocialAgentToolExecutorService', () => {
     );
   });
 
+  it('resolves nested candidate ids for connect_candidate tool calls', async () => {
+    const { service, taskRepo, friends, messages } = makeService();
+    const task = makeTask({
+      agentConnectionId: null,
+      permissionMode: AgentTaskPermissionMode.Confirm,
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    friends.ensureFollowing.mockResolvedValue({ followId: 33, followingId: 3 });
+    messages.startConversation.mockResolvedValue({ conversationId: 'conv_3' });
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.ConnectCandidate,
+      {
+        candidate: { candidateUserId: 3 },
+        openConversation: true,
+        metadata: { confirmationSource: 'social_agent_chat' },
+      },
+      1,
+    );
+
+    expect(call.status).toBe('succeeded');
+    expect(friends.ensureFollowing).toHaveBeenCalledWith(1, 3);
+    expect(messages.startConversation).toHaveBeenCalledWith(
+      1,
+      3,
+      expect.objectContaining({ agentConnectionId: null, ownerUserId: 1 }),
+    );
+    expect(call.output).toMatchObject({
+      success: true,
+      followId: 33,
+      targetUserId: 3,
+      candidateUserId: 3,
+      conversationId: 'conv_3',
+      friendAction: {
+        success: true,
+        status: 'connected',
+        targetUserId: 3,
+        candidateUserId: 3,
+        following: true,
+        conversationId: 'conv_3',
+        friendRequestId: '33',
+      },
+    });
+  });
+
+  it('returns different targets and conversations for different candidate users', async () => {
+    const { service, taskRepo, friends, messages } = makeService();
+    taskRepo.findOne.mockResolvedValue(
+      makeTask({
+        agentConnectionId: null,
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      }),
+    );
+    friends.ensureFollowing.mockImplementation(async (_ownerId, targetUserId) => ({
+      followId: targetUserId + 100,
+      followingId: targetUserId,
+    }));
+    messages.startConversation.mockImplementation(async (_ownerId, targetUserId) => ({
+      conversationId: `conv_${targetUserId}`,
+    }));
+
+    const first = await service.executeToolAction(
+      100,
+      SocialAgentToolName.ConnectCandidate,
+      { candidateUserId: 2, openConversation: true },
+      1,
+    );
+    const second = await service.executeToolAction(
+      100,
+      SocialAgentToolName.ConnectCandidate,
+      { candidateUserId: 3, openConversation: true },
+      1,
+    );
+
+    expect(first.output).toMatchObject({
+      success: true,
+      targetUserId: 2,
+      candidateUserId: 2,
+      conversationId: 'conv_2',
+      friendAction: {
+        success: true,
+        targetUserId: 2,
+        candidateUserId: 2,
+        conversationId: 'conv_2',
+      },
+    });
+    expect(second.output).toMatchObject({
+      success: true,
+      targetUserId: 3,
+      candidateUserId: 3,
+      conversationId: 'conv_3',
+      friendAction: {
+        success: true,
+        targetUserId: 3,
+        candidateUserId: 3,
+        conversationId: 'conv_3',
+      },
+    });
+  });
+
+  it('resolves public intent ids to the intent owner user', async () => {
+    const { service, taskRepo, publicIntentRepo, friends, messages } = makeService();
+    taskRepo.findOne.mockResolvedValue(
+      makeTask({
+        agentConnectionId: null,
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      }),
+    );
+    publicIntentRepo.findOne.mockResolvedValue({ id: 'intent_5', userId: 5 });
+    friends.ensureFollowing.mockResolvedValue({ followId: 55, followingId: 5 });
+    messages.startConversation.mockResolvedValue({ conversationId: 'conv_5' });
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.ConnectCandidate,
+      { publicIntentId: 'intent_5', openConversation: true },
+      1,
+    );
+
+    expect(call.status).toBe('succeeded');
+    expect(friends.ensureFollowing).toHaveBeenCalledWith(1, 5);
+    expect(call.output).toMatchObject({
+      targetUserId: 5,
+      candidateUserId: 5,
+      conversationId: 'conv_5',
+    });
+  });
+
+  it('returns a 400 target error instead of using a fallback candidate', async () => {
+    const { service, taskRepo, friends } = makeService();
+    taskRepo.findOne.mockResolvedValue(
+      makeTask({
+        agentConnectionId: null,
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      }),
+    );
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.ConnectCandidate,
+      { openConversation: true },
+      1,
+    );
+
+    expect(call.status).toBe('failed');
+    expect(call.error).toMatchObject({
+      code: 'MISSING_TARGET_USER',
+      statusCode: 400,
+    });
+    expect(friends.ensureFollowing).not.toHaveBeenCalled();
+  });
+
+  it('rejects self targets before creating friendships or conversations', async () => {
+    const { service, taskRepo, friends, messages } = makeService();
+    taskRepo.findOne.mockResolvedValue(
+      makeTask({
+        agentConnectionId: null,
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      }),
+    );
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.ConnectCandidate,
+      { targetUserId: 1, openConversation: true },
+      1,
+    );
+
+    expect(call.status).toBe('failed');
+    expect(call.error).toMatchObject({ code: 'TARGET_IS_SELF', statusCode: 400 });
+    expect(friends.ensureFollowing).not.toHaveBeenCalled();
+    expect(messages.startConversation).not.toHaveBeenCalled();
+  });
+
+  it('blocks candidate actions when either user has blocked the other', async () => {
+    const { service, taskRepo, safety, friends } = makeService();
+    taskRepo.findOne.mockResolvedValue(
+      makeTask({
+        agentConnectionId: null,
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      }),
+    );
+    safety.getMutualBlockUserIds.mockResolvedValue(new Set([2]));
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.ConnectCandidate,
+      { targetUserId: 2, openConversation: true },
+      1,
+    );
+
+    expect(call.status).toBe('blocked');
+    expect(call.error).toMatchObject({ code: 'TARGET_BLOCKED', statusCode: 403 });
+    expect(friends.ensureFollowing).not.toHaveBeenCalled();
+  });
+
   it('fails real social actions explicitly when the task is not bound to an agent connection', async () => {
     const { service, taskRepo, messages, actionLogs } = makeService();
     const task = makeTask({
@@ -937,7 +1331,7 @@ describe('SocialAgentToolExecutorService', () => {
     expect(task.plan[0]).toMatchObject({
       status: 'failed',
       error: expect.objectContaining({
-        code: 'tool_execution_failed',
+        code: 'TOOL_EXECUTION_FAILED',
         message: expect.stringContaining('agentConnectionId'),
       }),
     });
@@ -1204,7 +1598,8 @@ describe('SocialAgentToolExecutorService', () => {
   });
 
   it('reuses SocialRequestsService when creating a social request', async () => {
-    const { service, taskRepo, connectionRepo, socialRequests } = makeService();
+    const { service, taskRepo, eventRepo, connectionRepo, socialRequests } =
+      makeService();
     const task = makeTask({
       permissionMode: AgentTaskPermissionMode.Confirm,
       plan: [
@@ -1225,6 +1620,28 @@ describe('SocialAgentToolExecutorService', () => {
     const result = await service.executeTask(100);
 
     expect(result.succeededSteps).toBe(1);
+    expect(result.toolCalls[0]).toMatchObject({
+      toolName: SocialAgentToolName.CreateSocialRequest,
+      status: 'succeeded',
+    });
+    expect(result.toolCalls[0].id.length).toBeLessThanOrEqual(80);
+    expect(result.toolCalls[0].id).not.toContain(':');
+    expect(result.toolCalls[0].id).not.toContain(
+      'action_create_social_request',
+    );
+    const savedEvents = eventRepo.save.mock.calls.map(
+      ([event]) => event as Record<string, unknown>,
+    );
+    expect(savedEvents.length).toBeGreaterThan(0);
+    for (const event of savedEvents) {
+      if (event.toolCallId != null) {
+        expect(String(event.toolCallId).length).toBeLessThanOrEqual(80);
+        expect(String(event.toolCallId)).not.toContain(':');
+        expect(String(event.toolCallId)).not.toContain(
+          'action_create_social_request',
+        );
+      }
+    }
     expect(socialRequests.createFromNaturalLanguage).toHaveBeenCalledWith(
       '周末找人一起跑步',
       1,

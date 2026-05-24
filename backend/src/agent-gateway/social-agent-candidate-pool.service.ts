@@ -95,6 +95,7 @@ export type CandidatePoolResolvedQuery = {
 export type CandidatePoolCandidate = {
   source: CandidatePoolSource;
   isRealData: true;
+  targetUserId: number;
   candidateUserId: number;
   userId: number;
   publicIntentId: string | null;
@@ -134,6 +135,9 @@ export type CandidatePoolActivityResult = {
   id: string;
   source: CandidatePoolSource;
   isRealData: true;
+  targetUserId: number | null;
+  candidateUserId: number | null;
+  userId: number | null;
   activityId: number | null;
   publicIntentId: string | null;
   title: string;
@@ -185,7 +189,9 @@ export type CandidatePoolDebugSnapshot = {
       CandidatePoolCandidate,
       | 'source'
       | 'isRealData'
+      | 'targetUserId'
       | 'candidateUserId'
+      | 'userId'
       | 'publicIntentId'
       | 'socialRequestId'
       | 'activityId'
@@ -814,6 +820,7 @@ export class SocialAgentCandidatePoolService {
     return {
       source: input.source,
       isRealData: true,
+      targetUserId: input.user.id,
       candidateUserId: input.user.id,
       userId: input.user.id,
       publicIntentId: input.publicIntentId,
@@ -873,6 +880,9 @@ export class SocialAgentCandidatePoolService {
       id: String(activity.id),
       source: 'activity',
       isRealData: true,
+      targetUserId: activity.creatorId ?? null,
+      candidateUserId: activity.creatorId ?? null,
+      userId: activity.creatorId ?? null,
       activityId: activity.id,
       publicIntentId: null,
       title: cleanDisplayText(activity.title, '真实活动'),
@@ -914,6 +924,9 @@ export class SocialAgentCandidatePoolService {
       id: intent.id,
       source: 'public_intent',
       isRealData: true,
+      targetUserId: intent.userId ?? null,
+      candidateUserId: intent.userId ?? null,
+      userId: intent.userId ?? null,
       activityId: null,
       publicIntentId: intent.id,
       title: cleanDisplayText(intent.title, '公开约练卡片'),
@@ -1377,7 +1390,9 @@ export class SocialAgentCandidatePoolService {
       finalCandidates: input.finalCandidates.map((candidate) => ({
         source: candidate.source,
         isRealData: candidate.isRealData,
+        targetUserId: candidate.targetUserId,
         candidateUserId: candidate.candidateUserId,
+        userId: candidate.userId,
         publicIntentId: candidate.publicIntentId,
         socialRequestId: candidate.socialRequestId,
         activityId: candidate.activityId,

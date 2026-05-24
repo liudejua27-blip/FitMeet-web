@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import * as dataService from '../services/dataService';
 import { FilterBar, MasonryFeed } from '../components/discover';
 import { CreatePostModal } from '../components/common';
-import { useAuthStore, useMessageStore, useNotificationStore, useSocialStore } from '../stores';
+import { useAuthStore, useNotificationStore, useSocialStore } from '../stores';
 import { EmptyState, FeedCardSkeleton, SportVisual } from '../components/ui';
 import type { Meet, Post } from '../types';
 import { getSportLabel, isContentType, normalizeSportGroup } from '../data/taxonomy';
@@ -34,7 +34,6 @@ export const DiscoverPage = () => {
 
   const { isLoggedIn, openLogin } = useAuthStore();
   const { toggleFollow, toggleLike, toggleSave } = useSocialStore();
-  const { startChat } = useMessageStore();
   const { addNotification } = useNotificationStore();
 
   const loadPage = useCallback(
@@ -125,8 +124,8 @@ export const DiscoverPage = () => {
         return;
       }
       const post = feedData.find((p) => p.id === id);
-      if (!post) return;
-      toggleFollow(id);
+      if (!post?.userId) return;
+      toggleFollow(post.userId);
       addNotification({
         type: 'follow',
         username: post.username,
@@ -160,17 +159,21 @@ export const DiscoverPage = () => {
   );
 
   const handleMessage = useCallback(
-    (id: number) => {
+    async (id: number) => {
       if (!isLoggedIn) {
         openLogin();
         return;
       }
       const post = feedData.find((p) => p.id === id);
       if (!post?.userId) return;
-      startChat(post.userId, post.username, post.username[0], post.color);
-      navigate('/messages');
+      try {
+        const conversation = await dataService.startConversation(post.userId);
+        navigate(`/messages?conversationId=${encodeURIComponent(conversation.conversationId)}`);
+      } catch (error) {
+        setError(error instanceof Error ? error.message : '发起聊天失败，请稍后重试。');
+      }
     },
-    [feedData, isLoggedIn, navigate, openLogin, startChat],
+    [feedData, isLoggedIn, navigate, openLogin],
   );
 
   const handleUseMyLocation = useCallback(() => {

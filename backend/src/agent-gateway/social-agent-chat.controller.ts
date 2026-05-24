@@ -49,12 +49,14 @@ type SendMessageBody = {
   message?: string;
   suggestedOpener?: string;
   candidateRecordId?: number | null;
+  publicIntentId?: string | null;
   socialRequestId?: number | null;
   candidate?: Record<string, unknown>;
 };
 
 type SaveCandidateBody = {
   candidateRecordId?: number | null;
+  publicIntentId?: string | null;
   socialRequestId?: number | null;
   targetUserId?: number | null;
   candidate?: Record<string, unknown>;
@@ -64,6 +66,7 @@ type ConnectCandidateBody = {
   targetUserId?: number | null;
   candidateUserId?: number | null;
   candidateRecordId?: number | null;
+  publicIntentId?: string | null;
   socialRequestId?: number | null;
   candidate?: Record<string, unknown>;
 };
@@ -94,6 +97,19 @@ export class SocialAgentChatController {
   @HttpCode(200)
   handleMessage(@Req() req: FitMeetRequest, @Body() body: RouteMessageBody) {
     return this.chat.handleMessage(req.user.id, body ?? {});
+  }
+
+  @Get('session')
+  getLatestSession(@Req() req: FitMeetRequest) {
+    return this.chat.getLatestSession(req.user.id);
+  }
+
+  @Get('tasks/:id/session')
+  getTaskSession(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.chat.getTaskSession(req.user.id, id);
   }
 
   @Post('tasks/:id/messages')

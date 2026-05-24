@@ -35,6 +35,7 @@ import {
   SocialAgentToolExecutorService,
   SocialAgentToolName,
 } from './social-agent-tool-executor.service';
+import { SocialAgentChatService } from './social-agent-chat.service';
 import { rememberSocialAgentShortTerm } from './social-agent-memory.util';
 import {
   cleanDisplayText,
@@ -74,6 +75,7 @@ export class SocialAgentTasksController {
     private readonly connectionRepo: Repository<AgentConnection>,
     private readonly planner: SocialAgentPlannerService,
     private readonly executor: SocialAgentToolExecutorService,
+    private readonly chat: SocialAgentChatService,
   ) {}
 
   /** POST /api/social-agent/tasks */
@@ -175,13 +177,19 @@ export class SocialAgentTasksController {
     return this.executor.runNext(id, req.user.id);
   }
 
-  /** GET /api/social-agent/tasks/:id */
-  @Get(':id')
-  async getTask(
+  /** GET /api/social-agent/tasks/current */
+  @Get('current')
+  getCurrentTask(@Req() req: FitMeetRequest) {
+    return this.chat.getCurrentTask(req.user.id);
+  }
+
+  /** GET /api/social-agent/tasks/:id/timeline */
+  @Get(':id/timeline')
+  getTimeline(
     @Req() req: FitMeetRequest,
     @Param('id', ParseIntPipe) id: number,
   ) {
-    return this.serializeTask(await this.assertTaskOwner(id, req.user.id));
+    return this.chat.getTaskTimeline(req.user.id, id);
   }
 
   /** GET /api/social-agent/tasks/:id/events */
@@ -197,6 +205,15 @@ export class SocialAgentTasksController {
       take: 500,
     });
     return { taskId: id, events };
+  }
+
+  /** GET /api/social-agent/tasks/:id */
+  @Get(':id')
+  async getTask(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.serializeTask(await this.assertTaskOwner(id, req.user.id));
   }
 
   /** POST /api/social-agent/tasks/:id/actions/send-message */

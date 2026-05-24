@@ -21,6 +21,7 @@ export const MessagesPage = () => {
     loadConversations,
   } = useMessageStore();
   const [inputText, setInputText] = useState('');
+  const [conversationError, setConversationError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const activeConv = conversations.find((c) => c.id === activeConvId);
@@ -29,6 +30,11 @@ export const MessagesPage = () => {
     () => (activeConvId ? messages[activeConvId] || [] : []),
     [activeConvId, messages],
   );
+  const fromSocialAgent = searchParams.get('from') === 'social-agent';
+  const agentTaskId = searchParams.get('agentTaskId');
+  const socialAgentReturnUrl = agentTaskId
+    ? `/social-agent?taskId=${encodeURIComponent(agentTaskId)}`
+    : '/social-agent';
 
   useEffect(() => {
     const fromQuery =
@@ -38,12 +44,30 @@ export const MessagesPage = () => {
     loadConversations()
       .catch(() => undefined)
       .finally(() => {
-        if (!cancelled) selectConv(fromQuery);
+        if (cancelled) return;
+        const exists = useMessageStore
+          .getState()
+          .conversations.some((conversation) => conversation.id === fromQuery);
+        if (exists) {
+          setConversationError(null);
+          selectConv(fromQuery);
+        } else {
+          closeConv();
+          setConversationError('这个会话不存在或你无权访问，未自动打开其他会话。');
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [activeConvId, loadConversations, searchParams, selectConv]);
+  }, [activeConvId, closeConv, loadConversations, searchParams, selectConv]);
+
+  const handleSelectConversation = useCallback(
+    (id: string) => {
+      setConversationError(null);
+      selectConv(id);
+    },
+    [selectConv],
+  );
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -82,7 +106,7 @@ export const MessagesPage = () => {
                     ? 'bg-surface border-l-2 border-l-lime'
                     : 'hover:bg-surface/50'
                 )}
-                onClick={() => selectConv(conv.id)}
+                onClick={() => handleSelectConversation(conv.id)}
               >
                 <div className="relative flex-shrink-0">
                   <div
@@ -143,6 +167,14 @@ export const MessagesPage = () => {
                     {activeConv.online ? '🟢 在线' : '⚫ 离线'}
                   </div>
                 </div>
+                {fromSocialAgent ? (
+                  <Link
+                    to={socialAgentReturnUrl}
+                    className="ml-auto rounded-full border border-border px-3 py-1.5 text-xs font-bold text-textMuted transition hover:border-lime hover:text-lime"
+                  >
+                    返回 Agent
+                  </Link>
+                ) : null}
               </div>
 
               {/* Messages */}
@@ -233,6 +265,13 @@ export const MessagesPage = () => {
                 </div>
               </div>
             </>
+          ) : conversationError ? (
+            <div className="flex-1 flex items-center justify-center px-6">
+              <div className="max-w-sm text-center">
+                <div className="text-lg font-display font-bold text-white">无法打开会话</div>
+                <div className="text-sm text-textSofter mt-2">{conversationError}</div>
+              </div>
+            </div>
           ) : (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center">

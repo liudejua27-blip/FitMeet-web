@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 
 import {
   cleanDisplayText,
@@ -70,6 +70,7 @@ import {
 } from './social-agent-memory.util';
 import { AgentApprovalService } from './agent-approval.service';
 import {
+  AgentApprovalRequest,
   ApprovalRiskLevel,
   ApprovalType,
 } from './entities/agent-approval-request.entity';
@@ -93,6 +94,7 @@ export interface SocialAgentChatCandidate {
   source?: 'profile_candidate' | 'public_intent' | 'activity';
   isRealData?: boolean;
   socialRequestId: number | null;
+  targetUserId: number;
   userId: number;
   candidateUserId?: number;
   publicIntentId?: string | null;
@@ -141,6 +143,21 @@ export interface SocialAgentChatRunResult {
   approvalRequiredActions: Array<Record<string, unknown>>;
   events: Array<Record<string, unknown>>;
 }
+
+type CandidateTargetBody = {
+  targetUserId?: unknown;
+  candidateUserId?: unknown;
+  toUserId?: unknown;
+  recipientUserId?: unknown;
+  recipientId?: unknown;
+  receiverId?: unknown;
+  userId?: unknown;
+  followingId?: unknown;
+  publicIntentId?: unknown;
+  socialRequestId?: unknown;
+  candidateRecordId?: unknown;
+  candidate?: Record<string, unknown> | null;
+};
 
 export type SocialAgentChatStreamEvent =
   | { type: 'task'; taskId: number; status: AgentTaskStatus }
@@ -226,6 +243,84 @@ export interface SocialAgentActivityResult {
   createdAt: string | null;
   matchScore?: number;
   matchReasons?: string[];
+}
+
+export interface SocialAgentSessionMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  kind?: 'text' | 'risk' | 'approval';
+  content: string;
+  createdAt: string | null;
+  activityResults?: SocialAgentActivityResult[];
+  pendingApproval?: SocialAgentPendingApprovalSnapshot;
+}
+
+export interface SocialAgentSessionTaskSummary {
+  id: number;
+  status: AgentTaskStatus;
+  title: string;
+  goal: string;
+  permissionMode: AgentTaskPermissionMode;
+  statusReason: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+
+export interface SocialAgentSessionSnapshot {
+  hasSession: boolean;
+  activeTaskId: number | null;
+  task: SocialAgentSessionTaskSummary | null;
+  messages: SocialAgentSessionMessage[];
+  events: Array<Record<string, unknown>>;
+  result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null;
+  latestRun: SocialAgentAsyncRunSnapshot | null;
+  pendingApprovals: SocialAgentPendingApprovalSnapshot[];
+  candidateActions: Record<string, Record<string, unknown>>;
+  restoredAt: string;
+}
+
+export interface SocialAgentCurrentTaskSnapshot {
+  taskId: number;
+  status: AgentTaskStatus;
+  taskType: string;
+  title: string;
+  goal: string;
+  memory: Record<string, unknown>;
+  result: Record<string, unknown>;
+  updatedAt: string;
+  createdAt: string;
+}
+
+export interface SocialAgentTimelineMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  kind:
+    | 'text'
+    | 'status'
+    | 'candidates'
+    | 'activityResults'
+    | 'approval'
+    | 'risk'
+    | 'tool';
+  text: string;
+  createdAt: string | null;
+  candidates?: SocialAgentChatCandidate[];
+  activityResults?: SocialAgentActivityResult[];
+  pendingApproval?: SocialAgentPendingApprovalSnapshot | null;
+  toolCalls?: Array<Record<string, unknown>>;
+}
+
+export interface SocialAgentTaskTimelineSnapshot {
+  taskId: number;
+  messages: SocialAgentTimelineMessage[];
+  task: SocialAgentSessionTaskSummary;
+  memory: Record<string, unknown>;
+  result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null;
+  events: Array<Record<string, unknown>>;
+  latestRun: SocialAgentAsyncRunSnapshot | null;
+  pendingApprovals: SocialAgentPendingApprovalSnapshot[];
+  candidateActions: Record<string, Record<string, unknown>>;
+  restoredAt: string;
 }
 
 type SocialAgentCandidateSearchResult = {
@@ -774,6 +869,47 @@ export class SocialAgentChatService {
     };
   }
 
+  async getLatestSession(
+    ownerUserId: number,
+  ): Promise<SocialAgentSessionSnapshot> {
+    const task = await this.findLatestRestorableTask(ownerUserId);
+    return this.buildSessionSnapshot(ownerUserId, task);
+  }
+
+  async getTaskSession(
+    ownerUserId: number,
+    taskId: number,
+  ): Promise<SocialAgentSessionSnapshot> {
+    const task = await this.assertTaskOwner(taskId, ownerUserId);
+    return this.buildSessionSnapshot(ownerUserId, task);
+  }
+
+  async getCurrentTask(
+    ownerUserId: number,
+  ): Promise<SocialAgentCurrentTaskSnapshot | null> {
+    const task = await this.findLatestRestorableTask(ownerUserId);
+    if (!task) return null;
+    return {
+      taskId: task.id,
+      status: task.status,
+      taskType: cleanDisplayText(task.taskType, 'social_agent_chat'),
+      title: cleanDisplayText(task.title, 'FitMeet Social Agent 聊天'),
+      goal: cleanDisplayText(task.goal, ''),
+      memory: sanitizeForDisplay(task.memory) as Record<string, unknown>,
+      result: sanitizeForDisplay(task.result) as Record<string, unknown>,
+      updatedAt: this.isoDate(task.updatedAt),
+      createdAt: this.isoDate(task.createdAt),
+    };
+  }
+
+  async getTaskTimeline(
+    ownerUserId: number,
+    taskId: number,
+  ): Promise<SocialAgentTaskTimelineSnapshot> {
+    const task = await this.assertTaskOwner(taskId, ownerUserId);
+    return this.buildTaskTimeline(ownerUserId, task);
+  }
+
   private async executeReplanAndRefresh(
     ownerUserId: number,
     taskId: number,
@@ -1192,22 +1328,26 @@ export class SocialAgentChatService {
   async saveCandidate(
     ownerUserId: number,
     taskId: number,
-    body: {
+    body: CandidateTargetBody & {
       candidateRecordId?: number | null;
       socialRequestId?: number | null;
       targetUserId?: number | null;
+      candidateUserId?: number | null;
       candidate?: Record<string, unknown>;
     },
   ): Promise<SocialAgentToolCallRecord> {
-    await this.assertTaskOwner(taskId, ownerUserId);
+    let task = await this.assertTaskOwner(taskId, ownerUserId);
     const candidateRecordId = this.number(body.candidateRecordId);
     const socialRequestId = this.number(body.socialRequestId);
-    const targetUserId = this.number(body.targetUserId);
+    const targetUserId = await this.executor.resolveCandidateTargetUser(
+      body as Record<string, unknown>,
+      ownerUserId,
+    );
     if (!candidateRecordId && (!socialRequestId || !targetUserId)) {
       throw new BadRequestException('候选人缺少可收藏的持久化记录');
     }
 
-    return this.executor.executeToolAction(
+    const action = await this.executor.executeToolAction(
       taskId,
       SocialAgentToolName.SaveCandidate,
       {
@@ -1221,12 +1361,23 @@ export class SocialAgentChatService {
       },
       ownerUserId,
     );
+    if (action.status === 'succeeded') {
+      task = await this.assertTaskOwner(taskId, ownerUserId);
+      this.rememberCandidateAction(task, targetUserId, {
+        save: 'saved',
+        candidateRecordId,
+        socialRequestId,
+        toolCallId: action.id,
+      });
+      await this.taskRepo.save(task);
+    }
+    return action;
   }
 
   async sendCandidateMessage(
     ownerUserId: number,
     taskId: number,
-    body: {
+    body: CandidateTargetBody & {
       targetUserId?: number;
       candidateUserId?: number;
       message?: string;
@@ -1237,7 +1388,10 @@ export class SocialAgentChatService {
     },
   ): Promise<Record<string, unknown>> {
     await this.assertTaskOwner(taskId, ownerUserId);
-    const targetUserId = this.number(body.targetUserId ?? body.candidateUserId);
+    const targetUserId = await this.executor.resolveCandidateTargetUser(
+      body as Record<string, unknown>,
+      ownerUserId,
+    );
     const text = cleanDisplayText(
       body.message ?? body.suggestedOpener,
       '',
@@ -1278,23 +1432,52 @@ export class SocialAgentChatService {
       cleanDisplayText(output.id ?? output.messageId, '') || null;
     const conversationId = cleanDisplayText(output.conversationId, '') || null;
     const candidate = this.isRecord(output.candidate) ? output.candidate : null;
+    const outputStatus = cleanDisplayText(output.status, '') || null;
+    const requiresApproval =
+      outputStatus === 'pending_approval' ||
+      outputStatus === 'pending' ||
+      output.requiresApproval === true;
+
+    const task = await this.assertTaskOwner(taskId, ownerUserId);
+    this.rememberCandidateAction(task, targetUserId, {
+      send: requiresApproval ? 'pendingApproval' : 'sent',
+      conversationId,
+      messageId,
+      candidateRecordId,
+      socialRequestId,
+      toolCallId: messageAction.id,
+    });
+    await this.taskRepo.save(task);
 
     return {
-      success: messageAction.status === 'succeeded',
+      success: messageAction.status === 'succeeded' || requiresApproval,
       taskId,
       targetUserId,
-      status: messageAction.status === 'succeeded' ? 'sent' : 'failed',
+      candidateUserId: targetUserId,
+      status: requiresApproval
+        ? 'pending_approval'
+        : messageAction.status === 'succeeded'
+          ? 'sent'
+          : 'failed',
       messageId,
       conversationId,
+      approvalId: this.number(output.approvalId),
+      requiresApproval: requiresApproval || undefined,
+      message: requiresApproval ? '发送消息需要你确认' : undefined,
       candidateStatus: cleanDisplayText(candidate?.status, '') || null,
-      messageAction,
+      messageAction: {
+        status: requiresApproval ? 'pending_approval' : 'sent',
+        conversationId,
+        messageId,
+      },
+      toolCall: messageAction,
     };
   }
 
   async connectCandidate(
     ownerUserId: number,
     taskId: number,
-    body: {
+    body: CandidateTargetBody & {
       targetUserId?: number | null;
       candidateUserId?: number | null;
       candidateRecordId?: number | null;
@@ -1303,8 +1486,10 @@ export class SocialAgentChatService {
     },
   ): Promise<Record<string, unknown>> {
     let task = await this.assertTaskOwner(taskId, ownerUserId);
-    const targetUserId = this.number(body.targetUserId ?? body.candidateUserId);
-    if (!targetUserId) throw new BadRequestException('请选择要加好友的候选人');
+    const targetUserId = await this.executor.resolveCandidateTargetUser(
+      body as Record<string, unknown>,
+      ownerUserId,
+    );
 
     const friendAction = await this.executor.executeToolAction(
       taskId,
@@ -1362,18 +1547,36 @@ export class SocialAgentChatService {
         socialRequestId: this.number(body.socialRequestId),
       },
     });
+    this.rememberCandidateAction(task, targetUserId, {
+      connect: 'connected',
+      conversationId,
+      friendRequestId,
+      candidateRecordId: this.number(body.candidateRecordId),
+      socialRequestId: this.number(body.socialRequestId),
+      toolCallId: friendAction.id,
+    });
     await this.taskRepo.save(task);
     void this.longTermMemory.summarizeTask(task).catch(() => undefined);
 
     return {
       taskId,
       targetUserId,
+      candidateUserId: targetUserId,
       success: true,
       status: 'connected',
       following: true,
       friendRequestId,
       conversationId,
-      friendAction,
+      friendAction: {
+        success: true,
+        status: 'connected',
+        targetUserId,
+        candidateUserId: targetUserId,
+        following: true,
+        conversationId,
+        friendRequestId,
+      },
+      toolCall: friendAction,
     };
   }
 
@@ -1384,8 +1587,28 @@ export class SocialAgentChatService {
     if (action.status === 'succeeded') return;
 
     const message = this.toolActionErrorMessage(action, fallback);
-    if (action.status === 'blocked') throw new ForbiddenException(message);
-    throw new InternalServerErrorException(message);
+    const error = this.isRecord(action.error) ? action.error : {};
+    const code = cleanDisplayText(error.code, '') || 'TOOL_EXECUTION_FAILED';
+    const statusCode = this.number(error.statusCode);
+    if (action.status === 'blocked' || statusCode === 403) {
+      throw new ForbiddenException({
+        success: false,
+        code: code === 'tool_permission_blocked' ? 'TARGET_BLOCKED' : code,
+        message,
+      });
+    }
+    if (
+      statusCode === 400 ||
+      code === 'MISSING_TARGET_USER' ||
+      code === 'TARGET_IS_SELF'
+    ) {
+      throw new BadRequestException({ success: false, code, message });
+    }
+    throw new InternalServerErrorException({
+      success: false,
+      code: 'TOOL_EXECUTION_FAILED',
+      message,
+    });
   }
 
   private toolActionErrorMessage(
@@ -1507,9 +1730,9 @@ export class SocialAgentChatService {
     await this.taskRepo.save(task);
     await this.writeEvent(
       task,
-      AgentTaskEventType.Note,
+      AgentTaskEventType.SocialAgentMessageUser,
       '用户发送 Social Agent 消息',
-      { message, at: now },
+      { message, createdAt: now },
       AgentTaskEventActor.User,
     );
   }
@@ -1548,6 +1771,15 @@ export class SocialAgentChatService {
       text: message,
       intent: route.intent,
       at: now,
+      ...(route.activityResults?.length
+        ? { activityResults: sanitizeForDisplay(route.activityResults) }
+        : {}),
+      ...(route.pendingApproval
+        ? {
+            kind: 'approval',
+            pendingApproval: sanitizeForDisplay(route.pendingApproval),
+          }
+        : {}),
     });
     task.result = {
       ...(task.result ?? {}),
@@ -1564,14 +1796,20 @@ export class SocialAgentChatService {
     await this.taskRepo.save(task);
     await this.writeEvent(
       task,
-      AgentTaskEventType.Note,
+      AgentTaskEventType.SocialAgentMessageAssistant,
       'Social Agent 回复消息',
       {
         message,
         intent: route.intent,
         action: route.action,
+        activityResults: route.activityResults ?? [],
+        pendingApproval: route.pendingApproval ?? null,
+        riskAdvice:
+          route.intent === 'safety_or_boundary'
+            ? '首次线下见面建议选择公开场所，并保留平台内沟通记录。'
+            : null,
         queuedRunId: route.queuedRun?.runId ?? null,
-        at: now,
+        createdAt: now,
       },
       AgentTaskEventActor.Agent,
     );
@@ -2413,6 +2651,25 @@ export class SocialAgentChatService {
     };
     await this.taskRepo.save(task);
 
+    await this.writeEvent(
+      task,
+      AgentTaskEventType.SocialAgentCandidatesReturned,
+      candidates.length > 0 ? 'Social Agent 返回候选卡片' : 'Social Agent 返回空候选结果',
+      {
+        candidates,
+        activityResults: candidates.filter(
+          (candidate) =>
+            candidate.source === 'public_intent' || candidate.source === 'activity',
+        ),
+        socialRequestDraft: this.safeDraftForEvent(draft),
+        candidateCount: candidates.length,
+        emptyReason: searchResult.emptyReason,
+        message: searchResult.message,
+        createdAt: new Date().toISOString(),
+      },
+      AgentTaskEventActor.Agent,
+    );
+
     const events = await this.eventRepo.find({
       where: { taskId: task.id, ownerUserId },
       order: { createdAt: 'ASC', id: 'ASC' },
@@ -2468,6 +2725,7 @@ export class SocialAgentChatService {
           .map((warning) => cleanDisplayText(warning, ''))
           .filter(Boolean);
     const targetUserId =
+      this.number(record.targetUserId) ??
       this.number(record.candidateUserId) ??
       this.number(candidate.candidateUserId) ??
       this.number(candidate.userId) ??
@@ -2480,6 +2738,7 @@ export class SocialAgentChatService {
           : 'profile_candidate',
       isRealData: record.isRealData === true,
       socialRequestId: this.number(record.socialRequestId) ?? socialRequestId,
+      targetUserId,
       userId: targetUserId,
       candidateUserId: targetUserId,
       publicIntentId: cleanDisplayText(record.publicIntentId, '') || null,
@@ -2974,6 +3233,750 @@ export class SocialAgentChatService {
     ].join('\n');
   }
 
+  private async findLatestRestorableTask(
+    ownerUserId: number,
+  ): Promise<AgentTask | null> {
+    return this.taskRepo.findOne({
+      where: {
+        ownerUserId,
+        taskType: In([
+          'social_agent',
+          'social_agent_chat',
+          'social_agent_demo',
+          'social_search',
+          'activity_search',
+        ]),
+        status: Not(AgentTaskStatus.Cancelled),
+      },
+      order: { updatedAt: 'DESC' },
+    });
+  }
+
+  private async buildSessionSnapshot(
+    ownerUserId: number,
+    task: AgentTask | null,
+  ): Promise<SocialAgentSessionSnapshot> {
+    const restoredAt = new Date().toISOString();
+    if (!task) {
+      return {
+        hasSession: false,
+        activeTaskId: null,
+        task: null,
+        messages: [],
+        events: [],
+        result: null,
+        latestRun: null,
+        pendingApprovals: [],
+        candidateActions: {},
+        restoredAt,
+      };
+    }
+
+    const [events, approvalRows] = await Promise.all([
+      this.eventRepo.find({
+        where: { taskId: task.id, ownerUserId },
+        order: { createdAt: 'ASC', id: 'ASC' },
+        take: 500,
+      }),
+      this.approvals.getPendingForTask(ownerUserId, task.id).catch((error) => {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'social_agent.session.pending_approvals_failed',
+            taskId: task.id,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return [] as AgentApprovalRequest[];
+      }),
+    ]);
+    const eventDtos = events.map((event) => this.toEventDto(event));
+    const pendingApprovals = approvalRows.map((approval) =>
+      this.toPendingApprovalSnapshot(approval),
+    );
+    const latestRun = this.readLatestStoredRun(task);
+    const result = this.readRestorableResult(task, latestRun, eventDtos);
+
+    return {
+      hasSession: true,
+      activeTaskId: task.id,
+      task: this.toSessionTaskSummary(task),
+      messages: this.buildSessionMessages(task, result, pendingApprovals),
+      events: eventDtos,
+      result,
+      latestRun,
+      pendingApprovals,
+      candidateActions: this.readCandidateActions(task),
+      restoredAt,
+    };
+  }
+
+  private async buildTaskTimeline(
+    ownerUserId: number,
+    task: AgentTask,
+  ): Promise<SocialAgentTaskTimelineSnapshot> {
+    const restoredAt = new Date().toISOString();
+    const [events, approvalRows] = await Promise.all([
+      this.eventRepo.find({
+        where: { taskId: task.id, ownerUserId },
+        order: { createdAt: 'ASC', id: 'ASC' },
+        take: 500,
+      }),
+      this.approvals.getPendingForTask(ownerUserId, task.id).catch((error) => {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'social_agent.timeline.pending_approvals_failed',
+            taskId: task.id,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return [] as AgentApprovalRequest[];
+      }),
+    ]);
+    const eventDtos = events.map((event) => this.toEventDto(event));
+    const pendingApprovals = approvalRows.map((approval) =>
+      this.toPendingApprovalSnapshot(approval),
+    );
+    const latestRun = this.readLatestStoredRun(task);
+    const result = this.readRestorableResult(task, latestRun, eventDtos);
+
+    return {
+      taskId: task.id,
+      messages: this.buildTimelineMessages(
+        task,
+        result,
+        pendingApprovals,
+        eventDtos,
+      ),
+      task: this.toSessionTaskSummary(task),
+      memory: sanitizeForDisplay(task.memory) as Record<string, unknown>,
+      result,
+      events: eventDtos,
+      latestRun,
+      pendingApprovals,
+      candidateActions: this.readCandidateActions(task),
+      restoredAt,
+    };
+  }
+
+  private buildTimelineMessages(
+    task: AgentTask,
+    result:
+      | SocialAgentChatRunResult
+      | SocialAgentChatReplanRunResult
+      | null,
+    pendingApprovals: SocialAgentPendingApprovalSnapshot[],
+    events: Array<Record<string, unknown>>,
+  ): SocialAgentTimelineMessage[] {
+    const memoryMessages = this.buildSessionMessages(
+      task,
+      result,
+      pendingApprovals,
+    ).map((message): SocialAgentTimelineMessage => ({
+      id: cleanDisplayText(message.id, `task_${task.id}_memory_message`),
+      role: message.role,
+      kind: message.kind === 'approval' || message.kind === 'risk' ? message.kind : 'text',
+      text: cleanDisplayText(message.content, ''),
+      createdAt: message.createdAt,
+      ...(message.activityResults?.length
+        ? { activityResults: message.activityResults }
+        : {}),
+      ...(message.pendingApproval
+        ? { pendingApproval: message.pendingApproval }
+        : {}),
+    }));
+    const eventMessages = events
+      .map((event) => this.timelineMessageFromEvent(task, event))
+      .filter((message): message is SocialAgentTimelineMessage => !!message);
+
+    return this.dedupeTimelineMessages([...memoryMessages, ...eventMessages])
+      .sort(
+        (a, b) =>
+          Date.parse(a.createdAt ?? '') - Date.parse(b.createdAt ?? ''),
+      )
+      .slice(-120);
+  }
+
+  private timelineMessageFromEvent(
+    task: AgentTask,
+    event: Record<string, unknown>,
+  ): SocialAgentTimelineMessage | null {
+    const eventType = cleanDisplayText(event.eventType, '');
+    const payload = this.isRecord(event.payload) ? event.payload : {};
+    const id = `event_${this.number(event.id) ?? eventType}_${this.timelineCreatedAt(
+      payload,
+      event,
+    ) ?? 'unknown'}`;
+    const createdAt = this.timelineCreatedAt(payload, event);
+    const summary = cleanDisplayText(event.summary, '');
+
+    if (eventType === AgentTaskEventType.SocialAgentMessageUser) {
+      const text = cleanDisplayText(payload.message, summary);
+      if (!text) return null;
+      return { id, role: 'user', kind: 'text', text, createdAt };
+    }
+
+    if (eventType === AgentTaskEventType.SocialAgentMessageAssistant) {
+      const text = cleanDisplayText(payload.message, summary);
+      if (!text) return null;
+      const pendingApproval = this.normalizePendingApprovalSnapshot(
+        payload.pendingApproval,
+      );
+      const activityResults = this.readActivityResults(payload.activityResults);
+      return {
+        id,
+        role: 'assistant',
+        kind: pendingApproval
+          ? 'approval'
+          : activityResults.length > 0
+            ? 'activityResults'
+            : cleanDisplayText(payload.riskAdvice, '')
+              ? 'risk'
+              : 'text',
+        text,
+        createdAt,
+        ...(activityResults.length > 0 ? { activityResults } : {}),
+        ...(pendingApproval ? { pendingApproval } : {}),
+      };
+    }
+
+    if (eventType === AgentTaskEventType.SocialAgentCandidatesReturned) {
+      const candidates = this.readTimelineCandidates(task, payload.candidates);
+      const activityResults = this.readActivityResults(payload.activityResults);
+      const text =
+        cleanDisplayText(payload.message, '') ||
+        summary ||
+        (candidates.length > 0 ? '已返回候选卡片' : '没有找到候选卡片');
+      return {
+        id,
+        role: 'assistant',
+        kind:
+          candidates.length === 0 && activityResults.length > 0
+            ? 'activityResults'
+            : 'candidates',
+        text,
+        createdAt,
+        candidates,
+        activityResults,
+      };
+    }
+
+    if (
+      eventType === AgentTaskEventType.ToolCalled ||
+      eventType === AgentTaskEventType.ToolReturned ||
+      eventType === AgentTaskEventType.ToolFailed
+    ) {
+      const toolName = cleanDisplayText(payload.toolName ?? payload.tool, '');
+      return {
+        id,
+        role: 'system',
+        kind: 'tool',
+        text: summary || toolName || eventType,
+        createdAt,
+        toolCalls: [
+          sanitizeForDisplay({
+            id: cleanDisplayText(event.toolCallId, '') || id,
+            stepId: cleanDisplayText(event.stepId, '') || null,
+            toolName,
+            status:
+              cleanDisplayText(payload.status, '') ||
+              (eventType === AgentTaskEventType.ToolCalled
+                ? 'running'
+                : eventType === AgentTaskEventType.ToolFailed
+                  ? 'failed'
+                  : 'succeeded'),
+            output: this.isRecord(payload.output) ? payload.output : null,
+            error: this.isRecord(payload.error) ? payload.error : null,
+            createdAt,
+          }) as Record<string, unknown>,
+        ],
+      };
+    }
+
+    if (
+      eventType === AgentTaskEventType.GoalUnderstood ||
+      eventType === AgentTaskEventType.PlanGenerated ||
+      eventType === AgentTaskEventType.PlanUpdated ||
+      eventType === AgentTaskEventType.StepStarted ||
+      eventType === AgentTaskEventType.StepCompleted ||
+      eventType === AgentTaskEventType.SocialAgentContextAppended ||
+      eventType === AgentTaskEventType.SocialAgentReplanQueued ||
+      eventType === AgentTaskEventType.SocialAgentReplanStarted ||
+      eventType === AgentTaskEventType.SocialAgentReplanCompleted ||
+      eventType === AgentTaskEventType.SocialAgentReplanFailed ||
+      eventType === AgentTaskEventType.SocialAgentLlmTimeout
+    ) {
+      return {
+        id,
+        role: 'system',
+        kind: 'status',
+        text: summary || eventType,
+        createdAt,
+      };
+    }
+
+    return null;
+  }
+
+  private readTimelineCandidates(
+    task: AgentTask,
+    value: unknown,
+  ): SocialAgentChatCandidate[] {
+    if (!Array.isArray(value)) return [];
+    return value
+      .filter((item): item is Record<string, unknown> => this.isRecord(item))
+      .map((item) => this.candidateFromStoredSummary(task, item))
+      .filter((candidate): candidate is SocialAgentChatCandidate => !!candidate);
+  }
+
+  private timelineCreatedAt(
+    payload: Record<string, unknown>,
+    event: Record<string, unknown>,
+  ): string | null {
+    return (
+      cleanDisplayText(payload.createdAt ?? payload.at ?? event.createdAt, '') ||
+      null
+    );
+  }
+
+  private dedupeTimelineMessages(
+    messages: SocialAgentTimelineMessage[],
+  ): SocialAgentTimelineMessage[] {
+    const seen = new Set<string>();
+    const out: SocialAgentTimelineMessage[] = [];
+    for (const message of messages) {
+      const textKey = `${message.role}:${message.kind}:${
+        message.createdAt ?? ''
+      }:${cleanDisplayText(message.text, '').slice(0, 50)}`;
+      const key = message.kind === 'tool' || message.kind === 'status' ? message.id : textKey;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(message);
+    }
+    return out;
+  }
+
+  private toSessionTaskSummary(task: AgentTask): SocialAgentSessionTaskSummary {
+    return {
+      id: task.id,
+      status: task.status,
+      title: cleanDisplayText(task.title, 'FitMeet Social Agent 聊天'),
+      goal: cleanDisplayText(task.goal, ''),
+      permissionMode: task.permissionMode,
+      statusReason: cleanDisplayText(task.statusReason, '') || null,
+      updatedAt: this.isoDate(task.updatedAt),
+      createdAt: this.isoDate(task.createdAt),
+    };
+  }
+
+  private buildSessionMessages(
+    task: AgentTask,
+    result:
+      | SocialAgentChatRunResult
+      | SocialAgentChatReplanRunResult
+      | null,
+    pendingApprovals: SocialAgentPendingApprovalSnapshot[],
+  ): SocialAgentSessionMessage[] {
+    const messages = this.readConversationHistory(task)
+      .map((turn, index) => this.toSessionMessage(turn, index))
+      .filter((message): message is SocialAgentSessionMessage => !!message);
+
+    const goal = cleanDisplayText(task.goal, '');
+    if (goal && !messages.some((message) => message.role === 'user')) {
+      messages.unshift({
+        id: `task_${task.id}_goal`,
+        role: 'user',
+        content: goal,
+        createdAt: this.isoDate(task.createdAt),
+      });
+    }
+
+    const finalAssistantMessage = result
+      ? cleanDisplayText(result.assistantMessage, '')
+      : '';
+    if (
+      finalAssistantMessage &&
+      !messages.some(
+        (message) =>
+          message.role === 'assistant' &&
+          cleanDisplayText(message.content, '') === finalAssistantMessage,
+      )
+    ) {
+      messages.push({
+        id: `task_${task.id}_latest_result`,
+        role: 'assistant',
+        content: finalAssistantMessage,
+        createdAt: this.isoDate(task.updatedAt),
+      });
+    }
+
+    for (const approval of pendingApprovals) {
+      const exists = messages.some(
+        (message) => message.pendingApproval?.id === approval.id,
+      );
+      if (exists) continue;
+      messages.push({
+        id: `task_${task.id}_approval_${approval.id}`,
+        role: 'assistant',
+        kind: 'approval',
+        content: approval.summary,
+        createdAt: approval.expiresAt,
+        pendingApproval: approval,
+      });
+    }
+
+    return messages.slice(-80);
+  }
+
+  private toSessionMessage(
+    turn: Record<string, unknown>,
+    index: number,
+  ): SocialAgentSessionMessage | null {
+    const role = cleanDisplayText(turn.role, '');
+    if (role !== 'user' && role !== 'assistant') return null;
+    const content = cleanDisplayText(
+      turn.text ?? turn.content ?? turn.message,
+      '',
+    );
+    if (!content) return null;
+    const pendingApproval = this.normalizePendingApprovalSnapshot(
+      turn.pendingApproval,
+    );
+    const activityResults = this.readActivityResults(turn.activityResults);
+    const kindRaw = cleanDisplayText(turn.kind, '');
+    const kind = pendingApproval
+      ? 'approval'
+      : kindRaw === 'risk'
+        ? 'risk'
+        : undefined;
+    return {
+      id:
+        cleanDisplayText(turn.id, '') ||
+        `turn_${index}_${cleanDisplayText(turn.at ?? turn.createdAt, '') || 'memory'}`,
+      role,
+      kind,
+      content,
+      createdAt: cleanDisplayText(turn.at ?? turn.createdAt, '') || null,
+      ...(activityResults.length > 0 ? { activityResults } : {}),
+      ...(pendingApproval ? { pendingApproval } : {}),
+    };
+  }
+
+  private readRestorableResult(
+    task: AgentTask,
+    latestRun: SocialAgentAsyncRunSnapshot | null,
+    events: Array<Record<string, unknown>>,
+  ): SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null {
+    if (latestRun?.result && this.isRecord(latestRun.result)) {
+      const runResult = latestRun.result as SocialAgentChatRunResult | SocialAgentChatReplanRunResult;
+      return sanitizeForDisplay({
+        ...runResult,
+        taskId: task.id,
+        status: task.status,
+        visibleSteps:
+          runResult.visibleSteps?.length > 0
+            ? runResult.visibleSteps
+            : latestRun.visibleSteps,
+        events,
+      }) as SocialAgentChatRunResult | SocialAgentChatReplanRunResult;
+    }
+
+    return this.readResultFromTaskMemory(task, events);
+  }
+
+  private readResultFromTaskMemory(
+    task: AgentTask,
+    events: Array<Record<string, unknown>>,
+  ): SocialAgentChatRunResult | null {
+    const result = this.isRecord(task.result) ? task.result : {};
+    const chatRun = this.isRecord(result.chatRun) ? result.chatRun : {};
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const chat = this.isRecord(memory.socialAgentChat)
+      ? memory.socialAgentChat
+      : {};
+    const eventResult = this.readCandidateResultFromEvents(task, events);
+    const rawDraft = this.isRecord(chatRun.socialRequestDraft)
+      ? chatRun.socialRequestDraft
+      : this.isRecord(chat.socialRequestDraft)
+        ? chat.socialRequestDraft
+        : this.isRecord(eventResult?.socialRequestDraft)
+          ? eventResult.socialRequestDraft
+          : null;
+    const storedCandidates = this.readStoredCandidateSummaries(task)
+      .map((candidate) => this.candidateFromStoredSummary(task, candidate))
+      .filter((candidate): candidate is SocialAgentChatCandidate => !!candidate);
+    const candidates =
+      storedCandidates.length > 0
+        ? storedCandidates
+        : eventResult?.candidates ?? [];
+
+    if (!rawDraft && candidates.length === 0) return null;
+    const socialRequestDraft = rawDraft
+      ? ({
+          ...rawDraft,
+          agentTaskId: task.id,
+          socialRequestId:
+            this.number(rawDraft.socialRequestId) ??
+            this.number(chatRun.socialRequestId) ??
+            this.number(chat.socialRequestId) ??
+            null,
+          mode: 'draft',
+        } as SocialAgentRequestDraft)
+      : null;
+    return {
+      taskId: task.id,
+      status: task.status,
+      visibleSteps: this.readStoredVisibleSteps(task),
+      assistantMessage:
+        cleanDisplayText(chatRun.message, '') ||
+        cleanDisplayText(eventResult?.message, '') ||
+        this.assistantMessage(candidates),
+      emptyReason:
+        cleanDisplayText(chatRun.emptyReason, '') === 'no_real_candidates'
+          ? 'no_real_candidates'
+          : cleanDisplayText(eventResult?.emptyReason, '') === 'no_real_candidates'
+          ? 'no_real_candidates'
+          : null,
+      message:
+        cleanDisplayText(chatRun.message, '') ||
+        cleanDisplayText(eventResult?.message, '') ||
+        null,
+      debugReasons: this.isRecord(chatRun.debugReasons)
+        ? (chatRun.debugReasons as CandidatePoolDebugReasons)
+        : null,
+      socialRequestDraft,
+      candidates,
+      approvalRequiredActions: socialRequestDraft
+        ? this.approvalActions(task.id, socialRequestDraft, candidates)
+        : [],
+      events,
+    };
+  }
+
+  private readCandidateResultFromEvents(
+    task: AgentTask,
+    events: Array<Record<string, unknown>>,
+  ):
+    | {
+        candidates: SocialAgentChatCandidate[];
+        socialRequestDraft: Record<string, unknown> | null;
+        message: string | null;
+        emptyReason: string | null;
+      }
+    | null {
+    const event = [...events]
+      .reverse()
+      .find(
+        (item) =>
+          cleanDisplayText(item.eventType, '') ===
+          AgentTaskEventType.SocialAgentCandidatesReturned,
+      );
+    if (!event || !this.isRecord(event.payload)) return null;
+    const payload = event.payload;
+    return {
+      candidates: this.readTimelineCandidates(task, payload.candidates),
+      socialRequestDraft: this.isRecord(payload.socialRequestDraft)
+        ? (payload.socialRequestDraft as Record<string, unknown>)
+        : null,
+      message: cleanDisplayText(payload.message, '') || null,
+      emptyReason: cleanDisplayText(payload.emptyReason, '') || null,
+    };
+  }
+
+  private candidateFromStoredSummary(
+    task: AgentTask,
+    candidate: Record<string, unknown>,
+  ): SocialAgentChatCandidate | null {
+    const targetUserId =
+      this.number(candidate.targetUserId) ??
+      this.number(candidate.candidateUserId) ??
+      this.number(candidate.userId);
+    if (!targetUserId) return null;
+    const warnings = this.stringList(candidate.riskWarnings);
+    const risk = this.isRecord(candidate.risk) ? candidate.risk : {};
+    const riskWarnings =
+      warnings.length > 0 ? warnings : this.stringList(risk.warnings);
+    const nickname = cleanDisplayText(
+      candidate.displayName ?? candidate.nickname,
+      `用户 #${targetUserId}`,
+    );
+    return {
+      agentTaskId: task.id,
+      source:
+        cleanDisplayText(candidate.source, '') === 'public_intent' ||
+        cleanDisplayText(candidate.source, '') === 'activity'
+          ? (cleanDisplayText(candidate.source, '') as 'public_intent' | 'activity')
+          : 'profile_candidate',
+      isRealData: candidate.isRealData === true,
+      socialRequestId: this.number(candidate.socialRequestId),
+      targetUserId,
+      userId: targetUserId,
+      candidateUserId: targetUserId,
+      publicIntentId: cleanDisplayText(candidate.publicIntentId, '') || null,
+      activityId: this.number(candidate.activityId),
+      displayName: nickname,
+      candidateRecordId: this.number(candidate.candidateRecordId),
+      nickname,
+      avatar: cleanDisplayText(candidate.avatar, ''),
+      color: cleanDisplayText(candidate.color, '#202124'),
+      city: cleanDisplayText(candidate.city, ''),
+      score: this.number(candidate.score) ?? this.number(candidate.matchScore) ?? 0,
+      level: cleanDisplayText(candidate.level, 'medium'),
+      distanceKm: this.number(candidate.distanceKm),
+      commonTags: this.stringList(candidate.commonTags),
+      reasons: this.stringList(candidate.reasons ?? candidate.matchReasons),
+      interestTags: this.stringList(candidate.interestTags),
+      profileCompleteness: this.number(candidate.profileCompleteness) ?? undefined,
+      dataQuality:
+        candidate.dataQuality === 'complete' ||
+        candidate.dataQuality === 'partial' ||
+        candidate.dataQuality === 'incomplete'
+          ? candidate.dataQuality
+          : undefined,
+      matchScore: this.number(candidate.matchScore) ?? undefined,
+      matchReasons: this.stringList(candidate.matchReasons),
+      riskWarnings,
+      risk: {
+        level: cleanDisplayText(risk.level ?? candidate.riskLevel, 'low'),
+        warnings: riskWarnings,
+      },
+      suggestedOpener: cleanDisplayText(candidate.suggestedOpener, ''),
+      suggestedMessage: cleanDisplayText(candidate.suggestedMessage, ''),
+      status: cleanDisplayText(candidate.status, '') || undefined,
+    };
+  }
+
+  private readStoredVisibleSteps(task: AgentTask): SocialAgentVisibleStep[] {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const shortTerm = this.isRecord(memory.shortTerm) ? memory.shortTerm : {};
+    const steps = Array.isArray(shortTerm.steps) ? shortTerm.steps : [];
+    return steps
+      .filter((step): step is Record<string, unknown> => this.isRecord(step))
+      .map((step) => ({
+        id: cleanDisplayText(step.id, ''),
+        label: cleanDisplayText(step.label, '正在处理任务'),
+        status: this.normalizeStepStatus(step.status),
+      }))
+      .filter((step) => step.id);
+  }
+
+  private readCandidateActions(
+    task: AgentTask,
+  ): Record<string, Record<string, unknown>> {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const shortTerm = this.isRecord(memory.shortTerm) ? memory.shortTerm : {};
+    const actions = this.isRecord(shortTerm.candidateActions)
+      ? shortTerm.candidateActions
+      : {};
+    const out: Record<string, Record<string, unknown>> = {};
+    for (const [key, value] of Object.entries(actions)) {
+      if (!this.isRecord(value)) continue;
+      out[key] = sanitizeForDisplay(value) as Record<string, unknown>;
+    }
+    return out;
+  }
+
+  private rememberCandidateAction(
+    task: AgentTask,
+    targetUserId: number,
+    patch: Record<string, unknown>,
+  ): void {
+    const previous = this.readCandidateActions(task);
+    const key = String(targetUserId);
+    const sanitizedPatch = sanitizeForDisplay(patch) as Record<string, unknown>;
+    rememberSocialAgentShortTerm(task, {
+      candidateActions: {
+        ...previous,
+        [key]: {
+          ...(previous[key] ?? {}),
+          ...sanitizedPatch,
+          targetUserId,
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    });
+  }
+
+  private readLatestStoredRun(
+    task: AgentTask,
+  ): SocialAgentAsyncRunSnapshot | null {
+    const result = this.isRecord(task.result) ? task.result : {};
+    const latestRunId = cleanDisplayText(result.latestRunId, '');
+    if (latestRunId) {
+      const latest = this.readStoredRun(task, latestRunId);
+      if (latest) return latest;
+    }
+    return Object.keys(this.storedRunMap(task.result))
+      .map((runId) => this.readStoredRun(task, runId))
+      .filter((run): run is SocialAgentAsyncRunSnapshot => !!run)
+      .sort(
+        (a, b) =>
+          Date.parse(b.updatedAt || b.queuedAt) - Date.parse(a.updatedAt || a.queuedAt),
+      )[0] ?? null;
+  }
+
+  private toPendingApprovalSnapshot(
+    approval: AgentApprovalRequest,
+  ): SocialAgentPendingApprovalSnapshot {
+    return {
+      id: approval.id,
+      type: approval.type,
+      actionType: cleanDisplayText(approval.actionType, approval.type),
+      summary: cleanDisplayText(approval.summary, '待确认动作'),
+      riskLevel: approval.riskLevel,
+      payload: sanitizeForDisplay(approval.payload) as Record<string, unknown>,
+      expiresAt: approval.expiresAt ? approval.expiresAt.toISOString() : null,
+    };
+  }
+
+  private normalizePendingApprovalSnapshot(
+    value: unknown,
+  ): SocialAgentPendingApprovalSnapshot | undefined {
+    if (!this.isRecord(value)) return undefined;
+    const id = this.number(value.id);
+    if (!id) return undefined;
+    const type = Object.values(ApprovalType).includes(value.type as ApprovalType)
+      ? (value.type as ApprovalType)
+      : ApprovalType.Custom;
+    const riskLevel = Object.values(ApprovalRiskLevel).includes(
+      value.riskLevel as ApprovalRiskLevel,
+    )
+      ? (value.riskLevel as ApprovalRiskLevel)
+      : ApprovalRiskLevel.Low;
+    return {
+      id,
+      type,
+      actionType: cleanDisplayText(value.actionType, type),
+      summary: cleanDisplayText(value.summary, '待确认动作'),
+      riskLevel,
+      payload: this.isRecord(value.payload)
+        ? (sanitizeForDisplay(value.payload) as Record<string, unknown>)
+        : {},
+      expiresAt: cleanDisplayText(value.expiresAt, '') || null,
+    };
+  }
+
+  private readActivityResults(value: unknown): SocialAgentActivityResult[] {
+    if (!Array.isArray(value)) return [];
+    return value
+      .filter((item): item is Record<string, unknown> => this.isRecord(item))
+      .map((item) => sanitizeForDisplay(item) as SocialAgentActivityResult);
+  }
+
+  private stringList(value: unknown): string[] {
+    return Array.isArray(value)
+      ? value
+          .map((item) => cleanDisplayText(item, ''))
+          .filter(Boolean)
+          .slice(0, 20)
+      : [];
+  }
+
+  private isoDate(value: unknown): string {
+    if (value instanceof Date) return value.toISOString();
+    const text = cleanDisplayText(value, '');
+    return text || new Date().toISOString();
+  }
+
   private async writeEvent(
     task: AgentTask,
     eventType: AgentTaskEventType,
@@ -2981,16 +3984,33 @@ export class SocialAgentChatService {
     payload: Record<string, unknown> = {},
     actor: AgentTaskEventActor = AgentTaskEventActor.Agent,
   ) {
-    await this.eventRepo.save(
-      this.eventRepo.create({
-        taskId: task.id,
-        ownerUserId: task.ownerUserId,
-        eventType,
-        actor,
-        summary,
-        payload: sanitizeForDisplay(payload) as Record<string, unknown>,
-      }),
-    );
+    try {
+      await this.eventRepo.save(
+        this.eventRepo.create({
+          taskId: task.id,
+          ownerUserId: task.ownerUserId,
+          eventType,
+          actor,
+          summary: this.safeVarchar(summary, 500),
+          payload: sanitizeForDisplay(payload) as Record<string, unknown>,
+        }),
+      );
+    } catch (error) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'social_agent.task_event_write_failed',
+          taskId: task.id,
+          eventType,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  }
+
+  private safeVarchar(value: unknown, max = 80): string {
+    const text = cleanDisplayText(value, '');
+    if (text.length <= max) return text;
+    return `${text.slice(0, Math.max(0, max - 1))}…`;
   }
 
   private rememberShortTermStep(
@@ -3020,6 +4040,7 @@ export class SocialAgentChatService {
       socialRequestId: draft.socialRequestId ?? null,
       socialRequestDraft: this.safeDraftForEvent(draft),
       candidates: candidates.map((candidate) => ({
+        targetUserId: candidate.targetUserId,
         userId: candidate.userId,
         candidateUserId: candidate.candidateUserId ?? candidate.userId,
         nickname: candidate.nickname,

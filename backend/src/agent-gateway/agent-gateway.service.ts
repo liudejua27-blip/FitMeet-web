@@ -2925,6 +2925,8 @@ export class AgentGatewayService {
       .take(take)
       .skip(skip);
 
+    query.andWhere('intent.mode = :mode', { mode: 'public' });
+
     const city = sanitizeCity(filters.city);
     if (city) {
       query.andWhere('LOWER(intent.city) LIKE LOWER(:city)', {
@@ -2941,10 +2943,8 @@ export class AgentGatewayService {
       filters.status as SocialRequestStatus,
     )
       ? filters.status
-      : undefined;
-    if (status) {
-      query.andWhere('intent.status = :status', { status });
-    }
+      : SocialRequestStatus.Active;
+    query.andWhere('intent.status = :status', { status });
 
     const q = filters.q?.trim();
     if (q) {

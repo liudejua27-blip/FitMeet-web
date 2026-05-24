@@ -1,5 +1,5 @@
 import * as api from './client';
-import { cleanDisplayText, sanitizeDisplayValue } from '../lib/displayText';
+import { sanitizeDisplayValue } from '../lib/displayText';
 
 export type SocialAgentPermissionMode = 'assist' | 'confirm' | 'limited_auto';
 export type SocialAgentTaskStatus =
@@ -34,6 +34,7 @@ export interface SocialAgentChatCandidate {
   source?: 'profile_candidate' | 'public_intent' | 'activity';
   isRealData?: boolean;
   socialRequestId: number | null;
+  targetUserId?: number | null;
   userId: number;
   candidateUserId?: number;
   publicIntentId?: string | null;
@@ -162,6 +163,84 @@ export interface SocialAgentTaskEventsResult {
   events: SocialAgentTaskEvent[];
 }
 
+export interface SocialAgentSessionMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  kind?: 'text' | 'risk' | 'approval';
+  content: string;
+  createdAt: string | null;
+  activityResults?: SocialAgentActivityResult[];
+  pendingApproval?: SocialAgentPendingApproval;
+}
+
+export interface SocialAgentSessionTaskSummary {
+  id: number;
+  status: SocialAgentTaskStatus;
+  title: string;
+  goal: string;
+  permissionMode: SocialAgentPermissionMode;
+  statusReason: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+
+export interface SocialAgentSessionSnapshot {
+  hasSession: boolean;
+  activeTaskId: number | null;
+  task: SocialAgentSessionTaskSummary | null;
+  messages: SocialAgentSessionMessage[];
+  events: SocialAgentTaskEvent[];
+  result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null;
+  latestRun: SocialAgentAsyncRunResult | null;
+  pendingApprovals: SocialAgentPendingApproval[];
+  candidateActions: Record<string, Record<string, unknown>>;
+  restoredAt: string;
+}
+
+export interface SocialAgentCurrentTaskSnapshot {
+  taskId: number;
+  status: SocialAgentTaskStatus;
+  taskType: string;
+  title: string;
+  goal: string;
+  memory: Record<string, unknown>;
+  result: Record<string, unknown>;
+  updatedAt: string;
+  createdAt: string;
+}
+
+export interface SocialAgentTimelineMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  kind:
+    | 'text'
+    | 'status'
+    | 'candidates'
+    | 'activityResults'
+    | 'approval'
+    | 'risk'
+    | 'tool';
+  text: string;
+  createdAt: string | null;
+  candidates?: SocialAgentChatCandidate[];
+  activityResults?: SocialAgentActivityResult[];
+  pendingApproval?: SocialAgentPendingApproval;
+  toolCalls?: Array<Record<string, unknown>>;
+}
+
+export interface SocialAgentTaskTimelineSnapshot {
+  taskId: number;
+  messages: SocialAgentTimelineMessage[];
+  task: SocialAgentSessionTaskSummary;
+  memory: Record<string, unknown>;
+  result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null;
+  events: SocialAgentTaskEvent[];
+  latestRun: SocialAgentAsyncRunResult | null;
+  pendingApprovals: SocialAgentPendingApproval[];
+  candidateActions: Record<string, Record<string, unknown>>;
+  restoredAt: string;
+}
+
 export type SocialAgentIntentType =
   | 'casual_chat'
   | 'profile_update'
@@ -282,6 +361,7 @@ type SendCandidateMessageInput = {
   suggestedOpener?: string;
   candidate?: Record<string, unknown>;
   candidateRecordId?: number | null;
+  publicIntentId?: string | null;
   socialRequestId?: number | null;
   metadata?: Record<string, unknown>;
 };
@@ -289,6 +369,7 @@ type SendCandidateMessageInput = {
 type SaveCandidateInput = {
   candidateRecordId?: number | null;
   socialRequestId?: number | null;
+  publicIntentId?: string | null;
   candidateUserId?: number | null;
   targetUserId?: number | null;
   candidate?: Record<string, unknown>;
@@ -296,6 +377,17 @@ type SaveCandidateInput = {
 };
 
 type ConnectCandidateInput = SaveCandidateInput;
+
+export interface SocialAgentCandidateActionResult {
+  success?: boolean;
+  status: 'sent' | 'connected' | 'requested' | 'pending' | 'pending_approval' | string;
+  targetUserId?: number | null;
+  candidateUserId?: number | null;
+  following?: boolean;
+  conversationId?: string | null;
+  messageId?: string | null;
+  friendRequestId?: string | null;
+}
 
 export interface SocialAgentPublishResult {
   success: boolean;
@@ -313,22 +405,29 @@ export interface SocialAgentSendCandidateMessageResult {
   success: boolean;
   taskId: number;
   targetUserId: number;
-  status: 'sent' | 'failed' | string;
+  candidateUserId: number;
+  status: 'sent' | 'pending_approval' | 'failed' | string;
   messageId: string | null;
   conversationId: string | null;
+  approvalId?: number | null;
+  requiresApproval?: boolean;
+  message?: string | null;
   candidateStatus?: string | null;
-  messageAction?: SocialAgentToolCall;
+  messageAction?: SocialAgentCandidateActionResult;
+  toolCall?: SocialAgentToolCall;
 }
 
 export interface SocialAgentConnectCandidateResult {
   success: boolean;
   taskId: number;
   targetUserId: number;
+  candidateUserId: number;
   status: 'connected' | 'pending' | 'requested' | string;
   following?: boolean;
   friendRequestId: string | null;
   conversationId: string | null;
-  friendAction?: SocialAgentToolCall;
+  friendAction?: SocialAgentCandidateActionResult;
+  toolCall?: SocialAgentToolCall;
 }
 
 export const socialAgentApi = {
@@ -396,13 +495,12 @@ export const socialAgentApi = {
 
   sendCandidateMessage: (taskId: number, data: SendCandidateMessageInput) =>
     api
-      .requestProtected<SocialAgentToolCall>(
-        `/social-agent/tasks/${taskId}/tools/send_message_to_candidate`,
+      .requestProtected<SocialAgentSendCandidateMessageResult>(
+        `/social-agent/chat/tasks/${taskId}/send-message`,
         {
           method: 'POST',
           body: JSON.stringify({
             ...data,
-            text: data.message || data.suggestedOpener,
             metadata: {
               ...(data.metadata ?? {}),
               confirmationSource: 'social_agent_chat',
@@ -410,13 +508,12 @@ export const socialAgentApi = {
           }),
         },
       )
-      .then(sanitizeSocialAgentResponse)
-      .then((toolCall) => normalizeSendCandidateMessageResult(taskId, data, toolCall)),
+      .then(sanitizeSocialAgentResponse),
 
   connectCandidate: (taskId: number, data: ConnectCandidateInput) =>
     api
-      .requestProtected<SocialAgentToolCall>(
-        `/social-agent/tasks/${taskId}/tools/connect_candidate`,
+      .requestProtected<SocialAgentConnectCandidateResult>(
+        `/social-agent/chat/tasks/${taskId}/connect-candidate`,
         {
           method: 'POST',
           body: JSON.stringify({
@@ -429,8 +526,7 @@ export const socialAgentApi = {
           }),
         },
       )
-      .then(sanitizeSocialAgentResponse)
-      .then((toolCall) => normalizeConnectCandidateResult(taskId, data, toolCall)),
+      .then(sanitizeSocialAgentResponse),
 
   replanTask: (taskId: number, data: ReplanChatInput) =>
     api
@@ -485,64 +581,32 @@ export const socialAgentApi = {
     api
       .requestProtected<SocialAgentTaskEventsResult>(`/social-agent/tasks/${taskId}/events`)
       .then(sanitizeSocialAgentResponse),
+
+  getCurrentTask: () =>
+    api
+      .requestProtected<SocialAgentCurrentTaskSnapshot | null>('/social-agent/tasks/current')
+      .then(sanitizeSocialAgentResponse),
+
+  getTaskTimeline: (taskId: number) =>
+    api
+      .requestProtected<SocialAgentTaskTimelineSnapshot>(
+        `/social-agent/tasks/${taskId}/timeline`,
+      )
+      .then(sanitizeSocialAgentResponse),
+
+  getSession: () =>
+    api
+      .requestProtected<SocialAgentSessionSnapshot>('/social-agent/chat/session')
+      .then(sanitizeSocialAgentResponse),
+
+  getTaskSession: (taskId: number) =>
+    api
+      .requestProtected<SocialAgentSessionSnapshot>(`/social-agent/chat/tasks/${taskId}/session`)
+      .then(sanitizeSocialAgentResponse),
 };
 
 function sanitizeSocialAgentResponse<T>(value: T): T {
   return sanitizeDisplayValue(value) as T;
-}
-
-function normalizeSendCandidateMessageResult(
-  taskId: number,
-  data: SendCandidateMessageInput,
-  messageAction: SocialAgentToolCall,
-): SocialAgentSendCandidateMessageResult {
-  const output = recordValue(messageAction.output);
-  const candidate = recordValue(output.candidate);
-  return {
-    success: messageAction.status === 'succeeded',
-    taskId,
-    targetUserId: data.targetUserId ?? data.candidateUserId ?? 0,
-    status: messageAction.status === 'succeeded' ? 'sent' : 'failed',
-    messageId: stringValue(output.id ?? output.messageId),
-    conversationId: stringValue(output.conversationId),
-    candidateStatus: stringValue(candidate.status),
-    messageAction,
-  };
-}
-
-function normalizeConnectCandidateResult(
-  taskId: number,
-  data: ConnectCandidateInput,
-  friendAction: SocialAgentToolCall,
-): SocialAgentConnectCandidateResult {
-  const output = recordValue(friendAction.output);
-  const outputStatus = stringValue(output.status);
-  const connected = friendAction.status === 'succeeded';
-  return {
-    success: connected,
-    taskId,
-    targetUserId: data.targetUserId ?? data.candidateUserId ?? 0,
-    status: connected && isPendingToolOutputStatus(outputStatus) ? outputStatus : connected ? 'connected' : 'failed',
-    following: connected && (outputStatus === 'following' || outputStatus === 'connected'),
-    friendRequestId: stringValue(output.friendRequestId ?? output.followId ?? output.id),
-    conversationId: stringValue(output.conversationId),
-    friendAction,
-  };
-}
-
-function isPendingToolOutputStatus(status: string | null): status is 'pending' | 'requested' {
-  return status === 'pending' || status === 'requested';
-}
-
-function recordValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function stringValue(value: unknown): string | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-  return cleanDisplayText(value, '') || null;
 }
 
 async function runSocialAgentStream(

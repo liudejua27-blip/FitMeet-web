@@ -476,6 +476,14 @@ export class AgentApprovalService {
     });
   }
 
+  async getPendingForTask(userId: number, agentTaskId: number) {
+    return this.repo.find({
+      where: { userId, agentTaskId, status: ApprovalStatus.Pending },
+      order: { createdAt: 'DESC' },
+      take: 50,
+    });
+  }
+
   async getById(id: number, userId: number) {
     const row = await this.repo.findOne({ where: { id, userId } });
     if (!row) throw new NotFoundException('Approval not found');

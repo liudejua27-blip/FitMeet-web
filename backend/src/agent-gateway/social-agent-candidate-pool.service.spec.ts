@@ -288,7 +288,7 @@ describe('SocialAgentCandidatePoolService', () => {
           city: '青岛',
           status: SocialActivityStatus.Confirmed,
           startTime: now,
-          endTime: new Date('2026-05-24T08:00:00.000Z'),
+          endTime: new Date('2026-05-25T08:00:00.000Z'),
           createdAt: now,
           updatedAt: now,
         },
