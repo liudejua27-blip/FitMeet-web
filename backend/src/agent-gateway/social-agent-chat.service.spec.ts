@@ -90,127 +90,146 @@ function makeHarness() {
         fallbackReason: 'DEEPSEEK_API_KEY missing',
       };
     }),
-    replanTask: jest.fn(async (taskId: number, options: Record<string, unknown>) => ({
-      taskId,
-      permissionMode: AgentTaskPermissionMode.Confirm,
-      allowedActions: [SocialAgentAction.SearchProfiles],
-      plan: [
-        {
-          id: 'replan_search',
-          action: SocialAgentAction.SearchProfiles,
-          status: 'replanned',
-          requiresUserConfirmation: false,
-          riskLevel: 'low',
-          toolName: SocialAgentToolName.SearchMatches,
-          input: {},
-          rationale: 'follow-up refresh',
-        },
-      ],
-      source: 'fallback',
-      fallbackReason: 'DEEPSEEK_API_KEY missing',
-      reason: options.reason ?? 'user_follow_up',
-      replanAttempt: 1,
-    })),
+    replanTask: jest.fn(
+      async (taskId: number, options: Record<string, unknown>) => ({
+        taskId,
+        permissionMode: AgentTaskPermissionMode.Confirm,
+        allowedActions: [SocialAgentAction.SearchProfiles],
+        plan: [
+          {
+            id: 'replan_search',
+            action: SocialAgentAction.SearchProfiles,
+            status: 'replanned',
+            requiresUserConfirmation: false,
+            riskLevel: 'low',
+            toolName: SocialAgentToolName.SearchMatches,
+            input: {},
+            rationale: 'follow-up refresh',
+          },
+        ],
+        source: 'fallback',
+        fallbackReason: 'DEEPSEEK_API_KEY missing',
+        reason: options.reason ?? 'user_follow_up',
+        replanAttempt: 1,
+      }),
+    ),
   };
   const executor = {
     executeToolAction: jest.fn(
-      async (_taskId: number, toolName: SocialAgentToolName, input: Record<string, unknown>) => {
-      if (toolName === SocialAgentToolName.CreateSocialRequest && input.mode === 'ai_draft') {
-        return {
-          id: 'action_create_social_request_draft_1',
-          toolName,
-          status: 'succeeded',
-          output: {
-            draft: {
-              type: SocialRequestType.RunningPartner,
-              rawText: input.rawText,
-              title: '今晚青岛轻松跑步',
-              description: '公开地点，低压力，一起轻松跑。',
-              city: '青岛',
-              activityType: 'running',
-              interestTags: ['跑步', '低压力'],
-              radiusKm: 5,
-              safetyRequirement: SocialRequestSafety.LowRiskOnly,
-            },
-            card: { title: '今晚青岛轻松跑步' },
-            profileUsed: { city: '青岛' },
-          },
-          error: null,
-        };
-      }
-      if (toolName === SocialAgentToolName.CreateSocialRequest && input.mode === 'publish') {
-        return {
-          id: 'action_create_social_request_publish_1',
-          toolName,
-          status: 'succeeded',
-          output: {
-            id: 301,
-            socialRequestId: 301,
-            publicIntentId: 'social_request_301',
-            synced: true,
-            socialRequest: { id: 301, status: UserSocialRequestStatus.Matching },
-          },
-          error: null,
-        };
-      }
-      if (toolName === SocialAgentToolName.CreateSocialRequest) {
-        return {
-          id: 'action_create_social_request_private_1',
-          toolName,
-          status: 'succeeded',
-          output: { id: 301, socialRequestId: 301, status: UserSocialRequestStatus.Draft },
-          error: null,
-        };
-      }
-      if (toolName === SocialAgentToolName.SearchMatches) {
-        return {
-          id: 'action_search_matches_1',
-          toolName,
-          status: 'succeeded',
-          output: {
-            socialRequestId: 301,
-            candidates: [
-              {
-                userId: 22,
-                candidateRecordId: 501,
-                nickname: '小林',
-                avatar: '',
-                color: '#168a55',
-                score: 87.4,
-                level: 'high',
-                distanceKm: 2.1,
-                commonTags: ['跑步', '低压力'],
-                reasons: ['同城且时间匹配', '都偏好低压力运动'],
-                risk: { level: 'low', warnings: [] },
-                suggestedMessage: '今晚想在公开地点轻松跑一段吗？',
-                status: 'suggested',
+      async (
+        _taskId: number,
+        toolName: SocialAgentToolName,
+        input: Record<string, unknown>,
+      ) => {
+        if (
+          toolName === SocialAgentToolName.CreateSocialRequest &&
+          input.mode === 'ai_draft'
+        ) {
+          return {
+            id: 'action_create_social_request_draft_1',
+            toolName,
+            status: 'succeeded',
+            output: {
+              draft: {
+                type: SocialRequestType.RunningPartner,
+                rawText: input.rawText,
+                title: '今晚青岛轻松跑步',
+                description: '公开地点，低压力，一起轻松跑。',
+                city: '青岛',
+                activityType: 'running',
+                interestTags: ['跑步', '低压力'],
+                radiusKm: 5,
+                safetyRequirement: SocialRequestSafety.LowRiskOnly,
               },
-            ],
-          },
-          error: null,
-        };
-      }
-      if (toolName === SocialAgentToolName.AddFriend) {
+              card: { title: '今晚青岛轻松跑步' },
+              profileUsed: { city: '青岛' },
+            },
+            error: null,
+          };
+        }
+        if (
+          toolName === SocialAgentToolName.CreateSocialRequest &&
+          input.mode === 'publish'
+        ) {
+          return {
+            id: 'action_create_social_request_publish_1',
+            toolName,
+            status: 'succeeded',
+            output: {
+              id: 301,
+              socialRequestId: 301,
+              publicIntentId: 'social_request_301',
+              synced: true,
+              socialRequest: {
+                id: 301,
+                status: UserSocialRequestStatus.Matching,
+              },
+            },
+            error: null,
+          };
+        }
+        if (toolName === SocialAgentToolName.CreateSocialRequest) {
+          return {
+            id: 'action_create_social_request_private_1',
+            toolName,
+            status: 'succeeded',
+            output: {
+              id: 301,
+              socialRequestId: 301,
+              status: UserSocialRequestStatus.Draft,
+            },
+            error: null,
+          };
+        }
+        if (toolName === SocialAgentToolName.SearchMatches) {
+          return {
+            id: 'action_search_matches_1',
+            toolName,
+            status: 'succeeded',
+            output: {
+              socialRequestId: 301,
+              candidates: [
+                {
+                  userId: 22,
+                  candidateRecordId: 501,
+                  nickname: '小林',
+                  avatar: '',
+                  color: '#168a55',
+                  score: 87.4,
+                  level: 'high',
+                  distanceKm: 2.1,
+                  commonTags: ['跑步', '低压力'],
+                  reasons: ['同城且时间匹配', '都偏好低压力运动'],
+                  risk: { level: 'low', warnings: [] },
+                  suggestedMessage: '今晚想在公开地点轻松跑一段吗？',
+                  status: 'suggested',
+                },
+              ],
+            },
+            error: null,
+          };
+        }
+        if (toolName === SocialAgentToolName.AddFriend) {
+          return {
+            id: 'action_add_friend_1',
+            toolName,
+            status: 'succeeded',
+            output: {
+              id: 601,
+              followId: 601,
+              status: 'following',
+              conversationId: input.openConversation ? 'conv-22' : null,
+            },
+            error: null,
+          };
+        }
         return {
-          id: 'action_add_friend_1',
+          id: 'action_save_candidate_1',
           toolName,
           status: 'succeeded',
-          output: {
-            id: 601,
-            followId: 601,
-            status: 'following',
-            conversationId: input.openConversation ? 'conv-22' : null,
-          },
+          output: { id: 501, status: 'approved' },
           error: null,
         };
-      }
-      return {
-        id: 'action_save_candidate_1',
-        toolName,
-        status: 'succeeded',
-        output: { id: 501, status: 'approved' },
-        error: null,
-      };
       },
     ),
   };
@@ -228,15 +247,17 @@ function makeHarness() {
     createAgentInboxEvent: jest.fn().mockResolvedValue({ id: 'inbox-event-1' }),
   };
   const approvals = {
-    create: jest.fn().mockImplementation(async (input: Record<string, unknown>) => ({
-      id: 9001,
-      type: input.type,
-      actionType: input.actionType ?? input.type,
-      summary: input.summary,
-      riskLevel: input.riskLevel,
-      payload: input.payload,
-      expiresAt: new Date(Date.now() + 60_000),
-    })),
+    create: jest
+      .fn()
+      .mockImplementation(async (input: Record<string, unknown>) => ({
+        id: 9001,
+        type: input.type,
+        actionType: input.actionType ?? input.type,
+        summary: input.summary,
+        riskLevel: input.riskLevel,
+        payload: input.payload,
+        expiresAt: new Date(Date.now() + 60_000),
+      })),
   };
   const publicIntentRepo = {
     createQueryBuilder: jest.fn().mockReturnValue({
@@ -245,6 +266,15 @@ function makeHarness() {
       orderBy: jest.fn().mockReturnThis(),
       take: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue([]),
+    }),
+  };
+  const candidatePool = {
+    searchActivity: jest.fn().mockResolvedValue({
+      activityResults: [],
+      emptyReason: 'no_real_candidates',
+      message:
+        '当前没有找到符合条件的真实活动或公开约练卡片，可以换个城市、时间或活动类型再试。',
+      debugReasons: {},
     }),
   };
   const metrics = {
@@ -291,6 +321,7 @@ function makeHarness() {
     messages as never,
     approvals as never,
     publicIntentRepo as never,
+    candidatePool as never,
     metrics as never,
     longTermMemory as never,
     rag as never,
@@ -299,6 +330,7 @@ function makeHarness() {
   return {
     service,
     savedEvents,
+    eventRepo,
     taskRepo,
     connectionRepo,
     planner,
@@ -307,6 +339,7 @@ function makeHarness() {
     messages,
     approvals,
     publicIntentRepo,
+    candidatePool,
     metrics,
     longTermMemory,
     rag,
@@ -323,7 +356,9 @@ describe('SocialAgentChatService', () => {
   it('routes casual chat without running tools', async () => {
     const { service, executor, socialProfiles, savedEvents } = makeHarness();
 
-    const result = await service.routeMessage(7, { message: '你好，你能做什么？' });
+    const result = await service.routeMessage(7, {
+      message: '你好，你能做什么？',
+    });
 
     expect(result).toMatchObject({
       intent: 'casual_chat',
@@ -346,7 +381,9 @@ describe('SocialAgentChatService', () => {
   it('routes profile updates into profile storage and context memory', async () => {
     const { service, executor, socialProfiles, savedEvents } = makeHarness();
 
-    const result = await service.routeMessage(7, { message: '我喜欢拍照和跑步' });
+    const result = await service.routeMessage(7, {
+      message: '我喜欢拍照和跑步',
+    });
 
     expect(result).toMatchObject({
       intent: 'profile_update',
@@ -356,7 +393,11 @@ describe('SocialAgentChatService', () => {
       profileUpdated: true,
       taskId: 101,
     });
-    expect(socialProfiles.saveAnswer).toHaveBeenCalledWith(7, 'interestTags', '我喜欢拍照和跑步');
+    expect(socialProfiles.saveAnswer).toHaveBeenCalledWith(
+      7,
+      'interestTags',
+      '我喜欢拍照和跑步',
+    );
     expect(executor.executeToolAction).not.toHaveBeenCalled();
     expect(savedEvents.map((event) => event.eventType)).toContain(
       AgentTaskEventType.SocialAgentContextAppended,
@@ -366,7 +407,9 @@ describe('SocialAgentChatService', () => {
   it('routes safety boundaries into profile storage without searching', async () => {
     const { service, executor, socialProfiles } = makeHarness();
 
-    const result = await service.routeMessage(7, { message: '不要夜间见面，也别自动发消息' });
+    const result = await service.routeMessage(7, {
+      message: '不要夜间见面，也别自动发消息',
+    });
 
     expect(result).toMatchObject({
       intent: 'safety_or_boundary',
@@ -374,14 +417,54 @@ describe('SocialAgentChatService', () => {
       shouldQueueRun: false,
       profileUpdated: true,
     });
-    expect(socialProfiles.saveAnswer).toHaveBeenCalledWith(7, 'avoidTraits', '不要夜间见面，也别自动发消息');
+    expect(socialProfiles.saveAnswer).toHaveBeenCalledWith(
+      7,
+      'avoidTraits',
+      '不要夜间见面，也别自动发消息',
+    );
     expect(executor.executeToolAction).not.toHaveBeenCalled();
+  });
+
+  it('keeps safety-boundary replies successful when context event enum is missing', async () => {
+    const { service, eventRepo } = makeHarness();
+    eventRepo.save.mockImplementation(async (input) => {
+      if (input.eventType === AgentTaskEventType.SocialAgentContextAppended) {
+        throw new Error('invalid input value for enum agent_task_event_type_enum');
+      }
+      return input;
+    });
+
+    const result = await service.routeMessage(7, {
+      message: '不要夜间见面，也别自动发送消息',
+    });
+
+    expect(result.intent).toBe('safety_or_boundary');
+    expect(result.savedContext).toBe(true);
+    expect(result.assistantMessage).toContain('已记住这条安全边界');
+  });
+
+  it('routes search requests with safety constraints to candidate search', async () => {
+    const { service } = makeHarness();
+
+    const result = await service.routeMessage(7, {
+      message: '我想找青岛周末一起喝咖啡健身交流的人，只要公开地点，先不要发送消息',
+    });
+
+    expect(result).toMatchObject({
+      intent: 'social_search',
+      action: 'queue_search',
+      shouldQueueRun: true,
+      runMode: 'initial',
+    });
+    expect(result.queuedRun?.taskId).toBe(result.taskId);
   });
 
   it('routes social searches to the async search path', async () => {
     const { service } = makeHarness();
 
-    const result = await service.routeMessage(7, { message: '帮我找青岛附近的跑步搭子' });
+    const result = await service.routeMessage(7, {
+      message: '帮我找青岛附近的跑步搭子',
+    });
 
     expect(result).toMatchObject({
       intent: 'social_search',
@@ -396,7 +479,9 @@ describe('SocialAgentChatService', () => {
   it('routes gendered search requests as searches rather than boundaries', async () => {
     const { service } = makeHarness();
 
-    const result = await service.routeMessage(7, { message: '帮我找青岛附近女生拍照搭子' });
+    const result = await service.routeMessage(7, {
+      message: '帮我找青岛附近女生拍照搭子',
+    });
 
     expect(result).toMatchObject({
       intent: 'social_search',
@@ -405,24 +490,45 @@ describe('SocialAgentChatService', () => {
     });
   });
 
+  it('routes real-user profile and public-card searches instead of action confirmation', async () => {
+    const { service } = makeHarness();
+
+    const result = await service.routeMessage(7, {
+      message:
+        '帮我找青岛附近的跑步搭子，优先真实用户、有AI人物画像或发布过约练卡片的人',
+    });
+
+    expect(result).toMatchObject({
+      intent: 'social_search',
+      action: 'queue_search',
+      shouldQueueRun: true,
+      runMode: 'initial',
+    });
+  });
+
   it('routes action requests to explicit confirmation instead of execution', async () => {
     const { service, executor, taskRepo } = makeHarness();
-    taskRepo.findOne.mockResolvedValue(makeTask({
-      memory: {
-        shortTerm: {
-          candidates: [
-            {
-              userId: 22,
-              nickname: '小林',
-              candidateRecordId: 501,
-              score: 87,
-            },
-          ],
+    taskRepo.findOne.mockResolvedValue(
+      makeTask({
+        memory: {
+          shortTerm: {
+            candidates: [
+              {
+                userId: 22,
+                nickname: '小林',
+                candidateRecordId: 501,
+                score: 87,
+              },
+            ],
+          },
         },
-      },
-    }));
+      }),
+    );
 
-    const result = await service.routeMessage(7, { message: '帮我发消息给第一个人', taskId: 101 });
+    const result = await service.routeMessage(7, {
+      message: '帮我发消息给第一个人',
+      taskId: 101,
+    });
 
     expect(result).toMatchObject({
       intent: 'action_request',
@@ -436,24 +542,29 @@ describe('SocialAgentChatService', () => {
 
   it('answers candidate follow-up from existing candidates without full search', async () => {
     const { service, executor, taskRepo } = makeHarness();
-    taskRepo.findOne.mockResolvedValue(makeTask({
-      memory: {
-        shortTerm: {
-          candidates: [
-            {
-              userId: 22,
-              nickname: '小林',
-              candidateRecordId: 501,
-              score: 87,
-              reasons: ['同城且时间匹配', '都喜欢拍照'],
-              risk: { warnings: [] },
-            },
-          ],
+    taskRepo.findOne.mockResolvedValue(
+      makeTask({
+        memory: {
+          shortTerm: {
+            candidates: [
+              {
+                userId: 22,
+                nickname: '小林',
+                candidateRecordId: 501,
+                score: 87,
+                reasons: ['同城且时间匹配', '都喜欢拍照'],
+                risk: { warnings: [] },
+              },
+            ],
+          },
         },
-      },
-    }));
+      }),
+    );
 
-    const result = await service.handleMessage(7, { message: '第一个人为什么匹配', taskId: 101 });
+    const result = await service.handleMessage(7, {
+      message: '第一个人为什么匹配',
+      taskId: 101,
+    });
 
     expect(result).toMatchObject({
       intent: 'candidate_followup',
@@ -468,7 +579,9 @@ describe('SocialAgentChatService', () => {
   it('asks a clarification question for unknown intent', async () => {
     const { service, executor } = makeHarness();
 
-    const result = await service.routeMessage(7, { message: '这个情况有点复杂' });
+    const result = await service.routeMessage(7, {
+      message: '这个情况有点复杂',
+    });
 
     expect(result).toMatchObject({
       intent: 'unknown',
@@ -529,10 +642,16 @@ describe('SocialAgentChatService', () => {
     });
     expect(result.approvalRequiredActions).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ type: 'save_candidate', candidateRecordId: 501 }),
+        expect.objectContaining({
+          type: 'save_candidate',
+          candidateRecordId: 501,
+        }),
         expect.objectContaining({ type: 'send_message', targetUserId: 22 }),
         expect.objectContaining({ type: 'add_friend', targetUserId: 22 }),
-        expect.objectContaining({ type: 'publish_social_request', socialRequestId: 301 }),
+        expect.objectContaining({
+          type: 'publish_social_request',
+          socialRequestId: 301,
+        }),
       ]),
     );
     expect(savedEvents.map((event) => event.eventType)).toContain(
@@ -665,7 +784,10 @@ describe('SocialAgentChatService', () => {
       7,
     );
     expect(result.status).toBe('completed');
-    expect(result.result?.replan.replanAttempt).toBe(1);
+    expect(
+      (result.result as { replan?: { replanAttempt?: number } } | undefined)
+        ?.replan?.replanAttempt,
+    ).toBe(1);
     expect(result.result?.socialRequestDraft).toMatchObject({
       agentTaskId: 101,
       socialRequestId: 301,
@@ -725,20 +847,48 @@ describe('SocialAgentChatService', () => {
     });
   });
 
+  it('surfaces send-message tool failures to callers', async () => {
+    const { service, taskRepo, executor } = makeHarness();
+    taskRepo.findOne.mockResolvedValue(makeTask({ agentConnectionId: 9 }));
+    executor.executeToolAction.mockResolvedValueOnce({
+      id: 'action_send_message_1',
+      toolName: SocialAgentToolName.SendMessage,
+      status: 'failed',
+      output: undefined,
+      error: { message: 'Mongo conversation write failed' },
+    } as never);
+
+    await expect(
+      service.sendCandidateMessage(7, 101, {
+        targetUserId: 22,
+        message: '你好，今晚一起跑步吗？',
+      }),
+    ).rejects.toThrow('Mongo conversation write failed');
+  });
+
   describe('short-term task memory', () => {
-    function readTaskMemory(taskRepo: { save: jest.Mock }): Record<string, unknown> {
+    function readTaskMemory(taskRepo: {
+      save: jest.Mock;
+    }): Record<string, unknown> {
       const lastCall = taskRepo.save.mock.calls.at(-1);
-      const saved = lastCall?.[0] as { memory?: { taskMemory?: Record<string, unknown> } };
+      const saved = lastCall?.[0] as {
+        memory?: { taskMemory?: Record<string, unknown> };
+      };
       return saved?.memory?.taskMemory ?? {};
     }
 
     it('appends every routed user message into lastUserMessages with a cap', async () => {
       const { service, taskRepo } = makeHarness();
       await service.routeMessage(7, { message: '你好，你能做什么？' });
-      const memory = readTaskMemory(taskRepo) as { lastUserMessages: Array<{ text: string; intent: string }> };
+      const memory = readTaskMemory(taskRepo) as {
+        lastUserMessages: Array<{ text: string; intent: string }>;
+      };
       expect(memory.lastUserMessages).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ text: '你好，你能做什么？', intent: 'casual_chat' }),
+          expect.objectContaining({
+            text: '你好，你能做什么？',
+            intent: 'casual_chat',
+          }),
         ]),
       );
       expect(memory.lastUserMessages.length).toBeLessThanOrEqual(20);
@@ -747,15 +897,23 @@ describe('SocialAgentChatService', () => {
     it('writes preferences when the intent is profile_update', async () => {
       const { service, taskRepo } = makeHarness();
       await service.routeMessage(7, { message: '我喜欢拍照和跑步，比较慢热' });
-      const memory = readTaskMemory(taskRepo) as { preferences: { interests: string[]; socialStyle: string } };
-      expect(memory.preferences.interests).toEqual(expect.arrayContaining(['拍照', '跑步']));
+      const memory = readTaskMemory(taskRepo) as {
+        preferences: { interests: string[]; socialStyle: string };
+      };
+      expect(memory.preferences.interests).toEqual(
+        expect.arrayContaining(['拍照', '跑步']),
+      );
       expect(memory.preferences.socialStyle).toBe('slow_warm');
     });
 
     it('writes boundaries when the intent is safety_or_boundary', async () => {
       const { service, taskRepo } = makeHarness();
-      await service.routeMessage(7, { message: '不要夜间见面，也别自动发消息，请只在公开场所见面' });
-      const memory = readTaskMemory(taskRepo) as { boundaries: Record<string, unknown> };
+      await service.routeMessage(7, {
+        message: '不要夜间见面，也别自动发消息，请只在公开场所见面',
+      });
+      const memory = readTaskMemory(taskRepo) as {
+        boundaries: Record<string, unknown>;
+      };
       expect(memory.boundaries).toMatchObject({
         noNightMeet: true,
         noAutoMessage: true,
@@ -777,17 +935,31 @@ describe('SocialAgentChatService', () => {
 
     it('records a pending action when an action_request creates an approval', async () => {
       const { service, taskRepo } = makeHarness();
-      taskRepo.findOne.mockResolvedValue(makeTask({
-        memory: {
-          shortTerm: {
-            candidates: [{ userId: 22, nickname: '小林', candidateRecordId: 501, score: 87 }],
+      taskRepo.findOne.mockResolvedValue(
+        makeTask({
+          memory: {
+            shortTerm: {
+              candidates: [
+                {
+                  userId: 22,
+                  nickname: '小林',
+                  candidateRecordId: 501,
+                  score: 87,
+                },
+              ],
+            },
           },
-        },
-      }));
+        }),
+      );
 
-      await service.handleMessage(7, { message: '帮我发消息给第一个人', taskId: 101 });
+      await service.handleMessage(7, {
+        message: '帮我发消息给第一个人',
+        taskId: 101,
+      });
 
-      const memory = readTaskMemory(taskRepo) as { pendingActions: Array<Record<string, unknown>> };
+      const memory = readTaskMemory(taskRepo) as {
+        pendingActions: Array<Record<string, unknown>>;
+      };
       expect(memory.pendingActions.length).toBeGreaterThan(0);
       expect(memory.pendingActions.at(-1)).toMatchObject({
         id: 9001,
@@ -797,18 +969,32 @@ describe('SocialAgentChatService', () => {
 
     it('reads existing recommendedIds and moves them to rejectedIds when the user asks for a fresh batch', async () => {
       const { service, taskRepo } = makeHarness();
-      taskRepo.findOne.mockResolvedValue(makeTask({
-        memory: {
-          shortTerm: {
-            candidates: [{ userId: 22, nickname: '小林', candidateRecordId: 501, score: 87 }],
+      taskRepo.findOne.mockResolvedValue(
+        makeTask({
+          memory: {
+            shortTerm: {
+              candidates: [
+                {
+                  userId: 22,
+                  nickname: '小林',
+                  candidateRecordId: 501,
+                  score: 87,
+                },
+              ],
+            },
+            taskMemory: {
+              currentGoal: '青岛跑步搭子',
+              activeEntities: { city: '青岛', activityType: 'running' },
+              candidateState: {
+                recommendedIds: [22, 33],
+                savedIds: [],
+                messagedIds: [],
+                rejectedIds: [],
+              },
+            },
           },
-          taskMemory: {
-            currentGoal: '青岛跑步搭子',
-            activeEntities: { city: '青岛', activityType: 'running' },
-            candidateState: { recommendedIds: [22, 33], savedIds: [], messagedIds: [], rejectedIds: [] },
-          },
-        },
-      }));
+        }),
+      );
 
       await service.handleMessage(7, { message: '换一批人', taskId: 101 });
 
@@ -816,7 +1002,9 @@ describe('SocialAgentChatService', () => {
         candidateState: { recommendedIds: number[]; rejectedIds: number[] };
       };
       expect(memory.candidateState.recommendedIds).toEqual([]);
-      expect(memory.candidateState.rejectedIds).toEqual(expect.arrayContaining([22, 33]));
+      expect(memory.candidateState.rejectedIds).toEqual(
+        expect.arrayContaining([22, 33]),
+      );
     });
   });
 });

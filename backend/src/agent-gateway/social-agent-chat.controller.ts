@@ -103,7 +103,10 @@ export class SocialAgentChatController {
     @Param('id', ParseIntPipe) id: number,
     @Body() body: RouteMessageBody,
   ) {
-    return this.chat.handleMessage(req.user.id, { ...(body ?? {}), taskId: id });
+    return this.chat.handleMessage(req.user.id, {
+      ...(body ?? {}),
+      taskId: id,
+    });
   }
 
   @Post('stream')
@@ -130,7 +133,8 @@ export class SocialAgentChatController {
     } catch (error) {
       write('error', {
         type: 'error',
-        message: error instanceof Error ? error.message : 'Social Agent 运行失败',
+        message:
+          error instanceof Error ? error.message : 'Social Agent 运行失败',
       });
     } finally {
       res.end();
@@ -138,6 +142,7 @@ export class SocialAgentChatController {
   }
 
   @Post('tasks/:id/publish-social-request')
+  @HttpCode(200)
   publishSocialRequest(
     @Req() req: FitMeetRequest,
     @Param('id', ParseIntPipe) id: number,
@@ -175,6 +180,7 @@ export class SocialAgentChatController {
   }
 
   @Post('tasks/:id/save-candidate')
+  @HttpCode(200)
   saveCandidate(
     @Req() req: FitMeetRequest,
     @Param('id', ParseIntPipe) id: number,
@@ -184,6 +190,7 @@ export class SocialAgentChatController {
   }
 
   @Post('tasks/:id/send-message')
+  @HttpCode(200)
   sendMessage(
     @Req() req: FitMeetRequest,
     @Param('id', ParseIntPipe) id: number,
@@ -193,6 +200,7 @@ export class SocialAgentChatController {
   }
 
   @Post('tasks/:id/connect-candidate')
+  @HttpCode(200)
   connectCandidate(
     @Req() req: FitMeetRequest,
     @Param('id', ParseIntPipe) id: number,

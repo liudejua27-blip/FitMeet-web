@@ -40,6 +40,9 @@ const ACTIONS_BY_MODE: Record<
   readonly SocialAgentAction[]
 > = {
   [AgentTaskPermissionMode.Assist]: [
+    SocialAgentAction.SearchProfiles,
+    SocialAgentAction.GenerateContent,
+    SocialAgentAction.DraftMessage,
     SocialAgentAction.AddFriend,
     SocialAgentAction.SendMessage,
   ],
@@ -53,11 +56,14 @@ const ACTIONS_BY_MODE: Record<
     SocialAgentAction.SendInvite,
   ],
   [AgentTaskPermissionMode.LimitedAuto]: [
+    SocialAgentAction.SearchProfiles,
+    SocialAgentAction.GenerateContent,
     SocialAgentAction.FavoriteCandidate,
     SocialAgentAction.DraftMessage,
     SocialAgentAction.WriteInbox,
     SocialAgentAction.SendMessage,
     SocialAgentAction.AddFriend,
+    SocialAgentAction.SendInvite,
     SocialAgentAction.OfflineMeet,
     SocialAgentAction.Payment,
   ],

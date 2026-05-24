@@ -30,6 +30,31 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+DO $$
+DECLARE
+  event_value text;
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'agent_task_event_type_enum') THEN
+    FOREACH event_value IN ARRAY ARRAY[
+      'social_agent.context.appended',
+      'social_agent.replan.queued',
+      'social_agent.replan.started',
+      'social_agent.replan.completed',
+      'social_agent.replan.failed',
+      'social_agent.llm.timeout'
+    ] LOOP
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_enum e
+        JOIN pg_type t ON t.oid = e.enumtypid
+        WHERE t.typname = 'agent_task_event_type_enum'
+          AND e.enumlabel = event_value
+      ) THEN
+        EXECUTE format('ALTER TYPE "agent_task_event_type_enum" ADD VALUE %L', event_value);
+      END IF;
+    END LOOP;
+  END IF;
+END $$;
+
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'agent_action_logs_actiontype_enum')
      AND NOT EXISTS (

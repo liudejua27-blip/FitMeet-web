@@ -14,6 +14,7 @@ import {
   AgentPermissionService,
   SocialAgentAction,
 } from './agent-permission.service';
+import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
 import { resolveDeepSeekModel } from '../common/deepseek.util';
 
 export type SocialAgentPlanSource = 'deepseek' | 'fallback';
@@ -75,6 +76,7 @@ export class SocialAgentPlannerService {
     private readonly eventRepo: Repository<AgentTaskEvent>,
     private readonly config: ConfigService,
     private readonly permissions: AgentPermissionService,
+    private readonly toolRegistry: FitMeetAgentToolRegistryService,
   ) {}
 
   async planTask(
@@ -223,12 +225,16 @@ export class SocialAgentPlannerService {
     if (!apiKey) throw new Error('DEEPSEEK_API_KEY missing');
 
     const baseUrl =
-      this.config.get<string>('DEEPSEEK_BASE_URL') || 'https://api.deepseek.com';
+      this.config.get<string>('DEEPSEEK_BASE_URL') ||
+      'https://api.deepseek.com';
     const model = resolveDeepSeekModel(
       this.config.get<string>('DEEPSEEK_MODEL'),
     );
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.deepSeekTimeoutMs());
+    const timeout = setTimeout(
+      () => controller.abort(),
+      this.deepSeekTimeoutMs(),
+    );
 
     let res: Response;
     try {
@@ -276,6 +282,7 @@ export class SocialAgentPlannerService {
       'The JSON object must contain a steps array.',
       'Each step must contain: id, title, action, toolName, input, rationale, riskLevel, requiresUserConfirmation.',
       'Every step.action must be one of the allowedActions provided by the user message.',
+      'Every step.toolName must match one availableTools[].name exactly, or be null when no tool is needed.',
       'If an action is not allowed by the permission mode, omit that step entirely.',
     ].join('\n');
   }
@@ -291,6 +298,7 @@ export class SocialAgentPlannerService {
       agentConnectionId: task.agentConnectionId,
       permissionMode: task.permissionMode,
       allowedActions,
+      availableTools: this.toolRegistry.listPlannerTools(task.permissionMode),
       goal: task.goal,
       taskType: task.taskType,
       title: task.title,
@@ -363,7 +371,8 @@ export class SocialAgentPlannerService {
       steps.push({
         id: this.optionalString(rawStep.id) || `step_${steps.length + 1}`,
         title:
-          this.optionalString(rawStep.title) || this.defaultTitleForAction(action),
+          this.optionalString(rawStep.title) ||
+          this.defaultTitleForAction(action),
         action,
         status: isReplan ? 'replanned' : 'planned',
         requiresUserConfirmation: this.requiresUserConfirmation(
@@ -398,7 +407,9 @@ export class SocialAgentPlannerService {
         id: `${isReplan ? 'replan' : 'fallback'}_${index + 1}`,
         title: this.defaultTitleForAction(action),
         action,
-        status: (isReplan ? 'replanned' : 'planned') as SocialAgentPlanStepStatus,
+        status: (isReplan
+          ? 'replanned'
+          : 'planned') as SocialAgentPlanStepStatus,
         requiresUserConfirmation: this.requiresUserConfirmation(
           task.permissionMode,
           undefined,
@@ -420,11 +431,13 @@ export class SocialAgentPlannerService {
     reason: SocialAgentPlanReason,
     options: SocialAgentPlannerOptions,
   ): Record<string, unknown> {
-    const current = this.isRecord(task.memory?.brain)
-      ? task.memory.brain
-      : {};
+    const current = this.isRecord(task.memory?.brain) ? task.memory.brain : {};
     const now = new Date().toISOString();
-    const priorTurns = Array.isArray(current.turns) ? current.turns : [];
+    const priorTurns = Array.isArray(current.turns)
+      ? current.turns.filter((turn): turn is Record<string, unknown> =>
+          this.isRecord(turn),
+        )
+      : [];
     const nextTurn = this.optionalString(options.userMessage)
       ? [
           ...priorTurns,

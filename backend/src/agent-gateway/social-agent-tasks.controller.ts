@@ -279,10 +279,22 @@ export class SocialAgentTasksController {
     );
   }
 
+  /** POST /api/social-agent/tasks/:id/tools/:toolName */
+  @Post(':id/tools/:toolName')
+  @HttpCode(200)
+  callRegisteredTool(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('toolName') toolName: string,
+    @Body() body: ActionBody,
+  ) {
+    return this.executeAction(req.user.id, id, toolName, body);
+  }
+
   private async executeAction(
     ownerUserId: number,
     taskId: number,
-    toolName: SocialAgentToolName,
+    toolName: SocialAgentToolName | string,
     input: ActionBody,
   ) {
     await this.assertTaskOwner(taskId, ownerUserId);

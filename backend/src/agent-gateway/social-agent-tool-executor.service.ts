@@ -50,28 +50,51 @@ import {
   AgentPermissionService,
   SocialAgentAction,
 } from './agent-permission.service';
+import { AgentApprovalDispatcherService } from './agent-approval-dispatcher.service';
+import { AgentApprovalService } from './agent-approval.service';
+import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
 import {
   appendShortTermMemoryItem,
+  readSocialAgentTaskMemory,
   rememberSocialAgentShortTerm,
   shortTermMemoryList,
 } from './social-agent-memory.util';
 import { resolveDeepSeekModel } from '../common/deepseek.util';
 import { sanitizeCity } from '../common/city.util';
+import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
+import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 
 export enum SocialAgentToolName {
+  GetMyProfile = 'get_my_profile',
   GetAiProfile = 'get_ai_profile',
   GenerateProfileQuestions = 'generate_profile_questions',
   UpdateAiProfileFromAnswers = 'update_ai_profile_from_answers',
+  GetCurrentTaskMemory = 'get_current_task_memory',
+  PublishSocialRequest = 'publish_social_request',
   CreateSocialRequest = 'create_social_request',
+  SearchPublicIntents = 'search_public_intents',
+  SearchActivities = 'search_activities',
   SearchMatches = 'search_matches',
   ExplainMatches = 'explain_matches',
   DraftOpener = 'draft_opener',
+  SendMessageToCandidate = 'send_message_to_candidate',
   SendMessage = 'send_message',
+  ConnectCandidate = 'connect_candidate',
   AddFriend = 'add_friend',
+  CreateActivity = 'create_activity',
+  JoinActivity = 'join_activity',
   InviteActivity = 'invite_activity',
   SaveCandidate = 'save_candidate',
+  GetConversations = 'get_conversations',
+  GetAgentInbox = 'get_agent_inbox',
   WriteInbox = 'write_inbox',
   ReadInbox = 'read_inbox',
+  GetPendingApprovals = 'get_pending_approvals',
+  ApproveAction = 'approve_action',
+  RejectAction = 'reject_action',
+  ReadLongTermMemory = 'read_long_term_memory',
+  SummarizeCurrentTask = 'summarize_current_task',
+  GetCandidatePoolDebug = 'get_candidate_pool_debug',
   ReadTaskConversationMessages = 'read_task_conversation_messages',
   SummarizeReply = 'summarize_reply',
   DecideNextSocialAction = 'decide_next_social_action',
@@ -144,6 +167,20 @@ type ExecuteTaskOptions = {
   stopOnError?: boolean;
 };
 
+type ToolAuditDetails = {
+  userId: number;
+  agentTaskId: number;
+  toolName: SocialAgentToolName;
+  inputSummary: string;
+  outputSummary: string;
+  riskLevel: AgentActionRiskLevel;
+  requiresApproval: boolean;
+  approvalId: number | null;
+  status: SocialAgentToolCallStatus;
+  error: Record<string, unknown> | null;
+  createdAt: string;
+};
+
 const HIGH_RISK_TOOL_DAILY_LIMITS: Partial<
   Record<SocialAgentToolName, number>
 > = {
@@ -169,8 +206,13 @@ export class SocialAgentToolExecutorService {
     private readonly config: ConfigService,
     private readonly actionLogs: AgentActionLogService,
     private readonly permissions: AgentPermissionService,
+    private readonly toolRegistry: FitMeetAgentToolRegistryService,
+    private readonly approvals: AgentApprovalService,
+    private readonly approvalDispatcher: AgentApprovalDispatcherService,
+    private readonly longTermMemory: SocialAgentLongTermMemoryService,
     private readonly socialProfiles: SocialProfileService,
     private readonly socialRequests: SocialRequestsService,
+    private readonly candidatePool: SocialAgentCandidatePoolService,
     private readonly matchService: MatchService,
     private readonly matchReasoner: MatchReasonerService,
     private readonly ai: AIService,
@@ -217,9 +259,10 @@ export class SocialAgentToolExecutorService {
 
       if (call.status === 'failed' || call.status === 'blocked') {
         task.status = AgentTaskStatus.Failed;
-        task.statusReason = String(
-          call.error?.message ?? call.error?.code ?? call.status,
-        );
+        task.statusReason =
+          this.string(call.error?.message) ??
+          this.string(call.error?.code) ??
+          call.status;
         task.error = call.error;
         await this.taskRepo.save(task);
         this.logTaskFailure(task, call);
@@ -419,7 +462,7 @@ export class SocialAgentToolExecutorService {
 
   async executeToolAction(
     taskId: number,
-    toolName: SocialAgentToolName,
+    toolName: SocialAgentToolName | string,
     input: Record<string, unknown>,
     ownerUserId?: number,
   ): Promise<SocialAgentToolCallRecord> {
@@ -433,10 +476,15 @@ export class SocialAgentToolExecutorService {
     task.statusReason = null;
     await this.taskRepo.save(task);
 
-    const stepId = `action_${toolName}_${Date.now()}`;
+    const normalizedToolName = this.normalizeToolName(toolName);
+    if (!normalizedToolName) {
+      throw new BadRequestException(`Unknown tool ${String(toolName)}`);
+    }
+
+    const stepId = `action_${normalizedToolName}_${Date.now()}`;
     const call = await this.executeAdhocStep(task, {
       id: stepId,
-      toolName,
+      toolName: normalizedToolName,
       status: 'planned',
       input,
     });
@@ -450,7 +498,7 @@ export class SocialAgentToolExecutorService {
         : 'action_executed_waiting_result';
     } else {
       task.status = AgentTaskStatus.WaitingResult;
-      task.statusReason = String(call.error?.message ?? call.status);
+      task.statusReason = this.string(call.error?.message) ?? call.status;
       task.error = call.error;
     }
     rememberSocialAgentShortTerm(task, {});
@@ -489,7 +537,7 @@ export class SocialAgentToolExecutorService {
     try {
       this.assertToolAllowed(task.permissionMode, step, toolName);
       this.assertHighRiskFrequencyLimit(task, toolName);
-      this.assertAgentConnectionBound(task, toolName);
+      this.assertAgentConnectionBound(task, toolName, input);
       const output = await this.dispatchTool(task, toolName, input, stepId);
       const outputRecord = this.asRecord(output);
       const call = this.buildToolCall({
@@ -554,6 +602,7 @@ export class SocialAgentToolExecutorService {
     stepId: string,
   ): Promise<unknown> {
     switch (toolName) {
+      case SocialAgentToolName.GetMyProfile:
       case SocialAgentToolName.GetAiProfile:
         return this.socialProfiles.get(
           this.number(input.userId) ?? task.ownerUserId,
@@ -562,27 +611,62 @@ export class SocialAgentToolExecutorService {
         return this.socialProfiles.generateQuestions(task.ownerUserId);
       case SocialAgentToolName.UpdateAiProfileFromAnswers:
         return this.updateAiProfileFromAnswers(task.ownerUserId, input);
+      case SocialAgentToolName.GetCurrentTaskMemory:
+        return this.getCurrentTaskMemory(task);
+      case SocialAgentToolName.PublishSocialRequest:
+        return this.createSocialRequest(task, {
+          ...input,
+          mode: input.mode ?? 'publish',
+          publish: input.publish ?? true,
+        });
       case SocialAgentToolName.CreateSocialRequest:
         return this.createSocialRequest(task, input);
+      case SocialAgentToolName.SearchPublicIntents:
+        return this.searchPublicIntents(task, input);
+      case SocialAgentToolName.SearchActivities:
+        return this.searchActivities(task, input);
       case SocialAgentToolName.SearchMatches:
         return this.searchMatches(task, input);
       case SocialAgentToolName.ExplainMatches:
         return this.explainMatches(task, input);
       case SocialAgentToolName.DraftOpener:
         return this.draftOpener(input);
+      case SocialAgentToolName.SendMessageToCandidate:
+        return this.sendMessageToCandidate(task, input, stepId);
       case SocialAgentToolName.SendMessage:
         return this.sendMessage(task, input, stepId);
+      case SocialAgentToolName.ConnectCandidate:
+        return this.connectCandidate(task, input, stepId);
       case SocialAgentToolName.AddFriend:
         return this.addFriend(task, input, stepId);
+      case SocialAgentToolName.CreateActivity:
       case SocialAgentToolName.InviteActivity:
       case SocialAgentToolName.OfflineMeeting:
         return this.createActivity(task, input, toolName, stepId);
+      case SocialAgentToolName.JoinActivity:
+        return this.joinActivity(task, input);
       case SocialAgentToolName.SaveCandidate:
         return this.saveCandidate(task, input);
+      case SocialAgentToolName.GetConversations:
+        return this.getConversations(task, input);
+      case SocialAgentToolName.GetAgentInbox:
+        return this.getAgentInbox(task, input);
       case SocialAgentToolName.WriteInbox:
         return this.writeInbox(task, input, stepId);
       case SocialAgentToolName.ReadInbox:
         return this.readInbox(task, input);
+      case SocialAgentToolName.GetPendingApprovals:
+        return this.getPendingApprovals(task, input);
+      case SocialAgentToolName.ApproveAction:
+        return this.approveAction(task, input);
+      case SocialAgentToolName.RejectAction:
+        return this.rejectAction(task, input);
+      case SocialAgentToolName.ReadLongTermMemory:
+        return this.longTermMemory.readSnapshot(task.ownerUserId);
+      case SocialAgentToolName.SummarizeCurrentTask:
+        return this.summarizeCurrentTask(task, input);
+      case SocialAgentToolName.GetCandidatePoolDebug:
+        return this.getCandidatePoolDebug(task, input);
       case SocialAgentToolName.ReadTaskConversationMessages:
         return this.readTaskConversationMessages(task, input, stepId);
       case SocialAgentToolName.SummarizeReply:
@@ -638,12 +722,31 @@ export class SocialAgentToolExecutorService {
     throw new BadRequestException('answers, profile, or rawText is required');
   }
 
+  private getCurrentTaskMemory(task: AgentTask): Record<string, unknown> {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    return {
+      taskId: task.id,
+      ownerUserId: task.ownerUserId,
+      status: task.status,
+      goal: task.goal,
+      permissionMode: task.permissionMode,
+      taskMemory: readSocialAgentTaskMemory(task),
+      shortTerm: this.isRecord(memory.shortTerm) ? memory.shortTerm : {},
+      socialLoop: this.socialLoopMemory(task),
+      recentToolCalls: Array.isArray(task.toolCalls)
+        ? task.toolCalls.slice(-10)
+        : [],
+      result: this.isRecord(task.result) ? task.result : {},
+    };
+  }
+
   private async createSocialRequest(
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<unknown> {
     const mode = this.string(input.mode ?? input.intent);
-    const rawText = this.string(input.rawText ?? input.goal ?? task.goal) ?? task.goal;
+    const rawText =
+      this.string(input.rawText ?? input.goal ?? task.goal) ?? task.goal;
     const agent = await this.loadAgentConnection(task.agentConnectionId);
 
     if (mode === 'ai_draft' || mode === 'draft_only') {
@@ -677,7 +780,9 @@ export class SocialAgentToolExecutorService {
         agentTaskId: task.id,
       },
     };
-    const socialRequestId = this.number(input.socialRequestId ?? input.requestId);
+    const socialRequestId = this.number(
+      input.socialRequestId ?? input.requestId,
+    );
     const request = socialRequestId
       ? await this.socialRequests.update(
           socialRequestId,
@@ -688,7 +793,9 @@ export class SocialAgentToolExecutorService {
       : await this.socialRequests.create(task.ownerUserId, dto, { agent });
 
     const shouldSyncPublicIntent =
-      mode === 'publish' || this.bool(input.publish) === true || this.bool(input.syncPublicIntent) === true;
+      mode === 'publish' ||
+      this.bool(input.publish) === true ||
+      this.bool(input.syncPublicIntent) === true;
     if (!shouldSyncPublicIntent) {
       return {
         ...this.asRecord(request),
@@ -719,20 +826,59 @@ export class SocialAgentToolExecutorService {
     const socialRequestId = this.number(
       input.socialRequestId ?? input.requestId,
     );
-    if (socialRequestId) {
-      return this.matchService.runMatch(socialRequestId, task.ownerUserId, {
-        limit: this.number(input.limit) ?? undefined,
-      });
-    }
-    return this.matchService.searchNearby({
-      userId: task.ownerUserId,
+    return this.candidatePool.searchSocial({
+      ownerUserId: task.ownerUserId,
+      socialRequestId,
       city: sanitizeCity(input.city),
-      radiusKm: this.number(input.radiusKm) ?? undefined,
       activityType: this.string(input.activityType),
       interestTags: this.stringArray(input.interestTags ?? input.tags),
+      timePreference: this.string(input.timePreference),
+      locationPreference: this.string(input.locationPreference),
+      rawText: this.string(input.rawText ?? input.goal ?? input.message),
       limit: this.number(input.limit) ?? undefined,
-      agentAllowedRequired: true,
     });
+  }
+
+  private async searchPublicIntents(
+    task: AgentTask,
+    input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const result = this.asRecord(await this.searchMatches(task, input));
+    const candidates = Array.isArray(result.candidates)
+      ? result.candidates.filter(
+          (candidate) =>
+            this.isRecord(candidate) && candidate.source === 'public_intent',
+        )
+      : [];
+    return {
+      ...result,
+      candidates,
+      publicIntents: candidates,
+      emptyReason: candidates.length === 0 ? 'no_real_candidates' : null,
+      message:
+        candidates.length === 0 ? '当前没有找到符合条件的公开约练卡片。' : '',
+    };
+  }
+
+  private async searchActivities(
+    task: AgentTask,
+    input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const result = await this.candidatePool.searchActivity({
+      ownerUserId: task.ownerUserId,
+      taskId: task.id,
+      city: sanitizeCity(input.city),
+      activityType: this.string(input.activityType),
+      interestTags: this.stringArray(input.interestTags ?? input.tags),
+      timePreference: this.string(input.timePreference),
+      locationPreference: this.string(input.locationPreference),
+      rawText: this.string(input.rawText ?? input.goal ?? input.message),
+      limit: this.number(input.limit) ?? undefined,
+    });
+    return {
+      ...result,
+      activities: result.activityResults,
+    };
   }
 
   private async explainMatches(
@@ -782,6 +928,32 @@ export class SocialAgentToolExecutorService {
     return { message };
   }
 
+  private async sendMessageToCandidate(
+    task: AgentTask,
+    input: Record<string, unknown>,
+    stepId: string,
+  ): Promise<unknown> {
+    const candidateInput = this.isRecord(input.candidate)
+      ? input.candidate
+      : {};
+    const targetUserId =
+      this.number(
+        input.candidateUserId ??
+          input.targetUserId ??
+          input.toUserId ??
+          candidateInput.candidateUserId ??
+          candidateInput.userId,
+      ) ?? undefined;
+    return this.sendMessage(
+      task,
+      {
+        ...input,
+        targetUserId,
+      },
+      stepId,
+    );
+  }
+
   private async sendMessage(
     task: AgentTask,
     input: Record<string, unknown>,
@@ -822,25 +994,24 @@ export class SocialAgentToolExecutorService {
       conversationId,
       task.ownerUserId,
       text,
-      {
-        senderType: 'agent',
-        senderAgentId: task.agentConnectionId,
-        agentConnectionId: task.agentConnectionId,
-        ownerUserId: task.ownerUserId,
-        actorUserId: task.ownerUserId,
-        source: 'ai_delegate',
-        metadata: this.messageMetadata(task, stepId, input.metadata),
-      },
+      this.messageSendOptions(task, stepId, input),
     );
     const output = this.asRecord(message);
-    const candidateInput = this.isRecord(input.candidate) ? input.candidate : {};
+    const candidateInput = this.isRecord(input.candidate)
+      ? input.candidate
+      : {};
     const candidateRecordId = this.number(
-      input.candidateRecordId ?? input.candidateId ?? candidateInput.candidateRecordId,
+      input.candidateRecordId ??
+        input.candidateId ??
+        candidateInput.candidateRecordId,
     );
     const socialRequestId = this.number(
-      input.socialRequestId ?? input.requestId ?? candidateInput.socialRequestId,
+      input.socialRequestId ??
+        input.requestId ??
+        candidateInput.socialRequestId,
     );
-    let candidate: { id: number; status: SocialRequestCandidateStatus } | null = null;
+    let candidate: { id: number; status: SocialRequestCandidateStatus } | null =
+      null;
     if (candidateRecordId && socialRequestId) {
       try {
         candidate = await this.matchService.markCandidateMessaged(
@@ -889,7 +1060,10 @@ export class SocialAgentToolExecutorService {
     );
     if (!targetUserId)
       throw new BadRequestException('targetUserId is required');
-    const friend = await this.friends.ensureFollowing(task.ownerUserId, targetUserId);
+    const friend = await this.friends.ensureFollowing(
+      task.ownerUserId,
+      targetUserId,
+    );
     const friendRecord = this.asRecord(friend);
     if (this.bool(input.openConversation) !== true) return friendRecord;
 
@@ -917,6 +1091,32 @@ export class SocialAgentToolExecutorService {
       conversationId: conversationId ?? null,
       targetUserId,
     };
+  }
+
+  private async connectCandidate(
+    task: AgentTask,
+    input: Record<string, unknown>,
+    stepId: string,
+  ): Promise<unknown> {
+    const candidateInput = this.isRecord(input.candidate)
+      ? input.candidate
+      : {};
+    const targetUserId = this.number(
+      input.candidateUserId ??
+        input.targetUserId ??
+        input.userId ??
+        candidateInput.candidateUserId ??
+        candidateInput.userId,
+    );
+    return this.addFriend(
+      task,
+      {
+        ...input,
+        targetUserId,
+        openConversation: input.openConversation ?? true,
+      },
+      stepId,
+    );
   }
 
   private async createActivity(
@@ -1061,6 +1261,20 @@ export class SocialAgentToolExecutorService {
     return { ...this.asRecord(message), conversationId };
   }
 
+  private async joinActivity(
+    task: AgentTask,
+    input: Record<string, unknown>,
+  ): Promise<unknown> {
+    const activityId = this.number(input.activityId ?? input.id);
+    if (!activityId) throw new BadRequestException('activityId is required');
+    const activity = await this.activities.join(activityId, task.ownerUserId);
+    return {
+      ...this.asRecord(activity),
+      activityId,
+      joined: true,
+    };
+  }
+
   private async saveCandidate(
     task: AgentTask,
     input: Record<string, unknown>,
@@ -1149,6 +1363,139 @@ export class SocialAgentToolExecutorService {
         eventType: this.string(input.eventType) || undefined,
       }),
     };
+  }
+
+  private async getConversations(
+    task: AgentTask,
+    input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const limit = this.number(input.limit);
+    const conversations = await this.messages.getConversations(
+      task.ownerUserId,
+    );
+    return {
+      conversations: limit ? conversations.slice(0, limit) : conversations,
+    };
+  }
+
+  private async getAgentInbox(
+    task: AgentTask,
+    input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const agentConnectionId =
+      task.agentConnectionId ?? this.number(input.agentConnectionId);
+    const limit = this.number(input.limit) ?? undefined;
+    const conversationId = this.string(input.conversationId);
+
+    if (conversationId) {
+      if (!agentConnectionId) {
+        throw new BadRequestException('agentConnectionId is required');
+      }
+      return {
+        messages: await this.messages.getAgentInboxMessages(
+          conversationId,
+          agentConnectionId,
+          { limit },
+        ),
+      };
+    }
+
+    const [conversations, events] = await Promise.all([
+      agentConnectionId
+        ? this.messages.getAgentInboxConversations(agentConnectionId, {
+            limit,
+            unreadOnly: this.bool(input.unreadOnly) ?? undefined,
+          })
+        : Promise.resolve([]),
+      agentConnectionId
+        ? this.messages.getAgentInboxEvents(agentConnectionId, {
+            limit,
+            unreadOnly: this.bool(input.unreadOnly) ?? undefined,
+            eventType: this.string(input.eventType) || undefined,
+          })
+        : this.messages.getAgentInboxEventsForOwner(task.ownerUserId, {
+            limit,
+            unreadOnly: this.bool(input.unreadOnly) ?? undefined,
+            eventType: this.string(input.eventType) || undefined,
+          }),
+    ]);
+
+    return { conversations, events };
+  }
+
+  private async getPendingApprovals(
+    task: AgentTask,
+    input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const limit = this.number(input.limit);
+    const approvals = await this.approvals.getPending(task.ownerUserId);
+    return { approvals: limit ? approvals.slice(0, limit) : approvals };
+  }
+
+  private async approveAction(
+    task: AgentTask,
+    input: Record<string, unknown>,
+  ): Promise<unknown> {
+    const approvalId = this.number(input.approvalId ?? input.id);
+    if (!approvalId) throw new BadRequestException('approvalId is required');
+    return this.approvals.approve(approvalId, task.ownerUserId, (approval) =>
+      this.approvalDispatcher.dispatch(approval),
+    );
+  }
+
+  private async rejectAction(
+    task: AgentTask,
+    input: Record<string, unknown>,
+  ): Promise<unknown> {
+    const approvalId = this.number(input.approvalId ?? input.id);
+    if (!approvalId) throw new BadRequestException('approvalId is required');
+    return this.approvals.reject(approvalId, task.ownerUserId);
+  }
+
+  private async summarizeCurrentTask(
+    task: AgentTask,
+    input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const memory = this.getCurrentTaskMemory(task);
+    const summary = {
+      taskId: task.id,
+      title: task.title,
+      goal: task.goal,
+      status: task.status,
+      statusReason: task.statusReason,
+      permissionMode: task.permissionMode,
+      riskLevel: task.riskLevel,
+      plan: Array.isArray(task.plan) ? task.plan.slice(-10) : [],
+      recentToolCalls: Array.isArray(task.toolCalls)
+        ? task.toolCalls.slice(-10)
+        : [],
+      result: this.isRecord(task.result) ? task.result : {},
+      memory,
+    };
+    const shouldPersist = this.bool(
+      input.persistLongTerm ?? input.writeLongTerm,
+    );
+    return {
+      summary,
+      longTermMemory: shouldPersist
+        ? await this.longTermMemory.summarizeTask(task)
+        : null,
+    };
+  }
+
+  private async getCandidatePoolDebug(
+    task: AgentTask,
+    input: Record<string, unknown>,
+  ): Promise<unknown> {
+    const intent =
+      this.string(input.intent) === 'activity_search'
+        ? 'activity_search'
+        : 'social_search';
+    return this.candidatePool.debugCandidatePool(
+      task.ownerUserId,
+      this.number(input.taskId) ?? task.id,
+      intent,
+    );
   }
 
   private async readTaskConversationMessages(
@@ -1270,7 +1617,11 @@ export class SocialAgentToolExecutorService {
     });
     rememberSocialAgentShortTerm(task, {
       replySummary: summary,
-      currentStep: this.shortTermStep('summarize_reply', '已总结对方回复', 'done'),
+      currentStep: this.shortTermStep(
+        'summarize_reply',
+        '已总结对方回复',
+        'done',
+      ),
     });
 
     await this.writeSocialAgentInboxEvent(
@@ -1315,7 +1666,11 @@ export class SocialAgentToolExecutorService {
     });
     rememberSocialAgentShortTerm(task, {
       nextActionDecision: safeDecision,
-      currentStep: this.shortTermStep('decide_next_social_action', '已决定下一步社交动作', 'done'),
+      currentStep: this.shortTermStep(
+        'decide_next_social_action',
+        '已决定下一步社交动作',
+        'done',
+      ),
     });
 
     await this.writeSocialAgentInboxEvent(
@@ -1602,8 +1957,17 @@ export class SocialAgentToolExecutorService {
     rememberSocialAgentShortTerm(task, {
       conversationId: input.conversationId,
       targetUserId: input.targetUserId ?? null,
-      currentStep: this.shortTermStep(input.stepId, `已执行 ${input.toolName}`, 'done'),
-      sentMessages: appendShortTermMemoryItem(task, 'sentMessages', message, 30),
+      currentStep: this.shortTermStep(
+        input.stepId,
+        `已执行 ${input.toolName}`,
+        'done',
+      ),
+      sentMessages: appendShortTermMemoryItem(
+        task,
+        'sentMessages',
+        message,
+        30,
+      ),
     });
   }
 
@@ -1617,16 +1981,22 @@ export class SocialAgentToolExecutorService {
       'receivedReplies',
     );
     for (const message of messages) {
-      const id = this.string(message.id) ?? `${stepId}:${receivedReplies.length}`;
+      const id =
+        this.string(message.id) ?? `${stepId}:${receivedReplies.length}`;
       const reply = {
         id,
         conversationId:
-          this.string(message.conversationId) ?? this.socialLoopMemory(task).conversationId ?? null,
+          this.string(message.conversationId) ??
+          this.socialLoopMemory(task).conversationId ??
+          null,
         fromUserId: this.number(message.senderId) ?? null,
         textPreview: this.preview(message.text),
         receivedAt: new Date().toISOString(),
       };
-      receivedReplies = [...receivedReplies.filter((item) => item.id !== id), reply].slice(-30);
+      receivedReplies = [
+        ...receivedReplies.filter((item) => item.id !== id),
+        reply,
+      ].slice(-30);
     }
     rememberSocialAgentShortTerm(task, {
       receivedReplies,
@@ -1734,14 +2104,16 @@ export class SocialAgentToolExecutorService {
 
   private messageArray(value: unknown): AgentMessageRecord[] {
     if (!Array.isArray(value)) return [];
-    return value.filter(this.isRecord).map((item) => ({
-      ...item,
-      id: this.string(item.id ?? item.messageId),
-      conversationId: this.string(item.conversationId),
-      text: this.string(item.text ?? item.content),
-      senderId: this.number(item.senderId),
-      senderType: this.string(item.senderType),
-    }));
+    return value
+      .filter((item): item is Record<string, unknown> => this.isRecord(item))
+      .map((item) => ({
+        ...item,
+        id: this.string(item.id ?? item.messageId),
+        conversationId: this.string(item.conversationId),
+        text: this.string(item.text ?? item.content),
+        senderId: this.number(item.senderId),
+        senderType: this.string(item.senderType),
+      }));
   }
 
   private filterNewCounterpartMessages(
@@ -2186,8 +2558,10 @@ export class SocialAgentToolExecutorService {
     switch (value) {
       case 'reply_message':
       case 'send_message':
+      case 'send_message_to_candidate':
         return SocialAgentToolName.ReplyMessage;
       case 'add_friend':
+      case 'connect_candidate':
         return SocialAgentToolName.AddFriend;
       case 'invite_activity':
       case 'send_invite':
@@ -2208,8 +2582,10 @@ export class SocialAgentToolExecutorService {
     switch (toolName) {
       case SocialAgentToolName.ReplyMessage:
       case SocialAgentToolName.SendMessage:
+      case SocialAgentToolName.SendMessageToCandidate:
         return 'reply_message';
       case SocialAgentToolName.AddFriend:
+      case SocialAgentToolName.ConnectCandidate:
         return 'add_friend';
       case SocialAgentToolName.InviteActivity:
         return 'invite_activity';
@@ -2258,6 +2634,14 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     call: SocialAgentToolCallRecord,
   ): Promise<void> {
+    const policy = this.toolPolicyMetadata(task, toolName);
+    const audit = this.buildToolAuditDetails(
+      task,
+      toolName,
+      input,
+      call,
+      policy,
+    );
     const actionLog = await this.actionLogs.logAgentAction({
       ownerUserId: task.ownerUserId,
       agentId: task.agentConnectionId,
@@ -2266,15 +2650,15 @@ export class SocialAgentToolExecutorService {
       actionStatus: this.actionStatusForCall(call),
       eventType:
         call.status === 'succeeded'
-          ? 'social_agent.action.executed'
-          : 'social_agent.action.error',
+          ? 'social_agent.tool.succeeded'
+          : `social_agent.tool.${call.status}`,
       conversationId: this.string(call.output?.conversationId) ?? null,
       messageId:
         this.string(call.output?.messageId) ??
         this.string(call.output?.id) ??
         null,
       status: call.status,
-      riskLevel: this.riskLevelForTool(toolName),
+      riskLevel: audit.riskLevel,
       targetUserId: this.targetUserIdFor(input, call.output),
       relatedSocialRequestId: this.relatedSocialRequestIdFor(
         input,
@@ -2290,24 +2674,22 @@ export class SocialAgentToolExecutorService {
         input,
         call.output,
       ),
-      inputSummary: `${toolName} agentTaskId=${task.id}`,
-      outputSummary:
-        call.status === 'succeeded'
-          ? `${toolName} succeeded`
-          : `${toolName} ${call.status}: ${String(call.error?.message ?? '')}`,
+      inputSummary: audit.inputSummary,
+      outputSummary: audit.outputSummary,
       payload: {
+        ...audit,
         agentTaskId: task.id,
         stepId: call.stepId,
         toolCallId: call.id,
         toolName,
         permissionMode: task.permissionMode,
-        policy: this.toolPolicyMetadata(task, toolName),
+        policy,
         userId: task.ownerUserId,
         input,
         output: call.output,
         error: call.error,
       },
-      reason: call.error?.message ? String(call.error.message) : null,
+      reason: this.string(call.error?.message) ?? null,
     });
 
     if (!actionLog) {
@@ -2327,6 +2709,117 @@ export class SocialAgentToolExecutorService {
         );
       }
     }
+  }
+
+  private buildToolAuditDetails(
+    task: AgentTask,
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+    call: SocialAgentToolCallRecord,
+    policy: Record<string, unknown>,
+  ): ToolAuditDetails {
+    return {
+      userId: task.ownerUserId,
+      agentTaskId: task.id,
+      toolName,
+      inputSummary: this.toolInputSummary(toolName, input),
+      outputSummary: this.toolOutputSummary(toolName, call),
+      riskLevel: this.riskLevelForTool(toolName),
+      requiresApproval:
+        typeof policy.requiresApproval === 'boolean'
+          ? policy.requiresApproval
+          : false,
+      approvalId: this.approvalIdFor(toolName, input, call.output),
+      status: call.status,
+      error: call.error,
+      createdAt: call.completedAt,
+    };
+  }
+
+  private toolInputSummary(
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+  ): string {
+    return this.preview(
+      `${toolName} input=${this.auditValuePreview(input, 320)}`,
+      500,
+    );
+  }
+
+  private toolOutputSummary(
+    toolName: SocialAgentToolName,
+    call: SocialAgentToolCallRecord,
+  ): string {
+    if (call.status !== 'succeeded') {
+      const errorText =
+        this.string(call.error?.message) ??
+        this.string(call.error?.code) ??
+        'unknown_error';
+      return this.preview(`${toolName} ${call.status}: ${errorText}`, 500);
+    }
+
+    return this.preview(
+      `${toolName} succeeded output=${this.auditValuePreview(
+        call.output ?? {},
+        320,
+      )}`,
+      500,
+    );
+  }
+
+  private approvalIdFor(
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+    output: Record<string, unknown> | null,
+  ): number | null {
+    const outputApproval = this.isRecord(output?.approval)
+      ? output.approval
+      : null;
+    return (
+      this.number(input.approvalId) ??
+      ([
+        SocialAgentToolName.ApproveAction,
+        SocialAgentToolName.RejectAction,
+      ].includes(toolName)
+        ? this.number(input.id)
+        : undefined) ??
+      this.number(output?.approvalId) ??
+      this.number(outputApproval?.id) ??
+      ([
+        SocialAgentToolName.ApproveAction,
+        SocialAgentToolName.RejectAction,
+      ].includes(toolName)
+        ? this.number(output?.id)
+        : undefined) ??
+      null
+    );
+  }
+
+  private auditValuePreview(value: unknown, max: number): string {
+    const compactValue = this.compactAuditValue(value);
+    const text =
+      typeof compactValue === 'string'
+        ? compactValue
+        : JSON.stringify(compactValue);
+    return this.preview(text ?? this.safeUnknownText(value), max);
+  }
+
+  private compactAuditValue(value: unknown, depth = 0): unknown {
+    if (value == null) return value;
+    if (typeof value === 'string') return this.preview(value, 160);
+    if (typeof value !== 'object') return value;
+    if (depth >= 2) return Array.isArray(value) ? '[Array]' : '[Object]';
+    if (Array.isArray(value)) {
+      return value
+        .slice(0, 6)
+        .map((item) => this.compactAuditValue(item, depth + 1));
+    }
+
+    const result: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value).slice(0, 12)) {
+      result[key] = this.compactAuditValue(item, depth + 1);
+    }
+    return result;
   }
 
   private async writeActionResultInbox(
@@ -2357,7 +2850,7 @@ export class SocialAgentToolExecutorService {
       contentPreview:
         call.status === 'succeeded'
           ? `${toolName} completed`
-          : `${toolName} ${call.status}: ${String(call.error?.message ?? '')}`,
+          : `${toolName} ${call.status}: ${this.string(call.error?.message) ?? ''}`,
       unread: true,
       dedupeKey: `${task.agentConnectionId}:agent.action:${task.id}:${call.id}`,
       metadata: {
@@ -2377,61 +2870,109 @@ export class SocialAgentToolExecutorService {
   private assertAgentConnectionBound(
     task: AgentTask,
     toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
   ): void {
     const requiresAgentConnection = [
       SocialAgentToolName.SendMessage,
+      SocialAgentToolName.SendMessageToCandidate,
       SocialAgentToolName.ReplyMessage,
       SocialAgentToolName.AddFriend,
+      SocialAgentToolName.ConnectCandidate,
       SocialAgentToolName.InviteActivity,
+      SocialAgentToolName.CreateActivity,
       SocialAgentToolName.OfflineMeeting,
       SocialAgentToolName.Payment,
     ].includes(toolName);
     if (!requiresAgentConnection || task.agentConnectionId) return;
+    if (this.canRunAsConfirmedUserAction(toolName, input)) return;
     throw new BadRequestException(
       `agentConnectionId is required for ${toolName}`,
     );
   }
 
+  private canRunAsConfirmedUserAction(
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+  ): boolean {
+    const userConfirmedCandidateActions = [
+      SocialAgentToolName.SendMessage,
+      SocialAgentToolName.SendMessageToCandidate,
+      SocialAgentToolName.AddFriend,
+      SocialAgentToolName.ConnectCandidate,
+    ];
+    if (!userConfirmedCandidateActions.includes(toolName)) return false;
+    const metadata = this.isRecord(input.metadata) ? input.metadata : {};
+    return this.string(metadata.confirmationSource) === 'social_agent_chat';
+  }
+
   private shouldWriteActionResultInbox(toolName: SocialAgentToolName): boolean {
     return [
       SocialAgentToolName.SendMessage,
+      SocialAgentToolName.SendMessageToCandidate,
       SocialAgentToolName.AddFriend,
+      SocialAgentToolName.ConnectCandidate,
       SocialAgentToolName.InviteActivity,
+      SocialAgentToolName.CreateActivity,
+      SocialAgentToolName.JoinActivity,
       SocialAgentToolName.OfflineMeeting,
       SocialAgentToolName.ReplyMessage,
       SocialAgentToolName.SaveCandidate,
+      SocialAgentToolName.PublishSocialRequest,
+      SocialAgentToolName.ApproveAction,
+      SocialAgentToolName.RejectAction,
       SocialAgentToolName.Payment,
     ].includes(toolName);
   }
 
   private actionTypeForTool(toolName: SocialAgentToolName): AgentActionType {
     switch (toolName) {
+      case SocialAgentToolName.PublishSocialRequest:
       case SocialAgentToolName.CreateSocialRequest:
         return AgentActionType.CreateSocialRequest;
+      case SocialAgentToolName.SearchPublicIntents:
+      case SocialAgentToolName.SearchActivities:
       case SocialAgentToolName.SearchMatches:
       case SocialAgentToolName.ExplainMatches:
         return AgentActionType.RunMatch;
       case SocialAgentToolName.DraftOpener:
         return AgentActionType.GenerateInvite;
+      case SocialAgentToolName.SendMessageToCandidate:
       case SocialAgentToolName.SendMessage:
       case SocialAgentToolName.ReplyMessage:
         return AgentActionType.SendMessage;
+      case SocialAgentToolName.ConnectCandidate:
       case SocialAgentToolName.AddFriend:
         return AgentActionType.AddFriend;
+      case SocialAgentToolName.CreateActivity:
+        return AgentActionType.CreateActivity;
       case SocialAgentToolName.InviteActivity:
         return AgentActionType.InviteActivity;
       case SocialAgentToolName.OfflineMeeting:
         return AgentActionType.OfflineMeeting;
+      case SocialAgentToolName.JoinActivity:
+        return AgentActionType.JoinActivity;
       case SocialAgentToolName.SaveCandidate:
         return AgentActionType.ApproveAction;
       case SocialAgentToolName.GenerateProfileQuestions:
         return AgentActionType.GenerateProfileQuestion;
       case SocialAgentToolName.UpdateAiProfileFromAnswers:
         return AgentActionType.UpdateProfile;
+      case SocialAgentToolName.GetMyProfile:
       case SocialAgentToolName.GetAiProfile:
         return AgentActionType.ReadProfile;
+      case SocialAgentToolName.ApproveAction:
+        return AgentActionType.ApproveAction;
+      case SocialAgentToolName.RejectAction:
+        return AgentActionType.RejectAction;
       case SocialAgentToolName.Payment:
         return AgentActionType.Payment;
+      case SocialAgentToolName.GetCurrentTaskMemory:
+      case SocialAgentToolName.GetConversations:
+      case SocialAgentToolName.GetAgentInbox:
+      case SocialAgentToolName.GetPendingApprovals:
+      case SocialAgentToolName.ReadLongTermMemory:
+      case SocialAgentToolName.SummarizeCurrentTask:
+      case SocialAgentToolName.GetCandidatePoolDebug:
       case SocialAgentToolName.WriteInbox:
       case SocialAgentToolName.ReadInbox:
       case SocialAgentToolName.ReadTaskConversationMessages:
@@ -2454,17 +2995,24 @@ export class SocialAgentToolExecutorService {
   ): AgentActionRiskLevel {
     if (
       toolName === SocialAgentToolName.Payment ||
-      toolName === SocialAgentToolName.OfflineMeeting
+      toolName === SocialAgentToolName.OfflineMeeting ||
+      toolName === SocialAgentToolName.CreateActivity ||
+      toolName === SocialAgentToolName.JoinActivity ||
+      toolName === SocialAgentToolName.ApproveAction
     ) {
       return AgentActionRiskLevel.High;
     }
     if (
       [
         SocialAgentToolName.SendMessage,
+        SocialAgentToolName.SendMessageToCandidate,
         SocialAgentToolName.ReplyMessage,
         SocialAgentToolName.AddFriend,
+        SocialAgentToolName.ConnectCandidate,
         SocialAgentToolName.InviteActivity,
         SocialAgentToolName.SaveCandidate,
+        SocialAgentToolName.PublishSocialRequest,
+        SocialAgentToolName.RejectAction,
       ].includes(toolName)
     ) {
       return AgentActionRiskLevel.Medium;
@@ -2480,6 +3028,7 @@ export class SocialAgentToolExecutorService {
       this.number(
         input.targetUserId ??
           input.toUserId ??
+          input.candidateUserId ??
           input.payeeUserId ??
           input.userId ??
           input.followingId ??
@@ -2526,6 +3075,8 @@ export class SocialAgentToolExecutorService {
       this.number(output?.activityId) ??
       ([
         SocialAgentToolName.InviteActivity,
+        SocialAgentToolName.CreateActivity,
+        SocialAgentToolName.JoinActivity,
         SocialAgentToolName.OfflineMeeting,
       ].includes(toolName)
         ? this.number(output?.id)
@@ -2539,6 +3090,13 @@ export class SocialAgentToolExecutorService {
     step: StepRecord,
     toolName: SocialAgentToolName,
   ): void {
+    const registeredTool = this.toolRegistry.getToolByExecutorName(toolName);
+    if (registeredTool && !registeredTool.permissionMode.includes(mode)) {
+      throw new ForbiddenException(
+        `Tool ${toolName} is not registered for permission mode ${mode}`,
+      );
+    }
+
     const action =
       this.permissionActionForTool(mode, toolName) ??
       this.permissions.normalizeAction(
@@ -2581,11 +3139,18 @@ export class SocialAgentToolExecutorService {
     toolName: SocialAgentToolName,
   ): Record<string, unknown> {
     const limit = HIGH_RISK_TOOL_DAILY_LIMITS[toolName] ?? null;
+    const registeredTool = this.toolRegistry.getToolByExecutorName(toolName);
     const highRisk =
       toolName === SocialAgentToolName.OfflineMeeting ||
+      toolName === SocialAgentToolName.CreateActivity ||
+      toolName === SocialAgentToolName.JoinActivity ||
+      toolName === SocialAgentToolName.ApproveAction ||
       toolName === SocialAgentToolName.Payment;
     return {
       permissionMode: task.permissionMode,
+      registryToolName: registeredTool?.name ?? null,
+      category: registeredTool?.category ?? null,
+      requiresApproval: registeredTool?.requiresApproval ?? null,
       riskLevel: this.riskLevelForTool(toolName),
       highRisk,
       dailyLimit: limit,
@@ -2593,9 +3158,12 @@ export class SocialAgentToolExecutorService {
         toolName === SocialAgentToolName.Payment
           ? 'paymentIntentKeys'
           : toolName === SocialAgentToolName.OfflineMeeting ||
-              toolName === SocialAgentToolName.InviteActivity
+              toolName === SocialAgentToolName.InviteActivity ||
+              toolName === SocialAgentToolName.CreateActivity ||
+              toolName === SocialAgentToolName.JoinActivity
             ? 'activityInviteKeys'
             : toolName === SocialAgentToolName.SendMessage ||
+                toolName === SocialAgentToolName.SendMessageToCandidate ||
                 toolName === SocialAgentToolName.ReplyMessage
               ? 'sentMessageKeys'
               : null,
@@ -2617,21 +3185,29 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.UpdateAiProfileFromAnswers:
       case SocialAgentToolName.ExplainMatches:
         return SocialAgentAction.GenerateContent;
+      case SocialAgentToolName.PublishSocialRequest:
       case SocialAgentToolName.CreateSocialRequest:
         return SocialAgentAction.SendInvite;
+      case SocialAgentToolName.SearchPublicIntents:
+      case SocialAgentToolName.SearchActivities:
       case SocialAgentToolName.SearchMatches:
         return SocialAgentAction.SearchProfiles;
       case SocialAgentToolName.DraftOpener:
         return SocialAgentAction.DraftMessage;
+      case SocialAgentToolName.SendMessageToCandidate:
       case SocialAgentToolName.SendMessage:
       case SocialAgentToolName.ReplyMessage:
         return SocialAgentAction.SendMessage;
+      case SocialAgentToolName.ConnectCandidate:
       case SocialAgentToolName.AddFriend:
         return SocialAgentAction.AddFriend;
       case SocialAgentToolName.InviteActivity:
         return mode === AgentTaskPermissionMode.LimitedAuto
           ? SocialAgentAction.OfflineMeet
           : SocialAgentAction.SendInvite;
+      case SocialAgentToolName.CreateActivity:
+      case SocialAgentToolName.JoinActivity:
+        return SocialAgentAction.OfflineMeet;
       case SocialAgentToolName.SaveCandidate:
         return SocialAgentAction.FavoriteCandidate;
       case SocialAgentToolName.WriteInbox:
@@ -2640,7 +3216,17 @@ export class SocialAgentToolExecutorService {
         return SocialAgentAction.OfflineMeet;
       case SocialAgentToolName.Payment:
         return SocialAgentAction.Payment;
+      case SocialAgentToolName.GetMyProfile:
       case SocialAgentToolName.GetAiProfile:
+      case SocialAgentToolName.GetCurrentTaskMemory:
+      case SocialAgentToolName.GetConversations:
+      case SocialAgentToolName.GetAgentInbox:
+      case SocialAgentToolName.GetPendingApprovals:
+      case SocialAgentToolName.ApproveAction:
+      case SocialAgentToolName.RejectAction:
+      case SocialAgentToolName.ReadLongTermMemory:
+      case SocialAgentToolName.SummarizeCurrentTask:
+      case SocialAgentToolName.GetCandidatePoolDebug:
       case SocialAgentToolName.ReadInbox:
       case SocialAgentToolName.ReadTaskConversationMessages:
       case SocialAgentToolName.SummarizeReply:
@@ -2687,10 +3273,20 @@ export class SocialAgentToolExecutorService {
   private normalizeToolName(value: unknown): SocialAgentToolName | null {
     if (typeof value !== 'string') return null;
     const normalized = value.trim();
+    if (
+      Object.values(SocialAgentToolName).includes(
+        normalized as SocialAgentToolName,
+      )
+    ) {
+      return normalized as SocialAgentToolName;
+    }
+
+    const executorToolName =
+      this.toolRegistry.resolveExecutorToolName(normalized);
     return Object.values(SocialAgentToolName).includes(
-      normalized as SocialAgentToolName,
+      executorToolName as SocialAgentToolName,
     )
-      ? (normalized as SocialAgentToolName)
+      ? (executorToolName as SocialAgentToolName)
       : null;
   }
 
@@ -2799,6 +3395,37 @@ export class SocialAgentToolExecutorService {
     };
   }
 
+  private messageSendOptions(
+    task: AgentTask,
+    stepId: string,
+    input: Record<string, unknown>,
+  ) {
+    const metadata = this.messageMetadata(task, stepId, input.metadata);
+    if (
+      !task.agentConnectionId &&
+      this.canRunAsConfirmedUserAction(SocialAgentToolName.SendMessage, input)
+    ) {
+      return {
+        senderType: 'user' as const,
+        senderAgentId: null,
+        agentConnectionId: null,
+        ownerUserId: task.ownerUserId,
+        actorUserId: task.ownerUserId,
+        source: 'user' as const,
+        metadata,
+      };
+    }
+    return {
+      senderType: 'agent' as const,
+      senderAgentId: task.agentConnectionId,
+      agentConnectionId: task.agentConnectionId,
+      ownerUserId: task.ownerUserId,
+      actorUserId: task.ownerUserId,
+      source: 'ai_delegate' as const,
+      metadata,
+    };
+  }
+
   private messageMetadata(
     task: AgentTask,
     stepId: string,
@@ -2822,9 +3449,9 @@ export class SocialAgentToolExecutorService {
   }
 
   private activityTitle(toolName: SocialAgentToolName): string {
-    return toolName === SocialAgentToolName.OfflineMeeting
-      ? '线下见面安排'
-      : '约练邀请';
+    if (toolName === SocialAgentToolName.OfflineMeeting) return '线下见面安排';
+    if (toolName === SocialAgentToolName.CreateActivity) return '约练活动';
+    return '约练邀请';
   }
 
   private offlineMeetingInviteText(
@@ -2913,6 +3540,24 @@ export class SocialAgentToolExecutorService {
 
   private string(value: unknown): string | undefined {
     return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+  }
+
+  private safeUnknownText(value: unknown): string {
+    if (value == null) return 'null';
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean' ||
+      typeof value === 'bigint' ||
+      typeof value === 'symbol'
+    ) {
+      return String(value);
+    }
+    try {
+      return JSON.stringify(value) ?? '[unserializable]';
+    } catch {
+      return '[unserializable]';
+    }
   }
 
   private number(value: unknown): number | undefined {

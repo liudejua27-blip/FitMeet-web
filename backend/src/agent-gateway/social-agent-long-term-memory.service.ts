@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { AgentTask } from './entities/agent-task.entity';
+import { AgentTask, AgentTaskStatus } from './entities/agent-task.entity';
 import { SocialAgentLongTermMemory } from './entities/social-agent-long-term-memory.entity';
 import { readSocialAgentTaskMemory } from './social-agent-memory.util';
 
@@ -90,7 +90,9 @@ export class SocialAgentLongTermMemoryService {
         at: new Date().toISOString(),
       };
 
-      let row = await this.repo.findOne({ where: { userId: task.ownerUserId } });
+      let row = await this.repo.findOne({
+        where: { userId: task.ownerUserId },
+      });
       if (!row) {
         row = this.repo.create({
           userId: task.ownerUserId,
@@ -120,8 +122,10 @@ export class SocialAgentLongTermMemoryService {
         taskMemory,
         outcome,
       );
-      row.taskSummaries = [...(Array.isArray(row.taskSummaries) ? row.taskSummaries : []), summary]
-        .slice(-TASK_SUMMARY_LIMIT);
+      row.taskSummaries = [
+        ...(Array.isArray(row.taskSummaries) ? row.taskSummaries : []),
+        summary,
+      ].slice(-TASK_SUMMARY_LIMIT);
       row.taskCount = (row.taskCount ?? 0) + 1;
 
       const saved = await this.repo.save(row);
@@ -140,7 +144,9 @@ export class SocialAgentLongTermMemoryService {
   }
 
   async readSnapshot(userId: number): Promise<LongTermMemorySnapshot> {
-    const row = await this.repo.findOne({ where: { userId } }).catch(() => null);
+    const row = await this.repo
+      .findOne({ where: { userId } })
+      .catch(() => null);
     if (!row) {
       return emptySnapshot(userId);
     }
@@ -148,10 +154,9 @@ export class SocialAgentLongTermMemoryService {
   }
 
   private deriveOutcome(task: AgentTask): TaskSummaryEntry['outcome'] {
-    const status = task.status ?? '';
-    if (status === 'succeeded') return 'succeeded';
-    if (status === 'failed') return 'failed';
-    if (status === 'cancelled') return 'cancelled';
+    if (task.status === AgentTaskStatus.Succeeded) return 'succeeded';
+    if (task.status === AgentTaskStatus.Failed) return 'failed';
+    if (task.status === AgentTaskStatus.Cancelled) return 'cancelled';
     return 'other';
   }
 
@@ -206,9 +211,12 @@ export class SocialAgentLongTermMemoryService {
       userId: row.userId,
       preferences: {
         interests: stringList(prefs.interests),
-        socialStyle: typeof prefs.socialStyle === 'string' ? prefs.socialStyle : '',
+        socialStyle:
+          typeof prefs.socialStyle === 'string' ? prefs.socialStyle : '',
         communicationStyle:
-          typeof prefs.communicationStyle === 'string' ? prefs.communicationStyle : '',
+          typeof prefs.communicationStyle === 'string'
+            ? prefs.communicationStyle
+            : '',
         preferredTraits: stringList(prefs.preferredTraits),
       },
       boundaries: {
@@ -222,7 +230,9 @@ export class SocialAgentLongTermMemoryService {
         favoriteCities: stringList(activity.favoriteCities),
         favoriteActivityTypes: stringList(activity.favoriteActivityTypes),
         favoriteTimePreferences: stringList(activity.favoriteTimePreferences),
-        favoriteLocationPreferences: stringList(activity.favoriteLocationPreferences),
+        favoriteLocationPreferences: stringList(
+          activity.favoriteLocationPreferences,
+        ),
       },
       matchSignals: {
         successfulMatches: sampleArray(signals.successfulMatches),
@@ -267,11 +277,19 @@ function mergePreferences(
   incoming: ReturnType<typeof readSocialAgentTaskMemory>['preferences'],
 ): Record<string, unknown> {
   return {
-    interests: mergeStringList(stringList(previous.interests), incoming.interests, 32),
-    socialStyle: incoming.socialStyle || (typeof previous.socialStyle === 'string' ? previous.socialStyle : ''),
+    interests: mergeStringList(
+      stringList(previous.interests),
+      incoming.interests,
+      32,
+    ),
+    socialStyle:
+      incoming.socialStyle ||
+      (typeof previous.socialStyle === 'string' ? previous.socialStyle : ''),
     communicationStyle:
       incoming.communicationStyle ||
-      (typeof previous.communicationStyle === 'string' ? previous.communicationStyle : ''),
+      (typeof previous.communicationStyle === 'string'
+        ? previous.communicationStyle
+        : ''),
     preferredTraits: mergeStringList(
       stringList(previous.preferredTraits),
       incoming.preferredTraits,
@@ -291,9 +309,11 @@ function mergeBoundaries(
       8,
     ),
     noNightMeet: incoming.noNightMeet || previous.noNightMeet === true,
-    publicPlaceOnly: incoming.publicPlaceOnly || previous.publicPlaceOnly === true,
+    publicPlaceOnly:
+      incoming.publicPlaceOnly || previous.publicPlaceOnly === true,
     noAutoMessage: incoming.noAutoMessage || previous.noAutoMessage === true,
-    noContactExchange: incoming.noContactExchange || previous.noContactExchange === true,
+    noContactExchange:
+      incoming.noContactExchange || previous.noContactExchange === true,
   };
 }
 
@@ -302,7 +322,11 @@ function mergeActivityPreferences(
   incoming: ReturnType<typeof readSocialAgentTaskMemory>['activeEntities'],
 ): Record<string, unknown> {
   return {
-    favoriteCities: pushIfPresent(stringList(previous.favoriteCities), incoming.city, 10),
+    favoriteCities: pushIfPresent(
+      stringList(previous.favoriteCities),
+      incoming.city,
+      10,
+    ),
     favoriteActivityTypes: pushIfPresent(
       stringList(previous.favoriteActivityTypes),
       incoming.activityType,
@@ -328,10 +352,15 @@ function pushIfPresent(list: string[], value: string, limit: number): string[] {
   return [...filtered, trimmed].slice(-limit);
 }
 
-function mergeStringList(prev: string[], next: string[], limit: number): string[] {
+function mergeStringList(
+  prev: string[],
+  next: string[],
+  limit: number,
+): string[] {
   const out: string[] = [];
   for (const value of [...prev, ...next]) {
-    if (typeof value === 'string' && value && !out.includes(value)) out.push(value);
+    if (typeof value === 'string' && value && !out.includes(value))
+      out.push(value);
   }
   return out.slice(-limit);
 }
@@ -351,7 +380,10 @@ function dedupSamples(samples: LongTermMatchSample[]): LongTermMatchSample[] {
 function sampleArray(value: unknown): LongTermMatchSample[] {
   if (!Array.isArray(value)) return [];
   return value
-    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    .filter(
+      (item): item is Record<string, unknown> =>
+        typeof item === 'object' && item !== null,
+    )
     .map((item) => ({
       candidateUserId:
         typeof item.candidateUserId === 'number' ? item.candidateUserId : 0,
@@ -363,7 +395,9 @@ function sampleArray(value: unknown): LongTermMatchSample[] {
 
 function stringList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
+  return value.filter(
+    (item): item is string => typeof item === 'string' && item.length > 0,
+  );
 }
 
 function toRecord(value: unknown): Record<string, unknown> {

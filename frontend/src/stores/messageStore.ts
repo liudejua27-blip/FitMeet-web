@@ -179,22 +179,28 @@ export const useMessageStore = create<MessageState>()(
 
       loadConversations: async () => {
         try {
-          // eslint-disable-next-line
-          const apiConvs = (await dataService.getConversations()) as any[];
-          if (!apiConvs) return;
+          const apiConvs = normalizeArrayResponse(await dataService.getConversations(), [
+            'conversations',
+            'items',
+            'data',
+          ]);
+          if (apiConvs.length === 0) {
+            set({ conversations: [], totalUnread: 0 });
+            return;
+          }
 
           const convs: Conversation[] = apiConvs
             .filter((c) => isDisplayableRecordText([c.username, c.lastMessage, c.time]))
             .map((c) => ({
-              id: c.id,
-              userId: c.userId,
+              id: stringValue(c.id),
+              userId: numberValue(c.userId),
               username: cleanDisplayText(c.username, 'FitMeet 用户'),
               avatar: cleanDisplayText(c.avatar, 'F'),
-              color: c.color,
+              color: stringValue(c.color, '#18b98f'),
               lastMessage: cleanDisplayText(c.lastMessage, '还没有消息'),
               time: cleanDisplayText(c.time),
-              unread: c.unread || 0,
-              online: c.online || false,
+              unread: numberValue(c.unread),
+              online: booleanValue(c.online),
             }));
 
           set({
@@ -208,12 +214,23 @@ export const useMessageStore = create<MessageState>()(
 
       loadMessages: async (convId: string) => {
         try {
-          // eslint-disable-next-line
-          const texts = (await dataService.getMessages(convId)) as any[];
-          if (!texts) return;
+          const texts = normalizeArrayResponse(await dataService.getMessages(convId), [
+            'messages',
+            'items',
+            'data',
+          ]);
+          if (texts.length === 0) {
+            set((state) => ({
+              messages: {
+                ...state.messages,
+                [convId]: [],
+              },
+            }));
+            return;
+          }
 
           const msgs: ChatMessage[] = texts.map((m) => ({
-            id: m.id,
+            id: messageIdValue(m.id),
             text: cleanDisplayText(m.text, '消息内容已隐藏'),
             // Backend already formats time as "HH:MM" (zh-CN).
             time:
@@ -222,9 +239,9 @@ export const useMessageStore = create<MessageState>()(
                 hour: '2-digit',
                 minute: '2-digit',
               }),
-            isMine: m.isMine,
-            source: m.source ?? 'user',
-            card: m.card ?? null,
+            isMine: booleanValue(m.isMine),
+            source: messageSourceValue(m.source),
+            card: cardValue(m.card),
           }));
 
           set((state) => ({
@@ -315,3 +332,60 @@ export const useMessageStore = create<MessageState>()(
     },
   ),
 );
+
+function normalizeArrayResponse(value: unknown, keys: string[]): Array<Record<string, unknown>> {
+  const raw = Array.isArray(value)
+    ? value
+    : isRecord(value)
+      ? keys.reduce<unknown>((found, key) => {
+          if (Array.isArray(found)) return found;
+          return value[key];
+        }, undefined)
+      : [];
+
+  return Array.isArray(raw)
+    ? raw.filter((item): item is Record<string, unknown> => isRecord(item))
+    : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stringValue(value: unknown, fallback = ''): string {
+  if (typeof value === 'string') return cleanDisplayText(value, fallback);
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return fallback;
+}
+
+function numberValue(value: unknown, fallback = 0): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+function booleanValue(value: unknown): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    return ['true', '1', 'yes'].includes(value.toLowerCase());
+  }
+  return false;
+}
+
+function messageIdValue(value: unknown): string | number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  return stringValue(value, Date.now().toString());
+}
+
+function messageSourceValue(value: unknown): ChatMessage['source'] {
+  return value === 'ai_delegate' ? 'ai_delegate' : 'user';
+}
+
+function cardValue(value: unknown): ChatMessage['card'] {
+  return isRecord(value) && value.type === 'fitmeet_contact_card'
+    ? (value as ChatMessage['card'])
+    : null;
+}

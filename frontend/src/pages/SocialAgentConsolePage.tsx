@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { memo, useState, type FormEvent } from 'react';
+import { memo, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   socialAgentApi,
@@ -12,6 +12,7 @@ import {
   type SocialAgentPendingApproval,
   type SocialAgentStepStatus,
   type SocialAgentTaskEvent,
+  type SocialAgentToolCall,
 } from '../api/socialAgentApi';
 import { cleanDisplayArray, cleanDisplayText } from '../lib/displayText';
 
@@ -30,6 +31,21 @@ type StatusStep = {
   id: string;
   text: string;
   state: SocialAgentStepStatus;
+};
+
+type ToolCallViewStatus = 'running' | 'success' | 'failed' | 'blocked';
+
+type ToolCallView = {
+  id: string;
+  stepId: string | null;
+  toolName: string;
+  status: ToolCallViewStatus;
+  label: string;
+  detail: string;
+  count: number | null;
+  durationMs: number | null;
+  startedAt: string | null;
+  completedAt: string | null;
 };
 
 type DraftPublishState = {
@@ -104,17 +120,23 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [statuses, setStatuses] = useState<StatusStep[]>([]);
+  const [toolCalls, setToolCalls] = useState<ToolCallView[]>([]);
   const [result, setResult] = useState<SocialAgentChatRunResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [draftPublish, setDraftPublish] = useState<DraftPublishState>({ status: 'idle' });
-  const [candidateStates, setCandidateStates] = useState<Record<number, CandidateActionSnapshot>>({});
+  const [candidateStates, setCandidateStates] = useState<Record<string, CandidateActionSnapshot>>(
+    {},
+  );
   const [actionStatus, setActionStatus] = useState('');
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   const started = messages.length > 0;
   const draft = result?.socialRequestDraft ?? null;
   const candidates = result?.candidates ?? [];
+  const publicIntentCards = candidates.filter(isPublicIntentCandidate);
+  const realCandidateCards = candidates.filter((candidate) => !isPublicIntentCandidate(candidate));
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -125,6 +147,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     setIsPublishing(false);
     setActionStatus('');
     setStatuses([]);
+    setToolCalls([]);
     const taskId = result?.taskId ?? activeTaskId;
     if (!taskId) {
       setDraftPublish({ status: 'idle' });
@@ -166,7 +189,8 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
               id: nextId('risk'),
               role: 'assistant',
               kind: 'risk',
-              content: '已记住你的边界，后续匹配会硬过滤。首次线下见面建议选择公开场所，并保留平台内沟通记录。',
+              content:
+                '已记住你的边界，后续匹配会硬过滤。首次线下见面建议选择公开场所，并保留平台内沟通记录。',
             });
           }
           if (handled.pendingApproval) {
@@ -207,20 +231,14 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
         },
       ]);
       setStatuses((items) =>
-        items.map((item) =>
-          item.state === 'running' ? { ...item, state: 'failed' } : item,
-        ),
+        items.map((item) => (item.state === 'running' ? { ...item, state: 'failed' } : item)),
       );
     } finally {
       setIsRunning(false);
     }
   };
 
-  const pollAgentRun = async (
-    taskId: number,
-    runId: string,
-    mode: 'initial' | 'follow_up',
-  ) => {
+  const pollAgentRun = async (taskId: number, runId: string, mode: 'initial' | 'follow_up') => {
     const startedAt = Date.now();
     while (Date.now() - startedAt < 120_000) {
       const [run, timeline] = await Promise.all([
@@ -240,9 +258,10 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
           {
             id: nextId('assistant'),
             role: 'assistant',
-            content: mode === 'follow_up' && isReplanRunResult(refreshed)
-              ? replanAssistantMessage(refreshed)
-              : assistantMessage(refreshed),
+            content:
+              mode === 'follow_up' && isReplanRunResult(refreshed)
+                ? replanAssistantMessage(refreshed)
+                : assistantMessage(refreshed),
           },
         ]);
         return;
@@ -267,21 +286,26 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     events: SocialAgentTaskEvent[] = [],
     mode: 'initial' | 'follow_up' = 'follow_up',
   ) => {
-    setStatuses(statusesFromRun(run, events, mode));
-    if (events.some((event) => event.eventType === 'social_agent.llm.timeout')) {
+    const runEvents = eventsForRun(events, run);
+    setStatuses(statusesFromRun(run, runEvents, mode));
+    const calls = toolCallsFromEvents(runEvents);
+    if (calls.length > 0) {
+      setToolCalls(calls);
+    } else if (run.result) {
+      const resultCalls = toolCallsFromRunResult(run.result);
+      if (resultCalls.length > 0) setToolCalls(resultCalls);
+    }
+    if (runEvents.some((event) => event.eventType === 'social_agent.llm.timeout')) {
       setActionStatus('AI 分析超时，已使用规则匹配继续执行。');
     }
   };
 
-  const setCandidateAction = (
-    userId: number,
-    patch: Partial<CandidateActionSnapshot>,
-  ) => {
+  const setCandidateAction = (actionKey: string, patch: Partial<CandidateActionSnapshot>) => {
     setCandidateStates((current) => ({
       ...current,
-      [userId]: {
+      [actionKey]: {
         ...emptyCandidateActionState(),
-        ...(current[userId] ?? {}),
+        ...(current[actionKey] ?? {}),
         ...patch,
       },
     }));
@@ -296,9 +320,24 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     setIsPublishing(true);
     setDraftPublish((current) => ({ ...current, status: 'publishing', error: null }));
     setActionStatus('正在发布约练，并写入 Agent 审计记录...');
+    setToolCalls((current) =>
+      upsertToolCallView(
+        current,
+        syntheticToolCallView('publish_social_request', 'running', null),
+      ),
+    );
 
     try {
       const published = await socialAgentApi.publishSocialRequest(result.taskId, draft);
+      setToolCalls((current) =>
+        upsertToolCallView(
+          current,
+          syntheticToolCallView('publish_social_request', 'success', {
+            socialRequestId: published.socialRequestId,
+            publicIntentId: published.publicIntentId,
+          }),
+        ),
+      );
       setDraftPublish({
         status: 'published',
         socialRequestId: published.socialRequestId,
@@ -326,9 +365,17 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
             }
           : current,
       );
-      setActionStatus(`约练已发布，已同步到大厅。后续匹配、消息和候选动作都会关联 task #${result.taskId}。`);
+      setActionStatus(
+        `约练已发布，已同步到大厅。后续匹配、消息和候选动作都会关联 task #${result.taskId}。`,
+      );
     } catch (error) {
       const message = errorMessage(error, '发布失败，请稍后再试。');
+      setToolCalls((current) =>
+        upsertToolCallView(
+          current,
+          syntheticToolCallView('publish_social_request', 'failed', { error: message }),
+        ),
+      );
       setDraftPublish((current) => ({ ...current, status: 'failed', error: message }));
       setActionStatus(message);
     } finally {
@@ -337,49 +384,61 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
   };
 
   const saveCandidate = async (candidate: SocialAgentChatCandidate) => {
-    const state = candidateStates[candidate.userId];
-    if (!result?.taskId || state?.save === 'saving') return;
-    setCandidateAction(candidate.userId, { save: 'saving', error: null });
+    const actionKey = candidateActionKey(candidate);
+    const state = candidateStates[actionKey];
+    const targetUserId = candidateTargetUserId(candidate);
+    if (!result?.taskId || !targetUserId || state?.save === 'saving') return;
+    setCandidateAction(actionKey, { save: 'saving', error: null });
     setActionStatus(`正在收藏 ${displayName(candidate)}，并通过 SaveCandidate 写入候选记录...`);
 
     try {
-      await socialAgentApi.saveCandidate(result.taskId, {
+      const saved = await socialAgentApi.saveCandidate(result.taskId, {
         candidateRecordId: candidate.candidateRecordId,
         socialRequestId: candidate.socialRequestId ?? draft?.socialRequestId ?? null,
-        targetUserId: candidate.userId,
+        targetUserId,
         candidate: {
           userId: candidate.userId,
+          candidateUserId: targetUserId,
           nickname: candidate.nickname,
           score: candidate.score,
           reasons: candidate.reasons,
         },
       });
-      setCandidateAction(candidate.userId, { save: 'saved', error: null });
-      setActionStatus(`${displayName(candidate)} 已收藏，候选状态已持久化并关联 task #${result.taskId}。`);
+      if (saved.status !== 'succeeded') {
+        throw new Error(toolActionErrorMessage(saved, '收藏失败，请稍后再试。'));
+      }
+      setToolCalls((current) => upsertToolCallView(current, toolCallViewFromRecord(saved)));
+      setCandidateAction(actionKey, { save: 'saved', error: null });
+      setActionStatus(
+        `${displayName(candidate)} 已收藏，候选状态已持久化并关联 task #${result.taskId}。`,
+      );
     } catch (error) {
       const message = errorMessage(error, '收藏失败，请稍后再试。');
-      setCandidateAction(candidate.userId, { save: 'failed', error: message });
+      setCandidateAction(actionKey, { save: 'failed', error: message });
       setActionStatus(message);
     }
   };
 
   const sendMessage = async (candidate: SocialAgentChatCandidate) => {
     const message = cleanDisplayText(candidate.suggestedMessage, '').trim();
-    const state = candidateStates[candidate.userId];
-    if (!result?.taskId || !message || state?.send === 'sending') return;
-    setCandidateAction(candidate.userId, { send: 'sending', error: null });
+    const actionKey = candidateActionKey(candidate);
+    const state = candidateStates[actionKey];
+    const targetUserId = candidateTargetUserId(candidate);
+    if (!result?.taskId || !targetUserId || !message || state?.send === 'sending') return;
+    setCandidateAction(actionKey, { send: 'sending', error: null });
     setActionStatus(`正在发送给 ${displayName(candidate)}，并记录确认事件...`);
 
     try {
       const sent = await socialAgentApi.sendCandidateMessage(result.taskId, {
-        candidateUserId: candidate.userId,
-        targetUserId: candidate.userId,
+        candidateUserId: targetUserId,
+        targetUserId,
         message,
         suggestedOpener: message,
         candidateRecordId: candidate.candidateRecordId,
         socialRequestId: candidate.socialRequestId ?? draft?.socialRequestId ?? null,
         candidate: {
           userId: candidate.userId,
+          candidateUserId: targetUserId,
           nickname: candidate.nickname,
           score: candidate.score,
           reasons: candidate.reasons,
@@ -387,11 +446,18 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
           socialRequestId: candidate.socialRequestId,
         },
       });
-      if (!sent.success || sent.status === 'failed') {
-        throw new Error('发送失败，请稍后再试。');
+      const pending = isPendingActionStatus(sent.status);
+      const messageAction = sent.messageAction;
+      if (isFailedCandidateAction(sent.success, sent.status, messageAction, pending)) {
+        throw new Error(toolActionErrorMessage(messageAction, '发送失败，请稍后再试。'));
       }
-      setCandidateAction(candidate.userId, {
-        send: sent.status === 'pending' || sent.status === 'pending_approval' ? 'pendingApproval' : 'sent',
+      if (messageAction) {
+        setToolCalls((current) =>
+          upsertToolCallView(current, toolCallViewFromRecord(messageAction)),
+        );
+      }
+      setCandidateAction(actionKey, {
+        send: pending ? 'pendingApproval' : 'sent',
         error: null,
         conversationId: sent.conversationId,
         messageId: sent.messageId,
@@ -415,35 +481,47 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
       );
     } catch (error) {
       const messageText = errorMessage(error, '发送失败，请稍后再试。');
-      setCandidateAction(candidate.userId, { send: 'failed', error: messageText });
+      setCandidateAction(actionKey, { send: 'failed', error: messageText });
       setActionStatus(messageText);
     }
   };
 
   const connectCandidate = async (candidate: SocialAgentChatCandidate) => {
-    const state = candidateStates[candidate.userId];
-    if (!result?.taskId || state?.connect === 'connecting') return;
-    setCandidateAction(candidate.userId, { connect: 'connecting', error: null });
+    const actionKey = candidateActionKey(candidate);
+    const state = candidateStates[actionKey];
+    const targetUserId = candidateTargetUserId(candidate);
+    if (!result?.taskId || !targetUserId || state?.connect === 'connecting') return;
+    setCandidateAction(actionKey, { connect: 'connecting', error: null });
     setActionStatus(`正在添加 ${displayName(candidate)} 为好友，并创建站内会话...`);
 
     try {
       const connection = await socialAgentApi.connectCandidate(result.taskId, {
-        candidateUserId: candidate.userId,
+        candidateUserId: targetUserId,
         candidateRecordId: candidate.candidateRecordId,
         socialRequestId: candidate.socialRequestId ?? draft?.socialRequestId ?? null,
-        targetUserId: candidate.userId,
+        targetUserId,
         candidate: {
           userId: candidate.userId,
+          candidateUserId: targetUserId,
           nickname: candidate.nickname,
           score: candidate.score,
           reasons: candidate.reasons,
         },
       });
-      if (!connection.success || connection.status === 'failed') {
-        throw new Error('加好友失败，请稍后再试。');
+      const pending = isPendingActionStatus(connection.status);
+      const friendAction = connection.friendAction;
+      if (
+        isFailedCandidateAction(connection.success, connection.status, friendAction, pending)
+      ) {
+        throw new Error(toolActionErrorMessage(friendAction, '加好友失败，请稍后再试。'));
+      }
+      if (friendAction) {
+        setToolCalls((current) =>
+          upsertToolCallView(current, toolCallViewFromRecord(friendAction)),
+        );
       }
       if (connection.conversationId) {
-        setCandidateAction(candidate.userId, {
+        setCandidateAction(actionKey, {
           connect: 'connected',
           error: null,
           conversationId: connection.conversationId,
@@ -453,8 +531,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
         navigate(`/messages?conversationId=${encodeURIComponent(connection.conversationId)}`);
         return;
       }
-      const pending = connection.status === 'pending' || connection.status === 'requested';
-      setCandidateAction(candidate.userId, {
+      setCandidateAction(actionKey, {
         connect: pending ? 'pendingApproval' : 'connected',
         error: null,
         friendRequestId: connection.friendRequestId,
@@ -466,7 +543,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
       );
     } catch (error) {
       const message = errorMessage(error, '加好友失败，请稍后再试。');
-      setCandidateAction(candidate.userId, { connect: 'failed', error: message });
+      setCandidateAction(actionKey, { connect: 'failed', error: message });
       setActionStatus(message);
     }
   };
@@ -482,6 +559,23 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
   const currentGoal = result?.socialRequestDraft?.title || lastUserMessage?.content || '';
 
+  useEffect(() => {
+    if (!started) return;
+    chatEndRef.current?.scrollIntoView({
+      block: 'end',
+      behavior: isRunning ? 'smooth' : 'auto',
+    });
+  }, [
+    actionStatus,
+    candidates.length,
+    draft?.title,
+    isRunning,
+    messages.length,
+    started,
+    statuses.length,
+    toolCalls.length,
+  ]);
+
   return (
     <div className="min-h-screen bg-[#f8f8f6] text-[#202124]">
       <TopStatusBar
@@ -489,7 +583,14 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
         currentGoal={currentGoal}
         pendingApprovals={pendingApprovalsCount}
       />
-      <div className="mx-auto flex min-h-screen w-full max-w-4xl flex-col px-4 pb-40 pt-24 sm:px-6">
+      <div
+        className={clsx(
+          'mx-auto min-h-screen w-full px-4 pb-56 pt-24 sm:px-6',
+          started
+            ? 'max-w-6xl lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-6'
+            : 'flex max-w-4xl flex-col',
+        )}
+      >
         <section className="mx-auto mt-4 flex w-full max-w-3xl flex-1 flex-col">
           {!started ? (
             <div className="flex flex-1 items-center justify-center pb-20">
@@ -503,7 +604,14 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
                 <ChatMessage key={message.id} message={message} />
               ))}
 
-              {statuses.length > 0 ? <StatusStream statuses={statuses} /> : null}
+              {statuses.length > 0 || toolCalls.length > 0 ? (
+                <StatusStream
+                  statuses={statuses}
+                  toolCalls={toolCalls}
+                  result={result}
+                  isRunning={isRunning}
+                />
+              ) : null}
 
               {draft ? (
                 <DraftCard
@@ -515,19 +623,31 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
               ) : null}
 
               {result && candidates.length === 0 ? (
-                <EmptyResult />
+                <EmptyResult onQuickAction={(text) => setInput(text)} />
               ) : candidates.length > 0 ? (
                 <div className="space-y-3">
-                  {candidates.map((candidate) => (
-                    <CandidateCard
-                      key={`${candidate.userId}:${candidate.candidateRecordId ?? 'candidate'}`}
-                      candidate={candidate}
-                      state={candidateStates[candidate.userId] ?? emptyCandidateActionState()}
+                  {realCandidateCards.length > 0 ? (
+                    <CandidateResultGroup
+                      title="候选人"
+                      count={realCandidateCards.length}
+                      candidates={realCandidateCards}
+                      candidateStates={candidateStates}
                       onSave={saveCandidate}
                       onSendMessage={sendMessage}
                       onConnect={connectCandidate}
                     />
-                  ))}
+                  ) : null}
+                  {publicIntentCards.length > 0 ? (
+                    <CandidateResultGroup
+                      title="公开约练卡片"
+                      count={publicIntentCards.length}
+                      candidates={publicIntentCards}
+                      candidateStates={candidateStates}
+                      onSave={saveCandidate}
+                      onSendMessage={sendMessage}
+                      onConnect={connectCandidate}
+                    />
+                  ) : null}
                 </div>
               ) : null}
 
@@ -536,9 +656,15 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
                   {actionStatus}
                 </div>
               ) : null}
+              <div ref={chatEndRef} className="h-36 scroll-mb-44" aria-hidden="true" />
             </div>
           )}
         </section>
+        {started ? (
+          <aside className="mt-5 lg:sticky lg:top-20 lg:mt-4 lg:self-start">
+            <ToolCallPanel toolCalls={toolCalls} />
+          </aside>
+        ) : null}
       </div>
 
       <form
@@ -558,7 +684,11 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
             }}
             rows={1}
             className="max-h-32 min-h-[46px] flex-1 resize-none border-0 bg-transparent px-3 py-3 text-[15px] leading-6 text-[#202124] outline-none placeholder:text-[#8c8d88]"
-            placeholder={result?.taskId || activeTaskId ? '继续聊天、补充偏好，或调整搜索条件...' : '先聊天，或说出你想找的人/活动...'}
+            placeholder={
+              result?.taskId || activeTaskId
+                ? '继续聊天、补充偏好，或调整搜索条件...'
+                : '先聊天，或说出你想找的人/活动...'
+            }
           />
           <button
             type="submit"
@@ -626,7 +756,7 @@ function TopStatusBar({
   const isLive = agentState === 'analyzing' || agentState === 'searching';
   return (
     <div className="fixed left-0 right-0 top-0 z-30 border-b border-[#e6e6df] bg-[#f8f8f6]/85 backdrop-blur">
-      <div className="mx-auto flex h-14 w-full max-w-4xl items-center gap-3 px-4 sm:px-6">
+      <div className="mx-auto flex h-14 w-full max-w-6xl items-center gap-3 px-4 sm:px-6">
         <div className="flex items-center gap-2 text-[13px] font-black text-[#202124]">
           <span className="text-base">FitMeet</span>
           <span className="text-[#a8a9a3]">·</span>
@@ -649,7 +779,10 @@ function TopStatusBar({
           {CONFIRM_PERMISSION_MODE_LABEL}
         </div>
         {currentGoal ? (
-          <div className="hidden min-w-0 flex-1 truncate text-[12px] text-[#777872] sm:block" title={currentGoal}>
+          <div
+            className="hidden min-w-0 flex-1 truncate text-[12px] text-[#777872] sm:block"
+            title={currentGoal}
+          >
             目标：{currentGoal}
           </div>
         ) : (
@@ -688,7 +821,9 @@ function ChatMessage({ message }: { message: Message }) {
     return (
       <div className="flex justify-start">
         <div className="max-w-[82%] rounded-2xl border border-[#f3e3b3] bg-[#fffaeb] px-4 py-3 text-[14px] leading-6 text-[#7a5a12]">
-          <div className="text-[12px] font-black uppercase tracking-wide text-[#8a5a00]">风险提示</div>
+          <div className="text-[12px] font-black uppercase tracking-wide text-[#8a5a00]">
+            风险提示
+          </div>
           <div className="mt-1">{message.content}</div>
         </div>
       </div>
@@ -707,9 +842,17 @@ function ChatMessage({ message }: { message: Message }) {
       <div className="flex justify-start">
         <article className="max-w-[82%] rounded-2xl border border-[#e6e6df] bg-white p-4 shadow-[0_8px_24px_rgba(32,33,36,0.06)]">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-[12px] font-black uppercase tracking-wide text-[#777872]">待确认动作</div>
-            <span className={clsx('rounded-full border px-2 py-[2px] text-[11px] font-bold', riskColor)}>
-              {approval.riskLevel === 'high' ? '高风险' : approval.riskLevel === 'medium' ? '中等风险' : '低风险'}
+            <div className="text-[12px] font-black uppercase tracking-wide text-[#777872]">
+              待确认动作
+            </div>
+            <span
+              className={clsx('rounded-full border px-2 py-[2px] text-[11px] font-bold', riskColor)}
+            >
+              {approval.riskLevel === 'high'
+                ? '高风险'
+                : approval.riskLevel === 'medium'
+                  ? '中等风险'
+                  : '低风险'}
             </span>
           </div>
           <h3 className="mt-2 text-[15px] font-black text-[#202124]">{approval.actionType}</h3>
@@ -750,12 +893,17 @@ function ChatMessage({ message }: { message: Message }) {
 
 function ActivityResultCard({ activity }: { activity: SocialAgentActivityResult }) {
   const tags = activity.interestTags ?? [];
-  const desc = activity.description?.length > 80 ? `${activity.description.slice(0, 80)}…` : activity.description;
+  const desc =
+    activity.description?.length > 80
+      ? `${activity.description.slice(0, 80)}…`
+      : activity.description;
   return (
     <div className="rounded-xl border border-[#e4e4de] bg-white px-3 py-2 text-[13px] leading-5 text-[#2f302d]">
       <div className="flex items-center gap-2 text-[14px] font-semibold">
         <span className="truncate">{activity.title || '公开约练'}</span>
-        {activity.city ? <span className="text-[12px] font-normal text-[#686963]">· {activity.city}</span> : null}
+        {activity.city ? (
+          <span className="text-[12px] font-normal text-[#686963]">· {activity.city}</span>
+        ) : null}
         {activity.requestType ? (
           <span className="text-[12px] font-normal text-[#686963]">· {activity.requestType}</span>
         ) : null}
@@ -767,7 +915,10 @@ function ActivityResultCard({ activity }: { activity: SocialAgentActivityResult 
       {tags.length > 0 ? (
         <div className="mt-1 flex flex-wrap gap-1">
           {tags.slice(0, 6).map((tag) => (
-            <span key={tag} className="rounded-full bg-[#f0efe9] px-2 py-[2px] text-[11px] text-[#555]">
+            <span
+              key={tag}
+              className="rounded-full bg-[#f0efe9] px-2 py-[2px] text-[11px] text-[#555]"
+            >
               {tag}
             </span>
           ))}
@@ -777,31 +928,156 @@ function ActivityResultCard({ activity }: { activity: SocialAgentActivityResult 
   );
 }
 
-function StatusStream({ statuses }: { statuses: StatusStep[] }) {
+function StatusStream({
+  statuses,
+  toolCalls,
+  result,
+  isRunning,
+}: {
+  statuses: StatusStep[];
+  toolCalls: ToolCallView[];
+  result: SocialAgentChatRunResult | null;
+  isRunning: boolean;
+}) {
+  const steps = progressStepsFromToolCalls(toolCalls, result, isRunning);
+  const displaySteps = steps.length > 0 ? steps : statuses;
+  const activeStep =
+    [...displaySteps].reverse().find((step) => step.state === 'running') ??
+    [...displaySteps].reverse().find((step) => step.state === 'failed') ??
+    (isRunning ? displaySteps.find((step) => step.state === 'pending') : null) ??
+    displaySteps[displaySteps.length - 1] ??
+    null;
+  const thinkingText = thinkingStepText(activeStep, result, isRunning);
+
   return (
-    <div className="ml-3 inline-flex max-w-full flex-col gap-1 border-l border-[#deded8] pl-3">
-      {statuses.map((step) => (
-        <div
-          key={step.id}
-          className="flex min-h-[20px] items-center gap-2 text-[13px] leading-5 text-[#686963] transition-all"
-        >
-          <StatusIcon state={step.state} />
-          <span className="truncate">{step.text}</span>
-        </div>
-      ))}
+    <div className="ml-0 flex max-w-[82%] justify-start">
+      <div
+        className={clsx(
+          'inline-flex min-h-[52px] max-w-full items-center gap-3 rounded-[22px] border px-4 py-3 shadow-[0_10px_28px_rgba(32,33,36,0.06)] backdrop-blur-sm transition-all duration-300',
+          activeStep?.state === 'failed'
+            ? 'border-[#f1d4d0] bg-[#fff5f3] text-[#b42318]'
+            : 'border-[#ecece8] bg-[#f5f5f3] text-[#666762]',
+        )}
+        aria-live="polite"
+      >
+        <ThinkingMark state={activeStep?.state ?? (isRunning ? 'running' : 'done')} />
+        <span className="min-w-0 truncate text-[15px] font-black leading-6">{thinkingText}</span>
+        <span className="shrink-0 text-[22px] font-light leading-none text-[#b3b4ad]">›</span>
+      </div>
     </div>
   );
 }
 
-function StatusIcon({ state }: { state: SocialAgentStepStatus }) {
-  if (state === 'done') return <span className="text-[#168a55]">✓</span>;
-  if (state === 'failed') return <span className="text-[#c24135]">!</span>;
-  if (state === 'running') {
+function thinkingStepText(
+  activeStep: StatusStep | null,
+  result: SocialAgentChatRunResult | null,
+  isRunning: boolean,
+): string {
+  if (activeStep?.state === 'failed') return activeStep.text;
+  if (activeStep?.text) return activeStep.text;
+  if (result) return '结果已整理完成';
+  return isRunning ? '正在思考搜索方向' : '思考完成';
+}
+
+function ThinkingMark({ state }: { state: SocialAgentStepStatus }) {
+  if (state === 'failed') {
     return (
-      <span className="h-2.5 w-2.5 animate-spin rounded-full border border-[#8a8b85] border-t-transparent" />
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#ffe3df] text-[13px] font-black text-[#c24135]">
+        !
+      </span>
     );
   }
-  return <span className="h-1.5 w-1.5 rounded-full bg-[#b7b8b1]" />;
+
+  return (
+    <span
+      className={clsx(
+        'relative flex h-6 w-6 shrink-0 items-center justify-center text-[#5f6260]',
+        state === 'running' && 'animate-pulse',
+      )}
+      aria-hidden="true"
+    >
+      <span className="absolute h-5 w-3 rounded-[50%] border-2 border-current" />
+      <span className="absolute h-5 w-3 rotate-[60deg] rounded-[50%] border-2 border-current" />
+      <span className="absolute h-5 w-3 -rotate-[60deg] rounded-[50%] border-2 border-current" />
+      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+    </span>
+  );
+}
+
+function ToolCallPanel({ toolCalls }: { toolCalls: ToolCallView[] }) {
+  const recent = latestToolCallsByName(toolCalls).slice(-12);
+  return (
+    <section className="overflow-hidden rounded-[24px] border border-[#e7e7e0] bg-[linear-gradient(180deg,#ffffff_0%,#fafaf7_100%)] p-4 shadow-[0_12px_32px_rgba(32,33,36,0.07)]">
+      <div className="flex items-start justify-between gap-3 border-b border-[#f0f0eb] pb-3">
+        <div>
+          <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[#8c8d88]">
+            Light Log
+          </div>
+          <h2 className="mt-1 text-[14px] font-black text-[#202124]">Tool Calls</h2>
+        </div>
+        <span className="rounded-full bg-[#f3f3ef] px-2.5 py-1 text-[11px] font-black text-[#686963]">
+          {recent.length}
+        </span>
+      </div>
+      {recent.length > 0 ? (
+        <div className="mt-3 flex flex-col gap-2 font-mono text-[11px] leading-5">
+          {recent.map((call) => (
+            <div
+              key={call.id}
+              className="rounded-2xl border border-[#f0f0ea] bg-white/90 px-3 py-2.5 transition hover:border-[#e4e4dc]"
+            >
+              <div className="flex min-w-0 items-center justify-between gap-3">
+                <div className="min-w-0 flex items-center gap-2">
+                  <span
+                    className={clsx(
+                      'h-2 w-2 shrink-0 rounded-full',
+                      call.status === 'success' && 'bg-[#168a55]',
+                      call.status === 'failed' && 'bg-[#c24135]',
+                      call.status === 'running' && 'animate-pulse bg-[#3a72d6]',
+                      call.status === 'blocked' && 'bg-[#d49a17]',
+                    )}
+                  />
+                  <span className="truncate font-bold text-[#202124]">{call.toolName}</span>
+                </div>
+                <span
+                  className={clsx(
+                    'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.12em]',
+                    call.status === 'success' && 'bg-[#e7f7ed] text-[#168a55]',
+                    call.status === 'failed' && 'bg-[#fff0ed] text-[#b42318]',
+                    call.status === 'running' && 'bg-[#edf3ff] text-[#3a72d6]',
+                    call.status === 'blocked' && 'bg-[#fff6df] text-[#8a5a00]',
+                  )}
+                >
+                  {call.status}
+                </span>
+              </div>
+              {call.detail && call.detail !== 'completed' && call.detail !== 'running' ? (
+                <div className="mt-1 pl-4 text-[10px] text-[#8c8d88]">{call.detail}</div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-3 rounded-2xl border border-dashed border-[#ecece6] bg-[#fbfbf8] px-3 py-4 text-xs text-[#8c8d88]">
+          等待 Agent 调用工具...
+        </div>
+      )}
+    </section>
+  );
+}
+
+function latestToolCallsByName(toolCalls: ToolCallView[]): ToolCallView[] {
+  const recent: ToolCallView[] = [];
+  const seen = new Set<string>();
+
+  for (let index = toolCalls.length - 1; index >= 0; index -= 1) {
+    const call = toolCalls[index];
+    if (seen.has(call.toolName)) continue;
+    seen.add(call.toolName);
+    recent.push(call);
+  }
+
+  return recent.reverse();
 }
 
 function DraftCard({
@@ -844,7 +1120,10 @@ function DraftCard({
         <div className="mt-2 text-xs font-black text-[#168a55]">已同步到大厅</div>
       ) : null}
       <p className="mt-3 text-sm leading-6 text-[#555650]">
-        {cleanDisplayText(draft.description, cleanDisplayText(draft.rawText, 'AI 已生成约练草稿。'))}
+        {cleanDisplayText(
+          draft.description,
+          cleanDisplayText(draft.rawText, 'AI 已生成约练草稿。'),
+        )}
       </p>
       {tags.length > 0 ? (
         <div className="mt-3 flex flex-wrap gap-1.5">
@@ -900,7 +1179,10 @@ function CandidateCard({
   const reasons = cleanDisplayArray(candidate.reasons);
   const warnings = cleanDisplayArray(candidate.risk?.warnings);
   const opener = cleanDisplayText(candidate.suggestedMessage, '');
-  const canSave = Boolean(candidate.candidateRecordId || (candidate.socialRequestId && candidate.userId));
+  const targetUserId = candidateTargetUserId(candidate);
+  const canSave = Boolean(
+    candidate.candidateRecordId || (candidate.socialRequestId && targetUserId),
+  );
   const isSaved = state.save === 'saved' || candidate.status === 'approved';
   const isSaving = state.save === 'saving';
   const isSaveFailed = state.save === 'failed';
@@ -912,7 +1194,8 @@ function CandidateCard({
   const isConnected = state.connect === 'connected';
   const isConnectPending = state.connect === 'pendingApproval';
   const isConnectFailed = state.connect === 'failed';
-  const hasStatusNotice = isSent || isConnected || isSendPending || isConnectPending || Boolean(state.error);
+  const hasStatusNotice =
+    isSent || isConnected || isSendPending || isConnectPending || Boolean(state.error);
 
   return (
     <article className="rounded-2xl border border-[#e6e6df] bg-white p-4 shadow-[0_8px_24px_rgba(32,33,36,0.06)]">
@@ -934,9 +1217,7 @@ function CandidateCard({
               {Math.round(candidate.score)}% 匹配
             </span>
           </div>
-          <p className="mt-1 text-xs font-bold text-[#777872]">
-            {candidateLocation(candidate)}
-          </p>
+          <p className="mt-1 text-xs font-bold text-[#777872]">{candidateLocation(candidate)}</p>
         </div>
       </div>
 
@@ -979,9 +1260,7 @@ function CandidateCard({
         <div
           className={clsx(
             'mt-3 rounded-xl px-3 py-2 text-xs font-bold leading-5',
-            state.error
-              ? 'bg-[#fff0ed] text-[#b42318]'
-              : 'bg-[#edf7ef] text-[#168a55]',
+            state.error ? 'bg-[#fff0ed] text-[#b42318]' : 'bg-[#edf7ef] text-[#168a55]',
           )}
           role={state.error ? 'alert' : 'status'}
         >
@@ -1025,7 +1304,7 @@ function CandidateCard({
         <button
           type="button"
           onClick={() => onConnect(candidate)}
-          disabled={isConnecting || isConnected || isConnectPending || !candidate.userId}
+          disabled={isConnecting || isConnected || isConnectPending || !targetUserId}
           className={clsx(
             'rounded-full border px-4 py-2 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-60',
             isConnectFailed
@@ -1048,10 +1327,74 @@ function CandidateCard({
   );
 }
 
-function EmptyResult() {
+function CandidateResultGroup({
+  title,
+  count,
+  candidates,
+  candidateStates,
+  onSave,
+  onSendMessage,
+  onConnect,
+}: {
+  title: string;
+  count: number;
+  candidates: SocialAgentChatCandidate[];
+  candidateStates: Record<string, CandidateActionSnapshot>;
+  onSave: (candidate: SocialAgentChatCandidate) => void;
+  onSendMessage: (candidate: SocialAgentChatCandidate) => void;
+  onConnect: (candidate: SocialAgentChatCandidate) => void;
+}) {
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center gap-2 px-1">
+        <h2 className="text-[13px] font-black text-[#202124]">{title}</h2>
+        <span className="rounded-full bg-[#f1f1ee] px-2 py-0.5 text-[11px] font-bold text-[#686963]">
+          {count}
+        </span>
+      </div>
+      <div className="space-y-3">
+        {candidates.map((candidate) => (
+          <CandidateCard
+            key={`${candidate.userId}:${candidate.candidateRecordId ?? candidate.publicIntentId ?? 'candidate'}`}
+            candidate={candidate}
+            state={candidateStates[candidateActionKey(candidate)] ?? emptyCandidateActionState()}
+            onSave={onSave}
+            onSendMessage={onSendMessage}
+            onConnect={onConnect}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function isPublicIntentCandidate(candidate: SocialAgentChatCandidate): boolean {
+  return candidate.source === 'public_intent' || candidate.source === 'activity';
+}
+
+function EmptyResult({ onQuickAction }: { onQuickAction: (text: string) => void }) {
+  const actions = [
+    ['发布约练需求', '帮我发布一个约练需求'],
+    ['放宽条件', '放宽城市、时间和兴趣条件再找真实用户'],
+    ['完善我的画像', '我想完善我的 AI 人物画像'],
+    ['换个城市/时间', '换个城市或时间再找真实用户'],
+  ] as const;
   return (
     <div className="rounded-2xl border border-dashed border-[#d9d9d2] bg-white/70 p-5 text-sm leading-6 text-[#686963]">
-      暂时没有找到符合条件的真实候选人。可以放宽城市、时间、距离或兴趣条件后重新搜索。
+      <div className="font-bold text-[#2f302d]">当前没有找到符合条件的真实用户。</div>
+      <div className="mt-1">可以发布约练需求，或放宽城市、时间、兴趣条件后重新搜索。</div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {actions.map(([label, text]) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => onQuickAction(text)}
+            className="rounded-full border border-[#deded8] bg-white px-3 py-1.5 text-xs font-bold text-[#555650] hover:border-[#168a55] hover:text-[#168a55]"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1069,6 +1412,352 @@ function candidateActionText(state: CandidateActionSnapshot): string {
   if (state.send === 'pendingApproval') return '消息已进入待确认队列。';
   if (state.save === 'saved') return '已收藏。';
   return '操作已完成。';
+}
+
+function isPendingActionStatus(status: string | null | undefined): boolean {
+  return status === 'pending' || status === 'pending_approval' || status === 'requested';
+}
+
+function isFailedCandidateAction(
+  success: boolean,
+  status: string | null | undefined,
+  action: SocialAgentToolCall | null | undefined,
+  pending: boolean,
+): boolean {
+  if (pending) return false;
+  if (status === 'failed' || action?.status === 'failed' || action?.status === 'blocked') return true;
+  return !success;
+}
+
+function toolActionErrorMessage(
+  action: SocialAgentToolCall | null | undefined,
+  fallback: string,
+): string {
+  const error = action?.error;
+  if (error && typeof error === 'object') {
+    const message = cleanDisplayText((error as Record<string, unknown>).message, '');
+    if (message) return message;
+  }
+  return fallback;
+}
+
+function progressStepsFromToolCalls(
+  toolCalls: ToolCallView[],
+  result: SocialAgentChatRunResult | null,
+  isRunning: boolean,
+): StatusStep[] {
+  if (toolCalls.length === 0) return [];
+  const steps = toolCalls.map((call) => ({
+    id: `tool_${call.id}`,
+    text: toolProgressText(call),
+    state: toolCallStatusToStepState(call.status),
+  }));
+  const hasSearch = toolCalls.some(
+    (call) =>
+      ['search_matches', 'search_real_candidates', 'search_public_intents'].includes(
+        call.toolName,
+      ) && call.status === 'success',
+  );
+  if (hasSearch) {
+    steps.push({
+      id: 'boundary_filter',
+      text: '已排除你自己和不符合边界的人',
+      state: 'done',
+    });
+  }
+  if (result) {
+    steps.push({
+      id: 'candidate_result',
+      text:
+        result.candidates.length > 0
+          ? `找到 ${result.candidates.length} 个候选`
+          : '没有找到符合条件的真实候选',
+      state: 'done',
+    });
+  } else if (isRunning && toolCalls.every((call) => call.status !== 'running')) {
+    steps.push({ id: 'candidate_result_pending', text: '正在整理候选结果', state: 'running' });
+  }
+  return steps;
+}
+
+function toolProgressText(call: ToolCallView): string {
+  const prefix = call.status === 'running' ? '正在' : call.status === 'success' ? '已' : '';
+  if (call.status === 'blocked') return `${call.label}被权限拦截`;
+  if (call.status === 'failed') return `${call.label}失败`;
+  if (call.toolName === 'get_my_profile' || call.toolName === 'get_ai_profile') {
+    return call.status === 'running' ? '正在读取你的画像' : '已读取你的画像';
+  }
+  if (call.toolName === 'search_matches' || call.toolName === 'search_real_candidates') {
+    return `${prefix}搜索真实用户画像${countSuffix(call.count)}`;
+  }
+  if (call.toolName === 'search_public_intents') {
+    return `${prefix}搜索公开约练卡片${countSuffix(call.count)}`;
+  }
+  if (call.toolName === 'search_activities') {
+    return `${prefix}搜索活动${countSuffix(call.count)}`;
+  }
+  return call.status === 'running' ? `正在${call.label}` : `已${call.label}`;
+}
+
+function countSuffix(count: number | null): string {
+  return count == null ? '' : `：${count} 条`;
+}
+
+function toolCallsFromRunResult(
+  result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult,
+): ToolCallView[] {
+  const events = Array.isArray(result.events)
+    ? result.events.map(normalizeTaskEvent).filter((event): event is SocialAgentTaskEvent => !!event)
+    : [];
+  const fromEvents = toolCallsFromEvents(events);
+  if (fromEvents.length > 0) return fromEvents;
+
+  const rawCalls = (result as { toolCalls?: unknown }).toolCalls;
+  if (!Array.isArray(rawCalls)) return [];
+  return rawCalls
+    .map((call) =>
+      isRecord(call) ? toolCallViewFromRecord(call as unknown as SocialAgentToolCall) : null,
+    )
+    .filter((call): call is ToolCallView => !!call);
+}
+
+function toolCallsFromEvents(events: SocialAgentTaskEvent[]): ToolCallView[] {
+  const calls = new Map<string, ToolCallView>();
+  for (const event of events) {
+    if (event.eventType !== 'tool.called' && event.eventType !== 'tool.returned') continue;
+    const payload = isRecord(event.payload) ? event.payload : {};
+    const toolName = stringValue(payload.toolName ?? payload.tool);
+    if (!toolName) continue;
+    const id = event.toolCallId || `${event.stepId ?? toolName}:${toolName}`;
+    const previous = calls.get(id);
+    if (event.eventType === 'tool.called') {
+      calls.set(id, {
+        ...(previous ?? emptyToolCallView(id, toolName)),
+        id,
+        stepId: event.stepId,
+        toolName,
+        status: previous?.status ?? 'running',
+        label: toolLabel(toolName),
+        detail: previous?.detail ?? 'running',
+        startedAt: previous?.startedAt ?? event.createdAt,
+      });
+      continue;
+    }
+
+    const rawStatus = payload.status ?? (event.eventType === 'tool.returned' ? 'succeeded' : null);
+    const status = toolCallStatusFromRaw(rawStatus);
+    const output = isRecord(payload.output) ? payload.output : null;
+    const error = isRecord(payload.error) ? payload.error : null;
+    calls.set(id, {
+      ...(previous ?? emptyToolCallView(id, toolName)),
+      id,
+      stepId: event.stepId,
+      toolName,
+      status,
+      label: toolLabel(toolName),
+      detail: toolDetail(toolName, status, output, error),
+      count: toolOutputCount(toolName, output),
+      completedAt: event.createdAt,
+    });
+  }
+  return Array.from(calls.values());
+}
+
+function eventsForRun(
+  events: SocialAgentTaskEvent[],
+  run: SocialAgentAsyncRunResult,
+): SocialAgentTaskEvent[] {
+  return events.filter((event) => {
+    const payload = isRecord(event.payload) ? event.payload : {};
+    const runId = stringValue(payload.runId ?? payload.run_id ?? payload.asyncRunId);
+    return !runId || runId === run.runId;
+  });
+}
+
+function normalizeTaskEvent(value: unknown): SocialAgentTaskEvent | null {
+  if (!isRecord(value)) return null;
+  const eventType = stringValue(value.eventType);
+  if (!eventType) return null;
+  return {
+    id: numberValue(value.id) ?? 0,
+    taskId: numberValue(value.taskId) ?? 0,
+    eventType,
+    actor: stringValue(value.actor) ?? 'agent',
+    summary: stringValue(value.summary) ?? '',
+    payload: isRecord(value.payload) ? value.payload : {},
+    stepId: stringValue(value.stepId) ?? null,
+    toolCallId: stringValue(value.toolCallId) ?? null,
+    createdAt: stringValue(value.createdAt) ?? new Date().toISOString(),
+  };
+}
+
+function toolCallViewFromRecord(call: SocialAgentToolCall): ToolCallView {
+  const toolName = stringValue(call.toolName) ?? 'unknown_tool';
+  const status = toolCallStatusFromRaw(call.status);
+  const output = isRecord(call.output) ? call.output : null;
+  const error = isRecord(call.error) ? call.error : null;
+  return {
+    id: stringValue(call.id) ?? nextId(`tool_${toolName}`),
+    stepId: stringValue(call.stepId) ?? null,
+    toolName,
+    status,
+    label: toolLabel(toolName),
+    detail: toolDetail(toolName, status, output, error),
+    count: toolOutputCount(toolName, output),
+    durationMs: numberValue(call.durationMs) ?? null,
+    startedAt: stringValue(call.startedAt) ?? null,
+    completedAt: stringValue(call.completedAt) ?? null,
+  };
+}
+
+function syntheticToolCallView(
+  toolName: string,
+  status: ToolCallViewStatus,
+  output: Record<string, unknown> | null,
+): ToolCallView {
+  return {
+    id: `synthetic_${toolName}`,
+    stepId: null,
+    toolName,
+    status,
+    label: toolLabel(toolName),
+    detail: toolDetail(toolName, status, output, null),
+    count: toolOutputCount(toolName, output),
+    durationMs: null,
+    startedAt: null,
+    completedAt: new Date().toISOString(),
+  };
+}
+
+function upsertToolCallView(current: ToolCallView[], next: ToolCallView): ToolCallView[] {
+  const index = current.findIndex((call) => call.id === next.id);
+  if (index < 0) return [...current, next];
+  return current.map((call, itemIndex) => (itemIndex === index ? next : call));
+}
+
+function emptyToolCallView(id: string, toolName: string): ToolCallView {
+  return {
+    id,
+    stepId: null,
+    toolName,
+    status: 'running',
+    label: toolLabel(toolName),
+    detail: 'running',
+    count: null,
+    durationMs: null,
+    startedAt: null,
+    completedAt: null,
+  };
+}
+
+function toolCallStatusFromRaw(value: unknown): ToolCallViewStatus {
+  if (value === 'succeeded' || value === 'success' || value === 'executed') return 'success';
+  if (value === 'blocked') return 'blocked';
+  if (value === 'failed' || value === 'error') return 'failed';
+  if (value === 'running') return 'running';
+  return 'running';
+}
+
+function toolCallStatusToStepState(status: ToolCallViewStatus): SocialAgentStepStatus {
+  if (status === 'success') return 'done';
+  if (status === 'running') return 'running';
+  return 'failed';
+}
+
+function toolLabel(toolName: string): string {
+  const labels: Record<string, string> = {
+    get_my_profile: '读取你的画像',
+    get_ai_profile: '读取你的画像',
+    get_current_task_memory: '读取当前任务记忆',
+    search_matches: '搜索真实用户画像',
+    search_real_candidates: '搜索真实用户画像',
+    search_public_intents: '搜索公开约练卡片',
+    rank_candidates: '更新候选排序',
+    search_activities: '搜索活动',
+    explain_matches: '更新候选排序',
+    draft_opener: '生成开场白',
+    publish_social_request: '发布约练需求',
+    create_social_request: '生成约练草稿',
+    save_candidate: '收藏候选',
+    send_message_to_candidate: '发送候选消息',
+    send_message: '发送消息',
+    connect_candidate: '连接候选',
+    add_friend: '添加好友',
+    get_conversations: '读取会话',
+    get_agent_inbox: '读取 Agent Inbox',
+    get_pending_approvals: '读取待确认动作',
+    approve_action: '批准动作',
+    reject_action: '拒绝动作',
+    read_long_term_memory: '读取长期记忆',
+    summarize_current_task: '总结当前任务',
+    get_candidate_pool_debug: '读取候选池诊断',
+  };
+  return labels[toolName] ?? toolName.replace(/_/g, ' ');
+}
+
+function toolDetail(
+  toolName: string,
+  status: ToolCallViewStatus,
+  output: Record<string, unknown> | null,
+  error: Record<string, unknown> | null,
+): string {
+  if (status === 'running') return 'running';
+  if (status === 'failed' || status === 'blocked') {
+    return stringValue(error?.message ?? error?.code) ?? status;
+  }
+  const count = toolOutputCount(toolName, output);
+  if (count != null) return `${count} 条`;
+  const id = numberValue(
+    output?.socialRequestId ?? output?.activityId ?? output?.messageId ?? output?.conversationId,
+  );
+  if (id != null) return `#${id}`;
+  return 'completed';
+}
+
+function toolOutputCount(toolName: string, output: Record<string, unknown> | null): number | null {
+  if (!output) return null;
+  if (toolName === 'search_matches' || toolName === 'search_real_candidates') {
+    return arrayLength(output.candidates ?? output.realCandidates ?? output.matches);
+  }
+  if (toolName === 'search_public_intents') {
+    return arrayLength(
+      output.publicIntents ?? output.intents ?? output.activities ?? output.activityResults ?? output.candidates,
+    );
+  }
+  if (toolName === 'search_activities') {
+    return arrayLength(output.activities ?? output.activityResults);
+  }
+  if (toolName === 'get_conversations') return arrayLength(output.conversations);
+  if (toolName === 'get_agent_inbox') {
+    return (
+      (arrayLength(output.events) ?? 0) +
+      (arrayLength(output.conversations) ?? 0) +
+      (arrayLength(output.messages) ?? 0)
+    );
+  }
+  if (toolName === 'get_pending_approvals') return arrayLength(output.approvals);
+  return null;
+}
+
+function arrayLength(value: unknown): number | null {
+  return Array.isArray(value) ? value.length : null;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function numberValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function pendingStatusesForIntent(
@@ -1132,16 +1821,17 @@ function statusesFromRun(
       if (id === 'done') {
         return {
           id,
-          text: run.result
-            ? `已刷新计划和 ${run.result.candidates.length} 位候选人`
-            : '已完成',
+          text: run.result ? `已刷新计划和 ${run.result.candidates.length} 位候选人` : '已完成',
           state: 'done',
         };
       }
-      return existing ?? { id, text: runStepText(id, stepLabels[id] ?? '', 'done'), state: 'done' };
+      return existing
+        ? { ...existing, text: runStepText(id, stepLabels[id] ?? existing.text, 'done'), state: 'done' }
+        : { id, text: runStepText(id, stepLabels[id] ?? '', 'done'), state: 'done' };
     }
     if (run.status === 'failed') {
-      if (existing) return existing.state === 'running' ? { ...existing, state: 'failed' } : existing;
+      if (existing)
+        return existing.state === 'running' ? { ...existing, state: 'failed' } : existing;
       return {
         id,
         text: stepLabels[id] ?? '正在处理任务',
@@ -1180,7 +1870,10 @@ function runStepText(
   state: SocialAgentStepStatus,
 ): string {
   if (id === 'understand') return state === 'done' ? '已理解需求' : '正在理解需求';
-  if (id === 'permission') return state === 'done' ? '已检查权限模式' : `正在检查权限模式：${CONFIRM_PERMISSION_MODE_LABEL}`;
+  if (id === 'permission')
+    return state === 'done'
+      ? '已检查权限模式'
+      : `正在检查权限模式：${CONFIRM_PERMISSION_MODE_LABEL}`;
   if (id === 'deepseek') return state === 'done' ? '已生成匹配意图' : '正在生成匹配意图';
   if (id === 'search') return state === 'done' ? '已搜索候选人' : '正在搜索候选人';
   if (id === 'draft') return state === 'done' ? '已更新约练草稿' : '正在更新约练草稿';
@@ -1225,7 +1918,20 @@ function isReplanRunResult(
 }
 
 function displayName(candidate: SocialAgentChatCandidate): string {
-  return cleanDisplayText(candidate.nickname, `用户 #${candidate.userId}`);
+  return cleanDisplayText(candidate.displayName ?? candidate.nickname, `用户 #${candidate.userId}`);
+}
+
+function candidateActionKey(candidate: SocialAgentChatCandidate): string {
+  return [
+    candidate.source ?? 'candidate',
+    candidate.candidateUserId ?? candidate.userId,
+    candidate.candidateRecordId ?? candidate.publicIntentId ?? candidate.activityId ?? 'transient',
+  ].join(':');
+}
+
+function candidateTargetUserId(candidate: SocialAgentChatCandidate): number | null {
+  const id = candidate.candidateUserId ?? candidate.userId;
+  return Number.isFinite(id) && id > 0 ? id : null;
 }
 
 function candidateLocation(candidate: SocialAgentChatCandidate): string {

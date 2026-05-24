@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { sanitizeCity } from '../common/city.util';
 import { cleanDisplayText } from '../common/display-text.util';
 import { resolveDeepSeekModel } from '../common/deepseek.util';
+import { SocialAgentMetricsService } from './social-agent-metrics.service';
 
 export type SocialAgentIntentType =
   | 'casual_chat'
@@ -54,7 +55,10 @@ export interface SocialAgentIntentRouterResult {
 export class SocialAgentIntentRouterService {
   private readonly logger = new Logger(SocialAgentIntentRouterService.name);
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    @Optional() private readonly metrics?: SocialAgentMetricsService,
+  ) {}
 
   async route(
     input: SocialAgentIntentRouterInput,
@@ -63,14 +67,32 @@ export class SocialAgentIntentRouterService {
     const fallback = this.routeByRules({ ...input, message });
     if (!this.shouldTryDeepSeek(message, fallback)) return fallback;
 
+    const startedAt = Date.now();
     try {
       const enhanced = await this.callDeepSeekRouter(input, fallback);
-      return enhanced ?? fallback;
+      this.metrics?.recordLatency(
+        'deepseek_intent_route',
+        Date.now() - startedAt,
+      );
+      if (!enhanced) {
+        this.metrics?.recordFallback('deepseek_empty');
+        return fallback;
+      }
+      return enhanced;
     } catch (error) {
+      this.metrics?.recordLatency(
+        'deepseek_intent_route',
+        Date.now() - startedAt,
+      );
+      const reason = error instanceof Error ? error.message : String(error);
+      const stage =
+        reason === 'deepseek_timeout' ? 'deepseek_timeout' : 'deepseek_error';
+      this.metrics?.recordFallback(stage);
+      this.metrics?.recordError(stage);
       this.logger.warn(
         JSON.stringify({
           event: 'social_agent.intent_router.deepseek_failed',
-          reason: error instanceof Error ? error.message : String(error),
+          reason,
         }),
       );
       return fallback;
@@ -83,10 +105,18 @@ export class SocialAgentIntentRouterService {
     const message = cleanDisplayText(input.message, '').trim();
     const text = message.toLowerCase();
     const entities = this.extractEntities(message);
-    const hasTask = Boolean(input.taskContext?.taskId);
+    const hasTask = input.taskContext?.hasSearchContext === true;
     const hasCandidates = input.taskContext?.hasCandidates === true;
     const wantsCandidateRefresh =
       /(换一批|换几个|更多|还有|更近|重新找|再找|扩大|放宽)/i.test(text);
+    const wantsSocialSearch =
+      /(帮我找|给我找|想找|想认识|找一个|找个|找人|找.*搭子|搭子.*有吗|有合适的人吗|合适的人|伙伴|好友|对象|同城朋友|匹配|搜索候选|推荐.*人|附近.*人|同城.*人|真实用户|约练用户|人物画像|画像认证|发布过约练|约练卡片|跑步搭子|拍照搭子|一起.*(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|骑行|city\s*walk|citywalk)|周末.*(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|骑行|city\s*walk|citywalk))/i.test(
+        text,
+      );
+    const wantsActivitySearch =
+      /(活动|局|约练活动|羽毛球局|跑团|课程|场地|报名|参加约练|附近有什么|有没有.*局|有什么.*活动)/i.test(
+        text,
+      );
 
     if (
       /(你好|hello|hi|嗨|你能做什么|你可以做什么|怎么找搭子|该怎么找|怎么聊天自然|聊天自然|你觉得怎么|建议|聊聊)/i.test(
@@ -99,6 +129,8 @@ export class SocialAgentIntentRouterService {
     }
 
     if (
+      !wantsSocialSearch &&
+      !wantsActivitySearch &&
       /(不要|别|不想|不喜欢|不接受|拒绝|避开|夜间|晚上见面|自动发|自动联系|隐私|手机号|微信|住址|地址)/i.test(
         text,
       )
@@ -110,7 +142,7 @@ export class SocialAgentIntentRouterService {
     }
 
     if (
-      /(发消息|发送|加好友|邀请|约他|约她|联系|收藏|发布|帮我发|帮我加|帮我邀请)/i.test(
+      /(发消息|发送.*(给|第一个|第二个|第三个|这个|那个|他|她|候选)|加好友|邀请(第一个|第二个|第三个|这个|那个|他|她|候选)|约他|约她|联系(第一个|第二个|第三个|这个|那个|他|她|候选)|收藏(第一个|第二个|第三个|这个|那个|他|她|候选)|确认发布|帮我发|帮我加|帮我邀请)/i.test(
         text,
       )
     ) {
@@ -140,11 +172,7 @@ export class SocialAgentIntentRouterService {
       );
     }
 
-    if (
-      /(活动|局|约练活动|羽毛球局|跑团|课程|场地|报名|参加约练|附近有什么|有没有.*局|有什么.*活动)/i.test(
-        text,
-      )
-    ) {
+    if (wantsActivitySearch && !wantsSocialSearch) {
       return this.result('activity_search', 0.85, entities, {
         shouldSearch: true,
         shouldReplan: hasTask,
@@ -152,11 +180,7 @@ export class SocialAgentIntentRouterService {
       });
     }
 
-    if (
-      /(帮我找|给我找|找一个|找个|找人|找.*搭子|搭子.*有吗|有合适的人吗|合适的人|伙伴|好友|对象|同城朋友|匹配|搜索候选|推荐.*人|附近.*人|同城.*人|跑步搭子|拍照搭子)/i.test(
-        text,
-      )
-    ) {
+    if (wantsSocialSearch) {
       return this.result('social_search', 0.88, entities, {
         shouldSearch: true,
         shouldReplan: hasTask,
@@ -179,7 +203,6 @@ export class SocialAgentIntentRouterService {
       replyStrategy: 'ask_clarifying_question',
     });
   }
-
   private result(
     intent: SocialAgentIntentType,
     confidence: number,

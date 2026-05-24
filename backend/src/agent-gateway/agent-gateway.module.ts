@@ -6,7 +6,12 @@ import { AgentApprovalDispatcherService } from './agent-approval-dispatcher.serv
 import { ActivitiesModule } from '../activities/activities.module';
 import { SocialAgentAutopilotController } from './social-agent-autopilot.controller';
 import { SocialAgentChatController } from './social-agent-chat.controller';
+import { SocialAgentDebugController } from './social-agent-debug.controller';
 import { SocialAgentTasksController } from './social-agent-tasks.controller';
+import {
+  FitMeetAgentToolRegistryAgentController,
+  FitMeetAgentToolRegistryUserController,
+} from './fitmeet-agent-tool-registry.controller';
 import {
   AgentUserController,
   AgentApiController,
@@ -33,8 +38,10 @@ import { AgentPermissionService } from './agent-permission.service';
 import { SocialAgentPlannerService } from './social-agent-planner.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentToolExecutorService } from './social-agent-tool-executor.service';
+import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
 import { SocialAgentAutopilotService } from './social-agent-autopilot.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
+import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentMetricsController } from './social-agent-metrics.controller';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
@@ -71,6 +78,7 @@ import { Follow } from '../friends/follow.entity';
 import { AiDelegateProfile } from '../ai-match/ai-delegate-profile.entity';
 import { AiMatchSession } from '../ai-match/ai-match-session.entity';
 import { UserSocialProfile } from '../users/user-social-profile.entity';
+import { SocialActivity } from '../activities/entities/activity.entity';
 
 @Module({
   imports: [
@@ -108,6 +116,7 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
       UserSocialProfile,
       SocialAgentLongTermMemory,
       User,
+      SocialActivity,
     ]),
   ],
   providers: [
@@ -118,16 +127,19 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
     AgentSettingsService,
     AgentActionLogService,
     AgentPermissionService,
+    FitMeetAgentToolRegistryService,
     SocialAgentPlannerService,
     SocialAgentIntentRouterService,
     SocialAgentAutopilotService,
     SocialAgentChatService,
+    SocialAgentCandidatePoolService,
     SocialAgentMetricsService,
     SocialAgentLongTermMemoryService,
     SocialAgentRagService,
     SocialAgentToolExecutorService,
     AgentWebhookService,
     AiSocialAutopilotService,
+    AgentDiscoveryService,
     AgentProfileQAService,
     ProfileMatchService,
     ProfileMatchAutopilotService,
@@ -147,6 +159,9 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
     PublicSocialSkillsController,
     SocialAgentAutopilotController,
     SocialAgentChatController,
+    SocialAgentDebugController,
+    FitMeetAgentToolRegistryAgentController,
+    FitMeetAgentToolRegistryUserController,
     SocialAgentMetricsController,
     SocialAgentTasksController,
   ],
@@ -158,10 +173,12 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
     AgentSettingsService,
     AgentActionLogService,
     AgentPermissionService,
+    FitMeetAgentToolRegistryService,
     SocialAgentPlannerService,
     SocialAgentIntentRouterService,
     SocialAgentAutopilotService,
     SocialAgentChatService,
+    SocialAgentCandidatePoolService,
     SocialAgentLongTermMemoryService,
     SocialAgentRagService,
     SocialAgentToolExecutorService,

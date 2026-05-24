@@ -38,6 +38,15 @@ function qbReturning(rows: User[], calls?: string[]) {
   };
 }
 
+function requestQbReturning(rows: UserSocialRequest[]) {
+  return {
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    getMany: jest.fn().mockResolvedValue(rows),
+  };
+}
+
 function user(overrides: Partial<User> = {}): User {
   return {
     id: 20,
@@ -74,7 +83,9 @@ function user(overrides: Partial<User> = {}): User {
   } as User;
 }
 
-function profile(overrides: Partial<UserSocialProfile> = {}): UserSocialProfile {
+function profile(
+  overrides: Partial<UserSocialProfile> = {},
+): UserSocialProfile {
   return {
     userId: 20,
     nickname: 'Runner',
@@ -116,7 +127,9 @@ function profile(overrides: Partial<UserSocialProfile> = {}): UserSocialProfile 
   } as UserSocialProfile;
 }
 
-function request(overrides: Partial<UserSocialRequest> = {}): UserSocialRequest {
+function request(
+  overrides: Partial<UserSocialRequest> = {},
+): UserSocialRequest {
   return {
     id: 301,
     userId: 10,
@@ -154,14 +167,19 @@ function request(overrides: Partial<UserSocialRequest> = {}): UserSocialRequest 
   } as UserSocialRequest;
 }
 
-function makeHarness(rows: User[] = [user()]) {
+function makeHarness(
+  rows: User[] = [user()],
+  activeRequests: UserSocialRequest[] = [],
+) {
   const callOrder: string[] = [];
   const userRepo = mockRepo();
   const requestRepo = mockRepo();
   const candidateRepo = mockRepo();
   const prefRepo = mockRepo();
   const profileRepo = mockRepo();
-  const safety = { getMutualBlockUserIds: jest.fn().mockResolvedValue(new Set()) };
+  const safety = {
+    getMutualBlockUserIds: jest.fn().mockResolvedValue(new Set()),
+  };
   const reasoner = {
     explainSocialRequestCandidate: jest.fn(async (input) => {
       callOrder.push('ai');
@@ -184,8 +202,13 @@ function makeHarness(rows: User[] = [user()]) {
   userRepo.createQueryBuilder.mockReturnValue(qb);
   userRepo.findOne.mockResolvedValue(user({ id: 10, name: 'Owner' }));
   requestRepo.findOne.mockResolvedValue(request());
+  requestRepo.createQueryBuilder.mockReturnValue(
+    requestQbReturning(activeRequests),
+  );
   profileRepo.findOne.mockResolvedValue(profile({ userId: 10 }));
-  profileRepo.find.mockResolvedValue(rows.map((row) => profile({ userId: row.id })));
+  profileRepo.find.mockResolvedValue(
+    rows.map((row) => profile({ userId: row.id })),
+  );
   prefRepo.find.mockResolvedValue(
     rows.map((row) => ({ userId: row.id, acceptAgentMessages: true })),
   );
@@ -252,7 +275,11 @@ describe('MatchService social request matching', () => {
       email: 'test-user@example.com',
       name: '测试用户',
     });
-    const realUser = user({ id: 22, email: 'real@example.com', name: 'Real Runner' });
+    const realUser = user({
+      id: 22,
+      email: 'real@example.com',
+      name: 'Real Runner',
+    });
     const { service, reasoner } = makeHarness([testUser, realUser]);
 
     const result = await service.runMatch(301, 10, { limit: 5 });
@@ -267,26 +294,112 @@ describe('MatchService social request matching', () => {
     );
   });
 
-  it('honors AI profile discovery and agent recommendation opt-outs', async () => {
-    const visible = user({ id: 21, email: 'visible@example.com', name: 'Visible Runner' });
-    const hidden = user({ id: 22, email: 'hidden@example.com', name: 'Hidden Runner' });
-    const agentOptOut = user({ id: 23, email: 'agent-opt-out@example.com', name: 'Quiet Runner' });
-    const { service, profileRepo, reasoner } = makeHarness([visible, hidden, agentOptOut]);
+  it('honors explicit privacy-boundary recommendation opt-outs', async () => {
+    const visible = user({
+      id: 21,
+      email: 'visible@example.com',
+      name: 'Visible Runner',
+    });
+    const hidden = user({
+      id: 22,
+      email: 'hidden@example.com',
+      name: 'Hidden Runner',
+    });
+    const agentOptOut = user({
+      id: 23,
+      email: 'agent-opt-out@example.com',
+      name: 'Quiet Runner',
+    });
+    const { service, profileRepo, reasoner } = makeHarness([
+      visible,
+      hidden,
+      agentOptOut,
+    ]);
     profileRepo.find.mockResolvedValue([
-      profile({ userId: 21, profileDiscoverable: true, agentCanRecommendMe: true }),
-      profile({ userId: 22, profileDiscoverable: false, agentCanRecommendMe: false }),
-      profile({ userId: 23, profileDiscoverable: true, agentCanRecommendMe: false }),
+      profile({
+        userId: 21,
+        profileDiscoverable: true,
+        agentCanRecommendMe: true,
+      }),
+      profile({
+        userId: 22,
+        privacyBoundary: '关闭推荐，不参与匹配',
+      }),
+      profile({
+        userId: 23,
+        profileDiscoverable: true,
+        agentCanRecommendMe: false,
+      }),
     ]);
 
     const result = await service.runMatch(301, 10, { limit: 10 });
 
-    expect(result.candidates).toHaveLength(1);
-    expect(result.candidates[0].candidateUserId).toBe(21);
-    expect(reasoner.explainSocialRequestCandidate).toHaveBeenCalledTimes(1);
-    expect(reasoner.explainSocialRequestCandidate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        candidateUser: expect.objectContaining({ id: 21 }),
+    expect(
+      result.candidates.map((candidate) => candidate.candidateUserId),
+    ).toEqual(expect.arrayContaining([21, 23]));
+    expect(
+      result.candidates.map((candidate) => candidate.candidateUserId),
+    ).not.toContain(22);
+    expect(reasoner.explainSocialRequestCandidate).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps default-recommendable real users and public-card users', async () => {
+    const profileCandidate = user({
+      id: 21,
+      email: 'profile@example.com',
+      name: 'Profile Runner',
+    });
+    const plainCandidate = user({
+      id: 22,
+      email: 'plain@example.com',
+      name: 'Plain Runner',
+    });
+    const publicCardCandidate = user({
+      id: 23,
+      email: 'public-card@example.com',
+      name: 'Public Card Runner',
+    });
+    const { service, profileRepo, reasoner } = makeHarness(
+      [profileCandidate, plainCandidate, publicCardCandidate],
+      [
+        request({
+          id: 401,
+          userId: 23,
+          title: '周末一起夜跑',
+          visibility: SocialRequestVisibility.Public,
+          status: UserSocialRequestStatus.Matching,
+          agentAllowed: true,
+          interestTags: ['running'],
+          activityType: 'running',
+        }),
+      ],
+    );
+    profileRepo.find.mockResolvedValue([
+      profile({
+        userId: 21,
+        profileDiscoverable: true,
+        agentCanRecommendMe: true,
       }),
+      profile({
+        userId: 22,
+        profileDiscoverable: false,
+        agentCanRecommendMe: false,
+      }),
+    ]);
+
+    const result = await service.runMatch(301, 10, { limit: 10 });
+
+    const ids = result.candidates.map((candidate) => candidate.candidateUserId);
+    expect(ids).toEqual(expect.arrayContaining([21, 22, 23]));
+    expect(ids).toHaveLength(3);
+    expect(reasoner.explainSocialRequestCandidate).toHaveBeenCalledTimes(3);
+    expect(
+      result.candidates.find((candidate) => candidate.candidateUserId === 23)
+        ?.reasons,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('active public social request'),
+      ]),
     );
   });
 });

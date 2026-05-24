@@ -7,6 +7,7 @@ import {
   SocialRequestGenderPreference,
   SocialRequestSafety,
   SocialRequestType,
+  SocialRequestVisibility,
   UserSocialRequest,
   UserSocialRequestStatus,
 } from '../social-requests/social-request.entity';
@@ -111,12 +112,23 @@ interface CandidateScore {
   user: User;
   pref: UserPreference | null;
   socialProfile: UserSocialProfile | null;
+  activeRequest: ActiveSocialRequestSignal | null;
   total: number;
   breakdown: Record<string, number>;
   reasons: string[];
   commonTags: string[];
   distanceKm: number | null;
   risk: { level: CandidateRiskLevel; warnings: string[] };
+}
+
+interface ActiveSocialRequestSignal {
+  id: number;
+  userId: number;
+  title: string;
+  city: string;
+  type: SocialRequestType;
+  activityType: string;
+  interestTags: string[];
 }
 
 @Injectable()
@@ -148,10 +160,14 @@ export class MatchService {
    * Quick search nearby people; does not persist candidates.
    * Used by `POST /api/agent/nearby/search`.
    */
-  async searchNearby(input: NearbySearchInput): Promise<MatchedCandidateView[]> {
+  async searchNearby(
+    input: NearbySearchInput,
+  ): Promise<MatchedCandidateView[]> {
     const owner = await this.userRepo.findOne({ where: { id: input.userId } });
     const city = (input.city ?? owner?.city ?? '').trim();
-    const blocked = await this.safetyService.getMutualBlockUserIds(input.userId);
+    const blocked = await this.safetyService.getMutualBlockUserIds(
+      input.userId,
+    );
 
     const users = await this.fetchCandidatePool({
       excludeUserIds: blocked,
@@ -165,6 +181,8 @@ export class MatchService {
     const userIds = users.map((u) => u.id);
     const prefs = await this.fetchPrefs(userIds);
     const profiles = await this.fetchSocialProfiles(userIds);
+    const activeRequestSignals =
+      await this.fetchActiveSocialRequestSignals(userIds);
     const ownerProfile = await this.socialProfileRepo.findOne({
       where: { userId: input.userId },
     });
@@ -186,6 +204,7 @@ export class MatchService {
       timeEnd: input.timeEnd ? new Date(input.timeEnd) : null,
       safetyRequirement: input.safetyRequirement,
       agentAllowedRequired: input.agentAllowedRequired ?? false,
+      activeRequestSignals,
     });
 
     if (ranked.length === 0) {
@@ -219,7 +238,9 @@ export class MatchService {
     actingUserId: number,
     opts: { limit?: number } = {},
   ): Promise<{ socialRequestId: number; candidates: MatchedCandidateView[] }> {
-    const request = await this.requestRepo.findOne({ where: { id: requestId } });
+    const request = await this.requestRepo.findOne({
+      where: { id: requestId },
+    });
     if (!request) throw new NotFoundException('Social request not found');
     if (request.userId !== actingUserId) {
       // Read-only API for non-owners is exposed elsewhere; matching is owner-only.
@@ -238,7 +259,9 @@ export class MatchService {
       (request.city || '').trim() ||
       (ownerProfile?.city || '').trim() ||
       (owner?.city || '').trim();
-    const blocked = await this.safetyService.getMutualBlockUserIds(request.userId);
+    const blocked = await this.safetyService.getMutualBlockUserIds(
+      request.userId,
+    );
 
     let users = await this.fetchCandidatePool({
       excludeUserIds: blocked,
@@ -271,6 +294,8 @@ export class MatchService {
     const userIds = users.map((u) => u.id);
     const prefs = await this.fetchPrefs(userIds);
     const profiles = await this.fetchSocialProfiles(userIds);
+    const activeRequestSignals =
+      await this.fetchActiveSocialRequestSignals(userIds);
     const ranked = this.scoreCandidates(users, prefs, {
       profiles,
       ownerProfile,
@@ -305,6 +330,7 @@ export class MatchService {
       timeEnd: request.timeEnd,
       safetyRequirement: request.safetyRequirement,
       agentAllowedRequired: request.agentAllowed,
+      activeRequestSignals,
     });
 
     // Replace previous Suggested rows.
@@ -431,7 +457,9 @@ export class MatchService {
     requestId: number,
     actingUserId: number,
   ): Promise<{ socialRequestId: number; candidates: MatchedCandidateView[] }> {
-    const request = await this.requestRepo.findOne({ where: { id: requestId } });
+    const request = await this.requestRepo.findOne({
+      where: { id: requestId },
+    });
     if (!request || request.userId !== actingUserId) {
       throw new NotFoundException('Social request not found');
     }
@@ -549,8 +577,7 @@ export class MatchService {
     const users = await qb.take(HARD_FILTER_USER_PAGE).getMany();
     return users.filter(
       (user) =>
-        !input.excludeUserIds.has(user.id) &&
-        !this.isProductionTestUser(user),
+        !input.excludeUserIds.has(user.id) && !this.isProductionTestUser(user),
     );
   }
 
@@ -575,6 +602,47 @@ export class MatchService {
       where: { userId: In(userIds) },
     });
     return new Map(profiles.map((p) => [p.userId, p]));
+  }
+
+  private async fetchActiveSocialRequestSignals(
+    userIds: number[],
+  ): Promise<Map<number, ActiveSocialRequestSignal>> {
+    if (!userIds.length) return new Map();
+    const rows = await this.requestRepo
+      .createQueryBuilder('request')
+      .where('request.userId IN (:...userIds)', { userIds })
+      .andWhere('request.visibility = :visibility', {
+        visibility: SocialRequestVisibility.Public,
+      })
+      .andWhere('request.agentAllowed = true')
+      .andWhere('request.status IN (:...statuses)', {
+        statuses: [
+          UserSocialRequestStatus.Matching,
+          UserSocialRequestStatus.Matched,
+          UserSocialRequestStatus.InvitationPending,
+          UserSocialRequestStatus.Chatting,
+        ],
+      })
+      .andWhere('(request.expiresAt IS NULL OR request.expiresAt >= :now)', {
+        now: new Date(),
+      })
+      .orderBy('request.updatedAt', 'DESC')
+      .getMany();
+
+    const byUser = new Map<number, ActiveSocialRequestSignal>();
+    for (const row of rows) {
+      if (byUser.has(row.userId)) continue;
+      byUser.set(row.userId, {
+        id: row.id,
+        userId: row.userId,
+        title: row.title,
+        city: row.city,
+        type: row.type,
+        activityType: row.activityType,
+        interestTags: row.interestTags ?? [],
+      });
+    }
+    return byUser;
   }
 
   // Shared scorer inputs
@@ -605,6 +673,7 @@ export class MatchService {
       socialGoal?: string;
       personalityPreference?: string[];
       locationPreference?: string;
+      activeRequestSignals: Map<number, ActiveSocialRequestSignal>;
     },
   ): CandidateScore[] {
     const desiredTags = new Set(
@@ -627,10 +696,12 @@ export class MatchService {
     for (const user of users) {
       const pref = prefs.get(user.id) ?? null;
       const socialProfile = ctx.profiles.get(user.id) ?? null;
+      const activeRequest = ctx.activeRequestSignals.get(user.id) ?? null;
 
-      if (ctx.agentAllowedRequired === true) {
-        if (socialProfile?.agentCanRecommendMe === false) continue;
-      } else if (socialProfile?.profileDiscoverable === false) {
+      if (
+        ctx.agentAllowedRequired !== true &&
+        socialProfile?.profileDiscoverable === false
+      ) {
         continue;
       }
 
@@ -644,12 +715,23 @@ export class MatchService {
       }
       if (this.violatesPrivacyBoundary(socialProfile, ctx)) continue;
       if (this.violatesOwnerBoundary(user, socialProfile, ctx)) continue;
-      if (this.violatesDemographicPreference(user, socialProfile, ctx)) continue;
+      if (this.violatesDemographicPreference(user, socialProfile, ctx))
+        continue;
 
       const breakdown: Record<string, number> = {};
       const reasons: string[] = [];
       const warnings: string[] = [];
       const candidateCity = (socialProfile?.city || user.city || '').trim();
+      if (activeRequest) {
+        reasons.push(
+          `Candidate has an active public social request: ${activeRequest.title}.`,
+        );
+      }
+      if (socialProfile?.agentCanRecommendMe) {
+        reasons.push(
+          'Candidate has an AI social profile enabled for matching.',
+        );
+      }
 
       // 1) Place / distance, max 25
       const distanceKm = this.computeDistanceKm(
@@ -661,17 +743,27 @@ export class MatchService {
       );
       const distScore = this.scoreDistance(distanceKm, ctx.radiusKm);
       breakdown.distance = distScore;
-      if (distanceKm == null && ctx.ownerCity && candidateCity === ctx.ownerCity) {
-        reasons.push(`Same city: ${candidateCity}. Distance needs coordinates.`);
+      if (
+        distanceKm == null &&
+        ctx.ownerCity &&
+        candidateCity === ctx.ownerCity
+      ) {
+        reasons.push(
+          `Same city: ${candidateCity}. Distance needs coordinates.`,
+        );
       } else if (distanceKm != null) {
-        reasons.push(`Distance ${distanceKm.toFixed(1)}km within ${ctx.radiusKm}km preference.`);
+        reasons.push(
+          `Distance ${distanceKm.toFixed(1)}km within ${ctx.radiusKm}km preference.`,
+        );
       }
       if (
         ctx.locationPreference &&
         socialProfile?.nearbyArea &&
         ctx.locationPreference.includes(socialProfile.nearbyArea)
       ) {
-        reasons.push(`Preferred nearby area matches: ${socialProfile.nearbyArea}.`);
+        reasons.push(
+          `Preferred nearby area matches: ${socialProfile.nearbyArea}.`,
+        );
       }
 
       // Hard filter: clearly out of radius and we have a real distance.
@@ -711,6 +803,9 @@ export class MatchService {
         ...(socialProfile?.lifestyleTags ?? []),
         ...(socialProfile?.socialScenes ?? []),
         ...(socialProfile?.traits ?? []),
+        ...(activeRequest?.interestTags ?? []),
+        activeRequest?.activityType ?? '',
+        activeRequest?.type ? TYPE_TO_TAG[activeRequest.type] : '',
       ];
       const compatibility = this.compatibility.scoreRequestCandidate({
         desiredTags: [...desiredTags],
@@ -757,17 +852,18 @@ export class MatchService {
         reasons.push('Activity type is related.');
       }
 
-
       // 6) Safety, max 10
-      const { score: safeScore, warnings: safeWarn, level } = this.scoreSafety(
-        user,
-        ctx.safetyRequirement,
-      );
+      const {
+        score: safeScore,
+        warnings: safeWarn,
+        level,
+      } = this.scoreSafety(user, ctx.safetyRequirement);
       breakdown.safety = safeScore;
       warnings.push(...safeWarn);
       if (user.verified) reasons.push('Candidate is verified.');
 
-      if (pref?.acceptAgentMessages) reasons.push('Candidate accepts agent-mediated messages.');
+      if (pref?.acceptAgentMessages)
+        reasons.push('Candidate accepts agent-mediated messages.');
 
       const total =
         distScore +
@@ -781,6 +877,7 @@ export class MatchService {
         user,
         pref,
         socialProfile,
+        activeRequest,
         total: Math.max(0, Math.min(100, Math.round(total))),
         breakdown,
         reasons,
@@ -839,7 +936,11 @@ export class MatchService {
     const normalized = (value ?? '').trim().toLowerCase();
     if (!normalized) return [];
     const tags = new Set([normalized]);
-    if (/(rich|wealth|money|income|salary|resource|resources|asset|net.?worth)/i.test(normalized)) {
+    if (
+      /(rich|wealth|money|income|salary|resource|resources|asset|net.?worth)/i.test(
+        normalized,
+      )
+    ) {
       tags.add('wealth_resource');
     }
     if (/(founder|entrepreneur|startup|business|ceo)/i.test(normalized)) {
@@ -884,9 +985,7 @@ export class MatchService {
       if (Number.isFinite(aS) && Number.isFinite(aE)) {
         if (aS <= rS && aE >= rE) return 20;
         if (aE > rS && aS < rE) return 12;
-        if (
-          new Date(aS).toDateString() === new Date(rS).toDateString()
-        )
+        if (new Date(aS).toDateString() === new Date(rS).toDateString())
           return 6;
         return 0;
       }
@@ -911,10 +1010,7 @@ export class MatchService {
     if (!type) return 6;
     const tags = (user.interestTags ?? []).map((t) => t.toLowerCase());
     const targetTag = TYPE_TO_TAG[type];
-    if (
-      activityType &&
-      tags.includes(activityType.toLowerCase())
-    ) {
+    if (activityType && tags.includes(activityType.toLowerCase())) {
       return 15;
     }
     if (targetTag && tags.includes(targetTag)) return 15;
@@ -931,7 +1027,8 @@ export class MatchService {
   ): number {
     if (!pref && !socialProfile && (!user.bio || user.bio.length < 5)) return 3;
     let score = 3;
-    const bio = `${user.bio ?? ''} ${socialProfile?.socialPreference ?? ''}`.toLowerCase();
+    const bio =
+      `${user.bio ?? ''} ${socialProfile?.socialPreference ?? ''}`.toLowerCase();
     const desired = (
       pref?.idealPartnerDescription ?? interestTags.join(' ')
     ).toLowerCase();
@@ -963,11 +1060,27 @@ export class MatchService {
       socialGoal?: string;
     },
   ) {
-    const boundary = `${ctx.ownerProfile?.rejectRules ?? ''} ${ctx.ownerProfile?.privacyBoundary ?? ''} ${profile?.rejectRules ?? ''} ${profile?.privacyBoundary ?? ''}`.toLowerCase();
-    const requestText = `${ctx.timePreference ?? ''} ${ctx.locationPreference ?? ''} ${ctx.socialGoal ?? ''}`.toLowerCase();
+    const boundary =
+      `${ctx.ownerProfile?.rejectRules ?? ''} ${ctx.ownerProfile?.privacyBoundary ?? ''} ${profile?.rejectRules ?? ''} ${profile?.privacyBoundary ?? ''}`.toLowerCase();
+    const requestText =
+      `${ctx.timePreference ?? ''} ${ctx.locationPreference ?? ''} ${ctx.socialGoal ?? ''}`.toLowerCase();
     if (!boundary) return false;
-    if (/(不接受|拒绝|禁止)/.test(boundary) && /(夜间|深夜|凌晨|night|midnight)/.test(requestText)) return true;
-    if (/(不接受|拒绝|禁止)/.test(boundary) && /(私人|住址|家里|酒店|hotel|home)/.test(requestText)) return true;
+    if (
+      /(不被推荐|不参与匹配|关闭推荐|不接受推荐|不要推荐|禁止推荐|退出匹配|关闭匹配)/.test(
+        boundary,
+      )
+    )
+      return true;
+    if (
+      /(不接受|拒绝|禁止)/.test(boundary) &&
+      /(夜间|深夜|凌晨|night|midnight)/.test(requestText)
+    )
+      return true;
+    if (
+      /(不接受|拒绝|禁止)/.test(boundary) &&
+      /(私人|住址|家里|酒店|hotel|home)/.test(requestText)
+    )
+      return true;
     return false;
   }
 
@@ -989,20 +1102,33 @@ export class MatchService {
   ): boolean {
     const owner = ctx.ownerProfile;
     if (!owner) return false;
-    const boundary = `${owner.rejectRules ?? ''} ${owner.privacyBoundary ?? ''} ${(owner.avoidTraits ?? []).join(' ')}`.toLowerCase();
+    const boundary =
+      `${owner.rejectRules ?? ''} ${owner.privacyBoundary ?? ''} ${(owner.avoidTraits ?? []).join(' ')}`.toLowerCase();
     if (!boundary) return false;
-    const candidateGender = this.normalizeGender(profile?.gender || user.gender || '');
-    if (candidateGender === 'male' && /(不要男|拒绝男|不推荐男|不接受男|别推荐男)/.test(boundary)) {
+    const candidateGender = this.normalizeGender(
+      profile?.gender || user.gender || '',
+    );
+    if (
+      candidateGender === 'male' &&
+      /(不要男|拒绝男|不推荐男|不接受男|别推荐男)/.test(boundary)
+    ) {
       return true;
     }
-    if (candidateGender === 'female' && /(不要女|拒绝女|不推荐女|不接受女|别推荐女)/.test(boundary)) {
+    if (
+      candidateGender === 'female' &&
+      /(不要女|拒绝女|不推荐女|不接受女|别推荐女)/.test(boundary)
+    ) {
       return true;
     }
     // Night meeting boundary: filter candidates whose declared availability is
     // exclusively night-time when the owner refused night meetings.
     if (/(不要夜|不接受夜|拒绝夜|不夜间|不晚上|别夜间|别晚上)/.test(boundary)) {
       const times = (profile?.availableTimes ?? []).join(' ').toLowerCase();
-      if (times && /(夜|night|凌晨|深夜|midnight)/.test(times) && !/(白天|day|下午|上午|周末|weekend)/.test(times)) {
+      if (
+        times &&
+        /(夜|night|凌晨|深夜|midnight)/.test(times) &&
+        !/(白天|day|下午|上午|周末|weekend)/.test(times)
+      ) {
         return true;
       }
     }
@@ -1090,12 +1216,11 @@ export class MatchService {
 
     let level: CandidateRiskLevel = CandidateRiskLevel.Low;
     if (warnings.length >= 2) level = CandidateRiskLevel.Medium;
-    if (
-      requirement === SocialRequestSafety.VerifiedOnly &&
-      !user.verified
-    ) {
+    if (requirement === SocialRequestSafety.VerifiedOnly && !user.verified) {
       level = CandidateRiskLevel.High;
-      warnings.push('Verified-only was requested, but the candidate is not verified.');
+      warnings.push(
+        'Verified-only was requested, but the candidate is not verified.',
+      );
     }
     return { score: Math.min(score, 10), warnings, level };
   }
@@ -1141,11 +1266,16 @@ export class MatchService {
     request?: UserSocialRequest,
   ): string[] {
     const reasons = [...cand.reasons];
-    if (request?.activityType && cand.user.interestTags?.includes(request.activityType)) {
+    if (
+      request?.activityType &&
+      cand.user.interestTags?.includes(request.activityType)
+    ) {
       reasons.push(`Both like ${request.activityType}.`);
     }
     if (cand.commonTags.length === 0 && cand.breakdown.interest === 0) {
-      reasons.push('No shared interest tags yet, but other dimensions look compatible.');
+      reasons.push(
+        'No shared interest tags yet, but other dimensions look compatible.',
+      );
     }
     return Array.from(new Set(reasons)).slice(0, 6);
   }
@@ -1190,7 +1320,9 @@ export class MatchService {
     const reasons = this.generateMatchReasons(cand, request);
     const suggestedMessage = this.generateIcebreakerMessage(cand, request);
     const source: MatchResultSource =
-      request?.source === 'public' ? 'public_intent' : 'social_request';
+      request?.source === 'public' || cand.activeRequest
+        ? 'public_intent'
+        : 'social_request';
     const riskWarning = cand.risk.warnings.join(' ');
     return {
       targetType: 'user',

@@ -59,6 +59,7 @@ DRIFT_FIX_FILE="${DRIFT_FIX_FILE:-$SCRIPT_DIR/agent-schema-drift-fix-20260513.sq
 AGENT_LOG_FIELDS_FIX_FILE="${AGENT_LOG_FIELDS_FIX_FILE:-$SCRIPT_DIR/fix-agent-log-fields-20260514.sql}"
 AGENT_TASK_RUNTIME_PATCH_FILE="${AGENT_TASK_RUNTIME_PATCH_FILE:-$SCRIPT_DIR/agent-task-runtime-schema-patch-20260519.sql}"
 SOCIAL_AGENT_FINAL_PATCH_FILE="${SOCIAL_AGENT_FINAL_PATCH_FILE:-$SCRIPT_DIR/social-agent-final-schema-patch-20260519.sql}"
+AGENT_LONG_TERM_MEMORY_PATCH_FILE="${AGENT_LONG_TERM_MEMORY_PATCH_FILE:-$SCRIPT_DIR/agent-long-term-memory-20260601.sql}"
 BACKUP_DIR="${BACKUP_DIR:-/opt/fitmeet-db-backup}"
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-fitness-postgres}"
 
@@ -103,7 +104,7 @@ echo "      patch applied successfully."
 # -- 3a. Apply follow-up patches --------------------------------------------
 #       These are idempotent (IF NOT EXISTS / pg_enum guards) and safe to
 #       run on a DB that has been fully migrated by the base patch above.
-for FOLLOWUP in "$ROUND3_PATCH_FILE" "$DRIFT_FIX_FILE" "$AGENT_LOG_FIELDS_FIX_FILE" "$AGENT_TASK_RUNTIME_PATCH_FILE" "$SOCIAL_AGENT_FINAL_PATCH_FILE"; do
+for FOLLOWUP in "$ROUND3_PATCH_FILE" "$DRIFT_FIX_FILE" "$AGENT_LOG_FIELDS_FIX_FILE" "$AGENT_TASK_RUNTIME_PATCH_FILE" "$SOCIAL_AGENT_FINAL_PATCH_FILE" "$AGENT_LONG_TERM_MEMORY_PATCH_FILE"; do
   if [[ -f "$FOLLOWUP" ]]; then
     echo "      Applying follow-up: $(basename "$FOLLOWUP")"
     docker exec -i "$POSTGRES_CONTAINER" \
@@ -126,6 +127,7 @@ TABLES=(
   user_preferences social_requests public_social_intents
   ai_delegate_profiles ai_match_sessions
   agent_tasks agent_task_events payment_intents
+  social_agent_long_term_memory
 )
 MISSING_TABLES=()
 for t in "${TABLES[@]}"; do
@@ -148,6 +150,7 @@ declare -A COLUMNS=(
   [agent_tasks]="ownerUserId agentConnectionId taskType title goal input plan toolCalls result memory status permissionMode riskLevel idempotencyKey statusReason error startedAt awaitingConfirmationAt completedAt"
   [agent_task_events]="taskId ownerUserId eventType actor summary payload stepId toolCallId"
   [payment_intents]="ownerUserId agentConnectionId agentTaskId stepId targetUserId amount currency description status provider providerReference metadata"
+  [social_agent_long_term_memory]="userId preferences boundaries activityPreferences matchSignals taskSummaries taskCount"
 )
 MISSING_COLUMNS=()
 for tbl in "${!COLUMNS[@]}"; do
@@ -161,9 +164,25 @@ for tbl in "${!COLUMNS[@]}"; do
   done
 done
 
+declare -A ENUM_VALUES=(
+  [agent_task_event_type_enum]="social_agent.context.appended social_agent.replan.queued social_agent.replan.started social_agent.replan.completed social_agent.replan.failed social_agent.llm.timeout"
+)
+MISSING_ENUM_VALUES=()
+for enum_type in "${!ENUM_VALUES[@]}"; do
+  for enum_value in ${ENUM_VALUES[$enum_type]}; do
+    exists="$(docker exec "$POSTGRES_CONTAINER" psql -tA -U "$DB_USERNAME" -d "$DB_DATABASE" \
+        -c "SELECT EXISTS(SELECT 1 FROM pg_enum e
+                          JOIN pg_type t ON t.oid = e.enumtypid
+                          WHERE t.typname='$enum_type' AND e.enumlabel='$enum_value');")"
+    if [[ "$exists" != "t" ]]; then
+      MISSING_ENUM_VALUES+=("$enum_type.$enum_value")
+    fi
+  done
+done
+
 echo
 echo "=================== RESULT ==================="
-if [[ ${#MISSING_TABLES[@]} -eq 0 && ${#MISSING_COLUMNS[@]} -eq 0 ]]; then
+if [[ ${#MISSING_TABLES[@]} -eq 0 && ${#MISSING_COLUMNS[@]} -eq 0 && ${#MISSING_ENUM_VALUES[@]} -eq 0 ]]; then
   echo "  All critical tables and columns are present."
   echo "  Backup: $BACKUP_FILE"
   echo "=============================================="
@@ -175,6 +194,9 @@ else
   fi
   if [[ ${#MISSING_COLUMNS[@]} -gt 0 ]]; then
     echo "  MISSING COLUMNS:  ${MISSING_COLUMNS[*]}"
+  fi
+  if [[ ${#MISSING_ENUM_VALUES[@]} -gt 0 ]]; then
+    echo "  MISSING ENUMS:    ${MISSING_ENUM_VALUES[*]}"
   fi
   echo "=============================================="
   echo "Backup is safe at: $BACKUP_FILE"

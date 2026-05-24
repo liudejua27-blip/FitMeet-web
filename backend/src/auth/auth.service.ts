@@ -303,9 +303,13 @@ export class AuthService {
       !this.hasConfiguredValue(appSecret)
     ) {
       if (this.isProduction) {
-        throw new BadRequestException('WeChat Mini Program login is not configured');
+        throw new BadRequestException(
+          'WeChat Mini Program login is not configured',
+        );
       }
-      this.logger.warn('[DEV] WeChat Mini Program not configured, using mock login');
+      this.logger.warn(
+        '[DEV] WeChat Mini Program not configured, using mock login',
+      );
       return this.ensureUserByWechatMini(`dev_mini_${dto.code}`, dto);
     }
 
@@ -335,7 +339,9 @@ export class AuthService {
         throw error;
       }
       this.logger.error('WeChat Mini login unexpected error', error);
-      throw new UnauthorizedException('WeChat Mini Program login is temporarily unavailable');
+      throw new UnauthorizedException(
+        'WeChat Mini Program login is temporarily unavailable',
+      );
     }
   }
 
@@ -435,7 +441,7 @@ export class AuthService {
         '#38BDF8',
         '#22C55E',
       ];
-      const name = dto.nickname?.trim() || `FitMeet User ${openid.slice(-4)}`;
+      const name = dto.nickname?.trim() || '微信用户';
       user = this.userRepo.create({
         wechatOpenId: scopedOpenId,
         email: `wxmini_${openid.slice(0, 18)}@wechat-mini.local`,

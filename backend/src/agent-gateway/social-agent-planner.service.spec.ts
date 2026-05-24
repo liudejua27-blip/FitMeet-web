@@ -1,12 +1,16 @@
 import { ConfigService } from '@nestjs/config';
 
-import { AgentPermissionService, SocialAgentAction } from './agent-permission.service';
+import {
+  AgentPermissionService,
+  SocialAgentAction,
+} from './agent-permission.service';
 import {
   AgentTask,
   AgentTaskEventActor,
   AgentTaskEventType,
   AgentTaskPermissionMode,
 } from './entities/agent-task.entity';
+import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
 import { SocialAgentPlannerService } from './social-agent-planner.service';
 
 const taskRepo = () => ({
@@ -58,6 +62,7 @@ function serviceWith(config: ConfigService) {
     events as never,
     config,
     new AgentPermissionService(),
+    new FitMeetAgentToolRegistryService(),
   );
   return { service, tasks, events };
 }
@@ -79,7 +84,7 @@ describe('SocialAgentPlannerService', () => {
             message: {
               content: JSON.stringify({
                 steps: [
-                  { id: 'blocked', action: 'search_profiles', title: 'Search' },
+                  { id: 'blocked', action: 'payment', title: 'Pay' },
                   {
                     id: 'allowed',
                     action: 'send_message',
@@ -137,7 +142,9 @@ describe('SocialAgentPlannerService', () => {
       }),
     } as never);
 
-    const { service, tasks } = serviceWith(makeConfig({ DEEPSEEK_API_KEY: 'key' }));
+    const { service, tasks } = serviceWith(
+      makeConfig({ DEEPSEEK_API_KEY: 'key' }),
+    );
     tasks.findOne.mockResolvedValue(
       makeTask({ permissionMode: AgentTaskPermissionMode.Confirm }),
     );
@@ -154,14 +161,14 @@ describe('SocialAgentPlannerService', () => {
       SocialAgentAction.SendInvite,
     ]);
     expect(
-      result.plan.every((step) =>
-        result.allowedActions.includes(step.action),
-      ),
+      result.plan.every((step) => result.allowedActions.includes(step.action)),
     ).toBe(true);
   });
 
   it('falls back and writes a timeout event when DeepSeek planning aborts', async () => {
-    const abortError = Object.assign(new Error('aborted'), { name: 'AbortError' });
+    const abortError = Object.assign(new Error('aborted'), {
+      name: 'AbortError',
+    });
     global.fetch = jest.fn().mockRejectedValue(abortError);
 
     const { service, tasks, events } = serviceWith(
@@ -210,11 +217,11 @@ describe('SocialAgentPlannerService', () => {
     expect(result.plan.map((step) => step.action)).toContain(
       SocialAgentAction.Payment,
     );
-    expect(result.plan.every((step) => step.requiresUserConfirmation)).toBe(false);
+    expect(result.plan.every((step) => step.requiresUserConfirmation)).toBe(
+      false,
+    );
     expect(
-      result.plan.every((step) =>
-        result.allowedActions.includes(step.action),
-      ),
+      result.plan.every((step) => result.allowedActions.includes(step.action)),
     ).toBe(true);
   });
 

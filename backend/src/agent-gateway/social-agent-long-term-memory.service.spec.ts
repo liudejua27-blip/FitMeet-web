@@ -13,15 +13,15 @@ function makeRepo() {
   const store = new Map<number, Row>();
   return {
     store,
-    findOne: jest.fn(async ({ where }: { where: { userId: number } }) =>
-      store.get(where.userId) ?? null,
+    findOne: jest.fn(({ where }: { where: { userId: number } }) =>
+      Promise.resolve(store.get(where.userId) ?? null),
     ),
-    create: jest.fn((data: Partial<Row>) => ({ ...data } as Row)),
-    save: jest.fn(async (row: Row) => {
+    create: jest.fn((data: Partial<Row>) => ({ ...data }) as Row),
+    save: jest.fn((row: Row) => {
       if (!row.id) row.id = store.size + 1;
       row.updatedAt = new Date();
       store.set(row.userId, row);
-      return row;
+      return Promise.resolve(row);
     }),
   };
 }
@@ -39,9 +39,15 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return task;
 }
 
-function seedTaskMemory(task: AgentTask, patch: Partial<SocialAgentTaskMemory>): void {
+function seedTaskMemory(
+  task: AgentTask,
+  patch: Partial<SocialAgentTaskMemory>,
+): void {
   const memory = readSocialAgentTaskMemory(task);
-  writeSocialAgentTaskMemory(task, { ...memory, ...patch } as SocialAgentTaskMemory);
+  writeSocialAgentTaskMemory(task, {
+    ...memory,
+    ...patch,
+  } as SocialAgentTaskMemory);
 }
 
 describe('SocialAgentLongTermMemoryService', () => {
@@ -72,7 +78,9 @@ describe('SocialAgentLongTermMemoryService', () => {
     expect(snapshot!.preferences.interests).toEqual(['跑步', '咖啡']);
     expect(snapshot!.preferences.socialStyle).toBe('casual');
     expect(snapshot!.activityPreferences.favoriteCities).toContain('上海');
-    expect(snapshot!.activityPreferences.favoriteActivityTypes).toContain('跑步');
+    expect(snapshot!.activityPreferences.favoriteActivityTypes).toContain(
+      '跑步',
+    );
     expect(snapshot!.taskCount).toBe(1);
     expect(repo.save).toHaveBeenCalledTimes(1);
   });
@@ -144,10 +152,12 @@ describe('SocialAgentLongTermMemoryService', () => {
     });
 
     const snapshot = await service.summarizeTask(task);
-    expect(snapshot!.matchSignals.successfulMatches.map((s) => s.candidateUserId)).toContain(7);
-    expect(snapshot!.matchSignals.failedMatches.map((s) => s.candidateUserId)).toEqual(
-      expect.arrayContaining([9, 10]),
-    );
+    expect(
+      snapshot!.matchSignals.successfulMatches.map((s) => s.candidateUserId),
+    ).toContain(7);
+    expect(
+      snapshot!.matchSignals.failedMatches.map((s) => s.candidateUserId),
+    ).toEqual(expect.arrayContaining([9, 10]));
   });
 
   it('readSnapshot returns an empty snapshot when no row exists', async () => {

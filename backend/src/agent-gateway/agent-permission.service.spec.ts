@@ -11,6 +11,9 @@ describe('AgentPermissionService', () => {
 
   it('allows only Assist Mode actions', () => {
     expect(service.getAllowedActions(AgentTaskPermissionMode.Assist)).toEqual([
+      SocialAgentAction.SearchProfiles,
+      SocialAgentAction.GenerateContent,
+      SocialAgentAction.DraftMessage,
       SocialAgentAction.AddFriend,
       SocialAgentAction.SendMessage,
     ]);
@@ -31,7 +34,7 @@ describe('AgentPermissionService', () => {
         AgentTaskPermissionMode.Assist,
         SocialAgentAction.SearchProfiles,
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('allows only Confirm Mode actions', () => {
@@ -74,11 +77,14 @@ describe('AgentPermissionService', () => {
     expect(
       service.getAllowedActions(AgentTaskPermissionMode.LimitedAuto),
     ).toEqual([
+      SocialAgentAction.SearchProfiles,
+      SocialAgentAction.GenerateContent,
       SocialAgentAction.FavoriteCandidate,
       SocialAgentAction.DraftMessage,
       SocialAgentAction.WriteInbox,
       SocialAgentAction.SendMessage,
       SocialAgentAction.AddFriend,
+      SocialAgentAction.SendInvite,
       SocialAgentAction.OfflineMeet,
       SocialAgentAction.Payment,
     ]);
@@ -93,13 +99,13 @@ describe('AgentPermissionService', () => {
         AgentTaskPermissionMode.LimitedAuto,
         SocialAgentAction.SearchProfiles,
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       service.canExecute(
         AgentTaskPermissionMode.LimitedAuto,
         SocialAgentAction.SendInvite,
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('normalizes existing agent action enums to runtime actions', () => {
