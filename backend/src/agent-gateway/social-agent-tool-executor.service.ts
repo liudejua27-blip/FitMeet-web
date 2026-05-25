@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -30,6 +31,7 @@ import {
 } from '../social-requests/social-request.entity';
 import { SocialRequestsService } from '../social-requests/social-requests.service';
 import { SocialProfileService } from '../users/social-profile.service';
+import { UpdateSocialProfileDto } from '../users/dto/update-social-profile.dto';
 import { User } from '../users/user.entity';
 import { SafetyService } from '../safety/safety.service';
 import { AgentActionLogService } from './agent-action-log.service';
@@ -65,17 +67,21 @@ import {
   rememberSocialAgentShortTerm,
   shortTermMemoryList,
 } from './social-agent-memory.util';
-import { resolveDeepSeekModel } from '../common/deepseek.util';
 import { sanitizeCity } from '../common/city.util';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { PublicSocialIntent } from './entities/public-social-intent.entity';
+import {
+  SocialAgentModelRouterService,
+  SocialAgentModelUseCase,
+} from './social-agent-model-router.service';
 
 export enum SocialAgentToolName {
   GetMyProfile = 'get_my_profile',
   GetAiProfile = 'get_ai_profile',
   GenerateProfileQuestions = 'generate_profile_questions',
   UpdateAiProfileFromAnswers = 'update_ai_profile_from_answers',
+  UpdateProfileFromAgentContext = 'update_profile_from_agent_context',
   GetCurrentTaskMemory = 'get_current_task_memory',
   PublishSocialRequest = 'publish_social_request',
   CreateSocialRequest = 'create_social_request',
@@ -234,6 +240,8 @@ export class SocialAgentToolExecutorService {
     private readonly friends: FriendsService,
     private readonly activities: ActivitiesService,
     private readonly safety: SafetyService,
+    @Optional()
+    private readonly modelRouter?: SocialAgentModelRouterService,
   ) {}
 
   async executeTask(
@@ -643,6 +651,8 @@ export class SocialAgentToolExecutorService {
         return this.socialProfiles.generateQuestions(task.ownerUserId);
       case SocialAgentToolName.UpdateAiProfileFromAnswers:
         return this.updateAiProfileFromAnswers(task.ownerUserId, input);
+      case SocialAgentToolName.UpdateProfileFromAgentContext:
+        return this.updateProfileFromAgentContext(task, input);
       case SocialAgentToolName.GetCurrentTaskMemory:
         return this.getCurrentTaskMemory(task);
       case SocialAgentToolName.PublishSocialRequest:
@@ -752,6 +762,101 @@ export class SocialAgentToolExecutorService {
     }
 
     throw new BadRequestException('answers, profile, or rawText is required');
+  }
+
+  private async updateProfileFromAgentContext(
+    task: AgentTask,
+    input: Record<string, unknown>,
+  ): Promise<unknown> {
+    const extracted = this.isRecord(input.extractedProfile)
+      ? input.extractedProfile
+      : {};
+    const sourceMessage = this.string(input.sourceMessage) ?? '';
+    const dto: UpdateSocialProfileDto = {};
+    const updatedFields: string[] = [];
+    const memoryFields: string[] = [];
+    const missingFields: string[] = [];
+    const setString = (field: string, value: unknown) => {
+      const text = this.string(value);
+      if (!text) return;
+      dto[field] = text;
+      updatedFields.push(field);
+    };
+    const setList = (field: string, value: unknown) => {
+      const list = this.stringList(value);
+      if (list.length === 0) return;
+      dto[field] = list;
+      updatedFields.push(field);
+    };
+
+    setString('gender', extracted.gender);
+    setString('ageRange', extracted.ageRange);
+    setString('city', extracted.city);
+    setString('nearbyArea', extracted.nearbyArea);
+    setString('zodiac', extracted.zodiac);
+    setString('mbti', extracted.mbti);
+    setList('traits', extracted.traits ?? extracted.personality);
+    setList('interestTags', extracted.interestTags);
+    setList('availableTimes', extracted.availableTimes);
+    setList('wantToMeet', extracted.wantToMeet ?? extracted.socialGoal);
+    setList(
+      'preferredTraits',
+      extracted.preferredTraits ?? extracted.targetPreference,
+    );
+    setString('rejectRules', extracted.rejectRules);
+    setString('privacyBoundary', extracted.privacyBoundary);
+
+    const supplemental: Record<string, unknown> = {};
+    for (const field of [
+      'height',
+      'weight',
+      'school',
+      'targetPreference',
+      'socialGoal',
+    ]) {
+      const value = extracted[field];
+      if (value === undefined || value === null || value === '') continue;
+      supplemental[field] = value;
+      memoryFields.push(field);
+    }
+    if (Object.keys(supplemental).length > 0 || sourceMessage) {
+      dto.matchSignals = {
+        agentProfileMemory: supplemental,
+        sourceMessage,
+        updatedAt: new Date().toISOString(),
+      };
+      updatedFields.push('matchSignals');
+    }
+    for (const field of [
+      'availableTimes',
+      'privacyBoundary',
+      'interestTags',
+      'wantToMeet',
+    ]) {
+      if (!updatedFields.includes(field)) missingFields.push(field);
+    }
+
+    const saved =
+      Object.keys(dto).length > 0
+        ? await this.socialProfiles.upsert(task.ownerUserId, dto)
+        : await this.socialProfiles.get(task.ownerUserId);
+    await this.createTaskEvent(task, AgentTaskEventType.SocialAgentContextAppended, {
+      summary: 'Updated social profile from agent context',
+      payload: {
+        extractedProfile: extracted,
+        updatedFields,
+        memoryFields,
+        missingFields,
+        sourceMessage,
+      },
+    });
+    return {
+      success: true,
+      updatedFields,
+      memoryFields,
+      missingFields,
+      profile: saved,
+    };
   }
 
   private getCurrentTaskMemory(task: AgentTask): Record<string, unknown> {
@@ -1790,6 +1895,7 @@ export class SocialAgentToolExecutorService {
       'summarize_reply',
       this.replySummaryPrompt(task, messages),
       () => this.fallbackReplySummary(messages),
+      task,
     );
     this.rememberConversation(task, {
       replySummary: summary,
@@ -1838,6 +1944,7 @@ export class SocialAgentToolExecutorService {
       'decide_next_social_action',
       this.nextActionPrompt(task, messages, summary),
       () => this.fallbackNextAction(task, messages, summary),
+      task,
     );
     const safeDecision = this.normalizeNextActionDecision(task, decision);
     this.rememberConversation(task, {
@@ -2375,6 +2482,7 @@ export class SocialAgentToolExecutorService {
     purpose: string,
     prompt: string,
     fallback: () => Record<string, unknown>,
+    task?: AgentTask,
   ): Promise<Record<string, unknown>> {
     const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
     if (!apiKey) {
@@ -2382,19 +2490,20 @@ export class SocialAgentToolExecutorService {
         JSON.stringify({
           event: 'deepseek.call_skipped',
           purpose,
+          taskId: task?.id ?? null,
           reason: 'DEEPSEEK_API_KEY missing',
         }),
       );
       return fallback();
     }
 
+    const useCase = this.modelUseCaseForPurpose(purpose);
+    let model = this.modelFor(useCase);
+    const startedAt = Date.now();
     try {
       const baseUrl =
         this.config.get<string>('DEEPSEEK_BASE_URL') ||
         'https://api.deepseek.com';
-      const model = resolveDeepSeekModel(
-        this.config.get<string>('DEEPSEEK_MODEL'),
-      );
       const res = await fetch(
         `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
         {
@@ -2405,7 +2514,7 @@ export class SocialAgentToolExecutorService {
           },
           body: JSON.stringify({
             model,
-            temperature: 0.2,
+            temperature: this.modelRouter?.getTemperature(useCase) ?? 0.2,
             response_format: { type: 'json_object' },
             messages: [
               {
@@ -2419,6 +2528,15 @@ export class SocialAgentToolExecutorService {
         },
       );
       if (!res.ok) {
+        this.logModelCall({
+          useCase,
+          model,
+          taskId: task?.id ?? null,
+          intent: purpose,
+          latencyMs: Date.now() - startedAt,
+          success: false,
+          reason: `DeepSeek HTTP ${res.status}`,
+        });
         this.logger.warn(
           JSON.stringify({
             event: 'deepseek.call_failed',
@@ -2434,12 +2552,29 @@ export class SocialAgentToolExecutorService {
       };
       const content = data.choices?.[0]?.message?.content ?? '';
       const parsed = this.parseJsonObject(content);
+      this.logModelCall({
+        useCase,
+        model,
+        taskId: task?.id ?? null,
+        intent: purpose,
+        latencyMs: Date.now() - startedAt,
+        success: true,
+      });
       return {
         ...parsed,
         source: 'deepseek',
         purpose,
       };
     } catch (error) {
+      this.logModelCall({
+        useCase,
+        model,
+        taskId: task?.id ?? null,
+        intent: purpose,
+        latencyMs: Date.now() - startedAt,
+        success: false,
+        reason: error instanceof Error ? error.message : String(error),
+      });
       this.logger.warn(
         JSON.stringify({
           event: 'deepseek.call_failed',
@@ -2450,6 +2585,62 @@ export class SocialAgentToolExecutorService {
       );
       return fallback();
     }
+  }
+
+  private modelUseCaseForPurpose(purpose: string): SocialAgentModelUseCase {
+    if (/candidate|match|summary/i.test(purpose)) return 'candidate_summary';
+    if (/card|social_request|request/i.test(purpose)) return 'card_generation';
+    if (/safety|boundary|risk/i.test(purpose)) return 'safety_check';
+    return 'planner';
+  }
+
+  private modelFor(useCase: SocialAgentModelUseCase): string {
+    if (this.modelRouter) return this.modelRouter.getModel(useCase);
+    const legacy = this.config.get<string>('DEEPSEEK_MODEL');
+    if (useCase === 'candidate_summary' || useCase === 'card_generation') {
+      return (
+        this.config.get<string>('AGENT_CARD_MODEL') ||
+        this.config.get<string>('DEEPSEEK_FAST_MODEL') ||
+        legacy ||
+        'deepseek-v4-flash'
+      );
+    }
+    if (useCase === 'safety_check') {
+      return (
+        this.config.get<string>('DEEPSEEK_FAST_MODEL') ||
+        legacy ||
+        'deepseek-v4-flash'
+      );
+    }
+    return (
+      this.config.get<string>('AGENT_PLANNER_MODEL') ||
+      this.config.get<string>('DEEPSEEK_FAST_MODEL') ||
+      legacy ||
+      'deepseek-v4-flash'
+    );
+  }
+
+  private logModelCall(input: {
+    useCase: string;
+    model: string;
+    taskId: number | null;
+    intent?: unknown;
+    latencyMs: number;
+    success: boolean;
+    reason?: string;
+  }): void {
+    this.logger.log(
+      JSON.stringify({
+        event: 'social_agent.model_call',
+        useCase: input.useCase,
+        model: input.model,
+        taskId: input.taskId,
+        intent: typeof input.intent === 'string' ? input.intent : null,
+        latencyMs: input.latencyMs,
+        success: input.success,
+        ...(input.reason ? { reason: input.reason } : {}),
+      }),
+    );
   }
 
   private replySummaryPrompt(
@@ -3163,6 +3354,7 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.GenerateProfileQuestions:
         return AgentActionType.GenerateProfileQuestion;
       case SocialAgentToolName.UpdateAiProfileFromAnswers:
+      case SocialAgentToolName.UpdateProfileFromAgentContext:
         return AgentActionType.UpdateProfile;
       case SocialAgentToolName.GetMyProfile:
       case SocialAgentToolName.GetAiProfile:
@@ -3403,6 +3595,7 @@ export class SocialAgentToolExecutorService {
     switch (toolName) {
       case SocialAgentToolName.GenerateProfileQuestions:
       case SocialAgentToolName.UpdateAiProfileFromAnswers:
+      case SocialAgentToolName.UpdateProfileFromAgentContext:
       case SocialAgentToolName.ExplainMatches:
         return SocialAgentAction.GenerateContent;
       case SocialAgentToolName.PublishSocialRequest:
@@ -3826,6 +4019,13 @@ export class SocialAgentToolExecutorService {
 
   private string(value: unknown): string | undefined {
     return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+  }
+
+  private stringList(value: unknown): string[] {
+    const raw = Array.isArray(value) ? value : value ? [value] : [];
+    return raw
+      .map((item) => this.string(item))
+      .filter((item): item is string => Boolean(item));
   }
 
   private safeUnknownText(value: unknown): string {

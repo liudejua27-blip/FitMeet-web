@@ -243,6 +243,11 @@ export interface SocialAgentTaskTimelineSnapshot {
 
 export type SocialAgentIntentType =
   | 'casual_chat'
+  | 'product_help'
+  | 'workflow_help'
+  | 'profile_enrichment'
+  | 'profile_enrichment_request'
+  | 'correction_or_clarification'
   | 'profile_update'
   | 'social_search'
   | 'activity_search'
@@ -252,6 +257,7 @@ export type SocialAgentIntentType =
   | 'unknown';
 
 export type SocialAgentIntentAction =
+  | 'answer'
   | 'reply'
   | 'save_context'
   | 'queue_search'
@@ -260,6 +266,7 @@ export type SocialAgentIntentAction =
   | 'clarify';
 
 export type SocialAgentReplyStrategy =
+  | 'conversational_answer'
   | 'direct_reply'
   | 'ask_clarifying_question'
   | 'append_context'

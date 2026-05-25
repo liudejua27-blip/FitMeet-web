@@ -4,6 +4,7 @@ import type { LongTermMemorySnapshot } from './social-agent-long-term-memory.ser
 function emptySnapshot(userId: number): LongTermMemorySnapshot {
   return {
     userId,
+    profileFacts: {},
     preferences: {
       interests: [],
       socialStyle: '',
@@ -17,6 +18,8 @@ function emptySnapshot(userId: number): LongTermMemorySnapshot {
       noAutoMessage: false,
       noContactExchange: false,
     },
+    socialGoals: [],
+    availability: [],
     activityPreferences: {
       favoriteCities: [],
       favoriteActivityTypes: [],

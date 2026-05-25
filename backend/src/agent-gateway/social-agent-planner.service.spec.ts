@@ -109,6 +109,10 @@ describe('SocialAgentPlannerService', () => {
     const result = await service.planTask(10);
 
     expect(result.source).toBe('deepseek');
+    expect(
+      JSON.parse(((global.fetch as jest.Mock).mock.calls[0]?.[1] as { body?: string }).body ?? '{}')
+        .model,
+    ).toBe('deepseek-v4-flash');
     expect(result.plan).toHaveLength(1);
     expect(result.plan[0]).toMatchObject({
       id: 'allowed',

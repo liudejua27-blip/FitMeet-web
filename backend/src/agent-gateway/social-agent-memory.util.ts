@@ -7,14 +7,38 @@ export type SocialAgentShortTermStep = Record<string, unknown> & {
   updatedAt: string;
 };
 
+export type SocialAgentShortTermTurn = Record<string, unknown> & {
+  role: 'user' | 'assistant' | 'tool' | 'system';
+  text: string;
+  intent?: string;
+  action?: string;
+  at: string;
+};
+
+export type SocialAgentShortTermAction = Record<string, unknown> & {
+  action: string;
+  intent?: string;
+  status: string;
+  at: string;
+};
+
 export type SocialAgentShortTermMemory = Record<string, unknown> & {
   taskId?: number;
   currentGoal?: string;
   permissionMode?: string;
   currentStatus?: string;
+  recentTurns?: SocialAgentShortTermTurn[];
+  lastAgentActions?: SocialAgentShortTermAction[];
   currentStep?: SocialAgentShortTermStep | null;
   steps?: SocialAgentShortTermStep[];
   candidates?: Record<string, unknown>[];
+  displayedCandidates?: Record<string, unknown>[];
+  hasSearched?: boolean;
+  lastSearchAt?: string;
+  lastSearchIntent?: string;
+  lastSearchCandidateCount?: number;
+  misunderstandingDetected?: boolean;
+  misunderstandingReason?: string;
   sentMessages?: Record<string, unknown>[];
   receivedReplies?: Record<string, unknown>[];
   updatedAt?: string;
@@ -67,6 +91,81 @@ export function appendShortTermMemoryItem<T extends Record<string, unknown>>(
     (entry) => !id || entry.id !== id,
   );
   return [...previous, item].slice(-limit);
+}
+
+export function appendSocialAgentShortTermTurn(
+  task: AgentTask,
+  turn: Omit<SocialAgentShortTermTurn, 'at'> & { at?: string },
+  limit = 20,
+): SocialAgentShortTermMemory {
+  const memory = isRecord(task.memory) ? task.memory : {};
+  const shortTerm = isRecord(memory.shortTerm)
+    ? (memory.shortTerm as SocialAgentShortTermMemory)
+    : {};
+  const turns = Array.isArray(shortTerm.recentTurns)
+    ? shortTerm.recentTurns.filter(isRecord)
+    : [];
+  return rememberSocialAgentShortTerm(task, {
+    recentTurns: [
+      ...turns,
+      {
+        ...turn,
+        text: String(turn.text ?? '').slice(0, 500),
+        at: turn.at ?? new Date().toISOString(),
+      },
+    ].slice(-limit) as SocialAgentShortTermTurn[],
+  });
+}
+
+export function recordSocialAgentShortTermAction(
+  task: AgentTask,
+  action: Omit<SocialAgentShortTermAction, 'at'> & { at?: string },
+  limit = 20,
+): SocialAgentShortTermMemory {
+  const memory = isRecord(task.memory) ? task.memory : {};
+  const shortTerm = isRecord(memory.shortTerm)
+    ? (memory.shortTerm as SocialAgentShortTermMemory)
+    : {};
+  const actions = Array.isArray(shortTerm.lastAgentActions)
+    ? shortTerm.lastAgentActions.filter(isRecord)
+    : [];
+  return rememberSocialAgentShortTerm(task, {
+    lastAgentActions: [
+      ...actions,
+      {
+        ...action,
+        at: action.at ?? new Date().toISOString(),
+      },
+    ].slice(-limit) as SocialAgentShortTermAction[],
+  });
+}
+
+export function recordSocialAgentSearchMemory(
+  task: AgentTask,
+  input: {
+    intent: string;
+    candidates?: Record<string, unknown>[];
+    candidateCount?: number;
+  },
+): SocialAgentShortTermMemory {
+  const candidates = input.candidates ?? [];
+  return rememberSocialAgentShortTerm(task, {
+    hasSearched: true,
+    lastSearchAt: new Date().toISOString(),
+    lastSearchIntent: input.intent,
+    lastSearchCandidateCount: input.candidateCount ?? candidates.length,
+    displayedCandidates: candidates.slice(-20),
+  });
+}
+
+export function recordSocialAgentMisunderstanding(
+  task: AgentTask,
+  reason: string,
+): SocialAgentShortTermMemory {
+  return rememberSocialAgentShortTerm(task, {
+    misunderstandingDetected: true,
+    misunderstandingReason: reason,
+  });
 }
 
 // -----------------------------------------------------------------------------
@@ -127,6 +226,35 @@ export type SocialAgentUserMessageMemo = {
   at: string;
 };
 
+export type SocialAgentState =
+  | 'idle'
+  | 'casual_chatting'
+  | 'profile_building'
+  | 'profile_saved'
+  | 'workflow_guiding'
+  | 'searching_candidates'
+  | 'showing_candidates'
+  | 'waiting_confirmation'
+  | 'messaging_candidate'
+  | 'activity_planning'
+  | 'error_recovery';
+
+export type SocialAgentStateTransitionReason =
+  | 'user_message'
+  | 'casual_chat'
+  | 'workflow_help'
+  | 'profile_detected'
+  | 'profile_saved'
+  | 'user_correction'
+  | 'search_started'
+  | 'candidates_returned'
+  | 'activity_search_returned'
+  | 'confirmation_required'
+  | 'message_action'
+  | 'activity_planning'
+  | 'error'
+  | 'reset';
+
 export type SocialAgentTaskMemory = {
   currentGoal: string;
   activeEntities: SocialAgentActiveEntities;
@@ -136,6 +264,20 @@ export type SocialAgentTaskMemory = {
   activityState: SocialAgentActivityState;
   pendingActions: SocialAgentPendingActionMemo[];
   lastUserMessages: SocialAgentUserMessageMemo[];
+  currentTask: {
+    state: SocialAgentState;
+    previousState: SocialAgentState | '';
+    stateReason: SocialAgentStateTransitionReason | '';
+    stateUpdatedAt: string;
+    objective: string;
+    nextStep: string;
+    shouldSearchNow: boolean;
+    profileSaved: boolean;
+    awaitingSearchConfirmation: boolean;
+    waitingFor: string;
+    lastCompletedStep: string;
+  };
+  stableProfileFacts: Record<string, string | string[]>;
   updatedAt: string;
 };
 
@@ -169,6 +311,20 @@ function defaultTaskMemory(): SocialAgentTaskMemory {
     activityState: { recommendedIds: [], joinedIds: [], dismissedIds: [] },
     pendingActions: [],
     lastUserMessages: [],
+    currentTask: {
+      state: 'idle',
+      previousState: '',
+      stateReason: '',
+      stateUpdatedAt: new Date(0).toISOString(),
+      objective: '',
+      nextStep: '',
+      shouldSearchNow: false,
+      profileSaved: false,
+      awaitingSearchConfirmation: false,
+      waitingFor: '',
+      lastCompletedStep: '',
+    },
+    stableProfileFacts: {},
     updatedAt: new Date(0).toISOString(),
   };
 }
@@ -216,6 +372,49 @@ export function readSocialAgentTaskMemory(task: AgentTask): SocialAgentTaskMemor
           at: typeof entry.at === 'string' ? entry.at : new Date(0).toISOString(),
         }))
       : base.lastUserMessages,
+    currentTask: {
+      ...base.currentTask,
+      ...(isRecord(stored.currentTask)
+        ? {
+            objective:
+              typeof stored.currentTask.objective === 'string'
+                ? stored.currentTask.objective
+                : base.currentTask.objective,
+            nextStep:
+              typeof stored.currentTask.nextStep === 'string'
+                ? stored.currentTask.nextStep
+                : base.currentTask.nextStep,
+            shouldSearchNow: stored.currentTask.shouldSearchNow === true,
+            state: isSocialAgentState(stored.currentTask.state)
+              ? stored.currentTask.state
+              : base.currentTask.state,
+            previousState: isSocialAgentState(stored.currentTask.previousState)
+              ? stored.currentTask.previousState
+              : '',
+            stateReason: isSocialAgentStateReason(stored.currentTask.stateReason)
+              ? stored.currentTask.stateReason
+              : '',
+            stateUpdatedAt:
+              typeof stored.currentTask.stateUpdatedAt === 'string'
+                ? stored.currentTask.stateUpdatedAt
+                : base.currentTask.stateUpdatedAt,
+            profileSaved: stored.currentTask.profileSaved === true,
+            awaitingSearchConfirmation:
+              stored.currentTask.awaitingSearchConfirmation === true,
+            waitingFor:
+              typeof stored.currentTask.waitingFor === 'string'
+                ? stored.currentTask.waitingFor
+                : base.currentTask.waitingFor,
+            lastCompletedStep:
+              typeof stored.currentTask.lastCompletedStep === 'string'
+                ? stored.currentTask.lastCompletedStep
+                : base.currentTask.lastCompletedStep,
+          }
+        : {}),
+    },
+    stableProfileFacts: isRecord(stored.stableProfileFacts)
+      ? coerceProfileFacts(stored.stableProfileFacts)
+      : base.stableProfileFacts,
     updatedAt: typeof stored.updatedAt === 'string' ? stored.updatedAt : base.updatedAt,
   };
 }
@@ -358,6 +557,92 @@ export function recordSocialAgentRecommendedCandidates(
   return memory;
 }
 
+export function rememberSocialAgentCurrentTask(
+  task: AgentTask,
+  patch: Partial<SocialAgentTaskMemory['currentTask']>,
+): SocialAgentTaskMemory {
+  const memory = readSocialAgentTaskMemory(task);
+  memory.currentTask = {
+    ...memory.currentTask,
+    ...patch,
+  };
+  writeSocialAgentTaskMemory(task, memory);
+  return memory;
+}
+
+export function transitionSocialAgentState(
+  task: AgentTask,
+  reason: SocialAgentStateTransitionReason,
+  patch: Partial<SocialAgentTaskMemory['currentTask']> = {},
+): SocialAgentTaskMemory {
+  const memory = readSocialAgentTaskMemory(task);
+  const previousState = memory.currentTask.state || 'idle';
+  const nextState = stateForTransition(previousState, reason, patch);
+  memory.currentTask = {
+    ...memory.currentTask,
+    ...patch,
+    state: nextState,
+    previousState,
+    stateReason: reason,
+    stateUpdatedAt: new Date().toISOString(),
+  };
+  writeSocialAgentTaskMemory(task, memory);
+  return memory;
+}
+
+export function stateForTransition(
+  previous: SocialAgentState,
+  reason: SocialAgentStateTransitionReason,
+  patch: Partial<SocialAgentTaskMemory['currentTask']> = {},
+): SocialAgentState {
+  if (patch.state && isSocialAgentState(patch.state)) return patch.state;
+  switch (reason) {
+    case 'casual_chat':
+      return 'casual_chatting';
+    case 'workflow_help':
+      return 'workflow_guiding';
+    case 'profile_detected':
+      return 'profile_building';
+    case 'profile_saved':
+      return 'profile_saved';
+    case 'user_correction':
+      return 'error_recovery';
+    case 'search_started':
+      return 'searching_candidates';
+    case 'candidates_returned':
+    case 'activity_search_returned':
+      return patch.waitingFor === 'search_refinement'
+        ? 'error_recovery'
+        : 'showing_candidates';
+    case 'confirmation_required':
+      return 'waiting_confirmation';
+    case 'message_action':
+      return 'messaging_candidate';
+    case 'activity_planning':
+      return 'activity_planning';
+    case 'error':
+      return 'error_recovery';
+    case 'reset':
+      return 'idle';
+    case 'user_message':
+    default:
+      return previous || 'idle';
+  }
+}
+
+export function mergeSocialAgentStableProfileFacts(
+  task: AgentTask,
+  facts: Record<string, unknown>,
+): SocialAgentTaskMemory {
+  const memory = readSocialAgentTaskMemory(task);
+  memory.stableProfileFacts = {
+    ...memory.stableProfileFacts,
+    ...coerceProfileFacts(facts),
+  };
+  writeSocialAgentTaskMemory(task, memory);
+  return memory;
+}
+
 function extractInterestKeywords(text: string): string[] {
   const tags = [
     '拍照',
@@ -463,6 +748,69 @@ function coerceStringLists(input: Record<string, unknown>): Partial<SocialAgentA
     }
   }
   return out;
+}
+
+function coerceProfileFacts(
+  input: Record<string, unknown>,
+): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof value === 'string' && value.trim()) {
+      out[key] = value.trim();
+      continue;
+    }
+    if (
+      Array.isArray(value) &&
+      value.every((item) => typeof item === 'string')
+    ) {
+      const list = value.map((item) => item.trim()).filter(Boolean);
+      if (list.length > 0) out[key] = list;
+    }
+  }
+  return out;
+}
+
+function isSocialAgentState(value: unknown): value is SocialAgentState {
+  return (
+    typeof value === 'string' &&
+    [
+      'idle',
+      'casual_chatting',
+      'profile_building',
+      'profile_saved',
+      'workflow_guiding',
+      'searching_candidates',
+      'showing_candidates',
+      'waiting_confirmation',
+      'messaging_candidate',
+      'activity_planning',
+      'error_recovery',
+    ].includes(value)
+  );
+}
+
+function isSocialAgentStateReason(
+  value: unknown,
+): value is SocialAgentStateTransitionReason {
+  return (
+    typeof value === 'string' &&
+    [
+      'user_message',
+      'casual_chat',
+      'workflow_help',
+      'profile_detected',
+      'profile_saved',
+      'user_correction',
+      'search_started',
+      'candidates_returned',
+      'activity_search_returned',
+      'confirmation_required',
+      'message_action',
+      'activity_planning',
+      'error',
+      'reset',
+    ].includes(value)
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

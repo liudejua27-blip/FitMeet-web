@@ -258,6 +258,10 @@ export const useMessageStore = create<MessageState>()(
       selectConv: (id) => {
         set((state) => ({
           activeConvId: id,
+          messages: {
+            ...state.messages,
+            [id]: [],
+          },
           conversations: state.conversations.map((c) => (c.id === id ? { ...c, unread: 0 } : c)),
           totalUnread: state.conversations.reduce(
             (sum, c) => sum + (c.id === id ? 0 : c.unread),

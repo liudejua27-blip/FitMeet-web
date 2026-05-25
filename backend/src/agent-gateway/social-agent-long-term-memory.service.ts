@@ -43,8 +43,11 @@ export type LongTermMatchSignals = {
 
 export type LongTermMemorySnapshot = {
   userId: number;
+  profileFacts: Record<string, string | string[]>;
   preferences: LongTermPreferencesSnapshot;
   boundaries: LongTermBoundariesSnapshot;
+  socialGoals: string[];
+  availability: string[];
   activityPreferences: LongTermActivitySnapshot;
   matchSignals: LongTermMatchSignals;
   taskCount: number;
@@ -108,6 +111,7 @@ export class SocialAgentLongTermMemoryService {
       row.preferences = mergePreferences(
         toRecord(row.preferences),
         taskMemory.preferences,
+        taskMemory.stableProfileFacts,
       );
       row.boundaries = mergeBoundaries(
         toRecord(row.boundaries),
@@ -116,6 +120,7 @@ export class SocialAgentLongTermMemoryService {
       row.activityPreferences = mergeActivityPreferences(
         toRecord(row.activityPreferences),
         taskMemory.activeEntities,
+        taskMemory.stableProfileFacts,
       );
       row.matchSignals = this.mergeMatchSignals(
         toRecord(row.matchSignals),
@@ -219,6 +224,9 @@ export class SocialAgentLongTermMemoryService {
             : '',
         preferredTraits: stringList(prefs.preferredTraits),
       },
+      profileFacts: profileFacts(prefs.profileFacts),
+      socialGoals: stringList(prefs.socialGoals),
+      availability: stringList(prefs.availability),
       boundaries: {
         excludedGenders: stringList(bounds.excludedGenders),
         noNightMeet: bounds.noNightMeet === true,
@@ -247,6 +255,7 @@ export class SocialAgentLongTermMemoryService {
 function emptySnapshot(userId: number): LongTermMemorySnapshot {
   return {
     userId,
+    profileFacts: {},
     preferences: {
       interests: [],
       socialStyle: '',
@@ -260,6 +269,8 @@ function emptySnapshot(userId: number): LongTermMemorySnapshot {
       noAutoMessage: false,
       noContactExchange: false,
     },
+    socialGoals: [],
+    availability: [],
     activityPreferences: {
       favoriteCities: [],
       favoriteActivityTypes: [],
@@ -275,11 +286,20 @@ function emptySnapshot(userId: number): LongTermMemorySnapshot {
 function mergePreferences(
   previous: Record<string, unknown>,
   incoming: ReturnType<typeof readSocialAgentTaskMemory>['preferences'],
+  stableProfileFacts: Record<string, string | string[]> = {},
 ): Record<string, unknown> {
   return {
+    profileFacts: {
+      ...profileFacts(previous.profileFacts),
+      ...stableProfileFacts,
+    },
     interests: mergeStringList(
       stringList(previous.interests),
-      incoming.interests,
+      mergeStringList(
+        incoming.interests,
+        stringList(stableProfileFacts.interestTags),
+        32,
+      ),
       32,
     ),
     socialStyle:
@@ -292,8 +312,32 @@ function mergePreferences(
         : ''),
     preferredTraits: mergeStringList(
       stringList(previous.preferredTraits),
-      incoming.preferredTraits,
+      mergeStringList(
+        incoming.preferredTraits,
+        [
+          ...stringList(stableProfileFacts.preferredTraits),
+          ...stringList(stableProfileFacts.wantToMeet),
+          stringValue(stableProfileFacts.targetPreference),
+        ].filter(Boolean),
+        24,
+      ),
       24,
+    ),
+    socialGoals: mergeStringList(
+      stringList(previous.socialGoals),
+      [
+        stringValue(stableProfileFacts.socialGoal),
+        stringValue(stableProfileFacts.targetPreference),
+      ].filter(Boolean),
+      20,
+    ),
+    availability: mergeStringList(
+      stringList(previous.availability),
+      [
+        ...stringList(stableProfileFacts.availableTimes),
+        stringValue(stableProfileFacts.timePreference),
+      ].filter(Boolean),
+      20,
     ),
   };
 }
@@ -320,11 +364,12 @@ function mergeBoundaries(
 function mergeActivityPreferences(
   previous: Record<string, unknown>,
   incoming: ReturnType<typeof readSocialAgentTaskMemory>['activeEntities'],
+  stableProfileFacts: Record<string, string | string[]> = {},
 ): Record<string, unknown> {
   return {
     favoriteCities: pushIfPresent(
       stringList(previous.favoriteCities),
-      incoming.city,
+      incoming.city || stringValue(stableProfileFacts.city),
       10,
     ),
     favoriteActivityTypes: pushIfPresent(
@@ -334,12 +379,12 @@ function mergeActivityPreferences(
     ),
     favoriteTimePreferences: pushIfPresent(
       stringList(previous.favoriteTimePreferences),
-      incoming.timePreference,
+      incoming.timePreference || stringValue(stableProfileFacts.timePreference),
       10,
     ),
     favoriteLocationPreferences: pushIfPresent(
       stringList(previous.favoriteLocationPreferences),
-      incoming.locationPreference,
+      incoming.locationPreference || stringValue(stableProfileFacts.nearbyArea),
       10,
     ),
   };
@@ -391,6 +436,31 @@ function sampleArray(value: unknown): LongTermMatchSample[] {
       at: typeof item.at === 'string' ? item.at : new Date(0).toISOString(),
     }))
     .filter((item) => item.candidateUserId > 0);
+}
+
+function profileFacts(value: unknown): Record<string, string | string[]> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+  const out: Record<string, string | string[]> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw === 'string' && raw.trim()) {
+      out[key] = raw.trim();
+      continue;
+    }
+    if (
+      Array.isArray(raw) &&
+      raw.every((item) => typeof item === 'string')
+    ) {
+      const list = raw.map((item) => item.trim()).filter(Boolean);
+      if (list.length > 0) out[key] = list;
+    }
+  }
+  return out;
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function stringList(value: unknown): string[] {

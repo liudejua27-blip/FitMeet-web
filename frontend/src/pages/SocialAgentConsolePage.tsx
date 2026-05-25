@@ -19,7 +19,7 @@ import {
 import { cleanDisplayArray, cleanDisplayText } from '../lib/displayText';
 import { messageUrlWithSocialAgentReturn } from '../lib/socialAgentReturnUrl';
 
-type MessageKind = 'text' | 'risk' | 'approval';
+type MessageKind = 'text' | 'risk' | 'approval' | 'profile';
 
 type Message = {
   id: string;
@@ -28,6 +28,12 @@ type Message = {
   content: string;
   activityResults?: SocialAgentActivityResult[];
   pendingApproval?: SocialAgentPendingApproval;
+  profileCard?: ProfileCardData;
+};
+
+type ProfileCardData = {
+  summary: string[];
+  missing: string[];
 };
 
 type StatusStep = {
@@ -126,6 +132,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
   const [statuses, setStatuses] = useState<StatusStep[]>([]);
   const [toolCalls, setToolCalls] = useState<ToolCallView[]>([]);
   const [result, setResult] = useState<SocialAgentChatRunResult | null>(null);
+  const [shouldShowCandidateCards, setShouldShowCandidateCards] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [draftPublish, setDraftPublish] = useState<DraftPublishState>({ status: 'idle' });
@@ -134,11 +141,11 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
   );
   const [actionStatus, setActionStatus] = useState('');
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
-  const [taskSummary, setTaskSummary] = useState<SocialAgentTaskTimelineSnapshot['task'] | null>(
+  const [, setTaskSummary] = useState<SocialAgentTaskTimelineSnapshot['task'] | null>(
     null,
   );
-  const [taskMemory, setTaskMemory] = useState<Record<string, unknown>>({});
-  const [restoredAt, setRestoredAt] = useState<string | null>(null);
+  const [, setTaskMemory] = useState<Record<string, unknown>>({});
+  const [, setRestoredAt] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState(true);
   const [restoreError, setRestoreError] = useState('');
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -147,8 +154,9 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
   const started = isRestoring || messages.length > 0 || Boolean(result) || Boolean(activeTaskId);
   const draft = result?.socialRequestDraft ?? null;
   const candidates = result?.candidates ?? [];
-  const publicIntentCards = candidates.filter(isPublicIntentCandidate);
-  const realCandidateCards = candidates.filter((candidate) => !isPublicIntentCandidate(candidate));
+  const visibleCandidates = shouldShowCandidateCards && !isRunning ? candidates : [];
+  const publicIntentCards = visibleCandidates.filter(isPublicIntentCandidate);
+  const realCandidateCards = visibleCandidates.filter((candidate) => !isPublicIntentCandidate(candidate));
 
   const applyTimelineSnapshot = (snapshot: SocialAgentTaskTimelineSnapshot | null) => {
     if (!snapshot) {
@@ -157,6 +165,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
       setStatuses([]);
       setToolCalls([]);
       setResult(null);
+      setShouldShowCandidateCards(false);
       setCandidateStates({});
       setDraftPublish({ status: 'idle' });
       setTaskSummary(null);
@@ -189,6 +198,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
         .filter((message): message is Message => !!message),
     );
     setResult(restoredResult);
+    setShouldShowCandidateCards(shouldShowCandidateCardsForResult(restoredResult));
     setToolCalls(nextToolCalls);
     setCandidateStates(
       candidateStatesFromSession(
@@ -255,6 +265,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     setRestoreError('');
     setStatuses([]);
     setToolCalls([]);
+    setShouldShowCandidateCards(false);
     const taskId = result?.taskId ?? activeTaskId;
     if (!taskId) {
       setDraftPublish({ status: 'idle' });
@@ -287,14 +298,28 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
           ]);
         }
         setMessages((items) => {
+          const profileCard = profileCardFromAssistantMessage(
+            handled.intent,
+            handled.assistantMessage,
+          );
           const extra: Message[] = [
             {
               id: nextId('assistant'),
               role: 'assistant',
               content: handled.assistantMessage,
               activityResults: handled.activityResults ?? undefined,
+              profileCard: profileCard ?? undefined,
             },
           ];
+          if (profileCard) {
+            extra.push({
+              id: nextId('profile'),
+              role: 'assistant',
+              kind: 'profile',
+              content: '画像摘要',
+              profileCard,
+            });
+          }
           if (handled.intent === 'safety_or_boundary' && handled.savedContext) {
             extra.push({
               id: nextId('risk'),
@@ -315,6 +340,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
           }
           return [...items, ...extra];
         });
+        setShouldShowCandidateCards(false);
         return;
       }
 
@@ -329,7 +355,12 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
       const queued = handled.queuedRun;
       setActiveTaskId(queued.taskId);
       applyRunProgress(queued, [], handled.runMode ?? 'initial');
-      await pollAgentRun(queued.taskId, queued.runId, handled.runMode ?? 'initial');
+      await pollAgentRun(
+        queued.taskId,
+        queued.runId,
+        handled.runMode ?? 'initial',
+        handled.intent,
+      );
     } catch (error) {
       const msg = errorMessage(error);
       const isUnified = msg.startsWith('请求超时');
@@ -349,7 +380,12 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     }
   };
 
-  const pollAgentRun = async (taskId: number, runId: string, mode: 'initial' | 'follow_up') => {
+  const pollAgentRun = async (
+    taskId: number,
+    runId: string,
+    mode: 'initial' | 'follow_up',
+    intent: SocialAgentIntentType,
+  ) => {
     const startedAt = Date.now();
     while (Date.now() - startedAt < 120_000) {
       const [run, timeline] = await Promise.all([
@@ -361,6 +397,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
       if (run.status === 'completed' && run.result) {
         const refreshed = run.result;
         setResult(refreshed);
+        setShouldShowCandidateCards(shouldShowCandidateCardsForResult(refreshed, intent));
         setActiveTaskId(refreshed.taskId);
         setCandidateStates({});
         setDraftPublish({ status: 'idle' });
@@ -611,6 +648,9 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
             ? `已发送给 ${displayName(candidate)}，可前往消息查看。`
             : `已发送给 ${displayName(candidate)}，消息已关联 task #${result.taskId}。`,
       );
+      if (!pending && sent.conversationId) {
+        navigate(messageUrlWithSocialAgentReturn(sent.conversationId, result.taskId ?? activeTaskId));
+      }
     } catch (error) {
       const messageText = isServerError(error)
         ? '发送失败，请稍后重试。'
@@ -699,6 +739,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     setStatuses([]);
     setToolCalls([]);
     setResult(null);
+    setShouldShowCandidateCards(false);
     setDraftPublish({ status: 'idle' });
     setCandidateStates({});
     setActionStatus('');
@@ -755,30 +796,16 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
       />
       <div
         className={clsx(
-          'mx-auto min-h-screen w-full px-4 pb-56 pt-24 sm:px-6',
-          started
-            ? 'max-w-6xl lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-6'
-            : 'flex max-w-4xl flex-col',
+          'mx-auto flex min-h-screen w-full flex-col px-4 pb-56 pt-24 sm:px-6',
+          started ? 'max-w-4xl' : 'max-w-4xl',
         )}
       >
-        <section className="mx-auto mt-4 flex w-full max-w-3xl flex-1 flex-col">
+        <section className="mx-auto mt-4 flex w-full max-w-4xl flex-1 flex-col">
           {!started ? (
             <AgentWelcome onPrompt={queuePrompt} />
           ) : (
             <div className="space-y-5">
               {isRestoring ? <RestoringState /> : null}
-
-              {!isRestoring ? (
-                <AgentOverviewStrip
-                  activeTaskId={activeTaskId}
-                  taskStatus={taskSummary?.status ?? result?.status ?? null}
-                  toolCalls={toolCalls}
-                  candidateCount={realCandidateCards.length}
-                  publicIntentCount={publicIntentCards.length}
-                  pendingApprovals={pendingApprovalsCount}
-                  restoredAt={restoredAt}
-                />
-              ) : null}
 
               {messages.map((message) => (
                 <ChatMessage key={message.id} message={message} />
@@ -808,9 +835,9 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
                 />
               ) : null}
 
-              {result && candidates.length === 0 ? (
+              {shouldShowCandidateCards && result && visibleCandidates.length === 0 ? (
                 <EmptyResult onQuickAction={(text) => setInput(text)} />
-              ) : candidates.length > 0 ? (
+              ) : visibleCandidates.length > 0 ? (
                 <div className="space-y-3">
                   {realCandidateCards.length > 0 ? (
                     <CandidateResultGroup
@@ -846,23 +873,6 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
             </div>
           )}
         </section>
-        {started ? (
-          <aside className="mt-5 lg:sticky lg:top-20 lg:mt-4 lg:self-start">
-            <AgentWorkbench
-              activeTaskId={activeTaskId}
-              taskSummary={taskSummary}
-              taskMemory={taskMemory}
-              toolCalls={toolCalls}
-              result={result}
-              statuses={statuses}
-              pendingApprovals={pendingApprovalsCount}
-              candidateCount={realCandidateCards.length}
-              publicIntentCount={publicIntentCards.length}
-              draftStatus={draftPublish.status}
-              onPrompt={queuePrompt}
-            />
-          </aside>
-        ) : null}
       </div>
 
       <form
@@ -1094,7 +1104,7 @@ function PromptRail({
   );
 }
 
-function AgentOverviewStrip({
+export function AgentOverviewStrip({
   activeTaskId,
   taskStatus,
   toolCalls,
@@ -1141,51 +1151,7 @@ function AgentOverviewStrip({
   );
 }
 
-function AgentWorkbench({
-  activeTaskId,
-  taskSummary,
-  taskMemory,
-  toolCalls,
-  result,
-  statuses,
-  pendingApprovals,
-  candidateCount,
-  publicIntentCount,
-  draftStatus,
-  onPrompt,
-}: {
-  activeTaskId: number | null;
-  taskSummary: SocialAgentTaskTimelineSnapshot['task'] | null;
-  taskMemory: Record<string, unknown>;
-  toolCalls: ToolCallView[];
-  result: SocialAgentChatRunResult | null;
-  statuses: StatusStep[];
-  pendingApprovals: number;
-  candidateCount: number;
-  publicIntentCount: number;
-  draftStatus: DraftPublishState['status'];
-  onPrompt: (text: string) => void;
-}) {
-  return (
-    <div className="space-y-3">
-      <TaskRunPanel
-        activeTaskId={activeTaskId}
-        taskSummary={taskSummary}
-        statuses={statuses}
-        result={result}
-        pendingApprovals={pendingApprovals}
-        candidateCount={candidateCount}
-        publicIntentCount={publicIntentCount}
-        draftStatus={draftStatus}
-      />
-      <CapabilityDock toolCalls={toolCalls} onPrompt={onPrompt} />
-      <ToolCallPanel toolCalls={toolCalls} />
-      <MemoryPanel taskMemory={taskMemory} currentGoal={taskSummary?.goal ?? result?.assistantMessage ?? ''} />
-    </div>
-  );
-}
-
-function TaskRunPanel({
+export function TaskRunPanel({
   activeTaskId,
   taskSummary,
   statuses,
@@ -1280,7 +1246,7 @@ const capabilityGroups = [
   },
 ] as const;
 
-function CapabilityDock({
+export function CapabilityDock({
   toolCalls,
   onPrompt,
 }: {
@@ -1325,7 +1291,7 @@ function CapabilityDock({
   );
 }
 
-function MemoryPanel({
+export function MemoryPanel({
   taskMemory,
   currentGoal,
 }: {
@@ -1431,6 +1397,14 @@ function ChatMessage({ message }: { message: Message }) {
     );
   }
 
+  if (message.kind === 'profile' && message.profileCard) {
+    return (
+      <div className="flex justify-start">
+        <ProfileSummaryCard data={message.profileCard} />
+      </div>
+    );
+  }
+
   return (
     <div className={clsx('flex', isUser ? 'justify-end' : 'justify-start')}>
       <div
@@ -1486,6 +1460,40 @@ function ActivityResultCard({ activity }: { activity: SocialAgentActivityResult 
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ProfileSummaryCard({ data }: { data: ProfileCardData }) {
+  return (
+    <article className="max-w-[82%] rounded-2xl border border-[#dfe8d8] bg-[#fbfff8] p-4 shadow-[0_8px_24px_rgba(32,33,36,0.05)]">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-black text-[#202124]">画像摘要</h3>
+        <span className="rounded-full bg-[#e7f7ed] px-2.5 py-1 text-[11px] font-black text-[#168a55]">
+          已整理
+        </span>
+      </div>
+      {data.summary.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {data.summary.slice(0, 8).map((item) => (
+            <span
+              key={item}
+              className="rounded-full border border-[#dbe8d5] bg-white px-2.5 py-1 text-xs font-bold text-[#3f403b]"
+            >
+              {item}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <div className="mt-3 rounded-xl bg-white/80 p-3 text-xs leading-5 text-[#555650]">
+        <div className="font-black text-[#202124]">还可以补充</div>
+        <div className="mt-1">
+          {(data.missing.length > 0
+            ? data.missing
+            : ['可约时间', '具体活动类型', '边界要求']
+          ).join('、')}
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -1565,7 +1573,7 @@ function ThinkingMark({ state }: { state: SocialAgentStepStatus }) {
   );
 }
 
-function ToolCallPanel({ toolCalls }: { toolCalls: ToolCallView[] }) {
+export function ToolCallPanel({ toolCalls }: { toolCalls: ToolCallView[] }) {
   const recent = latestToolCallsByName(toolCalls).slice(-12);
   return (
     <section className="overflow-hidden rounded-[24px] border border-[#e7e7e0] bg-[linear-gradient(180deg,#ffffff_0%,#fafaf7_100%)] p-4 shadow-[0_12px_32px_rgba(32,33,36,0.07)]">
@@ -2115,6 +2123,56 @@ function messageFromTimeline(message: SocialAgentTimelineMessage): Message | nul
     content: cleanDisplayText(message.text, ''),
     activityResults: message.activityResults,
     pendingApproval: message.pendingApproval,
+    profileCard: profileCardFromAssistantMessage(
+      'unknown',
+      cleanDisplayText(message.text, ''),
+    ) ?? undefined,
+  };
+}
+
+function profileCardFromAssistantMessage(
+  intent: SocialAgentIntentType | 'unknown',
+  text: string,
+): ProfileCardData | null {
+  if (
+    ![
+      'profile_enrichment',
+      'profile_enrichment_request',
+      'correction_or_clarification',
+      'profile_update',
+      'unknown',
+    ].includes(intent)
+  ) {
+    return null;
+  }
+  const content = cleanDisplayText(text, '');
+  if (!/(已提取|写入 AI 画像|画像字段|还缺|缺少|可约时间|边界要求)/.test(content)) {
+    return null;
+  }
+  const summary = Array.from(
+    new Set(
+      [
+        ...content.matchAll(
+          /(zodiac|mbti|city|school|targetPreference|socialGoal|height|weight|nearbyArea|gender|ageRange):\s*([^；\n]+)/gi,
+        ),
+      ]
+        .map((match) => cleanDisplayText(match[2], ''))
+        .filter(Boolean),
+    ),
+  );
+  const missingPatterns: Array<[string, RegExp]> = [
+    ['可约时间', /可约时间|availableTimes/i],
+    ['具体活动类型', /具体活动类型|activityType/i],
+    ['边界要求', /边界要求|privacyBoundary|明确边界/i],
+    ['是否只接受校内/公共场所', /校内\/公共场所|公共场所|校内/i],
+  ];
+  const missing = missingPatterns
+    .filter(([, pattern]) => pattern.test(content))
+    .map(([label]) => label);
+
+  return {
+    summary,
+    missing: Array.from(new Set(missing)),
   };
 }
 
@@ -2731,6 +2789,20 @@ function isReplanRunResult(
   return 'replan' in result;
 }
 
+function shouldShowCandidateCardsForResult(
+  result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null,
+  intent?: SocialAgentIntentType,
+): boolean {
+  if (!result || result.candidates.length === 0) return false;
+  if (
+    intent &&
+    !['social_search', 'activity_search', 'candidate_followup'].includes(intent)
+  ) {
+    return false;
+  }
+  return Boolean(result.socialRequestDraft || intent);
+}
+
 function displayName(candidate: SocialAgentChatCandidate): string {
   return cleanDisplayText(candidate.displayName ?? candidate.nickname, `用户 #${candidate.userId}`);
 }
@@ -2772,6 +2844,13 @@ function errorMessage(error: unknown, fallback = '请稍后再试。'): string {
     )
   ) {
     return '请求超时，但你的补充信息已保存。请稍后重试。';
+  }
+  if (
+    /API|DeepSeek HTTP|JSON|stack|exception|Mongo|Postgres|database|enum|tool|undefined|null|Cannot |TypeError|ReferenceError/i.test(
+      message,
+    )
+  ) {
+    return '这次操作没有完成，我已经保留当前上下文。你可以稍后重试，或先继续补充条件。';
   }
   return message;
 }

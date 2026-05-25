@@ -10,7 +10,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useMessageStore } from '../stores';
 
 export const MessagesPage = () => {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const {
     conversations,
     activeConvId,
@@ -35,11 +35,23 @@ export const MessagesPage = () => {
   const socialAgentReturnUrl = agentTaskId
     ? `/social-agent?taskId=${encodeURIComponent(agentTaskId)}`
     : '/social-agent';
+  const handledConversationQueryRef = useRef<string | null>(null);
 
   useEffect(() => {
     const fromQuery =
       searchParams.get('conversationId') ?? searchParams.get('conversation');
-    if (!fromQuery || activeConvId === fromQuery) return;
+    if (!fromQuery) {
+      handledConversationQueryRef.current = null;
+      return;
+    }
+    if (
+      handledConversationQueryRef.current === fromQuery ||
+      activeConvId === fromQuery
+    ) {
+      handledConversationQueryRef.current = fromQuery;
+      return;
+    }
+    handledConversationQueryRef.current = fromQuery;
     let cancelled = false;
     loadConversations()
       .catch(() => undefined)
@@ -64,9 +76,11 @@ export const MessagesPage = () => {
   const handleSelectConversation = useCallback(
     (id: string) => {
       setConversationError(null);
+      handledConversationQueryRef.current = id;
       selectConv(id);
+      setSearchParams({ conversationId: id });
     },
-    [selectConv],
+    [selectConv, setSearchParams],
   );
 
   useEffect(() => {
@@ -178,7 +192,10 @@ export const MessagesPage = () => {
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+              <div
+                key={`messages-${activeConvId}`}
+                className="flex-1 overflow-y-auto px-5 py-4 space-y-3"
+              >
                 {activeMessages.map((msg) => (
                   <div
                     key={msg.id}

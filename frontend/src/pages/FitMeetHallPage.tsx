@@ -227,7 +227,9 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
         if (!item.publicIntentId) {
           await dataService.sendMessage(result.conversationId, opener);
         }
-        navigate(`/messages?conversationId=${encodeURIComponent(result.conversationId)}`);
+        navigate(
+          `/messages?conversationId=${encodeURIComponent(result.conversationId)}&from=hall`,
+        );
       } catch (err) {
         setContactNotice(err instanceof Error ? err.message : '发起聊天失败，请稍后重试。');
       } finally {

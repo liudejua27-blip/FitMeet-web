@@ -18,6 +18,15 @@ export enum FitMeetAgentToolCategory {
 }
 
 export type FitMeetAgentToolRuntimeStatus = 'implemented' | 'planned';
+export type FitMeetAgentToolPermission =
+  | 'read_only'
+  | 'profile_write'
+  | 'memory_write'
+  | 'search'
+  | 'draft_or_create'
+  | 'limited_auto_or_confirmed'
+  | 'confirmed_action'
+  | 'admin_debug';
 
 export interface FitMeetAgentToolCategoryDefinition {
   id: FitMeetAgentToolCategory;
@@ -29,8 +38,10 @@ export interface FitMeetAgentToolDefinition {
   name: string;
   description: string;
   category: FitMeetAgentToolCategory;
+  permission?: FitMeetAgentToolPermission;
   riskLevel: AgentActionRiskLevel;
   requiresApproval: boolean;
+  requiresConfirmation?: boolean;
   inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown>;
   permissionMode: AgentTaskPermissionMode[];
@@ -40,6 +51,8 @@ export interface FitMeetAgentToolDefinition {
   plannerEnabled: boolean;
   dataScope: string;
   sideEffects: string[];
+  failureFallback?: string;
+  aliases?: string[];
 }
 
 export interface FitMeetAgentToolRegistryFilter {
@@ -55,6 +68,7 @@ export interface FitMeetAgentToolRegistryManifest {
   description: string;
   categories: FitMeetAgentToolCategoryDefinition[];
   tools: FitMeetAgentToolDefinition[];
+  modelTools: FitMeetAgentToolDefinition[];
   safetyRules: string[];
 }
 
@@ -72,18 +86,24 @@ const CONFIRM_AND_AUTO = [
 const LIMITED_AUTO_ONLY = [AgentTaskPermissionMode.LimitedAuto];
 
 export const FIRST_STAGE_AGENT_TOOL_NAMES = [
+  'get_user_profile',
   'get_my_profile',
   'update_my_profile',
+  'update_profile_from_agent_context',
+  'append_profile_memory',
   'get_current_task_memory',
   'search_real_candidates',
   'search_public_intents',
   'search_activities',
+  'create_social_request',
   'publish_social_request',
   'save_candidate',
   'send_message_to_candidate',
   'connect_candidate',
+  'get_conversation_messages',
   'get_conversations',
   'get_agent_inbox',
+  'get_candidate_detail',
   'create_activity',
   'join_activity',
   'get_pending_approvals',
@@ -92,6 +112,20 @@ export const FIRST_STAGE_AGENT_TOOL_NAMES = [
   'read_long_term_memory',
   'summarize_current_task',
   'get_candidate_pool_debug',
+] as const;
+
+export const SOCIAL_AGENT_MODEL_TOOL_NAMES = [
+  'get_user_profile',
+  'update_profile_from_agent_context',
+  'append_profile_memory',
+  'search_real_candidates',
+  'search_public_intents',
+  'create_social_request',
+  'send_message_to_candidate',
+  'connect_candidate',
+  'create_activity',
+  'get_conversation_messages',
+  'get_candidate_detail',
 ] as const;
 
 const TOOL_CATEGORIES: FitMeetAgentToolCategoryDefinition[] = [
@@ -191,6 +225,142 @@ const candidateOutputSchema = objectSchema(
 );
 
 const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
+  {
+    name: 'get_user_profile',
+    description:
+      'Read the current user profile and AI social profile summary for planning. Never reads another user profile.',
+    category: FitMeetAgentToolCategory.Profile,
+    permission: 'read_only',
+    riskLevel: AgentActionRiskLevel.Low,
+    requiresApproval: false,
+    requiresConfirmation: false,
+    inputSchema: objectSchema(
+      {
+        includeMissingFields: { type: 'boolean' },
+        includeMemorySummary: { type: 'boolean' },
+      },
+      [],
+    ),
+    outputSchema: objectSchema(
+      {
+        profile: objectSchema({}, [], true),
+        completion: { type: 'number' },
+        missingFields: stringArraySchema,
+        memorySummary: objectSchema({}, [], true),
+      },
+      ['profile'],
+      true,
+    ),
+    permissionMode: [...ALL_PERMISSION_MODES],
+    executorToolName: 'get_my_profile',
+    runtimeStatus: 'implemented',
+    plannerEnabled: true,
+    dataScope: 'owner_profile_only',
+    sideEffects: [],
+    failureFallback:
+      'Continue with the profile facts already present in conversation/task memory and ask the user for missing fields.',
+    aliases: ['get_my_profile', 'get_ai_profile'],
+  },
+  {
+    name: 'update_profile_from_agent_context',
+    description:
+      'Update the current user AI social profile from explicitly provided conversation facts.',
+    category: FitMeetAgentToolCategory.Profile,
+    permission: 'profile_write',
+    riskLevel: AgentActionRiskLevel.Medium,
+    requiresApproval: false,
+    requiresConfirmation: false,
+    inputSchema: objectSchema(
+      {
+        extractedProfile: objectSchema(
+          {
+            city: { type: 'string' },
+            nearbyArea: { type: 'string' },
+            age: { type: ['string', 'number'] },
+            height: { type: 'string' },
+            weight: { type: 'string' },
+            mbti: { type: 'string' },
+            zodiac: { type: 'string' },
+            school: { type: 'string' },
+            interestTags: stringArraySchema,
+            availableTimes: stringArraySchema,
+            targetPreference: { type: 'string' },
+            socialGoal: { type: 'string' },
+            privacyBoundary: { type: 'string' },
+            rejectRules: { type: 'string' },
+          },
+          [],
+          true,
+        ),
+        sourceMessage: { type: 'string' },
+        taskId: { type: 'integer' },
+      },
+      ['extractedProfile'],
+      false,
+    ),
+    outputSchema: objectSchema(
+      {
+        success: { type: 'boolean' },
+        updatedFields: stringArraySchema,
+        memoryFields: stringArraySchema,
+        missingFields: stringArraySchema,
+      },
+      ['success'],
+      true,
+    ),
+    permissionMode: [...ALL_PERMISSION_MODES],
+    permissionAction: SocialAgentAction.GenerateContent,
+    executorToolName: 'update_profile_from_agent_context',
+    runtimeStatus: 'implemented',
+    plannerEnabled: true,
+    dataScope: 'owner_profile_only',
+    sideEffects: ['profile_update', 'task_memory_update'],
+    failureFallback:
+      'Store the extracted facts in task memory, tell the user the profile write failed, and ask whether to retry.',
+    aliases: ['update_ai_profile', 'save_profile_memory'],
+  },
+  {
+    name: 'append_profile_memory',
+    description:
+      'Append lightweight profile memory or preference notes when user facts should be remembered but do not map cleanly to profile fields.',
+    category: FitMeetAgentToolCategory.Memory,
+    permission: 'memory_write',
+    riskLevel: AgentActionRiskLevel.Medium,
+    requiresApproval: false,
+    requiresConfirmation: false,
+    inputSchema: objectSchema(
+      {
+        memoryType: {
+          type: 'string',
+          enum: ['preference', 'boundary', 'profile_fact', 'social_goal', 'note'],
+        },
+        text: { type: 'string' },
+        sourceMessage: { type: 'string' },
+        tags: stringArraySchema,
+      },
+      ['memoryType', 'text'],
+      false,
+    ),
+    outputSchema: objectSchema(
+      {
+        success: { type: 'boolean' },
+        memoryFields: stringArraySchema,
+        storedIn: { type: 'string' },
+      },
+      ['success'],
+      true,
+    ),
+    permissionMode: [...ALL_PERMISSION_MODES],
+    permissionAction: SocialAgentAction.GenerateContent,
+    executorToolName: 'update_profile_from_agent_context',
+    runtimeStatus: 'implemented',
+    plannerEnabled: true,
+    dataScope: 'owner_agent_memory_only',
+    sideEffects: ['task_memory_update'],
+    failureFallback:
+      'Keep the note in the current assistant reply and ask the user to restate it later if persistence matters.',
+    aliases: ['remember_profile_note', 'append_social_agent_memory'],
+  },
   {
     name: 'get_my_profile',
     description: '读取当前用户自己的 FitMeet 社交画像和 AI 画像摘要。',
@@ -332,6 +502,44 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     sideEffects: [],
   },
   {
+    name: 'get_candidate_detail',
+    description:
+      'Read details for one already selected candidate, including public profile summary, match reasons and safety warnings.',
+    category: FitMeetAgentToolCategory.Candidate,
+    permission: 'read_only',
+    riskLevel: AgentActionRiskLevel.Low,
+    requiresApproval: false,
+    requiresConfirmation: false,
+    inputSchema: objectSchema(
+      {
+        candidateUserId: { type: 'integer' },
+        candidateRecordId: { type: 'integer' },
+        publicIntentId: { type: 'string' },
+      },
+      [],
+      false,
+    ),
+    outputSchema: objectSchema(
+      {
+        candidate: objectSchema({}, [], true),
+        matchReasons: stringArraySchema,
+        riskWarnings: stringArraySchema,
+      },
+      ['candidate'],
+      true,
+    ),
+    permissionMode: [...ALL_PERMISSION_MODES],
+    permissionAction: SocialAgentAction.SearchProfiles,
+    executorToolName: 'explain_matches',
+    runtimeStatus: 'implemented',
+    plannerEnabled: true,
+    dataScope: 'selected_candidate_only',
+    sideEffects: [],
+    failureFallback:
+      'Use the candidate summary already attached to the current task and ask the user which candidate they mean if ambiguous.',
+    aliases: ['explain_candidate_recommendation', 'candidate_detail'],
+  },
+  {
     name: 'generate_opener',
     description: '为指定候选人生成站内开场白草稿，不直接发送。',
     category: FitMeetAgentToolCategory.Candidate,
@@ -401,6 +609,51 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     plannerEnabled: false,
     dataScope: 'owner_match_history_only',
     sideEffects: [],
+  },
+  {
+    name: 'create_social_request',
+    description:
+      'Create a social request draft or publishable request card from the user confirmed goal.',
+    category: FitMeetAgentToolCategory.Request,
+    permission: 'draft_or_create',
+    riskLevel: AgentActionRiskLevel.Medium,
+    requiresApproval: true,
+    requiresConfirmation: true,
+    inputSchema: objectSchema(
+      {
+        mode: { type: 'string', enum: ['draft', 'publish', 'ai_draft'] },
+        title: { type: 'string' },
+        description: { type: 'string' },
+        requestType: { type: 'string' },
+        city: { type: 'string' },
+        location: { type: 'string' },
+        interests: stringArraySchema,
+        timePreference: { type: 'string' },
+        visibility: { type: 'string' },
+      },
+      ['description'],
+      true,
+    ),
+    outputSchema: objectSchema(
+      {
+        socialRequestId: { type: ['integer', 'null'] },
+        status: { type: 'string' },
+        draft: objectSchema({}, [], true),
+        profileUsed: objectSchema({}, [], true),
+      },
+      [],
+      true,
+    ),
+    permissionMode: [...CONFIRM_AND_AUTO],
+    permissionAction: SocialAgentAction.SendInvite,
+    executorToolName: 'create_social_request',
+    runtimeStatus: 'implemented',
+    plannerEnabled: true,
+    dataScope: 'owner_social_requests_only',
+    sideEffects: ['social_request_create_or_draft'],
+    failureFallback:
+      'Return a text draft to the user and ask them to confirm or edit before retrying creation.',
+    aliases: ['publish_social_request'],
   },
   {
     name: 'publish_social_request',
@@ -634,6 +887,43 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     plannerEnabled: true,
     dataScope: 'owner_conversations_only',
     sideEffects: [],
+  },
+  {
+    name: 'get_conversation_messages',
+    description:
+      'Read recent messages from the current task conversation or a selected agent inbox conversation.',
+    category: FitMeetAgentToolCategory.Message,
+    permission: 'read_only',
+    riskLevel: AgentActionRiskLevel.Low,
+    requiresApproval: false,
+    requiresConfirmation: false,
+    inputSchema: objectSchema(
+      {
+        conversationId: { type: 'string' },
+        limit: { type: 'integer', minimum: 1, maximum: 100 },
+        unreadOnly: { type: 'boolean' },
+      },
+      [],
+      false,
+    ),
+    outputSchema: objectSchema(
+      {
+        messages: { type: 'array', items: objectSchema({}, [], true) },
+        summary: objectSchema({}, [], true),
+        hasNewMessages: { type: 'boolean' },
+      },
+      ['messages'],
+      true,
+    ),
+    permissionMode: [...ALL_PERMISSION_MODES],
+    executorToolName: 'read_task_conversation_messages',
+    runtimeStatus: 'implemented',
+    plannerEnabled: true,
+    dataScope: 'owner_or_selected_conversation_only',
+    sideEffects: [],
+    failureFallback:
+      'Use the recent conversation history already present in task memory and ask the user for clarification if needed.',
+    aliases: ['read_task_conversation_messages', 'get_agent_inbox'],
   },
   {
     name: 'reply_message',
@@ -991,9 +1281,24 @@ export class FitMeetAgentToolRegistryService {
     });
   }
 
+  listModelTools(
+    permissionMode: AgentTaskPermissionMode,
+  ): FitMeetAgentToolDefinition[] {
+    const required = new Set<string>(SOCIAL_AGENT_MODEL_TOOL_NAMES);
+    void permissionMode;
+    return this.listTools({
+      runtimeStatus: 'implemented',
+      plannerEnabled: true,
+    }).filter((tool) => required.has(tool.name));
+  }
+
   getTool(name: string): FitMeetAgentToolDefinition | null {
     const normalized = name.trim();
-    const tool = TOOL_DEFINITIONS.find((item) => item.name === normalized);
+    const tool =
+      TOOL_DEFINITIONS.find((item) => item.name === normalized) ??
+      TOOL_DEFINITIONS.find((item) =>
+        (item.aliases ?? []).includes(normalized),
+      );
     return tool ? this.cloneTool(tool) : null;
   }
 
@@ -1009,7 +1314,11 @@ export class FitMeetAgentToolRegistryService {
 
   resolveExecutorToolName(toolName: string): string | null {
     const normalized = toolName.trim();
-    const direct = TOOL_DEFINITIONS.find((item) => item.name === normalized);
+    const direct =
+      TOOL_DEFINITIONS.find((item) => item.name === normalized) ??
+      TOOL_DEFINITIONS.find((item) =>
+        (item.aliases ?? []).includes(normalized),
+      );
     if (direct?.executorToolName) return direct.executorToolName;
     const byExecutor = TOOL_DEFINITIONS.find(
       (item) => item.executorToolName === normalized,
@@ -1027,6 +1336,17 @@ export class FitMeetAgentToolRegistryService {
         'Canonical tool metadata for FitMeet Social Agent planning, permission checks, audit logs and future runtime execution.',
       categories: this.listCategories(),
       tools: this.listTools(filter),
+      modelTools: filter.permissionMode
+        ? this.listModelTools(filter.permissionMode as AgentTaskPermissionMode)
+        : this.listTools({
+            ...filter,
+            runtimeStatus: 'implemented',
+            plannerEnabled: true,
+          }).filter((tool) =>
+            (SOCIAL_AGENT_MODEL_TOOL_NAMES as readonly string[]).includes(
+              tool.name,
+            ),
+          ),
       safetyRules: [
         'Tools must operate on the owner scope or an explicitly selected candidate/activity only.',
         'Tools must not read all-user private data or arbitrary database tables.',
@@ -1067,11 +1387,60 @@ export class FitMeetAgentToolRegistryService {
   ): FitMeetAgentToolDefinition {
     return {
       ...tool,
+      permission: tool.permission ?? this.inferPermission(tool),
+      requiresConfirmation:
+        tool.requiresConfirmation ?? tool.requiresApproval === true,
+      failureFallback: tool.failureFallback ?? this.defaultFailureFallback(tool),
       permissionMode: [...tool.permissionMode],
       inputSchema: this.cloneRecord(tool.inputSchema),
       outputSchema: this.cloneRecord(tool.outputSchema),
       sideEffects: [...tool.sideEffects],
+      aliases: [...(tool.aliases ?? [])],
     };
+  }
+
+  private inferPermission(
+    tool: FitMeetAgentToolDefinition,
+  ): FitMeetAgentToolPermission {
+    if (tool.category === FitMeetAgentToolCategory.AdminDebug) {
+      return 'admin_debug';
+    }
+    if (tool.sideEffects.length === 0) {
+      return tool.category === FitMeetAgentToolCategory.Candidate ||
+        tool.category === FitMeetAgentToolCategory.Request ||
+        tool.category === FitMeetAgentToolCategory.Activity
+        ? 'search'
+        : 'read_only';
+    }
+    if (tool.permissionAction === SocialAgentAction.SendMessage) {
+      return 'limited_auto_or_confirmed';
+    }
+    if (
+      tool.requiresApproval ||
+      tool.riskLevel === AgentActionRiskLevel.High
+    ) {
+      return 'confirmed_action';
+    }
+    if (tool.sideEffects.some((item) => item.includes('memory'))) {
+      return 'memory_write';
+    }
+    if (tool.sideEffects.some((item) => item.includes('profile'))) {
+      return 'profile_write';
+    }
+    return 'limited_auto_or_confirmed';
+  }
+
+  private defaultFailureFallback(tool: FitMeetAgentToolDefinition): string {
+    if (tool.category === FitMeetAgentToolCategory.Candidate) {
+      return 'Explain that no reliable candidate result is available and ask the user to broaden or clarify the search.';
+    }
+    if (tool.category === FitMeetAgentToolCategory.Message) {
+      return 'Do not claim the message was sent; draft the message text for user confirmation instead.';
+    }
+    if (tool.requiresApproval || tool.riskLevel !== AgentActionRiskLevel.Low) {
+      return 'Do not execute silently; ask the user to confirm, edit, or retry the action.';
+    }
+    return 'Continue from available conversation/task memory and ask one concise clarification if needed.';
   }
 
   private cloneRecord(value: Record<string, unknown>): Record<string, unknown> {

@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -15,7 +15,7 @@ import {
   SocialAgentAction,
 } from './agent-permission.service';
 import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
-import { resolveDeepSeekModel } from '../common/deepseek.util';
+import { SocialAgentModelRouterService } from './social-agent-model-router.service';
 
 export type SocialAgentPlanSource = 'deepseek' | 'fallback';
 export type SocialAgentPlanStepStatus = 'planned' | 'replanned';
@@ -77,6 +77,7 @@ export class SocialAgentPlannerService {
     private readonly config: ConfigService,
     private readonly permissions: AgentPermissionService,
     private readonly toolRegistry: FitMeetAgentToolRegistryService,
+    @Optional() private readonly modelRouter?: SocialAgentModelRouterService,
   ) {}
 
   async planTask(
@@ -166,7 +167,7 @@ export class SocialAgentPlannerService {
           summary: 'AI 分析超时，已使用规则匹配继续执行。',
           payload: {
             reason,
-            timeoutMs: this.deepSeekTimeoutMs(),
+            timeoutMs: this.deepSeekTimeoutMs('planner'),
             fallbackMessage: '已收到补充信息，当前先基于规则匹配继续搜索。',
           },
         }),
@@ -227,13 +228,13 @@ export class SocialAgentPlannerService {
     const baseUrl =
       this.config.get<string>('DEEPSEEK_BASE_URL') ||
       'https://api.deepseek.com';
-    const model = resolveDeepSeekModel(
-      this.config.get<string>('DEEPSEEK_MODEL'),
-    );
+    const useCase = 'planner' as const;
+    const model = this.modelFor(useCase);
+    const startedAt = Date.now();
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(),
-      this.deepSeekTimeoutMs(),
+      this.deepSeekTimeoutMs(useCase),
     );
 
     let res: Response;
@@ -246,8 +247,8 @@ export class SocialAgentPlannerService {
           authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model,
-          temperature: 0.2,
+            model,
+            temperature: this.modelRouter?.getTemperature(useCase) ?? 0.15,
           response_format: { type: 'json_object' },
           messages: [
             { role: 'system', content: this.buildSystemPrompt() },
@@ -259,19 +260,58 @@ export class SocialAgentPlannerService {
         }),
       });
     } catch (error) {
+      this.logModelCall({
+        useCase,
+        model,
+        taskId: task.id,
+        intent: task.taskType,
+        latencyMs: Date.now() - startedAt,
+        success: false,
+        reason: error instanceof Error ? error.message : String(error),
+      });
       if (this.isAbortError(error)) throw new Error('deepseek_timeout');
       throw error;
     } finally {
       clearTimeout(timeout);
     }
 
-    if (!res.ok) throw new Error(`DeepSeek HTTP ${res.status}`);
+    if (!res.ok) {
+      this.logModelCall({
+        useCase,
+        model,
+        taskId: task.id,
+        intent: task.taskType,
+        latencyMs: Date.now() - startedAt,
+        success: false,
+        reason: `DeepSeek HTTP ${res.status}`,
+      });
+      throw new Error(`DeepSeek HTTP ${res.status}`);
+    }
 
     const data = (await res.json()) as {
       choices?: { message?: { content?: string } }[];
     };
     const content = data.choices?.[0]?.message?.content ?? '';
-    if (!content.trim()) throw new Error('DeepSeek returned empty plan');
+    if (!content.trim()) {
+      this.logModelCall({
+        useCase,
+        model,
+        taskId: task.id,
+        intent: task.taskType,
+        latencyMs: Date.now() - startedAt,
+        success: false,
+        reason: 'DeepSeek returned empty plan',
+      });
+      throw new Error('DeepSeek returned empty plan');
+    }
+    this.logModelCall({
+      useCase,
+      model,
+      taskId: task.id,
+      intent: task.taskType,
+      latencyMs: Date.now() - startedAt,
+      success: true,
+    });
     return content;
   }
 
@@ -298,7 +338,7 @@ export class SocialAgentPlannerService {
       agentConnectionId: task.agentConnectionId,
       permissionMode: task.permissionMode,
       allowedActions,
-      availableTools: this.toolRegistry.listPlannerTools(task.permissionMode),
+      availableTools: this.toolRegistry.listModelTools(task.permissionMode),
       goal: task.goal,
       taskType: task.taskType,
       title: task.title,
@@ -622,7 +662,18 @@ export class SocialAgentPlannerService {
     return 'unknown_planner_error';
   }
 
-  private deepSeekTimeoutMs(): number {
+  private modelFor(useCase: 'planner'): string {
+    if (this.modelRouter) return this.modelRouter.getModel(useCase);
+    return (
+      this.config.get<string>('AGENT_PLANNER_MODEL') ||
+      this.config.get<string>('DEEPSEEK_FAST_MODEL') ||
+      this.config.get<string>('DEEPSEEK_MODEL') ||
+      'deepseek-v4-flash'
+    );
+  }
+
+  private deepSeekTimeoutMs(useCase?: 'planner'): number {
+    if (useCase && this.modelRouter) return this.modelRouter.getTimeout(useCase);
     const configured = Number(
       this.config.get<string>('SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS') ??
         this.config.get<string>('DEEPSEEK_TIMEOUT_MS'),
@@ -631,6 +682,29 @@ export class SocialAgentPlannerService {
       return Math.min(configured, 15_000);
     }
     return 15_000;
+  }
+
+  private logModelCall(input: {
+    useCase: string;
+    model: string;
+    taskId: number | null;
+    intent?: unknown;
+    latencyMs: number;
+    success: boolean;
+    reason?: string;
+  }): void {
+    this.logger.log(
+      JSON.stringify({
+        event: 'social_agent.model_call',
+        useCase: input.useCase,
+        model: input.model,
+        taskId: input.taskId,
+        intent: typeof input.intent === 'string' ? input.intent : null,
+        latencyMs: input.latencyMs,
+        success: input.success,
+        ...(input.reason ? { reason: input.reason } : {}),
+      }),
+    );
   }
 
   private isAbortError(error: unknown): boolean {

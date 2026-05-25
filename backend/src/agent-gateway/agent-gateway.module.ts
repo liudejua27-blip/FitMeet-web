@@ -37,6 +37,10 @@ import { AgentActionLogService } from './agent-action-log.service';
 import { AgentPermissionService } from './agent-permission.service';
 import { SocialAgentPlannerService } from './social-agent-planner.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
+import { SocialAgentBrainService } from './social-agent-brain.service';
+import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
+import { SocialAgentModelRouterService } from './social-agent-model-router.service';
+import { SocialAgentMemoryContextService } from './social-agent-memory-context.service';
 import { SocialAgentToolExecutorService } from './social-agent-tool-executor.service';
 import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
 import { SocialAgentAutopilotService } from './social-agent-autopilot.service';
@@ -130,6 +134,10 @@ import { SocialActivity } from '../activities/entities/activity.entity';
     FitMeetAgentToolRegistryService,
     SocialAgentPlannerService,
     SocialAgentIntentRouterService,
+    SocialAgentBrainService,
+    SocialAgentFinalResponseService,
+    SocialAgentModelRouterService,
+    SocialAgentMemoryContextService,
     SocialAgentAutopilotService,
     SocialAgentChatService,
     SocialAgentCandidatePoolService,
@@ -176,6 +184,10 @@ import { SocialActivity } from '../activities/entities/activity.entity';
     FitMeetAgentToolRegistryService,
     SocialAgentPlannerService,
     SocialAgentIntentRouterService,
+    SocialAgentBrainService,
+    SocialAgentFinalResponseService,
+    SocialAgentModelRouterService,
+    SocialAgentMemoryContextService,
     SocialAgentAutopilotService,
     SocialAgentChatService,
     SocialAgentCandidatePoolService,

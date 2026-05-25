@@ -70,6 +70,7 @@ function makeService() {
   };
   const socialProfiles = {
     get: jest.fn(),
+    upsert: jest.fn(),
     generateQuestions: jest.fn(),
     saveAnswer: jest.fn(),
     saveAiDraft: jest.fn(),
@@ -173,6 +174,63 @@ function makeService() {
 }
 
 describe('SocialAgentToolExecutorService', () => {
+  it('updates social profile from extracted agent context', async () => {
+    const { service, taskRepo, socialProfiles } = makeService();
+    const task = makeTask({ permissionMode: AgentTaskPermissionMode.Assist });
+    taskRepo.findOne.mockResolvedValue(task);
+    socialProfiles.upsert.mockResolvedValue({ userId: 1, city: 'Qingdao' });
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.UpdateProfileFromAgentContext,
+      {
+        extractedProfile: {
+          gender: 'male',
+          ageRange: '18',
+          city: 'Qingdao',
+          nearbyArea: 'Qingdao University',
+          zodiac: 'Aries',
+          mbti: 'INFP',
+          height: '181cm',
+          weight: '70kg',
+          school: 'Qingdao University',
+          targetPreference: 'same-school women',
+          wantToMeet: ['same-school women'],
+        },
+        sourceMessage:
+          'I am an Aries male, 18, 181cm, 70kg, studying in Qingdao University.',
+      },
+      1,
+    );
+
+    expect(call.status).toBe('succeeded');
+    expect(socialProfiles.upsert).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        gender: 'male',
+        ageRange: '18',
+        city: 'Qingdao',
+        nearbyArea: 'Qingdao University',
+        zodiac: 'Aries',
+        mbti: 'INFP',
+        wantToMeet: ['same-school women'],
+        matchSignals: expect.objectContaining({
+          agentProfileMemory: expect.objectContaining({
+            height: '181cm',
+            weight: '70kg',
+            school: 'Qingdao University',
+            targetPreference: 'same-school women',
+          }),
+        }),
+      }),
+    );
+    expect(call.output).toMatchObject({
+      success: true,
+      updatedFields: expect.arrayContaining(['gender', 'city', 'matchSignals']),
+      memoryFields: expect.arrayContaining(['height', 'weight', 'school']),
+    });
+  });
+
   it('executes a permitted send_message step through MessagesService', async () => {
     const { service, taskRepo, messages, actionLogs } = makeService();
     const task = makeTask({

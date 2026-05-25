@@ -105,6 +105,11 @@ export interface SocialAgentRagContext {
 
 const INTENT_KIND_MAP: Record<SocialAgentIntentType, SocialAgentRagDocKind[]> = {
   casual_chat: [],
+  product_help: [],
+  workflow_help: [],
+  profile_enrichment: ['user_memory_summary'],
+  profile_enrichment_request: ['user_memory_summary'],
+  correction_or_clarification: ['user_memory_summary'],
   profile_update: ['user_memory_summary'],
   social_search: ['opening_templates', 'successful_match_cases', 'user_memory_summary'],
   activity_search: ['activity_sop', 'user_memory_summary'],
@@ -321,6 +326,20 @@ export class SocialAgentRagService {
 
 function summariseSnapshot(snapshot: LongTermMemorySnapshot): UserMemorySummaryDoc {
   const prefBits: string[] = [];
+  const profileFacts = Object.entries(snapshot.profileFacts)
+    .map(([key, value]) =>
+      `${key}:${Array.isArray(value) ? value.join('、') : value}`,
+    )
+    .slice(0, 8);
+  if (profileFacts.length > 0) {
+    prefBits.push(`画像事实：${profileFacts.join('；')}`);
+  }
+  if (snapshot.socialGoals.length > 0) {
+    prefBits.push(`社交目标：${snapshot.socialGoals.slice(-3).join('、')}`);
+  }
+  if (snapshot.availability.length > 0) {
+    prefBits.push(`可约时间：${snapshot.availability.slice(-3).join('、')}`);
+  }
   if (snapshot.preferences.interests.length > 0) {
     prefBits.push(`兴趣：${snapshot.preferences.interests.slice(0, 5).join('、')}`);
   }

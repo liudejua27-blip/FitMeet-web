@@ -137,6 +137,37 @@ describe('SocialAgentLongTermMemoryService', () => {
     expect(snapshot!.boundaries.noNightMeet).toBe(true);
   });
 
+  it('persists stable profile facts, social goals and availability into long-term memory', async () => {
+    const repo = makeRepo();
+    const service = new SocialAgentLongTermMemoryService(repo as never);
+
+    const task = makeTask();
+    seedTaskMemory(task, {
+      stableProfileFacts: {
+        city: '青岛',
+        nearbyArea: '崂山区青岛大学',
+        mbti: 'INFP',
+        targetPreference: '同校女生',
+        socialGoal: '认识同校女生',
+        availableTimes: ['周末下午'],
+      },
+    });
+
+    const snapshot = await service.summarizeTask(task);
+
+    expect(snapshot!.profileFacts).toMatchObject({
+      city: '青岛',
+      nearbyArea: '崂山区青岛大学',
+      mbti: 'INFP',
+    });
+    expect(snapshot!.socialGoals).toContain('认识同校女生');
+    expect(snapshot!.availability).toContain('周末下午');
+    expect(snapshot!.activityPreferences.favoriteCities).toContain('青岛');
+    expect(snapshot!.activityPreferences.favoriteLocationPreferences).toContain(
+      '崂山区青岛大学',
+    );
+  });
+
   it('captures rejected candidates as failedMatches signals', async () => {
     const repo = makeRepo();
     const service = new SocialAgentLongTermMemoryService(repo as never);

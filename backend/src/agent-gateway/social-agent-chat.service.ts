@@ -5,7 +5,9 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Not, Repository } from 'typeorm';
 
@@ -52,21 +54,38 @@ import {
   type SocialAgentIntentType,
   type SocialAgentReplyStrategy,
 } from './social-agent-intent-router.service';
+import { SocialAgentBrainService } from './social-agent-brain.service';
+import type {
+  SocialAgentBrainPlannedTool,
+  SocialAgentBrainTurnDecision,
+} from './social-agent-brain.service';
+import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
+import {
+  SocialAgentModelRouterService,
+  SocialAgentModelUseCase,
+} from './social-agent-model-router.service';
 import {
   SocialAgentToolCallRecord,
   SocialAgentToolExecutorService,
   SocialAgentToolName,
 } from './social-agent-tool-executor.service';
 import {
+  appendSocialAgentShortTermTurn,
   appendShortTermMemoryItem,
   appendSocialAgentUserMemo,
+  mergeSocialAgentStableProfileFacts,
   mergeSocialAgentActiveEntities,
   mergeSocialAgentBoundaries,
   mergeSocialAgentPreferences,
   readSocialAgentTaskMemory,
   recordSocialAgentPendingAction,
   recordSocialAgentRecommendedCandidates,
+  recordSocialAgentSearchMemory,
+  recordSocialAgentMisunderstanding,
+  recordSocialAgentShortTermAction,
+  rememberSocialAgentCurrentTask,
   rememberSocialAgentShortTerm,
+  transitionSocialAgentState,
 } from './social-agent-memory.util';
 import { AgentApprovalService } from './agent-approval.service';
 import {
@@ -82,6 +101,10 @@ import {
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentRagService } from './social-agent-rag.service';
+import {
+  SocialAgentMemoryContext,
+  SocialAgentMemoryContextService,
+} from './social-agent-memory-context.service';
 
 export interface SocialAgentVisibleStep {
   id: string;
@@ -186,6 +209,7 @@ type SocialAgentRouteMessageBody = {
 type StreamEmit = (event: SocialAgentChatStreamEvent) => void | Promise<void>;
 
 export type SocialAgentIntentAction =
+  | 'answer'
   | 'reply'
   | 'save_context'
   | 'queue_search'
@@ -245,6 +269,8 @@ export interface SocialAgentActivityResult {
   matchReasons?: string[];
 }
 
+type ExtractedProfileFields = Record<string, string | string[]>;
+
 export interface SocialAgentSessionMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -282,6 +308,7 @@ export interface SocialAgentSessionSnapshot {
 export interface SocialAgentCurrentTaskSnapshot {
   taskId: number;
   status: AgentTaskStatus;
+  agentState?: string;
   taskType: string;
   title: string;
   goal: string;
@@ -401,6 +428,13 @@ export class SocialAgentChatService {
     private readonly metrics: SocialAgentMetricsService,
     private readonly longTermMemory: SocialAgentLongTermMemoryService,
     private readonly rag: SocialAgentRagService,
+    private readonly config: ConfigService,
+    @Optional() private readonly brain?: SocialAgentBrainService,
+    @Optional() private readonly memoryContext?: SocialAgentMemoryContextService,
+    @Optional()
+    private readonly finalResponses?: SocialAgentFinalResponseService,
+    @Optional()
+    private readonly modelRouter?: SocialAgentModelRouterService,
   ) {}
 
   run(
@@ -444,12 +478,49 @@ export class SocialAgentChatService {
       }),
     ]);
     task = freshTask;
-    const route = await this.intentRouter.route({
+    let memoryContext = this.buildMemoryContext(
+      task,
+      longTermSnapshot,
+    );
+    let route = await this.intentRouter.route({
       message,
-      taskContext: this.buildTaskContext(task, body, longTermSnapshot),
+      taskContext: this.buildTaskContext(
+        task,
+        body,
+        longTermSnapshot,
+        memoryContext,
+      ),
       profile: profile ?? {},
       conversationHistory: this.readConversationHistory(task),
     });
+    const brainDecision = await this.brain?.planTurn({
+      message,
+      route,
+      profile: profile ?? {},
+      taskContext: this.buildTaskContext(
+        task,
+        body,
+        longTermSnapshot,
+        memoryContext,
+      ),
+      conversationHistory: this.readConversationHistory(task),
+      memoryContext: memoryContext ?? undefined,
+    });
+    if (brainDecision) {
+      route = brainDecision.route;
+      this.rememberConversationBrainDecision(task, brainDecision);
+      if (brainDecision.conversationMode === 'profile_correction') {
+        recordSocialAgentMisunderstanding(task, brainDecision.reason || 'user_correction');
+        transitionSocialAgentState(task, 'user_correction', {
+          objective: 'profile_enrichment',
+          nextStep: '重新理解上一段画像信息并继续补齐',
+          shouldSearchNow: false,
+          waitingFor: 'profile_repair',
+        });
+      }
+    }
+    this.rememberCurrentTaskFromBrain(task, route);
+    memoryContext = this.buildMemoryContext(task, longTermSnapshot);
     await this.recordIntentRoute(task, route).catch((error) => {
       this.metrics.recordError('intent_route_event_failed');
       this.logger.warn(
@@ -463,6 +534,11 @@ export class SocialAgentChatService {
     appendSocialAgentUserMemo(task, message, route.intent);
     this.applyTaskMemoryForIntent(task, message, route);
     await this.applyRagContext(task, route, message, longTermSnapshot);
+    const brainToolResults = await this.executeConversationBrainReadTools(
+      ownerUserId,
+      task,
+      brainDecision,
+    );
 
     let savedContext = false;
     let profileUpdated = false;
@@ -470,6 +546,62 @@ export class SocialAgentChatService {
     let runMode: SocialAgentIntentRouteResult['runMode'] = null;
     let assistantMessage = this.assistantMessageForRoute(route, task, message);
     let activityResults: SocialAgentActivityResult[] = [];
+
+    const confirmedCandidateMessage =
+      await this.confirmPendingCandidateMessageIfRequested(
+        ownerUserId,
+        task,
+        message,
+      );
+    if (confirmedCandidateMessage) {
+      task = confirmedCandidateMessage.task;
+      assistantMessage = confirmedCandidateMessage.assistantMessage;
+      const result: SocialAgentIntentRouteResult = {
+        ...route,
+        intent: 'action_request',
+        action: 'reply',
+        taskId: task.id,
+        assistantMessage,
+        savedContext: false,
+        profileUpdated: false,
+        shouldExecuteAction: true,
+        shouldQueueRun: false,
+        runMode: null,
+        queuedRun: null,
+        pendingApproval: null,
+        activityResults: [],
+      };
+      this.metrics.recordAction(result.action);
+      await this.recordAssistantMessage(task, assistantMessage, result);
+      this.metrics.observeRouteLatency(Date.now() - startedAt);
+      return result;
+    }
+
+    if (
+      route.intent === 'profile_enrichment' ||
+      route.intent === 'profile_enrichment_request' ||
+      route.intent === 'correction_or_clarification'
+    ) {
+      const handled = await this.handleProfileEnrichmentTurn(
+        ownerUserId,
+        task,
+        message,
+        route.intent,
+      );
+      assistantMessage = handled.assistantMessage;
+      savedContext = handled.savedContext;
+      profileUpdated = handled.profileUpdated;
+      task = handled.task;
+    } else if (this.shouldUseLlmDirectReply(route)) {
+      assistantMessage = await this.generateConversationalAnswer({
+        message,
+        route,
+        profile,
+        task,
+        longTermSnapshot,
+        toolResults: brainToolResults,
+      });
+    }
 
     if (
       route.intent === 'profile_update' ||
@@ -495,6 +627,29 @@ export class SocialAgentChatService {
         activityResults.length > 0,
         activityResults.length,
       );
+      recordSocialAgentSearchMemory(task, {
+        intent: 'activity_search',
+        candidates: activityResults.map((activity) => ({
+          id: activity.id,
+          title: activity.title,
+          city: activity.city,
+          requestType: activity.requestType,
+          matchScore: activity.matchScore,
+        })),
+        candidateCount: activityResults.length,
+      });
+      transitionSocialAgentState(task, 'activity_search_returned', {
+        objective: 'activity_search',
+        nextStep:
+          activityResults.length > 0
+            ? '等待用户选择活动或继续筛选'
+            : '等待用户调整活动条件',
+        shouldSearchNow: false,
+        awaitingSearchConfirmation: false,
+        waitingFor:
+          activityResults.length > 0 ? 'activity_selection' : 'search_refinement',
+        lastCompletedStep: 'activity_search_completed',
+      });
       if (activityResults.length > 0) {
         this.rememberActivityResultsInTaskMemory(task, activityResults);
         assistantMessage = `已为你找到 ${activityResults.length} 条公开约练/活动意向，先放在下方卡片里。如果都不合适，告诉我"再找几条"或换个时间/活动，我再补搜候选人。`;
@@ -502,6 +657,13 @@ export class SocialAgentChatService {
         assistantMessage =
           '当前没有找到符合条件的真实活动或公开约练卡片，可以换个城市、时间或活动类型再试。';
       }
+      assistantMessage = await this.generateActivitySearchAssistantMessage({
+        task,
+        message,
+        route,
+        activityResults,
+        fallbackReply: assistantMessage,
+      });
     } else if (route.intent === 'social_search') {
       if (route.shouldReplan && this.hasSearchContext(task)) {
         queuedRun = await this.replanAndRefresh(ownerUserId, task.id, {
@@ -553,7 +715,10 @@ export class SocialAgentChatService {
         route,
       );
       if (pendingApproval) {
-        assistantMessage = `${assistantMessage}\n（已创建待确认动作 #${pendingApproval.id}，请在卡片上点击“批准/拒绝”。）`;
+        const draft = this.candidateMessageDraft(task);
+        assistantMessage = draft
+          ? `${assistantMessage}\n我先给你拟一条开场白：${draft}\n确认后我再发送。待确认动作 #${pendingApproval.id} 已创建。`
+          : `${assistantMessage}\n（已创建待确认动作 #${pendingApproval.id}，请在卡片上点击“批准/拒绝”。）`;
         this.metrics.recordApproval(pendingApproval.type);
         recordSocialAgentPendingAction(task, {
           id: pendingApproval.id,
@@ -889,9 +1054,11 @@ export class SocialAgentChatService {
   ): Promise<SocialAgentCurrentTaskSnapshot | null> {
     const task = await this.findLatestRestorableTask(ownerUserId);
     if (!task) return null;
+    const taskMemory = readSocialAgentTaskMemory(task);
     return {
       taskId: task.id,
       status: task.status,
+      agentState: taskMemory.currentTask.state,
       taskType: cleanDisplayText(task.taskType, 'social_agent_chat'),
       title: cleanDisplayText(task.title, 'FitMeet Social Agent 聊天'),
       goal: cleanDisplayText(task.goal, ''),
@@ -1447,6 +1614,22 @@ export class SocialAgentChatService {
       socialRequestId,
       toolCallId: messageAction.id,
     });
+    transitionSocialAgentState(
+      task,
+      requiresApproval ? 'confirmation_required' : 'message_action',
+      {
+        objective: 'candidate_messaging',
+        nextStep: requiresApproval
+          ? '等待用户确认发送消息'
+          : '等待候选人回复',
+        shouldSearchNow: false,
+        awaitingSearchConfirmation: false,
+        waitingFor: requiresApproval ? 'message_confirmation' : 'candidate_reply',
+        lastCompletedStep: requiresApproval
+          ? 'message_approval_created'
+          : 'message_sent',
+      },
+    );
     await this.taskRepo.save(task);
 
     return {
@@ -1554,6 +1737,14 @@ export class SocialAgentChatService {
       candidateRecordId: this.number(body.candidateRecordId),
       socialRequestId: this.number(body.socialRequestId),
       toolCallId: friendAction.id,
+    });
+    transitionSocialAgentState(task, 'message_action', {
+      objective: 'candidate_messaging',
+      nextStep: '进入候选人会话，等待继续沟通',
+      shouldSearchNow: false,
+      awaitingSearchConfirmation: false,
+      waitingFor: 'candidate_conversation',
+      lastCompletedStep: 'candidate_connected',
     });
     await this.taskRepo.save(task);
     void this.longTermMemory.summarizeTask(task).catch(() => undefined);
@@ -1722,6 +1913,12 @@ export class SocialAgentChatService {
       text: message,
       at: now,
     });
+    appendSocialAgentShortTermTurn(task, {
+      role: 'user',
+      text: message,
+      at: now,
+    });
+    transitionSocialAgentState(task, 'user_message');
     task.status =
       task.status === AgentTaskStatus.Pending
         ? AgentTaskStatus.AwaitingFeedback
@@ -1781,6 +1978,19 @@ export class SocialAgentChatService {
           }
         : {}),
     });
+    appendSocialAgentShortTermTurn(task, {
+      role: 'assistant',
+      text: message,
+      intent: route.intent,
+      action: route.action,
+      at: now,
+    });
+    recordSocialAgentShortTermAction(task, {
+      action: route.action,
+      intent: route.intent,
+      status: route.shouldQueueRun ? 'queued' : 'completed',
+      at: now,
+    });
     task.result = {
       ...(task.result ?? {}),
       latestMessageRoute: {
@@ -1821,15 +2031,19 @@ export class SocialAgentChatService {
     longTermSnapshot?:
       | import('./social-agent-long-term-memory.service').LongTermMemorySnapshot
       | null,
+    memoryContext?: SocialAgentMemoryContext | null,
   ): Record<string, unknown> {
     const candidates = this.readStoredCandidateSummaries(task);
     const result = this.isRecord(task.result) ? task.result : {};
     const chatRun = this.isRecord(result.chatRun) ? result.chatRun : {};
     const hasSearchContext = this.hasSearchContext(task);
+    const taskMemory = readSocialAgentTaskMemory(task);
     return {
       taskId: task.id,
       taskType: task.taskType,
       status: task.status,
+      agentState: taskMemory.currentTask.state,
+      currentTask: taskMemory.currentTask,
       goal: task.goal,
       hasSearchContext,
       hasCandidates: body.hasCandidates === true || candidates.length > 0,
@@ -1839,13 +2053,32 @@ export class SocialAgentChatService {
       longTermSignals: longTermSnapshot
         ? {
             taskCount: longTermSnapshot.taskCount,
+            profileFacts: longTermSnapshot.profileFacts,
             preferences: longTermSnapshot.preferences,
             boundaries: longTermSnapshot.boundaries,
+            socialGoals: longTermSnapshot.socialGoals,
+            availability: longTermSnapshot.availability,
             activityPreferences: longTermSnapshot.activityPreferences,
             matchSignals: longTermSnapshot.matchSignals,
           }
         : null,
+      memoryContext: memoryContext ?? null,
     };
+  }
+
+  private buildMemoryContext(
+    task: AgentTask,
+    longTermSnapshot:
+      | import('./social-agent-long-term-memory.service').LongTermMemorySnapshot
+      | null,
+  ): SocialAgentMemoryContext | null {
+    return (
+      this.memoryContext?.build({
+        task,
+        conversationHistory: this.readConversationHistory(task),
+        longTermSnapshot,
+      }) ?? null
+    );
   }
 
   private readConversationHistory(
@@ -1898,6 +2131,7 @@ export class SocialAgentChatService {
   ): SocialAgentIntentAction {
     if (queuedRun)
       return runMode === 'follow_up' ? 'queue_replan' : 'queue_search';
+    if (route.replyStrategy === 'conversational_answer') return 'answer';
     if (route.replyStrategy === 'append_context') return 'save_context';
     if (route.replyStrategy === 'execute_action') return 'await_confirmation';
     if (route.replyStrategy === 'ask_clarifying_question') return 'clarify';
@@ -1910,6 +2144,19 @@ export class SocialAgentChatService {
     message: string,
   ): string {
     if (route.intent === 'casual_chat') return this.casualChatReply(message);
+    if (route.intent === 'product_help') {
+      return this.productHelpFallbackReply(message);
+    }
+    if (route.intent === 'workflow_help') {
+      return this.workflowHelpReply();
+    }
+    if (
+      route.intent === 'profile_enrichment' ||
+      route.intent === 'profile_enrichment_request' ||
+      route.intent === 'correction_or_clarification'
+    ) {
+      return '我先按你的画像信息来理解，不会直接搜索候选人。';
+    }
     if (route.intent === 'profile_update') {
       return '已记住你的偏好，并写入当前上下文。等你明确说要找人、找活动或找搭子时，我再开始匹配。';
     }
@@ -1939,6 +2186,1256 @@ export class SocialAgentChatService {
     return '我还不确定你是想继续聊天、补充偏好，还是开始找人/活动。你可以直接说“帮我找青岛拍照搭子”或“记住我不喜欢夜间见面”。';
   }
 
+  private shouldUseLlmDirectReply(
+    route: SocialAgentIntentRouterResult,
+  ): boolean {
+    return (
+      route.intent === 'product_help' ||
+      route.intent === 'workflow_help' ||
+      route.intent === 'casual_chat' ||
+      route.intent === 'unknown'
+    );
+  }
+
+  private async generateConversationalAnswer(input: {
+    message: string;
+    route: SocialAgentIntentRouterResult;
+    profile: Record<string, unknown> | null;
+    task: AgentTask;
+    longTermSnapshot:
+      | Awaited<ReturnType<SocialAgentLongTermMemoryService['readSnapshot']>>
+      | null;
+    toolResults?: Array<Record<string, unknown>>;
+  }): Promise<string> {
+    const fallbackReply = this.conversationalFallbackReply(
+      input.message,
+      input.route.intent,
+    );
+    if (this.finalResponses) {
+      return this.finalResponses.generate({
+        userMessage: input.message,
+        intent: input.route.intent,
+        route: input.route as unknown as Record<string, unknown>,
+        agentState: this.currentAgentState(input.task),
+        conversationHistory: this.llmConversationHistory(input.task),
+        memoryContext: this.buildMemoryContext(
+          input.task,
+          input.longTermSnapshot,
+        ) as unknown as Record<string, unknown>,
+        taskContext: this.summarizeTaskMemoryForLlm(input.task),
+        plannerDecision: this.currentConversationBrainDecision(input.task),
+        toolResults:
+          input.toolResults && input.toolResults.length > 0
+            ? input.toolResults
+            : [this.currentConversationBrainLastToolResult(input.task)].filter(
+                Boolean,
+              ),
+        safetyRules: this.finalResponseSafetyRules(),
+        responseGoal: '直接回答用户问题，并根据当前状态自然推进下一步。',
+        fallbackReply,
+      });
+    }
+    try {
+      const answer = await this.callDeepSeekForDirectReply(input);
+      if (answer) return answer;
+    } catch (error) {
+      this.metrics.recordError('social_agent_chat_deepseek_failed');
+      this.logger.warn(
+        JSON.stringify({
+          event: 'social_agent.chat.deepseek_failed',
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+    return fallbackReply;
+  }
+
+  private async callDeepSeekForDirectReply(input: {
+    message: string;
+    route: SocialAgentIntentRouterResult;
+    profile: Record<string, unknown> | null;
+    task: AgentTask;
+    longTermSnapshot:
+      | Awaited<ReturnType<SocialAgentLongTermMemoryService['readSnapshot']>>
+      | null;
+  }): Promise<string | null> {
+    const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
+    if (!apiKey) return null;
+    const baseUrl =
+      this.config.get<string>('DEEPSEEK_BASE_URL') ||
+      'https://api.deepseek.com';
+    const useCase =
+      input.route.intent === 'casual_chat' ? 'casual_chat' : 'final_response';
+    const model = this.modelFor(useCase);
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      this.chatDeepSeekTimeoutMs(useCase),
+    );
+    try {
+      const response = await fetch(
+        `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
+        {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            temperature: this.modelRouter?.getTemperature(useCase) ?? 0.6,
+            max_tokens: 700,
+            messages: [
+              {
+                role: 'system',
+                content: this.directReplySystemPrompt(),
+              },
+              {
+                role: 'user',
+                content: JSON.stringify({
+                  userMessage: input.message,
+                  intent: input.route.intent,
+                  profileSummary: input.profile ?? {},
+                  taskMemory: this.summarizeTaskMemoryForLlm(input.task),
+                  memoryContext: this.buildMemoryContext(
+                    input.task,
+                    input.longTermSnapshot,
+                  ),
+                  longTermMemory: input.longTermSnapshot
+                    ? {
+                        taskCount: input.longTermSnapshot.taskCount,
+                        profileFacts: input.longTermSnapshot.profileFacts,
+                        preferences: input.longTermSnapshot.preferences,
+                        boundaries: input.longTermSnapshot.boundaries,
+                        socialGoals: input.longTermSnapshot.socialGoals,
+                        availability: input.longTermSnapshot.availability,
+                        activityPreferences:
+                          input.longTermSnapshot.activityPreferences,
+                        matchSignals: input.longTermSnapshot.matchSignals,
+                      }
+                    : null,
+                  conversationHistory: this.readConversationHistory(input.task)
+                    .slice(-8)
+                    .map((turn) => ({
+                      role: cleanDisplayText(turn.role, ''),
+                      text: cleanDisplayText(turn.text ?? turn.content, ''),
+                    })),
+                }),
+              },
+            ],
+          }),
+        },
+      );
+      if (!response.ok) {
+        this.logModelCall({
+          useCase,
+          model,
+          taskId: input.task.id,
+          intent: input.route.intent,
+          latencyMs: Date.now() - startedAt,
+          success: false,
+          reason: `DeepSeek HTTP ${response.status}`,
+        });
+        throw new Error(`DeepSeek HTTP ${response.status}`);
+      }
+      const payload = (await response.json()) as Record<string, unknown>;
+      const content = this.readChatDeepSeekContent(payload);
+      this.logModelCall({
+        useCase,
+        model,
+        taskId: input.task.id,
+        intent: input.route.intent,
+        latencyMs: Date.now() - startedAt,
+        success: true,
+      });
+      return cleanDisplayText(content, '').trim() || null;
+    } catch (error) {
+      this.logModelCall({
+        useCase,
+        model,
+        taskId: input.task.id,
+        intent: input.route.intent,
+        latencyMs: Date.now() - startedAt,
+        success: false,
+        reason:
+          error instanceof Error && error.name === 'AbortError'
+            ? 'deepseek_timeout'
+            : error instanceof Error
+              ? error.message
+              : String(error),
+      });
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('deepseek_timeout');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private conversationalFallbackReply(
+    message: string,
+    intent: SocialAgentIntentType,
+  ): string {
+    if (/(你能做什么|你可以做什么|能力|fitmeet|产品|社交助理)/i.test(message)) {
+      return '我是 FitMeet 的 AI 社交助理，可以正常聊天、解释人物画像和匹配逻辑，也能帮你完善画像、找搭子、推荐候选、发起约练，并生成更自然的开场白。当你明确说要找人、找搭子或找活动时，我再调用搜索工具；发送消息、加好友和邀请见面都需要你确认。';
+    }
+    if (intent === 'workflow_help' || this.looksLikeWorkflowQuestion(message)) {
+      return this.workflowHelpReply();
+    }
+    if (this.looksLikeProfileDefinitionQuestion(message)) {
+      return '人物画像是 FitMeet 用来理解你社交偏好的一组信息，包括城市、常活动区域、兴趣爱好、运动目标、可约时间、想认识什么样的人、隐私边界和不接受的行为。它不是公开简历，而是帮助 Agent 更准确地推荐合适的人、约练卡片和活动。';
+    }
+    if (this.looksLikeProfileCompletionQuestion(message)) {
+      return '可以。我会边聊边帮你补齐画像。你可以先告诉我：你在哪个城市、常活动区域、兴趣爱好、可约时间、想认识什么样的人，以及不接受哪些行为。比如：我在青岛大学，周末下午有空，喜欢跑步和咖啡，想认识同校运动搭子，不喜欢夜间见面。';
+    }
+    if (/(deepseek|api|不会回答|为什么.*回答|回答.*问题)/i.test(message)) {
+      return '你说得对，普通问题我应该直接回答，而不是只返回模板。作为 FitMeet 的 AI 社交助理，我可以回答产品、人物画像、匹配逻辑和社交偏好问题；当你明确要找人、找活动或发起动作时，我再调用对应工具。';
+    }
+    return '可以，我是 FitMeet 的 AI 社交助理，先按最短流程帮你梳理。你不用一次性填写完整画像，只要先告诉我：城市、兴趣、可约时间、常活动区域、想约什么、想认识什么样的人，以及有什么边界要求。后面我会边聊边补齐。';
+  }
+
+  private looksLikeWorkflowQuestion(message: string): boolean {
+    return /(先.*画像.*约练|先.*完善.*画像|直接发布需求|怎么开始约练|下一步|需要怎么做|流程)/i.test(
+      message,
+    );
+  }
+
+  private looksLikeProfileDefinitionQuestion(message: string): boolean {
+    return /(人物画像是什么|AI画像是什么|ai画像是什么|画像是什么|什么是人物画像)/i.test(
+      message,
+    );
+  }
+
+  private looksLikeProfileCompletionQuestion(message: string): boolean {
+    return /(帮我完善.*画像|完善.*人物画像|完善.*AI画像|怎么填写画像|怎么完善画像)/i.test(
+      message,
+    );
+  }
+
+  private directReplySystemPrompt(): string {
+    return [
+      '你是 FitMeet 的主 Agent 大脑。你要像一个真正的社交助理一样完整理解上下文，而不是只按关键词返回模板。',
+      '如果用户问流程，例如“先完善画像再约练，还是直接发布需求”，回答两种路径都可以：直接发布更快，先完善画像更准；建议先补齐城市/区域、兴趣、可约时间、想认识的人和边界。',
+      '如果用户纠正你，例如“不是不是”“上面是我的人物画像”，要承认修正并重新理解上一轮，不要重复解释概念。',
+      '如果用户只是提问或聊天，直接回答问题；只有用户明确要求找人、找活动、发消息、加好友时，才提到工具动作。',
+      '不要暴露 DeepSeek、API、模型失败、后端、工具日志等技术细节。',
+      '你是 FitMeet 的 AI 社交助理。',
+      '你的职责：回答用户关于人物画像、偏好、匹配、社交边界、约练流程、权限模式和产品能力的问题。',
+      '你可以帮助用户完善画像，但不要在用户没提供具体偏好时伪造画像，也不要把提问写成偏好。',
+      '当用户明确说要找人、找搭子、找活动时，才说明可以进入搜索；当前这条链路只负责自然语言回答，不能伪装已经搜索。',
+      '当用户明确说要发消息、加好友、邀请见面时，必须说明需要用户确认，不能声称已经执行。',
+      '不要乱编候选人、消息、会话或工具结果。',
+      '回答要具体、自然、像智能助手，不要只说“等你明确说要找人时再搜索”。',
+      '如果用户问“人物画像是什么”，解释它是 FitMeet 用来理解城市、兴趣、运动习惯、可约时间、想认识的人、隐私边界和不接受行为的偏好信息，不是完整公开简历。',
+      '如果用户问“你可以帮我完善人物画像吗”，先解释可以，并引导用户从城市/区域、兴趣、运动目标、可约时间、想认识的人、不接受行为开始补充。',
+    ].join('\n');
+  }
+
+  private summarizeTaskMemoryForLlm(task: AgentTask): Record<string, unknown> {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const taskMemory = this.isRecord(memory.taskMemory)
+      ? memory.taskMemory
+      : {};
+    const socialAgentChat = this.isRecord(memory.socialAgentChat)
+      ? memory.socialAgentChat
+      : {};
+    const shortTerm = this.isRecord(memory.shortTerm) ? memory.shortTerm : {};
+    return {
+      goal: cleanDisplayText(task.goal, ''),
+      preferences: taskMemory.preferences ?? socialAgentChat.preferences ?? [],
+      boundaries: taskMemory.boundaries ?? socialAgentChat.boundaries ?? [],
+      activeEntities: taskMemory.activeEntities ?? {},
+      candidateCount: Array.isArray(shortTerm.candidates)
+        ? shortTerm.candidates.length
+        : 0,
+    };
+  }
+
+  private readChatDeepSeekContent(payload: Record<string, unknown>): string {
+    const choices = Array.isArray(payload.choices) ? payload.choices : [];
+    const first = this.isRecord(choices[0]) ? choices[0] : {};
+    const message = this.isRecord(first.message) ? first.message : {};
+    return cleanDisplayText(message.content, '').trim();
+  }
+
+  private modelFor(useCase: SocialAgentModelUseCase): string {
+    if (this.modelRouter) return this.modelRouter.getModel(useCase);
+    const legacy = this.config.get<string>('DEEPSEEK_MODEL');
+    if (useCase === 'casual_chat') {
+      return (
+        this.config.get<string>('AGENT_CASUAL_CHAT_MODEL') ||
+        this.config.get<string>('DEEPSEEK_CHAT_MODEL') ||
+        this.chatCompatibleLegacyModel(legacy) ||
+        'deepseek-chat'
+      );
+    }
+    if (useCase === 'final_response') {
+      return (
+        this.config.get<string>('AGENT_FINAL_RESPONSE_MODEL') ||
+        this.config.get<string>('DEEPSEEK_CHAT_MODEL') ||
+        this.chatCompatibleLegacyModel(legacy) ||
+        'deepseek-chat'
+      );
+    }
+    return (
+      this.config.get<string>('DEEPSEEK_FAST_MODEL') ||
+      legacy ||
+      'deepseek-v4-flash'
+    );
+  }
+
+  private chatCompatibleLegacyModel(value?: string | null): string | null {
+    const legacy = `${value ?? ''}`.trim();
+    if (!legacy || legacy === 'deepseek-v4') return null;
+    return /chat/i.test(legacy) ? legacy : null;
+  }
+
+  private chatDeepSeekTimeoutMs(useCase?: SocialAgentModelUseCase): number {
+    if (useCase && this.modelRouter) return this.modelRouter.getTimeout(useCase);
+    const configured = Number(
+      this.config.get<string>('SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS') ?? '5000',
+    );
+    if (!Number.isFinite(configured) || configured <= 0) return 5000;
+    return Math.min(configured, 8000);
+  }
+
+  private logModelCall(input: {
+    useCase: string;
+    model: string;
+    taskId: number | null;
+    intent?: unknown;
+    latencyMs: number;
+    success: boolean;
+    reason?: string;
+  }): void {
+    this.logger.log(
+      JSON.stringify({
+        event: 'social_agent.model_call',
+        useCase: input.useCase,
+        model: input.model,
+        taskId: input.taskId,
+        intent: typeof input.intent === 'string' ? input.intent : null,
+        latencyMs: input.latencyMs,
+        success: input.success,
+        ...(input.reason ? { reason: input.reason } : {}),
+      }),
+    );
+  }
+
+  private productHelpFallbackReply(message: string): string {
+    if (/(先.*画像.*约练|直接发布需求|怎么开始约练|下一步|需要怎么做|怎么做|流程)/i.test(message)) {
+      return this.workflowHelpReply();
+    }
+    if (/(人物画像|ai画像|画像是什么|画像.*是什么)/i.test(message)) {
+      return '人物画像是 FitMeet 用来理解你社交偏好的一组信息，包括城市、常活动区域、兴趣爱好、运动目标、可约时间、想认识什么样的人、隐私边界和不接受的行为。它不是公开简历，而是帮助 Agent 更准确地推荐合适的人、约练卡片和活动。';
+    }
+    if (/(完善.*画像|画像.*完善|帮我完善)/i.test(message)) {
+      return '可以。我可以通过几个问题帮你补齐画像。你可以先告诉我：你在哪个城市、常活动区域、兴趣爱好、可约时间、想认识什么样的人，以及不接受哪些行为。';
+    }
+    if (/(deepseek|api|不会回答|回答问题|为什么.*回答)/i.test(message)) {
+      return '你说得对，普通问题应该由大模型回答，而不是只返回模板。如果大模型暂时超时，我也应该给你相关解释。你可以继续问 FitMeet、人物画像、匹配逻辑或社交偏好相关问题。';
+    }
+    if (/(你能做什么|你可以做什么|能力|fitmeet|产品|社交助理)/i.test(message)) {
+      return '我是 FitMeet 的 AI 社交助理，可以正常聊天、解释人物画像和匹配逻辑，也能帮你完善画像、找搭子、推荐候选、发起约练，并生成更自然的开场白。当你明确说要找人、找搭子或找活动时，我再调用搜索工具；发送消息、加好友和邀请见面都需要你确认。';
+    }
+    if (/(你好|hello|hi|嗨)/i.test(message)) {
+      return '你好，我是 FitMeet 的 AI 社交助理。你可以问我人物画像、匹配逻辑、偏好怎么补充，也可以直接告诉我城市、兴趣、可约时间和社交边界，我会帮你整理得更清楚。';
+    }
+    return '我刚才调用大模型失败了，但我仍然可以先帮你梳理。你可以告诉我：城市、兴趣、可约时间、想认识的人和不接受的行为，我会继续完善画像。';
+  }
+
+  private workflowHelpReply(): string {
+    return [
+      '两种都可以。',
+      '如果你想快，可以直接发布需求，比如“我在青岛大学，想找周末下午一起跑步的同校搭子”，Agent 会边匹配边补齐画像。',
+      '如果你想匹配更准，建议先完善画像，至少补齐：城市/区域、兴趣、可约时间、想认识的人、边界要求。',
+      '我建议你现在先用 1 分钟补齐基础画像，然后我再帮你发布约练需求。',
+      '你可以直接按这个格式发我：我在__，平时喜欢__，一般__有空，想认识__，不接受__。',
+    ].join('\n');
+  }
+
+  private async handleProfileEnrichmentTurn(
+    ownerUserId: number,
+    task: AgentTask,
+    message: string,
+    intent: SocialAgentIntentType,
+  ): Promise<{
+    assistantMessage: string;
+    savedContext: boolean;
+    profileUpdated: boolean;
+    task: AgentTask;
+  }> {
+    if (this.isProfileMissingFieldsQuestion(message)) {
+      return {
+        assistantMessage: this.profileMissingFieldsReply(task),
+        savedContext: true,
+        profileUpdated: false,
+        task,
+      };
+    }
+
+    const sourceMessage =
+      intent === 'profile_enrichment'
+        ? message
+        : this.findRecentProfileSourceMessage(task, message) || message;
+    const extractedProfile = this.extractProfileFieldsFromConversation([
+      sourceMessage,
+    ]);
+    const llmExtractedProfile = await this.extractProfileFieldsWithLlm(
+      task,
+      sourceMessage,
+    );
+    const plannedProfile = this.profileFieldsFromRecord(
+      this.currentConversationBrainToolArguments(
+        task,
+        SocialAgentToolName.UpdateProfileFromAgentContext,
+      ),
+    );
+    const mergedProfile: ExtractedProfileFields = {
+      ...plannedProfile,
+      ...extractedProfile,
+      ...llmExtractedProfile,
+    };
+    this.rememberExtractedProfileInTaskMemory(task, mergedProfile, sourceMessage);
+    await this.taskRepo.save(task);
+
+    const shouldSave = this.shouldSaveProfileFromMessage(message);
+    const brainMode = this.currentConversationBrainMode(task);
+    const brainWantsProfileTool = this.currentConversationBrainTools(task).includes(
+      SocialAgentToolName.UpdateProfileFromAgentContext,
+    );
+    if (
+      (shouldSave || brainMode === 'profile_update_tool' || brainWantsProfileTool) &&
+      Object.keys(mergedProfile).length > 0
+    ) {
+      const call = await this.executor.executeToolAction(
+        task.id,
+        SocialAgentToolName.UpdateProfileFromAgentContext,
+        {
+          extractedProfile: mergedProfile,
+          sourceMessage,
+          taskId: task.id,
+        },
+        ownerUserId,
+      );
+      const output = this.isRecord(call.output) ? call.output : {};
+      this.rememberConversationBrainToolResult(task, {
+        name: SocialAgentToolName.UpdateProfileFromAgentContext,
+        status: call.status,
+        input: {
+          extractedProfile: mergedProfile,
+          sourceMessage,
+        },
+        output,
+        error: call.error ?? null,
+      });
+      mergeSocialAgentStableProfileFacts(task, mergedProfile);
+      transitionSocialAgentState(task, 'profile_saved', {
+        objective: 'profile_enrichment',
+        nextStep: '询问可约时间、边界要求，或等待用户确认开始搜索',
+        shouldSearchNow: false,
+        profileSaved: call.status === 'succeeded',
+        awaitingSearchConfirmation: true,
+        waitingFor: 'availability_boundaries_or_search_confirmation',
+        lastCompletedStep: 'profile_saved',
+      });
+      await this.taskRepo.save(task);
+      const fallbackReply = this.profileUpdatedReply(mergedProfile, output);
+      return {
+        assistantMessage: await this.generateAgentBrainReply({
+          message,
+          task,
+          intent,
+          mode: 'profile_updated',
+          extractedProfile: mergedProfile,
+          sourceMessage,
+          toolOutput: output,
+          fallbackReply,
+        }),
+        savedContext: true,
+        profileUpdated: call.status === 'succeeded',
+        task,
+      };
+    }
+
+    const fallbackReply = this.profileExtractionReply(
+      mergedProfile,
+      intent === 'correction_or_clarification',
+    );
+    rememberSocialAgentCurrentTask(task, {
+      objective: 'profile_enrichment',
+      nextStep: '询问是否保存画像，或继续补齐可约时间和边界',
+      shouldSearchNow: false,
+      profileSaved: false,
+      awaitingSearchConfirmation: true,
+      waitingFor: 'profile_save_or_more_profile_facts',
+      lastCompletedStep: 'profile_extracted',
+    });
+    transitionSocialAgentState(task, 'profile_detected');
+    return {
+      assistantMessage: await this.generateAgentBrainReply({
+        message,
+        task,
+        intent,
+        mode:
+          intent === 'correction_or_clarification'
+            ? 'profile_correction'
+            : 'profile_extraction',
+        extractedProfile: mergedProfile,
+        sourceMessage,
+        fallbackReply,
+      }),
+      savedContext: true,
+      profileUpdated: false,
+      task,
+    };
+  }
+
+  private shouldSaveProfileFromMessage(message: string): boolean {
+    return /(调用工具|保存|写入|存到|完善ai画像|完善AI画像|对，|对,|确认|可以保存)/i.test(
+      message,
+    );
+  }
+
+  private isProfileMissingFieldsQuestion(message: string): boolean {
+    return /(\u8fd8\u7f3a\u4ec0\u4e48|\u8fd8\u5dee\u4ec0\u4e48|\u7f3a\u54ea\u4e9b|\u7f3a\u5c11\u54ea\u4e9b|\u753b\u50cf.*\u7f3a|\u8d44\u6599.*\u7f3a|\u8fd8\u9700\u8981\u8865\u5145\u4ec0\u4e48)/i.test(
+      message,
+    );
+  }
+
+  private async generateAgentBrainReply(input: {
+    message: string;
+    task: AgentTask;
+    intent: SocialAgentIntentType;
+    mode:
+      | 'profile_extraction'
+      | 'profile_correction'
+      | 'profile_updated';
+    extractedProfile: ExtractedProfileFields;
+    sourceMessage: string;
+    toolOutput?: Record<string, unknown>;
+    fallbackReply: string;
+  }): Promise<string> {
+    if (this.finalResponses) {
+      return this.finalResponses.generate({
+        userMessage: input.message,
+        intent: input.intent,
+        agentState: this.currentAgentState(input.task),
+        conversationHistory: this.llmConversationHistory(input.task),
+        memoryContext: this.buildMemoryContext(
+          input.task,
+          null,
+        ) as unknown as Record<string, unknown>,
+        taskContext: this.summarizeTaskMemoryForLlm(input.task),
+        plannerDecision: this.currentConversationBrainDecision(input.task),
+        toolResults: input.toolOutput ? [input.toolOutput] : [],
+        safetyRules: this.finalResponseSafetyRules(),
+        responseGoal:
+          input.mode === 'profile_updated'
+            ? '告诉用户画像已保存，说明已更新字段、补充记忆和缺失信息，并询问下一步。'
+            : '告诉用户已提取画像信息，说明暂未自动搜索，并询问是否保存、补充或开始搜索。',
+        fallbackReply: input.fallbackReply,
+      });
+    }
+    try {
+      const answer = await this.callDeepSeekForAgentBrain(input);
+      if (answer) return answer;
+    } catch (error) {
+      this.metrics.recordError('social_agent_brain_deepseek_failed');
+      this.logger.warn(
+        JSON.stringify({
+          event: 'social_agent.brain.deepseek_failed',
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+    return input.fallbackReply;
+  }
+
+  private async callDeepSeekForAgentBrain(input: {
+    message: string;
+    task: AgentTask;
+    intent: SocialAgentIntentType;
+    mode:
+      | 'profile_extraction'
+      | 'profile_correction'
+      | 'profile_updated';
+    extractedProfile: ExtractedProfileFields;
+    sourceMessage: string;
+    toolOutput?: Record<string, unknown>;
+  }): Promise<string | null> {
+    const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
+    if (!apiKey) return null;
+    const baseUrl =
+      this.config.get<string>('DEEPSEEK_BASE_URL') ||
+      'https://api.deepseek.com';
+    const useCase = 'final_response' as const;
+    const model = this.modelFor(useCase);
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      this.chatDeepSeekTimeoutMs(useCase),
+    );
+    try {
+      const response = await fetch(
+        `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
+        {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            temperature: this.modelRouter?.getTemperature(useCase) ?? 0.6,
+            max_tokens: 650,
+            messages: [
+              {
+                role: 'system',
+                content: [
+                  '你是 FitMeet 的主 Agent 大脑，不是关键词模板机器人。',
+                  '你要完整理解最近上下文、用户纠正和当前动作状态，再生成自然、具体的中文回复。',
+                  '如果 mode=profile_extraction：说明已提取画像信息，不要立刻搜索；询问用户是先保存/继续补齐，还是现在开始搜索。',
+                  '如果 mode=profile_correction：先承认理解修正，说明上一段是画像信息不是搜索需求；展示提取字段；不要重复解释“人物画像是什么”。',
+                  '如果 mode=profile_updated：说明已经调用工具保存画像；区分已写入画像字段和作为补充记忆记录的字段；继续询问缺少的可约时间、约练类型和边界要求。',
+                  '如果用户的画像信息里带有“想找某类人”，这只是社交目标；除非用户明确说现在搜索，否则不要声称已经搜索。',
+                  '不要暴露 DeepSeek、API、模型失败、后端、工具日志等技术细节。',
+                  '不要编造候选人、会话、消息或已经执行的工具结果。',
+                ].join('\n'),
+              },
+              {
+                role: 'user',
+                content: JSON.stringify({
+                  userMessage: input.message,
+                  intent: input.intent,
+                  mode: input.mode,
+                  sourceProfileMessage: input.sourceMessage,
+                  extractedProfile: input.extractedProfile,
+                  toolOutput: input.toolOutput ?? null,
+                  toolResult: input.toolOutput ?? null,
+                  plannedTools: this.currentConversationBrainPlannedTools(input.task),
+                  lastToolResult: this.currentConversationBrainLastToolResult(input.task),
+                  memoryContext: this.buildMemoryContext(input.task, null),
+                  availableTools: [
+                    'update_profile_from_agent_context',
+                    'search_real_candidates',
+                    'create_social_request',
+                    'send_message_to_candidate',
+                    'connect_candidate',
+                    'create_activity',
+                    'get_user_profile',
+                    'get_conversation_history',
+                  ],
+                  taskMemory: this.summarizeTaskMemoryForLlm(input.task),
+                  conversationHistory: this.readConversationHistory(input.task)
+                    .slice(-8)
+                    .map((turn) => ({
+                      role: cleanDisplayText(turn.role, ''),
+                      text: cleanDisplayText(turn.text ?? turn.content, ''),
+                    })),
+                }),
+              },
+            ],
+          }),
+        },
+      );
+      if (!response.ok) {
+        this.logModelCall({
+          useCase,
+          model,
+          taskId: input.task.id,
+          intent: input.intent,
+          latencyMs: Date.now() - startedAt,
+          success: false,
+          reason: `DeepSeek HTTP ${response.status}`,
+        });
+        throw new Error(`DeepSeek HTTP ${response.status}`);
+      }
+      const payload = (await response.json()) as Record<string, unknown>;
+      this.logModelCall({
+        useCase,
+        model,
+        taskId: input.task.id,
+        intent: input.intent,
+        latencyMs: Date.now() - startedAt,
+        success: true,
+      });
+      return this.readChatDeepSeekContent(payload) || null;
+    } catch (error) {
+      this.logModelCall({
+        useCase,
+        model,
+        taskId: input.task.id,
+        intent: input.intent,
+        latencyMs: Date.now() - startedAt,
+        success: false,
+        reason:
+          error instanceof Error && error.name === 'AbortError'
+            ? 'deepseek_timeout'
+            : error instanceof Error
+              ? error.message
+              : String(error),
+      });
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('deepseek_timeout');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async extractProfileFieldsWithLlm(
+    task: AgentTask,
+    sourceMessage: string,
+  ): Promise<ExtractedProfileFields> {
+    const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
+    if (!apiKey || !cleanDisplayText(sourceMessage, '').trim()) return {};
+    const useCase = 'profile_extraction' as const;
+    const model = this.modelFor(useCase);
+    const startedAt = Date.now();
+    const baseUrl =
+      this.config.get<string>('DEEPSEEK_BASE_URL') ||
+      'https://api.deepseek.com';
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      this.chatDeepSeekTimeoutMs(useCase),
+    );
+
+    try {
+      const response = await fetch(
+        `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
+        {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            temperature: this.modelRouter?.getTemperature(useCase) ?? 0.15,
+            response_format: { type: 'json_object' },
+            messages: [
+              {
+                role: 'system',
+                content: [
+                  'You extract FitMeet user profile facts.',
+                  'Return only one valid JSON object.',
+                  'Allowed keys: gender, age, heightCm, weightKg, city, school, area, mbti, zodiac, personality, targetPreference, activityType, availableTimes, boundaries.',
+                  'Use strings or string arrays only. Do not invent missing facts.',
+                ].join('\n'),
+              },
+              {
+                role: 'user',
+                content: JSON.stringify({
+                  taskId: task.id,
+                  message: sourceMessage,
+                  outputSchema: {
+                    city: 'Qingdao',
+                    school: 'Qingdao University',
+                    mbti: 'INFP',
+                    targetPreference: 'same-school women',
+                  },
+                }),
+              },
+            ],
+          }),
+        },
+      );
+      if (!response.ok) throw new Error(`DeepSeek HTTP ${response.status}`);
+      const payload = (await response.json()) as Record<string, unknown>;
+      const content = this.readChatDeepSeekContent(payload);
+      const parsed = this.parseJsonObject(content);
+      this.logModelCall({
+        useCase,
+        model,
+        taskId: task.id,
+        intent: 'profile_enrichment',
+        latencyMs: Date.now() - startedAt,
+        success: true,
+      });
+      return this.profileFieldsFromRecord(parsed);
+    } catch (error) {
+      this.logModelCall({
+        useCase,
+        model,
+        taskId: task.id,
+        intent: 'profile_enrichment',
+        latencyMs: Date.now() - startedAt,
+        success: false,
+        reason:
+          error instanceof Error && error.name === 'AbortError'
+            ? 'deepseek_timeout'
+            : error instanceof Error
+              ? error.message
+              : String(error),
+      });
+      return {};
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private findRecentProfileSourceMessage(
+    task: AgentTask,
+    currentMessage: string,
+  ): string | null {
+    const current = cleanDisplayText(currentMessage, '');
+    const userTurns = this.readConversationHistory(task)
+      .filter((turn) => cleanDisplayText(turn.role, '') === 'user')
+      .map((turn) => cleanDisplayText(turn.text ?? turn.content, ''))
+      .filter((text) => text && text !== current)
+      .slice(-5)
+      .reverse();
+    return (
+      userTurns.find((text) => Object.keys(this.extractProfileFieldsFromConversation([text])).length >= 2) ??
+      userTurns[0] ??
+      null
+    );
+  }
+
+  private extractProfileFieldsFromConversation(
+    messages: string[],
+  ): ExtractedProfileFields {
+    const text = messages.map((item) => cleanDisplayText(item, '')).join('。');
+    const fields: ExtractedProfileFields = {};
+    const genderMatch = text.match(/(男生|女生|男|女)/);
+    if (genderMatch) fields.gender = genderMatch[1].includes('女') ? '女' : '男';
+    const ageMatch = text.match(/(?:^|[，。,.\s])(\d{1,2})\s*(?:岁)?(?:[，。,.\s]|$)/);
+    if (ageMatch) fields.ageRange = ageMatch[1];
+    const heightMatch = text.match(/身高\s*(\d{2,3})\s*(?:cm|厘米)?/i);
+    if (heightMatch) fields.height = `${heightMatch[1]}cm`;
+    const weightMatch = text.match(/体重\s*(\d{2,3})\s*(?:kg|公斤|斤)?/i);
+    if (weightMatch) fields.weight = `${weightMatch[1]}kg`;
+    const zodiacMatch = text.match(
+      /(白羊|金牛|双子|巨蟹|狮子|处女|天秤|天蝎|射手|摩羯|水瓶|双鱼)(?:座)?/,
+    );
+    if (zodiacMatch) fields.zodiac = `${zodiacMatch[1]}座`;
+    const mbtiMatch = text.match(/\b(infp|enfp|intj|entj|intp|entp|isfp|istp|isfj|istj|esfp|estp|esfj|estj|infj|enfj)\b/i);
+    if (mbtiMatch) fields.mbti = mbtiMatch[1].toUpperCase();
+    const cityMatch = text.match(/(青岛|北京|上海|深圳|广州|杭州|南京|成都|武汉|西安|重庆|苏州|厦门|天津|长沙|郑州|济南|宁波|合肥)/);
+    if (cityMatch) fields.city = sanitizeCity(cityMatch[1]);
+    const schoolMatch = text.match(/([\u4e00-\u9fa5]{2,20}大学)/);
+    if (schoolMatch) {
+      fields.school = schoolMatch[1].replace(/^.*?(?=[\u4e00-\u9fa5]{2,8}大学$)/, '');
+      if (schoolMatch[1].includes('青岛大学')) fields.school = '青岛大学';
+    }
+    const nearbyMatch = text.match(/(?:常住在|住在|在)([^，。,.]{2,30}(?:区|大学|校区|附近))/);
+    if (nearbyMatch) fields.nearbyArea = nearbyMatch[1];
+    const personalityMatch = text.match(/性格([^，。,.]{1,30})/);
+    const personalityParts = [
+      personalityMatch?.[1],
+      typeof fields.mbti === 'string' ? fields.mbti : '',
+    ].filter((item): item is string => Boolean(item));
+    if (personalityParts.length > 0) {
+      fields.personality = personalityParts.join('，');
+      fields.traits = personalityParts;
+    }
+    const interestMatches = Array.from(
+      text.matchAll(/(跑步|咖啡|健身|羽毛球|瑜伽|徒步|骑行|游泳|拍照|篮球|足球|网球)/g),
+    ).map((match) => match[1]);
+    if (interestMatches.length > 0) fields.interestTags = Array.from(new Set(interestMatches));
+    const timeMatch = text.match(/(周末[^，。,.]{0,12}|下午|晚上|工作日[^，。,.]{0,12})/);
+    if (timeMatch) fields.availableTimes = [timeMatch[1]];
+    const targetMatch = text.match(/想(?:找|认识)([^，。,.]{1,30})/);
+    if (targetMatch) {
+      const target = targetMatch[1].trim().replace(/^(一个|个|一位|位)/, '');
+      fields.socialGoal = `想认识${target}`;
+      fields.targetPreference = target;
+      fields.wantToMeet = [target];
+      fields.preferredTraits = [target];
+    }
+    const rejectMatch = text.match(/(?:不喜欢|不接受|不想|拒绝|避免)([^，。,.]{1,40})/);
+    if (rejectMatch) fields.rejectRules = rejectMatch[0];
+    const privacyMatch = text.match(/(?:隐私|不公开|不透露)([^，。,.]{1,60})/);
+    if (privacyMatch) fields.privacyBoundary = privacyMatch[0];
+    return fields;
+  }
+
+  private rememberExtractedProfileInTaskMemory(
+    task: AgentTask,
+    extractedProfile: ExtractedProfileFields,
+    sourceMessage: string,
+  ): void {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    task.memory = {
+      ...memory,
+      pendingProfileEnrichment: {
+        extractedProfile,
+        sourceMessage,
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  private rememberConversationBrainDecision(
+    task: AgentTask,
+    decision: SocialAgentBrainTurnDecision,
+  ): void {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    task.memory = {
+      ...memory,
+      conversationBrain: {
+        intent: decision.route.intent,
+        replyStrategy: decision.route.replyStrategy,
+        conversationMode: decision.conversationMode,
+        shouldExecuteTool: decision.shouldExecuteTool,
+        shouldAskClarifyingQuestion: decision.shouldAskClarifyingQuestion,
+        plannerSource: decision.plannerSource,
+        userIntent: decision.userIntent,
+        reason: decision.reason,
+        responseGoal: decision.responseGoal,
+        needUserConfirmation: decision.needUserConfirmation,
+        tools: decision.tools,
+        notes: decision.notes,
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  private async executeConversationBrainReadTools(
+    ownerUserId: number,
+    task: AgentTask,
+    decision?: SocialAgentBrainTurnDecision,
+  ): Promise<Array<Record<string, unknown>>> {
+    if (!decision?.shouldExecuteTool) return [];
+    const readTools = decision.tools.filter((tool) =>
+      this.isConversationBrainReadTool(tool.name),
+    );
+    const results: Array<Record<string, unknown>> = [];
+    for (const tool of readTools) {
+      const toolName = this.executorToolForConversationBrainRead(tool.name);
+      if (!toolName) continue;
+      try {
+        const call = await this.executor.executeToolAction(
+          task.id,
+          toolName,
+          {
+            ...tool.arguments,
+            userId: ownerUserId,
+          },
+          ownerUserId,
+        );
+        const result = {
+          name: tool.name,
+          executorToolName: toolName,
+          status: call.status,
+          output: call.output,
+          error: call.error,
+        };
+        results.push(result);
+        this.rememberConversationBrainToolResult(task, result);
+      } catch (error) {
+        this.metrics.recordError('conversation_brain_read_tool_failed');
+        const result = {
+          name: tool.name,
+          executorToolName: toolName,
+          status: 'failed',
+          error: {
+            message: error instanceof Error ? error.message : String(error),
+          },
+        };
+        results.push(result);
+        this.rememberConversationBrainToolResult(task, result);
+      }
+    }
+    return results;
+  }
+
+  private isConversationBrainReadTool(toolName: string): boolean {
+    return [
+      'get_user_profile',
+      'get_conversation_messages',
+      'get_candidate_detail',
+    ].includes(cleanDisplayText(toolName, ''));
+  }
+
+  private executorToolForConversationBrainRead(
+    toolName: string,
+  ): SocialAgentToolName | null {
+    switch (cleanDisplayText(toolName, '')) {
+      case 'get_user_profile':
+        return SocialAgentToolName.GetMyProfile;
+      case 'get_conversation_messages':
+        return SocialAgentToolName.ReadTaskConversationMessages;
+      case 'get_candidate_detail':
+        return SocialAgentToolName.ExplainMatches;
+      default:
+        return null;
+    }
+  }
+
+  private rememberCurrentTaskFromBrain(
+    task: AgentTask,
+    route: SocialAgentIntentRouterResult,
+  ): void {
+    const brainMode = this.currentConversationBrainMode(task);
+    if (
+      route.intent === 'profile_enrichment' ||
+      route.intent === 'profile_enrichment_request' ||
+      route.intent === 'correction_or_clarification' ||
+      brainMode === 'profile_enrichment' ||
+      brainMode === 'profile_correction' ||
+      brainMode === 'profile_update_tool'
+    ) {
+      rememberSocialAgentCurrentTask(task, {
+        objective: 'profile_enrichment',
+        nextStep:
+          brainMode === 'profile_update_tool'
+            ? '保存画像后询问可约时间和边界要求'
+            : '提取画像信息，询问是否保存或继续补齐',
+        shouldSearchNow: false,
+        awaitingSearchConfirmation: true,
+        waitingFor:
+          brainMode === 'profile_update_tool'
+            ? 'profile_save'
+            : 'profile_save_or_search_confirmation',
+      });
+      transitionSocialAgentState(
+        task,
+        route.intent === 'correction_or_clarification'
+          ? 'user_correction'
+          : 'profile_detected',
+      );
+      return;
+    }
+    if (route.intent === 'workflow_help') {
+      rememberSocialAgentCurrentTask(task, {
+        objective: 'workflow_help',
+        nextStep: '解释直接发布需求和先完善画像两种路径',
+        shouldSearchNow: false,
+        awaitingSearchConfirmation: false,
+        waitingFor: 'user_choice',
+      });
+      transitionSocialAgentState(task, 'workflow_help');
+      return;
+    }
+    if (route.intent === 'social_search' || route.intent === 'activity_search') {
+      rememberSocialAgentCurrentTask(task, {
+        objective: 'search',
+        nextStep: '调用搜索工具并基于真实结果回复',
+        shouldSearchNow: true,
+        awaitingSearchConfirmation: false,
+        waitingFor: 'search_results',
+      });
+      transitionSocialAgentState(task, 'search_started');
+    }
+  }
+
+  private currentConversationBrainMode(task: AgentTask): string {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const brain = this.isRecord(memory.conversationBrain)
+      ? memory.conversationBrain
+      : {};
+    return cleanDisplayText(brain.conversationMode, '');
+  }
+
+  private currentAgentState(task: AgentTask): string {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const state = cleanDisplayText(memory.agentState, '');
+    if (state) return state;
+    const taskMemory = readSocialAgentTaskMemory(task);
+    return cleanDisplayText(taskMemory.currentTask.state, '') || 'idle';
+  }
+
+  private currentConversationBrainDecision(
+    task: AgentTask,
+  ): Record<string, unknown> | null {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const brain = this.isRecord(memory.conversationBrain)
+      ? memory.conversationBrain
+      : null;
+    return brain;
+  }
+
+  private llmConversationHistory(
+    task: AgentTask,
+  ): Array<Record<string, unknown>> {
+    return this.readConversationHistory(task)
+      .slice(-12)
+      .map((turn) => ({
+        role: cleanDisplayText(turn.role, ''),
+        text: cleanDisplayText(turn.text ?? turn.content, ''),
+      }));
+  }
+
+  private finalResponseSafetyRules(): string[] {
+    return [
+      '私信、加好友、连接候选人、创建公开需求或活动，必须遵守工具权限和用户确认要求。',
+      '不得编造候选人、活动、消息发送结果或已经执行的动作。',
+      '涉及线下见面时，优先公共场所、尊重边界，不承诺绝对安全。',
+      '不要暴露 DeepSeek、API、后端、工具日志或内部状态机细节。',
+    ];
+  }
+
+  private currentConversationBrainTools(task: AgentTask): string[] {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const brain = this.isRecord(memory.conversationBrain)
+      ? memory.conversationBrain
+      : {};
+    const tools = Array.isArray(brain.tools) ? brain.tools : [];
+    return tools
+      .flatMap((tool) => {
+        if (!this.isRecord(tool)) return [];
+        const name = cleanDisplayText(tool.name, '');
+        return name ? [name] : [];
+      });
+  }
+
+  private currentConversationBrainPlannedTools(
+    task: AgentTask,
+  ): Array<Record<string, unknown>> {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const brain = this.isRecord(memory.conversationBrain)
+      ? memory.conversationBrain
+      : {};
+    return Array.isArray(brain.tools)
+      ? brain.tools.filter((tool): tool is Record<string, unknown> =>
+          this.isRecord(tool),
+        )
+      : [];
+  }
+
+  private currentConversationBrainToolArguments(
+    task: AgentTask,
+    toolName: string,
+  ): Record<string, unknown> {
+    const tool = this.currentConversationBrainPlannedTools(task).find(
+      (item) => cleanDisplayText(item.name, '') === toolName,
+    );
+    if (!tool) return {};
+    return this.isRecord(tool.arguments) ? tool.arguments : {};
+  }
+
+  private profileFieldsFromRecord(
+    value: Record<string, unknown>,
+  ): ExtractedProfileFields {
+    const fields: ExtractedProfileFields = {};
+    for (const [key, raw] of Object.entries(value)) {
+      if (typeof raw === 'string') {
+        const text = cleanDisplayText(raw, '');
+        if (text) fields[key] = text;
+        continue;
+      }
+      if (
+        Array.isArray(raw) &&
+        raw.every((item) => typeof item === 'string')
+      ) {
+        const list = raw.map((item) => cleanDisplayText(item, '')).filter(Boolean);
+        if (list.length > 0) fields[key] = list;
+      }
+    }
+    return fields;
+  }
+
+  private rememberConversationBrainToolResult(
+    task: AgentTask,
+    result: Record<string, unknown>,
+  ): void {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const brain = this.isRecord(memory.conversationBrain)
+      ? memory.conversationBrain
+      : {};
+    task.memory = {
+      ...memory,
+      conversationBrain: {
+        ...brain,
+        lastToolResult: {
+          ...result,
+          completedAt: new Date().toISOString(),
+        },
+      },
+    };
+  }
+
+  private currentConversationBrainLastToolResult(
+    task: AgentTask,
+  ): Record<string, unknown> | null {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const brain = this.isRecord(memory.conversationBrain)
+      ? memory.conversationBrain
+      : {};
+    return this.isRecord(brain.lastToolResult) ? brain.lastToolResult : null;
+  }
+
+  private profileMissingFieldsReply(task: AgentTask): string {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const brain = this.isRecord(memory.conversationBrain)
+      ? memory.conversationBrain
+      : {};
+    const lastToolResult = this.isRecord(brain.lastToolResult)
+      ? brain.lastToolResult
+      : {};
+    const output = this.isRecord(lastToolResult.output)
+      ? lastToolResult.output
+      : {};
+    const missingFields = Array.isArray(output.missingFields)
+      ? output.missingFields.map((item) => cleanDisplayText(item, '')).filter(Boolean)
+      : [];
+    const knownMissing =
+      missingFields.length > 0
+        ? `工具返回还缺：${missingFields.join('、')}。`
+        : '目前画像主干已经有了，但关键约练条件还不够完整。';
+
+    return [
+      knownMissing,
+      '建议再补：可约时间、具体活动类型、边界要求，以及是否只接受校内/公共场所。',
+      '你可以直接按“时间 + 活动 + 边界”补一句，比如：周末下午，校园内咖啡或散步，只在公共场所。',
+    ].join('\n');
+  }
+
+  private profileExtractionReply(
+    extractedProfile: ExtractedProfileFields,
+    corrected: boolean,
+  ): string {
+    const lines = this.profileFieldLines(extractedProfile);
+    const intro = corrected
+      ? '我理解了，刚才那段是你的画像信息，不是立即搜索需求。我先不搜索。'
+      : '我已提取到这些画像信息，先不直接搜索候选人。';
+    return [
+      intro,
+      lines.length > 0 ? `已提取：${lines.join('；')}` : '我还没有提取到足够明确的画像字段。',
+      '你要我把这些信息保存到 AI 画像里吗？保存后，我也可以继续问你可约时间、边界要求，再基于画像开始搜索。',
+      '你也可以直接补充：城市/区域、兴趣、可约时间、想认识的人和边界。',
+    ].join('\n');
+  }
+
+  private profileUpdatedReply(
+    extractedProfile: ExtractedProfileFields,
+    output: Record<string, unknown>,
+  ): string {
+    const updatedFields = Array.isArray(output.updatedFields)
+      ? output.updatedFields.map((item) => cleanDisplayText(item, '')).filter(Boolean)
+      : [];
+    const memoryFields = Array.isArray(output.memoryFields)
+      ? output.memoryFields.map((item) => cleanDisplayText(item, '')).filter(Boolean)
+      : [];
+    const lines = this.profileFieldLines(extractedProfile);
+    return [
+      '已帮你把刚才的信息写入 AI 画像。',
+      updatedFields.length > 0 ? `已保存到画像字段：${updatedFields.join('、')}` : '',
+      memoryFields.length > 0 ? `作为补充偏好记录：${memoryFields.join('、')}` : '',
+      lines.length > 0 ? `本次识别：${lines.join('；')}` : '',
+      '还缺少可约时间、明确边界和具体约练偏好。你可以继续补充，或者告诉我“现在开始搜索”。',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private profileFieldLines(fields: ExtractedProfileFields): string[] {
+    return Object.entries(fields).map(([key, value]) => {
+      const rendered = Array.isArray(value) ? value.join('、') : value;
+      return `${key}: ${rendered}`;
+    });
+  }
+
   private async queueInitialSearchForTask(
     ownerUserId: number,
     task: AgentTask,
@@ -1956,6 +3453,13 @@ export class SocialAgentChatService {
       executionBoundary: 'conversation_then_tools',
       latestSearchMessage: goal,
     };
+    transitionSocialAgentState(task, 'search_started', {
+      objective: 'search',
+      nextStep: '搜索真实候选人并展示结果',
+      shouldSearchNow: true,
+      awaitingSearchConfirmation: false,
+      waitingFor: 'search_results',
+    });
     await this.taskRepo.save(task);
     return this.runQueued(ownerUserId, {
       goal,
@@ -2010,6 +3514,47 @@ export class SocialAgentChatService {
     }
   }
 
+  private async generateActivitySearchAssistantMessage(input: {
+    task: AgentTask;
+    message: string;
+    route: SocialAgentIntentRouterResult;
+    activityResults: SocialAgentActivityResult[];
+    fallbackReply: string;
+  }): Promise<string> {
+    if (!this.finalResponses) return input.fallbackReply;
+    return this.finalResponses.generate({
+      userMessage: input.message,
+      intent: input.route.intent,
+      route: input.route as unknown as Record<string, unknown>,
+      agentState: this.currentAgentState(input.task),
+      conversationHistory: this.llmConversationHistory(input.task),
+      memoryContext: this.buildMemoryContext(
+        input.task,
+        null,
+      ) as unknown as Record<string, unknown>,
+      taskContext: this.summarizeTaskMemoryForLlm(input.task),
+      plannerDecision: this.currentConversationBrainDecision(input.task),
+      toolResults: [
+        {
+          tool: 'search_public_intents',
+          success: true,
+          resultCount: input.activityResults.length,
+        },
+      ],
+      searchResults: {
+        activityResults: input.activityResults,
+        emptyReason:
+          input.activityResults.length === 0 ? 'no_real_candidates' : null,
+      },
+      safetyRules: this.finalResponseSafetyRules(),
+      responseGoal:
+        input.activityResults.length > 0
+          ? '自然说明已找到真实活动或公开意向，并引导用户选择或继续筛选。'
+          : '自然说明没有找到真实活动或公开意向，并建议调整城市、时间或活动类型。',
+      fallbackReply: input.fallbackReply,
+    });
+  }
+
   private async createActionApproval(
     ownerUserId: number,
     task: AgentTask,
@@ -2048,6 +3593,14 @@ export class SocialAgentChatService {
         relatedCandidateId:
           this.number(firstCandidate?.candidateRecordId) ?? null,
       });
+      transitionSocialAgentState(task, 'confirmation_required', {
+        objective: 'candidate_action',
+        nextStep: '等待用户确认候选人动作',
+        shouldSearchNow: false,
+        awaitingSearchConfirmation: false,
+        waitingFor: 'action_confirmation',
+        lastCompletedStep: 'approval_created',
+      });
       return {
         id: approval.id,
         type: approval.type,
@@ -2067,6 +3620,101 @@ export class SocialAgentChatService {
       );
       return null;
     }
+  }
+
+  private async confirmPendingCandidateMessageIfRequested(
+    ownerUserId: number,
+    task: AgentTask,
+    message: string,
+  ): Promise<{ task: AgentTask; assistantMessage: string } | null> {
+    if (!this.looksLikeMessageSendConfirmation(message)) return null;
+    const pendingMessageAction = readSocialAgentTaskMemory(task)
+      .pendingActions.slice()
+      .reverse()
+      .find((action) => action.actionType === 'send_candidate_message');
+    if (!pendingMessageAction) return null;
+
+    const candidate = this.readStoredCandidateSummaries(task)[0];
+    if (!candidate) return null;
+    const targetUserId =
+      this.number(candidate.candidateUserId) ?? this.number(candidate.userId);
+    const text = this.candidateMessageDraft(task);
+    if (!targetUserId || !text) return null;
+
+    const candidateRecordId = this.number(candidate.candidateRecordId);
+    const socialRequestId = this.number(candidate.socialRequestId);
+    const action = await this.executor.executeToolAction(
+      task.id,
+      SocialAgentToolName.SendMessageToCandidate,
+      {
+        candidateUserId: targetUserId,
+        targetUserId,
+        message: text,
+        text,
+        suggestedOpener: text,
+        candidateRecordId,
+        socialRequestId,
+        candidate,
+        metadata: {
+          confirmationSource: 'social_agent_chat',
+          pendingApprovalId: pendingMessageAction.id,
+          userConfirmationText: message,
+        },
+      },
+      ownerUserId,
+    );
+    this.assertToolActionSucceeded(action, '发送消息失败，请稍后再试');
+
+    const output = this.isRecord(action.output) ? action.output : {};
+    const messageId =
+      cleanDisplayText(output.id ?? output.messageId, '') || null;
+    const conversationId = cleanDisplayText(output.conversationId, '') || null;
+    this.rememberCandidateAction(task, targetUserId, {
+      send: 'sent',
+      conversationId,
+      messageId,
+      candidateRecordId,
+      socialRequestId,
+      toolCallId: action.id,
+    });
+    transitionSocialAgentState(task, 'message_action', {
+      objective: 'candidate_messaging',
+      nextStep: '等待候选人回复',
+      shouldSearchNow: false,
+      awaitingSearchConfirmation: false,
+      waitingFor: 'candidate_reply',
+      lastCompletedStep: 'message_sent',
+    });
+    await this.taskRepo.save(task);
+
+    const name = cleanDisplayText(
+      candidate.nickname,
+      `用户 #${targetUserId}`,
+    );
+    return {
+      task,
+      assistantMessage: `已确认发送给${name}：${text}`,
+    };
+  }
+
+  private looksLikeMessageSendConfirmation(message: string): boolean {
+    if (
+      /^(确认发送|确认发出|发送吧|可以发送|发吧|帮我发送|就发这条|确认)[。.!！\s]*$/i.test(
+        message.trim(),
+      )
+    ) {
+      return true;
+    }
+    return /^(确认发送|确认发出|发送吧|可以发送|发吧|帮我发送|就发这条|确认)$/i.test(
+      message.trim(),
+    );
+  }
+
+  private candidateMessageDraft(task: AgentTask): string {
+    const candidate = this.readStoredCandidateSummaries(task)[0];
+    const suggested = cleanDisplayText(candidate?.suggestedMessage, '').trim();
+    if (suggested) return suggested;
+    return '你好，看到你也在附近，想先站内聊聊看看是否方便一起约练。';
   }
 
   private inferApprovalTypeFromMessage(message: string): {
@@ -2237,6 +3885,11 @@ export class SocialAgentChatService {
       }
       case 'action_request':
       case 'casual_chat':
+      case 'product_help':
+      case 'workflow_help':
+      case 'profile_enrichment':
+      case 'profile_enrichment_request':
+      case 'correction_or_clarification':
       case 'unknown':
       default:
         // No structured memory change beyond appendSocialAgentUserMemo above.
@@ -2675,13 +4328,21 @@ export class SocialAgentChatService {
       order: { createdAt: 'ASC', id: 'ASC' },
       take: 500,
     });
+    const fallbackAssistantMessage =
+      searchResult.message || this.assistantMessage(candidates);
+    const assistantMessage = await this.generateRecommendationAssistantMessage({
+      task,
+      draft,
+      candidates,
+      searchResult,
+      fallbackReply: fallbackAssistantMessage,
+    });
 
     const result = {
       taskId: task.id,
       status: task.status,
       visibleSteps,
-      assistantMessage:
-        searchResult.message || this.assistantMessage(candidates),
+      assistantMessage,
       emptyReason: searchResult.emptyReason,
       message: searchResult.message,
       debugReasons: searchResult.debugReasons,
@@ -2692,6 +4353,58 @@ export class SocialAgentChatService {
     };
     await emit?.({ type: 'result', result });
     return result;
+  }
+
+  private async generateRecommendationAssistantMessage(input: {
+    task: AgentTask;
+    draft: SocialAgentRequestDraft;
+    candidates: SocialAgentChatCandidate[];
+    searchResult: SocialAgentCandidateSearchResult;
+    fallbackReply: string;
+  }): Promise<string> {
+    if (!this.finalResponses) return input.fallbackReply;
+    return this.finalResponses.generate({
+      userMessage: cleanDisplayText(input.draft.rawText, input.task.goal),
+      intent: 'candidate_search',
+      agentState: this.currentAgentState(input.task),
+      conversationHistory: this.llmConversationHistory(input.task),
+      memoryContext: this.buildMemoryContext(
+        input.task,
+        null,
+      ) as unknown as Record<string, unknown>,
+      taskContext: this.summarizeTaskMemoryForLlm(input.task),
+      plannerDecision: this.currentConversationBrainDecision(input.task),
+      toolResults: [
+        {
+          tool: 'search_real_candidates',
+          success: true,
+          candidateCount: input.candidates.length,
+          emptyReason: input.searchResult.emptyReason,
+          message: input.searchResult.message,
+          debugReasons: input.searchResult.debugReasons,
+        },
+      ],
+      searchResults: {
+        socialRequestDraft: this.safeDraftForEvent(input.draft),
+        candidates: input.candidates.map((candidate) => ({
+          userId: candidate.userId,
+          candidateUserId: candidate.candidateUserId ?? candidate.userId,
+          nickname: candidate.nickname,
+          score: candidate.score,
+          reasons: candidate.reasons,
+          commonTags: candidate.commonTags,
+          risk: candidate.risk,
+          source: candidate.source,
+        })),
+        emptyReason: input.searchResult.emptyReason,
+      },
+      safetyRules: this.finalResponseSafetyRules(),
+      responseGoal:
+        input.candidates.length > 0
+          ? '自然说明搜索结果，突出最相关候选人，并提醒下一步动作需要用户确认。'
+          : '自然说明当前没有找到真实候选人，并给出放宽条件、补充信息或发布需求的下一步。',
+      fallbackReply: input.fallbackReply,
+    });
   }
 
   private toChatCandidate(
@@ -4053,6 +5766,29 @@ export class SocialAgentChatService {
         status: candidate.status ?? null,
       })),
     });
+    recordSocialAgentSearchMemory(task, {
+      intent: 'social_search',
+      candidates: candidates.map((candidate) => ({
+        targetUserId: candidate.targetUserId,
+        candidateUserId: candidate.candidateUserId ?? candidate.userId,
+        nickname: candidate.nickname,
+        score: candidate.score,
+        reasons: candidate.reasons,
+        status: candidate.status ?? null,
+      })),
+      candidateCount: candidates.length,
+    });
+    transitionSocialAgentState(task, 'candidates_returned', {
+      objective: 'search',
+      nextStep:
+        candidates.length > 0
+          ? '等待用户选择候选人或确认下一步动作'
+          : '等待用户放宽条件或补充偏好',
+      shouldSearchNow: false,
+      awaitingSearchConfirmation: false,
+      waitingFor: candidates.length > 0 ? 'candidate_selection' : 'search_refinement',
+      lastCompletedStep: 'search_completed',
+    });
   }
 
   private toEventDto(event: AgentTaskEvent): Record<string, unknown> {
@@ -4126,6 +5862,11 @@ export class SocialAgentChatService {
 
   private safeDraftForEvent(value: unknown): Record<string, unknown> {
     return sanitizeForDisplay(value) as Record<string, unknown>;
+  }
+
+  private parseJsonObject(content: string): Record<string, unknown> {
+    const parsed = JSON.parse(content) as unknown;
+    return this.isRecord(parsed) ? parsed : {};
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

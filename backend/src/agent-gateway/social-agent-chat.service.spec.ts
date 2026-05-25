@@ -43,7 +43,7 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   } as AgentTask;
 }
 
-function makeHarness() {
+function makeHarness(options: Record<string, unknown> = {}) {
   const savedEvents: Array<Record<string, unknown>> = [];
   let latestTask: AgentTask | null = null;
   const taskRepo = {
@@ -245,6 +245,27 @@ function makeHarness() {
             durationMs: 1,
           };
         }
+        if (toolName === SocialAgentToolName.SendMessageToCandidate) {
+          return {
+            id: 'action_send_candidate_message_1',
+            stepId: 'action_send_candidate_message',
+            toolName,
+            status: 'succeeded',
+            input,
+            output: {
+              id: 'msg-22',
+              messageId: 'msg-22',
+              conversationId: 'conv-22',
+              status: 'sent',
+              candidateUserId: input.candidateUserId,
+              candidate: { status: 'messaged' },
+            },
+            error: null,
+            startedAt: new Date(0).toISOString(),
+            completedAt: new Date(1).toISOString(),
+            durationMs: 1,
+          };
+        }
         if (toolName === SocialAgentToolName.AddFriend) {
           return {
             id: 'action_add_friend_1',
@@ -255,6 +276,21 @@ function makeHarness() {
               followId: 601,
               status: 'following',
               conversationId: input.openConversation ? 'conv-22' : null,
+            },
+            error: null,
+          };
+        }
+        if (toolName === SocialAgentToolName.UpdateProfileFromAgentContext) {
+          return {
+            id: 'action_update_profile_1',
+            toolName,
+            status: 'succeeded',
+            input,
+            output: {
+              success: true,
+              updatedFields: ['gender', 'ageRange', 'city', 'nearbyArea'],
+              memoryFields: ['height', 'weight', 'school', 'targetPreference'],
+              missingFields: ['availableTimes', 'privacyBoundary'],
             },
             error: null,
           };
@@ -278,6 +314,7 @@ function makeHarness() {
       agentCanRecommendMe: true,
     }),
     saveAnswer: jest.fn().mockResolvedValue({ id: 1 }),
+    update: jest.fn().mockResolvedValue({ id: 1 }),
   };
   const messages = {
     createAgentInboxEvent: jest.fn().mockResolvedValue({ id: 'inbox-event-1' }),
@@ -346,6 +383,9 @@ function makeHarness() {
       userMemorySummary: null,
     }),
   };
+  const config = {
+    get: jest.fn().mockReturnValue(undefined),
+  };
 
   const service = new SocialAgentChatService(
     taskRepo as never,
@@ -362,6 +402,10 @@ function makeHarness() {
     metrics as never,
     longTermMemory as never,
     rag as never,
+    config as never,
+    options.brain as never,
+    undefined,
+    options.finalResponses as never,
   );
 
   return {
@@ -380,6 +424,7 @@ function makeHarness() {
     metrics,
     longTermMemory,
     rag,
+    config,
   };
 }
 
@@ -394,22 +439,23 @@ describe('SocialAgentChatService', () => {
     const { service, executor, socialProfiles, savedEvents } = makeHarness();
 
     const result = await service.routeMessage(7, {
-      message: '你好，你能做什么？',
+      message: '你好，聊聊今天状态',
     });
 
     expect(result).toMatchObject({
       intent: 'casual_chat',
-      action: 'reply',
+      action: 'answer',
+      replyStrategy: 'conversational_answer',
       shouldQueueRun: false,
       taskId: 101,
     });
-    expect(result.assistantMessage).toContain('正常聊天');
+    expect(result.assistantMessage).toContain('FitMeet');
     expect(savedEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           eventType: AgentTaskEventType.SocialAgentMessageUser,
           summary: '用户发送 Social Agent 消息',
-          payload: expect.objectContaining({ message: '你好，你能做什么？' }),
+          payload: expect.objectContaining({ message: '你好，聊聊今天状态' }),
         }),
         expect.objectContaining({ summary: 'Social Agent 已完成意图路由' }),
         expect.objectContaining({
@@ -420,6 +466,480 @@ describe('SocialAgentChatService', () => {
     );
     expect(executor.executeToolAction).not.toHaveBeenCalled();
     expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
+  });
+
+  it('answers profile explanation as product help without updating profile or searching', async () => {
+    const { service, executor, socialProfiles } = makeHarness();
+
+    const result = await service.routeMessage(7, {
+      message: '人物画像是什么',
+    });
+
+    expect(result).toMatchObject({
+      intent: 'product_help',
+      action: 'answer',
+      replyStrategy: 'conversational_answer',
+      shouldSearch: false,
+      shouldQueueRun: false,
+      savedContext: false,
+      profileUpdated: false,
+      activityResults: [],
+    });
+    expect(result.assistantMessage).toContain('人物画像');
+    expect(result.assistantMessage).not.toContain('已记住你的偏好');
+    expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+  });
+
+  it('guides profile completion without writing preference memory', async () => {
+    const { service, socialProfiles } = makeHarness();
+
+    const result = await service.routeMessage(7, {
+      message: '你可以帮我完善人物画像吗',
+    });
+
+    expect(result).toMatchObject({
+      intent: 'profile_enrichment_request',
+      action: 'answer',
+      replyStrategy: 'conversational_answer',
+      savedContext: true,
+      profileUpdated: false,
+      shouldQueueRun: false,
+    });
+    expect(result.assistantMessage).toContain('城市');
+    expect(result.assistantMessage).toContain('可约时间');
+    expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
+  });
+
+  it('calls DeepSeek for product help when configured', async () => {
+    const { service, config, socialProfiles } = makeHarness();
+    const originalFetch = global.fetch;
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content:
+                '你说得对，普通问题应该由大模型回答。我可以解释 FitMeet 的画像、匹配和社交偏好问题。',
+            },
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock as never;
+    config.get.mockImplementation((key: string) => {
+      if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+      if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
+      if (key === 'DEEPSEEK_MODEL') return 'deepseek-chat';
+      return undefined;
+    });
+
+    try {
+      const result = await service.routeMessage(7, {
+        message: '为什么你不会回答问题？我不是调用的 deepseek 的 api 吗？',
+      });
+
+      expect(result.intent).toBe('product_help');
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://deepseek.test/v1/chat/completions',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            authorization: 'Bearer test-key',
+          }),
+        }),
+      );
+      expect(result.assistantMessage).toContain('大模型回答');
+      expect(result.assistantMessage).not.toContain('等你明确说要找人');
+      expect(
+        JSON.parse((fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}')
+          .model,
+      ).toBe('deepseek-chat');
+      expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('uses DeepSeek as the final answer generator for persona questions', async () => {
+    const { service, config, socialProfiles, executor } = makeHarness();
+    const originalFetch = global.fetch;
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content:
+                '人物画像是 FitMeet 用来理解城市、兴趣、可约时间和社交边界的偏好模型。',
+            },
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock as never;
+    config.get.mockImplementation((key: string) => {
+      if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+      if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
+      if (key === 'DEEPSEEK_MODEL') return 'deepseek-v4-flash';
+      return undefined;
+    });
+
+    try {
+      const result = await service.routeMessage(7, {
+        message: '人物画像是什么？',
+      });
+
+      expect(result).toMatchObject({
+        intent: 'product_help',
+        action: 'answer',
+        replyStrategy: 'conversational_answer',
+        shouldSearch: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        shouldQueueRun: false,
+        pendingApproval: null,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(
+        JSON.parse((fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}')
+          .model,
+      ).toBe('deepseek-chat');
+      expect(result.assistantMessage).toBe(
+        '人物画像是 FitMeet 用来理解城市、兴趣、可约时间和社交边界的偏好模型。',
+      );
+      expect(result.assistantMessage).not.toContain('等你明确说要找人');
+      expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
+      expect(executor.executeToolAction).not.toHaveBeenCalled();
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('uses DeepSeek as the final answer generator for casual chat', async () => {
+    const { service, config, executor } = makeHarness();
+    const originalFetch = global.fetch;
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content:
+                '当然可以，我们可以先聊你的运动习惯，再慢慢整理成适合匹配的偏好。',
+            },
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock as never;
+    config.get.mockImplementation((key: string) => {
+      if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+      if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
+      return undefined;
+    });
+
+    try {
+      const result = await service.routeMessage(7, {
+        message: '你好，今天可以随便聊聊吗？',
+      });
+
+      expect(result).toMatchObject({
+        intent: 'casual_chat',
+        action: 'answer',
+        replyStrategy: 'conversational_answer',
+        shouldSearch: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(
+        JSON.parse((fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}')
+          .model,
+      ).toBe('deepseek-chat');
+      expect(result.assistantMessage).toContain('运动习惯');
+      expect(result.assistantMessage).not.toContain('等你明确说要找人');
+      expect(executor.executeToolAction).not.toHaveBeenCalled();
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('uses deepseek-v4-flash for structured profile extraction', async () => {
+    const { service, config } = makeHarness();
+    const originalFetch = global.fetch;
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                city: '青岛',
+                school: '青岛大学',
+                mbti: 'INFP',
+              }),
+            },
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock as never;
+    config.get.mockImplementation((key: string) => {
+      if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+      if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
+      if (key === 'DEEPSEEK_FAST_MODEL') return 'deepseek-v4-flash';
+      return undefined;
+    });
+
+    try {
+      const extracted = await (
+        service as unknown as {
+          extractProfileFieldsWithLlm(
+            task: AgentTask,
+            sourceMessage: string,
+          ): Promise<Record<string, unknown>>;
+        }
+      ).extractProfileFieldsWithLlm(
+        makeTask(),
+        '我是白羊男，18，青岛大学，INFP，想找同校女生。',
+      );
+
+      expect(extracted).toMatchObject({
+        city: '青岛',
+        school: '青岛大学',
+        mbti: 'INFP',
+      });
+      expect(
+        JSON.parse((fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}')
+          .model,
+      ).toBe('deepseek-v4-flash');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('executes safe read tools planned by Agent Brain before final reply', async () => {
+    const finalResponses = {
+      generate: jest.fn(async () => '我看了你的画像，现在还缺可约时间。'),
+    };
+    const brain = {
+      planTurn: jest.fn(async ({ route }: Record<string, unknown>) => ({
+        route: {
+          ...(route as Record<string, unknown>),
+          intent: 'product_help',
+          replyStrategy: 'conversational_answer',
+          shouldSearch: false,
+          shouldReplan: false,
+          shouldUpdateProfile: false,
+          shouldExecuteAction: false,
+        },
+        conversationMode: 'answer',
+        shouldExecuteTool: true,
+        shouldAskClarifyingQuestion: false,
+        plannerSource: 'deepseek',
+        userIntent: 'product_help',
+        reason: 'Need current profile before answering.',
+        responseGoal: 'Answer from profile context.',
+        needUserConfirmation: false,
+        tools: [{ name: 'get_user_profile', arguments: {} }],
+        notes: ['llm_planner_used'],
+      })),
+    };
+    const { service, executor } = makeHarness({ brain, finalResponses });
+
+    const result = await service.routeMessage(7, {
+      message: '我的画像现在缺什么？',
+    });
+
+    expect(result.assistantMessage).toBe(
+      '我看了你的画像，现在还缺可约时间。',
+    );
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.GetMyProfile,
+      expect.objectContaining({ userId: 7 }),
+      7,
+    );
+    expect(finalResponses.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolResults: expect.arrayContaining([
+          expect.objectContaining({
+            name: 'get_user_profile',
+            executorToolName: SocialAgentToolName.GetMyProfile,
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it('uses a relevant fallback when direct DeepSeek chat fails', async () => {
+    const { service, config } = makeHarness();
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockRejectedValue(new Error('network down')) as never;
+    config.get.mockImplementation((key: string) => {
+      if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+      if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
+      return undefined;
+    });
+
+    try {
+      const result = await service.routeMessage(7, {
+        message: '为什么你不会回答问题？我不是调用的 deepseek 的 api 吗？',
+      });
+
+      expect(result.intent).toBe('product_help');
+      expect(result.assistantMessage).toContain('普通问题我应该直接回答');
+      expect(result.assistantMessage).not.toContain('调用大模型失败');
+      expect(result.assistantMessage).not.toContain('等你明确说要找人');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('uses a relevant fallback when direct DeepSeek chat times out', async () => {
+    const { service, config } = makeHarness();
+    const originalFetch = global.fetch;
+    const abortError = new Error('aborted');
+    abortError.name = 'AbortError';
+    global.fetch = jest.fn().mockRejectedValue(abortError) as never;
+    config.get.mockImplementation((key: string) => {
+      if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+      if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
+      return undefined;
+    });
+
+    try {
+      const result = await service.routeMessage(7, {
+        message: '人物画像是什么？',
+      });
+
+      expect(result.intent).toBe('product_help');
+      expect(result.assistantMessage).toContain('人物画像是 FitMeet 用来理解');
+      expect(result.assistantMessage).not.toContain('等你明确说要找人');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('answers workflow help without returning persona definition or searching', async () => {
+    const { service, executor, taskRepo } = makeHarness();
+
+    const result = await service.routeMessage(7, {
+      message: '我是先完成人物画像然后再进行约练？还是直接发布需求就可以',
+    });
+
+    expect(result).toMatchObject({
+      intent: 'workflow_help',
+      action: 'answer',
+      replyStrategy: 'conversational_answer',
+      shouldSearch: false,
+      shouldQueueRun: false,
+    });
+    expect(result.assistantMessage).toContain('两种都可以');
+    expect(result.assistantMessage).toContain('直接发布需求');
+    expect(result.assistantMessage).not.toContain('不是公开简历');
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+  });
+
+  it('extracts rich profile facts without immediately searching', async () => {
+    const { service, executor } = makeHarness();
+
+    const result = await service.routeMessage(7, {
+      message:
+        '我是白羊男，18，身高181，体重70kg，在青岛上学，性格开放、infp。常住在崂山区青岛大学，想找个同校的女生',
+    });
+
+    expect(result).toMatchObject({
+      intent: 'profile_enrichment',
+      action: 'answer',
+      shouldSearch: false,
+      shouldQueueRun: false,
+    });
+    expect(result.assistantMessage).toContain('已提取');
+    expect(result.assistantMessage).toContain('白羊座');
+    expect(result.assistantMessage).toContain('青岛大学');
+    expect(result.assistantMessage).toContain('同校的女生');
+    expect(result.assistantMessage).toContain('保存到 AI 画像');
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+  });
+
+  it('uses previous profile facts when the user corrects the agent', async () => {
+    const { service, executor } = makeHarness();
+
+    await service.routeMessage(7, {
+      message:
+        '我是白羊男，18，身高181，体重70kg，在青岛上学，性格开放、infp。常住在崂山区青岛大学，想找个同校的女生',
+    });
+    const result = await service.routeMessage(7, {
+      message: '不是不是，上面是我的人物画像，你帮我完善。',
+      taskId: 101,
+    });
+
+    expect(result.intent).toBe('correction_or_clarification');
+    expect(result.shouldSearch).toBe(false);
+    expect(result.assistantMessage).toContain('刚才那段是你的画像信息');
+    expect(result.assistantMessage).toContain('青岛大学');
+    expect(result.assistantMessage).not.toContain('人物画像是 FitMeet');
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.SearchMatches,
+      expect.any(Object),
+      expect.any(Number),
+    );
+  });
+
+  it('calls profile update tool when the user explicitly asks to complete AI profile', async () => {
+    const { service, executor, taskRepo } = makeHarness();
+
+    await service.routeMessage(7, {
+      message:
+        '我是白羊男，18，身高181，体重70kg，在青岛上学，性格开放、infp。常住在崂山区青岛大学，想找个同校的女生',
+    });
+    const result = await service.routeMessage(7, {
+      message: '对，你调用工具去帮我完善ai画像',
+      taskId: 101,
+    });
+
+    expect(result.intent).toBe('profile_enrichment_request');
+    expect(result.shouldSearch).toBe(false);
+    expect(result.profileUpdated).toBe(true);
+    expect(result.assistantMessage).toContain('已帮你把刚才的信息写入 AI 画像');
+    expect(result.assistantMessage).toContain('已保存到画像字段');
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.UpdateProfileFromAgentContext,
+      expect.objectContaining({
+        extractedProfile: expect.objectContaining({
+          zodiac: '白羊座',
+          mbti: 'INFP',
+          city: '青岛',
+          school: '青岛大学',
+        }),
+      }),
+      7,
+    );
+    const savedTaskWithToolResult = taskRepo.save.mock.calls
+      .map((call) => call[0] as AgentTask)
+      .find((task) => {
+        const memory = task.memory as Record<string, unknown>;
+        const brain = memory?.conversationBrain as Record<string, unknown>;
+        return Boolean(brain?.lastToolResult);
+      });
+    expect(savedTaskWithToolResult?.memory).toEqual(
+      expect.objectContaining({
+        conversationBrain: expect.objectContaining({
+          lastToolResult: expect.objectContaining({
+            name: SocialAgentToolName.UpdateProfileFromAgentContext,
+            status: 'succeeded',
+            output: expect.objectContaining({
+              success: true,
+            }),
+          }),
+        }),
+      }),
+    );
   });
 
   it('restores the latest social agent task session from persisted task memory and events', async () => {
@@ -767,10 +1287,11 @@ describe('SocialAgentChatService', () => {
 
     expect(result).toMatchObject({
       intent: 'unknown',
-      action: 'clarify',
+      action: 'answer',
+      replyStrategy: 'conversational_answer',
       shouldQueueRun: false,
     });
-    expect(result.assistantMessage).toContain('还不确定');
+    expect(result.assistantMessage).toContain('城市、兴趣、可约时间');
     expect(executor.executeToolAction).not.toHaveBeenCalled();
   });
 
@@ -1123,6 +1644,181 @@ describe('SocialAgentChatService', () => {
       send: 'sent',
       conversationId: 'conv-22',
       messageId: 'msg-22',
+    });
+  });
+
+  describe('real conversation acceptance suite', () => {
+    it('passes the fixed A-J multi-turn social agent conversation', async () => {
+      const { service, executor, taskRepo } = makeHarness();
+      const toolCallsBeforeChat = executor.executeToolAction.mock.calls.length;
+
+      const a = await service.routeMessage(7, {
+        message: '你好，你能做什么？',
+      });
+      expect(a.shouldQueueRun).toBe(false);
+      expect(executor.executeToolAction).toHaveBeenCalledTimes(toolCallsBeforeChat);
+      expect(a.assistantMessage).toContain('完善画像');
+      expect(a.assistantMessage).toContain('推荐候选');
+      expect(a.assistantMessage).toContain('发起约练');
+      expect(a.assistantMessage).toContain('开场白');
+
+      const b = await service.routeMessage(7, {
+        message: '人物画像是什么？',
+        taskId: a.taskId,
+      });
+      expect(b).toMatchObject({
+        intent: 'product_help',
+        shouldSearch: false,
+        shouldQueueRun: false,
+        profileUpdated: false,
+      });
+      expect(b.assistantMessage).toContain('人物画像');
+      expect(executor.executeToolAction).toHaveBeenCalledTimes(toolCallsBeforeChat);
+
+      const c = await service.routeMessage(7, {
+        message: '我是先完善人物画像再约练，还是直接发布需求就可以？',
+        taskId: a.taskId,
+      });
+      expect(c).toMatchObject({
+        intent: 'workflow_help',
+        shouldSearch: false,
+        shouldQueueRun: false,
+      });
+      expect(c.assistantMessage).toContain('两种都可以');
+      expect(c.assistantMessage).toContain('直接发布需求');
+      expect(c.assistantMessage).toContain('先完善画像');
+      expect(c.assistantMessage).toContain('我在__');
+
+      const d = await service.routeMessage(7, {
+        message:
+          '我是白羊男，18，身高181，体重70kg，在青岛上学，性格开放、INFP，常住在崂山区青岛大学，想找个同校的女生。',
+        taskId: a.taskId,
+      });
+      expect(d).toMatchObject({
+        intent: 'profile_enrichment',
+        shouldSearch: false,
+        shouldQueueRun: false,
+        profileUpdated: false,
+      });
+      expect(d.assistantMessage).toContain('已提取');
+      expect(d.assistantMessage).toContain('白羊座');
+      expect(d.assistantMessage).toContain('青岛大学');
+      expect(d.assistantMessage).toContain('同校的女生');
+      expect(executor.executeToolAction).toHaveBeenCalledTimes(toolCallsBeforeChat);
+
+      const e = await service.routeMessage(7, {
+        message: '不是不是，上面是我的人物画像，你帮我完善。',
+        taskId: a.taskId,
+      });
+      expect(e.intent).toBe('correction_or_clarification');
+      expect(e.shouldSearch).toBe(false);
+      expect(e.assistantMessage).toContain('刚才那段是你的画像信息');
+      expect(e.assistantMessage).not.toContain('人物画像是 FitMeet');
+      expect(executor.executeToolAction).toHaveBeenCalledTimes(toolCallsBeforeChat);
+
+      const f = await service.routeMessage(7, {
+        message: '对，你调用工具去帮我完善 AI 画像。',
+        taskId: a.taskId,
+      });
+      expect(f).toMatchObject({
+        intent: 'profile_enrichment_request',
+        shouldSearch: false,
+        profileUpdated: true,
+      });
+      expect(executor.executeToolAction).toHaveBeenCalledWith(
+        a.taskId,
+        SocialAgentToolName.UpdateProfileFromAgentContext,
+        expect.objectContaining({
+          extractedProfile: expect.objectContaining({
+            zodiac: '白羊座',
+            mbti: 'INFP',
+            city: '青岛',
+            school: '青岛大学',
+          }),
+        }),
+        7,
+      );
+      expect(f.assistantMessage).toContain('已保存到画像字段');
+      expect(f.assistantMessage).toContain('作为补充偏好记录');
+      expect(f.assistantMessage).toContain('还缺少');
+
+      const g = await service.routeMessage(7, {
+        message: '那我还缺什么？',
+        taskId: a.taskId,
+      });
+      expect(g.shouldSearch).toBe(false);
+      expect(g.shouldQueueRun).toBe(false);
+      expect(g.assistantMessage).toContain('可约时间');
+      expect(g.assistantMessage).toContain('具体活动类型');
+      expect(g.assistantMessage).toContain('边界要求');
+      expect(g.assistantMessage).toContain('校内/公共场所');
+
+      const h = await service.routeMessage(7, {
+        message: '现在帮我找青岛大学同校女生。',
+        taskId: a.taskId,
+      });
+      expect(h).toMatchObject({
+        intent: 'social_search',
+        action: 'queue_search',
+        shouldQueueRun: true,
+      });
+      await flushAsync();
+      expect(executor.executeToolAction).toHaveBeenCalledWith(
+        h.taskId,
+        SocialAgentToolName.SearchMatches,
+        expect.objectContaining({ limit: 10 }),
+        7,
+      );
+      const searchRun = await service.getRunStatus(
+        7,
+        h.taskId as number,
+        h.queuedRun?.runId ?? '',
+      );
+      expect(searchRun.status).toBe('completed');
+      expect(searchRun.result?.candidates?.[0]).toMatchObject({
+        userId: 22,
+        nickname: '小林',
+      });
+      expect(searchRun.result?.assistantMessage).toContain('小林');
+
+      const i = await service.routeMessage(7, {
+        message: '帮我给第一个人发消息。',
+        taskId: h.taskId,
+      });
+      expect(i).toMatchObject({
+        intent: 'action_request',
+        action: 'await_confirmation',
+        shouldQueueRun: false,
+      });
+      expect(i.assistantMessage).toContain('开场白');
+      expect(i.assistantMessage).toContain('确认后我再发送');
+      expect(
+        executor.executeToolAction.mock.calls.some(
+          (call) => call[1] === SocialAgentToolName.SendMessageToCandidate,
+        ),
+      ).toBe(false);
+
+      const j = await service.routeMessage(7, {
+        message: '确认发送。',
+        taskId: h.taskId,
+      });
+      expect(j).toMatchObject({
+        intent: 'action_request',
+        action: 'reply',
+      });
+      expect(executor.executeToolAction).toHaveBeenCalledWith(
+        h.taskId,
+        SocialAgentToolName.SendMessageToCandidate,
+        expect.objectContaining({
+          targetUserId: 22,
+          message: expect.any(String),
+        }),
+        7,
+      );
+      expect(j.assistantMessage).toContain('已确认发送');
+
+      const finalTask = taskRepo.save.mock.calls.at(-1)?.[0] as AgentTask;
+      expect(finalTask.memory).toBeTruthy();
     });
   });
 
