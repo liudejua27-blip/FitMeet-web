@@ -3,9 +3,11 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { Notification, NotificationSchema } from './notification.schema';
+import { RealtimeModule } from '../realtime/realtime.module';
 
 @Module({
   imports: [
+    RealtimeModule,
     MongooseModule.forFeature([
       { name: Notification.name, schema: NotificationSchema },
     ]),

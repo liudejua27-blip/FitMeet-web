@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { ProfileSettings } from '../components/profile/ProfileSettings';
 import { useAuthStore } from '../stores';
 
@@ -35,6 +36,16 @@ export const ProfilePage = () => {
       </div>
 
       <main className="mx-auto max-w-4xl px-6 pt-6">
+        <Link
+          to="/life-graph"
+          className="mb-5 block rounded-2xl border border-lime/25 bg-limeDim p-5 transition hover:border-lime/50"
+        >
+          <p className="text-xs font-black uppercase tracking-[0.2em] text-lime">Life Graph</p>
+          <h2 className="mt-2 text-xl font-black text-white">进入 AI 生活画像控制台</h2>
+          <p className="mt-2 text-sm leading-6 text-textMuted">
+            查看、编辑、确认和撤回 Agent 用于匹配、安全边界和多端同步的长期画像。
+          </p>
+        </Link>
         <ProfileSettings
           profile={user}
           onVerificationApproved={refreshProfile}

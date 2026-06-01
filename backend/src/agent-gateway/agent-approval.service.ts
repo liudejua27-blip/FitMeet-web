@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -25,6 +26,7 @@ import {
   LoggedAction,
 } from './entities/agent-activity-log.entity';
 import { AgentWebhookService } from './agent-webhook.service';
+import { RealtimeEventService } from '../realtime/realtime-event.service';
 
 /**
  * Approval lifecycle helpers + risk classifier.
@@ -46,6 +48,8 @@ export class AgentApprovalService {
     @InjectRepository(AgentActivityLog)
     private readonly logRepo: Repository<AgentActivityLog>,
     private readonly webhooks: AgentWebhookService,
+    @Optional()
+    private readonly realtime?: RealtimeEventService,
   ) {}
 
   // ───────────────────────────────────────────────
@@ -465,6 +469,24 @@ export class AgentApprovalService {
       }),
     );
     void this.emitApprovalWebhook(saved, 'approval.created');
+    this.realtime?.emitToUser({
+      userId: saved.userId,
+      eventType: 'agent:approval_required',
+      payload: {
+        approvalId: saved.id,
+        agentTaskId: saved.agentTaskId,
+        actionType: saved.actionType,
+        riskLevel: saved.riskLevel,
+        summary: saved.summary,
+        status: saved.status,
+      },
+      rooms: saved.agentTaskId ? [`agent_task:${saved.agentTaskId}`] : [],
+      notification: {
+        type: 'approval',
+        text: saved.summary,
+        pushPayload: { approvalId: saved.id, agentTaskId: saved.agentTaskId },
+      },
+    });
     return saved;
   }
 
@@ -508,9 +530,11 @@ export class AgentApprovalService {
     const row = await this.repo.findOne({ where: { id, userId } });
     if (!row) throw new NotFoundException('Approval not found');
     if (row.status !== ApprovalStatus.Pending) {
-      throw new BadRequestException(
-        `Approval already resolved (${row.status})`,
-      );
+      return {
+        approval: row,
+        dispatched: false,
+        dispatchResult: { idempotent: true, status: row.status },
+      };
     }
     if (row.expiresAt < new Date()) {
       row.status = ApprovalStatus.Expired;
@@ -540,6 +564,19 @@ export class AgentApprovalService {
       dispatchResult,
       dispatchError,
     });
+    await this.writeDecisionLog(saved, ActionResult.Success);
+    this.realtime?.emitToUser({
+      userId: saved.userId,
+      eventType: 'agent:completed',
+      payload: {
+        approvalId: saved.id,
+        agentTaskId: saved.agentTaskId,
+        status: saved.status,
+        dispatched,
+        dispatchError,
+      },
+      rooms: saved.agentTaskId ? [`agent_task:${saved.agentTaskId}`] : [],
+    });
     return { approval: saved, dispatched, dispatchResult, dispatchError };
   }
 
@@ -556,6 +593,16 @@ export class AgentApprovalService {
     const saved = await this.repo.save(row);
     await this.writeDecisionLog(saved, ActionResult.Blocked);
     void this.emitApprovalWebhook(saved, 'approval.rejected');
+    this.realtime?.emitToUser({
+      userId: saved.userId,
+      eventType: 'agent:completed',
+      payload: {
+        approvalId: saved.id,
+        agentTaskId: saved.agentTaskId,
+        status: saved.status,
+      },
+      rooms: saved.agentTaskId ? [`agent_task:${saved.agentTaskId}`] : [],
+    });
     return saved;
   }
 

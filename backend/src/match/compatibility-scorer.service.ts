@@ -148,26 +148,12 @@ export class CompatibilityScorerService {
         input.candidateNearbyArea &&
         input.ownerNearbyArea.trim() === input.candidateNearbyArea.trim(),
     );
-    const mbtiMatch = Boolean(
-      input.ownerMbti &&
-        input.candidateMbti &&
-        input.ownerMbti === input.candidateMbti,
-    );
-    const zodiacMatch = Boolean(
-      input.ownerZodiac &&
-        input.candidateZodiac &&
-        input.ownerZodiac === input.candidateZodiac,
-    );
-
     const geography = (cityMatch ? 14 : 0) + (nearbyMatch ? 6 : 0);
     const interest = Math.min(sharedPublic.length, 4) * 6;
     const bidirectionalIntent =
       Math.min(ownerWantsCandidate.length, 4) * 8 +
       Math.min(candidateWantsOwner.length, 3) * 5;
-    const personality =
-      Math.min(traitOverlap.length, 3) * 4 +
-      (mbtiMatch ? 6 : 0) +
-      (zodiacMatch ? 3 : 0);
+    const personality = Math.min(traitOverlap.length, 3) * 4;
     const scene = Math.min(sceneOverlap.length, 2) * 4;
     const agentAcceptance = input.candidateAgentCanRecommendMe ? 5 : 0;
     const base = 18;
@@ -210,8 +196,6 @@ export class CompatibilityScorerService {
         sceneOverlap.length
           ? `Similar activity scenes: ${sceneOverlap.slice(0, 2).join(', ')}`
           : '',
-        mbtiMatch ? `MBTI aligned: ${input.ownerMbti}` : '',
-        zodiacMatch ? `Zodiac aligned: ${input.ownerZodiac}` : '',
       ].filter(Boolean),
       privateReasons: [
         ownerWantsCandidate.length

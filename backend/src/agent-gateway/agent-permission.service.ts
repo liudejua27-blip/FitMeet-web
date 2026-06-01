@@ -19,7 +19,13 @@ export enum SocialAgentAction {
 
 export type SocialAgentPermissionMode =
   | AgentTaskPermissionMode
-  | `${AgentTaskPermissionMode}`;
+  | `${AgentTaskPermissionMode}`
+  | 'manual_confirm'
+  | 'open'
+  | 'lab'
+  | 'normal'
+  | 'standard'
+  | 'sandbox_internal';
 
 export type SocialAgentActionInput =
   | SocialAgentAction
@@ -28,52 +34,40 @@ export type SocialAgentActionInput =
   | string;
 
 export interface AgentPermissionDecision {
-  mode: AgentTaskPermissionMode | null;
+  mode: CanonicalPermissionMode | null;
   action: SocialAgentAction | null;
   allowed: boolean;
   reason: string;
   allowedActions: SocialAgentAction[];
 }
 
-const ACTIONS_BY_MODE: Record<
-  AgentTaskPermissionMode,
-  readonly SocialAgentAction[]
-> = {
-  [AgentTaskPermissionMode.Assist]: [
-    SocialAgentAction.SearchProfiles,
-    SocialAgentAction.GenerateContent,
-    SocialAgentAction.DraftMessage,
-    SocialAgentAction.AddFriend,
-    SocialAgentAction.SendMessage,
-  ],
-  [AgentTaskPermissionMode.Confirm]: [
-    SocialAgentAction.AddFriend,
-    SocialAgentAction.SearchProfiles,
-    SocialAgentAction.GenerateContent,
-    SocialAgentAction.DraftMessage,
-    SocialAgentAction.FavoriteCandidate,
-    SocialAgentAction.SendMessage,
-    SocialAgentAction.SendInvite,
-  ],
-  [AgentTaskPermissionMode.LimitedAuto]: [
-    SocialAgentAction.SearchProfiles,
-    SocialAgentAction.GenerateContent,
-    SocialAgentAction.FavoriteCandidate,
-    SocialAgentAction.DraftMessage,
-    SocialAgentAction.WriteInbox,
-    SocialAgentAction.SendMessage,
-    SocialAgentAction.AddFriend,
-    SocialAgentAction.SendInvite,
-    SocialAgentAction.OfflineMeet,
-    SocialAgentAction.Payment,
-  ],
+type CanonicalPermissionMode =
+  | 'manual_confirm'
+  | 'limited_auto'
+  | 'open'
+  | 'lab';
+
+const ALL_SOCIAL_ACTIONS: readonly SocialAgentAction[] = [
+  SocialAgentAction.SearchProfiles,
+  SocialAgentAction.GenerateContent,
+  SocialAgentAction.DraftMessage,
+  SocialAgentAction.FavoriteCandidate,
+  SocialAgentAction.WriteInbox,
+  SocialAgentAction.SendMessage,
+  SocialAgentAction.AddFriend,
+  SocialAgentAction.SendInvite,
+  SocialAgentAction.OfflineMeet,
+  SocialAgentAction.Payment,
+];
+
+const ACTIONS_BY_MODE: Record<CanonicalPermissionMode, readonly SocialAgentAction[]> = {
+  manual_confirm: ALL_SOCIAL_ACTIONS,
+  limited_auto: ALL_SOCIAL_ACTIONS,
+  open: ALL_SOCIAL_ACTIONS,
+  lab: ALL_SOCIAL_ACTIONS,
 };
 
 const CANONICAL_ACTIONS = new Set<string>(Object.values(SocialAgentAction));
-const PERMISSION_MODES = new Set<string>(
-  Object.values(AgentTaskPermissionMode),
-);
-
 const ACTION_ALIASES = new Map<string, SocialAgentAction>([
   [AgentAction.ContactRequest, SocialAgentAction.AddFriend],
   [AgentAction.SendMessage, SocialAgentAction.SendMessage],
@@ -167,9 +161,24 @@ export class AgentPermissionService {
 
   normalizeMode(
     mode: SocialAgentPermissionMode,
-  ): AgentTaskPermissionMode | null {
-    return PERMISSION_MODES.has(mode)
-      ? (mode as AgentTaskPermissionMode)
-      : null;
+  ): CanonicalPermissionMode | null {
+    const raw = String(mode ?? '').trim().toLowerCase();
+    if (
+      raw === AgentTaskPermissionMode.LimitedAuto ||
+      raw === 'normal' ||
+      raw === 'standard'
+    ) {
+      return 'limited_auto';
+    }
+    if (raw === 'open') return 'open';
+    if (raw === 'lab' || raw === 'sandbox_internal') return 'lab';
+    if (
+      raw === AgentTaskPermissionMode.Assist ||
+      raw === AgentTaskPermissionMode.Confirm ||
+      raw === 'manual_confirm'
+    ) {
+      return 'manual_confirm';
+    }
+    return null;
   }
 }

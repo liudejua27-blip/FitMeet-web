@@ -1,4 +1,7 @@
-import { SocialRequestCandidateStatus } from './social-request-candidate.entity';
+import {
+  CandidateRiskLevel,
+  SocialRequestCandidateStatus,
+} from './social-request-candidate.entity';
 import { MatchService } from './match.service';
 import { CompatibilityScorerService } from './compatibility-scorer.service';
 import {
@@ -258,13 +261,103 @@ describe('MatchService social request matching', () => {
       candidateUserId: 20,
       source: 'social_request',
       score: 86,
-      scoreBreakdown: expect.objectContaining({ aiSecondPass: 4 }),
+      scoreBreakdown: expect.objectContaining({
+        distance: expect.any(Number),
+        timeOverlap: expect.any(Number),
+        interestSimilarity: expect.any(Number),
+        lifeRhythm: expect.any(Number),
+        socialEnergy: expect.any(Number),
+        relationshipGoal: expect.any(Number),
+        trustworthiness: expect.any(Number),
+        safetyRisk: expect.any(Number),
+        aiSecondPass: 4,
+      }),
       matchedSignals: ['running', '晚上'],
       publicReason: expect.stringContaining('跑步'),
       privateReason: expect.stringContaining('规则评分'),
       riskWarning: expect.any(String),
       suggestedOpener: expect.stringContaining('FitMeet'),
+      nextAction: 'strict_owner_confirmation_required:walking',
+    });
+  });
+
+  it('raises high-risk scenes to double confirmation even after AI reasoning', async () => {
+    const { service, requestRepo, candidateRepo } = makeHarness();
+    requestRepo.findOne.mockResolvedValue(
+      request({
+        type: SocialRequestType.Custom,
+        title: 'Friday drink buddy',
+        description: 'Find a drink buddy near a public bar.',
+        rawText: 'drink buddy bar',
+        activityType: 'drink',
+        interestTags: ['drink'],
+      }),
+    );
+
+    const result = await service.runMatch(301, 10, { limit: 5 });
+    const candidate = result.candidates[0];
+
+    expect(candidate.nextAction).toBe('double_confirmation_required:drinking');
+    expect(candidate.risk.level).toBe(CandidateRiskLevel.High);
+    expect(candidate.risk.warnings).toEqual(
+      expect.arrayContaining([expect.stringContaining('Agent')]),
+    );
+    expect(candidate.scoreBreakdown).toEqual(
+      expect.objectContaining({
+        distance: expect.any(Number),
+        timeOverlap: expect.any(Number),
+        interestSimilarity: expect.any(Number),
+        lifeRhythm: expect.any(Number),
+        socialEnergy: expect.any(Number),
+        relationshipGoal: expect.any(Number),
+        trustworthiness: expect.any(Number),
+        safetyRisk: expect.any(Number),
+      }),
+    );
+    expect(candidateRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ riskLevel: CandidateRiskLevel.High }),
+    );
+  });
+
+  it('uses strict confirmation for medium-risk offline scenes', async () => {
+    const { service, requestRepo } = makeHarness();
+    requestRepo.findOne.mockResolvedValue(
+      request({
+        type: SocialRequestType.Custom,
+        title: 'Mahjong table',
+        description: 'Find a mahjong buddy nearby.',
+        rawText: 'mahjong buddy',
+        activityType: 'mahjong',
+        interestTags: ['mahjong'],
+      }),
+    );
+
+    const result = await service.runMatch(301, 10, { limit: 5 });
+
+    expect(result.candidates[0]).toMatchObject({
+      nextAction: 'strict_owner_confirmation_required:mahjong',
+      risk: expect.objectContaining({ level: CandidateRiskLevel.Medium }),
+    });
+  });
+
+  it('keeps low-risk coffee chats at normal owner confirmation', async () => {
+    const { service, requestRepo } = makeHarness();
+    requestRepo.findOne.mockResolvedValue(
+      request({
+        type: SocialRequestType.CoffeeChat,
+        title: 'Coffee chat',
+        description: 'Quiet public cafe chat.',
+        rawText: 'coffee chat',
+        activityType: 'coffee',
+        interestTags: ['coffee'],
+      }),
+    );
+
+    const result = await service.runMatch(301, 10, { limit: 5 });
+
+    expect(result.candidates[0]).toMatchObject({
       nextAction: 'owner_confirmation_required',
+      risk: expect.objectContaining({ level: CandidateRiskLevel.Low }),
     });
   });
 

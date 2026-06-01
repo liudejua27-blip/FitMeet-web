@@ -106,6 +106,15 @@ export interface MatchedCandidateView {
   riskWarning: string;
   suggestedOpener: string;
   nextAction: string;
+  emotionalInsight: SocialEmotionalInsight;
+}
+
+export interface SocialEmotionalInsight {
+  fitReason: string;
+  openerAdvice: string;
+  possibleAwkwardness: string;
+  safeFirstStep: string;
+  tone: 'gentle' | 'active' | 'careful';
 }
 
 interface CandidateScore {
@@ -119,7 +128,30 @@ interface CandidateScore {
   commonTags: string[];
   distanceKm: number | null;
   risk: { level: CandidateRiskLevel; warnings: string[] };
+  scenePolicy: MatchScenePolicy;
 }
+
+type MatchSceneKind =
+  | 'fitness'
+  | 'travel'
+  | 'drinking'
+  | 'dating'
+  | 'renting'
+  | 'mahjong'
+  | 'cards'
+  | 'pet'
+  | 'study'
+  | 'coffee'
+  | 'walking'
+  | 'general';
+
+type MatchScenePolicy = {
+  kind: MatchSceneKind;
+  label: string;
+  riskLevel: CandidateRiskLevel;
+  confirmation: 'normal' | 'strict' | 'double_confirm' | 'blocked';
+  warning: string;
+};
 
 interface ActiveSocialRequestSignal {
   id: number;
@@ -192,6 +224,11 @@ export class MatchService {
       ownerLat: input.lat ?? null,
       ownerLng: input.lng ?? null,
       ownerCity: city,
+      requestText: [
+        input.type ?? '',
+        input.activityType ?? '',
+        ...(input.interestTags ?? []),
+      ].join(' '),
       radiusKm: input.radiusKm ?? 5,
       type: input.type,
       activityType: input.activityType,
@@ -302,6 +339,17 @@ export class MatchService {
       ownerLat: request.lat,
       ownerLng: request.lng,
       ownerCity: matchCity,
+      requestText: [
+        request.type,
+        request.activityType,
+        request.title,
+        request.description,
+        request.rawText,
+        ...(request.interestTags ?? []),
+        ...(typeof request.metadata?.socialGoal === 'string'
+          ? [request.metadata.socialGoal]
+          : []),
+      ].join(' '),
       radiusKm: request.radiusKm,
       type: request.type,
       activityType: request.activityType,
@@ -384,17 +432,18 @@ export class MatchService {
       view.privateReason = reasoning.privateReason;
       view.riskWarning = reasoning.riskWarning;
       view.suggestedOpener = reasoning.suggestedOpener;
-      view.nextAction = reasoning.nextAction;
+      view.nextAction = this.nextActionForScene(c.scenePolicy);
       view.suggestedMessage = reasoning.suggestedOpener;
       view.reasons = Array.from(
         new Set([reasoning.publicReason, ...view.reasons].filter(Boolean)),
       ).slice(0, 6);
       view.risk = {
-        ...view.risk,
+        level: view.risk.level,
         warnings: Array.from(
           new Set([...view.risk.warnings, ...reasoning.riskWarnings]),
         ),
       };
+      view.emotionalInsight = this.buildEmotionalInsight(c, request, view.reasons);
       const row = await this.candidateRepo.save(
         this.candidateRepo.create({
           socialRequestId: request.id,
@@ -656,6 +705,7 @@ export class MatchService {
       ownerLat: number | null;
       ownerLng: number | null;
       ownerCity: string;
+      requestText: string;
       radiusKm: number;
       type?: SocialRequestType;
       activityType?: string;
@@ -693,6 +743,8 @@ export class MatchService {
     }
 
     const out: CandidateScore[] = [];
+    const scenePolicy = this.classifyScenePolicy(ctx);
+
     for (const user of users) {
       const pref = prefs.get(user.id) ?? null;
       const socialProfile = ctx.profiles.get(user.id) ?? null;
@@ -733,7 +785,7 @@ export class MatchService {
         );
       }
 
-      // 1) Place / distance, max 25
+      // 1) Distance, max 15
       const distanceKm = this.computeDistanceKm(
         ctx.ownerLat,
         ctx.ownerLng,
@@ -776,8 +828,8 @@ export class MatchService {
         continue;
       }
 
-      // 2) Time, max 20
-      const rawTimeScore = this.scoreTime(
+      // 2) Available-time overlap, max 15
+      const availabilityScore = this.scoreAvailabilityOverlap(
         ctx.timeStart,
         ctx.timeEnd,
         user,
@@ -785,17 +837,16 @@ export class MatchService {
         socialProfile,
         ctx.timePreference,
       );
-      const timeScore = rawTimeScore;
-      breakdown.time = timeScore;
-      if (rawTimeScore >= 20) {
-        reasons.push('Time window is a strong match.');
-      } else if (rawTimeScore >= 12) {
-        reasons.push('Time window partially matches.');
-      } else if (rawTimeScore >= 6) {
-        reasons.push('Candidate appears available around the requested time.');
+      breakdown.timeOverlap = availabilityScore;
+      if (availabilityScore >= 13) {
+        reasons.push('可约时间高度重叠。');
+      } else if (availabilityScore >= 8) {
+        reasons.push('可约时间有部分交集。');
+      } else if (availabilityScore >= 4) {
+        reasons.push('候选人可能有时间窗口，但需要先确认。');
       }
 
-      // 3) Interest tags, max 20
+      // 3) Interest similarity, max 18
       const publicUserTags = [
         ...(user.interestTags ?? []),
         ...(socialProfile?.interestTags ?? []),
@@ -826,52 +877,72 @@ export class MatchService {
         agentAllowedRequired: ctx.agentAllowedRequired,
         candidateAcceptsAgentMessages: pref?.acceptAgentMessages ?? null,
       });
-      Object.assign(breakdown, compatibility.breakdown);
       reasons.push(...compatibility.publicReasons);
       reasons.push(...compatibility.privateReasons);
       warnings.push(...compatibility.riskTips);
-      const levelGoalScore = Math.min(
-        15,
+      const interestScore = Math.min(
+        18,
         Math.round(
-          compatibility.breakdown.interest * 0.55 +
-            compatibility.breakdown.bidirectionalIntent * 0.35 +
-            Math.min(compatibility.commonTags.length, 2),
+          compatibility.breakdown.interest * 0.65 +
+            Math.min(compatibility.commonTags.length, 4) * 2,
         ),
       );
-      breakdown.levelAndGoal = levelGoalScore;
-
-      // 4) Activity type / sport category, max 20
-
-      const actScore = Math.round(
-        (this.scoreActivityType(ctx.type, ctx.activityType, user) / 15) * 20,
-      );
-      breakdown.activityType = actScore;
-      if (actScore >= 10) {
-        reasons.push('Activity type is a strong match.');
-      } else if (actScore >= 5) {
-        reasons.push('Activity type is related.');
+      breakdown.interestSimilarity = interestScore;
+      if (interestScore >= 14) {
+        reasons.push('兴趣相似度较高，适合自然破冰。');
+      } else if (interestScore >= 8) {
+        reasons.push('兴趣有交集，可以先从轻量话题试探。');
       }
 
-      // 6) Safety, max 10
+      // 4-6) Life rhythm, social energy, and relationship goal.
+      const lifestyleScore = this.scoreLifestyleSync(ctx.ownerProfile, socialProfile);
+      breakdown.lifeRhythm = lifestyleScore;
+      if (lifestyleScore >= 9) reasons.push('生活作息或日常场景比较同频。');
+
+      const socialEnergyScore = this.scoreSocialEnergy(ctx.ownerProfile, socialProfile);
+      breakdown.socialEnergy = socialEnergyScore;
+      if (socialEnergyScore >= 8) reasons.push('社交能量接近，沟通节奏更容易舒服。');
+
+      const relationshipGoalScore = this.scoreRelationshipGoal(
+        ctx,
+        socialProfile,
+        compatibility.breakdown.bidirectionalIntent,
+      );
+      breakdown.relationshipGoal = relationshipGoalScore;
+      if (relationshipGoalScore >= 9) reasons.push('关系目标接近，双方期待更容易对齐。');
+
+      // 7-8) Trust and safety-risk, max 10 + 8
       const {
-        score: safeScore,
+        score: trustScore,
         warnings: safeWarn,
-        level,
+        level: profileRiskLevel,
       } = this.scoreSafety(user, ctx.safetyRequirement);
-      breakdown.safety = safeScore;
+      breakdown.trustworthiness = trustScore;
       warnings.push(...safeWarn);
       if (user.verified) reasons.push('Candidate is verified.');
 
       if (pref?.acceptAgentMessages)
         reasons.push('Candidate accepts agent-mediated messages.');
 
+      const safetyRiskScore = this.scoreSafetyRisk(scenePolicy, {
+        verified: user.verified,
+        warnings,
+        distanceKm,
+      });
+      breakdown.safetyRisk = safetyRiskScore;
+      if (scenePolicy.warning) warnings.push(scenePolicy.warning);
+
       const total =
         distScore +
-        timeScore +
-        actScore +
-        levelGoalScore +
-        compatibility.breakdown.personality +
-        safeScore;
+        availabilityScore +
+        interestScore +
+        lifestyleScore +
+        socialEnergyScore +
+        relationshipGoalScore +
+        trustScore +
+        safetyRiskScore;
+
+      const riskLevel = this.maxRiskLevel(profileRiskLevel, scenePolicy.riskLevel);
 
       out.push({
         user,
@@ -883,7 +954,8 @@ export class MatchService {
         reasons,
         commonTags: compatibility.commonTags,
         distanceKm,
-        risk: { level, warnings },
+        risk: { level: riskLevel, warnings: Array.from(new Set(warnings)) },
+        scenePolicy,
       });
     }
 
@@ -895,14 +967,271 @@ export class MatchService {
   private scoreDistance(distanceKm: number | null, radiusKm: number): number {
     if (distanceKm == null) {
       // Same-city fallback (no coords available): moderate score.
-      return 15;
+      return 9;
     }
-    if (distanceKm <= 1) return 25;
-    if (distanceKm <= 3) return 21;
-    if (distanceKm <= 5) return 17;
-    if (distanceKm <= 10) return 11;
-    if (distanceKm <= radiusKm) return 6;
+    if (distanceKm <= 1) return 15;
+    if (distanceKm <= 3) return 13;
+    if (distanceKm <= 5) return 10;
+    if (distanceKm <= 10) return 7;
+    if (distanceKm <= radiusKm) return 4;
     return 0;
+  }
+
+  private scoreAvailabilityOverlap(
+    start: Date | null,
+    end: Date | null,
+    user: User,
+    pref: UserPreference | null,
+    profile: UserSocialProfile | null,
+    timePreference?: string,
+  ): number {
+    const raw = this.scoreTime(start, end, user, pref, profile, timePreference);
+    return Math.min(15, Math.round(raw * 0.75));
+  }
+
+  private scoreLifestyleSync(
+    owner: UserSocialProfile | null | undefined,
+    candidate: UserSocialProfile | null,
+  ): number {
+    if (!owner || !candidate) return 4;
+    const ownerSignals = [
+      ...this.parseTimeTokens(owner.availableTimes?.join(' ') ?? ''),
+      ...this.parseTimeTokens(owner.weekdayAvailability ?? ''),
+      ...this.parseTimeTokens(owner.weekendAvailability ?? ''),
+      ...this.cleanList(owner.lifestyleTags),
+      ...this.cleanList(owner.socialScenes),
+    ];
+    const candidateSignals = [
+      ...this.parseTimeTokens(candidate.availableTimes?.join(' ') ?? ''),
+      ...this.parseTimeTokens(candidate.weekdayAvailability ?? ''),
+      ...this.parseTimeTokens(candidate.weekendAvailability ?? ''),
+      ...this.cleanList(candidate.lifestyleTags),
+      ...this.cleanList(candidate.socialScenes),
+    ];
+    const overlap = this.overlapCount(ownerSignals, candidateSignals);
+    if (overlap >= 4) return 12;
+    if (overlap === 3) return 10;
+    if (overlap === 2) return 8;
+    if (overlap === 1) return 6;
+    return 3;
+  }
+
+  private scoreSocialEnergy(
+    owner: UserSocialProfile | null | undefined,
+    candidate: UserSocialProfile | null,
+  ): number {
+    if (!owner || !candidate) return 4;
+    const ownerEnergy = this.energyLevel(
+      `${owner.socialStyle} ${owner.openness} ${owner.socialPreference} ${(owner.traits ?? []).join(' ')}`,
+    );
+    const candidateEnergy = this.energyLevel(
+      `${candidate.socialStyle} ${candidate.openness} ${candidate.socialPreference} ${(candidate.traits ?? []).join(' ')}`,
+    );
+    if (ownerEnergy === 0 || candidateEnergy === 0) return 5;
+    const diff = Math.abs(ownerEnergy - candidateEnergy);
+    if (diff === 0) return 10;
+    if (diff === 1) return 8;
+    return 4;
+  }
+
+  private scoreRelationshipGoal(
+    ctx: {
+      socialGoal?: string;
+      type?: SocialRequestType;
+      requestText?: string;
+      ownerProfile?: UserSocialProfile | null;
+    },
+    candidate: UserSocialProfile | null,
+    bidirectionalIntent: number,
+  ): number {
+    const requestGoals = this.relationshipGoalTokens(
+      `${ctx.socialGoal ?? ''} ${ctx.type ?? ''} ${ctx.requestText ?? ''} ${(ctx.ownerProfile?.relationshipGoals ?? []).join(' ')}`,
+    );
+    const candidateGoals = this.relationshipGoalTokens(
+      `${(candidate?.relationshipGoals ?? []).join(' ')} ${(candidate?.wantToMeet ?? []).join(' ')} ${candidate?.socialPreference ?? ''}`,
+    );
+    const overlap = this.overlapCount(requestGoals, candidateGoals);
+    if (overlap >= 2) return 12;
+    if (overlap === 1) return 9;
+    if (bidirectionalIntent >= 7) return 8;
+    if (requestGoals.length === 0 || candidateGoals.length === 0) return 5;
+    return 2;
+  }
+
+  private scoreSafetyRisk(
+    policy: MatchScenePolicy,
+    input: { verified: boolean; warnings: string[]; distanceKm: number | null },
+  ): number {
+    let score = 8;
+    if (policy.riskLevel === CandidateRiskLevel.Medium) score -= 2;
+    if (policy.riskLevel === CandidateRiskLevel.High) score -= 5;
+    if (!input.verified) score -= 1;
+    if (input.warnings.length >= 2) score -= 1;
+    if (input.distanceKm == null && policy.confirmation !== 'normal') score -= 1;
+    return Math.max(0, Math.min(8, score));
+  }
+
+  private classifyScenePolicy(ctx: {
+    type?: SocialRequestType;
+    activityType?: string;
+    requestText?: string;
+  }): MatchScenePolicy {
+    const text = `${ctx.type ?? ''} ${ctx.activityType ?? ''} ${ctx.requestText ?? ''}`.toLowerCase();
+    if (/(支付|付款|转账|钱包|押金|精确定位|实时定位|共享位置|payment|wallet|deposit|precise.?location)/i.test(text)) {
+      return {
+        kind: 'general',
+        label: '禁止自动执行动作',
+        riskLevel: CandidateRiskLevel.High,
+        confirmation: 'blocked',
+        warning: '支付、钱包和精确定位永远不能由 Agent 自动执行，只能由用户本人在明确确认后处理。',
+      };
+    }
+    if (/(酒|喝酒|酒搭子|夜店)/i.test(text) || /\b(bar|pub|club|ktv|drinking|drink)\b/i.test(text)) {
+      return {
+        kind: 'drinking',
+        label: '酒局',
+        riskLevel: CandidateRiskLevel.High,
+        confirmation: 'double_confirm',
+        warning: '酒局属于高风险线下场景，必须双方确认公开地点、结束时间和回家方式，Agent 不应自动推进。',
+      };
+    }
+    if (/(相亲|dating|date|恋爱|脱单|对象|婚恋)/i.test(text)) {
+      return {
+        kind: 'dating',
+        label: '相亲/约会',
+        riskLevel: CandidateRiskLevel.High,
+        confirmation: 'double_confirm',
+        warning: '相亲约会需要更高确认门槛：先站内沟通，避免承诺关系、金钱往来或私密地点见面。',
+      };
+    }
+    if (/(租房|合租|室友|看房|房东|押金|rent|roommate|apartment)/i.test(text)) {
+      return {
+        kind: 'renting',
+        label: '租房',
+        riskLevel: CandidateRiskLevel.High,
+        confirmation: 'double_confirm',
+        warning: '租房涉及住址和资金风险，Agent 只能辅助筛选，押金、合同和看房必须人工确认。',
+      };
+    }
+    if (/(旅游|旅行|出游|旅伴|trip|travel|hotel|酒店|民宿|过夜)/i.test(text)) {
+      return {
+        kind: 'travel',
+        label: '旅行',
+        riskLevel: CandidateRiskLevel.High,
+        confirmation: 'double_confirm',
+        warning: '旅行搭子涉及长时间同行和住宿边界，必须拆成公开短行程并人工确认预算、路线和安全预案。',
+      };
+    }
+    if (/(麻将|mahjong)/i.test(text)) {
+      return {
+        kind: 'mahjong',
+        label: '麻将',
+        riskLevel: CandidateRiskLevel.Medium,
+        confirmation: 'strict',
+        warning: '麻将场景要提前确认是否涉钱、地点是否公开，Agent 不自动组织私密牌局。',
+      };
+    }
+    if (/(扑克|德州|牌局|poker|cards|texas)/i.test(text)) {
+      return {
+        kind: 'cards',
+        label: '扑克/牌局',
+        riskLevel: CandidateRiskLevel.Medium,
+        confirmation: 'strict',
+        warning: '牌局场景要提前确认规则和是否涉钱，避免私人封闭场所。',
+      };
+    }
+    if (ctx.type === SocialRequestType.FitnessPartner || /(健身|gym|workout|撸铁|私教)/i.test(text)) {
+      return {
+        kind: 'fitness',
+        label: '健身',
+        riskLevel: CandidateRiskLevel.Medium,
+        confirmation: 'strict',
+        warning: '健身约练需先确认强度、场馆和身体边界，不让 Agent 自动承诺训练计划或私教付费。',
+      };
+    }
+    if (ctx.type === SocialRequestType.DogWalking || /(遛狗|宠物|dog)/i.test(text)) {
+      return {
+        kind: 'pet',
+        label: '遛狗/宠物',
+        riskLevel: CandidateRiskLevel.Medium,
+        confirmation: 'strict',
+        warning: '宠物见面建议开放场地，先保持距离适应，不进入私人住址。',
+      };
+    }
+    if (ctx.type === SocialRequestType.CoffeeChat) {
+      return {
+        kind: 'coffee',
+        label: '咖啡轻聊',
+        riskLevel: CandidateRiskLevel.Low,
+        confirmation: 'normal',
+        warning: '',
+      };
+    }
+    if (ctx.type === SocialRequestType.CityWalk || ctx.type === SocialRequestType.RunningPartner) {
+      return {
+        kind: 'walking',
+        label: '户外轻活动',
+        riskLevel: CandidateRiskLevel.Medium,
+        confirmation: 'strict',
+        warning: '户外活动要先确认路线、强度、结束点和天气，不建议偏僻路线。',
+      };
+    }
+    if (ctx.type === SocialRequestType.StudyPartner) {
+      return {
+        kind: 'study',
+        label: '学习搭子',
+        riskLevel: CandidateRiskLevel.Low,
+        confirmation: 'normal',
+        warning: '',
+      };
+    }
+    return {
+      kind: 'general',
+      label: '普通社交',
+      riskLevel: CandidateRiskLevel.Low,
+      confirmation: 'normal',
+      warning: '',
+    };
+  }
+
+  private maxRiskLevel(
+    a: CandidateRiskLevel,
+    b: CandidateRiskLevel,
+  ): CandidateRiskLevel {
+    const rank = {
+      [CandidateRiskLevel.Low]: 0,
+      [CandidateRiskLevel.Medium]: 1,
+      [CandidateRiskLevel.High]: 2,
+    };
+    return rank[a] >= rank[b] ? a : b;
+  }
+
+  private cleanList(values: string[] | undefined): string[] {
+    return (values ?? []).map((item) => item.trim().toLowerCase()).filter(Boolean);
+  }
+
+  private overlapCount(a: string[], b: string[]): number {
+    const bSet = new Set(this.cleanList(b));
+    return new Set(this.cleanList(a).filter((item) => bSet.has(item))).size;
+  }
+
+  private energyLevel(text: string): number {
+    const value = text.toLowerCase();
+    if (/(高|主动|外向|开放|热情|open|active|extrovert|high)/i.test(value)) return 3;
+    if (/(低|安静|慢热|克制|内向|introvert|quiet|low)/i.test(value)) return 1;
+    if (/(中|适中|稳定|medium|balanced)/i.test(value)) return 2;
+    return 0;
+  }
+
+  private relationshipGoalTokens(text: string): string[] {
+    const value = text.toLowerCase();
+    const tokens: string[] = [];
+    if (/(搭子|partner|buddy|约练|跑步|健身|麻将|扑克|散步|旅游|旅行)/i.test(value)) tokens.push('partner');
+    if (/(朋友|交友|聊天|认识|friend|social)/i.test(value)) tokens.push('friendship');
+    if (/(相亲|恋爱|对象|dating|date|relationship)/i.test(value)) tokens.push('dating');
+    if (/(学习|自习|study)/i.test(value)) tokens.push('study');
+    if (/(租房|合租|室友|rent|roommate)/i.test(value)) tokens.push('renting');
+    return Array.from(new Set(tokens));
   }
 
   private getConfirmedPrivateMatchTags(
@@ -1272,7 +1601,7 @@ export class MatchService {
     ) {
       reasons.push(`Both like ${request.activityType}.`);
     }
-    if (cand.commonTags.length === 0 && cand.breakdown.interest === 0) {
+    if (cand.commonTags.length === 0 && cand.breakdown.interestSimilarity === 0) {
       reasons.push(
         'No shared interest tags yet, but other dimensions look compatible.',
       );
@@ -1285,19 +1614,83 @@ export class MatchService {
     cand: CandidateScore,
     request?: UserSocialRequest,
   ): string {
-    const name = cand.user.name || 'there';
+    const name = cand.user.name || '你好';
     const activity =
-      request?.activityType ||
-      (request?.type ? TYPE_TO_TAG[request.type] : '') ||
-      'a shared activity';
+      this.activityLabel(request?.type, request?.activityType) || '一次轻松活动';
     const city = request?.city || cand.user.city || '';
-    const where = city ? ` in ${city}` : '';
+    const where = city ? `在${city}` : '在附近';
     const when = request?.timeStart
       ? this.formatTimeWindow(request.timeStart, request.timeEnd)
-      : 'recently';
-    const tags = cand.commonTags.slice(0, 2).join(', ');
-    const tagPart = tags ? ` We both like ${tags}.` : '';
-    return `Hi ${name},${tagPart} I am looking for someone to do ${activity}${where} ${when}. Would you like to chat on FitMeet first?`;
+      : '最近';
+    const tags = cand.commonTags.slice(0, 2).join('、');
+    const tagPart = tags ? `看到你也对「${tags}」感兴趣，感觉我们节奏可能挺合适。` : '';
+    return `你好 ${name}，${tagPart}我最近想${where}${when}约一次${activity}，不着急定，先在 FitMeet 上简单聊聊时间和公开地点可以吗？`;
+  }
+
+  private buildEmotionalInsight(
+    cand: CandidateScore,
+    request?: UserSocialRequest,
+    reasons: string[] = [],
+  ): SocialEmotionalInsight {
+    const name = cand.user.name || 'TA';
+    const tags = cand.commonTags.slice(0, 2);
+    const city = request?.city || cand.socialProfile?.city || cand.user.city || '';
+    const activity = this.activityLabel(request?.type, request?.activityType);
+    const hasRisk = cand.risk.level !== CandidateRiskLevel.Low || cand.risk.warnings.length > 0;
+    const fitSignal = tags.length
+      ? `TA 和你都提到过 ${tags.join('、')}，共同话题比较自然`
+      : reasons[0] || 'TA 在时间、地点或社交边界上和这次需求有交集';
+    const placeSignal = city ? `，而且都在${city}附近，线下成本不高` : '';
+
+    return {
+      fitReason: `${fitSignal}${placeSignal}。这不是只看分数，更像是一次可以低压力开始的连接。`,
+      openerAdvice: tags.length
+        ? `开场建议轻一点，从「${tags[0]}」切入，不要一上来就把时间地点全压给对方，先给 TA 一个舒服的选择空间。`
+        : '开场建议先确认对方当下是否方便聊，再慢慢补充你的活动想法，语气保持轻松、可拒绝。',
+      possibleAwkwardness: hasRisk
+        ? `这里需要温柔但谨慎：${cand.risk.warnings[0] || '资料信息还不够完整'}。别急着推进见面，先用站内聊天确认节奏。`
+        : '可能的小尴尬是双方期待不完全一样：一个想认真约练，一个只是轻松认识。开头先说清楚强度和时长，会更体面。',
+      safeFirstStep: this.safeFirstStep(request, activity),
+      tone: hasRisk ? 'careful' : cand.total >= 80 ? 'active' : 'gentle',
+    };
+  }
+
+  private safeFirstStep(
+    request: UserSocialRequest | undefined,
+    activity: string,
+  ): string {
+    const type = request?.type;
+    if (
+      type === SocialRequestType.RunningPartner ||
+      type === SocialRequestType.FitnessPartner
+    ) {
+      return `第一步建议只约公开场地的短时${activity}，比如 30-45 分钟；路线、强度和结束点先说清楚，不交换私人联系方式。`;
+    }
+    if (type === SocialRequestType.CoffeeChat || type === SocialRequestType.CityWalk) {
+      return `第一步建议选人多、好离开的公开地点，先聊 30-60 分钟；不合适也能自然结束，双方都轻松。`;
+    }
+    if (type === SocialRequestType.DogWalking) {
+      return '第一步建议在开放公园或小区公共区域见面，先让宠物保持距离适应，不去私人住址。';
+    }
+    return '第一步建议先站内聊清楚时间、地点、预算和边界，再选择公开场景见面；任何联系方式交换都等双方确认。';
+  }
+
+  private activityLabel(
+    type?: SocialRequestType,
+    activityType?: string | null,
+  ): string {
+    if (activityType) return activityType;
+    if (!type) return '';
+    const map: Record<SocialRequestType, string> = {
+      [SocialRequestType.RunningPartner]: '跑步',
+      [SocialRequestType.FitnessPartner]: '健身',
+      [SocialRequestType.DogWalking]: '遛狗',
+      [SocialRequestType.CoffeeChat]: '咖啡轻聊',
+      [SocialRequestType.CityWalk]: '散步',
+      [SocialRequestType.StudyPartner]: '学习搭子',
+      [SocialRequestType.Custom]: '见面聊聊',
+    };
+    return map[type] ?? '';
   }
 
   private formatTimeWindow(start: Date, end: Date | null): string {
@@ -1319,6 +1712,7 @@ export class MatchService {
   ): MatchedCandidateView {
     const reasons = this.generateMatchReasons(cand, request);
     const suggestedMessage = this.generateIcebreakerMessage(cand, request);
+    const emotionalInsight = this.buildEmotionalInsight(cand, request, reasons);
     const source: MatchResultSource =
       request?.source === 'public' || cand.activeRequest
         ? 'public_intent'
@@ -1345,7 +1739,8 @@ export class MatchService {
       privateReason: '规则匹配结果，AI 仅可解释或生成话术。',
       riskWarning,
       suggestedOpener: suggestedMessage,
-      nextAction: 'owner_confirmation_required',
+      nextAction: this.nextActionForScene(cand.scenePolicy),
+      emotionalInsight,
       status: row?.status,
       candidateRecordId: row?.id,
     };
@@ -1355,6 +1750,30 @@ export class MatchService {
     row: SocialRequestCandidate,
     user: User,
   ): MatchedCandidateView {
+    const fallbackCandidate: CandidateScore = {
+      user,
+      pref: null,
+      socialProfile: null,
+      activeRequest: null,
+      total: row.score,
+      breakdown: row.scoreBreakdown ?? {},
+      reasons: row.reasons ?? [],
+      commonTags: row.commonTags ?? [],
+      distanceKm: row.distanceKm,
+      risk: { level: row.riskLevel, warnings: row.riskWarnings ?? [] },
+      scenePolicy: {
+        kind: 'general',
+        label: '普通社交',
+        riskLevel: row.riskLevel,
+        confirmation:
+          row.riskLevel === CandidateRiskLevel.High
+            ? 'double_confirm'
+            : row.riskLevel === CandidateRiskLevel.Medium
+              ? 'strict'
+              : 'normal',
+        warning: (row.riskWarnings ?? [])[0] ?? '',
+      },
+    };
     return {
       targetType: 'user',
       userId: user.id,
@@ -1377,6 +1796,11 @@ export class MatchService {
       riskWarning: (row.riskWarnings ?? []).join(' '),
       suggestedOpener: row.suggestedMessage,
       nextAction: 'owner_confirmation_required',
+      emotionalInsight: this.buildEmotionalInsight(
+        fallbackCandidate,
+        undefined,
+        row.reasons ?? [],
+      ),
       status: row.status,
       candidateRecordId: row.id,
     };
@@ -1386,6 +1810,19 @@ export class MatchService {
     if (score >= 80) return CandidateMatchLevel.High;
     if (score >= 60) return CandidateMatchLevel.Medium;
     return CandidateMatchLevel.Low;
+  }
+
+  private nextActionForScene(policy: MatchScenePolicy): string {
+    if (policy.confirmation === 'blocked') {
+      return `blocked_manual_only:${policy.kind}`;
+    }
+    if (policy.confirmation === 'double_confirm') {
+      return `double_confirmation_required:${policy.kind}`;
+    }
+    if (policy.confirmation === 'strict') {
+      return `strict_owner_confirmation_required:${policy.kind}`;
+    }
+    return 'owner_confirmation_required';
   }
 
   // Status transitions

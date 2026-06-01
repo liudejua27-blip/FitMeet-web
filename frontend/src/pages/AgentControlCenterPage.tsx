@@ -60,25 +60,34 @@ interface ApprovalRequest {
 }
 
 const MODE_LABEL: Record<AgentMode, string> = {
-  assisted: '基础模式',
-  basic: '基础模式',
-  normal: '正常模式',
-  standard: '正常模式',
+  assisted: '手动确认模式',
+  basic: '手动确认模式',
+  normal: '半自动模式',
+  standard: '半自动模式',
   open: '开放模式',
 };
 
 const MODE_DESC: Record<AgentMode, string> = {
   assisted:
-    'Agent 只能建议和生成草稿；发送消息、邀约、加好友、创建活动都会进入待确认。',
+    'Agent 只能整理画像、搜索候选、生成建议；发消息、加好友、见面、定位、支付都必须由你确认。',
   basic:
-    'Agent 可以发帖、识别意图、搜索匹配、生成破冰话术与推荐。首条私信、交换联系方式、加好友、线下邀约、创建活动、上传完成凭证都需要你点「同意」后才会执行。最安全。',
+    'Agent 可以识别意图、搜索匹配、生成开场白与推荐解释。首条私信、交换联系方式、加好友、线下邀约、活动创建都需要你点「同意」。最适合作为默认模式。',
   normal:
-    'Agent 可以自动匹配、生成邀约并发送站内消息；加好友、交换联系方式、线下活动仍需确认。',
+    'Agent 可以自动匹配、生成邀约并发送低风险站内消息；加好友、交换联系方式、线下活动仍需确认。',
   standard:
-    'Agent 可以发帖、自动筛选匹配、进行普通聊天与续聊、协助交换联系方式与发出活动邀请。首次联系陌生人、夜间 / 饮酒 / 支付 / 精确定位 / 上传照片 / 最终发布仍需你确认。',
+    'Agent 可以自动筛选匹配、普通聊天与续聊、协助发出活动邀请。首次联系陌生人、夜间 / 饮酒 / 支付 / 精确定位 / 上传照片仍需确认。',
   open:
-    'Agent 拥有最高自由度：可以自动聊天、加好友、邀请用户、发布活动。平台仍会拦截违法、骚扰、色情、暴力、诱导转账、被对方拉黑或对方拒绝 Agent 等高风险行为，开放模式也不能绕过平台安全风控。',
+    'Agent 拥有更高自由度：可以自动聊天、加好友、邀请用户、发布活动。平台仍会拦截违法、骚扰、诱导转账、被对方拉黑或对方拒绝 Agent 等高风险行为。',
 };
+
+const privacyBoundaries = [
+  '允许使用实时定位前必须明确授权',
+  '运动数据只用于约练和健康匹配',
+  '作息分析默认只参与匹配，不公开展示',
+  '附近展示优先使用模糊位置',
+  'Agent 代发需求前必须展示最终文案',
+  '支付 / 钱包永远不能自动执行',
+];
 
 const RISK_STYLE: Record<RiskLevel, { ring: string; pill: string; label: string }> = {
   low: {
@@ -255,10 +264,10 @@ export const AgentControlCenterPage = memo(function AgentControlCenterPage() {
               FitMeet · Agent Console
             </p>
             <h1 className="mt-2 text-2xl font-light tracking-tight text-[#F4EFE6]">
-              Agent 控制台
+              Agent 权限控制台
             </h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[#8C8A6E]">
-              你是 Agent 的所有者。这里决定 OpenClaw / QClaw 能代表你做什么、
+              你是 Agent 的所有者。这里决定 OpenClaw / QClaw 能代表你做什么，
               以及哪些动作必须先由你点「同意」后才能执行。
             </p>
           </div>
@@ -298,7 +307,7 @@ export const AgentControlCenterPage = memo(function AgentControlCenterPage() {
             active={tab === 'permissions'}
             onClick={() => setTab('permissions')}
           >
-            权限与配额
+            权限与边界
           </TabBtn>
         </div>
 
@@ -540,7 +549,7 @@ function PermissionsPanel({
         <p className="mt-1 text-xs text-[#8C8A6E]">
           这一项决定 Agent 默认有多少自由度。下面的开关可以更细粒度地覆盖它。
         </p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="mt-4 grid gap-3 lg:grid-cols-4">
           {modes.map((m) => {
             const active = settings.mode === m;
             return (
@@ -567,6 +576,13 @@ function PermissionsPanel({
               </button>
             );
           })}
+          <div className="rounded-xl border border-dashed border-[#3a3a30] bg-[#0A0A09] p-4 text-left opacity-80">
+            <p className="text-sm font-medium text-[#E8E4DC]">实验室模式</p>
+            <p className="mt-2 text-xs leading-5 text-[#8C8A6E]">
+              预留给内测和企业沙盒。未来可开放多 Agent 协作、自动活动编排和开发者工具链，但必须带审计。
+            </p>
+            <p className="mt-3 text-[11px] font-black text-amber-200">暂未开放</p>
+          </div>
         </div>
       </section>
 
@@ -578,59 +594,59 @@ function PermissionsPanel({
         </p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <Toggle
-            label="搜索（用户、活动、内容）"
+            label="可自动搜索候选人"
             checked={settings.allowSearch}
             disabled={saving}
             onChange={(v) => onChange({ allowSearch: v })}
           />
           <Toggle
-            label="生成消息草稿"
+            label="可自动生成开场白"
             checked={settings.allowDraftMessage}
             disabled={saving}
             onChange={(v) => onChange({ allowDraftMessage: v })}
           />
           <Toggle
-            label="代发私信"
+            label="可代发站内私信"
             checked={settings.allowSendMessage}
             disabled={saving}
             danger
             onChange={(v) => onChange({ allowSendMessage: v })}
           />
           <Toggle
-            label="自动回复已有对话"
+            label="可自动回复已有对话"
             checked={settings.allowAutoReply}
             disabled={saving}
             onChange={(v) => onChange({ allowAutoReply: v })}
           />
           <Toggle
-            label="创建线下活动"
+            label="可创建线下活动"
             checked={settings.allowCreateActivity}
             disabled={saving}
             danger
             onChange={(v) => onChange({ allowCreateActivity: v })}
           />
           <Toggle
-            label="代你报名线下活动"
+            label="可代你报名线下活动"
             checked={settings.allowJoinActivity}
             disabled={saving}
             danger
             onChange={(v) => onChange({ allowJoinActivity: v })}
           />
           <Toggle
-            label="分享精确位置"
+            label="可共享精确定位"
             checked={settings.allowShareLocation}
             disabled={saving}
             danger
             onChange={(v) => onChange({ allowShareLocation: v })}
           />
           <Toggle
-            label="上传活动证明照片"
+            label="可上传活动证明照片"
             checked={settings.allowUploadProof}
             disabled={saving}
             onChange={(v) => onChange({ allowUploadProof: v })}
           />
           <Toggle
-            label="交换联系方式（微信 / 手机号）"
+            label="可交换联系方式（微信 / 手机号）"
             checked={settings.allowContactExchange}
             disabled={saving}
             danger
@@ -647,19 +663,19 @@ function PermissionsPanel({
         </p>
         <div className="mt-4 space-y-3">
           <Toggle
-            label="给陌生人发首条消息"
+            label="发消息前必须确认"
             checked={settings.requireApprovalForFirstMessage}
             disabled={saving}
             onChange={(v) => onChange({ requireApprovalForFirstMessage: v })}
           />
           <Toggle
-            label="确认线下见面 / 活动"
+            label="线下见面前必须确认"
             checked={settings.requireApprovalForOfflineMeeting}
             disabled={saving}
             onChange={(v) => onChange({ requireApprovalForOfflineMeeting: v })}
           />
           <Toggle
-            label="上传照片"
+            label="上传照片前必须确认"
             checked={settings.requireApprovalForPhotoUpload}
             disabled={saving}
             onChange={(v) => onChange({ requireApprovalForPhotoUpload: v })}
@@ -671,6 +687,23 @@ function PermissionsPanel({
             danger
             onChange={(v) => onChange({ requireApprovalForAll: v })}
           />
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-[#2a2a22] bg-[#111110] p-6">
+        <h2 className="text-sm font-medium text-[#F4EFE6]">隐私边界</h2>
+        <p className="mt-1 text-xs text-[#8C8A6E]">
+          这些边界是产品级规则，不让 Agent 因为“匹配分高”就越过用户安全感。
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {privacyBoundaries.map((item) => (
+            <div
+              key={item}
+              className="rounded-xl border border-[#2a2a22] bg-[#0A0A09] px-4 py-3 text-sm text-[#E8E4DC]"
+            >
+              {item}
+            </div>
+          ))}
         </div>
       </section>
 

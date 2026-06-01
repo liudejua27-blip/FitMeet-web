@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
   OnModuleInit,
+  Optional,
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -44,6 +45,7 @@ import {
 import { AIService } from '../ai/ai.service';
 import { PublicSocialIntent } from '../agent-gateway/entities/public-social-intent.entity';
 import { SocialRequestStatus as PublicSocialIntentStatus } from '../agent-gateway/entities/social-request.entity';
+import { RealtimeEventService } from '../realtime/realtime-event.service';
 
 const NIGHT_TIPS = [
   '当前为夜间时段（22:00 - 06:00），请优先选择有照明、人流稳定的地点。',
@@ -108,6 +110,8 @@ export class ActivitiesService implements OnModuleInit {
     @Inject(forwardRef(() => MeetsService))
     private readonly meetsService: MeetsService,
     private readonly ai: AIService,
+    @Optional()
+    private readonly realtime?: RealtimeEventService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -238,6 +242,11 @@ export class ActivitiesService implements OnModuleInit {
       reviewByUserId: {},
     });
     const saved = await this.activityRepo.save(entity);
+    if (dto.invitedUserId && dto.invitedUserId !== creatorId) {
+      this.emitActivityEvent(saved, 'activity:invitation', dto.invitedUserId, {
+        invitedByUserId: creatorId,
+      });
+    }
 
     // Side effect 1: if this activity came from a Meet, write back the meet's
     // status + activityId so MeetPage can route into 履约.
@@ -319,7 +328,11 @@ export class ActivitiesService implements OnModuleInit {
     if (activity.status === SocialActivityStatus.Draft) {
       activity.status = SocialActivityStatus.PendingConfirm;
     }
-    return this.activityRepo.save(activity);
+    const saved = await this.activityRepo.save(activity);
+    this.emitActivityEvent(saved, 'activity:invitation', userId, {
+      joinedByUserId: userId,
+    });
+    return saved;
   }
 
   async confirm(id: number, userId: number): Promise<SocialActivity> {
@@ -342,7 +355,11 @@ export class ActivitiesService implements OnModuleInit {
         activity.status = SocialActivityStatus.Confirmed;
       }
     }
-    return this.activityRepo.save(activity);
+    const saved = await this.activityRepo.save(activity);
+    this.emitActivityEvent(saved, 'activity:confirmed', userId, {
+      confirmedByUserId: userId,
+    });
+    return saved;
   }
 
   async checkin(
@@ -363,6 +380,9 @@ export class ActivitiesService implements OnModuleInit {
       activity.status = SocialActivityStatus.InProgress;
     }
     await this.activityRepo.save(activity);
+    this.emitActivityEvent(activity, 'activity:checked_in', userId, {
+      checkedInByUserId: userId,
+    });
 
     const proof = await this.proofRepo.save(
       this.proofRepo.create({
@@ -602,6 +622,9 @@ export class ActivitiesService implements OnModuleInit {
       }
     }
     const saved = await this.activityRepo.save(activity);
+    this.emitActivityEvent(saved, 'activity:completed', actingUserId, {
+      completedByUserId: actingUserId,
+    });
     await this.applyTrustOnCompletion(saved, actingUserId);
     await this.propagateCompletionToSocialRequest(saved);
     if (saved.meetId) {
@@ -686,7 +709,11 @@ export class ActivitiesService implements OnModuleInit {
       throw new ForbiddenException('Only the creator can cancel this activity.');
     }
     activity.status = SocialActivityStatus.Cancelled;
-    return this.activityRepo.save(activity);
+    const saved = await this.activityRepo.save(activity);
+    this.emitActivityEvent(saved, 'activity:cancelled', userId, {
+      cancelledByUserId: userId,
+    });
+    return saved;
   }
 
   /**
@@ -726,5 +753,41 @@ export class ActivitiesService implements OnModuleInit {
       }
     }
     return { ok: true };
+  }
+
+  private emitActivityEvent(
+    activity: SocialActivity,
+    eventType:
+      | 'activity:invitation'
+      | 'activity:confirmed'
+      | 'activity:checked_in'
+      | 'activity:completed'
+      | 'activity:cancelled',
+    actorUserId: number,
+    extra: Record<string, unknown> = {},
+  ) {
+    for (const userId of activity.participantIds ?? []) {
+      this.realtime?.emitToUser({
+        userId,
+        eventType,
+        payload: {
+          activityId: activity.id,
+          title: activity.title,
+          status: activity.status,
+          actorUserId,
+          ...extra,
+        },
+        rooms: [`activity:${activity.id}`],
+        notification:
+          userId !== actorUserId
+            ? {
+                type: 'activity',
+                text: activity.title,
+                targetId: activity.id,
+                pushPayload: { activityId: activity.id, eventType },
+              }
+            : undefined,
+      });
+    }
   }
 }

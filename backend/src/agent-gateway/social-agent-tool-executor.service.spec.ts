@@ -10,6 +10,7 @@ import {
   SocialAgentToolExecutorService,
   SocialAgentToolName,
 } from './social-agent-tool-executor.service';
+import { SceneRiskPolicyService } from './scene-risk-policy.service';
 
 const repo = () => ({
   findOne: jest.fn(),
@@ -24,7 +25,7 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
     agentConnectionId: 7,
     taskType: 'social_goal',
     title: 'Find partner',
-    goal: '帮我找一个跑步搭子',
+    goal: 'find a running partner',
     input: {},
     plan: [],
     toolCalls: [],
@@ -107,6 +108,17 @@ function makeService() {
     getMutualBlockUserIds: jest.fn().mockResolvedValue(new Set<number>()),
   };
   const approvals = {
+    create: jest.fn().mockImplementation((input) =>
+      Promise.resolve({
+        id: 501,
+        type: input.type,
+        actionType: input.actionType,
+        summary: input.summary,
+        riskLevel: input.riskLevel,
+        payload: input.payload,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      }),
+    ),
     getPending: jest.fn(),
     approve: jest.fn(),
     reject: jest.fn(),
@@ -143,6 +155,7 @@ function makeService() {
     friends as never,
     activities as never,
     safety as never,
+    new SceneRiskPolicyService(),
   );
 
   return {
@@ -231,8 +244,8 @@ describe('SocialAgentToolExecutorService', () => {
     });
   });
 
-  it('executes a permitted send_message step through MessagesService', async () => {
-    const { service, taskRepo, messages, actionLogs } = makeService();
+  it('gates send_message as pending approval instead of direct execution', async () => {
+    const { service, taskRepo, messages, actionLogs, approvals } = makeService();
     const task = makeTask({
       permissionMode: AgentTaskPermissionMode.Assist,
       plan: [
@@ -241,7 +254,7 @@ describe('SocialAgentToolExecutorService', () => {
           toolName: SocialAgentToolName.SendMessage,
           action: 'send_message',
           status: 'planned',
-          input: { targetUserId: 2, text: '你好，一起跑步吗？' },
+          input: { targetUserId: 2, text: 'Want to run together?' },
         },
       ],
     });
@@ -249,7 +262,7 @@ describe('SocialAgentToolExecutorService', () => {
     messages.startConversation.mockResolvedValue({ conversationId: 'conv_1' });
     messages.sendMessage.mockResolvedValue({
       id: 'msg_1',
-      text: '你好，一起跑步吗？',
+      text: 'Want to run together?',
     });
 
     const result = await service.executeTask(100);
@@ -260,60 +273,22 @@ describe('SocialAgentToolExecutorService', () => {
       failedSteps: 0,
       blockedSteps: 0,
     });
-    expect(messages.startConversation).toHaveBeenCalledWith(
-      1,
-      2,
-      expect.objectContaining({ agentConnectionId: 7, ownerUserId: 1 }),
-    );
-    expect(messages.sendMessage).toHaveBeenCalledWith(
-      'conv_1',
-      1,
-      '你好，一起跑步吗？',
+    expect(messages.startConversation).not.toHaveBeenCalled();
+    expect(messages.sendMessage).not.toHaveBeenCalled();
+    expect(approvals.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        senderType: 'agent',
-        senderAgentId: 7,
-        agentConnectionId: 7,
-        ownerUserId: 1,
-        actorUserId: 1,
-        metadata: expect.objectContaining({
-          agentTaskId: 100,
-          stepId: 'step_1',
-          userId: 1,
-        }),
+        userId: 1,
+        agentTaskId: 100,
+        skillName: SocialAgentToolName.SendMessage,
+        actionType: 'send_message',
       }),
     );
-    expect(task.memory).toMatchObject({
-      socialLoop: {
-        taskId: 100,
-        conversationId: 'conv_1',
-        targetUserId: 2,
-        lastMessageId: 'msg_1',
-        lastAgentMessageId: 'msg_1',
-      },
-      shortTerm: {
-        taskId: 100,
-        currentGoal: '帮我找一个跑步搭子',
-        permissionMode: AgentTaskPermissionMode.Assist,
-        conversationId: 'conv_1',
-        targetUserId: 2,
-        currentStatus: AgentTaskStatus.WaitingReply,
-        sentMessages: [
-          expect.objectContaining({
-            id: 'msg_1',
-            conversationId: 'conv_1',
-            targetUserId: 2,
-            textPreview: '你好，一起跑步吗？',
-            toolName: SocialAgentToolName.SendMessage,
-          }),
-        ],
-      },
-    });
     expect(actionLogs.logAgentAction).toHaveBeenCalledWith(
       expect.objectContaining({
         ownerUserId: 1,
         agentId: 7,
         actionType: 'send_message',
-        actionStatus: 'executed',
+        actionStatus: 'pending_approval',
         agentTaskId: 100,
         inputSummary: expect.stringContaining(SocialAgentToolName.SendMessage),
         outputSummary: expect.stringContaining('succeeded'),
@@ -328,8 +303,9 @@ describe('SocialAgentToolExecutorService', () => {
           inputSummary: expect.stringContaining('targetUserId'),
           outputSummary: expect.stringContaining('succeeded'),
           riskLevel: 'medium',
-          requiresApproval: false,
-          approvalId: null,
+          requiresApproval: true,
+          approvalId: 501,
+          executed: false,
           status: 'succeeded',
           error: null,
           createdAt: expect.any(String),
@@ -351,7 +327,7 @@ describe('SocialAgentToolExecutorService', () => {
       }),
     );
     expect(task.plan[0]).toMatchObject({ status: 'succeeded' });
-    expect(task.status).toBe(AgentTaskStatus.WaitingReply);
+    expect(task.status).toBe(AgentTaskStatus.Succeeded);
   });
 
   it('records required audit fields for every registered tool call', async () => {
@@ -410,7 +386,7 @@ describe('SocialAgentToolExecutorService', () => {
           toolName: 'search_real_candidates',
           action: 'search_profiles',
           status: 'planned',
-          input: { city: '青岛', rawText: '找跑步搭子' },
+          input: { city: 'Qingdao', rawText: 'find running partner' },
         },
       ],
     });
@@ -418,7 +394,7 @@ describe('SocialAgentToolExecutorService', () => {
     candidatePool.searchSocial.mockResolvedValue({
       candidates: [],
       emptyReason: 'no_real_candidates',
-      message: '当前没有找到符合条件的真实用户。',
+      message: 'No real candidates found.',
       debugReasons: [],
     });
 
@@ -429,7 +405,7 @@ describe('SocialAgentToolExecutorService', () => {
       status: 'succeeded',
     });
     expect(candidatePool.searchSocial).toHaveBeenCalledWith(
-      expect.objectContaining({ city: '青岛', rawText: '找跑步搭子' }),
+      expect.objectContaining({ city: 'Qingdao', rawText: 'find running partner' }),
     );
   });
 
@@ -447,7 +423,7 @@ describe('SocialAgentToolExecutorService', () => {
     const task = makeTask({
       permissionMode: AgentTaskPermissionMode.Assist,
       memory: {
-        taskMemory: { currentGoal: '找青岛跑步搭子' },
+        taskMemory: { currentGoal: 'find Qingdao running partner' },
         shortTerm: { candidates: [{ candidateUserId: 2 }] },
       },
       plan: [
@@ -461,13 +437,13 @@ describe('SocialAgentToolExecutorService', () => {
           id: 'public',
           toolName: 'search_public_intents',
           status: 'planned',
-          input: { city: '青岛' },
+          input: { city: 'Qingdao' },
         },
         {
           id: 'activities',
           toolName: 'search_activities',
           status: 'planned',
-          input: { city: '青岛' },
+          input: { city: 'Qingdao' },
         },
         {
           id: 'conversations',
@@ -498,7 +474,7 @@ describe('SocialAgentToolExecutorService', () => {
       ],
     });
     taskRepo.findOne.mockResolvedValue(task);
-    socialProfiles.get.mockResolvedValue({ userId: 1, interests: ['跑步'] });
+    socialProfiles.get.mockResolvedValue({ userId: 1, interests: ['running'] });
     candidatePool.searchSocial.mockResolvedValue({
       candidates: [
         { source: 'profile_candidate', candidateUserId: 2 },
@@ -568,13 +544,13 @@ describe('SocialAgentToolExecutorService', () => {
           id: 'publish',
           toolName: 'publish_social_request',
           status: 'planned',
-          input: { type: 'custom', description: '找青岛跑步搭子' },
+          input: { type: 'custom', description: 'find Qingdao running partner' },
         },
         {
           id: 'message',
           toolName: 'send_message_to_candidate',
           status: 'planned',
-          input: { candidateUserId: 2, text: '一起跑步吗？' },
+          input: { candidateUserId: 2, text: 'Want to run together?' },
         },
         {
           id: 'connect',
@@ -586,7 +562,7 @@ describe('SocialAgentToolExecutorService', () => {
           id: 'create_activity',
           toolName: 'create_activity',
           status: 'planned',
-          input: { title: '周末跑步', city: '青岛' },
+          input: { title: 'weekend running', city: 'Qingdao' },
         },
         {
           id: 'join_activity',
@@ -632,17 +608,36 @@ describe('SocialAgentToolExecutorService', () => {
     expect(result.succeededSteps).toBe(7);
     expect(actionLogs.logAgentAction).toHaveBeenCalledTimes(7);
     expect(socialRequests.syncPublicIntentById).toHaveBeenCalledWith(21, 1);
-    expect(messages.startConversation).toHaveBeenCalledWith(
-      1,
-      2,
-      expect.any(Object),
+    expect(messages.startConversation).not.toHaveBeenCalled();
+    expect(messages.sendMessage).not.toHaveBeenCalled();
+    expect(friends.ensureFollowing).not.toHaveBeenCalled();
+    expect(activities.create).not.toHaveBeenCalled();
+    expect(activities.join).not.toHaveBeenCalled();
+    expect(approvals.create).toHaveBeenCalledTimes(4);
+    expect(approvals.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillName: SocialAgentToolName.SendMessageToCandidate,
+        actionType: 'send_message',
+      }),
     );
-    expect(friends.ensureFollowing).toHaveBeenCalledWith(1, 2);
-    expect(activities.create).toHaveBeenCalledWith(
-      1,
-      expect.objectContaining({ title: '周末跑步', city: '青岛' }),
+    expect(approvals.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillName: SocialAgentToolName.ConnectCandidate,
+        actionType: 'add_friend',
+      }),
     );
-    expect(activities.join).toHaveBeenCalledWith(9, 1);
+    expect(approvals.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillName: SocialAgentToolName.CreateActivity,
+        actionType: 'create_activity',
+      }),
+    );
+    expect(approvals.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillName: SocialAgentToolName.JoinActivity,
+        actionType: 'join_activity',
+      }),
+    );
     expect(approvals.approve).toHaveBeenCalledWith(12, 1, expect.any(Function));
     expect(approvals.reject).toHaveBeenCalledWith(13, 1);
     const toolEvents = eventRepo.save.mock.calls
@@ -666,7 +661,7 @@ describe('SocialAgentToolExecutorService', () => {
       ),
     ).toEqual(
       expect.objectContaining({
-        riskLevel: 'high',
+        riskLevel: 'low',
         status: 'succeeded',
         payload: expect.objectContaining({
           approvalId: 12,
@@ -692,7 +687,7 @@ describe('SocialAgentToolExecutorService', () => {
   });
 
   it('runs the waiting reply loop and sends the decided reply', async () => {
-    const { service, taskRepo, messages } = makeService();
+    const { service, taskRepo, messages, approvals } = makeService();
     const task = makeTask({
       status: AgentTaskStatus.WaitingReply,
       memory: {
@@ -710,14 +705,14 @@ describe('SocialAgentToolExecutorService', () => {
       {
         id: 'msg_1',
         conversationId: 'conv_1',
-        text: '今晚一起跑步吗？',
+        text: 'Want to run tonight?',
         senderType: 'agent',
         senderId: 1,
       },
       {
         id: 'msg_2',
         conversationId: 'conv_1',
-        text: '可以，我想先确认路线和集合点。',
+        text: 'Sure, let us confirm the route and meeting point first.',
         senderType: 'user',
         senderId: 2,
       },
@@ -725,7 +720,7 @@ describe('SocialAgentToolExecutorService', () => {
     messages.sendAgentReply.mockResolvedValue({
       id: 'msg_3',
       conversationId: 'conv_1',
-      text: '可以，我们先把时间、地点和路线确认清楚。',
+      text: 'Sure, let us confirm time, place, and route first.',
       recipientUserId: 2,
     });
 
@@ -756,21 +751,12 @@ describe('SocialAgentToolExecutorService', () => {
         eventType: 'social_agent.next_action.decided',
       }),
     );
-    expect(messages.sendAgentReply).toHaveBeenCalledWith(
-      'conv_1',
-      7,
-      expect.stringContaining('时间'),
+    expect(messages.sendAgentReply).not.toHaveBeenCalled();
+    expect(approvals.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        ownerUserId: 1,
-        metadata: expect.objectContaining({ agentTaskId: 100 }),
-      }),
-    );
-    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventType: 'social_agent.reply.sent',
-        conversationId: 'conv_1',
-        messageId: 'msg_3',
-        fromUserId: 2,
+        skillName: SocialAgentToolName.ReplyMessage,
+        actionType: 'send_message',
+        agentTaskId: 100,
       }),
     );
     expect(task.memory).toMatchObject({
@@ -779,7 +765,7 @@ describe('SocialAgentToolExecutorService', () => {
         targetUserId: 2,
         lastReceivedMessageId: 'msg_2',
         lastReadMessageId: 'msg_2',
-        lastAgentMessageId: 'msg_3',
+        lastAgentMessageId: 'msg_1',
       },
       shortTerm: {
         taskId: 100,
@@ -790,15 +776,7 @@ describe('SocialAgentToolExecutorService', () => {
           expect.objectContaining({
             id: 'msg_2',
             fromUserId: 2,
-            textPreview: '可以，我想先确认路线和集合点。',
-          }),
-        ],
-        sentMessages: [
-          expect.objectContaining({
-            id: 'msg_3',
-            conversationId: 'conv_1',
-            targetUserId: 2,
-            toolName: SocialAgentToolName.ReplyMessage,
+            textPreview: 'Sure, let us confirm the route and meeting point first.',
           }),
         ],
         replySummary: expect.any(Object),
@@ -807,8 +785,8 @@ describe('SocialAgentToolExecutorService', () => {
     });
   });
 
-  it('blocks a tool when the task permission mode does not allow its action', async () => {
-    const { service, taskRepo, activities, actionLogs } = makeService();
+  it('turns offline meeting into pending approval in assist/manual mode', async () => {
+    const { service, taskRepo, activities, actionLogs, approvals } = makeService();
     const task = makeTask({
       permissionMode: AgentTaskPermissionMode.Assist,
       plan: [
@@ -817,7 +795,7 @@ describe('SocialAgentToolExecutorService', () => {
           toolName: SocialAgentToolName.OfflineMeeting,
           action: 'offline_meet',
           status: 'planned',
-          input: { title: '线下约练', targetUserId: 2 },
+          input: { title: 'offline workout', targetUserId: 2 },
         },
       ],
     });
@@ -827,32 +805,39 @@ describe('SocialAgentToolExecutorService', () => {
 
     expect(result).toMatchObject({
       executedSteps: 1,
-      succeededSteps: 0,
-      blockedSteps: 1,
+      succeededSteps: 1,
+      blockedSteps: 0,
     });
     expect(activities.create).not.toHaveBeenCalled();
+    expect(approvals.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillName: SocialAgentToolName.OfflineMeeting,
+        actionType: 'offline_meeting',
+        riskLevel: 'high',
+      }),
+    );
     expect(actionLogs.logAgentAction).toHaveBeenCalledWith(
       expect.objectContaining({
         ownerUserId: 1,
         agentId: 7,
         actionType: 'offline_meeting',
-        actionStatus: 'failed',
-        status: 'blocked',
+        actionStatus: 'pending_approval',
+        status: 'succeeded',
         payload: expect.objectContaining({
           agentTaskId: 100,
           toolName: SocialAgentToolName.OfflineMeeting,
-          status: 'blocked',
-          requiresApproval: expect.any(Boolean),
-          error: expect.objectContaining({ code: 'tool_permission_blocked' }),
+          status: 'succeeded',
+          requiresApproval: true,
+          executed: false,
+          approvalId: 501,
         }),
       }),
     );
-    expect(task.plan[0]).toMatchObject({ status: 'blocked' });
-    expect(task.status).toBe(AgentTaskStatus.Failed);
+    expect(task.plan[0]).toMatchObject({ status: 'succeeded' });
   });
 
-  it('executes add_friend through FriendsService and records the action result', async () => {
-    const { service, taskRepo, friends, actionLogs, messages } = makeService();
+  it('gates add_friend through pending approval and records the action result', async () => {
+    const { service, taskRepo, friends, actionLogs, messages, approvals } = makeService();
     const task = makeTask({
       permissionMode: AgentTaskPermissionMode.Assist,
       plan: [
@@ -874,30 +859,38 @@ describe('SocialAgentToolExecutorService', () => {
     const result = await service.executeTask(100);
 
     expect(result.succeededSteps).toBe(1);
-    expect(friends.ensureFollowing).toHaveBeenCalledWith(1, 2);
+    expect(friends.ensureFollowing).not.toHaveBeenCalled();
+    expect(approvals.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillName: SocialAgentToolName.AddFriend,
+        actionType: 'add_friend',
+      }),
+    );
     expect(actionLogs.logAgentAction).toHaveBeenCalledWith(
       expect.objectContaining({
         ownerUserId: 1,
         agentId: 7,
         actionType: 'add_friend',
-        actionStatus: 'executed',
+        actionStatus: 'pending_approval',
         targetUserId: 2,
         payload: expect.objectContaining({
           agentTaskId: 100,
           userId: 1,
           toolName: SocialAgentToolName.AddFriend,
+          requiresApproval: true,
+          executed: false,
+          approvalId: 501,
         }),
       }),
     );
     expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        agentConnectionId: 7,
-        ownerUserId: 1,
         eventType: 'agent.action.succeeded',
-        fromUserId: 2,
         metadata: expect.objectContaining({
-          agentTaskId: 100,
-          toolName: SocialAgentToolName.AddFriend,
+          output: expect.objectContaining({
+            pendingApproval: true,
+            status: 'pending_approval',
+          }),
         }),
       }),
     );
@@ -921,7 +914,7 @@ describe('SocialAgentToolExecutorService', () => {
       SocialAgentToolName.SendMessageToCandidate,
       {
         targetUserId: 2,
-        text: '你好，一起喝咖啡吗？',
+        text: 'Hi, want to grab coffee?',
         metadata: { confirmationSource: 'social_agent_chat' },
       },
       1,
@@ -936,7 +929,7 @@ describe('SocialAgentToolExecutorService', () => {
     expect(messages.sendMessage).toHaveBeenCalledWith(
       'conv_user',
       1,
-      '你好，一起喝咖啡吗？',
+      'Hi, want to grab coffee?',
       expect.objectContaining({
         senderType: 'user',
         senderAgentId: null,
@@ -1367,7 +1360,7 @@ describe('SocialAgentToolExecutorService', () => {
           toolName: SocialAgentToolName.SendMessage,
           action: 'send_message',
           status: 'planned',
-          input: { targetUserId: 2, text: '你好' },
+          input: { targetUserId: 2, text: 'Hi' },
         },
       ],
     });
@@ -1395,8 +1388,8 @@ describe('SocialAgentToolExecutorService', () => {
     });
   });
 
-  it('executes offline_meeting by creating an activity and sending an invite message', async () => {
-    const { service, taskRepo, activities, messages, actionLogs } =
+  it('gates offline_meeting as pending approval without creating an activity', async () => {
+    const { service, taskRepo, activities, messages, actionLogs, approvals } =
       makeService();
     const task = makeTask({
       permissionMode: AgentTaskPermissionMode.LimitedAuto,
@@ -1408,9 +1401,9 @@ describe('SocialAgentToolExecutorService', () => {
           status: 'planned',
           input: {
             targetUserId: 2,
-            title: '周末跑步见面',
-            locationName: '朝阳公园西门',
-            city: '北京',
+            title: 'weekend running meetup',
+            locationName: 'Chaoyang Park west gate',
+            city: 'Beijing',
           },
         },
       ],
@@ -1418,10 +1411,10 @@ describe('SocialAgentToolExecutorService', () => {
     taskRepo.findOne.mockResolvedValue(task);
     activities.create.mockResolvedValue({
       id: 33,
-      title: '周末跑步见面',
+      title: 'weekend running meetup',
       status: 'pending_confirm',
-      city: '北京',
-      locationName: '朝阳公园西门',
+      city: 'Beijing',
+      locationName: 'Chaoyang Park west gate',
       startTime: null,
     });
     messages.startConversation.mockResolvedValue({
@@ -1435,45 +1428,18 @@ describe('SocialAgentToolExecutorService', () => {
     const result = await service.executeTask(100);
 
     expect(result.succeededSteps).toBe(1);
-    expect(activities.create).toHaveBeenCalledWith(
-      1,
+    expect(activities.create).not.toHaveBeenCalled();
+    expect(messages.startConversation).not.toHaveBeenCalled();
+    expect(messages.sendMessage).not.toHaveBeenCalled();
+    expect(approvals.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: '周末跑步见面',
-        invitedUserId: 2,
-        city: '北京',
-        locationName: '朝阳公园西门',
-      }),
-    );
-    expect(messages.startConversation).toHaveBeenCalledWith(
-      1,
-      2,
-      expect.objectContaining({
-        agentConnectionId: 7,
-        ownerUserId: 1,
-        metadata: expect.objectContaining({
-          agentTaskId: 100,
-          stepId: 'step_1',
-          toolName: SocialAgentToolName.OfflineMeeting,
-          activityId: 33,
-        }),
-      }),
-    );
-    expect(messages.sendMessage).toHaveBeenCalledWith(
-      'conv_meet',
-      1,
-      expect.stringContaining('线下见面安排'),
-      expect.objectContaining({
-        senderType: 'agent',
-        senderAgentId: 7,
-        agentConnectionId: 7,
-        ownerUserId: 1,
-        actorUserId: 1,
-        metadata: expect.objectContaining({
-          agentTaskId: 100,
-          stepId: 'step_1',
-          userId: 1,
-          toolName: SocialAgentToolName.OfflineMeeting,
-          activityId: 33,
+        userId: 1,
+        agentTaskId: 100,
+        skillName: SocialAgentToolName.OfflineMeeting,
+        actionType: 'offline_meeting',
+        riskLevel: 'high',
+        payload: expect.objectContaining({
+          targetUserId: 2,
         }),
       }),
     );
@@ -1482,30 +1448,31 @@ describe('SocialAgentToolExecutorService', () => {
         ownerUserId: 1,
         agentId: 7,
         actionType: 'offline_meeting',
-        actionStatus: 'executed',
+        actionStatus: 'pending_approval',
         riskLevel: 'high',
         targetUserId: 2,
-        relatedActivityId: 33,
+        payload: expect.objectContaining({
+          requiresApproval: true,
+          approvalId: 501,
+          executed: false,
+        }),
       }),
     );
     expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        agentConnectionId: 7,
-        ownerUserId: 1,
-        conversationId: 'conv_meet',
-        messageId: 'msg_meet',
-        fromUserId: 2,
+        eventType: 'agent.action.succeeded',
         metadata: expect.objectContaining({
-          agentTaskId: 100,
-          toolName: SocialAgentToolName.OfflineMeeting,
-          status: 'succeeded',
+          output: expect.objectContaining({
+            pendingApproval: true,
+            status: 'pending_approval',
+          }),
         }),
       }),
     );
   });
 
-  it('creates a payment intent for payment steps and records it for review', async () => {
-    const { service, taskRepo, paymentIntentRepo, actionLogs, messages } =
+  it('gates payment steps as pending approval and never creates payment intent automatically', async () => {
+    const { service, taskRepo, paymentIntentRepo, actionLogs, messages, approvals } =
       makeService();
     const task = makeTask({
       permissionMode: AgentTaskPermissionMode.LimitedAuto,
@@ -1519,7 +1486,7 @@ describe('SocialAgentToolExecutorService', () => {
             amount: 88.5,
             currency: 'cny',
             payeeUserId: 2,
-            description: '场地订金',
+            description: '鍦哄湴璁㈤噾',
           },
         },
       ],
@@ -1533,18 +1500,22 @@ describe('SocialAgentToolExecutorService', () => {
     const result = await service.executeTask(100);
 
     expect(result.succeededSteps).toBe(1);
-    expect(paymentIntentRepo.create).toHaveBeenCalledWith(
+    expect(paymentIntentRepo.create).not.toHaveBeenCalled();
+    expect(paymentIntentRepo.save).not.toHaveBeenCalled();
+    expect(approvals.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        ownerUserId: 1,
-        agentConnectionId: 7,
+        userId: 1,
         agentTaskId: 100,
-        stepId: 'step_1',
-        targetUserId: 2,
-        amount: '88.50',
-        currency: 'CNY',
-        description: '场地订金',
-        status: 'created',
-        provider: 'manual_intent',
+        skillName: SocialAgentToolName.Payment,
+        actionType: 'payment',
+        riskLevel: 'high',
+        payload: expect.objectContaining({
+          amount: 88.5,
+          currency: 'cny',
+          payeeUserId: 2,
+          riskLevel: 'critical',
+          blockedActions: expect.arrayContaining(['auto_execute']),
+        }),
       }),
     );
     expect(actionLogs.logAgentAction).toHaveBeenCalledWith(
@@ -1552,7 +1523,7 @@ describe('SocialAgentToolExecutorService', () => {
         ownerUserId: 1,
         agentId: 7,
         actionType: 'payment',
-        actionStatus: 'executed',
+        actionStatus: 'pending_approval',
         riskLevel: 'high',
         targetUserId: 2,
         payload: expect.objectContaining({
@@ -1560,34 +1531,25 @@ describe('SocialAgentToolExecutorService', () => {
           userId: 1,
           toolName: SocialAgentToolName.Payment,
           permissionMode: AgentTaskPermissionMode.LimitedAuto,
+          requiresApproval: true,
+          approvalId: 501,
+          executed: false,
           policy: expect.objectContaining({
-            highRisk: true,
-            dailyLimit: 3,
-            executionContract: 'create_payment_intent_only',
+            sceneRisk: expect.objectContaining({
+              riskLevel: 'critical',
+              blockedActions: expect.arrayContaining(['auto_execute']),
+            }),
           }),
-          output: expect.objectContaining({ paymentIntentId: 88 }),
         }),
       }),
     );
     expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        agentConnectionId: 7,
-        ownerUserId: 1,
-        fromUserId: 2,
+        eventType: 'agent.action.succeeded',
         metadata: expect.objectContaining({
-          agentTaskId: 100,
-          toolName: SocialAgentToolName.Payment,
-          status: 'succeeded',
           output: expect.objectContaining({
-            paymentIntentId: 88,
-            status: 'created',
-            amount: '88.50',
-            currency: 'CNY',
-            auditPolicy: 'payment_intent_only_no_silent_charge',
-          }),
-          policy: expect.objectContaining({
-            highRisk: true,
-            dailyLimit: 3,
+            pendingApproval: true,
+            status: 'pending_approval',
           }),
         }),
       }),
@@ -1621,7 +1583,7 @@ describe('SocialAgentToolExecutorService', () => {
             amount: 88.5,
             currency: 'cny',
             payeeUserId: 2,
-            description: '鍦哄湴璁㈤噾',
+            description: 'venue deposit',
           },
         },
       ],
@@ -1666,7 +1628,7 @@ describe('SocialAgentToolExecutorService', () => {
           toolName: SocialAgentToolName.CreateSocialRequest,
           action: 'send_invite',
           status: 'planned',
-          input: { rawText: '周末找人一起跑步' },
+          input: { rawText: 'find someone to run this weekend' },
         },
       ],
     });
@@ -1701,7 +1663,7 @@ describe('SocialAgentToolExecutorService', () => {
       }
     }
     expect(socialRequests.createFromNaturalLanguage).toHaveBeenCalledWith(
-      '周末找人一起跑步',
+      'find someone to run this weekend',
       1,
       agent,
     );
@@ -1731,5 +1693,78 @@ describe('SocialAgentToolExecutorService', () => {
 
     expect(result).toMatchObject({ succeededSteps: 1, failedSteps: 0 });
     expect(task.status).toBe(AgentTaskStatus.Succeeded);
+  });
+
+  it('manual_confirm mode turns social sends into pending approvals and audits them', async () => {
+    const { service, taskRepo, messages, approvals, actionLogs } = makeService();
+    const task = makeTask({
+      permissionMode: 'manual_confirm' as never,
+      plan: [
+        {
+          id: 'step_1',
+          toolName: SocialAgentToolName.SendMessage,
+          action: 'send_message',
+          status: 'planned',
+          input: { targetUserId: 2, text: 'Hi, want to work out together?' },
+        },
+      ],
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+
+    const result = await service.executeTask(100);
+
+    expect(result.succeededSteps).toBe(1);
+    expect(messages.sendMessage).not.toHaveBeenCalled();
+    expect(approvals.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 1,
+        agentTaskId: 100,
+        skillName: SocialAgentToolName.SendMessage,
+      }),
+    );
+    expect(actionLogs.logAgentAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionType: 'send_message',
+        actionStatus: 'pending_approval',
+        payload: expect.objectContaining({
+          requiresApproval: true,
+          executed: false,
+          sceneType: 'general',
+        }),
+      }),
+    );
+  });
+
+  it('lab mode simulates write tools without executing real side effects', async () => {
+    const { service, taskRepo, messages, approvals, actionLogs } = makeService();
+    const task = makeTask({
+      permissionMode: 'lab' as never,
+      plan: [
+        {
+          id: 'step_1',
+          toolName: SocialAgentToolName.SendMessage,
+          action: 'send_message',
+          status: 'planned',
+          input: { targetUserId: 2, text: 'Hi' },
+        },
+      ],
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+
+    const result = await service.executeTask(100);
+
+    expect(result.succeededSteps).toBe(1);
+    expect(messages.sendMessage).not.toHaveBeenCalled();
+    expect(approvals.create).not.toHaveBeenCalled();
+    expect(actionLogs.logAgentAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionType: 'send_message',
+        actionStatus: 'executed',
+        payload: expect.objectContaining({
+          executed: false,
+          output: expect.objectContaining({ simulated: true }),
+        }),
+      }),
+    );
   });
 });

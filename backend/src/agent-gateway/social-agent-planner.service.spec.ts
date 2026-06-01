@@ -75,7 +75,7 @@ describe('SocialAgentPlannerService', () => {
     jest.restoreAllMocks();
   });
 
-  it('calls DeepSeek, filters disallowed actions, writes task plan and event', async () => {
+  it('calls DeepSeek, keeps social actions for risk gating, writes task plan and event', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
@@ -113,11 +113,18 @@ describe('SocialAgentPlannerService', () => {
       JSON.parse(((global.fetch as jest.Mock).mock.calls[0]?.[1] as { body?: string }).body ?? '{}')
         .model,
     ).toBe('deepseek-v4-flash');
-    expect(result.plan).toHaveLength(1);
+    expect(result.plan).toHaveLength(2);
     expect(result.plan[0]).toMatchObject({
+      id: 'blocked',
+      action: SocialAgentAction.Payment,
+      status: 'planned',
+      requiresUserConfirmation: true,
+    });
+    expect(result.plan[1]).toMatchObject({
       id: 'allowed',
       action: SocialAgentAction.SendMessage,
       status: 'planned',
+      requiresUserConfirmation: true,
     });
     expect(tasks.save).toHaveBeenCalledWith(
       expect.objectContaining({ id: 10, plan: result.plan }),
@@ -131,7 +138,7 @@ describe('SocialAgentPlannerService', () => {
         payload: expect.objectContaining({
           source: 'deepseek',
           permissionMode: AgentTaskPermissionMode.Assist,
-          stepCount: 1,
+          stepCount: 2,
         }),
       }),
     );

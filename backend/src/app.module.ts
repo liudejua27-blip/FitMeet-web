@@ -32,6 +32,10 @@ import { MatchModule } from './match/match.module';
 import { ActivitiesModule } from './activities/activities.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { UsersModule } from './users/users.module';
+import { LifeGraphModule } from './life-graph/life-graph.module';
+import { WaitlistModule } from './waitlist/waitlist.module';
+import { RealtimeModule } from './realtime/realtime.module';
+import { FutureSkillsGatewayModule } from './future-skills-gateway/future-skills-gateway.module';
 
 @Module({
   imports: [
@@ -121,6 +125,10 @@ import { UsersModule } from './users/users.module';
     KafkaModule.forRoot(),
     UploadsModule,
     UsersModule,
+    RealtimeModule,
+    LifeGraphModule,
+    WaitlistModule,
+    FutureSkillsGatewayModule,
     AuthModule,
     CategoriesModule,
     CoachesModule,

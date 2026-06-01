@@ -11,6 +11,7 @@ import { MeetsModule } from '../meets/meets.module';
 import { User } from '../users/user.entity';
 import { UserSocialRequest } from '../social-requests/social-request.entity';
 import { PublicSocialIntent } from '../agent-gateway/entities/public-social-intent.entity';
+import { RealtimeModule } from '../realtime/realtime.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { PublicSocialIntent } from '../agent-gateway/entities/public-social-inte
     ]),
     forwardRef(() => AgentGatewayModule),
     forwardRef(() => MeetsModule),
+    RealtimeModule,
   ],
   providers: [ActivitiesService],
   controllers: [ActivitiesController, AgentActivitiesController],

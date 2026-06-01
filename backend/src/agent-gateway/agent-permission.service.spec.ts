@@ -8,15 +8,23 @@ import {
 
 describe('AgentPermissionService', () => {
   const service = new AgentPermissionService();
+  const allActions = [
+    SocialAgentAction.SearchProfiles,
+    SocialAgentAction.GenerateContent,
+    SocialAgentAction.DraftMessage,
+    SocialAgentAction.FavoriteCandidate,
+    SocialAgentAction.WriteInbox,
+    SocialAgentAction.SendMessage,
+    SocialAgentAction.AddFriend,
+    SocialAgentAction.SendInvite,
+    SocialAgentAction.OfflineMeet,
+    SocialAgentAction.Payment,
+  ];
 
-  it('allows only Assist Mode actions', () => {
-    expect(service.getAllowedActions(AgentTaskPermissionMode.Assist)).toEqual([
-      SocialAgentAction.SearchProfiles,
-      SocialAgentAction.GenerateContent,
-      SocialAgentAction.DraftMessage,
-      SocialAgentAction.AddFriend,
-      SocialAgentAction.SendMessage,
-    ]);
+  it('keeps Assist/manual_confirm actions available for approval gating', () => {
+    expect(service.getAllowedActions(AgentTaskPermissionMode.Assist)).toEqual(
+      allActions,
+    );
     expect(
       service.canExecute(
         AgentTaskPermissionMode.Assist,
@@ -37,16 +45,10 @@ describe('AgentPermissionService', () => {
     ).toBe(true);
   });
 
-  it('allows only Confirm Mode actions', () => {
-    expect(service.getAllowedActions(AgentTaskPermissionMode.Confirm)).toEqual([
-      SocialAgentAction.AddFriend,
-      SocialAgentAction.SearchProfiles,
-      SocialAgentAction.GenerateContent,
-      SocialAgentAction.DraftMessage,
-      SocialAgentAction.FavoriteCandidate,
-      SocialAgentAction.SendMessage,
-      SocialAgentAction.SendInvite,
-    ]);
+  it('keeps Confirm/manual_confirm actions available for approval gating', () => {
+    expect(service.getAllowedActions(AgentTaskPermissionMode.Confirm)).toEqual(
+      allActions,
+    );
     expect(
       service.canExecute(
         AgentTaskPermissionMode.Confirm,
@@ -70,24 +72,13 @@ describe('AgentPermissionService', () => {
         AgentTaskPermissionMode.Confirm,
         SocialAgentAction.Payment,
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  it('allows only Limited Auto Mode actions', () => {
+  it('keeps Limited Auto actions available while risk policy decides automation', () => {
     expect(
       service.getAllowedActions(AgentTaskPermissionMode.LimitedAuto),
-    ).toEqual([
-      SocialAgentAction.SearchProfiles,
-      SocialAgentAction.GenerateContent,
-      SocialAgentAction.FavoriteCandidate,
-      SocialAgentAction.DraftMessage,
-      SocialAgentAction.WriteInbox,
-      SocialAgentAction.SendMessage,
-      SocialAgentAction.AddFriend,
-      SocialAgentAction.SendInvite,
-      SocialAgentAction.OfflineMeet,
-      SocialAgentAction.Payment,
-    ]);
+    ).toEqual(allActions);
     expect(
       service.canExecute(
         AgentTaskPermissionMode.LimitedAuto,
@@ -147,7 +138,7 @@ describe('AgentPermissionService', () => {
     expect(
       service.evaluate(AgentTaskPermissionMode.Assist, 'unknown' as never),
     ).toMatchObject({
-      mode: AgentTaskPermissionMode.Assist,
+      mode: 'manual_confirm',
       action: null,
       allowed: false,
       reason: 'unknown_action',

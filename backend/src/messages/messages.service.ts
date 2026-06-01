@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -44,6 +45,7 @@ import {
   isDisplayableText,
   sanitizeForDisplay,
 } from '../common/display-text.util';
+import { RealtimeEventService } from '../realtime/realtime-event.service';
 
 type SendMessageOptions = {
   source?: MessageSource;
@@ -136,6 +138,8 @@ export class MessagesService {
     private readonly publicIntentRepo: Repository<PublicSocialIntent>,
     @InjectRepository(UserSocialRequest)
     private readonly socialRequestRepo: Repository<UserSocialRequest>,
+    @Optional()
+    private readonly realtime?: RealtimeEventService,
   ) {}
 
   async getConversations(userId: number) {
@@ -384,6 +388,48 @@ export class MessagesService {
           }`,
         );
       }
+    }
+
+    const realtimePayload = {
+      id: msg._id.toString(),
+      text: cleanDisplayText(msg.text, '消息内容已隐藏'),
+      source: msg.source ?? 'user',
+      card: msg.card ?? null,
+      senderId,
+      senderType,
+      conversationId: conv._id.toString(),
+      time: new Date().toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+    };
+    for (const participantId of conv.participantIds.filter(
+      (id) => Number(id) !== Number(senderId),
+    )) {
+      this.realtime?.emitToUser({
+        userId: participantId,
+        eventType: 'message:new',
+        payload: realtimePayload,
+        rooms: [`conversation:${conv._id.toString()}`],
+        notification: {
+          type: 'message',
+          text: this.preview(safeText),
+          pushPayload: {
+            conversationId: conv._id.toString(),
+            messageId: msg._id.toString(),
+          },
+        },
+      });
+      this.realtime?.emitToUser({
+        userId: participantId,
+        eventType: 'conversation:updated',
+        payload: {
+          conversationId: conv._id.toString(),
+          lastMessage: safeText,
+          updatedAt: new Date().toISOString(),
+        },
+        rooms: [`conversation:${conv._id.toString()}`],
+      });
     }
 
     return {

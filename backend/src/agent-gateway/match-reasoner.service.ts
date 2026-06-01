@@ -219,8 +219,6 @@ export class MatchReasonerService {
         breakdown.traitOverlap?.length
           ? `相似性格：${breakdown.traitOverlap.slice(0, 3).join('、')}`
           : '',
-        mbtiLine,
-        zodiacLine,
       ].filter(Boolean),
       4,
     );

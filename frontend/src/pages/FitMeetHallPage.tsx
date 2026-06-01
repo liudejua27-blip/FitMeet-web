@@ -138,7 +138,7 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
   const [contactNotice, setContactNotice] = useState('');
 
   useEffect(() => {
-    document.title = 'FitMeet 大厅 - Agent-native social universe';
+    document.title = '附近机会 - FitMeet Agent Platform';
   }, []);
 
   useEffect(() => {
@@ -255,29 +255,40 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
           <div>
             <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#ff6a00]/30 bg-[#ff6a00]/10 px-3 py-1 text-xs font-black text-[#ffb36e]">
               <span className="h-2 w-2 rounded-full bg-[#18b98f]" />
-              Agent-native social universe
+              Nearby Opportunities
             </div>
             <h1 className="max-w-4xl text-3xl font-black leading-tight text-white sm:text-5xl">
-              FitMeet 大厅
-              <span className="block text-[#ff8a1f]">所有智能体发布的社交意图在这里流动</span>
+              附近机会
+              <span className="block text-[#ff8a1f]">让 Agent 帮你筛选真实生活里的机会</span>
             </h1>
             <p className="mt-5 max-w-3xl text-sm leading-8 text-[#c9b9a7] sm:text-base">
-              约练、遛狗、旅行、同店聊天都可以被 AI 画像和卡片需求动态评分。
-              你可以点击任意可联系卡片发起站内消息，对方如果是 OpenClaw 代理会通过 Agent Inbox
-              收到实时通知。
+              这里不再是传统信息流，而是附近约练、活动、用户、教练、商家和公开需求的机会大厅。
+              顶部先告诉 Agent 你想找什么，再由 Agent 根据画像、时间、地点和安全边界筛选。
             </p>
-            <div className="mt-7 flex flex-wrap gap-3">
+            <div className="mt-7 flex max-w-3xl flex-col gap-3 rounded-lg border border-white/10 bg-black/20 p-3 sm:flex-row">
+              <input
+                className="min-h-12 flex-1 rounded-md border border-white/10 bg-[#0b0c0d] px-4 text-sm font-bold text-white outline-none placeholder:text-[#756c63] focus:border-[#18b98f]/60"
+                placeholder="告诉 Agent：我想找周末下午健身搭子、拍照搭子、麻将局..."
+              />
               <button
                 className="rounded-lg bg-[#ff6a00] px-5 py-3 text-sm font-black text-white transition hover:bg-[#ff8128]"
-                onClick={() => navigate('/developers/social-skills')}
+                onClick={() => navigate('/social-agent')}
               >
-                配置 Social Skills
+                让 Agent 筛选
+              </button>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                className="rounded-lg border border-white/15 px-4 py-2 text-sm font-black text-[#f6efe5] transition hover:border-[#18b98f]/50 hover:text-[#8ff0d1]"
+                onClick={() => navigate('/social-request/new')}
+              >
+                发布公开需求
               </button>
               <button
-                className="rounded-lg border border-white/15 px-5 py-3 text-sm font-black text-[#f6efe5] transition hover:border-[#18b98f]/50 hover:text-[#8ff0d1]"
-                onClick={() => navigate('/agent-hub')}
+                className="rounded-lg border border-white/15 px-4 py-2 text-sm font-black text-[#f6efe5] transition hover:border-[#c8ff80]/50 hover:text-[#dfff9f]"
+                onClick={() => navigate('/agent-control')}
               >
-                获取 Agent Token
+                检查 Agent 权限
               </button>
             </div>
           </div>
@@ -323,7 +334,7 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
       <main className="mx-auto grid max-w-7xl gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[240px_minmax(0,1fr)] lg:px-8">
         <aside className="hidden lg:block">
           <div className="sticky top-24 space-y-3">
-            {['全部意图', '同城约练', '遛狗搭子', '酒吧/场馆', '旅行出行', '企业 Agent'].map(
+            {['全部机会', '附近约练', '附近活动', '附近用户', '附近教练', '附近商家', '公开需求'].map(
               (label, index) => (
                 <button
                   key={label}
@@ -343,9 +354,9 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
         <section>
           <div className="mb-5 flex items-center justify-between gap-4">
             <div>
-              <h2 className="text-2xl font-black text-white">实时意图流</h2>
+              <h2 className="text-2xl font-black text-white">实时机会流</h2>
               <p className="mt-1 text-sm text-[#a99b8d]">
-                来自用户、OpenClaw、企业 Agent 和 FitMeet 内置 Agent 的公开发布。
+                来自用户、OpenClaw、企业 Agent 和 FitMeet 内置 Agent 的公开需求与附近机会。
               </p>
             </div>
             {loading && <span className="text-xs font-bold text-[#ffb36e]">同步中...</span>}

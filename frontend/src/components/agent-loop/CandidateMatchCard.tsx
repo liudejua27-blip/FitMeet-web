@@ -1,12 +1,12 @@
-import { useState } from 'react';
-import type { CandidateView } from '../../api/socialRequestsApi';
+import { useMemo, useState } from 'react';
+import type { CandidateView, SocialEmotionalInsight } from '../../api/socialRequestsApi';
 
 const RISK_LABEL: Record<
   CandidateView['risk']['level'],
   { text: string; tone: string }
 > = {
   low: { text: '低风险', tone: 'text-[#C8FF80] border-[#C8FF80]/40' },
-  medium: { text: '需注意', tone: 'text-amber-300 border-amber-400/40' },
+  medium: { text: '需留意', tone: 'text-amber-300 border-amber-400/40' },
   high: { text: '高风险', tone: 'text-red-300 border-red-500/40' },
 };
 
@@ -41,6 +41,7 @@ export function CandidateMatchCard({
   const [editing, setEditing] = useState(false);
   const risk = RISK_LABEL[c.risk.level] ?? RISK_LABEL.low;
   const scorePct = Math.max(0, Math.min(100, Math.round(c.score)));
+  const insight = useMemo(() => emotionalInsightFor(c), [c]);
 
   return (
     <article className="relative flex flex-col gap-4 overflow-hidden rounded-lg border border-[#26261d] bg-[#15150f] p-5">
@@ -69,7 +70,7 @@ export function CandidateMatchCard({
           </div>
           <div className="mt-0.5 text-[11px] text-[#8C8A6E]">
             {c.distanceKm != null ? `${c.distanceKm.toFixed(1)} km` : '距离待确认'}
-            {c.commonTags.length > 0 && ` · 共同标签 ${c.commonTags.length} 个`}
+            {c.commonTags.length > 0 && ` · 共同信号 ${c.commonTags.length} 个`}
           </div>
         </div>
 
@@ -79,7 +80,7 @@ export function CandidateMatchCard({
             <span className="text-xs text-[#8C8A6E]"> /100</span>
           </div>
           <div className="text-[9px] uppercase tracking-wider text-[#8C8A6E]">
-            匹配分
+            参考分
           </div>
         </div>
       </div>
@@ -104,21 +105,17 @@ export function CandidateMatchCard({
         </div>
       )}
 
-      {c.reasons.length > 0 && (
-        <ul className="relative space-y-1 text-[11px] text-[#C7C2B0]">
-          {c.reasons.slice(0, 4).map((reason) => (
-            <li key={reason} className="flex gap-2 leading-5">
-              <span className="text-[#6B7A5A]">•</span>
-              <span>{reason}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      <section className="relative grid gap-2">
+        <InsightRow label="为什么适合" value={insight.fitReason} />
+        <InsightRow label="怎么开场" value={insight.openerAdvice} />
+        <InsightRow label="可能尴尬" value={insight.possibleAwkwardness} />
+        <InsightRow label="安全第一步" value={insight.safeFirstStep} highlight />
+      </section>
 
       {c.risk.warnings.length > 0 && (
         <ul className="relative space-y-1 rounded-md border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-[11px] text-amber-300/80">
           {c.risk.warnings.slice(0, 3).map((warning) => (
-            <li key={warning}>• {warning}</li>
+            <li key={warning}>· {warning}</li>
           ))}
         </ul>
       )}
@@ -126,14 +123,14 @@ export function CandidateMatchCard({
       <div className="relative space-y-2 rounded-lg border border-[#26261d] bg-[#0d0d0b] p-3">
         <div className="flex items-center justify-between">
           <div className="text-[10px] uppercase tracking-wider text-[#8C8A6E]">
-            推荐开场白
+            高情商开场白
           </div>
           <button
             type="button"
             onClick={() => setEditing((value) => !value)}
             className="text-[10px] text-[#C8FF80]/80 hover:text-[#C8FF80]"
           >
-            {editing ? '完成' : '修改'}
+            {editing ? '完成' : '微调'}
           </button>
         </div>
         {editing ? (
@@ -176,7 +173,7 @@ export function CandidateMatchCard({
             onClick={onCreateActivity}
             className="rounded-md border border-[#6B7A5A]/40 px-3 py-2 text-xs text-[#C8FF80] hover:border-[#C8FF80]/60 disabled:opacity-50"
           >
-            发起约练
+            发起活动
           </button>
         )}
         {onRequestContact && (
@@ -200,6 +197,62 @@ export function CandidateMatchCard({
       </div>
     </article>
   );
+}
+
+function InsightRow({
+  label,
+  value,
+  highlight = false,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 ${
+        highlight
+          ? 'border-[#C8FF80]/25 bg-[#C8FF80]/10'
+          : 'border-[#26261d] bg-[#0d0d0b]/75'
+      }`}
+    >
+      <div className="text-[10px] font-black tracking-[0.16em] text-[#8C8A6E]">
+        {label}
+      </div>
+      <p className="mt-1 text-xs leading-5 text-[#E8E2CF]">{value}</p>
+    </div>
+  );
+}
+
+function emotionalInsightFor(candidate: CandidateView): SocialEmotionalInsight {
+  if (candidate.candidateExplanation) {
+    return {
+      fitReason: candidate.candidateExplanation.fitReasons[0] || 'TA 和这次需求有可对齐的地方。',
+      openerAdvice: candidate.candidateExplanation.suggestedOpener,
+      possibleAwkwardness:
+        candidate.candidateExplanation.awkwardPoints[0] || '先确认边界和节奏，避免推进太快。',
+      safeFirstStep: candidate.candidateExplanation.safeFirstStep,
+      tone: candidate.candidateExplanation.requiresConfirmation ? 'careful' : 'gentle',
+    };
+  }
+  if (candidate.emotionalInsight) return candidate.emotionalInsight;
+
+  const tags = candidate.commonTags.slice(0, 2);
+  const riskWarning = candidate.risk.warnings[0];
+  return {
+    fitReason: tags.length
+      ? `TA 和你都有 ${tags.join('、')} 这些共同信号，适合从轻量话题开始，而不是只靠分数判断。`
+      : candidate.reasons[0] || 'TA 和你的时间、地点或兴趣边界较匹配，可以低压力试着聊聊。',
+    openerAdvice: tags.length
+      ? `开场先提「${tags[0]}」，语气轻一点，给对方选择空间。`
+      : '开场先问对方是否方便聊，再说明你的具体活动想法。',
+    possibleAwkwardness: riskWarning
+      ? `需要留意：${riskWarning} 建议先站内确认边界，不急着推进见面。`
+      : '可能的小尴尬是双方期待不同，先说清楚活动强度、时长和边界会更自然。',
+    safeFirstStep:
+      '第一步先在站内聊清楚时间、公开地点和活动强度；线下选择人多、好离开的场所。',
+    tone: riskWarning ? 'careful' : candidate.score >= 80 ? 'active' : 'gentle',
+  };
 }
 
 export default CandidateMatchCard;

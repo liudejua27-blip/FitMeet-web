@@ -3,7 +3,7 @@ import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 
-function renderWithRouter(ui: React.ReactElement, { route = '/hall' } = {}) {
+function renderWithRouter(ui: React.ReactElement, { route = '/social-agent' } = {}) {
   return render(<MemoryRouter initialEntries={[route]}>{ui}</MemoryRouter>);
 }
 
@@ -17,19 +17,17 @@ describe('Layout', () => {
     expect(screen.getByText('Meet')).toBeInTheDocument();
   });
 
-  it('renders agent-first app navigation links outside the homepage', () => {
+  it('renders the simplified FitMeet Agent navigation', () => {
     renderWithRouter(
       <Layout>
         <div>test</div>
       </Layout>,
     );
     const nav = screen.getByRole('navigation', { name: '主导航' });
-    expect(within(nav).getByText('FitMeet 大厅')).toHaveAttribute('href', '/hall');
-    expect(within(nav).getByText('Agent 宇宙')).toHaveAttribute('href', '/ai');
-    expect(within(nav).getByText('Social Agent')).toHaveAttribute('href', '/social-agent');
-    expect(within(nav).getByText('Social Skills')).toHaveAttribute('href', '/developers/social-skills');
-    expect(within(nav).getByText('安全')).toHaveAttribute('href', '/safety');
-    expect(within(nav).queryByText('Agent 接入')).not.toBeInTheDocument();
+    expect(within(nav).getByText('首页')).toHaveAttribute('href', '/');
+    expect(within(nav).getByText('社交')).toHaveAttribute('href', '/social-agent');
+    expect(within(nav).getByText('我的')).toHaveAttribute('href', '/profile');
+    expect(within(nav).queryByText('开发者')).not.toBeInTheDocument();
   });
 
   it('marks current app route link with aria-current', () => {
@@ -37,10 +35,13 @@ describe('Layout', () => {
       <Layout>
         <div>test</div>
       </Layout>,
-      { route: '/hall' },
+      { route: '/social-agent' },
     );
     const nav = screen.getByRole('navigation', { name: '主导航' });
-    expect(within(nav).getByRole('link', { name: 'FitMeet 大厅' })).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('link', { name: '社交' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
   });
 
   it('has a skip-to-content link on app routes', () => {
@@ -70,6 +71,8 @@ describe('Layout', () => {
     );
     expect(screen.getByTestId('home-child')).toBeInTheDocument();
     expect(screen.queryByText('Meet')).not.toBeInTheDocument();
-    expect(screen.queryByRole('navigation', { name: '主导航' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('navigation', { name: '主导航' }),
+    ).not.toBeInTheDocument();
   });
 });

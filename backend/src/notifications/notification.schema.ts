@@ -32,6 +32,9 @@ export class Notification extends Document {
 
   @Prop()
   targetId!: number;
+
+  @Prop({ type: Object, default: null })
+  pushPayload?: Record<string, unknown> | null;
 }
 
 export const NotificationSchema = SchemaFactory.createForClass(Notification);

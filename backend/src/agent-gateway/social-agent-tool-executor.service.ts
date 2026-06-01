@@ -60,6 +60,10 @@ import {
 } from './agent-permission.service';
 import { AgentApprovalDispatcherService } from './agent-approval-dispatcher.service';
 import { AgentApprovalService } from './agent-approval.service';
+import {
+  ApprovalRiskLevel,
+  ApprovalType,
+} from './entities/agent-approval-request.entity';
 import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
 import {
   appendShortTermMemoryItem,
@@ -75,6 +79,10 @@ import {
   SocialAgentModelRouterService,
   SocialAgentModelUseCase,
 } from './social-agent-model-router.service';
+import {
+  SceneRiskPolicyResult,
+  SceneRiskPolicyService,
+} from './scene-risk-policy.service';
 
 export enum SocialAgentToolName {
   GetMyProfile = 'get_my_profile',
@@ -188,6 +196,9 @@ type ToolAuditDetails = {
   outputSummary: string;
   riskLevel: AgentActionRiskLevel;
   requiresApproval: boolean;
+  userConfirmed: boolean;
+  executed: boolean;
+  sceneType: string;
   approvalId: number | null;
   status: SocialAgentToolCallStatus;
   error: Record<string, unknown> | null;
@@ -240,6 +251,7 @@ export class SocialAgentToolExecutorService {
     private readonly friends: FriendsService,
     private readonly activities: ActivitiesService,
     private readonly safety: SafetyService,
+    private readonly sceneRisk: SceneRiskPolicyService,
     @Optional()
     private readonly modelRouter?: SocialAgentModelRouterService,
   ) {}
@@ -544,6 +556,7 @@ export class SocialAgentToolExecutorService {
     const input = this.stepInput(step);
     const startedAt = new Date();
     const callId = this.safeToolCallId(task.id, toolName, startedAt);
+    const policy = this.toolPolicyMetadata(task, toolName, input);
 
     await this.createTaskEvent(task, AgentTaskEventType.StepStarted, {
       summary: `Started ${toolName}`,
@@ -558,7 +571,7 @@ export class SocialAgentToolExecutorService {
       payload: {
         toolName,
         input,
-        policy: this.toolPolicyMetadata(task, toolName),
+        policy,
       },
     });
 
@@ -566,6 +579,45 @@ export class SocialAgentToolExecutorService {
       this.assertToolAllowed(task.permissionMode, step, toolName);
       this.assertHighRiskFrequencyLimit(task, toolName);
       this.assertAgentConnectionBound(task, toolName, input);
+      const gatedOutput = await this.maybeGateActionByRisk(
+        task,
+        toolName,
+        input,
+        stepId,
+        policy.sceneRisk as SceneRiskPolicyResult,
+      );
+      if (gatedOutput) {
+        const call = this.buildToolCall({
+          id: callId,
+          stepId,
+          toolName,
+          status: 'succeeded',
+          input,
+          output: gatedOutput,
+          error: null,
+          startedAt,
+        });
+        await this.recordActionSideEffects(task, toolName, input, call);
+        await this.createTaskEvent(task, AgentTaskEventType.ToolReturned, {
+          summary: `${toolName} pending approval`,
+          stepId,
+          toolCallId: callId,
+          payload: {
+            toolName,
+            inputSummary: this.preview(this.safeUnknownText(input), 240),
+            status: call.status,
+            output: call.output,
+            error: null,
+          },
+        });
+        await this.createTaskEvent(task, AgentTaskEventType.StepCompleted, {
+          summary: `Completed ${toolName}`,
+          stepId,
+          toolCallId: callId,
+          payload: { status: call.status, pendingApproval: true },
+        });
+        return call;
+      }
       const output = await this.dispatchTool(task, toolName, input, stepId);
       const outputRecord = this.asRecord(output);
       const call = this.buildToolCall({
@@ -720,6 +772,186 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.Payment:
         return this.recordPaymentIntent(task, input, stepId);
     }
+  }
+
+  private async maybeGateActionByRisk(
+    task: AgentTask,
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+    stepId: string,
+    policy: SceneRiskPolicyResult,
+  ): Promise<Record<string, unknown> | null> {
+    if (policy.blockedActions.includes('execute_real_action')) {
+      return {
+        success: true,
+        status: 'simulated',
+        simulated: true,
+        message: '实验室模式只模拟，不会真实执行这个社交动作。',
+        toolName,
+        stepId,
+        riskPolicy: policy,
+      };
+    }
+
+    if (!policy.requiresConfirmation) return null;
+    if (this.hasUserApproval(input)) return null;
+    if (!this.isConfirmableTool(toolName)) return null;
+
+    const approval = await this.approvals.create({
+      userId: task.ownerUserId,
+      agentConnectionId: task.agentConnectionId ?? null,
+      agentTaskId: task.id,
+      type: this.approvalTypeForTool(toolName, policy),
+      actionType: this.actionTypeForTool(toolName),
+      skillName: toolName,
+      payload: {
+        ...input,
+        agentTaskId: task.id,
+        stepId,
+        toolName,
+        sceneType: policy.sceneType,
+        riskLevel: policy.riskLevel,
+        requiresDoubleConfirmation: policy.requiresDoubleConfirmation,
+        blockedActions: policy.blockedActions,
+      },
+      summary: this.approvalSummaryForPolicy(toolName, policy),
+      riskLevel: this.approvalRiskLevel(policy.riskLevel),
+      reason: policy.safetyPrompts.join('；') || '该动作需要用户确认后再执行。',
+      createdBy: 'agent',
+      relatedSocialRequestId: this.relatedSocialRequestIdFor(input, null),
+      relatedCandidateId: this.relatedCandidateIdFor(toolName, input, null),
+      relatedActivityId: this.relatedActivityIdFor(toolName, input, null),
+      rationale: policy.safetyPrompts.join('；') || 'Agent 已按场景风险策略暂停执行。',
+    });
+
+    return {
+      success: false,
+      status: 'pending_approval',
+      pendingApproval: true,
+      approvalId: approval.id,
+      approval: {
+        id: approval.id,
+        type: approval.type,
+        actionType: approval.actionType,
+        summary: approval.summary,
+        riskLevel: approval.riskLevel,
+        payload: approval.payload,
+        expiresAt: approval.expiresAt?.toISOString?.() ?? null,
+      },
+      riskPolicy: policy,
+      message: '已创建待确认动作，用户确认后 Agent 才会继续执行。',
+    };
+  }
+
+  private hasUserApproval(input: Record<string, unknown>): boolean {
+    if (this.number(input.approvalId) || this.number(input.approvalRequestId)) {
+      return true;
+    }
+    const metadata = this.isRecord(input.metadata) ? input.metadata : {};
+    return (
+      this.bool(input.userConfirmed) ||
+      this.bool(input.confirmedByUser) ||
+      this.string(metadata.confirmationSource) === 'social_agent_chat'
+    );
+  }
+
+  private isConfirmableTool(toolName: SocialAgentToolName): boolean {
+    return [
+      SocialAgentToolName.SendMessageToCandidate,
+      SocialAgentToolName.SendMessage,
+      SocialAgentToolName.ReplyMessage,
+      SocialAgentToolName.ConnectCandidate,
+      SocialAgentToolName.AddFriend,
+      SocialAgentToolName.CreateActivity,
+      SocialAgentToolName.InviteActivity,
+      SocialAgentToolName.JoinActivity,
+      SocialAgentToolName.OfflineMeeting,
+      SocialAgentToolName.Payment,
+      SocialAgentToolName.PublishSocialRequest,
+      SocialAgentToolName.CreateSocialRequest,
+    ].includes(toolName);
+  }
+
+  private approvalTypeForTool(
+    toolName: SocialAgentToolName,
+    policy: SceneRiskPolicyResult,
+  ): ApprovalType {
+    if (policy.actionType === 'payment' || policy.actionType === 'wallet') {
+      return ApprovalType.Payment;
+    }
+    if (
+      policy.actionType === 'share_location' ||
+      policy.actionType === 'precise_location'
+    ) {
+      return ApprovalType.ShareLocation;
+    }
+    if (policy.actionType === 'contact_exchange') {
+      return ApprovalType.ContactExchange;
+    }
+    if (policy.sceneType === 'drinking') return ApprovalType.AlcoholActivity;
+    switch (toolName) {
+      case SocialAgentToolName.SendMessage:
+      case SocialAgentToolName.SendMessageToCandidate:
+      case SocialAgentToolName.ReplyMessage:
+        return ApprovalType.SendMessage;
+      case SocialAgentToolName.ConnectCandidate:
+      case SocialAgentToolName.AddFriend:
+        return ApprovalType.ContactRequest;
+      case SocialAgentToolName.JoinActivity:
+        return ApprovalType.JoinActivity;
+      case SocialAgentToolName.CreateActivity:
+      case SocialAgentToolName.InviteActivity:
+        return ApprovalType.CreateActivity;
+      case SocialAgentToolName.OfflineMeeting:
+        return ApprovalType.OfflineMeeting;
+      case SocialAgentToolName.Payment:
+        return ApprovalType.Payment;
+      default:
+        return ApprovalType.Custom;
+    }
+  }
+
+  private approvalRiskLevel(level: SceneRiskPolicyResult['riskLevel']) {
+    if (level === 'low') return ApprovalRiskLevel.Low;
+    if (level === 'medium') return ApprovalRiskLevel.Medium;
+    return ApprovalRiskLevel.High;
+  }
+
+  private approvalSummaryForPolicy(
+    toolName: SocialAgentToolName,
+    policy: SceneRiskPolicyResult,
+  ): string {
+    const actionLabel = this.toolLabel(toolName);
+    const riskLabel =
+      policy.riskLevel === 'critical'
+        ? 'Critical'
+        : policy.riskLevel === 'high'
+          ? '高风险'
+          : policy.riskLevel === 'medium'
+            ? '中风险'
+            : '低风险';
+    const confirmText = policy.requiresDoubleConfirmation
+      ? '需要双确认'
+      : '需要确认';
+    return `${actionLabel}属于${riskLabel}动作，${confirmText}后再执行。`;
+  }
+
+  private toolLabel(toolName: SocialAgentToolName): string {
+    const labels: Partial<Record<SocialAgentToolName, string>> = {
+      [SocialAgentToolName.SendMessage]: '发消息',
+      [SocialAgentToolName.SendMessageToCandidate]: '给候选人发消息',
+      [SocialAgentToolName.ReplyMessage]: '回复消息',
+      [SocialAgentToolName.AddFriend]: '加好友',
+      [SocialAgentToolName.ConnectCandidate]: '连接候选人',
+      [SocialAgentToolName.CreateActivity]: '创建活动',
+      [SocialAgentToolName.InviteActivity]: '邀请参加活动',
+      [SocialAgentToolName.JoinActivity]: '加入活动',
+      [SocialAgentToolName.OfflineMeeting]: '线下见面',
+      [SocialAgentToolName.Payment]: '支付/钱包',
+      [SocialAgentToolName.PublishSocialRequest]: '发布社交需求',
+      [SocialAgentToolName.CreateSocialRequest]: '创建社交需求',
+    };
+    return labels[toolName] ?? toolName;
   }
 
   private async updateAiProfileFromAnswers(
@@ -3005,7 +3237,7 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     call: SocialAgentToolCallRecord,
   ): Promise<void> {
-    const policy = this.toolPolicyMetadata(task, toolName);
+    const policy = this.toolPolicyMetadata(task, toolName, input);
     const audit = this.buildToolAuditDetails(
       task,
       toolName,
@@ -3089,17 +3321,29 @@ export class SocialAgentToolExecutorService {
     call: SocialAgentToolCallRecord,
     policy: Record<string, unknown>,
   ): ToolAuditDetails {
+    const scenePolicy = this.isRecord(policy.sceneRisk)
+      ? (policy.sceneRisk as unknown as SceneRiskPolicyResult)
+      : null;
+    const pendingApproval =
+      call.output?.pendingApproval === true ||
+      call.output?.status === 'pending_approval';
+    const simulated = call.output?.simulated === true;
     return {
       userId: task.ownerUserId,
       agentTaskId: task.id,
       toolName,
       inputSummary: this.toolInputSummary(toolName, input),
       outputSummary: this.toolOutputSummary(toolName, call),
-      riskLevel: this.riskLevelForTool(toolName),
+      riskLevel: scenePolicy
+        ? this.riskLevelForPolicy(scenePolicy.riskLevel)
+        : this.riskLevelForTool(toolName),
       requiresApproval:
         typeof policy.requiresApproval === 'boolean'
           ? policy.requiresApproval
           : false,
+      userConfirmed: this.hasUserApproval(input),
+      executed: call.status === 'succeeded' && !pendingApproval && !simulated,
+      sceneType: scenePolicy?.sceneType ?? 'general',
       approvalId: this.approvalIdFor(toolName, input, call.output),
       status: call.status,
       error: call.error,
@@ -3384,6 +3628,12 @@ export class SocialAgentToolExecutorService {
   private actionStatusForCall(
     call: SocialAgentToolCallRecord,
   ): AgentActionStatus {
+    if (
+      call.output?.pendingApproval === true ||
+      call.output?.status === 'pending_approval'
+    ) {
+      return AgentActionStatus.PendingApproval;
+    }
     return call.status === 'succeeded'
       ? AgentActionStatus.Executed
       : AgentActionStatus.Failed;
@@ -3417,6 +3667,48 @@ export class SocialAgentToolExecutorService {
       return AgentActionRiskLevel.Medium;
     }
     return AgentActionRiskLevel.Low;
+  }
+
+  private riskLevelForPolicy(
+    level: SceneRiskPolicyResult['riskLevel'],
+  ): AgentActionRiskLevel {
+    if (level === 'low') return AgentActionRiskLevel.Low;
+    if (level === 'medium') return AgentActionRiskLevel.Medium;
+    return AgentActionRiskLevel.High;
+  }
+
+  private sceneActionTypeForTool(toolName: SocialAgentToolName): string {
+    switch (toolName) {
+      case SocialAgentToolName.GetMyProfile:
+      case SocialAgentToolName.GetAiProfile:
+      case SocialAgentToolName.UpdateAiProfileFromAnswers:
+      case SocialAgentToolName.UpdateProfileFromAgentContext:
+        return 'profile';
+      case SocialAgentToolName.SearchPublicIntents:
+      case SocialAgentToolName.SearchActivities:
+      case SocialAgentToolName.SearchMatches:
+      case SocialAgentToolName.ExplainMatches:
+        return 'search_candidates';
+      case SocialAgentToolName.DraftOpener:
+        return 'generate_opener';
+      case SocialAgentToolName.SendMessageToCandidate:
+      case SocialAgentToolName.SendMessage:
+      case SocialAgentToolName.ReplyMessage:
+        return 'send_message';
+      case SocialAgentToolName.ConnectCandidate:
+      case SocialAgentToolName.AddFriend:
+        return 'add_friend';
+      case SocialAgentToolName.CreateActivity:
+      case SocialAgentToolName.InviteActivity:
+      case SocialAgentToolName.JoinActivity:
+        return 'create_activity';
+      case SocialAgentToolName.OfflineMeeting:
+        return 'offline_meeting';
+      case SocialAgentToolName.Payment:
+        return 'payment';
+      default:
+        return 'chat';
+    }
   }
 
   private targetUserIdFor(
@@ -3498,12 +3790,16 @@ export class SocialAgentToolExecutorService {
   }
 
   private assertToolAllowed(
-    mode: AgentTaskPermissionMode,
+    mode: AgentTaskPermissionMode | string,
     step: StepRecord,
     toolName: SocialAgentToolName,
   ): void {
     const registeredTool = this.toolRegistry.getToolByExecutorName(toolName);
-    if (registeredTool && !registeredTool.permissionMode.includes(mode)) {
+    const registryMode =
+      mode === 'open' || mode === 'lab' || mode === 'manual_confirm'
+        ? AgentTaskPermissionMode.LimitedAuto
+        : (mode as AgentTaskPermissionMode);
+    if (registeredTool && !registeredTool.permissionMode.includes(registryMode)) {
       throw new ForbiddenException(
         `Tool ${toolName} is not registered for permission mode ${mode}`,
       );
@@ -3515,7 +3811,7 @@ export class SocialAgentToolExecutorService {
         this.string(step.action ?? step.actionType) ?? '',
       );
     if (!action) return;
-    if (!this.permissions.canExecute(mode, action)) {
+    if (!this.permissions.canExecute(mode as never, action)) {
       throw new ForbiddenException(
         `Tool ${toolName} requires action ${action}, not allowed in mode ${mode}`,
       );
@@ -3549,21 +3845,38 @@ export class SocialAgentToolExecutorService {
   private toolPolicyMetadata(
     task: AgentTask,
     toolName: SocialAgentToolName,
+    input: Record<string, unknown> = {},
   ): Record<string, unknown> {
     const limit = HIGH_RISK_TOOL_DAILY_LIMITS[toolName] ?? null;
     const registeredTool = this.toolRegistry.getToolByExecutorName(toolName);
+    const sceneRisk = this.sceneRisk.evaluate({
+      sceneType: this.string(input.sceneType ?? input.activityType ?? input.type),
+      actionType: this.sceneActionTypeForTool(toolName),
+      text: `${task.goal ?? ''} ${task.title ?? ''} ${this.safeUnknownText(input)}`,
+      permissionMode: task.permissionMode,
+      involvesMoney: this.bool(input.involvesMoney ?? input.hasMoney ?? input.money),
+      preciseLocation: this.bool(
+        input.preciseLocation ?? input.sharePreciseLocation ?? input.exactLocation,
+      ),
+    });
     const highRisk =
       toolName === SocialAgentToolName.OfflineMeeting ||
       toolName === SocialAgentToolName.CreateActivity ||
       toolName === SocialAgentToolName.JoinActivity ||
       toolName === SocialAgentToolName.ApproveAction ||
-      toolName === SocialAgentToolName.Payment;
+      toolName === SocialAgentToolName.Payment ||
+      sceneRisk.riskLevel === 'high' ||
+      sceneRisk.riskLevel === 'critical';
     return {
       permissionMode: task.permissionMode,
+      canonicalPermissionMode: sceneRisk.permissionMode,
       registryToolName: registeredTool?.name ?? null,
       category: registeredTool?.category ?? null,
-      requiresApproval: registeredTool?.requiresApproval ?? null,
-      riskLevel: this.riskLevelForTool(toolName),
+      requiresApproval:
+        sceneRisk.requiresConfirmation || registeredTool?.requiresApproval || false,
+      requiresDoubleConfirmation: sceneRisk.requiresDoubleConfirmation,
+      riskLevel: this.riskLevelForPolicy(sceneRisk.riskLevel),
+      sceneRisk,
       highRisk,
       dailyLimit: limit,
       idempotency:
@@ -3589,7 +3902,7 @@ export class SocialAgentToolExecutorService {
   }
 
   private permissionActionForTool(
-    mode: AgentTaskPermissionMode,
+    mode: AgentTaskPermissionMode | string,
     toolName: SocialAgentToolName,
   ): SocialAgentAction | null {
     switch (toolName) {

@@ -1,13 +1,16 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Notification } from './notification.schema';
+import { RealtimeEventService } from '../realtime/realtime-event.service';
 
 @Injectable()
 export class NotificationsService {
   constructor(
     @InjectModel(Notification.name)
     private readonly notifModel: Model<Notification>,
+    @Optional()
+    private readonly realtime?: RealtimeEventService,
   ) {}
 
   async findByUser(userId: number) {
@@ -41,7 +44,7 @@ export class NotificationsService {
     fromColor?: string;
     targetId?: number;
   }) {
-    return this.notifModel.create({
+    const notification = await this.notifModel.create({
       userId: data.userId,
       type: data.type,
       text: data.text,
@@ -51,6 +54,23 @@ export class NotificationsService {
       fromColor: data.fromColor || '#38BDF8',
       targetId: data.targetId,
     });
+    this.realtime?.emitToUser({
+      userId: data.userId,
+      eventType: 'notification:new',
+      payload: {
+        id: notification._id.toString(),
+        type: notification.type,
+        text: notification.text,
+        targetId: notification.targetId,
+        read: notification.read,
+      },
+      notification: {
+        type: data.type,
+        text: data.text,
+        targetId: data.targetId,
+      },
+    });
+    return notification;
   }
 
   async markAsRead(notificationId: string) {

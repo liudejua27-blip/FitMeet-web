@@ -1,7 +1,13 @@
 import * as api from './client';
 import { sanitizeDisplayValue } from '../lib/displayText';
 
-export type SocialAgentPermissionMode = 'assist' | 'confirm' | 'limited_auto';
+export type SocialAgentPermissionMode =
+  | 'assist'
+  | 'confirm'
+  | 'manual_confirm'
+  | 'limited_auto'
+  | 'open'
+  | 'lab';
 export type SocialAgentTaskStatus =
   | 'pending'
   | 'planning'
@@ -59,7 +65,35 @@ export interface SocialAgentChatCandidate {
   risk: { level: string; warnings: string[] };
   suggestedOpener?: string;
   suggestedMessage: string;
+  candidateExplanation?: SocialAgentCandidateExplanation;
+  emotionalInsight?: SocialAgentEmotionalInsight;
+  lifeGraphExplanation?: SocialAgentLifeGraphExplanation;
   status?: string;
+}
+
+export interface SocialAgentCandidateExplanation {
+  fitReasons: string[];
+  suggestedOpener: string;
+  awkwardPoints: string[];
+  safeFirstStep: string;
+  nextActionSuggestion: string;
+  requiresConfirmation: boolean;
+  lifeGraphExplanation?: SocialAgentLifeGraphExplanation;
+}
+
+export interface SocialAgentLifeGraphExplanation {
+  usedSignals: string[];
+  missingSignals: string[];
+  boundaryNotes: string[];
+  confidenceLevel: 'high' | 'medium' | 'low';
+}
+
+export interface SocialAgentEmotionalInsight {
+  fitReason: string;
+  openerAdvice: string;
+  possibleAwkwardness: string;
+  safeFirstStep: string;
+  tone?: 'gentle' | 'active' | 'careful';
 }
 
 export interface SocialAgentChatRunResult {
@@ -86,6 +120,69 @@ export interface SocialAgentChatRunResult {
   candidates: SocialAgentChatCandidate[];
   approvalRequiredActions: Array<Record<string, unknown>>;
   events: Array<Record<string, unknown>>;
+  cards?: FitMeetAlphaCard[];
+  safety?: FitMeetAgentSafety;
+  traceId?: string;
+  agentTrace?: FitMeetAgentTrace;
+  structuredIntent?: Record<string, unknown>;
+}
+
+export type FitMeetAlphaCardType =
+  | 'profile_proposal'
+  | 'candidate_card'
+  | 'opener_approval'
+  | 'activity_plan'
+  | 'checkin_card'
+  | 'review_card'
+  | 'audit_update'
+  | 'safety_boundary';
+
+export interface FitMeetAlphaCardAction {
+  id: string;
+  label: string;
+  action:
+    | 'confirm_profile_update'
+    | 'send_message'
+    | 'connect_candidate'
+    | 'save_candidate'
+    | 'create_activity'
+    | 'generate_opener'
+    | 'see_more'
+    | 'filter_school'
+    | 'filter_gender_female'
+    | 'dislike_candidate'
+    | 'check_in'
+    | 'submit_review'
+    | 'refine_request';
+  requiresConfirmation: boolean;
+  payload?: Record<string, unknown>;
+}
+
+export interface FitMeetAlphaCard {
+  id: string;
+  type: FitMeetAlphaCardType;
+  title: string;
+  body?: string;
+  status?: 'ready' | 'waiting_confirmation' | 'completed' | 'blocked';
+  data: Record<string, unknown>;
+  actions: FitMeetAlphaCardAction[];
+}
+
+export interface FitMeetAgentSafety {
+  blocked: boolean;
+  level: 'low' | 'medium' | 'high' | 'blocked';
+  reasons: string[];
+  boundaryNotes: string[];
+  requiredConfirmations: string[];
+}
+
+export interface FitMeetAgentTrace {
+  traceId: string;
+  sdkEnabled: boolean;
+  model: string;
+  agentPath: string[];
+  handoffs: Array<Record<string, unknown>>;
+  guardrails: Array<Record<string, unknown>>;
 }
 
 export interface SocialAgentPlanStep {
@@ -332,6 +429,7 @@ export interface SocialAgentActivityResult {
   createdAt: string | null;
   matchScore?: number;
   matchReasons?: string[];
+  candidateExplanation?: SocialAgentCandidateExplanation;
 }
 
 export type SocialAgentChatStreamEvent =

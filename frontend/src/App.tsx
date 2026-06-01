@@ -8,7 +8,12 @@ import { LoginModal } from './components/auth/LoginModal';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { useAuthStore, useNotificationStore, useSocialStore } from './stores';
 
-const HomePage = lazy(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })));
+const PlatformPage = lazy(() =>
+  import('./pages/PlatformPage').then((m) => ({ default: m.PlatformPage })),
+);
+const AgentWorkspacePage = lazy(() =>
+  import('./pages/AgentWorkspacePage').then((m) => ({ default: m.AgentWorkspacePage })),
+);
 const FitMeetHallPage = lazy(() =>
   import('./pages/FitMeetHallPage').then((m) => ({ default: m.FitMeetHallPage })),
 );
@@ -37,8 +42,8 @@ const AgentControlCenterPage = lazy(() =>
 const AgentInboxPage = lazy(() =>
   import('./pages/AgentInboxPage').then((m) => ({ default: m.AgentInboxPage })),
 );
-const SocialAgentConsolePage = lazy(() =>
-  import('./pages/SocialAgentConsolePage').then((m) => ({ default: m.SocialAgentConsolePage })),
+const LifeGraphPage = lazy(() =>
+  import('./pages/LifeGraphPage').then((m) => ({ default: m.LifeGraphPage })),
 );
 const MatchConfirmationsPage = lazy(() =>
   import('./pages/MatchConfirmationsPage').then((m) => ({
@@ -91,6 +96,9 @@ const LegalPage = lazy(() => import('./pages/LegalPage').then((m) => ({ default:
 const SafetyAdminPage = lazy(() =>
   import('./pages/SafetyAdminPage').then((m) => ({ default: m.SafetyAdminPage })),
 );
+const AdminWaitlistPage = lazy(() =>
+  import('./pages/AdminWaitlistPage').then((m) => ({ default: m.AdminWaitlistPage })),
+);
 const GeoLandingPage = lazy(() =>
   import('./pages/GeoLandingPage').then((m) => ({ default: m.GeoLandingPage })),
 );
@@ -129,6 +137,16 @@ function PageLoader() {
   );
 }
 
+function LoginEntry() {
+  const openLogin = useAuthStore((state) => state.openLogin);
+
+  useEffect(() => {
+    openLogin();
+  }, [openLogin]);
+
+  return <Navigate to="/" replace />;
+}
+
 function App() {
   const { restoreSession, isLoggedIn } = useAuthStore();
   const { syncFromServer } = useSocialStore();
@@ -152,15 +170,29 @@ function App() {
           <Layout>
             <Suspense fallback={<PageLoader />}>
             <Routes>
-              <Route path="/" element={<HomePage />} />
+              <Route path="/" element={<PlatformPage page="home" />} />
+              <Route path="/ecosystem" element={<PlatformPage page="ecosystem" />} />
+              <Route path="/developers" element={<PlatformPage page="developers" />} />
+              <Route path="/safety" element={<PlatformPage page="safety" />} />
+              <Route path="/about" element={<PlatformPage page="about" />} />
+              <Route path="/app" element={<PlatformPage page="app" />} />
+              <Route path="/life-graph" element={<PlatformPage page="lifeGraph" />} />
+              <Route path="/login" element={<LoginEntry />} />
+              <Route path="/legacy-home" element={<PlatformPage page="home" />} />
+              <Route path="/agent" element={<AgentWorkspacePage view="home" />} />
+              <Route path="/agent/chat/:taskId" element={<AgentWorkspacePage view="chat" />} />
+              <Route path="/agent/settings" element={<AgentWorkspacePage view="settings" />} />
+              <Route path="/agent/projects" element={<AgentWorkspacePage view="projects" />} />
+              <Route path="/agent/history" element={<AgentWorkspacePage view="history" />} />
               <Route path="/hall" element={<FitMeetHallPage />} />
+              <Route path="/nearby" element={<Navigate to="/hall" replace />} />
               <Route path="/discover" element={<DiscoverPage />} />
               <Route path="/meet" element={<MeetPage />} />
               <Route path="/human" element={<Navigate to="/hall" replace />} />
               <Route path="/coach" element={<CoachPage />} />
               <Route path="/pet" element={<PetPage />} />
               <Route path="/ai" element={<AiRealmPage />} />
-              <Route path="/ai-match" element={<Navigate to="/social-agent" replace />} />
+              <Route path="/ai-match" element={<Navigate to="/agent" replace />} />
               <Route
                 path="/ai-profile"
                 element={
@@ -177,7 +209,7 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              <Route path="/agent-token" element={<Navigate to="/agent-hub" replace />} />
+              <Route path="/agent-token" element={<Navigate to="/agent" replace />} />
               <Route
                 path="/agent-hub"
                 element={
@@ -187,24 +219,24 @@ function App() {
                 }
               />
               <Route path="/agent-connect" element={<AgentConnectPage />} />
-              <Route path="/agent-connect/permissions" element={<Navigate to="/agent-control" replace />} />
+              <Route path="/agent-connect/permissions" element={<Navigate to="/agent/settings" replace />} />
               <Route path="/agent-connect/preferences" element={<Navigate to="/ai-profile" replace />} />
-              <Route path="/agent-connect/activity" element={<Navigate to="/agent-activity" replace />} />
+              <Route path="/agent-connect/activity" element={<Navigate to="/agent" replace />} />
               <Route path="/agent-connect/social-hall" element={<Navigate to="/hall" replace />} />
               <Route path="/agent-connect/*" element={<Navigate to="/agent-connect" replace />} />
               <Route
                 path="/agent-control"
-                element={
-                  <ProtectedRoute>
-                    <AgentControlCenterPage />
-                  </ProtectedRoute>
-                }
+                element={<Navigate to="/agent/settings" replace />}
               />
               <Route
                 path="/social-agent"
+                element={<Navigate to="/agent" replace />}
+              />
+              <Route
+                path="/profile/life-graph"
                 element={
                   <ProtectedRoute>
-                    <SocialAgentConsolePage />
+                    <LifeGraphPage />
                   </ProtectedRoute>
                 }
               />
@@ -312,14 +344,23 @@ function App() {
               <Route path="/guides/:slug" element={<GeoLandingPage />} />
               <Route path="/about" element={<AboutPage />} />
               <Route path="/safety" element={<SafetyPage />} />
-              <Route path="/ai-hosting" element={<Navigate to="/social-agent" replace />} />
+              <Route path="/ai-hosting" element={<Navigate to="/agent" replace />} />
               <Route path="/developers/social-skills" element={<SocialSkillsDeveloperPage />} />
+              <Route path="/waitlist" element={<Navigate to="/app" replace />} />
               <Route path="/press" element={<GeoLandingPage />} />
               <Route
                 path="/admin/safety"
                 element={
                   <ProtectedRoute>
                     <SafetyAdminPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/waitlist"
+                element={
+                  <ProtectedRoute>
+                    <AdminWaitlistPage />
                   </ProtectedRoute>
                 }
               />

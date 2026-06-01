@@ -1,5 +1,6 @@
 import { AgentApprovalService } from './agent-approval.service';
 import {
+  ApprovalStatus,
   ApprovalRiskLevel,
   ApprovalType,
 } from './entities/agent-approval-request.entity';
@@ -121,5 +122,41 @@ describe('AgentApprovalService classify', () => {
         'activity_invite_requires_approval_or_permission_source',
       ]),
     );
+  });
+});
+
+describe('AgentApprovalService pending approval realtime idempotency', () => {
+  it('does not dispatch an already approved pending approval again', async () => {
+    const approval = {
+      id: 9,
+      userId: 1,
+      agentConnectionId: null,
+      agentTaskId: 101,
+      type: ApprovalType.SendMessage,
+      actionType: 'send_message',
+      skillName: 'send_message',
+      status: ApprovalStatus.Approved,
+      riskLevel: ApprovalRiskLevel.Medium,
+      summary: 'send a message',
+      payload: {},
+      expiresAt: new Date(Date.now() + 10000),
+    };
+    const repo = { findOne: jest.fn().mockResolvedValue(approval) };
+    const dispatcher = jest.fn();
+    const service = new AgentApprovalService(
+      repo as never,
+      {} as never,
+      { emitToConnection: jest.fn() } as never,
+      { emitToUser: jest.fn() } as never,
+    );
+
+    const result = await service.approve(9, 1, dispatcher);
+
+    expect(result.dispatched).toBe(false);
+    expect(result.dispatchResult).toEqual({
+      idempotent: true,
+      status: ApprovalStatus.Approved,
+    });
+    expect(dispatcher).not.toHaveBeenCalled();
   });
 });

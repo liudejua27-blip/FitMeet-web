@@ -57,8 +57,27 @@ export interface CandidateView {
   scoreBreakdown: Record<string, number>;
   risk: { level: 'low' | 'medium' | 'high'; warnings: string[] };
   suggestedMessage: string;
+  candidateExplanation?: SocialCandidateExplanation;
+  emotionalInsight?: SocialEmotionalInsight;
   status?: string;
   candidateRecordId?: number;
+}
+
+export interface SocialEmotionalInsight {
+  fitReason: string;
+  openerAdvice: string;
+  possibleAwkwardness: string;
+  safeFirstStep: string;
+  tone?: 'gentle' | 'active' | 'careful';
+}
+
+export interface SocialCandidateExplanation {
+  fitReasons: string[];
+  suggestedOpener: string;
+  awkwardPoints: string[];
+  safeFirstStep: string;
+  nextActionSuggestion: string;
+  requiresConfirmation: boolean;
 }
 
 export interface CreateSocialRequestPayload {

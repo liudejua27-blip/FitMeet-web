@@ -30,6 +30,7 @@ ui-verify-out/
 **/ui-verify-out/
 playwright-report/
 test-results/
+frontend/output/
 fitmeet-backup*/
 fitmeet-old*/
 fitmeet-new/

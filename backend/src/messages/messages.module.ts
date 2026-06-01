@@ -17,6 +17,7 @@ import { AgentActivityLog } from '../agent-gateway/entities/agent-activity-log.e
 import { AgentActionLog } from '../agent-gateway/entities/agent-action-log.entity';
 import { PublicSocialIntent } from '../agent-gateway/entities/public-social-intent.entity';
 import { UserSocialRequest } from '../social-requests/social-request.entity';
+import { RealtimeModule } from '../realtime/realtime.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { UserSocialRequest } from '../social-requests/social-request.entity';
       UserSocialRequest,
     ]),
     AuthModule,
+    RealtimeModule,
   ],
   controllers: [MessagesController],
   providers: [MessagesService, MessagesGateway],

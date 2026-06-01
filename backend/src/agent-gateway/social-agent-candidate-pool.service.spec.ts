@@ -5,6 +5,8 @@ import { User } from '../users/user.entity';
 import { UserSocialProfile } from '../users/user-social-profile.entity';
 import { PublicSocialIntent } from './entities/public-social-intent.entity';
 import { SocialRequestStatus } from './entities/social-request.entity';
+import { CandidateExplanationService } from './candidate-explanation.service';
+import { SceneRiskPolicyService } from './scene-risk-policy.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 
 function repo<T>(rows: T[] = []) {
@@ -159,6 +161,7 @@ function makeService(
     socialRequests?: Array<Record<string, unknown>>;
     activities?: Array<Record<string, unknown>>;
     blockedIds?: number[];
+    lifeGraphSignals?: Record<string, unknown> | null;
   } = {},
 ) {
   const users = repo(options.users ?? [realUser(1), realUser(2)]);
@@ -175,6 +178,9 @@ function makeService(
       async () => new Set(options.blockedIds ?? []),
     ),
   };
+  const lifeGraph = options.lifeGraphSignals
+    ? { getUnifiedMatchSignals: jest.fn(async () => options.lifeGraphSignals) }
+    : undefined;
   const service = new SocialAgentCandidatePoolService(
     users as never,
     profiles as never,
@@ -186,8 +192,11 @@ function makeService(
     candidates as never,
     tasks as never,
     safety as never,
+    new CandidateExplanationService(new SceneRiskPolicyService()),
+    new SceneRiskPolicyService(),
+    lifeGraph as never,
   );
-  return { service, candidates, safety };
+  return { service, candidates, safety, lifeGraph };
 }
 
 describe('SocialAgentCandidatePoolService', () => {
@@ -208,6 +217,16 @@ describe('SocialAgentCandidatePoolService', () => {
       isRealData: true,
       candidateUserId: 2,
       displayName: '画像用户 2',
+      scoreBreakdown: expect.objectContaining({
+        distance: expect.any(Number),
+        timeOverlap: expect.any(Number),
+        interestSimilarity: expect.any(Number),
+        lifeRhythm: expect.any(Number),
+        socialEnergy: expect.any(Number),
+        relationshipGoal: expect.any(Number),
+        trustworthiness: expect.any(Number),
+        safetyRisk: expect.any(Number),
+      }),
     });
   });
 
@@ -288,7 +307,7 @@ describe('SocialAgentCandidatePoolService', () => {
           city: '青岛',
           status: SocialActivityStatus.Confirmed,
           startTime: now,
-          endTime: new Date('2026-05-25T08:00:00.000Z'),
+          endTime: new Date('2026-06-27T08:00:00.000Z'),
           createdAt: now,
           updatedAt: now,
         },
@@ -462,5 +481,86 @@ describe('SocialAgentCandidatePoolService', () => {
       }),
     );
     expect(result.candidates[0].candidateRecordId).toBeDefined();
+  });
+
+  it('productizes mahjong confirmation risk into candidate risk and persisted rows', async () => {
+    const { service, candidates } = makeService({
+      profiles: [profile(2, { interestTags: ['麻将'], city: '青岛' })],
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      socialRequestId: 301,
+      rawText: '找麻将搭子，先确认是否涉钱和公开地点',
+      interestTags: ['麻将'],
+    });
+
+    expect(result.candidates[0]).toMatchObject({
+      risk: expect.objectContaining({
+        level: 'medium',
+        warnings: expect.arrayContaining([expect.stringContaining('麻将')]),
+      }),
+      candidateExplanation: expect.objectContaining({
+        requiresConfirmation: true,
+        safeFirstStep: expect.stringContaining('公开'),
+      }),
+    });
+    expect(candidates.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        riskLevel: 'medium',
+        riskWarnings: expect.arrayContaining([expect.stringContaining('麻将')]),
+      }),
+    );
+  });
+
+  it('uses Life Graph signals for candidate scoring and explanations', async () => {
+    const { service, lifeGraph } = makeService({
+      profiles: [
+        profile(2, {
+          interestTags: ['跑步'],
+          city: '青岛',
+          availableTimes: ['周末下午'],
+        }),
+      ],
+      lifeGraphSignals: {
+        identitySignals: { city: '青岛', nearbyArea: '青岛大学附近' },
+        socialIntentSignals: {
+          currentSocialGoal: '找跑步搭子',
+          preferredSocialStyle: '先聊天后见面',
+        },
+        lifestyleSignals: { availableTimes: ['周末下午'] },
+        fitnessSignals: { sportsPreferences: ['跑步'], publicPlaceOnly: true },
+        safetySignals: {
+          publicPlaceOnly: true,
+          locationSharingAllowed: false,
+          strictConfirmationRequired: true,
+          realNameRequired: false,
+          acceptsNightMeet: false,
+        },
+        confidence: { overall: 0.9, byField: {} },
+        missingCriticalFields: [{ label: '运动强度' }],
+      },
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      rawText: '帮我找附近跑步搭子',
+      interestTags: ['跑步'],
+    });
+
+    expect(lifeGraph?.getUnifiedMatchSignals).toHaveBeenCalledWith(1);
+    expect(result.candidates[0].lifeGraphExplanation).toMatchObject({
+      usedSignals: expect.arrayContaining([
+        expect.stringContaining('青岛大学附近'),
+        expect.stringContaining('跑步'),
+      ]),
+      missingSignals: expect.arrayContaining(['运动强度']),
+      boundaryNotes: expect.arrayContaining([
+        expect.stringContaining('公共场所'),
+      ]),
+    });
+    expect(result.candidates[0].scoreBreakdown.interestSimilarity).toBeGreaterThan(10);
   });
 });

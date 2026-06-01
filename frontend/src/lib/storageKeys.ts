@@ -11,6 +11,7 @@ export const STORAGE_KEYS = {
   legacySocialStore: 'fitmate-social',
   token: 'fitmeet-token',
   legacyToken: 'fitmate-token',
+  appWaitlist: 'fitmeet-app-waitlist',
 } as const;
 
 function migrateStorageKey(storage: Storage | undefined, legacyKey: string, currentKey: string) {

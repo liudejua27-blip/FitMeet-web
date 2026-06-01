@@ -33,11 +33,19 @@ import { AgentActivityLog } from './entities/agent-activity-log.entity';
 import { AgentActionLog } from './entities/agent-action-log.entity';
 import { PaymentIntent } from './entities/payment-intent.entity';
 import { AgentTask, AgentTaskEvent } from './entities/agent-task.entity';
+import {
+  FitMeetAgentMessage,
+  FitMeetAgentMemoryUpdate,
+  FitMeetAgentRun,
+  FitMeetAgentRunStep,
+  FitMeetAgentToolCall,
+} from './entities/fitmeet-agent-runtime.entity';
 import { AgentActionLogService } from './agent-action-log.service';
 import { AgentPermissionService } from './agent-permission.service';
 import { SocialAgentPlannerService } from './social-agent-planner.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentBrainService } from './social-agent-brain.service';
+import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
 import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
 import { SocialAgentModelRouterService } from './social-agent-model-router.service';
 import { SocialAgentMemoryContextService } from './social-agent-memory-context.service';
@@ -45,6 +53,7 @@ import { SocialAgentToolExecutorService } from './social-agent-tool-executor.ser
 import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
 import { SocialAgentAutopilotService } from './social-agent-autopilot.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
+import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentMetricsController } from './social-agent-metrics.controller';
@@ -58,6 +67,13 @@ import { AgentProfileQAService } from './agent-profile-qa.service';
 import { ProfileMatchService } from './profile-match.service';
 import { ProfileMatchAutopilotService } from './profile-match-autopilot.service';
 import { MatchReasonerService } from './match-reasoner.service';
+import { CandidateExplanationService } from './candidate-explanation.service';
+import { SceneRiskPolicyService } from './scene-risk-policy.service';
+import { CardCopywriterService } from './response-quality/card-copywriter.service';
+import { ConfirmationCopyService } from './response-quality/confirmation-copy.service';
+import { PersonalizationService } from './response-quality/personalization.service';
+import { SafetyCopyService } from './response-quality/safety-copy.service';
+import { TonePolicyService } from './response-quality/tone-policy.service';
 import { MatchModule } from '../match/match.module';
 import { AgentApprovalRequest } from './entities/agent-approval-request.entity';
 import { AgentSettings } from './entities/agent-settings.entity';
@@ -70,6 +86,7 @@ import { SocialRequest } from './entities/social-request.entity';
 import { PublicSocialIntent } from './entities/public-social-intent.entity';
 import { User } from '../users/user.entity';
 import { UsersModule } from '../users/users.module';
+import { LifeGraphModule } from '../life-graph/life-graph.module';
 import { MessagesModule } from '../messages/messages.module';
 import { MeetsModule } from '../meets/meets.module';
 import { SafetyModule } from '../safety/safety.module';
@@ -83,6 +100,7 @@ import { AiDelegateProfile } from '../ai-match/ai-delegate-profile.entity';
 import { AiMatchSession } from '../ai-match/ai-match-session.entity';
 import { UserSocialProfile } from '../users/user-social-profile.entity';
 import { SocialActivity } from '../activities/entities/activity.entity';
+import { RealtimeModule } from '../realtime/realtime.module';
 
 @Module({
   imports: [
@@ -91,7 +109,9 @@ import { SocialActivity } from '../activities/entities/activity.entity';
     SafetyModule,
     NotificationsModule,
     FriendsModule,
+    RealtimeModule,
     UsersModule,
+    LifeGraphModule,
     forwardRef(() => ActivitiesModule),
     forwardRef(() => SocialRequestsModule),
     forwardRef(() => MatchModule),
@@ -106,6 +126,11 @@ import { SocialActivity } from '../activities/entities/activity.entity';
       PaymentIntent,
       AgentTask,
       AgentTaskEvent,
+      FitMeetAgentRun,
+      FitMeetAgentRunStep,
+      FitMeetAgentToolCall,
+      FitMeetAgentMessage,
+      FitMeetAgentMemoryUpdate,
       AgentApprovalRequest,
       AgentSettings,
       SafetyEvent,
@@ -131,15 +156,24 @@ import { SocialActivity } from '../activities/entities/activity.entity';
     AgentSettingsService,
     AgentActionLogService,
     AgentPermissionService,
+    CandidateExplanationService,
+    SceneRiskPolicyService,
+    TonePolicyService,
+    SafetyCopyService,
+    ConfirmationCopyService,
+    PersonalizationService,
+    CardCopywriterService,
     FitMeetAgentToolRegistryService,
     SocialAgentPlannerService,
     SocialAgentIntentRouterService,
     SocialAgentBrainService,
+    FitMeetAlphaAgentSdkService,
     SocialAgentFinalResponseService,
     SocialAgentModelRouterService,
     SocialAgentMemoryContextService,
     SocialAgentAutopilotService,
     SocialAgentChatService,
+    FitMeetAgentRuntimeService,
     SocialAgentCandidatePoolService,
     SocialAgentMetricsService,
     SocialAgentLongTermMemoryService,
@@ -181,15 +215,19 @@ import { SocialActivity } from '../activities/entities/activity.entity';
     AgentSettingsService,
     AgentActionLogService,
     AgentPermissionService,
+    CandidateExplanationService,
+    SceneRiskPolicyService,
     FitMeetAgentToolRegistryService,
     SocialAgentPlannerService,
     SocialAgentIntentRouterService,
     SocialAgentBrainService,
+    FitMeetAlphaAgentSdkService,
     SocialAgentFinalResponseService,
     SocialAgentModelRouterService,
     SocialAgentMemoryContextService,
     SocialAgentAutopilotService,
     SocialAgentChatService,
+    FitMeetAgentRuntimeService,
     SocialAgentCandidatePoolService,
     SocialAgentLongTermMemoryService,
     SocialAgentRagService,

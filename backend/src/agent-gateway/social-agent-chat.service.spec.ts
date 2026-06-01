@@ -406,6 +406,12 @@ function makeHarness(options: Record<string, unknown> = {}) {
     options.brain as never,
     undefined,
     options.finalResponses as never,
+    undefined,
+    options.lifeGraph as never,
+    undefined,
+    options.fitMeetRuntime as never,
+    options.alphaAgent as never,
+    options.tonePolicy as never,
   );
 
   return {
@@ -865,6 +871,76 @@ describe('SocialAgentChatService', () => {
     expect(executor.executeToolAction).not.toHaveBeenCalled();
   });
 
+  it('returns a confirmable Life Graph proposal card for profile completion', async () => {
+    const lifeGraph = {
+      extractFromChat: jest.fn().mockResolvedValue({
+        proposalId: 77,
+        userId: 7,
+        taskId: 101,
+        messageId: null,
+        status: 'proposed',
+        aiSummary: '识别到周末下午、跑步搭子和附近偏好。',
+        confirmationRequired: true,
+        createdAt: new Date(0).toISOString(),
+        confirmedAt: null,
+        rejectedAt: null,
+        missingFields: [],
+        proposedFields: [
+          {
+            proposalFieldId: 'lifestyle:availableTimes:1',
+            category: 'lifestyle',
+            fieldKey: 'availableTimes',
+            fieldValue: ['周末下午'],
+            source: 'ai_inferred',
+            confidence: 0.9,
+            reason: '用户提到周末下午一般有空',
+            requiresUserConfirmation: true,
+            status: 'proposed',
+            conflict: false,
+            oldValue: null,
+          },
+          {
+            proposalFieldId: 'fitness_activity:sportsPreferences:1',
+            category: 'fitness_activity',
+            fieldKey: 'sportsPreferences',
+            fieldValue: ['跑步'],
+            source: 'ai_inferred',
+            confidence: 0.9,
+            reason: '用户提到跑步搭子',
+            requiresUserConfirmation: true,
+            status: 'proposed',
+            conflict: false,
+            oldValue: null,
+          },
+        ],
+      }),
+    };
+    const { service, executor } = makeHarness({ lifeGraph });
+
+    const result = await service.routeMessage(7, {
+      message: '请帮我完善人物画像：我周末下午一般有空，喜欢跑步。',
+    });
+
+    expect([
+      'profile_enrichment',
+      'profile_enrichment_request',
+      'profile_update',
+    ]).toContain(result.intent);
+    expect(result.profileUpdated).toBe(false);
+    expect(result.profileUpdateProposal).toMatchObject({
+      proposalId: 77,
+      confirmationRequired: true,
+    });
+    expect(result.assistantMessage).toContain('我识别到以下画像信息');
+    expect(result.assistantMessage).toContain('是否保存到你的 Life Graph');
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.UpdateProfileFromAgentContext,
+      expect.any(Object),
+      expect.any(Number),
+    );
+  });
+
   it('uses previous profile facts when the user corrects the agent', async () => {
     const { service, executor } = makeHarness();
 
@@ -1208,6 +1284,39 @@ describe('SocialAgentChatService', () => {
     });
   });
 
+  it('asks for critical Life Graph fields before blind social search', async () => {
+    const lifeGraph = {
+      getUnifiedMatchSignals: jest.fn().mockResolvedValue({
+        identitySignals: { city: '青岛' },
+        socialIntentSignals: { currentSocialGoal: '找跑步搭子' },
+        lifestyleSignals: {},
+        fitnessSignals: {},
+        safetySignals: {
+          publicPlaceOnly: false,
+          locationSharingAllowed: false,
+          strictConfirmationRequired: false,
+          realNameRequired: false,
+          acceptsNightMeet: null,
+        },
+        confidence: { overall: 0.4, byField: {} },
+        missingCriticalFields: [
+          { label: '可约时间' },
+          { label: '公共场所边界' },
+        ],
+      }),
+    };
+    const { service } = makeHarness({ lifeGraph });
+
+    const result = await service.routeMessage(7, {
+      message: '帮我找附近跑步搭子',
+    });
+
+    expect(result.intent).toBe('social_search');
+    expect(result.shouldQueueRun).toBe(false);
+    expect(result.assistantMessage).toContain('一般什么时候有空');
+    expect(result.assistantMessage).toContain('公共场所');
+  });
+
   it('routes action requests to explicit confirmation instead of execution', async () => {
     const { service, executor, taskRepo } = makeHarness();
     taskRepo.findOne.mockResolvedValue(
@@ -1384,6 +1493,49 @@ describe('SocialAgentChatService', () => {
         score: 87,
       }),
     ]);
+  });
+
+  it('does not search when Main Agent asks a low-pressure clarification', async () => {
+    const alphaAgent = {
+      prepareTurn: jest.fn().mockResolvedValue({
+        traceId: 'trace-low-pressure',
+        safety: {
+          blocked: false,
+          level: 'low',
+          reasons: [],
+          boundaryNotes: ['第一次见面建议选择公共场所'],
+          requiredConfirmations: ['发送消息'],
+        },
+        agentTrace: {
+          traceId: 'trace-low-pressure',
+          sdkEnabled: false,
+          model: 'local',
+          agentPath: ['FitMeet Main Agent'],
+          handoffs: [],
+          guardrails: [],
+        },
+        cards: [],
+        structuredIntent: {
+          intent: 'general_social_need',
+          readiness: 'clarify',
+          requiresSearch: false,
+          clarifyingQuestion:
+            '可以。我先帮你找轻松一点、不需要太强社交压力的散步搭子。你更想今晚附近走走，还是周末下午找个时间？',
+        },
+      }),
+    };
+    const { service, executor } = makeHarness({ alphaAgent });
+
+    const result = await service.run(7, {
+      goal: '最近有点无聊，想找个人走走',
+      permissionMode: AgentTaskPermissionMode.Confirm,
+    });
+
+    expect(result.assistantMessage).toContain('今晚附近走走');
+    expect(result.candidates).toHaveLength(0);
+    expect(result.socialRequestDraft).toBeNull();
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+    expect(result.structuredIntent).toMatchObject({ requiresSearch: false });
   });
 
   it('streams visible steps before returning the final result', async () => {

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ObjectLiteral, Repository } from 'typeorm';
 
@@ -25,6 +25,13 @@ import {
   SocialRequest,
   SocialRequestStatus,
 } from './entities/social-request.entity';
+import {
+  CandidateExplanation,
+  CandidateExplanationService,
+} from './candidate-explanation.service';
+import { SceneRiskPolicyService } from './scene-risk-policy.service';
+import { LifeGraphService } from '../life-graph/life-graph.service';
+import { LifeGraphUnifiedMatchSignalsDto } from '../life-graph/dto/life-graph.dto';
 
 export type CandidatePoolSource =
   | 'profile_candidate'
@@ -128,7 +135,23 @@ export type CandidatePoolCandidate = {
   privateReason: string;
   riskWarning: string;
   nextAction: string;
+  candidateExplanation: CandidateExplanation;
+  emotionalInsight: CandidateEmotionalInsight;
+  lifeGraphExplanation?: {
+    usedSignals: string[];
+    missingSignals: string[];
+    boundaryNotes: string[];
+    confidenceLevel: 'high' | 'medium' | 'low';
+  };
   updatedAt: string | null;
+};
+
+export type CandidateEmotionalInsight = {
+  fitReason: string;
+  openerAdvice: string;
+  possibleAwkwardness: string;
+  safeFirstStep: string;
+  tone: 'gentle' | 'active' | 'careful';
 };
 
 export type CandidatePoolActivityResult = {
@@ -152,6 +175,7 @@ export type CandidatePoolActivityResult = {
   createdAt: string | null;
   matchScore: number;
   matchReasons: string[];
+  candidateExplanation?: CandidateExplanation;
 };
 
 export type CandidatePoolSearchResult = {
@@ -253,6 +277,9 @@ export class SocialAgentCandidatePoolService {
     @InjectRepository(AgentTask)
     private readonly taskRepo: Repository<AgentTask>,
     private readonly safety: SafetyService,
+    private readonly candidateExplanation: CandidateExplanationService,
+    private readonly sceneRisk: SceneRiskPolicyService,
+    @Optional() private readonly lifeGraph?: LifeGraphService,
   ) {}
 
   async searchSocial(
@@ -270,6 +297,7 @@ export class SocialAgentCandidatePoolService {
       publicIntents,
       legacyRequests,
       blockedIds,
+      lifeGraphSignals,
     ] = await Promise.all([
       this.loadCounts(),
       this.safeFind(this.userRepo, { order: { updatedAt: 'DESC' } }),
@@ -280,6 +308,7 @@ export class SocialAgentCandidatePoolService {
         order: { updatedAt: 'DESC' },
       }),
       this.loadBlockedIds(input.ownerUserId),
+      this.loadLifeGraphSignals(input.ownerUserId),
     ]);
 
     const profileMap = new Map(
@@ -299,6 +328,7 @@ export class SocialAgentCandidatePoolService {
       delegateMap,
       blockedIds,
       filtered,
+      lifeGraphSignals,
     });
     const publicCandidates = this.buildPublicIntentCandidates({
       ownerUserId: input.ownerUserId,
@@ -310,6 +340,7 @@ export class SocialAgentCandidatePoolService {
       delegateMap,
       blockedIds,
       filtered,
+      lifeGraphSignals,
     });
     const merged = this.mergeSocialCandidates([
       ...profileCandidates,
@@ -488,6 +519,7 @@ export class SocialAgentCandidatePoolService {
     delegateMap: Map<number, AiDelegateProfile>;
     blockedIds: Set<number>;
     filtered: CandidatePoolFiltered;
+    lifeGraphSignals: LifeGraphUnifiedMatchSignalsDto | null;
   }): CandidatePoolCandidate[] {
     const out: CandidatePoolCandidate[] = [];
     for (const user of input.users) {
@@ -505,7 +537,7 @@ export class SocialAgentCandidatePoolService {
         input.filtered.boundaryMismatch += 1;
         continue;
       }
-      out.push(this.toProfileCandidate(user, profile, delegate, input.query));
+      out.push(this.toProfileCandidate(user, profile, delegate, input.query, input.lifeGraphSignals));
     }
     return out.sort((a, b) => b.matchScore - a.matchScore);
   }
@@ -520,6 +552,7 @@ export class SocialAgentCandidatePoolService {
     delegateMap: Map<number, AiDelegateProfile>;
     blockedIds: Set<number>;
     filtered: CandidatePoolFiltered;
+    lifeGraphSignals: LifeGraphUnifiedMatchSignalsDto | null;
   }): CandidatePoolCandidate[] {
     const out: CandidatePoolCandidate[] = [];
     for (const intent of input.publicIntents) {
@@ -549,6 +582,7 @@ export class SocialAgentCandidatePoolService {
           delegate,
           intent,
           input.query,
+          input.lifeGraphSignals,
         ),
       );
     }
@@ -578,6 +612,7 @@ export class SocialAgentCandidatePoolService {
           delegate,
           request,
           input.query,
+          input.lifeGraphSignals,
         ),
       );
     }
@@ -639,6 +674,7 @@ export class SocialAgentCandidatePoolService {
     profile: UserSocialProfile | null,
     delegate: AiDelegateProfile | null,
     query: CandidatePoolResolvedQuery,
+    lifeGraphSignals: LifeGraphUnifiedMatchSignalsDto | null = null,
   ): CandidatePoolCandidate {
     const city = this.firstText(profile?.city, user.city, delegate?.city);
     const tags = this.profileTags(user, profile, delegate);
@@ -653,6 +689,7 @@ export class SocialAgentCandidatePoolService {
       city,
       completeness,
       commonTags,
+      lifeGraphSignals,
     });
     const matchScore = this.totalScore(scoreBreakdown);
     const displayName = this.displayName(user, profile, city);
@@ -678,6 +715,7 @@ export class SocialAgentCandidatePoolService {
       publicIntentId: null,
       socialRequestId: query.socialRequestId,
       activityId: null,
+      lifeGraphSignals,
     });
   }
 
@@ -687,6 +725,7 @@ export class SocialAgentCandidatePoolService {
     delegate: AiDelegateProfile | null,
     intent: PublicSocialIntent,
     query: CandidatePoolResolvedQuery,
+    lifeGraphSignals: LifeGraphUnifiedMatchSignalsDto | null = null,
   ): CandidatePoolCandidate {
     const city = this.firstText(
       intent.city,
@@ -708,6 +747,7 @@ export class SocialAgentCandidatePoolService {
       commonTags,
       completeness,
       updatedAt: intent.updatedAt,
+      lifeGraphSignals,
     });
     const matchScore = this.totalScore(scoreBreakdown);
     const displayName = this.displayName(user, profile, city);
@@ -732,6 +772,7 @@ export class SocialAgentCandidatePoolService {
       publicIntentId: intent.id,
       socialRequestId: intent.linkedSocialRequestId ?? query.socialRequestId,
       activityId: null,
+      lifeGraphSignals,
     });
   }
 
@@ -741,6 +782,7 @@ export class SocialAgentCandidatePoolService {
     delegate: AiDelegateProfile | null,
     request: SocialRequest,
     query: CandidatePoolResolvedQuery,
+    lifeGraphSignals: LifeGraphUnifiedMatchSignalsDto | null = null,
   ): CandidatePoolCandidate {
     const city = this.firstText(
       request.city,
@@ -762,6 +804,7 @@ export class SocialAgentCandidatePoolService {
       commonTags,
       completeness,
       updatedAt: request.updatedAt,
+      lifeGraphSignals,
     });
     const displayName = this.displayName(user, profile, city);
     const matchReasons = this.publicIntentReasons(
@@ -790,6 +833,7 @@ export class SocialAgentCandidatePoolService {
       publicIntentId: null,
       socialRequestId: request.id,
       activityId: null,
+      lifeGraphSignals,
     });
   }
 
@@ -808,14 +852,45 @@ export class SocialAgentCandidatePoolService {
     publicIntentId: string | null;
     socialRequestId: number | null;
     activityId: number | null;
+    lifeGraphSignals?: LifeGraphUnifiedMatchSignalsDto | null;
   }): CandidatePoolCandidate {
     const quality = this.dataQuality(input.profileCompleteness);
     const riskWarnings =
       quality === 'incomplete' ? ['资料较少，建议先站内沟通确认。'] : [];
-    const suggestedOpener = this.suggestedOpener(
-      input.displayName,
-      input.commonTags,
-      input.city,
+    const sceneText = [
+      ...input.interestTags,
+      ...input.commonTags,
+      ...input.matchReasons,
+    ].join(' ');
+    const sceneType = this.sceneRisk.normalizeScene(null, sceneText);
+    const policy = this.sceneRisk.evaluate({
+      sceneType,
+      actionType: 'send_message',
+      text: sceneText,
+      permissionMode: 'limited_auto',
+      safetySignals: input.lifeGraphSignals?.safetySignals,
+    });
+    const candidateExplanation = this.candidateExplanation.explain({
+      userRequest: {
+        rawText: sceneText,
+        interestTags: input.interestTags,
+      },
+      candidate: {
+        displayName: input.displayName,
+        city: input.city,
+        commonTags: input.commonTags,
+        interestTags: input.interestTags,
+      },
+      matchScore: input.matchScore,
+      matchReasons: input.matchReasons,
+      sceneType,
+      riskWarnings: [...riskWarnings, ...policy.safetyPrompts],
+      lifeGraphSignals: input.lifeGraphSignals,
+    });
+    const suggestedOpener = candidateExplanation.suggestedOpener;
+    const emotionalInsight = this.emotionalInsightFromExplanation(
+      candidateExplanation,
+      policy.riskLevel === 'high' || policy.riskLevel === 'critical',
     );
     return {
       source: input.source,
@@ -839,8 +914,11 @@ export class SocialAgentCandidatePoolService {
       level: this.matchLevel(input.matchScore),
       matchReasons: input.matchReasons,
       reasons: input.matchReasons,
-      riskWarnings,
-      risk: { level: CandidateRiskLevel.Low, warnings: riskWarnings },
+      riskWarnings: [...riskWarnings, ...policy.safetyPrompts],
+      risk: {
+        level: this.candidateRiskLevel(policy.riskLevel),
+        warnings: [...riskWarnings, ...policy.safetyPrompts],
+      },
       suggestedOpener,
       suggestedMessage: suggestedOpener,
       commonTags: input.commonTags,
@@ -851,8 +929,11 @@ export class SocialAgentCandidatePoolService {
       matchedSignals: input.commonTags,
       publicReason: input.matchReasons[0] ?? '来自真实候选池。',
       privateReason: '候选来自真实用户、社交画像或公开约练卡片。',
-      riskWarning: riskWarnings[0] ?? '',
-      nextAction: 'owner_confirmation_required',
+      riskWarning: riskWarnings[0] ?? policy.safetyPrompts[0] ?? '',
+      nextAction: candidateExplanation.nextActionSuggestion,
+      candidateExplanation,
+      emotionalInsight,
+      lifeGraphExplanation: candidateExplanation.lifeGraphExplanation,
       updatedAt: input.user.updatedAt
         ? input.user.updatedAt.toISOString()
         : null,
@@ -876,6 +957,7 @@ export class SocialAgentCandidatePoolService {
     const matchScore = this.clampScore(
       cityScore + tagScore + typeScore + recentScore,
     );
+    const matchReasons = this.activityReasons(query, activity.city, commonTags);
     return {
       id: String(activity.id),
       source: 'activity',
@@ -898,7 +980,15 @@ export class SocialAgentCandidatePoolService {
       status: activity.status,
       createdAt: activity.createdAt ? activity.createdAt.toISOString() : null,
       matchScore,
-      matchReasons: this.activityReasons(query, activity.city, commonTags),
+      matchReasons,
+      candidateExplanation: this.explainActivityCandidate({
+        title: cleanDisplayText(activity.title, '活动'),
+        city: sanitizeCity(activity.city),
+        tags,
+        query,
+        matchScore,
+        matchReasons,
+      }),
     };
   }
 
@@ -920,6 +1010,7 @@ export class SocialAgentCandidatePoolService {
     const matchScore = this.clampScore(
       cityScore + tagScore + typeScore + recentScore,
     );
+    const matchReasons = this.activityReasons(query, intent.city, commonTags);
     return {
       id: intent.id,
       source: 'public_intent',
@@ -940,7 +1031,15 @@ export class SocialAgentCandidatePoolService {
       status: intent.status,
       createdAt: intent.createdAt ? intent.createdAt.toISOString() : null,
       matchScore,
-      matchReasons: this.activityReasons(query, intent.city, commonTags),
+      matchReasons,
+      candidateExplanation: this.explainActivityCandidate({
+        title: cleanDisplayText(intent.title, '公开约练卡片'),
+        city: sanitizeCity(intent.city),
+        tags,
+        query,
+        matchScore,
+        matchReasons,
+      }),
     };
   }
 
@@ -965,8 +1064,8 @@ export class SocialAgentCandidatePoolService {
       row.reasons = candidate.matchReasons;
       row.commonTags = candidate.commonTags;
       row.distanceKm = null;
-      row.riskLevel = CandidateRiskLevel.Low;
-      row.riskWarnings = candidate.riskWarnings;
+      row.riskLevel = candidate.risk.level;
+      row.riskWarnings = candidate.risk.warnings;
       row.suggestedMessage = candidate.suggestedOpener;
       row.status = existing?.status ?? SocialRequestCandidateStatus.Suggested;
       const saved = await this.candidateRepo.save(row);
@@ -1026,18 +1125,35 @@ export class SocialAgentCandidatePoolService {
     city: string;
     completeness: number;
     commonTags: string[];
+    lifeGraphSignals?: LifeGraphUnifiedMatchSignalsDto | null;
   }): Record<string, number> {
+    const sceneType = this.sceneRisk.normalizeScene(
+      null,
+      [input.query.rawText, input.query.activityType, ...input.query.interestTags, ...input.tags].join(' '),
+    );
+    const policy = this.sceneRisk.evaluate({
+      sceneType,
+      actionType: 'send_message',
+      text: input.query.rawText,
+      permissionMode: 'limited_auto',
+      safetySignals: input.lifeGraphSignals?.safetySignals,
+    });
     return {
-      city: this.cityMatches(input.query.city, input.city) ? 25 : 0,
-      interest: Math.min(30, input.commonTags.length * 12),
-      time: this.timeMatches(
+      distance: Math.min(18, (this.cityMatches(input.query.city, input.city) ? 14 : 6) + this.lifeGraphLocationBoost(input.city, input.lifeGraphSignals)),
+      timeOverlap: Math.min(15, this.timeMatches(
         input.query.timePreference,
         input.profile,
         input.delegate,
+      ) + this.lifeGraphTimeBoost(input.lifeGraphSignals)),
+      interestSimilarity: Math.min(20, input.commonTags.length * 10 + this.lifeGraphSportBoost(input.tags, input.lifeGraphSignals)),
+      lifeRhythm: Math.min(10, this.lifeRhythmScore(input.profile, input.delegate) + this.lifeGraphRhythmBoost(input.lifeGraphSignals)),
+      socialEnergy: this.socialEnergyScore(input.profile, input.delegate),
+      relationshipGoal: Math.min(10, this.relationshipGoalScore(input.query, input.tags) + this.lifeGraphGoalBoost(input.query, input.tags, input.lifeGraphSignals)),
+      trustworthiness: Math.min(
+        10,
+        Math.round(input.completeness * 5) + (input.user.verified ? 5 : 0),
       ),
-      profileCompleteness: Math.round(input.completeness * 15),
-      recentActivity: this.recentScore(input.user.updatedAt, 5),
-      verified: input.user.verified ? 5 : 0,
+      safetyRisk: Math.max(0, this.safetyRiskScore(policy.riskLevel) - this.lifeGraphSafetyPenalty(input.user, input.lifeGraphSignals)),
     };
   }
 
@@ -1048,15 +1164,193 @@ export class SocialAgentCandidatePoolService {
     commonTags: string[];
     completeness: number;
     updatedAt: Date;
+    lifeGraphSignals?: LifeGraphUnifiedMatchSignalsDto | null;
   }): Record<string, number> {
+    const sceneType = this.sceneRisk.normalizeScene(
+      null,
+      [input.query.rawText, input.query.activityType, ...input.query.interestTags, ...input.tags].join(' '),
+    );
+    const policy = this.sceneRisk.evaluate({
+      sceneType,
+      actionType: 'send_message',
+      text: input.query.rawText,
+      permissionMode: 'limited_auto',
+      safetySignals: input.lifeGraphSignals?.safetySignals,
+    });
     return {
-      city: this.cityMatches(input.query.city, input.city) ? 25 : 0,
-      interest: Math.min(30, input.commonTags.length * 12),
-      time: input.query.timePreference ? 10 : 6,
-      profileCompleteness: Math.round(input.completeness * 10),
-      recentActivity: this.recentScore(input.updatedAt, 20),
-      publicIntent: 15,
+      distance: Math.min(18, (this.cityMatches(input.query.city, input.city) ? 14 : 6) + this.lifeGraphLocationBoost(input.city, input.lifeGraphSignals)),
+      timeOverlap: Math.min(15, (input.query.timePreference ? 10 : 6) + this.lifeGraphTimeBoost(input.lifeGraphSignals)),
+      interestSimilarity: Math.min(20, input.commonTags.length * 10 + this.lifeGraphSportBoost(input.tags, input.lifeGraphSignals)),
+      lifeRhythm: Math.min(10, (input.query.timePreference ? 7 : 4) + this.lifeGraphRhythmBoost(input.lifeGraphSignals)),
+      socialEnergy: 5,
+      relationshipGoal: Math.min(10, this.relationshipGoalScore(input.query, input.tags) + this.lifeGraphGoalBoost(input.query, input.tags, input.lifeGraphSignals)),
+      trustworthiness: Math.min(
+        10,
+        Math.round(input.completeness * 5) + this.recentScore(input.updatedAt, 5),
+      ),
+      safetyRisk: this.safetyRiskScore(policy.riskLevel),
     };
+  }
+
+  private lifeRhythmScore(
+    profile: UserSocialProfile | null,
+    delegate: AiDelegateProfile | null,
+  ): number {
+    const text = [
+      ...this.normalizeArray(profile?.availableTimes),
+      profile?.weekdayAvailability ?? '',
+      profile?.weekendAvailability ?? '',
+      ...this.normalizeArray(profile?.lifestyleTags),
+      ...this.normalizeArray(profile?.socialScenes),
+      delegate?.availability ?? '',
+    ].join(' ');
+    if (!text.trim()) return 4;
+    if (/周末|白天|规律|早睡|morning|weekend|day/i.test(text)) return 10;
+    if (/晚上|夜间|night|evening/i.test(text)) return 7;
+    return 6;
+  }
+
+  private lifeGraphLocationBoost(
+    candidateCity: string,
+    signals?: LifeGraphUnifiedMatchSignalsDto | null,
+  ): number {
+    if (!signals) return 0;
+    const city = this.textSignal(signals.identitySignals.city);
+    const nearbyArea = this.textSignal(signals.identitySignals.nearbyArea);
+    if (city && candidateCity && this.cityMatches(city, candidateCity)) return nearbyArea ? 4 : 3;
+    return nearbyArea ? 1 : 0;
+  }
+
+  private lifeGraphTimeBoost(
+    signals?: LifeGraphUnifiedMatchSignalsDto | null,
+  ): number {
+    if (!signals) return 0;
+    const text = [
+      this.textSignal(signals.lifestyleSignals.availableTimes),
+      this.textSignal(signals.lifestyleSignals.weekendAvailability),
+      this.textSignal(signals.lifestyleSignals.activeHours),
+    ].join(' ');
+    if (/周末|下午|上午|晚上|weekend|morning|afternoon|evening/i.test(text)) return 3;
+    return 0;
+  }
+
+  private lifeGraphSportBoost(
+    tags: string[],
+    signals?: LifeGraphUnifiedMatchSignalsDto | null,
+  ): number {
+    const sports = this.signalList(signals?.fitnessSignals.sportsPreferences);
+    if (sports.length === 0) return 0;
+    return sports.some((sport) =>
+      tags.some((tag) => tag.toLowerCase().includes(sport.toLowerCase()) || sport.toLowerCase().includes(tag.toLowerCase())),
+    )
+      ? 5
+      : 0;
+  }
+
+  private lifeGraphRhythmBoost(
+    signals?: LifeGraphUnifiedMatchSignalsDto | null,
+  ): number {
+    return signals?.lifestyleSignals.availableTimes ||
+      signals?.lifestyleSignals.weekendAvailability
+      ? 2
+      : 0;
+  }
+
+  private lifeGraphGoalBoost(
+    query: CandidatePoolResolvedQuery,
+    tags: string[],
+    signals?: LifeGraphUnifiedMatchSignalsDto | null,
+  ): number {
+    const goal = [
+      this.textSignal(signals?.socialIntentSignals.currentSocialGoal),
+      this.textSignal(signals?.socialIntentSignals.relationshipGoal),
+    ].join(' ');
+    if (!goal.trim()) return 0;
+    const text = [query.rawText, query.activityType, ...query.interestTags, ...tags].join(' ');
+    return goal
+      .split(/[、,\s]+/)
+      .filter(Boolean)
+      .some((part) => text.includes(part))
+      ? 2
+      : 1;
+  }
+
+  private lifeGraphSafetyPenalty(
+    candidate: User,
+    signals?: LifeGraphUnifiedMatchSignalsDto | null,
+  ): number {
+    if (!signals) return 0;
+    let penalty = 0;
+    if (signals.safetySignals.realNameRequired && !candidate.verified) penalty += 2;
+    if (signals.safetySignals.acceptsNightMeet === false) penalty += 1;
+    return penalty;
+  }
+
+  private textSignal(value: unknown): string {
+    if (Array.isArray(value)) return value.map((item) => this.firstText(item)).filter(Boolean).join(' ');
+    return this.firstText(value);
+  }
+
+  private signalList(value: unknown): string[] {
+    return Array.isArray(value)
+      ? value.map((item) => this.firstText(item)).filter(Boolean)
+      : this.firstText(value)
+        ? [this.firstText(value)]
+        : [];
+  }
+
+  private socialEnergyScore(
+    profile: UserSocialProfile | null,
+    delegate: AiDelegateProfile | null,
+  ): number {
+    const text = [
+      profile?.socialStyle,
+      profile?.openness,
+      profile?.socialPreference,
+      ...(profile?.traits ?? []),
+      delegate?.idealPartner,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    if (!text.trim()) return 4;
+    if (/适中|稳定|随和|balanced|medium/i.test(text)) return 8;
+    if (/主动|外向|热情|开放|active|open|extrovert/i.test(text)) return 7;
+    if (/慢热|安静|内向|克制|quiet|introvert/i.test(text)) return 6;
+    return 5;
+  }
+
+  private relationshipGoalScore(
+    query: CandidatePoolResolvedQuery,
+    tags: string[],
+  ): number {
+    const text = [
+      query.rawText,
+      query.activityType,
+      ...query.interestTags,
+      ...tags,
+    ].join(' ');
+    if (/相亲|恋爱|对象|dating|date/i.test(text)) return 10;
+    if (/搭子|约练|跑步|健身|麻将|扑克|旅行|旅游|partner|buddy/i.test(text)) return 9;
+    if (/朋友|聊天|认识|friend|social/i.test(text)) return 8;
+    if (/学习|自习|study/i.test(text)) return 7;
+    return 5;
+  }
+
+  private safetyRiskScore(riskLevel: ReturnType<SceneRiskPolicyService['evaluate']>['riskLevel']): number {
+    if (riskLevel === 'critical') return 0;
+    if (riskLevel === 'high') return 3;
+    if (riskLevel === 'medium') return 6;
+    return 9;
+  }
+
+  private candidateRiskLevel(
+    riskLevel: ReturnType<SceneRiskPolicyService['evaluate']>['riskLevel'],
+  ): CandidateRiskLevel {
+    if (riskLevel === 'high' || riskLevel === 'critical') {
+      return CandidateRiskLevel.High;
+    }
+    if (riskLevel === 'medium') return CandidateRiskLevel.Medium;
+    return CandidateRiskLevel.Low;
   }
 
   private profileReasons(
@@ -1187,9 +1481,87 @@ export class SocialAgentCandidatePoolService {
   }
 
   private suggestedOpener(name: string, tags: string[], city: string): string {
-    const tag = tags[0] ? `也喜欢${tags[0]}` : '需求比较匹配';
-    const place = city ? `在${city}` : '在 FitMeet';
-    return `你好 ${name}，看到你${tag}，方便先${place}聊聊时间和公开地点吗？`;
+    const tag = tags[0] ? `也喜欢「${tags[0]}」` : '和这次需求比较匹配';
+    const place = city ? `在${city}` : '在附近';
+    return `你好 ${name}，看到你${tag}，感觉可以先轻松认识一下。不急着定见面，方便先${place}聊聊时间和公开地点吗？`;
+  }
+
+  private emotionalInsight(input: {
+    displayName: string;
+    city: string;
+    commonTags: string[];
+    matchReasons: string[];
+    riskWarnings: string[];
+    score: number;
+  }): CandidateEmotionalInsight {
+    const tags = input.commonTags.slice(0, 2);
+    const firstReason = input.matchReasons[0] || 'TA 和这次需求有可对齐的地方';
+    const hasRisk = input.riskWarnings.length > 0;
+    const cityPart = input.city ? `，并且都在${input.city}附近` : '';
+    return {
+      fitReason: tags.length
+        ? `TA 和你都有 ${tags.join('、')} 这些共同信号${cityPart}，适合从轻量话题开始，不需要一上来就很正式。`
+        : `${firstReason}${cityPart}。建议把这次连接当成一次低压力试探，而不是马上推进关系。`,
+      openerAdvice: tags.length
+        ? `开场可以先提「${tags[0]}」，语气像自然搭话：给对方选择空间，不催、不压、不替 TA 做决定。`
+        : '开场先问对方是否方便聊，再说明你的具体需求；把邀请说成“可以一起看看是否合适”，会更舒服。',
+      possibleAwkwardness: hasRisk
+        ? `需要留意：${input.riskWarnings[0]} 所以前几句先确认边界和真实意愿，别急着要联系方式。`
+        : '可能的小尴尬是双方期待不同。先说清楚活动强度、时长和是否只是搭子，会显得真诚也体面。',
+      safeFirstStep:
+        '第一步建议只在站内聊时间、公开地点和活动强度；线下见面选人多、好离开的场所，联系方式等双方确认后再交换。',
+      tone: hasRisk ? 'careful' : input.score >= 80 ? 'active' : 'gentle',
+    };
+  }
+
+  private emotionalInsightFromExplanation(
+    explanation: CandidateExplanation,
+    highRisk: boolean,
+  ): CandidateEmotionalInsight {
+    return {
+      fitReason: explanation.fitReasons[0] || 'TA 和这次需求有可对齐的地方，适合先轻量沟通。',
+      openerAdvice: explanation.suggestedOpener,
+      possibleAwkwardness:
+        explanation.awkwardPoints[0] || '对方资料或时间偏好还需要进一步确认。',
+      safeFirstStep: explanation.safeFirstStep,
+      tone: highRisk || explanation.requiresConfirmation ? 'careful' : 'gentle',
+    };
+  }
+
+  private explainActivityCandidate(input: {
+    title: string;
+    city: string;
+    tags: string[];
+    query: CandidatePoolResolvedQuery;
+    matchScore: number;
+    matchReasons: string[];
+  }): CandidateExplanation {
+    const requestText = [
+      input.query.rawText,
+      input.query.activityType,
+      ...input.query.interestTags,
+      ...input.tags,
+    ].join(' ');
+    const sceneType = this.sceneRisk.normalizeScene(null, requestText);
+    const policy = this.sceneRisk.evaluate({
+      sceneType,
+      actionType: 'create_activity',
+      text: requestText,
+      permissionMode: 'limited_auto',
+    });
+    return this.candidateExplanation.explain({
+      userRequest: { rawText: requestText, interestTags: input.query.interestTags },
+      candidate: {
+        displayName: input.title,
+        city: input.city,
+        commonTags: input.tags,
+        interestTags: input.tags,
+      },
+      matchScore: input.matchScore,
+      matchReasons: input.matchReasons,
+      sceneType,
+      riskWarnings: policy.safetyPrompts,
+    });
   }
 
   private hasRecommendationBoundary(
@@ -1364,6 +1736,16 @@ export class SocialAgentCandidatePoolService {
       return await this.safety.getMutualBlockUserIds(ownerUserId);
     } catch {
       return new Set<number>();
+    }
+  }
+
+  private async loadLifeGraphSignals(
+    ownerUserId: number,
+  ): Promise<LifeGraphUnifiedMatchSignalsDto | null> {
+    try {
+      return (await this.lifeGraph?.getUnifiedMatchSignals(ownerUserId)) ?? null;
+    } catch {
+      return null;
     }
   }
 

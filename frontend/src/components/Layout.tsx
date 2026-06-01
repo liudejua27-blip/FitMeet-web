@@ -5,21 +5,14 @@ import { useAuthStore, useMessageStore, useNotificationStore } from '../stores';
 import { BackToTop } from './ui';
 
 const navItems = [
-  { to: '/hall', label: 'FitMeet 大厅' },
-  { to: '/ai', label: 'Agent 宇宙' },
-  { to: '/social-agent', label: 'Social Agent' },
-  { to: '/ai-profile', label: 'AI 画像' },
-  { to: '/agent-inbox', label: 'Agent Inbox' },
-  { to: '/match-confirmations', label: '确认中心' },
-  { to: '/developers/social-skills', label: 'Social Skills' },
-  { to: '/safety', label: '安全' },
+  { to: '/', label: '首页' },
+  { to: '/social-agent', label: '社交' },
+  { to: '/profile', label: '我的' },
 ];
 
 const bottomTabs = [
   { id: 'home', to: '/', label: '首页', icon: 'home' as const },
-  { id: 'hall', to: '/hall', label: '大厅', icon: 'discover' as const },
-  { id: 'create', to: '/hall', label: '发布', icon: 'create' as const, isCreate: true },
-  { id: 'messages', to: '/messages', label: '消息', icon: 'messages' as const, badge: 'messages' as const },
+  { id: 'social', to: '/social-agent', label: '社交', icon: 'create' as const, isCreate: true },
   { id: 'profile', to: '/profile', label: '我的', icon: 'profile' as const },
 ];
 
@@ -74,7 +67,7 @@ const Navbar = () => {
           onClick={() => navigate('/search')}
         >
           <SearchIcon />
-          搜索 Agent、意图或城市
+          搜索 Agent、附近机会或城市
         </button>
 
         <div className="hidden items-center gap-2 md:flex">
@@ -82,9 +75,9 @@ const Navbar = () => {
             <>
               <button
                 className="rounded-lg bg-lime px-4 py-2.5 text-sm font-black text-white transition hover:bg-brand2 hover:shadow-glow"
-                onClick={() => navigate('/social-request/new')}
+                onClick={() => navigate('/social-agent')}
               >
-                发布意图
+                告诉 Agent
               </button>
               <IconButton label="通知" count={unreadNotifs} onClick={() => navigate('/notifications')}>
                 <BellIcon />
@@ -121,9 +114,9 @@ const Navbar = () => {
               </button>
               <button
                 className="rounded-lg bg-lime px-4 py-2.5 text-sm font-black text-white transition hover:bg-brand2 hover:shadow-glow"
-                onClick={() => navigate('/hall')}
+                onClick={() => navigate('/app')}
               >
-                进入大厅
+                预约内测
               </button>
             </>
           )}
@@ -170,8 +163,8 @@ const Navbar = () => {
                 <button className="rounded-lg border border-white/10 py-3 text-sm font-bold text-textMuted" onClick={openLogin}>
                   登录
                 </button>
-                <button className="rounded-lg bg-lime py-3 text-sm font-black text-white" onClick={() => navigate('/hall')}>
-                  进入大厅
+                <button className="rounded-lg bg-lime py-3 text-sm font-black text-white" onClick={() => navigate('/app')}>
+                  预约内测
                 </button>
               </>
             )}
@@ -211,10 +204,9 @@ const BottomTabBar = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { isLoggedIn, openLogin } = useAuthStore();
-  const totalUnread = useMessageStore((s) => s.totalUnread);
 
   const handleTabClick = (tab: (typeof bottomTabs)[0]) => {
-    if ((tab.to === '/messages' || tab.to === '/profile') && !isLoggedIn) {
+    if (tab.to === '/profile' && !isLoggedIn) {
       openLogin();
       return;
     }
@@ -223,7 +215,7 @@ const BottomTabBar = () => {
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/10 bg-[#100b08]/95 backdrop-blur-xl md:hidden">
-      <div className="grid h-16 grid-cols-5">
+      <div className="grid h-16 grid-cols-3">
         {bottomTabs.map((tab) => {
           const active = location.pathname === tab.to;
           return (
@@ -244,11 +236,6 @@ const BottomTabBar = () => {
                 <>
                   <TabIcon icon={tab.icon} />
                   <span>{tab.label}</span>
-                  {tab.badge === 'messages' && totalUnread > 0 && (
-                    <span className="absolute right-5 top-2 flex min-h-[16px] min-w-[16px] items-center justify-center rounded-full bg-coral px-1 text-[9px] text-white">
-                      {totalUnread > 99 ? '99+' : totalUnread}
-                    </span>
-                  )}
                 </>
               )}
             </button>
@@ -263,10 +250,10 @@ const Footer = () => (
   <footer className="border-t border-white/10 bg-[#100b08] px-4 py-8 text-xs text-textSofter">
     <div className="mx-auto flex max-w-7xl flex-col items-center gap-3 text-center">
       <nav className="flex flex-wrap justify-center gap-5" aria-label="合规链接">
-        <Link className="transition hover:text-lime" to="/hall">FitMeet 大厅</Link>
-        <Link className="transition hover:text-lime" to="/ai">Agent 宇宙</Link>
-        <Link className="transition hover:text-lime" to="/social-agent">Social Agent</Link>
-        <Link className="transition hover:text-lime" to="/developers/social-skills">Social Skills</Link>
+        <Link className="transition hover:text-lime" to="/hall">附近机会</Link>
+        <Link className="transition hover:text-lime" to="/social-agent">Agent 控制台</Link>
+        <Link className="transition hover:text-lime" to="/agent-control">权限控制台</Link>
+        <Link className="transition hover:text-lime" to="/developers/social-skills">Agent API</Link>
         <Link className="transition hover:text-lime" to="/safety">安全</Link>
         <Link className="transition hover:text-lime" to="/terms">用户协议</Link>
         <Link className="transition hover:text-lime" to="/privacy">隐私政策</Link>
@@ -281,7 +268,22 @@ const Footer = () => (
 export const Layout = ({ children }: { children: ReactNode }) => {
   const location = useLocation();
 
-  if (location.pathname === '/' || location.pathname.startsWith('/agent-connect')) {
+  const isPlatformRoute =
+    location.pathname === '/' ||
+    location.pathname === '/legacy-home' ||
+    location.pathname === '/ecosystem' ||
+    location.pathname === '/app' ||
+    location.pathname === '/developers' ||
+    location.pathname === '/developers/social-skills' ||
+    location.pathname === '/safety' ||
+    location.pathname === '/about' ||
+    location.pathname === '/life-graph' ||
+    location.pathname === '/profile/life-graph' ||
+    location.pathname === '/admin/waitlist' ||
+    location.pathname === '/login';
+  const isAgentWorkspace = location.pathname === '/agent' || location.pathname.startsWith('/agent/');
+
+  if (isPlatformRoute || isAgentWorkspace || location.pathname.startsWith('/agent-connect')) {
     return <>{children}</>;
   }
 

@@ -18,6 +18,7 @@ import {
 import { sanitizeCity } from '../common/city.util';
 import type { MatchedCandidateView } from '../match/match.service';
 import { MessagesService } from '../messages/messages.service';
+import { RealtimeEventService } from '../realtime/realtime-event.service';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
 import { UpdateSocialRequestDto } from '../social-requests/dto/update-social-request.dto';
 import {
@@ -98,6 +99,7 @@ import {
   CandidatePoolDebugReasons,
   SocialAgentCandidatePoolService,
 } from './social-agent-candidate-pool.service';
+import { CandidateExplanation } from './candidate-explanation.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentRagService } from './social-agent-rag.service';
@@ -105,6 +107,22 @@ import {
   SocialAgentMemoryContext,
   SocialAgentMemoryContextService,
 } from './social-agent-memory-context.service';
+import { LifeGraphProposalDto } from '../life-graph/dto/life-graph.dto';
+import { LifeGraphService } from '../life-graph/life-graph.service';
+import {
+  FitMeetAgentRunStatus,
+  FitMeetAgentStepStatus,
+  FitMeetAgentToolStatus,
+} from './entities/fitmeet-agent-runtime.entity';
+import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
+import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
+import type {
+  FitMeetAgentSafety,
+  FitMeetAgentTrace,
+  FitMeetAlphaCard,
+  FitMeetAlphaTurnDecision,
+} from './fitmeet-alpha-agent.types';
+import { TonePolicyService } from './response-quality/tone-policy.service';
 
 export interface SocialAgentVisibleStep {
   id: string;
@@ -142,6 +160,14 @@ export interface SocialAgentChatCandidate {
   risk: { level: string; warnings: string[] };
   suggestedOpener?: string;
   suggestedMessage: string;
+  candidateExplanation?: CandidateExplanation;
+  emotionalInsight?: {
+    fitReason: string;
+    openerAdvice: string;
+    possibleAwkwardness: string;
+    safeFirstStep: string;
+    tone?: 'gentle' | 'active' | 'careful';
+  };
   status?: string;
 }
 
@@ -165,6 +191,11 @@ export interface SocialAgentChatRunResult {
   candidates: SocialAgentChatCandidate[];
   approvalRequiredActions: Array<Record<string, unknown>>;
   events: Array<Record<string, unknown>>;
+  cards?: FitMeetAlphaCard[];
+  safety?: FitMeetAgentSafety;
+  traceId?: string;
+  agentTrace?: FitMeetAgentTrace;
+  structuredIntent?: Record<string, unknown>;
 }
 
 type CandidateTargetBody = {
@@ -237,6 +268,12 @@ export interface SocialAgentIntentRouteResult {
   queuedRun?: SocialAgentAsyncRunSnapshot | null;
   pendingApproval?: SocialAgentPendingApprovalSnapshot | null;
   activityResults?: SocialAgentActivityResult[];
+  profileUpdateProposal?: LifeGraphProposalDto | null;
+  cards?: FitMeetAlphaCard[];
+  safety?: FitMeetAgentSafety;
+  traceId?: string;
+  agentTrace?: FitMeetAgentTrace;
+  structuredIntent?: Record<string, unknown>;
 }
 
 export interface SocialAgentPendingApprovalSnapshot {
@@ -435,6 +472,16 @@ export class SocialAgentChatService {
     private readonly finalResponses?: SocialAgentFinalResponseService,
     @Optional()
     private readonly modelRouter?: SocialAgentModelRouterService,
+    @Optional()
+    private readonly lifeGraph?: LifeGraphService,
+    @Optional()
+    private readonly realtime?: RealtimeEventService,
+    @Optional()
+    private readonly fitMeetRuntime?: FitMeetAgentRuntimeService,
+    @Optional()
+    private readonly alphaAgent?: FitMeetAlphaAgentSdkService,
+    @Optional()
+    private readonly tonePolicy?: TonePolicyService,
   ) {}
 
   run(
@@ -461,6 +508,133 @@ export class SocialAgentChatService {
     const taskId = this.number(body.taskId);
     let task = await this.ensureConversationTask(ownerUserId, taskId, message);
     await this.recordUserMessage(task, message);
+
+    const alphaTurn = await this.alphaAgent?.prepareTurn({
+      ownerUserId,
+      taskId: task.id,
+      message,
+      permissionMode: task.permissionMode,
+      context: { hasCandidates: body.hasCandidates === true },
+    });
+    if (alphaTurn?.safety.blocked) {
+      task.status = AgentTaskStatus.Failed;
+      task.riskLevel = AgentTaskRiskLevel.Blocked;
+      task.statusReason = 'main_agent_guardrail_blocked';
+      task.result = {
+        ...(task.result ?? {}),
+        alphaAgent: {
+          traceId: alphaTurn.traceId,
+          safety: alphaTurn.safety,
+          cards: alphaTurn.cards,
+          agentTrace: alphaTurn.agentTrace,
+        },
+      };
+      await this.taskRepo.save(task);
+      const assistantMessage =
+        alphaTurn.assistantMessage ||
+        '这个请求不符合 FitMeet 的安全边界，我不能继续执行。';
+      const result: SocialAgentIntentRouteResult = {
+        intent: 'safety_or_boundary',
+        confidence: 1,
+        entities: this.emptyIntentEntities(),
+        shouldSearch: false,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'direct_reply',
+        source: 'rules',
+        action: 'answer',
+        taskId: task.id,
+        assistantMessage,
+        savedContext: true,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: null,
+        queuedRun: null,
+        pendingApproval: null,
+        activityResults: [],
+        profileUpdateProposal: null,
+        cards: alphaTurn.cards,
+        safety: alphaTurn.safety,
+        traceId: alphaTurn.traceId,
+        agentTrace: alphaTurn.agentTrace,
+        structuredIntent: alphaTurn.structuredIntent,
+      };
+      await this.writeEvent(
+        task,
+        AgentTaskEventType.TaskFailed,
+        'Main Agent 已拦截不安全请求',
+        {
+          traceId: alphaTurn.traceId,
+          safety: alphaTurn.safety,
+          agentTrace: alphaTurn.agentTrace,
+        },
+        AgentTaskEventActor.Agent,
+      );
+      await this.recordAssistantMessage(task, assistantMessage, result);
+      this.metrics.observeRouteLatency(Date.now() - startedAt);
+      return result;
+    }
+    if (this.alphaNeedsClarification(alphaTurn)) {
+      const assistantMessage = this.alphaClarifyingMessage(alphaTurn);
+      task.status = AgentTaskStatus.AwaitingFeedback;
+      task.statusReason = 'main_agent_waiting_for_clarification';
+      task.result = {
+        ...(task.result ?? {}),
+        alphaAgent: {
+          traceId: alphaTurn?.traceId,
+          safety: alphaTurn?.safety,
+          cards: alphaTurn?.cards ?? [],
+          agentTrace: alphaTurn?.agentTrace,
+          structuredIntent: alphaTurn?.structuredIntent,
+        },
+      };
+      await this.taskRepo.save(task);
+      const result: SocialAgentIntentRouteResult = {
+        intent: 'unknown',
+        confidence: 0.86,
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+        shouldSearch: false,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'ask_clarifying_question',
+        source: 'rules',
+        action: 'clarify',
+        taskId: task.id,
+        assistantMessage,
+        savedContext: true,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: null,
+        queuedRun: null,
+        pendingApproval: null,
+        activityResults: [],
+        profileUpdateProposal: null,
+        cards: alphaTurn?.cards ?? [],
+        safety: alphaTurn?.safety,
+        traceId: alphaTurn?.traceId,
+        agentTrace: alphaTurn?.agentTrace,
+        structuredIntent: alphaTurn?.structuredIntent,
+      };
+      await this.writeEvent(
+        task,
+        AgentTaskEventType.Note,
+        'Main Agent 正在等待用户补充需求',
+        { structuredIntent: alphaTurn?.structuredIntent },
+        AgentTaskEventActor.Agent,
+      );
+      await this.recordAssistantMessage(task, assistantMessage, result);
+      this.metrics.recordAction(result.action);
+      this.metrics.observeRouteLatency(Date.now() - startedAt);
+      return result;
+    }
 
     const [profile, freshTask, longTermSnapshot] = await Promise.all([
       this.readProfileSummary(ownerUserId),
@@ -546,6 +720,7 @@ export class SocialAgentChatService {
     let runMode: SocialAgentIntentRouteResult['runMode'] = null;
     let assistantMessage = this.assistantMessageForRoute(route, task, message);
     let activityResults: SocialAgentActivityResult[] = [];
+    let profileUpdateProposal: LifeGraphProposalDto | null = null;
 
     const confirmedCandidateMessage =
       await this.confirmPendingCandidateMessageIfRequested(
@@ -591,6 +766,7 @@ export class SocialAgentChatService {
       assistantMessage = handled.assistantMessage;
       savedContext = handled.savedContext;
       profileUpdated = handled.profileUpdated;
+      profileUpdateProposal = handled.profileUpdateProposal ?? null;
       task = handled.task;
     } else if (this.shouldUseLlmDirectReply(route)) {
       assistantMessage = await this.generateConversationalAnswer({
@@ -607,14 +783,38 @@ export class SocialAgentChatService {
       route.intent === 'profile_update' ||
       route.intent === 'safety_or_boundary'
     ) {
-      await this.rememberRoutedMessage(task, message, route.intent);
-      savedContext = true;
-      profileUpdated = await this.saveIntentToProfile(
-        ownerUserId,
-        route.intent,
-        message,
-      );
-      task = await this.assertTaskOwner(task.id, ownerUserId);
+      if (this.lifeGraph) {
+        const proposal = await this.lifeGraph.extractFromChat(ownerUserId, {
+          message,
+          taskId: task.id,
+          context: { intent: route.intent },
+        });
+        if (proposal.proposedFields.length > 0) {
+          profileUpdateProposal = proposal;
+          assistantMessage = this.lifeGraphProposalReply(proposal);
+          savedContext = true;
+          profileUpdated = false;
+          rememberSocialAgentCurrentTask(task, {
+            objective: 'profile_enrichment',
+            nextStep: '等待用户确认是否保存 Life Graph 画像提案',
+            shouldSearchNow: false,
+            profileSaved: false,
+            waitingFor: 'life_graph_profile_confirmation',
+            lastCompletedStep: 'life_graph_profile_proposed',
+          });
+          await this.taskRepo.save(task);
+        }
+      }
+      if (!profileUpdateProposal) {
+        await this.rememberRoutedMessage(task, message, route.intent);
+        savedContext = true;
+        profileUpdated = await this.saveIntentToProfile(
+          ownerUserId,
+          route.intent,
+          message,
+        );
+        task = await this.assertTaskOwner(task.id, ownerUserId);
+      }
     }
 
     if (route.intent === 'activity_search') {
@@ -665,7 +865,16 @@ export class SocialAgentChatService {
         fallbackReply: assistantMessage,
       });
     } else if (route.intent === 'social_search') {
-      if (route.shouldReplan && this.hasSearchContext(task)) {
+      const lifeGraphClarification = await this.lifeGraphSearchClarification(
+        ownerUserId,
+        message,
+      );
+      if (lifeGraphClarification) {
+        assistantMessage = lifeGraphClarification;
+        savedContext = true;
+        runMode = null;
+        queuedRun = null;
+      } else if (route.shouldReplan && this.hasSearchContext(task)) {
         queuedRun = await this.replanAndRefresh(ownerUserId, task.id, {
           userMessage: message,
           reason: 'user_follow_up',
@@ -744,6 +953,7 @@ export class SocialAgentChatService {
       queuedRun,
       pendingApproval,
       activityResults,
+      profileUpdateProposal,
     };
     if (queuedRun && runMode) this.metrics.recordQueuedRun(runMode);
     this.metrics.recordAction(result.action);
@@ -1199,6 +1409,11 @@ export class SocialAgentChatService {
       toolName: SocialAgentToolName.ExplainMatches,
       topCandidateUserId: candidates[0]?.userId ?? null,
     });
+    this.realtime?.emitAgentEvent(ownerUserId, 'agent:approval_required', {
+      taskId: task.id,
+      reason: 'recommendations_ready_waiting_user_confirmation',
+      candidateCount: candidates.length,
+    });
     await done(
       'done',
       '已根据补充要求刷新结果',
@@ -1218,6 +1433,8 @@ export class SocialAgentChatService {
       candidates,
       searchResult,
       'follow_up_replan_refreshed',
+      undefined,
+      undefined,
     );
     const finalResult = { ...result, replan };
     task = await this.updateRunSnapshot(ownerUserId, taskId, runId, {
@@ -1263,12 +1480,24 @@ export class SocialAgentChatService {
     const permissionMode = this.normalizePermissionMode(body.permissionMode);
     const idempotencyKey = cleanDisplayText(body.idempotencyKey, '');
     const visibleSteps: SocialAgentVisibleStep[] = [];
+    let runtimeStepOrder = 0;
+    const runtimeRun = await this.fitMeetRuntime?.startRun({
+      userId: ownerUserId,
+      userMessage: goal,
+      permissionMode,
+    });
 
     let task = await this.createOrReuseTask({
       ownerUserId,
       goal,
       permissionMode,
       idempotencyKey: idempotencyKey || null,
+    });
+    await this.fitMeetRuntime?.attachTask(runtimeRun?.id, task.id);
+    this.realtime?.emitAgentEvent(ownerUserId, 'agent:thinking', {
+      taskId: task.id,
+      goal,
+      status: 'understanding',
     });
     this.rememberShortTermStep(
       task,
@@ -1278,19 +1507,174 @@ export class SocialAgentChatService {
     );
     await emit?.({ type: 'task', taskId: task.id, status: task.status });
 
+    const alphaTurn = await this.alphaAgent?.prepareTurn({
+      ownerUserId,
+      taskId: task.id,
+      message: goal,
+      permissionMode,
+      context: { flow: 'run_stream' },
+    });
+    if (alphaTurn?.safety.blocked) {
+      const blockedStep: SocialAgentVisibleStep = {
+        id: 'main_agent_safety',
+        label: 'Main Agent 已拦截不安全请求',
+        status: 'failed',
+      };
+      visibleSteps.push(blockedStep);
+      task.status = AgentTaskStatus.Failed;
+      task.riskLevel = AgentTaskRiskLevel.Blocked;
+      task.statusReason = 'main_agent_guardrail_blocked';
+      task.result = {
+        ...(task.result ?? {}),
+        alphaAgent: {
+          traceId: alphaTurn.traceId,
+          safety: alphaTurn.safety,
+          cards: alphaTurn.cards,
+          agentTrace: alphaTurn.agentTrace,
+        },
+      };
+      await this.taskRepo.save(task);
+      await this.writeEvent(
+        task,
+        AgentTaskEventType.TaskFailed,
+        blockedStep.label,
+        {
+          traceId: alphaTurn.traceId,
+          safety: alphaTurn.safety,
+          agentTrace: alphaTurn.agentTrace,
+        },
+        AgentTaskEventActor.Agent,
+      );
+      await emit?.({ type: 'step', step: blockedStep });
+      const events = await this.eventRepo.find({
+        where: { taskId: task.id, ownerUserId },
+        order: { createdAt: 'ASC', id: 'ASC' },
+        take: 500,
+      });
+      const result: SocialAgentChatRunResult = {
+        taskId: task.id,
+        status: task.status,
+        visibleSteps,
+        assistantMessage:
+          alphaTurn.assistantMessage ||
+          '这个请求不符合 FitMeet 的安全边界，我不能继续执行。',
+        emptyReason: null,
+        message: null,
+        debugReasons: null,
+        socialRequestDraft: null,
+        candidates: [],
+        approvalRequiredActions: [],
+        events: events.map((event) => this.toEventDto(event)),
+        cards: alphaTurn.cards,
+        safety: alphaTurn.safety,
+        traceId: alphaTurn.traceId,
+        agentTrace: alphaTurn.agentTrace,
+        structuredIntent: alphaTurn.structuredIntent,
+      };
+      await emit?.({ type: 'result', result });
+      return result;
+    }
+    if (this.alphaNeedsClarification(alphaTurn)) {
+      const clarifyStep: SocialAgentVisibleStep = {
+        id: 'clarify',
+        label: this.userVisibleStepLabel('clarify', '正在等待你补充需求'),
+        status: 'done',
+      };
+      visibleSteps.push(clarifyStep);
+      task.status = AgentTaskStatus.AwaitingFeedback;
+      task.statusReason = 'main_agent_waiting_for_clarification';
+      task.result = {
+        ...(task.result ?? {}),
+        alphaAgent: {
+          traceId: alphaTurn?.traceId,
+          safety: alphaTurn?.safety,
+          cards: alphaTurn?.cards ?? [],
+          agentTrace: alphaTurn?.agentTrace,
+          structuredIntent: alphaTurn?.structuredIntent,
+        },
+      };
+      await this.taskRepo.save(task);
+      await this.writeEvent(
+        task,
+        AgentTaskEventType.Note,
+        'Main Agent 正在等待用户补充需求',
+        { structuredIntent: alphaTurn?.structuredIntent },
+        AgentTaskEventActor.Agent,
+      );
+      await emit?.({ type: 'step', step: clarifyStep });
+      const events = await this.eventRepo.find({
+        where: { taskId: task.id, ownerUserId },
+        order: { createdAt: 'ASC', id: 'ASC' },
+        take: 500,
+      });
+      const result: SocialAgentChatRunResult = {
+        taskId: task.id,
+        status: task.status,
+        visibleSteps,
+        assistantMessage: this.alphaClarifyingMessage(alphaTurn),
+        emptyReason: null,
+        message: null,
+        debugReasons: null,
+        socialRequestDraft: null,
+        candidates: [],
+        approvalRequiredActions: [],
+        events: events.map((event) => this.toEventDto(event)),
+        cards: alphaTurn?.cards ?? [],
+        safety: alphaTurn?.safety,
+        traceId: alphaTurn?.traceId,
+        agentTrace: alphaTurn?.agentTrace,
+        structuredIntent: alphaTurn?.structuredIntent,
+      };
+      await this.fitMeetRuntime?.completeRun({
+        runId: runtimeRun?.id,
+        userId: ownerUserId,
+        status: FitMeetAgentRunStatus.WaitingConfirmation,
+        assistantMessage: result.assistantMessage,
+        resultPayload: { taskId: task.id, awaitingClarification: true },
+      });
+      await emit?.({ type: 'result', result });
+      return result;
+    }
+
     const done = async (
       id: string,
       label: string,
       eventType: AgentTaskEventType,
       payload: Record<string, unknown> = {},
     ) => {
-      await emit?.({ type: 'step', step: { id, label, status: 'running' } });
-      this.rememberShortTermStep(task, id, label, 'running');
-      const step: SocialAgentVisibleStep = { id, label, status: 'done' };
+      const publicLabel = this.userVisibleStepLabel(id, label);
+      await emit?.({ type: 'step', step: { id, label: publicLabel, status: 'running' } });
+      this.rememberShortTermStep(task, id, publicLabel, 'running');
+      const step: SocialAgentVisibleStep = { id, label: publicLabel, status: 'done' };
       visibleSteps.push(step);
-      this.rememberShortTermStep(task, id, label, 'done');
+      this.rememberShortTermStep(task, id, publicLabel, 'done');
       await this.writeEvent(task, eventType, label, payload);
+      await this.fitMeetRuntime?.recordStep({
+        runId: runtimeRun?.id,
+        userId: ownerUserId,
+        stepOrder: ++runtimeStepOrder,
+        stepKey: id,
+        title: publicLabel,
+        status: FitMeetAgentStepStatus.Completed,
+        safePayload: payload,
+      });
       await emit?.({ type: 'step', step });
+    };
+
+    const recordTool = async (
+      toolName: string,
+      status: FitMeetAgentToolStatus,
+      safeInput: Record<string, unknown> = {},
+      safeOutput: Record<string, unknown> = {},
+    ) => {
+      await this.fitMeetRuntime?.recordToolCall({
+        runId: runtimeRun?.id,
+        userId: ownerUserId,
+        toolName,
+        status,
+        safeInput,
+        safeOutput,
+      });
     };
 
     await done(
@@ -1313,7 +1697,16 @@ export class SocialAgentChatService {
       },
     );
 
+    await recordTool('fitmeet_get_my_profile', FitMeetAgentToolStatus.Running, {
+      taskId: task.id,
+    });
     const profileSummary = await this.readProfileSummary(ownerUserId);
+    await recordTool(
+      'fitmeet_get_my_profile',
+      FitMeetAgentToolStatus.Succeeded,
+      { taskId: task.id },
+      { hasProfileSummary: Boolean(profileSummary) },
+    );
     const planResult = await this.planner.planExistingTask(task);
     await done(
       'deepseek',
@@ -1329,7 +1722,26 @@ export class SocialAgentChatService {
       },
     );
 
+    this.realtime?.emitAgentEvent(ownerUserId, 'agent:tool_call', {
+      taskId: task.id,
+      toolName: SocialAgentToolName.CreateSocialRequest,
+      status: 'started',
+    });
+    await recordTool('fitmeet_create_social_intent', FitMeetAgentToolStatus.Running, {
+      taskId: task.id,
+    });
     const draftResult = await this.generateDraftWithTool(task, goal);
+    await recordTool(
+      'fitmeet_create_social_intent',
+      FitMeetAgentToolStatus.Succeeded,
+      { taskId: task.id },
+      { draftReady: true },
+    );
+    this.realtime?.emitAgentEvent(ownerUserId, 'agent:tool_result', {
+      taskId: task.id,
+      toolName: SocialAgentToolName.CreateSocialRequest,
+      status: 'draft_ready',
+    });
     task = await this.assertTaskOwner(task.id, ownerUserId);
     const draft = this.buildDraft(
       task.id,
@@ -1340,9 +1752,50 @@ export class SocialAgentChatService {
 
     draft.socialRequestId = await this.createPrivateDraftRequest(task, draft);
     task = await this.assertTaskOwner(task.id, ownerUserId);
+    await recordTool(
+      'fitmeet_create_social_intent',
+      FitMeetAgentToolStatus.WaitingConfirmation,
+      { taskId: task.id, mode: 'private_draft' },
+      {
+        socialRequestId: draft.socialRequestId ?? null,
+        publishPolicy: 'requires_user_confirmation',
+      },
+    );
 
+    this.realtime?.emitAgentEvent(ownerUserId, 'agent:tool_call', {
+      taskId: task.id,
+      toolName: SocialAgentToolName.SearchMatches,
+      status: 'started',
+    });
+    await recordTool('fitmeet_search_candidates', FitMeetAgentToolStatus.Running, {
+      taskId: task.id,
+      socialRequestId: draft.socialRequestId ?? null,
+    });
     const searchResult = await this.searchCandidates(task, draft);
     const candidates = searchResult.candidates;
+    await recordTool(
+      'fitmeet_search_candidates',
+      FitMeetAgentToolStatus.Succeeded,
+      {
+        taskId: task.id,
+        socialRequestId: draft.socialRequestId ?? null,
+      },
+      { candidateCount: candidates.length },
+    );
+    await recordTool(
+      'fitmeet_score_candidates',
+      FitMeetAgentToolStatus.Succeeded,
+      { taskId: task.id },
+      {
+        candidateCount: candidates.length,
+        scoringInputs: ['life_graph', 'time_overlap', 'interest', 'safety_boundary'],
+      },
+    );
+    this.realtime?.emitAgentEvent(ownerUserId, 'agent:candidates', {
+      taskId: task.id,
+      candidateCount: candidates.length,
+      candidates,
+    });
     task = await this.assertTaskOwner(task.id, ownerUserId);
     await done(
       'search',
@@ -1362,6 +1815,16 @@ export class SocialAgentChatService {
       { candidateCount: candidates.length },
     );
 
+    await done(
+      'safety_filter',
+      '正在进行隐私、骚扰、诈骗和线下见面风险过滤',
+      AgentTaskEventType.StepCompleted,
+      {
+        candidateCount: candidates.length,
+        policy: 'critical_actions_require_user_confirmation',
+      },
+    );
+
     await done('draft', '正在生成约练草稿', AgentTaskEventType.ToolReturned, {
       toolName: SocialAgentToolName.CreateSocialRequest,
       draft: this.safeDraftForEvent(draft),
@@ -1371,13 +1834,26 @@ export class SocialAgentChatService {
       toolName: SocialAgentToolName.ExplainMatches,
       topCandidateUserId: candidates[0]?.userId ?? null,
     });
+    await done('icebreaker', '正在生成高情商开场白', AgentTaskEventType.ToolReturned, {
+      toolName: 'fitmeet_generate_icebreaker',
+      candidateCount: candidates.length,
+    });
+    await recordTool(
+      'fitmeet_generate_icebreaker',
+      FitMeetAgentToolStatus.Succeeded,
+      { taskId: task.id },
+      {
+        candidateCount: candidates.length,
+        requiresUserConfirmationBeforeSend: true,
+      },
+    );
 
     await done('done', '已完成', AgentTaskEventType.TaskSucceeded, {
       candidateCount: candidates.length,
       requiresConfirmation: true,
     });
 
-    return this.completeRecommendationResult(
+    const result = await this.completeRecommendationResult(
       ownerUserId,
       task,
       visibleSteps,
@@ -1386,7 +1862,29 @@ export class SocialAgentChatService {
       searchResult,
       'recommendations_ready_waiting_user_confirmation',
       emit,
+      alphaTurn,
     );
+    this.realtime?.emitAgentEvent(ownerUserId, 'agent:completed', {
+      taskId: task.id,
+      status: result.status,
+      candidateCount: result.candidates.length,
+      approvalRequiredCount: result.approvalRequiredActions.length,
+    });
+    await this.fitMeetRuntime?.completeRun({
+      runId: runtimeRun?.id,
+      userId: ownerUserId,
+      status:
+        result.approvalRequiredActions.length > 0 || result.candidates.length > 0
+          ? FitMeetAgentRunStatus.WaitingConfirmation
+          : FitMeetAgentRunStatus.Completed,
+      assistantMessage: result.assistantMessage,
+      resultPayload: {
+        taskId: task.id,
+        candidateCount: result.candidates.length,
+        approvalRequiredCount: result.approvalRequiredActions.length,
+      },
+    });
+    return result;
   }
 
   async publishDraft(
@@ -2066,6 +2564,16 @@ export class SocialAgentChatService {
     };
   }
 
+  private emptyIntentEntities(): SocialAgentIntentEntities {
+    return {
+      city: '',
+      activityType: '',
+      targetGender: '',
+      timePreference: '',
+      locationPreference: '',
+    };
+  }
+
   private buildMemoryContext(
     task: AgentTask,
     longTermSnapshot:
@@ -2566,6 +3074,7 @@ export class SocialAgentChatService {
     assistantMessage: string;
     savedContext: boolean;
     profileUpdated: boolean;
+    profileUpdateProposal?: LifeGraphProposalDto | null;
     task: AgentTask;
   }> {
     if (this.isProfileMissingFieldsQuestion(message)) {
@@ -2573,6 +3082,7 @@ export class SocialAgentChatService {
         assistantMessage: this.profileMissingFieldsReply(task),
         savedContext: true,
         profileUpdated: false,
+        profileUpdateProposal: null,
         task,
       };
     }
@@ -2601,6 +3111,33 @@ export class SocialAgentChatService {
     };
     this.rememberExtractedProfileInTaskMemory(task, mergedProfile, sourceMessage);
     await this.taskRepo.save(task);
+
+    if (this.lifeGraph && Object.keys(mergedProfile).length > 0) {
+      const proposal = await this.lifeGraph.extractFromChat(ownerUserId, {
+        message: sourceMessage,
+        taskId: task.id,
+        context: { intent, extractedProfile: mergedProfile },
+      });
+      if (proposal.proposedFields.length > 0) {
+        rememberSocialAgentCurrentTask(task, {
+          objective: 'profile_enrichment',
+          nextStep: '等待用户确认是否保存 Life Graph 画像提案',
+          shouldSearchNow: false,
+          profileSaved: false,
+          waitingFor: 'life_graph_profile_confirmation',
+          lastCompletedStep: 'life_graph_profile_proposed',
+        });
+        transitionSocialAgentState(task, 'profile_detected');
+        await this.taskRepo.save(task);
+        return {
+          assistantMessage: this.lifeGraphProposalReply(proposal),
+          savedContext: true,
+          profileUpdated: false,
+          profileUpdateProposal: proposal,
+          task,
+        };
+      }
+    }
 
     const shouldSave = this.shouldSaveProfileFromMessage(message);
     const brainMode = this.currentConversationBrainMode(task);
@@ -2657,6 +3194,7 @@ export class SocialAgentChatService {
         }),
         savedContext: true,
         profileUpdated: call.status === 'succeeded',
+        profileUpdateProposal: null,
         task,
       };
     }
@@ -2690,8 +3228,88 @@ export class SocialAgentChatService {
       }),
       savedContext: true,
       profileUpdated: false,
+      profileUpdateProposal: null,
       task,
     };
+  }
+
+  private lifeGraphProposalReply(proposal: LifeGraphProposalDto): string {
+    const lines = proposal.proposedFields.slice(0, 8).map((field) => {
+      const value = Array.isArray(field.fieldValue)
+        ? field.fieldValue.join('、')
+        : safeUnknownText(field.fieldValue);
+      return `- ${this.lifeGraphFieldLabel(field.fieldKey)}：${value}`;
+    });
+    return [
+      '我识别到以下画像信息：',
+      ...lines,
+      '是否保存到你的 Life Graph？保存后我会用它提升匹配准确度；不保存也不会影响当前聊天。',
+    ].join('\n');
+  }
+
+  private lifeGraphFieldLabel(fieldKey: string): string {
+    const labels: Record<string, string> = {
+      city: '城市',
+      nearbyArea: '常活动区域',
+      availableTimes: '可约时间',
+      weekendAvailability: '周末可用时间',
+      sportsPreferences: '运动偏好',
+      currentSocialGoal: '当前目标',
+      preferredSocialStyle: '社交方式',
+      acceptsNightMeet: '是否接受晚上见面',
+      publicPlaceOnly: '公开地点偏好',
+    };
+    return labels[fieldKey] ?? fieldKey;
+  }
+
+  private async lifeGraphSearchClarification(
+    ownerUserId: number,
+    message: string,
+  ): Promise<string | null> {
+    if (!this.lifeGraph || !/找|匹配|推荐|搭子|candidate|match|find/i.test(message)) {
+      return null;
+    }
+    const signals = await this.lifeGraph.getUnifiedMatchSignals(ownerUserId);
+    const missing: string[] = [];
+    if (!signals.lifestyleSignals.availableTimes && !signals.lifestyleSignals.weekendAvailability) {
+      missing.push('你一般什么时候有空');
+    }
+    if (
+      signals.fitnessSignals.publicPlaceOnly !== true &&
+      signals.safetySignals.publicPlaceOnly !== true
+    ) {
+      missing.push('第一次见面是否只接受公共场所');
+    }
+    if (missing.length === 0) return null;
+    return `我可以帮你找合适的人，但还缺 ${missing.length} 个会明显影响匹配的信息：${missing.join('？')}？补充后我再开始搜索，会更准也更安全。`;
+  }
+
+  private alphaNeedsClarification(
+    alphaTurn?: FitMeetAlphaTurnDecision,
+  ): boolean {
+    const intent = this.isRecord(alphaTurn?.structuredIntent)
+      ? alphaTurn?.structuredIntent
+      : {};
+    return (
+      intent.requiresSearch === false &&
+      cleanDisplayText(intent.readiness, '') === 'clarify'
+    );
+  }
+
+  private alphaClarifyingMessage(
+    alphaTurn?: FitMeetAlphaTurnDecision,
+  ): string {
+    const intent = this.isRecord(alphaTurn?.structuredIntent)
+      ? alphaTurn?.structuredIntent
+      : {};
+    const question = cleanDisplayText(intent.clarifyingQuestion, '');
+    const fallback =
+      '可以。我先帮你找轻松一点、不需要太强社交压力的人。你更想今晚附近试试，还是周末下午找个时间？';
+    return this.tonePolicy?.safeAssistantMessage(question, fallback) || question || fallback;
+  }
+
+  private userVisibleStepLabel(id: string, label: string): string {
+    return this.tonePolicy?.userStatus(id, label) ?? label;
   }
 
   private shouldSaveProfileFromMessage(message: string): boolean {
@@ -4263,6 +4881,7 @@ export class SocialAgentChatService {
     searchResult: SocialAgentCandidateSearchResult,
     statusReason: string,
     emit?: StreamEmit,
+    alphaTurn?: FitMeetAlphaTurnDecision,
   ): Promise<SocialAgentChatRunResult> {
     task.status = AgentTaskStatus.AwaitingConfirmation;
     task.statusReason = statusReason;
@@ -4328,15 +4947,21 @@ export class SocialAgentChatService {
       order: { createdAt: 'ASC', id: 'ASC' },
       take: 500,
     });
+    const lifeGraphSignals = this.lifeGraph
+      ? await this.lifeGraph.getUnifiedMatchSignals(ownerUserId).catch(() => null)
+      : null;
     const fallbackAssistantMessage =
       searchResult.message || this.assistantMessage(candidates);
-    const assistantMessage = await this.generateRecommendationAssistantMessage({
+    const assistantMessage = this.tonePolicy?.safeAssistantMessage(
+      await this.generateRecommendationAssistantMessage({
       task,
       draft,
       candidates,
       searchResult,
       fallbackReply: fallbackAssistantMessage,
-    });
+      }),
+      fallbackAssistantMessage,
+    ) ?? fallbackAssistantMessage;
 
     const result = {
       taskId: task.id,
@@ -4350,6 +4975,19 @@ export class SocialAgentChatService {
       candidates,
       approvalRequiredActions: this.approvalActions(task.id, draft, candidates),
       events: events.map((event) => this.toEventDto(event)),
+      cards: this.alphaAgent?.buildResultCards({
+        taskId: task.id,
+        socialRequestDraft: draft as unknown as Record<string, unknown>,
+        candidates: candidates as unknown as Array<Record<string, unknown>>,
+        approvalRequiredActions: this.approvalActions(task.id, draft, candidates),
+        safety: alphaTurn?.safety,
+        traceId: alphaTurn?.traceId,
+        lifeGraphSignals: lifeGraphSignals as Record<string, unknown> | null,
+      }),
+      safety: alphaTurn?.safety,
+      traceId: alphaTurn?.traceId,
+      agentTrace: alphaTurn?.agentTrace,
+      structuredIntent: alphaTurn?.structuredIntent,
     };
     await emit?.({ type: 'result', result });
     return result;
@@ -4493,7 +5131,54 @@ export class SocialAgentChatService {
         candidate.suggestedMessage ?? record.suggestedOpener,
         '',
       ),
+      candidateExplanation: this.candidateExplanationFromRecord(
+        record.candidateExplanation,
+      ),
+      emotionalInsight: this.emotionalInsightFromRecord(record.emotionalInsight),
       status: candidate.status ? String(candidate.status) : undefined,
+    };
+  }
+
+  private candidateExplanationFromRecord(
+    value: unknown,
+  ): CandidateExplanation | undefined {
+    if (!this.isRecord(value)) return undefined;
+    const fitReasons = this.stringList(value.fitReasons);
+    const awkwardPoints = this.stringList(value.awkwardPoints);
+    const suggestedOpener = cleanDisplayText(value.suggestedOpener, '');
+    const safeFirstStep = cleanDisplayText(value.safeFirstStep, '');
+    if (!fitReasons.length || !suggestedOpener || !safeFirstStep) return undefined;
+    return {
+      fitReasons,
+      suggestedOpener,
+      awkwardPoints,
+      safeFirstStep,
+      nextActionSuggestion: cleanDisplayText(
+        value.nextActionSuggestion,
+        '确认后发送轻量开场',
+      ),
+      requiresConfirmation: value.requiresConfirmation === true,
+    };
+  }
+
+  private emotionalInsightFromRecord(
+    value: unknown,
+  ): SocialAgentChatCandidate['emotionalInsight'] {
+    if (!this.isRecord(value)) return undefined;
+    const fitReason = cleanDisplayText(value.fitReason, '');
+    const openerAdvice = cleanDisplayText(value.openerAdvice, '');
+    const possibleAwkwardness = cleanDisplayText(value.possibleAwkwardness, '');
+    const safeFirstStep = cleanDisplayText(value.safeFirstStep, '');
+    if (!fitReason || !openerAdvice || !safeFirstStep) return undefined;
+    return {
+      fitReason,
+      openerAdvice,
+      possibleAwkwardness,
+      safeFirstStep,
+      tone:
+        value.tone === 'active' || value.tone === 'careful' || value.tone === 'gentle'
+          ? value.tone
+          : undefined,
     };
   }
 
@@ -4631,8 +5316,21 @@ export class SocialAgentChatService {
       return '当前没有找到符合条件的真实用户，我可以帮你发布一个约练需求，或者你可以放宽城市、时间、兴趣条件。';
     }
     const first = candidates[0];
-    const reason = first.reasons.slice(0, 2).join('；') || '画像和需求较匹配';
-    return `我找到了 ${candidates.length} 位真实候选人。优先推荐 ${first.nickname}，匹配度 ${first.score}%，原因是 ${reason}。`;
+    const explanation = first.candidateExplanation;
+    const reason =
+      explanation?.fitReasons?.[0] ||
+      first.emotionalInsight?.fitReason ||
+      first.reasons.slice(0, 2).join('；') ||
+      '画像和需求较匹配';
+    const opener =
+      explanation?.suggestedOpener ||
+      first.emotionalInsight?.openerAdvice ||
+      first.suggestedMessage;
+    const safeStep =
+      explanation?.safeFirstStep ||
+      first.emotionalInsight?.safeFirstStep ||
+      '第一次建议选择公开场所，并先在站内确认时间、地点和边界。';
+    return `我找到了 ${candidates.length} 位真实候选人。优先看 ${first.nickname}：${reason} 开场可以这样说：${opener} 第一步建议：${safeStep}`;
   }
 
   private async appendFollowUpContext(
@@ -4844,7 +5542,10 @@ export class SocialAgentChatService {
       .filter((step) => this.isRecord(step))
       .map((step) => ({
         id: cleanDisplayText(step.id, ''),
-        label: cleanDisplayText(step.label, '正在处理任务'),
+        label: this.userVisibleStepLabel(
+          cleanDisplayText(step.id, ''),
+          cleanDisplayText(step.label, '正在处理任务'),
+        ),
         status: this.normalizeStepStatus(step.status),
       }))
       .filter((step) => step.id);
@@ -5554,6 +6255,10 @@ export class SocialAgentChatService {
       },
       suggestedOpener: cleanDisplayText(candidate.suggestedOpener, ''),
       suggestedMessage: cleanDisplayText(candidate.suggestedMessage, ''),
+      candidateExplanation: this.candidateExplanationFromRecord(
+        candidate.candidateExplanation,
+      ),
+      emotionalInsight: this.emotionalInsightFromRecord(candidate.emotionalInsight),
       status: cleanDisplayText(candidate.status, '') || undefined,
     };
   }
@@ -5566,7 +6271,10 @@ export class SocialAgentChatService {
       .filter((step): step is Record<string, unknown> => this.isRecord(step))
       .map((step) => ({
         id: cleanDisplayText(step.id, ''),
-        label: cleanDisplayText(step.label, '正在处理任务'),
+        label: this.userVisibleStepLabel(
+          cleanDisplayText(step.id, ''),
+          cleanDisplayText(step.label, '正在处理任务'),
+        ),
         status: this.normalizeStepStatus(step.status),
       }))
       .filter((step) => step.id);
@@ -5763,6 +6471,8 @@ export class SocialAgentChatService {
         commonTags: candidate.commonTags,
         reasons: candidate.reasons,
         suggestedMessage: candidate.suggestedMessage,
+        candidateExplanation: candidate.candidateExplanation ?? null,
+        emotionalInsight: candidate.emotionalInsight ?? null,
         status: candidate.status ?? null,
       })),
     });
