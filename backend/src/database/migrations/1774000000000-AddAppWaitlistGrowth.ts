@@ -92,16 +92,32 @@ export class AddAppWaitlistGrowth1774000000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_waitlist_events_ip_created"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_waitlist_events_name_created"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_waitlist_events_ip_created"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_waitlist_events_name_created"`,
+    );
     await queryRunner.query(`DROP INDEX IF EXISTS "idx_invite_codes_batch"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_invite_codes_active_expires"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_invite_codes_active_expires"`,
+    );
     await queryRunner.query(`DROP INDEX IF EXISTS "idx_invite_codes_code"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_waitlist_app_entries_city_created"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_waitlist_app_entries_quality_created"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_waitlist_app_entries_status_created"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_waitlist_app_entries_phone"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_waitlist_app_entries_email"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_waitlist_app_entries_city_created"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_waitlist_app_entries_quality_created"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_waitlist_app_entries_status_created"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_waitlist_app_entries_phone"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_waitlist_app_entries_email"`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS "waitlist_analytics_events"`);
     await queryRunner.query(`DROP TABLE IF EXISTS "invite_codes"`);
     await queryRunner.query(`DROP TABLE IF EXISTS "waitlist_app_entries"`);

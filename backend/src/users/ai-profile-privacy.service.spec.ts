@@ -154,7 +154,10 @@ describe('SocialProfileService — privacy & sensitive tags', () => {
 
   it('invariant 5: discoverable=false keeps the user out of the pool', async () => {
     profileRepo.findOne.mockResolvedValue({
-      ...baseProfile({ profileDiscoverable: false, agentCanRecommendMe: false }),
+      ...baseProfile({
+        profileDiscoverable: false,
+        agentCanRecommendMe: false,
+      }),
     });
 
     const privacy = await service.getPrivacy(1);
@@ -253,6 +256,8 @@ describe('SocialProfileService — privacy & sensitive tags', () => {
   it('hard-blocks identifier-like tags from ever being matchable', () => {
     expect(service.classifyTag('13800000000')).toBe('unavailable');
     expect(service.classifyTag('110105199001011234')).toBe('unavailable');
-    expect(service.classifyTag('朝阳区幸福里小区5号楼3单元')).toBe('unavailable');
+    expect(service.classifyTag('朝阳区幸福里小区5号楼3单元')).toBe(
+      'unavailable',
+    );
   });
 });

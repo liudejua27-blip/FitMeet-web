@@ -61,7 +61,6 @@ import {
   CreateSocialRequestDto,
   ConfirmSocialRequestCandidateDto,
   SearchMatchDto,
-  SearchNearbyPeopleDto,
   DraftContentDto,
   SendMessageDto,
   ContactRequestDto,
@@ -1019,8 +1018,7 @@ export class AgentApiController {
     const conn = req[AGENT_CONNECTION_KEY];
     return this.socialProfiles.upsert(conn.userId, {
       profileDiscoverable: body.profileDiscoverable,
-      agentCanRecommendMe:
-        body.agentCanRecommendMe ?? body.allowAgentRecommend,
+      agentCanRecommendMe: body.agentCanRecommendMe ?? body.allowAgentRecommend,
       agentCanStartChatAfterApproval: body.agentCanStartChatAfterApproval,
     });
   }

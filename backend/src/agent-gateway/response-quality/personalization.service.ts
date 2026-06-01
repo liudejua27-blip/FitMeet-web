@@ -42,9 +42,11 @@ export class PersonalizationService {
       typeof input.distanceKm === 'number' && Number.isFinite(input.distanceKm)
         ? `${input.distanceKm.toFixed(1)} 公里`
         : '';
-    if (time && place) return `${time}、${place}这个条件已经比较具体，可以先筛掉时间或区域不合适的人。`;
+    if (time && place)
+      return `${time}、${place}这个条件已经比较具体，可以先筛掉时间或区域不合适的人。`;
     if (time) return `${time}这个时间点比较明确，适合先看可约时间匹配的人。`;
-    if (place || distance) return `${place || distance}附近更适合从公共场所的轻量见面开始。`;
+    if (place || distance)
+      return `${place || distance}附近更适合从公共场所的轻量见面开始。`;
     return '现在更适合先用低压力方式开场，再根据回复决定是否约见。';
   }
 
@@ -62,16 +64,21 @@ export class PersonalizationService {
     const behavior = this.record(signals.behaviorSignals);
     const city = cleanDisplayText(identity.city, '');
     const nearbyArea = cleanDisplayText(identity.nearbyArea, '');
-    const availableTimes = this.valueText(lifestyle.availableTimes ?? lifestyle.weekendAvailability);
+    const availableTimes = this.valueText(
+      lifestyle.availableTimes ?? lifestyle.weekendAvailability,
+    );
     const sports = this.valueText(fitness.sportsPreferences);
     const socialStyle = cleanDisplayText(social.preferredSocialStyle, '');
     const behaviorInsights = Array.isArray(behavior.insights)
-      ? behavior.insights.map((item) => cleanDisplayText(item, '')).filter(Boolean)
+      ? behavior.insights
+          .map((item) => cleanDisplayText(item, ''))
+          .filter(Boolean)
       : [];
     if (behaviorInsights.length) output.push(...behaviorInsights.slice(0, 3));
     if (availableTimes) output.push(`更适合${availableTimes}的安排`);
     if (sports) output.push(`偏好${sports}`);
-    if (city || nearbyArea) output.push(`更容易接受${nearbyArea || city}附近的人`);
+    if (city || nearbyArea)
+      output.push(`更容易接受${nearbyArea || city}附近的人`);
     if (socialStyle) output.push(`社交节奏偏${socialStyle}`);
     output.push('第一次见面优先公共场所');
     return output.slice(0, 5);
@@ -85,9 +92,13 @@ export class PersonalizationService {
 
   private valueText(value: unknown): string {
     if (Array.isArray(value)) {
-      return value.map((item) => cleanDisplayText(item, '')).filter(Boolean).join('、');
+      return value
+        .map((item) => cleanDisplayText(item, ''))
+        .filter(Boolean)
+        .join('、');
     }
-    if (this.record(value).value) return this.valueText(this.record(value).value);
+    if (this.record(value).value)
+      return this.valueText(this.record(value).value);
     return cleanDisplayText(value, '');
   }
 }

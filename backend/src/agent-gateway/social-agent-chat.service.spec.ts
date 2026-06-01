@@ -48,11 +48,11 @@ function makeHarness(options: Record<string, unknown> = {}) {
   let latestTask: AgentTask | null = null;
   const taskRepo = {
     create: jest.fn((input) => input),
-    findOne: jest.fn(async () => latestTask),
-    save: jest.fn(async (input) => {
+    findOne: jest.fn(() => Promise.resolve(latestTask)),
+    save: jest.fn((input) => {
       if (!input.id) input.id = 101;
       latestTask = input as AgentTask;
-      return input;
+      return Promise.resolve(input);
     }),
   };
   const eventRepo = {
@@ -63,17 +63,17 @@ function makeHarness(options: Record<string, unknown> = {}) {
       createdAt: new Date(savedEvents.length),
       ...input,
     })),
-    save: jest.fn(async (input) => {
+    save: jest.fn((input) => {
       savedEvents.push(input);
-      return input;
+      return Promise.resolve(input);
     }),
-    find: jest.fn(async () => savedEvents),
+    find: jest.fn(() => Promise.resolve(savedEvents)),
   };
   const connectionRepo = {
     findOne: jest.fn().mockResolvedValue(null),
   };
   const planner = {
-    planExistingTask: jest.fn(async (task: AgentTask) => {
+    planExistingTask: jest.fn((task: AgentTask) => {
       task.plan = [
         {
           id: 'search',
@@ -81,17 +81,17 @@ function makeHarness(options: Record<string, unknown> = {}) {
           status: 'planned',
         },
       ];
-      return {
+      return Promise.resolve({
         taskId: task.id,
         permissionMode: task.permissionMode,
         allowedActions: [SocialAgentAction.SearchProfiles],
         plan: task.plan,
         source: 'fallback',
         fallbackReason: 'DEEPSEEK_API_KEY missing',
-      };
+      });
     }),
-    replanTask: jest.fn(
-      async (taskId: number, options: Record<string, unknown>) => ({
+    replanTask: jest.fn((taskId: number, options: Record<string, unknown>) =>
+      Promise.resolve({
         taskId,
         permissionMode: AgentTaskPermissionMode.Confirm,
         allowedActions: [SocialAgentAction.SearchProfiles],
@@ -115,24 +115,24 @@ function makeHarness(options: Record<string, unknown> = {}) {
     ),
   };
   const executor = {
-    resolveCandidateTargetUser: jest.fn(
-      async (input: Record<string, unknown>) => {
-        const candidate =
-          typeof input.candidate === 'object' && input.candidate !== null
-            ? (input.candidate as Record<string, unknown>)
-            : {};
-        return Number(
+    resolveCandidateTargetUser: jest.fn((input: Record<string, unknown>) => {
+      const candidate =
+        typeof input.candidate === 'object' && input.candidate !== null
+          ? (input.candidate as Record<string, unknown>)
+          : {};
+      return Promise.resolve(
+        Number(
           input.targetUserId ??
             input.candidateUserId ??
             input.userId ??
             candidate.targetUserId ??
             candidate.candidateUserId ??
             candidate.userId,
-        );
-      },
-    ),
+        ),
+      );
+    }),
     executeToolAction: jest.fn(
-      async (
+      (
         _taskId: number,
         toolName: SocialAgentToolName,
         input: Record<string, unknown>,
@@ -141,7 +141,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
           toolName === SocialAgentToolName.CreateSocialRequest &&
           input.mode === 'ai_draft'
         ) {
-          return {
+          return Promise.resolve({
             id: 'action_create_social_request_draft_1',
             toolName,
             status: 'succeeded',
@@ -161,7 +161,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
               profileUsed: { city: '青岛' },
             },
             error: null,
-          };
+          });
         }
         if (
           toolName === SocialAgentToolName.CreateSocialRequest &&
@@ -320,9 +320,8 @@ function makeHarness(options: Record<string, unknown> = {}) {
     createAgentInboxEvent: jest.fn().mockResolvedValue({ id: 'inbox-event-1' }),
   };
   const approvals = {
-    create: jest
-      .fn()
-      .mockImplementation(async (input: Record<string, unknown>) => ({
+    create: jest.fn().mockImplementation((input: Record<string, unknown>) =>
+      Promise.resolve({
         id: 9001,
         type: input.type,
         actionType: input.actionType ?? input.type,
@@ -330,8 +329,9 @@ function makeHarness(options: Record<string, unknown> = {}) {
         riskLevel: input.riskLevel,
         payload: input.payload,
         expiresAt: new Date(Date.now() + 60_000),
-      })),
-      getPendingForTask: jest.fn().mockResolvedValue([]),
+      }),
+    ),
+    getPendingForTask: jest.fn().mockResolvedValue([]),
   };
   const publicIntentRepo = {
     createQueryBuilder: jest.fn().mockReturnValue({
@@ -522,16 +522,17 @@ describe('SocialAgentChatService', () => {
     const originalFetch = global.fetch;
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        choices: [
-          {
-            message: {
-              content:
-                '你说得对，普通问题应该由大模型回答。我可以解释 FitMeet 的画像、匹配和社交偏好问题。',
+      json: () =>
+        Promise.resolve({
+          choices: [
+            {
+              message: {
+                content:
+                  '你说得对，普通问题应该由大模型回答。我可以解释 FitMeet 的画像、匹配和社交偏好问题。',
+              },
             },
-          },
-        ],
-      }),
+          ],
+        }),
     });
     global.fetch = fetchMock as never;
     config.get.mockImplementation((key: string) => {
@@ -559,8 +560,9 @@ describe('SocialAgentChatService', () => {
       expect(result.assistantMessage).toContain('大模型回答');
       expect(result.assistantMessage).not.toContain('等你明确说要找人');
       expect(
-        JSON.parse((fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}')
-          .model,
+        JSON.parse(
+          (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
+        ).model,
       ).toBe('deepseek-chat');
       expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
     } finally {
@@ -573,16 +575,17 @@ describe('SocialAgentChatService', () => {
     const originalFetch = global.fetch;
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        choices: [
-          {
-            message: {
-              content:
-                '人物画像是 FitMeet 用来理解城市、兴趣、可约时间和社交边界的偏好模型。',
+      json: () =>
+        Promise.resolve({
+          choices: [
+            {
+              message: {
+                content:
+                  '人物画像是 FitMeet 用来理解城市、兴趣、可约时间和社交边界的偏好模型。',
+              },
             },
-          },
-        ],
-      }),
+          ],
+        }),
     });
     global.fetch = fetchMock as never;
     config.get.mockImplementation((key: string) => {
@@ -609,8 +612,9 @@ describe('SocialAgentChatService', () => {
       });
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(
-        JSON.parse((fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}')
-          .model,
+        JSON.parse(
+          (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
+        ).model,
       ).toBe('deepseek-chat');
       expect(result.assistantMessage).toBe(
         '人物画像是 FitMeet 用来理解城市、兴趣、可约时间和社交边界的偏好模型。',
@@ -628,16 +632,17 @@ describe('SocialAgentChatService', () => {
     const originalFetch = global.fetch;
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        choices: [
-          {
-            message: {
-              content:
-                '当然可以，我们可以先聊你的运动习惯，再慢慢整理成适合匹配的偏好。',
+      json: () =>
+        Promise.resolve({
+          choices: [
+            {
+              message: {
+                content:
+                  '当然可以，我们可以先聊你的运动习惯，再慢慢整理成适合匹配的偏好。',
+              },
             },
-          },
-        ],
-      }),
+          ],
+        }),
     });
     global.fetch = fetchMock as never;
     config.get.mockImplementation((key: string) => {
@@ -661,8 +666,9 @@ describe('SocialAgentChatService', () => {
       });
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(
-        JSON.parse((fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}')
-          .model,
+        JSON.parse(
+          (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
+        ).model,
       ).toBe('deepseek-chat');
       expect(result.assistantMessage).toContain('运动习惯');
       expect(result.assistantMessage).not.toContain('等你明确说要找人');
@@ -677,19 +683,20 @@ describe('SocialAgentChatService', () => {
     const originalFetch = global.fetch;
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify({
-                city: '青岛',
-                school: '青岛大学',
-                mbti: 'INFP',
-              }),
+      json: () =>
+        Promise.resolve({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  city: '青岛',
+                  school: '青岛大学',
+                  mbti: 'INFP',
+                }),
+              },
             },
-          },
-        ],
-      }),
+          ],
+        }),
     });
     global.fetch = fetchMock as never;
     config.get.mockImplementation((key: string) => {
@@ -718,8 +725,9 @@ describe('SocialAgentChatService', () => {
         mbti: 'INFP',
       });
       expect(
-        JSON.parse((fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}')
-          .model,
+        JSON.parse(
+          (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
+        ).model,
       ).toBe('deepseek-v4-flash');
     } finally {
       global.fetch = originalFetch;
@@ -728,9 +736,11 @@ describe('SocialAgentChatService', () => {
 
   it('executes safe read tools planned by Agent Brain before final reply', async () => {
     const finalResponses = {
+      // eslint-disable-next-line @typescript-eslint/require-await
       generate: jest.fn(async () => '我看了你的画像，现在还缺可约时间。'),
     };
     const brain = {
+      // eslint-disable-next-line @typescript-eslint/require-await
       planTurn: jest.fn(async ({ route }: Record<string, unknown>) => ({
         route: {
           ...(route as Record<string, unknown>),
@@ -759,9 +769,7 @@ describe('SocialAgentChatService', () => {
       message: '我的画像现在缺什么？',
     });
 
-    expect(result.assistantMessage).toBe(
-      '我看了你的画像，现在还缺可约时间。',
-    );
+    expect(result.assistantMessage).toBe('我看了你的画像，现在还缺可约时间。');
     expect(executor.executeToolAction).toHaveBeenCalledWith(
       101,
       SocialAgentToolName.GetMyProfile,
@@ -783,7 +791,9 @@ describe('SocialAgentChatService', () => {
   it('uses a relevant fallback when direct DeepSeek chat fails', async () => {
     const { service, config } = makeHarness();
     const originalFetch = global.fetch;
-    global.fetch = jest.fn().mockRejectedValue(new Error('network down')) as never;
+    global.fetch = jest
+      .fn()
+      .mockRejectedValue(new Error('network down')) as never;
     config.get.mockImplementation((key: string) => {
       if (key === 'DEEPSEEK_API_KEY') return 'test-key';
       if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
@@ -830,7 +840,7 @@ describe('SocialAgentChatService', () => {
   });
 
   it('answers workflow help without returning persona definition or searching', async () => {
-    const { service, executor, taskRepo } = makeHarness();
+    const { service, executor } = makeHarness();
 
     const result = await service.routeMessage(7, {
       message: '我是先完成人物画像然后再进行约练？还是直接发布需求就可以',
@@ -1034,7 +1044,10 @@ describe('SocialAgentChatService', () => {
     });
     expect(snapshot.messages).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ role: 'user', content: '你好，你能做什么？' }),
+        expect.objectContaining({
+          role: 'user',
+          content: '你好，你能做什么？',
+        }),
         expect.objectContaining({ role: 'assistant' }),
       ]),
     );
@@ -1099,10 +1112,12 @@ describe('SocialAgentChatService', () => {
 
   it('blocks timeline reads for tasks owned by another user', async () => {
     const { service, taskRepo } = makeHarness();
-    taskRepo.findOne.mockImplementation(async (options: { where?: { ownerUserId?: number } }) => {
-      if (options.where?.ownerUserId !== 7) return null;
-      return makeTask();
-    });
+    taskRepo.findOne.mockImplementation(
+      (options: { where?: { ownerUserId?: number } }) => {
+        if (options.where?.ownerUserId !== 7) return null;
+        return Promise.resolve(makeTask());
+      },
+    );
 
     await expect(service.getTaskTimeline(8, 101)).rejects.toThrow(
       'Social agent task 101 not found',
@@ -1182,11 +1197,13 @@ describe('SocialAgentChatService', () => {
 
   it('keeps safety-boundary replies successful when context event enum is missing', async () => {
     const { service, eventRepo } = makeHarness();
-    eventRepo.save.mockImplementation(async (input) => {
+    eventRepo.save.mockImplementation((input) => {
       if (input.eventType === AgentTaskEventType.SocialAgentContextAppended) {
-        throw new Error('invalid input value for enum agent_task_event_type_enum');
+        throw new Error(
+          'invalid input value for enum agent_task_event_type_enum',
+        );
       }
-      return input;
+      return Promise.resolve(input);
     });
 
     const result = await service.routeMessage(7, {
@@ -1202,7 +1219,8 @@ describe('SocialAgentChatService', () => {
     const { service } = makeHarness();
 
     const result = await service.routeMessage(7, {
-      message: '我想找青岛周末一起喝咖啡健身交流的人，只要公开地点，先不要发送消息',
+      message:
+        '我想找青岛周末一起喝咖啡健身交流的人，只要公开地点，先不要发送消息',
     });
 
     expect(result).toMatchObject({
@@ -1808,7 +1826,9 @@ describe('SocialAgentChatService', () => {
         message: '你好，你能做什么？',
       });
       expect(a.shouldQueueRun).toBe(false);
-      expect(executor.executeToolAction).toHaveBeenCalledTimes(toolCallsBeforeChat);
+      expect(executor.executeToolAction).toHaveBeenCalledTimes(
+        toolCallsBeforeChat,
+      );
       expect(a.assistantMessage).toContain('完善画像');
       expect(a.assistantMessage).toContain('推荐候选');
       expect(a.assistantMessage).toContain('发起约练');
@@ -1825,7 +1845,9 @@ describe('SocialAgentChatService', () => {
         profileUpdated: false,
       });
       expect(b.assistantMessage).toContain('人物画像');
-      expect(executor.executeToolAction).toHaveBeenCalledTimes(toolCallsBeforeChat);
+      expect(executor.executeToolAction).toHaveBeenCalledTimes(
+        toolCallsBeforeChat,
+      );
 
       const c = await service.routeMessage(7, {
         message: '我是先完善人物画像再约练，还是直接发布需求就可以？',
@@ -1856,7 +1878,9 @@ describe('SocialAgentChatService', () => {
       expect(d.assistantMessage).toContain('白羊座');
       expect(d.assistantMessage).toContain('青岛大学');
       expect(d.assistantMessage).toContain('同校的女生');
-      expect(executor.executeToolAction).toHaveBeenCalledTimes(toolCallsBeforeChat);
+      expect(executor.executeToolAction).toHaveBeenCalledTimes(
+        toolCallsBeforeChat,
+      );
 
       const e = await service.routeMessage(7, {
         message: '不是不是，上面是我的人物画像，你帮我完善。',
@@ -1866,7 +1890,9 @@ describe('SocialAgentChatService', () => {
       expect(e.shouldSearch).toBe(false);
       expect(e.assistantMessage).toContain('刚才那段是你的画像信息');
       expect(e.assistantMessage).not.toContain('人物画像是 FitMeet');
-      expect(executor.executeToolAction).toHaveBeenCalledTimes(toolCallsBeforeChat);
+      expect(executor.executeToolAction).toHaveBeenCalledTimes(
+        toolCallsBeforeChat,
+      );
 
       const f = await service.routeMessage(7, {
         message: '对，你调用工具去帮我完善 AI 画像。',

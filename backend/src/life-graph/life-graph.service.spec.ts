@@ -9,6 +9,7 @@ import {
   LifeGraphFieldCategory,
   LifeGraphFieldSource,
 } from './life-graph.enums';
+/* eslint-disable @typescript-eslint/require-await */
 import { LifeGraphService } from './life-graph.service';
 
 const now = new Date('2026-05-26T01:00:00.000Z');
@@ -53,11 +54,13 @@ function repo<T extends Record<string, unknown>>(initialRows: T[] = []) {
         order?: Record<string, string>;
         take?: number;
       } = {}) =>
-        rows.filter((row) =>
-          Object.entries(where ?? {}).every(
-            ([key, value]) => (row as Record<string, unknown>)[key] === value,
-          ),
-        ).slice(0, take),
+        rows
+          .filter((row) =>
+            Object.entries(where ?? {}).every(
+              ([key, value]) => (row as Record<string, unknown>)[key] === value,
+            ),
+          )
+          .slice(0, take),
     ),
     update: jest.fn(
       async (
@@ -121,7 +124,9 @@ function socialProfile(overrides: Partial<UserSocialProfile> = {}) {
   } as UserSocialProfile;
 }
 
-function makeService(initialSocialProfile: UserSocialProfile | null = socialProfile()) {
+function makeService(
+  initialSocialProfile: UserSocialProfile | null = socialProfile(),
+) {
   const profiles = repo<LifeGraphProfile & Record<string, unknown>>();
   const fields = repo<LifeGraphField & Record<string, unknown>>();
   const auditLogs = repo<LifeGraphAuditLog & Record<string, unknown>>();
@@ -307,11 +312,19 @@ describe('LifeGraphService', () => {
 
     await service.confirmUpdate(1, {
       proposalId: proposal.proposalId,
-      fieldIds: [proposal.proposedFields.find((field) => field.fieldKey === 'sportsPreferences')!.proposalFieldId],
+      fieldIds: [
+        proposal.proposedFields.find(
+          (field) => field.fieldKey === 'sportsPreferences',
+        )!.proposalFieldId,
+      ],
     });
     await service.rejectUpdate(1, {
       proposalId: proposal.proposalId,
-      fieldIds: [proposal.proposedFields.find((field) => field.fieldKey === 'availableTimes')!.proposalFieldId],
+      fieldIds: [
+        proposal.proposedFields.find(
+          (field) => field.fieldKey === 'availableTimes',
+        )!.proposalFieldId,
+      ],
       reason: '暂时不保存时间',
     });
 
@@ -470,9 +483,7 @@ describe('LifeGraphService', () => {
 
     expect(beforeRevoke.identitySignals.city).toBe('青岛');
     expect(beforeRevoke.fitnessSignals.sportsPreferences).toEqual(['跑步']);
-    expect(
-      beforeRevoke.confidence.byField['identity.city'],
-    ).toBeGreaterThan(
+    expect(beforeRevoke.confidence.byField['identity.city']).toBeGreaterThan(
       beforeRevoke.confidence.byField['fitness_activity.sportsPreferences'],
     );
     expect(afterRevoke.lifestyleSignals.availableTimes).toBeUndefined();
@@ -671,7 +682,11 @@ describe('LifeGraphService', () => {
   it('logs audit write failures without leaking field values', async () => {
     const { service, auditLogs } = makeService(null);
     const logger = jest
-      .spyOn((service as never as { logger: { error: (message: string) => void } }).logger, 'error')
+      .spyOn(
+        (service as never as { logger: { error: (message: string) => void } })
+          .logger,
+        'error',
+      )
       .mockImplementation(() => undefined);
     auditLogs.save.mockRejectedValueOnce(new Error('database unavailable'));
 

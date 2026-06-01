@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await */
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 
 function makeRouter() {

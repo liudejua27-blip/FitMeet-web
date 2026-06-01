@@ -189,12 +189,21 @@ export class SocialAgentBrainService {
       );
     }
 
-    if (route.intent === 'social_search' || route.intent === 'activity_search') {
+    if (
+      route.intent === 'social_search' ||
+      route.intent === 'activity_search'
+    ) {
       return this.decision(route, 'search', notes, false, route.shouldSearch);
     }
 
     if (route.intent === 'action_request') {
-      return this.decision(route, 'action', notes, false, route.shouldExecuteAction);
+      return this.decision(
+        route,
+        'action',
+        notes,
+        false,
+        route.shouldExecuteAction,
+      );
     }
 
     return this.decision(route, 'answer', notes);
@@ -235,7 +244,9 @@ export class SocialAgentBrainService {
 
   private shouldUseLlmPlanner(message: string): boolean {
     if (!cleanDisplayText(message, '').trim()) return false;
-    if (this.config?.get<string>('SOCIAL_AGENT_BRAIN_LLM_PLANNER') === 'false') {
+    if (
+      this.config?.get<string>('SOCIAL_AGENT_BRAIN_LLM_PLANNER') === 'false'
+    ) {
       return false;
     }
     return Boolean(this.config?.get<string>('DEEPSEEK_API_KEY'));
@@ -464,7 +475,8 @@ export class SocialAgentBrainService {
       },
       {
         name: 'get_candidate_detail',
-        description: 'Read details and match reasons for one selected candidate.',
+        description:
+          'Read details and match reasons for one selected candidate.',
         whenToUse:
           'Use when the user asks why a candidate was recommended or wants more detail.',
         requiresConfirmation: false,
@@ -480,18 +492,20 @@ export class SocialAgentBrainService {
   ): SocialAgentBrainTurnDecision {
     const ruleSafety = this.reviewTurn(input);
     const notes = [
-      ...new Set([
-        ...fallback.notes,
-        ...ruleSafety.notes,
-        'llm_planner_used',
-      ]),
+      ...new Set([...fallback.notes, ...ruleSafety.notes, 'llm_planner_used']),
     ];
-    const userIntent = this.safetyClampIntent(plan.userIntent, ruleSafety.route.intent);
+    const userIntent = this.safetyClampIntent(
+      plan.userIntent,
+      ruleSafety.route.intent,
+    );
     const tools = this.normalizePlannedTools(plan.tools, userIntent);
     const shouldExecuteTool = tools.length > 0 && plan.shouldCallTool;
     const route = this.overrideRoute(input.route, userIntent, {
       confidence: Math.max(input.route.confidence, 0.89),
-      replyStrategy: this.replyStrategyForIntent(userIntent, input.route.replyStrategy),
+      replyStrategy: this.replyStrategyForIntent(
+        userIntent,
+        input.route.replyStrategy,
+      ),
       shouldSearch:
         userIntent === 'social_search' || userIntent === 'activity_search',
       shouldUpdateProfile:
@@ -541,28 +555,31 @@ export class SocialAgentBrainService {
     needUserConfirmation: boolean,
   ): SocialAgentBrainTurnDecision['conversationMode'] {
     if (needUserConfirmation || intent === 'unknown') return 'clarify';
-    if (tools.some((tool) => tool.name === 'update_profile_from_agent_context')) {
+    if (
+      tools.some((tool) => tool.name === 'update_profile_from_agent_context')
+    ) {
       return 'profile_update_tool';
     }
     if (intent === 'workflow_help') return 'workflow_help';
     if (intent === 'profile_enrichment') return 'profile_enrichment';
     if (intent === 'profile_enrichment_request') return 'profile_enrichment';
     if (intent === 'correction_or_clarification') return 'profile_correction';
-    if (intent === 'social_search' || intent === 'activity_search') return 'search';
+    if (intent === 'social_search' || intent === 'activity_search')
+      return 'search';
     if (intent === 'action_request') return 'action';
     return 'answer';
   }
 
-  private normalizeLlmPlan(parsed: Record<string, unknown>): SocialAgentLlmPlan {
+  private normalizeLlmPlan(
+    parsed: Record<string, unknown>,
+  ): SocialAgentLlmPlan {
     const rawIntent = parsed.intent ?? parsed.userIntent;
     const rawTools = Array.isArray(parsed.toolCalls)
       ? parsed.toolCalls
       : Array.isArray(parsed.tools)
         ? parsed.tools
         : [];
-    const userIntent = this.allowedIntent(rawIntent)
-      ? rawIntent
-      : 'unknown';
+    const userIntent = this.allowedIntent(rawIntent) ? rawIntent : 'unknown';
     return {
       userIntent,
       reason: cleanDisplayText(parsed.reason, ''),
@@ -628,9 +645,12 @@ export class SocialAgentBrainService {
         ) {
           return true;
         }
-        if (tool.name === 'search_real_candidates') return intent === 'social_search';
-        if (tool.name === 'search_public_intents') return intent === 'activity_search';
-        if (tool.name === 'create_social_request') return intent === 'social_search';
+        if (tool.name === 'search_real_candidates')
+          return intent === 'social_search';
+        if (tool.name === 'search_public_intents')
+          return intent === 'activity_search';
+        if (tool.name === 'create_social_request')
+          return intent === 'social_search';
         if (
           tool.name === 'send_message_to_candidate' ||
           tool.name === 'connect_candidate' ||
@@ -696,7 +716,8 @@ export class SocialAgentBrainService {
   }
 
   private plannerTimeoutMs(useCase?: 'planner'): number {
-    if (useCase && this.modelRouter) return this.modelRouter.getTimeout(useCase);
+    if (useCase && this.modelRouter)
+      return this.modelRouter.getTimeout(useCase);
     const configured = Number(
       this.config?.get<string>('SOCIAL_AGENT_BRAIN_LLM_TIMEOUT_MS') ?? '5000',
     );
@@ -745,15 +766,15 @@ export class SocialAgentBrainService {
       replyStrategy,
       shouldSearch:
         intent === 'social_search' || intent === 'activity_search'
-          ? overrides.shouldSearch ?? route.shouldSearch
+          ? (overrides.shouldSearch ?? route.shouldSearch)
           : false,
       shouldReplan:
         intent === 'social_search' || intent === 'activity_search'
-          ? overrides.shouldReplan ?? route.shouldReplan
+          ? (overrides.shouldReplan ?? route.shouldReplan)
           : false,
       shouldExecuteAction:
         intent === 'action_request'
-          ? overrides.shouldExecuteAction ?? route.shouldExecuteAction
+          ? (overrides.shouldExecuteAction ?? route.shouldExecuteAction)
           : false,
     };
   }
@@ -798,7 +819,11 @@ export class SocialAgentBrainService {
   }
 
   private isWorkflowQuestion(message: string): boolean {
-    if (/(帮我找|给我找|搜索|推荐.*人|找.*搭子|找.*候选|找.*女生|找.*男生)/i.test(message)) {
+    if (
+      /(帮我找|给我找|搜索|推荐.*人|找.*搭子|找.*候选|找.*女生|找.*男生)/i.test(
+        message,
+      )
+    ) {
       return false;
     }
     return /(先.*画像.*约练|先.*完善.*画像|直接发布需求|怎么开始约练|下一步|需要怎么做|怎么做|流程|新用户.*先做什么)/i.test(
@@ -819,6 +844,11 @@ export class SocialAgentBrainService {
       /(?:喜欢|爱好).{1,30}/i,
       /(?:周末|下午|晚上|工作日|有空)/i,
     ];
-    return signals.reduce((count, pattern) => count + (pattern.test(message) ? 1 : 0), 0) >= 2;
+    return (
+      signals.reduce(
+        (count, pattern) => count + (pattern.test(message) ? 1 : 0),
+        0,
+      ) >= 2
+    );
   }
 }

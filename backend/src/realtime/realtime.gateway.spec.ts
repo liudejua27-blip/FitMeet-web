@@ -14,7 +14,9 @@ function socket(token?: string) {
     },
     join: jest.fn((room: string) => joined.push(room)),
     leave: jest.fn(),
-    emit: jest.fn((event: string, payload: unknown) => emitted.push({ event, payload })),
+    emit: jest.fn((event: string, payload: unknown) =>
+      emitted.push({ event, payload }),
+    ),
     disconnect: jest.fn(),
     joined,
     emitted,

@@ -19,7 +19,6 @@ import {
 import {
   AgentConnection,
   AgentPermissionLevel,
-  KnownAgent,
 } from '../agent-gateway/entities/agent-connection.entity';
 import { AIService } from '../ai/ai.service';
 import type { SocialRequestCard } from '../ai/ai.service';
@@ -98,7 +97,7 @@ export class SocialRequestsService {
     // Decide source
     const source = agent
       ? this.agentSource(agent)
-      : dto.source ?? SocialRequestSource.Manual;
+      : (dto.source ?? SocialRequestSource.Manual);
 
     // requireUserConfirmation policy
     let requireUserConfirmation = dto.requireUserConfirmation ?? true;
@@ -274,7 +273,7 @@ export class SocialRequestsService {
       socialProfile?.interestTags && socialProfile.interestTags.length > 0
         ? socialProfile.interestTags.filter(Boolean)
         : Array.isArray(user?.interestTags)
-          ? user!.interestTags.filter(Boolean)
+          ? user.interestTags.filter(Boolean)
           : [];
     const ageRange = socialProfile?.ageRange || '';
     const nearbyArea = socialProfile?.nearbyArea || '';
@@ -353,7 +352,8 @@ export class SocialRequestsService {
   parseNaturalLanguage(rawText: string): CreateSocialRequestDto {
     const text = (rawText || '').toLowerCase();
     let type: SocialRequestType = SocialRequestType.Custom;
-    if (/(跑步|run|jogging)/.test(text)) type = SocialRequestType.RunningPartner;
+    if (/(跑步|run|jogging)/.test(text))
+      type = SocialRequestType.RunningPartner;
     else if (/(健身|gym|workout|训练)/.test(text))
       type = SocialRequestType.FitnessPartner;
     else if (/(遛狗|dog\s*walk|walking the dog)/.test(text))
@@ -524,10 +524,10 @@ export class SocialRequestsService {
   }
 
   private agentSource(agent: AgentConnection): SocialRequestSource {
-    switch (agent.agentName) {
-      case KnownAgent.OpenClaw:
+    switch (String(agent.agentName)) {
+      case 'openclaw':
         return SocialRequestSource.OpenClaw;
-      case KnownAgent.Codex:
+      case 'codex':
         return SocialRequestSource.Codex;
       default:
         // Claude isn't in KnownAgent enum yet; agents identifying themselves
@@ -644,9 +644,7 @@ export class SocialRequestsService {
   ) {
     if (agent) {
       if (item.userId !== agent.userId) {
-        throw new ForbiddenException(
-          'Agent is not authorized for this user',
-        );
+        throw new ForbiddenException('Agent is not authorized for this user');
       }
       return;
     }

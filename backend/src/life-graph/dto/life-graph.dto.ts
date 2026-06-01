@@ -131,8 +131,8 @@ export class LifeGraphAuditLogDto {
   userId: number;
   fieldKey: string;
   category: LifeGraphFieldCategory;
-  oldValue: unknown | null;
-  newValue: unknown | null;
+  oldValue: unknown;
+  newValue: unknown;
   source: LifeGraphFieldSource;
   confidence: number | null;
   action: LifeGraphAuditAction;
@@ -151,9 +151,14 @@ export class LifeGraphProposedFieldDto {
   confidence: number;
   reason: string;
   requiresUserConfirmation: boolean;
-  status: 'proposed' | 'confirmed' | 'rejected' | 'conflict' | 'revoked_conflict';
+  status:
+    | 'proposed'
+    | 'confirmed'
+    | 'rejected'
+    | 'conflict'
+    | 'revoked_conflict';
   conflict: boolean;
-  oldValue: unknown | null;
+  oldValue: unknown;
 }
 
 export class LifeGraphProposalDto {

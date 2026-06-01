@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await */
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import {
   FitMeetAgentRunStatus,

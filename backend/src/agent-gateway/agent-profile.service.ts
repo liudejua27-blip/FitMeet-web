@@ -7,7 +7,10 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
-import { CreateAgentProfileDto, UpdateAgentProfileDto } from './dto/agent-profile.dto';
+import {
+  CreateAgentProfileDto,
+  UpdateAgentProfileDto,
+} from './dto/agent-profile.dto';
 import { AgentConnection } from './entities/agent-connection.entity';
 import {
   AgentProfile,
@@ -30,8 +33,9 @@ export class AgentProfileService {
       .createQueryBuilder('profile')
       .where(
         new Brackets((qb) => {
-          qb.where('profile.ownerUserId = :requestUserId', { requestUserId })
-            .orWhere('profile.ownerUserId IS NULL');
+          qb.where('profile.ownerUserId = :requestUserId', {
+            requestUserId,
+          }).orWhere('profile.ownerUserId IS NULL');
         }),
       )
       .orderBy('profile.ownerUserId', 'DESC', 'NULLS LAST')
@@ -116,8 +120,10 @@ export class AgentProfileService {
       const term = `%${opts.q.trim().toLowerCase()}%`;
       qb.andWhere(
         new Brackets((b) => {
-          b.where('LOWER(profile.agentName) LIKE :term', { term })
-            .orWhere('LOWER(COALESCE(profile.bio, \'\')) LIKE :term', { term });
+          b.where('LOWER(profile.agentName) LIKE :term', { term }).orWhere(
+            "LOWER(COALESCE(profile.bio, '')) LIKE :term",
+            { term },
+          );
         }),
       );
     }

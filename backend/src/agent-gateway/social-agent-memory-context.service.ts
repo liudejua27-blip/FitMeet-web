@@ -78,8 +78,8 @@ export class SocialAgentMemoryContextService {
       ? shortTerm.candidates
       : [];
     const displayedCandidates = Array.isArray(shortTerm.displayedCandidates)
-      ? shortTerm.displayedCandidates.filter((item): item is Record<string, unknown> =>
-          this.isRecord(item),
+      ? shortTerm.displayedCandidates.filter(
+          (item): item is Record<string, unknown> => this.isRecord(item),
         )
       : candidateList.filter((item): item is Record<string, unknown> =>
           this.isRecord(item),
@@ -172,7 +172,9 @@ export class SocialAgentMemoryContextService {
       : [];
   }
 
-  private shouldRecallConversation(turns: Array<Record<string, unknown>>): boolean {
+  private shouldRecallConversation(
+    turns: Array<Record<string, unknown>>,
+  ): boolean {
     const latest = cleanDisplayText(turns.at(-1)?.text, '');
     return /(刚才|上面|之前|不是不是|我的意思|你理解错)/i.test(latest);
   }

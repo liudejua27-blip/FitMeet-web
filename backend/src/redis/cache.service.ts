@@ -10,7 +10,7 @@ export class CacheService {
   /**
    * 缓存用户信息（1小时）
    */
-  async cacheUser(userId: number, userData: any): Promise<void> {
+  async cacheUser(userId: number, userData: unknown): Promise<void> {
     try {
       const redis = this.redisService.getClient();
       await redis.setex(`user:${userId}`, 3600, JSON.stringify(userData));
@@ -37,7 +37,7 @@ export class CacheService {
   /**
    * 缓存热门帖子列表（5分钟）
    */
-  async cacheHotPosts(posts: any[]): Promise<void> {
+  async cacheHotPosts(posts: unknown[]): Promise<void> {
     try {
       const redis = this.redisService.getClient();
       await redis.setex('posts:hot', 300, JSON.stringify(posts));
@@ -50,7 +50,7 @@ export class CacheService {
   /**
    * 获取热门帖子
    */
-  async getHotPosts(): Promise<any[] | null> {
+  async getHotPosts(): Promise<unknown[] | null> {
     try {
       const redis = this.redisService.getClient();
       const data = await redis.get('posts:hot');
@@ -64,7 +64,7 @@ export class CacheService {
   /**
    * 缓存帖子详情（10分钟）
    */
-  async cachePost(postId: number, postData: any): Promise<void> {
+  async cachePost(postId: number, postData: unknown): Promise<void> {
     try {
       const redis = this.redisService.getClient();
       await redis.setex(`post:${postId}`, 600, JSON.stringify(postData));
@@ -122,7 +122,7 @@ export class CacheService {
    */
   async cacheSession(
     sessionId: string,
-    data: any,
+    data: unknown,
     ttl: number = 86400,
   ): Promise<void> {
     try {
@@ -162,7 +162,7 @@ export class CacheService {
   /**
    * 缓存活动列表（3分钟）
    */
-  async cacheMeets(type: string, meets: any[]): Promise<void> {
+  async cacheMeets(type: string, meets: unknown[]): Promise<void> {
     try {
       const redis = this.redisService.getClient();
       const key = type === 'all' ? 'meets:all' : `meets:${type}`;
@@ -176,12 +176,12 @@ export class CacheService {
   /**
    * 获取缓存的活动列表
    */
-  async getMeets(type: string): Promise<any[] | null> {
+  async getMeets(type: string): Promise<unknown[] | null> {
     try {
       const redis = this.redisService.getClient();
       const key = type === 'all' ? 'meets:all' : `meets:${type}`;
       const data = await redis.get(key);
-      return data ? JSON.parse(data) : null;
+      return data ? this.parseJson<unknown[]>(data) : null;
     } catch (error) {
       this.logger.error(`Failed to get cached meets for type ${type}:`, error);
       return null;

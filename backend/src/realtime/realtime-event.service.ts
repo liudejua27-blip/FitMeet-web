@@ -30,7 +30,8 @@ export class RealtimeEventService {
     const envelope = this.buildEnvelope(input);
 
     try {
-      const online = this.gateway?.emitEnvelope(envelope, input.rooms ?? []) ?? false;
+      const online =
+        this.gateway?.emitEnvelope(envelope, input.rooms ?? []) ?? false;
       if (!online && input.notification) {
         void this.writeOfflineNotification(envelope, input.notification);
       }
@@ -81,7 +82,8 @@ export class RealtimeEventService {
     return {
       adapter: 'socket.io-redis-adapter',
       attachPoint: 'RealtimeGateway.afterInit(server)',
-      broadcast: 'RealtimeEventService emits envelopes to user rooms; Redis adapter fans out rooms across instances.',
+      broadcast:
+        'RealtimeEventService emits envelopes to user rooms; Redis adapter fans out rooms across instances.',
       presence:
         'Use Redis SET realtime:online:{userId} with socket ids and TTL heartbeat; never rely only on one process map.',
     };

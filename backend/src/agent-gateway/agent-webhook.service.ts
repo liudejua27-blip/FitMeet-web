@@ -8,6 +8,7 @@ import {
   AgentActivityLog,
   LoggedAction,
 } from './entities/agent-activity-log.entity';
+import { cleanDisplayText } from '../common/display-text.util';
 
 export interface AgentWebhookPayload {
   event: string;
@@ -42,12 +43,16 @@ export class AgentWebhookService {
       where: { id: agentConnectionId },
     });
     if (!conn?.agentWebhookUrl) {
-      await this.logWebhookEvent(conn?.id ?? agentConnectionId, conn?.userId ?? 0, {
-        event,
-        eventType: 'webhook.skipped',
-        status: 'skipped',
-        reason: conn ? 'no_webhook_url' : 'no_connection',
-      });
+      await this.logWebhookEvent(
+        conn?.id ?? agentConnectionId,
+        conn?.userId ?? 0,
+        {
+          event,
+          eventType: 'webhook.skipped',
+          status: 'skipped',
+          reason: conn ? 'no_webhook_url' : 'no_connection',
+        },
+      );
       return { delivered: false, reason: 'no_webhook_url' as const };
     }
 
@@ -163,7 +168,9 @@ export class AgentWebhookService {
     if (!stable) return `evt_${crypto.randomUUID()}`;
     const digest = crypto
       .createHash('sha256')
-      .update(`${agentConnectionId ?? 'none'}:${event}:${String(stable)}`)
+      .update(
+        `${agentConnectionId ?? 'none'}:${event}:${cleanDisplayText(stable, '')}`,
+      )
       .digest('hex')
       .slice(0, 32);
     return `evt_${digest}`;

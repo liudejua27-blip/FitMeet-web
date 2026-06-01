@@ -24,34 +24,42 @@ export class SocialAgentModelRouterService {
         );
       case 'final_response':
         return (
-          this.firstModel(['AGENT_FINAL_RESPONSE_MODEL', 'DEEPSEEK_CHAT_MODEL']) ??
+          this.firstModel([
+            'AGENT_FINAL_RESPONSE_MODEL',
+            'DEEPSEEK_CHAT_MODEL',
+          ]) ??
           this.chatCompatibleLegacyModel() ??
           'deepseek-chat'
         );
       case 'planner':
-        return this.firstModel([
-          'AGENT_PLANNER_MODEL',
-          'DEEPSEEK_FAST_MODEL',
-          'DEEPSEEK_MODEL',
-        ], 'deepseek-v4-flash') ?? 'deepseek-v4-flash';
+        return (
+          this.firstModel(
+            ['AGENT_PLANNER_MODEL', 'DEEPSEEK_FAST_MODEL', 'DEEPSEEK_MODEL'],
+            'deepseek-v4-flash',
+          ) ?? 'deepseek-v4-flash'
+        );
       case 'profile_extraction':
-        return this.firstModel([
-          'AGENT_EXTRACTOR_MODEL',
-          'DEEPSEEK_FAST_MODEL',
-          'DEEPSEEK_MODEL',
-        ], 'deepseek-v4-flash') ?? 'deepseek-v4-flash';
+        return (
+          this.firstModel(
+            ['AGENT_EXTRACTOR_MODEL', 'DEEPSEEK_FAST_MODEL', 'DEEPSEEK_MODEL'],
+            'deepseek-v4-flash',
+          ) ?? 'deepseek-v4-flash'
+        );
       case 'card_generation':
       case 'candidate_summary':
-        return this.firstModel([
-          'AGENT_CARD_MODEL',
-          'DEEPSEEK_FAST_MODEL',
-          'DEEPSEEK_MODEL',
-        ], 'deepseek-v4-flash') ?? 'deepseek-v4-flash';
+        return (
+          this.firstModel(
+            ['AGENT_CARD_MODEL', 'DEEPSEEK_FAST_MODEL', 'DEEPSEEK_MODEL'],
+            'deepseek-v4-flash',
+          ) ?? 'deepseek-v4-flash'
+        );
       case 'safety_check':
-        return this.firstModel([
-          'DEEPSEEK_FAST_MODEL',
-          'DEEPSEEK_MODEL',
-        ], 'deepseek-v4-flash') ?? 'deepseek-v4-flash';
+        return (
+          this.firstModel(
+            ['DEEPSEEK_FAST_MODEL', 'DEEPSEEK_MODEL'],
+            'deepseek-v4-flash',
+          ) ?? 'deepseek-v4-flash'
+        );
       default:
         return 'deepseek-v4-flash';
     }
@@ -93,7 +101,9 @@ export class SocialAgentModelRouterService {
   }
 
   private chatCompatibleLegacyModel(): string | null {
-    const legacy = this.normalizeModel(this.config.get<string>('DEEPSEEK_MODEL'));
+    const legacy = this.normalizeModel(
+      this.config.get<string>('DEEPSEEK_MODEL'),
+    );
     if (!legacy) return null;
     return /chat/i.test(legacy) ? legacy : null;
   }

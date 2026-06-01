@@ -103,21 +103,30 @@ export interface SocialAgentRagContext {
   userMemorySummary: UserMemorySummaryDoc | null;
 }
 
-const INTENT_KIND_MAP: Record<SocialAgentIntentType, SocialAgentRagDocKind[]> = {
-  casual_chat: [],
-  product_help: [],
-  workflow_help: [],
-  profile_enrichment: ['user_memory_summary'],
-  profile_enrichment_request: ['user_memory_summary'],
-  correction_or_clarification: ['user_memory_summary'],
-  profile_update: ['user_memory_summary'],
-  social_search: ['opening_templates', 'successful_match_cases', 'user_memory_summary'],
-  activity_search: ['activity_sop', 'user_memory_summary'],
-  candidate_followup: ['opening_templates', 'safety_sop', 'successful_match_cases'],
-  action_request: ['safety_sop', 'opening_templates'],
-  safety_or_boundary: ['safety_sop'],
-  unknown: [],
-};
+const INTENT_KIND_MAP: Record<SocialAgentIntentType, SocialAgentRagDocKind[]> =
+  {
+    casual_chat: [],
+    product_help: [],
+    workflow_help: [],
+    profile_enrichment: ['user_memory_summary'],
+    profile_enrichment_request: ['user_memory_summary'],
+    correction_or_clarification: ['user_memory_summary'],
+    profile_update: ['user_memory_summary'],
+    social_search: [
+      'opening_templates',
+      'successful_match_cases',
+      'user_memory_summary',
+    ],
+    activity_search: ['activity_sop', 'user_memory_summary'],
+    candidate_followup: [
+      'opening_templates',
+      'safety_sop',
+      'successful_match_cases',
+    ],
+    action_request: ['safety_sop', 'opening_templates'],
+    safety_or_boundary: ['safety_sop'],
+    unknown: [],
+  };
 
 @Injectable()
 export class SocialAgentRagService {
@@ -217,7 +226,8 @@ export class SocialAgentRagService {
     {
       kind: 'successful_match_cases',
       id: 'case.running.weekly',
-      summary: '两位用户因每周固定晨跑配速接近匹配成功，第三次见面后建立稳定搭子关系。',
+      summary:
+        '两位用户因每周固定晨跑配速接近匹配成功，第三次见面后建立稳定搭子关系。',
       highlights: ['配速匹配', '固定时段', '低压力开场'],
       tags: ['running', 'stable_match'],
     },
@@ -230,9 +240,13 @@ export class SocialAgentRagService {
     },
   ];
 
-  constructor(private readonly longTermMemory: SocialAgentLongTermMemoryService) {}
+  constructor(
+    private readonly longTermMemory: SocialAgentLongTermMemoryService,
+  ) {}
 
-  async retrieve(input: SocialAgentRagRetrievalInput): Promise<SocialAgentRagContext> {
+  async retrieve(
+    input: SocialAgentRagRetrievalInput,
+  ): Promise<SocialAgentRagContext> {
     const kinds = INTENT_KIND_MAP[input.intent] ?? [];
     const context: SocialAgentRagContext = {
       intent: input.intent,
@@ -250,7 +264,11 @@ export class SocialAgentRagService {
     const activityType = (input.activityType ?? '').toLowerCase();
 
     if (kinds.includes('safety_sop')) {
-      context.safetySop = this.filterByTags(this.safetySop, message, activityType).slice(0, limit);
+      context.safetySop = this.filterByTags(
+        this.safetySop,
+        message,
+        activityType,
+      ).slice(0, limit);
     }
     if (kinds.includes('opening_templates')) {
       context.openingTemplates = this.filterByTags(
@@ -260,10 +278,11 @@ export class SocialAgentRagService {
       ).slice(0, limit);
     }
     if (kinds.includes('activity_sop')) {
-      context.activitySop = this.filterByTags(this.activitySop, message, activityType).slice(
-        0,
-        limit,
-      );
+      context.activitySop = this.filterByTags(
+        this.activitySop,
+        message,
+        activityType,
+      ).slice(0, limit);
     }
     if (kinds.includes('successful_match_cases')) {
       context.successfulMatchCases = this.filterByTags(
@@ -276,18 +295,16 @@ export class SocialAgentRagService {
       context.userMemorySummary = await this.buildUserMemorySummary(
         input.ownerUserId,
         input.longTermSnapshot ?? undefined,
-      ).catch(
-        (error) => {
-          this.logger.warn(
-            JSON.stringify({
-              event: 'social_agent.rag.user_memory_summary_failed',
-              ownerUserId: input.ownerUserId,
-              message: error instanceof Error ? error.message : String(error),
-            }),
-          );
-          return null;
-        },
-      );
+      ).catch((error) => {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'social_agent.rag.user_memory_summary_failed',
+            ownerUserId: input.ownerUserId,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return null;
+      });
     }
     return context;
   }
@@ -310,7 +327,9 @@ export class SocialAgentRagService {
         return { doc, score };
       })
       .sort((a, b) => b.score - a.score);
-    const positive = scored.filter((entry) => entry.score > 0).map((entry) => entry.doc);
+    const positive = scored
+      .filter((entry) => entry.score > 0)
+      .map((entry) => entry.doc);
     return positive.length > 0 ? positive : docs.slice();
   }
 
@@ -318,17 +337,21 @@ export class SocialAgentRagService {
     userId: number,
     preloaded?: LongTermMemorySnapshot | null,
   ): Promise<UserMemorySummaryDoc | null> {
-    const snapshot = preloaded ?? (await this.longTermMemory.readSnapshot(userId));
+    const snapshot =
+      preloaded ?? (await this.longTermMemory.readSnapshot(userId));
     if (!snapshot || snapshot.taskCount === 0) return null;
     return summariseSnapshot(snapshot);
   }
 }
 
-function summariseSnapshot(snapshot: LongTermMemorySnapshot): UserMemorySummaryDoc {
+function summariseSnapshot(
+  snapshot: LongTermMemorySnapshot,
+): UserMemorySummaryDoc {
   const prefBits: string[] = [];
   const profileFacts = Object.entries(snapshot.profileFacts)
-    .map(([key, value]) =>
-      `${key}:${Array.isArray(value) ? value.join('、') : value}`,
+    .map(
+      ([key, value]) =>
+        `${key}:${Array.isArray(value) ? value.join('、') : value}`,
     )
     .slice(0, 8);
   if (profileFacts.length > 0) {
@@ -341,7 +364,9 @@ function summariseSnapshot(snapshot: LongTermMemorySnapshot): UserMemorySummaryD
     prefBits.push(`可约时间：${snapshot.availability.slice(-3).join('、')}`);
   }
   if (snapshot.preferences.interests.length > 0) {
-    prefBits.push(`兴趣：${snapshot.preferences.interests.slice(0, 5).join('、')}`);
+    prefBits.push(
+      `兴趣：${snapshot.preferences.interests.slice(0, 5).join('、')}`,
+    );
   }
   if (snapshot.preferences.socialStyle) {
     prefBits.push(`社交风格：${snapshot.preferences.socialStyle}`);
@@ -350,21 +375,28 @@ function summariseSnapshot(snapshot: LongTermMemorySnapshot): UserMemorySummaryD
     prefBits.push(`沟通风格：${snapshot.preferences.communicationStyle}`);
   }
   if (snapshot.preferences.preferredTraits.length > 0) {
-    prefBits.push(`偏好特质：${snapshot.preferences.preferredTraits.slice(0, 5).join('、')}`);
+    prefBits.push(
+      `偏好特质：${snapshot.preferences.preferredTraits.slice(0, 5).join('、')}`,
+    );
   }
 
   const boundaryBits: string[] = [];
   if (snapshot.boundaries.noNightMeet) boundaryBits.push('不约夜间见面');
   if (snapshot.boundaries.publicPlaceOnly) boundaryBits.push('仅公开场所');
   if (snapshot.boundaries.noAutoMessage) boundaryBits.push('禁止自动发消息');
-  if (snapshot.boundaries.noContactExchange) boundaryBits.push('不交换联系方式');
+  if (snapshot.boundaries.noContactExchange)
+    boundaryBits.push('不交换联系方式');
   if (snapshot.boundaries.excludedGenders.length > 0) {
-    boundaryBits.push(`排除性别：${snapshot.boundaries.excludedGenders.join('、')}`);
+    boundaryBits.push(
+      `排除性别：${snapshot.boundaries.excludedGenders.join('、')}`,
+    );
   }
 
   const activityBits: string[] = [];
   if (snapshot.activityPreferences.favoriteCities.length > 0) {
-    activityBits.push(`城市：${snapshot.activityPreferences.favoriteCities.slice(-3).join('、')}`);
+    activityBits.push(
+      `城市：${snapshot.activityPreferences.favoriteCities.slice(-3).join('、')}`,
+    );
   }
   if (snapshot.activityPreferences.favoriteActivityTypes.length > 0) {
     activityBits.push(

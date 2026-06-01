@@ -17,10 +17,7 @@ import {
   MessageParticipantType,
   MessageSource,
 } from './message.schema';
-import {
-  AgentInboxEvent,
-  AgentInboxEventType,
-} from './agent-inbox-event.schema';
+import { AgentInboxEvent } from './agent-inbox-event.schema';
 import { User } from '../users/user.entity';
 import {
   AgentConnection,
@@ -83,7 +80,7 @@ type StartConversationOptions = {
 type AgentInboxEventInput = {
   agentConnectionId: number;
   ownerUserId: number;
-  eventType: AgentInboxEventType | string;
+  eventType: string;
   conversationId?: string | Types.ObjectId | null;
   messageId?: string | Types.ObjectId | null;
   requestId?: number | null;
@@ -680,14 +677,6 @@ export class MessagesService {
     const allUserIds = [
       ...new Set(conversations.flatMap((conv) => conv.participantIds ?? [])),
     ];
-    const allAgentIds = [
-      ...new Set(
-        conversations.flatMap((conv) => [
-          ...(conv.participantAgentIds ?? []),
-          ...Array.from(agentsByConversation.get(String(conv._id)) ?? []),
-        ]),
-      ),
-    ];
     const users = allUserIds.length
       ? await this.userRepo.find({ where: { id: In(allUserIds) } })
       : [];
@@ -1022,7 +1011,6 @@ export class MessagesService {
     query: Record<string, unknown>,
     limit: number,
   ) {
-
     const events = await this.inboxEventModel
       .find(query)
       .sort({ createdAt: -1 })
@@ -1573,7 +1561,7 @@ export class MessagesService {
     if (!stable) return `evt_${crypto.randomUUID()}`;
     const digest = crypto
       .createHash('sha256')
-      .update(`${agentConnectionId}:${event}:${String(stable)}`)
+      .update(`${agentConnectionId}:${event}:${cleanDisplayText(stable, '')}`)
       .digest('hex')
       .slice(0, 32);
     return `evt_${digest}`;
@@ -1645,14 +1633,12 @@ export class MessagesService {
   }
 
   private safeEventMetadata(metadata: Record<string, unknown>) {
-    const {
-      privateReasons: _privateReasons,
-      privateReason: _privateReason,
-      rawProfile: _rawProfile,
-      rawText: _rawText,
-      sensitivePrivateTags: _sensitivePrivateTags,
-      ...safe
-    } = metadata ?? {};
+    const safe = { ...(metadata ?? {}) };
+    delete safe.privateReasons;
+    delete safe.privateReason;
+    delete safe.rawProfile;
+    delete safe.rawText;
+    delete safe.sensitivePrivateTags;
     return sanitizeForDisplay(safe) as Record<string, unknown>;
   }
 

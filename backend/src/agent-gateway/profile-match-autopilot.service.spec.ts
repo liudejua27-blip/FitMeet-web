@@ -98,7 +98,9 @@ describe('ProfileMatchAutopilotService', () => {
     matchService = { runMatch: jest.fn() };
     notifications = { create: jest.fn().mockResolvedValue({}) };
     messages = { createAgentInboxEvent: jest.fn().mockResolvedValue({}) };
-    webhooks = { emitToConnection: jest.fn().mockResolvedValue({ delivered: true }) };
+    webhooks = {
+      emitToConnection: jest.fn().mockResolvedValue({ delivered: true }),
+    };
 
     socialProfileRepo.find.mockResolvedValue([]);
     aiProfileRepo.createQueryBuilder.mockReturnValue(qbReturning([]));
@@ -168,10 +170,7 @@ describe('ProfileMatchAutopilotService', () => {
 
   it('runs for website users even without an active agent connection', async () => {
     socialProfileRepo.createQueryBuilder.mockReturnValue(
-      qbReturning([
-        { userId: 1 },
-        { userId: 2 },
-      ]),
+      qbReturning([{ userId: 1 }, { userId: 2 }]),
     );
     connectionRepo.find.mockResolvedValue([
       { userId: 2, status: ConnectionStatus.Active },
@@ -231,7 +230,9 @@ describe('ProfileMatchAutopilotService', () => {
 
     await service.runOnce('manual');
 
-    expect(socialProfileRepo.createQueryBuilder).toHaveBeenCalledWith('profile');
+    expect(socialProfileRepo.createQueryBuilder).toHaveBeenCalledWith(
+      'profile',
+    );
     expect(aiProfileRepo.createQueryBuilder).toHaveBeenCalledWith('ai_profile');
 
     const profileSql = [
@@ -272,7 +273,11 @@ describe('ProfileMatchAutopilotService', () => {
     profileMatch.runOnce
       .mockResolvedValueOnce({ ok: true, matchedCount: 2, recommendations: [] })
       .mockRejectedValueOnce(new Error('boom'))
-      .mockResolvedValueOnce({ ok: true, matchedCount: 0, recommendations: [] });
+      .mockResolvedValueOnce({
+        ok: true,
+        matchedCount: 0,
+        recommendations: [],
+      });
 
     const summary = await service.runOnce('cron');
 
@@ -532,10 +537,16 @@ describe('ProfileMatchAutopilotService', () => {
       expect.objectContaining({ socialRequestId: 55 }),
     );
     expect(notifications.create).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 7, type: 'profile_match_autopilot.request_match' }),
+      expect.objectContaining({
+        userId: 7,
+        type: 'profile_match_autopilot.request_match',
+      }),
     );
     expect(notifications.create).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 8, type: 'profile_match_autopilot.request_match' }),
+      expect.objectContaining({
+        userId: 8,
+        type: 'profile_match_autopilot.request_match',
+      }),
     );
     expect(summary.generatedRequestCandidates).toBe(1);
     expect(summary.inboxEvents).toBe(1);

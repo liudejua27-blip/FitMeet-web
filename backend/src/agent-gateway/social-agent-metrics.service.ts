@@ -20,7 +20,10 @@ export class SocialAgentMetricsService {
   private readonly unknownIntentTotal = { count: 0 };
   private readonly errorTotal = new Map<string, number>(); // key: kind
   private readonly fallbackTotal = new Map<string, number>(); // key: stage
-  private readonly stageLatencyMs = new Map<string, { count: number; sumMs: number; maxMs: number }>();
+  private readonly stageLatencyMs = new Map<
+    string,
+    { count: number; sumMs: number; maxMs: number }
+  >();
 
   // latency histogram for route+handle pipeline (ms)
   private readonly routeLatencyMs = this.makeHist();
@@ -41,7 +44,10 @@ export class SocialAgentMetricsService {
     };
   }
 
-  recordIntent(intent: SocialAgentIntentType, source: 'rules' | 'deepseek'): void {
+  recordIntent(
+    intent: SocialAgentIntentType,
+    source: 'rules' | 'deepseek',
+  ): void {
     this.bump(this.intentTotal, `${intent}|${source}`);
     if (intent === 'unknown') this.unknownIntentTotal.count++;
   }
@@ -75,7 +81,11 @@ export class SocialAgentMetricsService {
 
   recordLatency(stage: string, ms: number): void {
     if (!Number.isFinite(ms) || ms < 0) return;
-    const current = this.stageLatencyMs.get(stage) ?? { count: 0, sumMs: 0, maxMs: 0 };
+    const current = this.stageLatencyMs.get(stage) ?? {
+      count: 0,
+      sumMs: 0,
+      maxMs: 0,
+    };
     current.count++;
     current.sumMs += ms;
     if (ms > current.maxMs) current.maxMs = ms;
@@ -127,8 +137,14 @@ export class SocialAgentMetricsService {
     return out;
   }
 
-  private serializeStageLatency(): Record<string, { count: number; sumMs: number; avgMs: number; maxMs: number }> {
-    const out: Record<string, { count: number; sumMs: number; avgMs: number; maxMs: number }> = {};
+  private serializeStageLatency(): Record<
+    string,
+    { count: number; sumMs: number; avgMs: number; maxMs: number }
+  > {
+    const out: Record<
+      string,
+      { count: number; sumMs: number; avgMs: number; maxMs: number }
+    > = {};
     for (const [stage, hist] of this.stageLatencyMs.entries()) {
       out[stage] = {
         count: hist.count,

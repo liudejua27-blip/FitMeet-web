@@ -28,10 +28,10 @@ export class LifeGraphAuditLog {
   category: LifeGraphFieldCategory;
 
   @Column({ type: 'jsonb', nullable: true })
-  oldValue: unknown | null;
+  oldValue: unknown;
 
   @Column({ type: 'jsonb', nullable: true })
-  newValue: unknown | null;
+  newValue: unknown;
 
   @Column({ type: 'varchar', length: 48 })
   source: LifeGraphFieldSource;

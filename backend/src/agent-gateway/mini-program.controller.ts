@@ -107,10 +107,7 @@ export class MiniProgramController {
   @Get('match-requests')
   async listMatchRequests(@CurrentUser() user: User) {
     const requests = await this.contactRepo.find({
-      where: [
-        { requesterId: user.id },
-        { targetUserId: user.id },
-      ],
+      where: [{ requesterId: user.id }, { targetUserId: user.id }],
       order: { createdAt: 'DESC' },
       take: 100,
     });
@@ -337,7 +334,10 @@ export class MiniProgramController {
     }
   }
 
-  private async findRecommendationId(ownerUserId: number, targetUserId: number) {
+  private async findRecommendationId(
+    ownerUserId: number,
+    targetUserId: number,
+  ) {
     let listed = await this.profileMatches.list(ownerUserId, 100);
     let found = listed.recommendations.find(
       (item) => item.targetUserId === targetUserId,
@@ -406,7 +406,9 @@ export class MiniProgramController {
       city: item.safeProfile.city,
       publicTags: item.safeProfile.publicTags,
       matchScore: Math.round(item.score),
-      matchReasons: item.publicReasons.length ? item.publicReasons : item.reasons,
+      matchReasons: item.publicReasons.length
+        ? item.publicReasons
+        : item.reasons,
       sharedSignals: item.reasoner?.sharedPoints ?? [],
       safeProfileSummary: item.safeProfile.summary || item.summary,
       openingTips:

@@ -106,7 +106,9 @@ export class ProfileMatchAutopilotService {
     ownerUserId?: number,
   ): Promise<ProfileMatchAutopilotSummary> {
     if (this.running) {
-      this.logger.warn('Profile Match Autopilot sweep already in progress, skipping');
+      this.logger.warn(
+        'Profile Match Autopilot sweep already in progress, skipping',
+      );
       const skipped = emptySummary(triggeredBy, 'already_running');
       this.lastSummary = skipped;
       this.lastDebugSnapshot = {
@@ -148,11 +150,15 @@ export class ProfileMatchAutopilotService {
         const limit = perOwnerLimit();
         for (const userId of ownerIds) {
           try {
-            const profileResult = await this.profileMatch.runOnce(userId, limit, {
-              autoEnableProfilePool: false,
-              initiatedBy: 'profile_match_autopilot',
-              debug: true,
-            });
+            const profileResult = await this.profileMatch.runOnce(
+              userId,
+              limit,
+              {
+                autoEnableProfilePool: false,
+                initiatedBy: 'profile_match_autopilot',
+                debug: true,
+              },
+            );
             summary.generatedRecommendations += profileResult.matchedCount ?? 0;
             summary.inboxEvents += profileResult.inboxEvents ?? 0;
             summary.skippedDuplicates += profileResult.skippedDuplicates ?? 0;
@@ -164,10 +170,11 @@ export class ProfileMatchAutopilotService {
               debugEntries,
               profileResult.debugEvents ?? [],
             );
-            summary.notificationsSent += await this.notifyProfileRecommendations(
-              userId,
-              profileResult.recommendations ?? [],
-            );
+            summary.notificationsSent +=
+              await this.notifyProfileRecommendations(
+                userId,
+                profileResult.recommendations ?? [],
+              );
 
             await this.runRequestCardMatchesForOwner(
               userId,
@@ -299,9 +306,13 @@ export class ProfileMatchAutopilotService {
       }
 
       try {
-        const result = await this.matchService.runMatch(request.id, ownerUserId, {
-          limit,
-        });
+        const result = await this.matchService.runMatch(
+          request.id,
+          ownerUserId,
+          {
+            limit,
+          },
+        );
         const candidates = result.candidates ?? [];
         if (candidates.length === 0) {
           this.recordSkippedReason(
@@ -332,7 +343,7 @@ export class ProfileMatchAutopilotService {
       } catch (err) {
         summary.errors += 1;
         this.logger.warn(
-            `Profile Match Autopilot request-card match failed for owner=${ownerUserId}, request=${request.id}: ${
+          `Profile Match Autopilot request-card match failed for owner=${ownerUserId}, request=${request.id}: ${
             err instanceof Error ? err.message : String(err)
           }`,
         );
@@ -449,7 +460,11 @@ export class ProfileMatchAutopilotService {
       });
       if (conn.id > 0) {
         void this.webhooks
-          .emitToConnection(conn.id, 'social_request.match.recommended', metadata)
+          .emitToConnection(
+            conn.id,
+            'social_request.match.recommended',
+            metadata,
+          )
           .catch(() => undefined);
       }
       events += 1;
@@ -587,7 +602,10 @@ export class ProfileMatchAutopilotService {
     });
     profileFeedback.forEach((session) => ownerIds.add(session.ownerId));
 
-    const collectedOwnerIds = Array.from(ownerIds).slice(0, MAX_OWNERS_PER_SWEEP);
+    const collectedOwnerIds = Array.from(ownerIds).slice(
+      0,
+      MAX_OWNERS_PER_SWEEP,
+    );
     const unverifiedOwnerIds = collectedOwnerIds.filter(
       (userId) => !eligibleOwnerIds.has(userId),
     );
@@ -618,16 +636,11 @@ export class ProfileMatchAutopilotService {
         if (this.isProfilePoolEnabled(profile)) {
           eligibleOwnerIds.add(profile.userId);
         } else {
-          this.recordSkippedReason(
-            summary,
-            'privacyDisabled',
-            debugEntries,
-            {
-              scope: 'owner',
-              ownerUserId: userId,
-              stage: 'profile_pool_disabled',
-            },
-          );
+          this.recordSkippedReason(summary, 'privacyDisabled', debugEntries, {
+            scope: 'owner',
+            ownerUserId: userId,
+            stage: 'profile_pool_disabled',
+          });
         }
       }
     }

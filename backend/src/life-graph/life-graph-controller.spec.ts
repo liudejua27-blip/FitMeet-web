@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await */
 import { LifeGraphController } from './life-graph.controller';
 import {
   LifeGraphAuditAction,
@@ -9,10 +10,25 @@ const req = { user: { id: 7 } } as never;
 
 function makeService() {
   return {
-    getLifeGraph: jest.fn(async () => ({ profile: { userId: 7 }, fields: {}, completeness: {} })),
-    updateLifeGraph: jest.fn(async () => ({ profile: { userId: 7 }, fields: {}, completeness: {} })),
-    getCompleteness: jest.fn(async () => ({ completenessScore: 72, modules: {}, missingFields: [] })),
-    getUnifiedMatchSignals: jest.fn(async () => ({ identitySignals: {}, safetySignals: {} })),
+    getLifeGraph: jest.fn(async () => ({
+      profile: { userId: 7 },
+      fields: {},
+      completeness: {},
+    })),
+    updateLifeGraph: jest.fn(async () => ({
+      profile: { userId: 7 },
+      fields: {},
+      completeness: {},
+    })),
+    getCompleteness: jest.fn(async () => ({
+      completenessScore: 72,
+      modules: {},
+      missingFields: [],
+    })),
+    getUnifiedMatchSignals: jest.fn(async () => ({
+      identitySignals: {},
+      safetySignals: {},
+    })),
     getAuditLogs: jest.fn(async () => [
       {
         id: 1,
@@ -24,10 +40,20 @@ function makeService() {
         createdAt: new Date().toISOString(),
       },
     ]),
-    extractFromChat: jest.fn(async () => ({ proposalId: 10, proposedFields: [] })),
-    confirmUpdate: jest.fn(async () => ({ proposalId: 10, status: 'confirmed' })),
+    extractFromChat: jest.fn(async () => ({
+      proposalId: 10,
+      proposedFields: [],
+    })),
+    confirmUpdate: jest.fn(async () => ({
+      proposalId: 10,
+      status: 'confirmed',
+    })),
     rejectUpdate: jest.fn(async () => ({ proposalId: 10, status: 'rejected' })),
-    revokeField: jest.fn(async () => ({ profile: { userId: 7 }, fields: {}, completeness: {} })),
+    revokeField: jest.fn(async () => ({
+      profile: { userId: 7 },
+      fields: {},
+      completeness: {},
+    })),
   };
 }
 

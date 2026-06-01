@@ -9,9 +9,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * migrations still add geo fields, clubs, agent tables, AI profile columns, and
  * trust-loop fields in their historical order.
  */
-export class InitialSchemaBaseline1700000000000
-  implements MigrationInterface
-{
+export class InitialSchemaBaseline1700000000000 implements MigrationInterface {
   name = 'InitialSchemaBaseline1700000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -257,7 +255,9 @@ export class InitialSchemaBaseline1700000000000
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`DROP TABLE IF EXISTS "activity_proofs" CASCADE`);
     await queryRunner.query(`DROP TABLE IF EXISTS "social_activities" CASCADE`);
-    await queryRunner.query(`DROP TABLE IF EXISTS "activity_templates" CASCADE`);
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS "activity_templates" CASCADE`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS "meet_participants" CASCADE`);
     await queryRunner.query(`DROP TABLE IF EXISTS "meets" CASCADE`);
     await queryRunner.query(`DROP TABLE IF EXISTS "reviews" CASCADE`);

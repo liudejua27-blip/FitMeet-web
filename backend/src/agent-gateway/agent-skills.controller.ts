@@ -1,23 +1,8 @@
-import {
-  Body,
-  Controller,
-  Param,
-  ParseIntPipe,
-  Post,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
-import {
-  IsNumber,
-  IsOptional,
-  IsString,
-  MaxLength,
-} from 'class-validator';
+import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { AgentGatewayService } from './agent-gateway.service';
 import { MeetsService } from '../meets/meets.service';
 import { SafetyService } from '../safety/safety.service';
-import { CreateMeetDto } from '../meets/dto/create-meet.dto';
 import { CreateReportDto } from '../safety/dto/create-report.dto';
 import {
   AGENT_CONNECTION_KEY,
@@ -35,47 +20,11 @@ import {
 } from './entities/agent-activity-log.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import {
-  AgentApprovalRequest,
-  ApprovalStatus,
-  ApprovalType,
-} from './entities/agent-approval-request.entity';
+import { AgentApprovalRequest } from './entities/agent-approval-request.entity';
 
 type AgentReq = Request & {
   [AGENT_CONNECTION_KEY]: AgentConnection;
 };
-
-class SubmitProofDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(2048)
-  photoUrl?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(1000)
-  note?: string;
-
-  @IsOptional()
-  @IsNumber()
-  lat?: number;
-
-  @IsOptional()
-  @IsNumber()
-  lng?: number;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(64)
-  finishedAt?: string;
-}
-
-class JoinActivityDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  note?: string;
-}
 
 @Controller('agent')
 @UseGuards(AgentTokenGuard, AgentPermissionGuard)

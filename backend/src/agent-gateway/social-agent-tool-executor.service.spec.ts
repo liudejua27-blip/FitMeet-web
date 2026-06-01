@@ -12,11 +12,45 @@ import {
 } from './social-agent-tool-executor.service';
 import { SceneRiskPolicyService } from './scene-risk-policy.service';
 
-const repo = () => ({
-  findOne: jest.fn(),
-  save: jest.fn(async (value) => value),
-  create: jest.fn((value) => value),
+type MockRepository<T extends object = Record<string, unknown>> = {
+  findOne: jest.Mock<Promise<T | null>, [unknown?]>;
+  save: jest.Mock<Promise<T>, [T]>;
+  create: jest.Mock<T, [Partial<T>]>;
+};
+
+type AgentActionAuditInput = {
+  inputSummary?: string;
+  outputSummary?: string;
+  payload?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+type ApprovalCreateInput = {
+  type?: unknown;
+  actionType?: unknown;
+  summary?: unknown;
+  riskLevel?: unknown;
+  payload?: unknown;
+};
+
+type ApprovalDispatchCallback = (
+  approval: Record<string, unknown>,
+) => Promise<unknown>;
+
+const repo = <
+  T extends object = Record<string, unknown>,
+>(): MockRepository<T> => ({
+  findOne: jest.fn<Promise<T | null>, [unknown?]>(),
+  save: jest.fn<Promise<T>, [T]>((value) => Promise.resolve(value)),
+  create: jest.fn<T, [Partial<T>]>((value) => value as T),
 });
+
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== 'string') {
+    throw new Error(`Expected ${label} to be a string.`);
+  }
+  return value;
+}
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -47,8 +81,8 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
 }
 
 function makeService() {
-  const taskRepo = repo();
-  const eventRepo = repo();
+  const taskRepo = repo<AgentTask>();
+  const eventRepo = repo<Record<string, unknown>>();
   const connectionRepo = repo();
   const candidatePool = {
     searchSocial: jest.fn(),
@@ -60,14 +94,19 @@ function makeService() {
   const userSocialRequestRepo = repo();
   const userRepo = {
     ...repo(),
-    findOne: jest.fn(async (options?: { where?: { id?: number } }) =>
-      options?.where?.id ? { id: options.where.id } : null,
+    findOne: jest.fn<
+      Promise<{ id: number } | null>,
+      [{ where?: { id?: number } }?]
+    >((options) =>
+      Promise.resolve(options?.where?.id ? { id: options.where.id } : null),
     ),
   };
   const paymentIntentRepo = repo();
   const config = { get: jest.fn().mockReturnValue(undefined) };
   const actionLogs = {
-    logAgentAction: jest.fn().mockResolvedValue({ id: 1 }),
+    logAgentAction: jest
+      .fn<Promise<{ id: number }>, [AgentActionAuditInput]>()
+      .mockResolvedValue({ id: 1 }),
   };
   const socialProfiles = {
     get: jest.fn(),
@@ -108,22 +147,31 @@ function makeService() {
     getMutualBlockUserIds: jest.fn().mockResolvedValue(new Set<number>()),
   };
   const approvals = {
-    create: jest.fn().mockImplementation((input) =>
-      Promise.resolve({
-        id: 501,
-        type: input.type,
-        actionType: input.actionType,
-        summary: input.summary,
-        riskLevel: input.riskLevel,
-        payload: input.payload,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-      }),
+    create: jest.fn<Promise<Record<string, unknown>>, [ApprovalCreateInput]>(
+      (input) =>
+        Promise.resolve({
+          id: 501,
+          type: input.type,
+          actionType: input.actionType,
+          summary: input.summary,
+          riskLevel: input.riskLevel,
+          payload: input.payload,
+          expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        }),
     ),
     getPending: jest.fn(),
-    approve: jest.fn(),
-    reject: jest.fn(),
+    approve: jest.fn<
+      Promise<Record<string, unknown>>,
+      [number, number, ApprovalDispatchCallback]
+    >(),
+    reject: jest.fn<Promise<Record<string, unknown>>, [number, number]>(),
   };
-  const approvalDispatcher = { dispatch: jest.fn() };
+  const approvalDispatcher = {
+    dispatch: jest.fn<
+      Promise<Record<string, unknown>>,
+      [Record<string, unknown>]
+    >(),
+  };
   const longTermMemory = {
     readSnapshot: jest.fn(),
     summarizeTask: jest.fn(),
@@ -245,7 +293,8 @@ describe('SocialAgentToolExecutorService', () => {
   });
 
   it('gates send_message as pending approval instead of direct execution', async () => {
-    const { service, taskRepo, messages, actionLogs, approvals } = makeService();
+    const { service, taskRepo, messages, actionLogs, approvals } =
+      makeService();
     const task = makeTask({
       permissionMode: AgentTaskPermissionMode.Assist,
       plan: [
@@ -405,7 +454,10 @@ describe('SocialAgentToolExecutorService', () => {
       status: 'succeeded',
     });
     expect(candidatePool.searchSocial).toHaveBeenCalledWith(
-      expect.objectContaining({ city: 'Qingdao', rawText: 'find running partner' }),
+      expect.objectContaining({
+        city: 'Qingdao',
+        rawText: 'find running partner',
+      }),
     );
   });
 
@@ -544,7 +596,10 @@ describe('SocialAgentToolExecutorService', () => {
           id: 'publish',
           toolName: 'publish_social_request',
           status: 'planned',
-          input: { type: 'custom', description: 'find Qingdao running partner' },
+          input: {
+            type: 'custom',
+            description: 'find Qingdao running partner',
+          },
         },
         {
           id: 'message',
@@ -599,7 +654,7 @@ describe('SocialAgentToolExecutorService', () => {
     approvals.approve.mockImplementation(async (_id, _userId, dispatcher) => ({
       approval: { id: 12 },
       dispatched: true,
-      dispatchResult: await dispatcher({ id: 12 } as never),
+      dispatchResult: await dispatcher({ id: 12 }),
     }));
     approvals.reject.mockResolvedValue({ id: 13, status: 'rejected' });
 
@@ -641,15 +696,14 @@ describe('SocialAgentToolExecutorService', () => {
     expect(approvals.approve).toHaveBeenCalledWith(12, 1, expect.any(Function));
     expect(approvals.reject).toHaveBeenCalledWith(13, 1);
     const toolEvents = eventRepo.save.mock.calls
-      .map(([event]) => event as Record<string, unknown>)
+      .map(([event]) => event)
       .filter((event) => event.toolCallId != null);
     expect(toolEvents.length).toBeGreaterThan(0);
     for (const event of toolEvents) {
-      expect(String(event.toolCallId).length).toBeLessThanOrEqual(80);
-      expect(String(event.toolCallId)).not.toContain(':');
-      expect(String(event.toolCallId)).not.toContain(
-        'action_create_social_request',
-      );
+      const toolCallId = requireString(event.toolCallId, 'toolCallId');
+      expect(toolCallId.length).toBeLessThanOrEqual(80);
+      expect(toolCallId).not.toContain(':');
+      expect(toolCallId).not.toContain('action_create_social_request');
     }
     const auditInputs = actionLogs.logAgentAction.mock.calls.map(
       ([input]) => input,
@@ -776,7 +830,8 @@ describe('SocialAgentToolExecutorService', () => {
           expect.objectContaining({
             id: 'msg_2',
             fromUserId: 2,
-            textPreview: 'Sure, let us confirm the route and meeting point first.',
+            textPreview:
+              'Sure, let us confirm the route and meeting point first.',
           }),
         ],
         replySummary: expect.any(Object),
@@ -786,7 +841,8 @@ describe('SocialAgentToolExecutorService', () => {
   });
 
   it('turns offline meeting into pending approval in assist/manual mode', async () => {
-    const { service, taskRepo, activities, actionLogs, approvals } = makeService();
+    const { service, taskRepo, activities, actionLogs, approvals } =
+      makeService();
     const task = makeTask({
       permissionMode: AgentTaskPermissionMode.Assist,
       plan: [
@@ -837,7 +893,8 @@ describe('SocialAgentToolExecutorService', () => {
   });
 
   it('gates add_friend through pending approval and records the action result', async () => {
-    const { service, taskRepo, friends, actionLogs, messages, approvals } = makeService();
+    const { service, taskRepo, friends, actionLogs, messages, approvals } =
+      makeService();
     const task = makeTask({
       permissionMode: AgentTaskPermissionMode.Assist,
       plan: [
@@ -903,7 +960,9 @@ describe('SocialAgentToolExecutorService', () => {
       permissionMode: AgentTaskPermissionMode.Confirm,
     });
     taskRepo.findOne.mockResolvedValue(task);
-    messages.startConversation.mockResolvedValue({ conversationId: 'conv_user' });
+    messages.startConversation.mockResolvedValue({
+      conversationId: 'conv_user',
+    });
     messages.sendMessage.mockResolvedValue({
       id: 'msg_user',
       conversationId: 'conv_user',
@@ -954,9 +1013,10 @@ describe('SocialAgentToolExecutorService', () => {
     const task = makeTask();
     const longSummary = 'summary_'.repeat(90);
     const longStepId = 'step_'.repeat(40);
-    const longToolCallId = 'send_message_to_candidate_20260524104548_candidate_123_public_intent_'.repeat(
-      2,
-    );
+    const longToolCallId =
+      'send_message_to_candidate_20260524104548_candidate_123_public_intent_'.repeat(
+        2,
+      );
     const fullPayload = { message: 'hello_'.repeat(200) };
 
     await expect(
@@ -981,17 +1041,24 @@ describe('SocialAgentToolExecutorService', () => {
       }),
     ).resolves.toBeUndefined();
 
-    const saved = eventRepo.save.mock.calls[0][0] as Record<string, unknown>;
-    expect(String(saved.summary).length).toBeLessThanOrEqual(500);
-    expect(String(saved.stepId).length).toBeLessThanOrEqual(80);
-    expect(String(saved.toolCallId).length).toBeLessThanOrEqual(80);
+    const saved = eventRepo.save.mock.calls[0][0];
+    expect(requireString(saved.summary, 'summary').length).toBeLessThanOrEqual(
+      500,
+    );
+    expect(requireString(saved.stepId, 'stepId').length).toBeLessThanOrEqual(
+      80,
+    );
+    expect(
+      requireString(saved.toolCallId, 'toolCallId').length,
+    ).toBeLessThanOrEqual(80);
     expect(saved.stepId).toEqual(expect.stringContaining('…'));
     expect(saved.toolCallId).toEqual(expect.stringContaining('…'));
     expect(saved.payload).toBe(fullPayload);
   });
 
   it('does not fail executeToolAction when task event writes fail', async () => {
-    const { service, taskRepo, eventRepo, messages, actionLogs } = makeService();
+    const { service, taskRepo, eventRepo, messages, actionLogs } =
+      makeService();
     const task = makeTask({
       agentConnectionId: null,
       permissionMode: AgentTaskPermissionMode.Confirm,
@@ -1000,7 +1067,9 @@ describe('SocialAgentToolExecutorService', () => {
     eventRepo.save.mockRejectedValue(
       new Error('value too long for type character varying(80)'),
     );
-    messages.startConversation.mockResolvedValue({ conversationId: 'conv_user' });
+    messages.startConversation.mockResolvedValue({
+      conversationId: 'conv_user',
+    });
     messages.sendMessage.mockResolvedValue({
       id: 'msg_user',
       conversationId: 'conv_user',
@@ -1048,7 +1117,9 @@ describe('SocialAgentToolExecutorService', () => {
       new Error('value too long for type character varying(80)'),
     );
     friends.ensureFollowing.mockResolvedValue({ id: 31, followingId: 2 });
-    messages.startConversation.mockResolvedValue({ conversationId: 'conv_user' });
+    messages.startConversation.mockResolvedValue({
+      conversationId: 'conv_user',
+    });
 
     const call = await service.executeToolAction(
       100,
@@ -1077,7 +1148,9 @@ describe('SocialAgentToolExecutorService', () => {
     });
     const longMessage = 'long message '.repeat(100);
     taskRepo.findOne.mockResolvedValue(task);
-    messages.startConversation.mockResolvedValue({ conversationId: 'conv_user' });
+    messages.startConversation.mockResolvedValue({
+      conversationId: 'conv_user',
+    });
     messages.sendMessage.mockResolvedValue({
       id: 'msg_user',
       conversationId: 'conv_user',
@@ -1095,17 +1168,21 @@ describe('SocialAgentToolExecutorService', () => {
     );
 
     expect(call.status).toBe('succeeded');
-    const savedEvents = eventRepo.save.mock.calls.map(
-      ([event]) => event as Record<string, unknown>,
-    );
+    const savedEvents = eventRepo.save.mock.calls.map(([event]) => event);
     expect(savedEvents.length).toBeGreaterThan(0);
     for (const event of savedEvents) {
-      expect(String(event.summary).length).toBeLessThanOrEqual(500);
+      expect(
+        requireString(event.summary, 'summary').length,
+      ).toBeLessThanOrEqual(500);
       if (event.stepId != null) {
-        expect(String(event.stepId).length).toBeLessThanOrEqual(80);
+        expect(
+          requireString(event.stepId, 'stepId').length,
+        ).toBeLessThanOrEqual(80);
       }
       if (event.toolCallId != null) {
-        expect(String(event.toolCallId).length).toBeLessThanOrEqual(80);
+        expect(
+          requireString(event.toolCallId, 'toolCallId').length,
+        ).toBeLessThanOrEqual(80);
       }
     }
     const calledPayload = savedEvents.find(
@@ -1122,7 +1199,9 @@ describe('SocialAgentToolExecutorService', () => {
     });
     taskRepo.findOne.mockResolvedValue(task);
     friends.ensureFollowing.mockResolvedValue({ id: 31, followingId: 2 });
-    messages.startConversation.mockResolvedValue({ conversationId: 'conv_user' });
+    messages.startConversation.mockResolvedValue({
+      conversationId: 'conv_user',
+    });
 
     const call = await service.executeToolAction(
       100,
@@ -1206,13 +1285,17 @@ describe('SocialAgentToolExecutorService', () => {
         permissionMode: AgentTaskPermissionMode.Confirm,
       }),
     );
-    friends.ensureFollowing.mockImplementation(async (_ownerId, targetUserId) => ({
-      followId: targetUserId + 100,
-      followingId: targetUserId,
-    }));
-    messages.startConversation.mockImplementation(async (_ownerId, targetUserId) => ({
-      conversationId: `conv_${targetUserId}`,
-    }));
+    friends.ensureFollowing.mockImplementation((_ownerId, targetUserId) =>
+      Promise.resolve({
+        followId: targetUserId + 100,
+        followingId: targetUserId,
+      }),
+    );
+    messages.startConversation.mockImplementation((_ownerId, targetUserId) =>
+      Promise.resolve({
+        conversationId: `conv_${targetUserId}`,
+      }),
+    );
 
     const first = await service.executeToolAction(
       100,
@@ -1254,7 +1337,8 @@ describe('SocialAgentToolExecutorService', () => {
   });
 
   it('resolves public intent ids to the intent owner user', async () => {
-    const { service, taskRepo, publicIntentRepo, friends, messages } = makeService();
+    const { service, taskRepo, publicIntentRepo, friends, messages } =
+      makeService();
     taskRepo.findOne.mockResolvedValue(
       makeTask({
         agentConnectionId: null,
@@ -1322,7 +1406,10 @@ describe('SocialAgentToolExecutorService', () => {
     );
 
     expect(call.status).toBe('failed');
-    expect(call.error).toMatchObject({ code: 'TARGET_IS_SELF', statusCode: 400 });
+    expect(call.error).toMatchObject({
+      code: 'TARGET_IS_SELF',
+      statusCode: 400,
+    });
     expect(friends.ensureFollowing).not.toHaveBeenCalled();
     expect(messages.startConversation).not.toHaveBeenCalled();
   });
@@ -1345,7 +1432,10 @@ describe('SocialAgentToolExecutorService', () => {
     );
 
     expect(call.status).toBe('blocked');
-    expect(call.error).toMatchObject({ code: 'TARGET_BLOCKED', statusCode: 403 });
+    expect(call.error).toMatchObject({
+      code: 'TARGET_BLOCKED',
+      statusCode: 403,
+    });
     expect(friends.ensureFollowing).not.toHaveBeenCalled();
   });
 
@@ -1472,8 +1562,14 @@ describe('SocialAgentToolExecutorService', () => {
   });
 
   it('gates payment steps as pending approval and never creates payment intent automatically', async () => {
-    const { service, taskRepo, paymentIntentRepo, actionLogs, messages, approvals } =
-      makeService();
+    const {
+      service,
+      taskRepo,
+      paymentIntentRepo,
+      actionLogs,
+      messages,
+      approvals,
+    } = makeService();
     const task = makeTask({
       permissionMode: AgentTaskPermissionMode.LimitedAuto,
       plan: [
@@ -1492,10 +1588,12 @@ describe('SocialAgentToolExecutorService', () => {
       ],
     });
     taskRepo.findOne.mockResolvedValue(task);
-    paymentIntentRepo.save.mockImplementation(async (value) => ({
-      id: 88,
-      ...value,
-    }));
+    paymentIntentRepo.save.mockImplementation((value) =>
+      Promise.resolve({
+        id: 88,
+        ...value,
+      }),
+    );
 
     const result = await service.executeTask(100);
 
@@ -1649,17 +1747,14 @@ describe('SocialAgentToolExecutorService', () => {
     expect(result.toolCalls[0].id).not.toContain(
       'action_create_social_request',
     );
-    const savedEvents = eventRepo.save.mock.calls.map(
-      ([event]) => event as Record<string, unknown>,
-    );
+    const savedEvents = eventRepo.save.mock.calls.map(([event]) => event);
     expect(savedEvents.length).toBeGreaterThan(0);
     for (const event of savedEvents) {
       if (event.toolCallId != null) {
-        expect(String(event.toolCallId).length).toBeLessThanOrEqual(80);
-        expect(String(event.toolCallId)).not.toContain(':');
-        expect(String(event.toolCallId)).not.toContain(
-          'action_create_social_request',
-        );
+        const toolCallId = requireString(event.toolCallId, 'toolCallId');
+        expect(toolCallId.length).toBeLessThanOrEqual(80);
+        expect(toolCallId).not.toContain(':');
+        expect(toolCallId).not.toContain('action_create_social_request');
       }
     }
     expect(socialRequests.createFromNaturalLanguage).toHaveBeenCalledWith(
@@ -1696,7 +1791,8 @@ describe('SocialAgentToolExecutorService', () => {
   });
 
   it('manual_confirm mode turns social sends into pending approvals and audits them', async () => {
-    const { service, taskRepo, messages, approvals, actionLogs } = makeService();
+    const { service, taskRepo, messages, approvals, actionLogs } =
+      makeService();
     const task = makeTask({
       permissionMode: 'manual_confirm' as never,
       plan: [
@@ -1736,7 +1832,8 @@ describe('SocialAgentToolExecutorService', () => {
   });
 
   it('lab mode simulates write tools without executing real side effects', async () => {
-    const { service, taskRepo, messages, approvals, actionLogs } = makeService();
+    const { service, taskRepo, messages, approvals, actionLogs } =
+      makeService();
     const task = makeTask({
       permissionMode: 'lab' as never,
       plan: [

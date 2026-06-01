@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { LessThan, Repository } from 'typeorm';
+import { cleanDisplayText } from '../common/display-text.util';
 import { UserSocialProfile } from '../users/user-social-profile.entity';
 import {
   LifeGraphCompletenessDto,
@@ -105,7 +106,12 @@ const LIFE_GRAPH_DEFINITIONS: LifeGraphFieldDefinition[] = [
   field(LifeGraphFieldCategory.Identity, 'school', '学校', 'low'),
   field(LifeGraphFieldCategory.Identity, 'company', '公司', 'low'),
   field(LifeGraphFieldCategory.Identity, 'nearbyArea', '常活动区域', 'medium'),
-  field(LifeGraphFieldCategory.Identity, 'verifiedStatus', '认证状态', 'medium'),
+  field(
+    LifeGraphFieldCategory.Identity,
+    'verifiedStatus',
+    '认证状态',
+    'medium',
+  ),
 
   field(
     LifeGraphFieldCategory.SocialIntent,
@@ -149,7 +155,12 @@ const LIFE_GRAPH_DEFINITIONS: LifeGraphFieldDefinition[] = [
     'high',
     true,
   ),
-  field(LifeGraphFieldCategory.SocialIntent, 'temporaryIntent', '临时意图', 'low'),
+  field(
+    LifeGraphFieldCategory.SocialIntent,
+    'temporaryIntent',
+    '临时意图',
+    'low',
+  ),
 
   field(LifeGraphFieldCategory.Lifestyle, 'activeHours', '活跃时段', 'medium'),
   field(
@@ -172,7 +183,12 @@ const LIFE_GRAPH_DEFINITIONS: LifeGraphFieldDefinition[] = [
     '作息偏好',
     'medium',
   ),
-  field(LifeGraphFieldCategory.Lifestyle, 'activityRadius', '活动半径', 'medium'),
+  field(
+    LifeGraphFieldCategory.Lifestyle,
+    'activityRadius',
+    '活动半径',
+    'medium',
+  ),
   field(
     LifeGraphFieldCategory.Lifestyle,
     'acceptsNightMeet',
@@ -344,7 +360,14 @@ function field(
   required = false,
   privateField = false,
 ): LifeGraphFieldDefinition {
-  return { category, fieldKey, label, priority, required, private: privateField };
+  return {
+    category,
+    fieldKey,
+    label,
+    priority,
+    required,
+    private: privateField,
+  };
 }
 
 @Injectable()
@@ -434,7 +457,10 @@ export class LifeGraphService {
     const fields = this.matchSignalFields(await this.findActiveFields(userId));
     const signals = {
       identity: this.signalGroup(fields, LifeGraphFieldCategory.Identity),
-      socialIntent: this.signalGroup(fields, LifeGraphFieldCategory.SocialIntent),
+      socialIntent: this.signalGroup(
+        fields,
+        LifeGraphFieldCategory.SocialIntent,
+      ),
       lifestyle: this.signalGroup(fields, LifeGraphFieldCategory.Lifestyle),
       fitnessActivity: this.signalGroup(
         fields,
@@ -481,8 +507,10 @@ export class LifeGraphService {
       const raw = value(category, fieldKey);
       return typeof raw === 'boolean' ? raw : fallback;
     };
-    const missingCriticalFields = this.calculateCompleteness(fields, profile)
-      .missingFields.filter((item) => item.priority === 'high');
+    const missingCriticalFields = this.calculateCompleteness(
+      fields,
+      profile,
+    ).missingFields.filter((item) => item.priority === 'high');
     const confidenceValues = Object.values(byField);
     const overall = confidenceValues.length
       ? Math.round(
@@ -493,8 +521,10 @@ export class LifeGraphService {
       : 0;
 
     const publicPlaceOnly =
-      boolValue(LifeGraphFieldCategory.FitnessActivity, 'publicPlaceOnly') === true ||
-      boolValue(LifeGraphFieldCategory.PrivacyBoundary, 'publicPlaceOnly') === true;
+      boolValue(LifeGraphFieldCategory.FitnessActivity, 'publicPlaceOnly') ===
+        true ||
+      boolValue(LifeGraphFieldCategory.PrivacyBoundary, 'publicPlaceOnly') ===
+        true;
     const locationSharingAllowed =
       boolValue(
         LifeGraphFieldCategory.PrivacyBoundary,
@@ -515,10 +545,13 @@ export class LifeGraphService {
     const signals = {
       identitySignals: {
         city: value(LifeGraphFieldCategory.Identity, 'city') ?? profile.city,
-        region: value(LifeGraphFieldCategory.Identity, 'region') ?? profile.region,
-        country: value(LifeGraphFieldCategory.Identity, 'country') ?? profile.country,
+        region:
+          value(LifeGraphFieldCategory.Identity, 'region') ?? profile.region,
+        country:
+          value(LifeGraphFieldCategory.Identity, 'country') ?? profile.country,
         timezone:
-          value(LifeGraphFieldCategory.Identity, 'timezone') ?? profile.timezone,
+          value(LifeGraphFieldCategory.Identity, 'timezone') ??
+          profile.timezone,
         nearbyArea: value(LifeGraphFieldCategory.Identity, 'nearbyArea'),
         preferredLanguage:
           value(LifeGraphFieldCategory.Identity, 'preferredLanguage') ??
@@ -547,13 +580,19 @@ export class LifeGraphService {
       },
       lifestyleSignals: {
         activeHours: value(LifeGraphFieldCategory.Lifestyle, 'activeHours'),
-        availableTimes: value(LifeGraphFieldCategory.Lifestyle, 'availableTimes'),
+        availableTimes: value(
+          LifeGraphFieldCategory.Lifestyle,
+          'availableTimes',
+        ),
         weekendAvailability: value(
           LifeGraphFieldCategory.Lifestyle,
           'weekendAvailability',
         ),
         acceptsNightMeet,
-        activityRadius: value(LifeGraphFieldCategory.Lifestyle, 'activityRadius'),
+        activityRadius: value(
+          LifeGraphFieldCategory.Lifestyle,
+          'activityRadius',
+        ),
       },
       fitnessSignals: {
         sportsPreferences: value(
@@ -615,7 +654,10 @@ export class LifeGraphService {
         (field) => field.category === category && field.fieldKey === fieldKey,
       )?.fieldValue;
     const text = (...values: unknown[]) =>
-      values.map((item) => this.signalText(item)).filter(Boolean).join(' ');
+      values
+        .map((item) => this.signalText(item))
+        .filter(Boolean)
+        .join(' ');
 
     const locationText = text(
       value(LifeGraphFieldCategory.Identity, 'nearbyArea'),
@@ -629,17 +671,14 @@ export class LifeGraphService {
       value(LifeGraphFieldCategory.SocialIntent, 'preferredPeople'),
       value(LifeGraphFieldCategory.SocialIntent, 'preferredSocialStyle'),
       value(LifeGraphFieldCategory.SocialIntent, 'unacceptableBehaviors'),
-      value(LifeGraphFieldCategory.InteractionMemory, 'likedRecommendationPatterns'),
+      value(
+        LifeGraphFieldCategory.InteractionMemory,
+        'likedRecommendationPatterns',
+      ),
       value(
         LifeGraphFieldCategory.InteractionMemory,
         'dislikedRecommendationPatterns',
       ),
-    );
-    const lifestyleText = text(
-      value(LifeGraphFieldCategory.Lifestyle, 'availableTimes'),
-      value(LifeGraphFieldCategory.Lifestyle, 'weekendAvailability'),
-      value(LifeGraphFieldCategory.Lifestyle, 'activeHours'),
-      value(LifeGraphFieldCategory.Lifestyle, 'acceptsNightMeet'),
     );
     const sportsText = text(
       value(LifeGraphFieldCategory.FitnessActivity, 'sportsPreferences'),
@@ -653,18 +692,23 @@ export class LifeGraphService {
       value(LifeGraphFieldCategory.PrivacyBoundary, 'preciseLocationSharing'),
       value(LifeGraphFieldCategory.TrustSafety, 'requiresStrictConfirmation'),
     );
-    const auditText = recentLogs.map((log) => `${log.fieldKey} ${log.reason}`).join(' ');
+    const auditText = recentLogs
+      .map((log) => `${log.fieldKey} ${log.reason}`)
+      .join(' ');
 
-    const completed = this.numberSignal(
-      value(LifeGraphFieldCategory.InteractionMemory, 'completedActivities'),
-      value(LifeGraphFieldCategory.InteractionMemory, 'completedMeetups'),
-      value(LifeGraphFieldCategory.InteractionMemory, 'completedWorkouts'),
-    ) + this.keywordCount(auditText, /完成|守时|评价|confirmed|completion/i);
-    const cancelled = this.numberSignal(
-      value(LifeGraphFieldCategory.InteractionMemory, 'cancelledActivities'),
-      value(LifeGraphFieldCategory.InteractionMemory, 'cancelledMeetups'),
-      value(LifeGraphFieldCategory.InteractionMemory, 'noShowCount'),
-    ) + this.keywordCount(auditText, /取消|爽约|撤回|rejected|revoked|cancel/i);
+    const completed =
+      this.numberSignal(
+        value(LifeGraphFieldCategory.InteractionMemory, 'completedActivities'),
+        value(LifeGraphFieldCategory.InteractionMemory, 'completedMeetups'),
+        value(LifeGraphFieldCategory.InteractionMemory, 'completedWorkouts'),
+      ) + this.keywordCount(auditText, /完成|守时|评价|confirmed|completion/i);
+    const cancelled =
+      this.numberSignal(
+        value(LifeGraphFieldCategory.InteractionMemory, 'cancelledActivities'),
+        value(LifeGraphFieldCategory.InteractionMemory, 'cancelledMeetups'),
+        value(LifeGraphFieldCategory.InteractionMemory, 'noShowCount'),
+      ) +
+      this.keywordCount(auditText, /取消|爽约|撤回|rejected|revoked|cancel/i);
     const trustScore = this.numberSignal(
       value(LifeGraphFieldCategory.InteractionMemory, 'trustScore'),
       value(LifeGraphFieldCategory.TrustSafety, 'trustScore'),
@@ -683,12 +727,12 @@ export class LifeGraphService {
     const lowPressure = /低压力|慢热|先聊|轻松|一对一|不急|自然/.test(
       `${socialText} ${safetyText}`,
     );
-    const avoidsNight = /不接受夜|不想晚上|深夜|私人场所/.test(
-      `${socialText} ${safetyText}`,
-    ) || value(LifeGraphFieldCategory.Lifestyle, 'acceptsNightMeet') === false;
-    const publicBoundary = /公共|公开|校园|操场|公园/.test(
-      `${safetyText} ${socialText}`,
-    ) || value(LifeGraphFieldCategory.FitnessActivity, 'publicPlaceOnly') === true;
+    const avoidsNight =
+      /不接受夜|不想晚上|深夜|私人场所/.test(`${socialText} ${safetyText}`) ||
+      value(LifeGraphFieldCategory.Lifestyle, 'acceptsNightMeet') === false;
+    const publicBoundary =
+      /公共|公开|校园|操场|公园/.test(`${safetyText} ${socialText}`) ||
+      value(LifeGraphFieldCategory.FitnessActivity, 'publicPlaceOnly') === true;
 
     const reliability =
       trustScore > 0
@@ -697,7 +741,11 @@ export class LifeGraphService {
           ? this.clampScore(55 + completed * 10 - cancelled * 14)
           : 50;
     const activityLevel =
-      recentActivityCount >= 6 ? 'active' : recentActivityCount <= 1 ? 'quiet' : 'unknown';
+      recentActivityCount >= 6
+        ? 'active'
+        : recentActivityCount <= 1
+          ? 'quiet'
+          : 'unknown';
     const socialEnergy =
       sportsKeywords && /聊天|朋友|相亲|恋爱|探店|拍照/.test(socialText)
         ? 'balanced'
@@ -722,7 +770,11 @@ export class LifeGraphService {
           : cancelled > 0
             ? 'occasional'
             : 'unknown';
-    const pressurePreference = lowPressure ? 'low' : socialText ? 'medium' : 'unknown';
+    const pressurePreference = lowPressure
+      ? 'low'
+      : socialText
+        ? 'medium'
+        : 'unknown';
     const nightBoundary = avoidsNight ? 'avoids_late_private' : 'unknown';
     const locationPreference = /大学|学校|校|附近|园区/.test(locationText)
       ? 'same_school_or_area'
@@ -775,7 +827,9 @@ export class LifeGraphService {
       scores: {
         rhythmConfidence: this.clampScore(35 + recentActivityCount * 8),
         sportsAffinity: this.clampScore(sportsKeywords ? 82 : 42),
-        lowPressureFit: this.clampScore(lowPressure ? 86 : publicBoundary ? 70 : 45),
+        lowPressureFit: this.clampScore(
+          lowPressure ? 86 : publicBoundary ? 70 : 45,
+        ),
         safetyBoundaryClarity: this.clampScore(
           publicBoundary || avoidsNight ? 86 : safetyText ? 64 : 35,
         ),
@@ -791,30 +845,44 @@ export class LifeGraphService {
     socialText: string,
   ): string[] {
     const explicit = [
-      value(LifeGraphFieldCategory.InteractionMemory, 'likedRecommendationPatterns'),
+      value(
+        LifeGraphFieldCategory.InteractionMemory,
+        'likedRecommendationPatterns',
+      ),
       value(LifeGraphFieldCategory.SocialIntent, 'preferredPeople'),
-      value(LifeGraphFieldCategory.InteractionMemory, 'dislikedRecommendationPatterns'),
+      value(
+        LifeGraphFieldCategory.InteractionMemory,
+        'dislikedRecommendationPatterns',
+      ),
     ]
       .map((item) => this.signalText(item))
       .filter(Boolean);
     if (explicit.length) return explicit.slice(0, 4);
     const inferred: string[] = [];
     if (/守时/.test(socialText)) inferred.push('对守时的人反馈更好');
-    if (/同校|附近|同城/.test(socialText)) inferred.push('更容易接受同校或同区域的人');
+    if (/同校|附近|同城/.test(socialText))
+      inferred.push('更容易接受同校或同区域的人');
     if (/慢热|低压力|先聊/.test(socialText)) inferred.push('更喜欢低压力开场');
     return inferred.slice(0, 4);
   }
 
   private signalText(value: unknown): string {
-    if (Array.isArray(value)) return value.map((item) => this.signalText(item)).filter(Boolean).join('、');
+    if (Array.isArray(value))
+      return value
+        .map((item) => this.signalText(item))
+        .filter(Boolean)
+        .join('、');
     if (value && typeof value === 'object') {
       const record = value as Record<string, unknown>;
       if ('value' in record) return this.signalText(record.value);
-      return Object.values(record).map((item) => this.signalText(item)).filter(Boolean).join('、');
+      return Object.values(record)
+        .map((item) => this.signalText(item))
+        .filter(Boolean)
+        .join('、');
     }
     if (typeof value === 'boolean') return value ? '是' : '否';
     if (value === null || value === undefined) return '';
-    return String(value).trim();
+    return cleanDisplayText(value, '').trim();
   }
 
   private numberSignal(...values: unknown[]): number {
@@ -888,7 +956,8 @@ export class LifeGraphService {
         Boolean(existing) &&
         (existing?.source === LifeGraphFieldSource.Manual ||
           existing?.revoked === true ||
-          JSON.stringify(existing?.fieldValue) !== JSON.stringify(item.fieldValue));
+          JSON.stringify(existing?.fieldValue) !==
+            JSON.stringify(item.fieldValue));
       const status = existing?.revoked
         ? 'revoked_conflict'
         : conflict
@@ -977,13 +1046,22 @@ export class LifeGraphService {
     let confirmedCount = 0;
     const nextFields: StoredProposalField[] = [];
     for (const field of fields) {
-      const selected = selectedIds.size === 0 || selectedIds.has(field.proposalFieldId);
-      if (!selected || field.status === 'rejected' || field.status === 'confirmed') {
+      const selected =
+        selectedIds.size === 0 || selectedIds.has(field.proposalFieldId);
+      if (
+        !selected ||
+        field.status === 'rejected' ||
+        field.status === 'confirmed'
+      ) {
         nextFields.push(field);
         continue;
       }
       if (field.category === LifeGraphFieldCategory.TrustSafety) {
-        nextFields.push({ ...field, status: 'rejected', rejectedAt: new Date().toISOString() });
+        nextFields.push({
+          ...field,
+          status: 'rejected',
+          rejectedAt: new Date().toISOString(),
+        });
         continue;
       }
       await this.upsertField(
@@ -1057,7 +1135,8 @@ export class LifeGraphService {
     const fields = this.proposalFields(proposal);
     const nextFields: StoredProposalField[] = [];
     for (const field of fields) {
-      const selected = selectedIds.size === 0 || selectedIds.has(field.proposalFieldId);
+      const selected =
+        selectedIds.size === 0 || selectedIds.has(field.proposalFieldId);
       if (!selected || field.status === 'confirmed') {
         nextFields.push(field);
         continue;
@@ -1177,10 +1256,15 @@ export class LifeGraphService {
     userId: number,
     profile: LifeGraphProfile,
   ): Promise<void> {
-    const socialProfile = await this.socialProfiles.findOne({ where: { userId } });
+    const socialProfile = await this.socialProfiles.findOne({
+      where: { userId },
+    });
     if (!socialProfile) return;
 
-    const imports = this.importCandidatesFromSocialProfile(socialProfile, profile);
+    const imports = this.importCandidatesFromSocialProfile(
+      socialProfile,
+      profile,
+    );
     for (const item of imports) {
       await this.upsertField(userId, item, {
         source: LifeGraphFieldSource.ImportedFromSocialProfile,
@@ -1201,7 +1285,10 @@ export class LifeGraphService {
       patch.currentSocialGoal = socialProfile.wantToMeet.join('、');
     }
     if (Object.keys(patch).length > 0) {
-      await this.profiles.update({ userId }, { ...patch, lastUpdatedAt: new Date() });
+      await this.profiles.update(
+        { userId },
+        { ...patch, lastUpdatedAt: new Date() },
+      );
     }
   }
 
@@ -1210,10 +1297,22 @@ export class LifeGraphService {
     profile: LifeGraphProfile,
   ): ImportCandidate[] {
     const values: ImportCandidate[] = [
-      imported(LifeGraphFieldCategory.Identity, 'nickname', socialProfile.nickname),
-      imported(LifeGraphFieldCategory.Identity, 'ageRange', socialProfile.ageRange),
+      imported(
+        LifeGraphFieldCategory.Identity,
+        'nickname',
+        socialProfile.nickname,
+      ),
+      imported(
+        LifeGraphFieldCategory.Identity,
+        'ageRange',
+        socialProfile.ageRange,
+      ),
       imported(LifeGraphFieldCategory.Identity, 'gender', socialProfile.gender),
-      imported(LifeGraphFieldCategory.Identity, 'city', socialProfile.city || profile.city),
+      imported(
+        LifeGraphFieldCategory.Identity,
+        'city',
+        socialProfile.city || profile.city,
+      ),
       imported(
         LifeGraphFieldCategory.Identity,
         'timezone',
@@ -1224,7 +1323,11 @@ export class LifeGraphService {
         'preferredLanguage',
         profile.preferredLanguage || 'zh-CN',
       ),
-      imported(LifeGraphFieldCategory.Identity, 'nearbyArea', socialProfile.nearbyArea),
+      imported(
+        LifeGraphFieldCategory.Identity,
+        'nearbyArea',
+        socialProfile.nearbyArea,
+      ),
       imported(
         LifeGraphFieldCategory.Identity,
         'verifiedStatus',
@@ -1275,9 +1378,10 @@ export class LifeGraphService {
       imported(
         LifeGraphFieldCategory.Lifestyle,
         'activeHours',
-        [socialProfile.weekdayAvailability, socialProfile.weekendAvailability].filter(
-          Boolean,
-        ),
+        [
+          socialProfile.weekdayAvailability,
+          socialProfile.weekendAvailability,
+        ].filter(Boolean),
       ),
       imported(
         LifeGraphFieldCategory.Lifestyle,
@@ -1322,7 +1426,11 @@ export class LifeGraphService {
         false,
       ),
       imported(LifeGraphFieldCategory.PrivacyBoundary, 'contactSharing', false),
-      imported(LifeGraphFieldCategory.PrivacyBoundary, 'paymentBoundary', false),
+      imported(
+        LifeGraphFieldCategory.PrivacyBoundary,
+        'paymentBoundary',
+        false,
+      ),
     ];
     return values.filter((item) => hasMeaningfulValue(item.fieldValue));
   }
@@ -1451,7 +1559,8 @@ export class LifeGraphService {
           : existing
             ? options.action
             : LifeGraphAuditAction.Created,
-      reason: 'reason' in update && update.reason ? update.reason : options.reason,
+      reason:
+        'reason' in update && update.reason ? update.reason : options.reason,
       taskId: options.taskId ?? null,
       messageId: options.messageId ?? null,
     });
@@ -1506,7 +1615,8 @@ export class LifeGraphService {
         ? LifeGraphSignalType.Weak
         : LifeGraphSignalType.Entertainment;
     }
-    if (SENSITIVE_SIGNAL_KEYS.has(fieldKey)) return LifeGraphSignalType.Sensitive;
+    if (SENSITIVE_SIGNAL_KEYS.has(fieldKey))
+      return LifeGraphSignalType.Sensitive;
     return LifeGraphSignalType.Core;
   }
 
@@ -1588,7 +1698,7 @@ export class LifeGraphService {
     }
 
     const visibleModules = Object.entries(modules).filter(
-      ([category]) => category !== LifeGraphFieldCategory.TrustSafety,
+      ([category]) => category !== 'trust_safety',
     );
     const completenessScore = Math.round(
       visibleModules.reduce((sum, [, value]) => sum + value, 0) /
@@ -1655,8 +1765,8 @@ export class LifeGraphService {
     userId: number;
     fieldKey: string;
     category: LifeGraphFieldCategory;
-    oldValue: unknown | null;
-    newValue: unknown | null;
+    oldValue: unknown;
+    newValue: unknown;
     source: LifeGraphFieldSource;
     action: LifeGraphAuditAction;
     reason: string;
@@ -1774,7 +1884,11 @@ export class LifeGraphService {
           : field.source === LifeGraphFieldSource.AiInferred
             ? 0.45
             : 0.75;
-    return Math.round(Math.max(0, Math.min(1, field.confidence * sourceWeight)) * 100) / 100;
+    return (
+      Math.round(
+        Math.max(0, Math.min(1, field.confidence * sourceWeight)) * 100,
+      ) / 100
+    );
   }
 
   private async findProposalForUser(
@@ -1790,13 +1904,15 @@ export class LifeGraphService {
 
   private proposalFields(proposal: LifeGraphProposal): StoredProposalField[] {
     return Array.isArray(proposal.proposedFields)
-      ? proposal.proposedFields
-          .filter((item): item is StoredProposalField => this.isProposalField(item))
+      ? proposal.proposedFields.filter((item): item is StoredProposalField =>
+          this.isProposalField(item),
+        )
       : [];
   }
 
   private isProposalField(value: unknown): value is StoredProposalField {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      return false;
     const item = value as Record<string, unknown>;
     return (
       typeof item.proposalFieldId === 'string' &&
@@ -1853,7 +1969,8 @@ function imported(
 function hasMeaningfulValue(value: unknown): boolean {
   if (value == null) return false;
   if (typeof value === 'string') return value.trim().length > 0;
-  if (Array.isArray(value)) return value.some((item) => hasMeaningfulValue(item));
+  if (Array.isArray(value))
+    return value.some((item) => hasMeaningfulValue(item));
   if (typeof value === 'object') return Object.keys(value).length > 0;
   return true;
 }

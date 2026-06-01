@@ -123,7 +123,9 @@ export class AIService {
       if (parsed?.activityType) return parsed;
       return fallback;
     } catch (err) {
-      this.logger.warn(`parseSocialIntent fell back: ${(err as Error).message}`);
+      this.logger.warn(
+        `parseSocialIntent fell back: ${(err as Error).message}`,
+      );
       return fallback;
     }
   }
@@ -149,13 +151,15 @@ export class AIService {
       );
       return out?.trim() || fallback;
     } catch (err) {
-      this.logger.warn(`generateInviteText fell back: ${(err as Error).message}`);
+      this.logger.warn(
+        `generateInviteText fell back: ${(err as Error).message}`,
+      );
       return fallback;
     }
   }
 
   /** Explain why a candidate matched. Currently a stub — returns reasons unchanged. */
-  async explainMatch(reasons: string[]): Promise<string> {
+  explainMatch(reasons: string[]): string {
     return reasons.filter(Boolean).join('；') || '兴趣和时间都比较接近。';
   }
 
@@ -290,14 +294,18 @@ export class AIService {
       commonTags?: string[] | null;
     },
   ): Promise<string> {
-    const reqTitle =
-      request.title || request.activityType || '一起约个运动';
+    const reqTitle = request.title || request.activityType || '一起约个运动';
     const nickname = candidate.nickname || '朋友';
     const tags =
       candidate.commonTags && candidate.commonTags.length > 0
         ? candidate.commonTags
-        : request.interestTags ?? [];
-    const fallback = this.fallbackInviteZh(reqTitle, request.activityType, nickname, tags);
+        : (request.interestTags ?? []);
+    const fallback = this.fallbackInviteZh(
+      reqTitle,
+      request.activityType,
+      nickname,
+      tags,
+    );
     if (!this.isLlmEnabled()) return fallback;
     try {
       const out = await this.callDeepseek(
@@ -816,9 +824,14 @@ export class AIService {
     ]);
 
     const nickname =
-      stringValue(existing.nickname) || input.user?.nickname || find(/昵称[是为:]?([^\n，。]+)/) || '';
+      stringValue(existing.nickname) ||
+      input.user?.nickname ||
+      find(/昵称[是为:]?([^\n，。]+)/) ||
+      '';
     const city =
-      stringValue(existing.city) || input.user?.city || find(/(?:常驻|城市|地区)[是为:]?([^\n，。]+)/);
+      stringValue(existing.city) ||
+      input.user?.city ||
+      find(/(?:常驻|城市|地区)[是为:]?([^\n，。]+)/);
     const ageRange =
       stringValue(existing.ageRange) || find(/(\d{2}\s*[-到至]\s*\d{2})/) || '';
     const gender = stringValue(existing.gender);
@@ -836,7 +849,11 @@ export class AIService {
         traits: this.cleanStrings([...existingArr('traits'), ...traits], 8),
         socialStyle:
           stringValue(existing.socialStyle) ||
-          (text.includes('慢热') ? '慢热型' : text.includes('主动') ? '主动型' : '自然相处型'),
+          (text.includes('慢热')
+            ? '慢热型'
+            : text.includes('主动')
+              ? '主动型'
+              : '自然相处型'),
         communicationStyle:
           stringValue(existing.communicationStyle) ||
           (text.includes('直接') || text.includes('高效')
@@ -844,8 +861,14 @@ export class AIService {
             : '真诚、尊重边界'),
       },
       interests: {
-        sports: this.cleanStrings([...existingArr('fitnessGoals'), ...sports], 8),
-        lifestyle: this.cleanStrings([...existingArr('lifestyleTags'), ...lifestyle], 8),
+        sports: this.cleanStrings(
+          [...existingArr('fitnessGoals'), ...sports],
+          8,
+        ),
+        lifestyle: this.cleanStrings(
+          [...existingArr('lifestyleTags'), ...lifestyle],
+          8,
+        ),
         socialScenes: this.cleanStrings(
           [...existingArr('socialScenes'), '同城约练', '线下交流'],
           6,
@@ -866,12 +889,21 @@ export class AIService {
         ),
       },
       relationshipIntent: {
-        goals: this.cleanStrings([...existingArr('relationshipGoals'), ...goals, '交朋友', '找搭子'], 6),
+        goals: this.cleanStrings(
+          [...existingArr('relationshipGoals'), ...goals, '交朋友', '找搭子'],
+          6,
+        ),
         openness: stringValue(existing.openness) || 'medium',
       },
       availability: {
-        weekdays: stringValue(existing.weekdayAvailability) || find(/工作日([^\n。]*)/) || '',
-        weekends: stringValue(existing.weekendAvailability) || find(/周末([^\n。]*)/) || '',
+        weekdays:
+          stringValue(existing.weekdayAvailability) ||
+          find(/工作日([^\n。]*)/) ||
+          '',
+        weekends:
+          stringValue(existing.weekendAvailability) ||
+          find(/周末([^\n。]*)/) ||
+          '',
       },
       visibility: {
         profileDiscoverable: true,
@@ -916,7 +948,9 @@ export class AIService {
     };
     const bool = (value: unknown, fallbackValue: boolean) =>
       typeof value === 'boolean' ? value : fallbackValue;
-    const basic = (parsed.basic ?? {}) as Partial<AiProfileBuilderCard['basic']>;
+    const basic = (parsed.basic ?? {}) as Partial<
+      AiProfileBuilderCard['basic']
+    >;
     const personality = (parsed.personality ?? {}) as Partial<
       AiProfileBuilderCard['personality']
     >;
@@ -940,7 +974,11 @@ export class AIService {
         ? (parsed.matchSignals as Partial<AiProfileMatchSignals>)
         : {};
     const matchSignals = this.buildMatchSignals({
-      publicTags: arr(rawSignals.publicTags, fallback.matchSignals.publicTags, 12),
+      publicTags: arr(
+        rawSignals.publicTags,
+        fallback.matchSignals.publicTags,
+        12,
+      ),
       privatePreferenceTags: arr(
         rawSignals.privatePreferenceTags,
         fallback.matchSignals.privatePreferenceTags,
@@ -975,7 +1013,8 @@ export class AIService {
         mbti: stringValue(personality.mbti) || fallback.personality.mbti,
         traits: arr(personality.traits, fallback.personality.traits, 8),
         socialStyle:
-          stringValue(personality.socialStyle) || fallback.personality.socialStyle,
+          stringValue(personality.socialStyle) ||
+          fallback.personality.socialStyle,
         communicationStyle:
           stringValue(personality.communicationStyle) ||
           fallback.personality.communicationStyle,
@@ -983,10 +1022,18 @@ export class AIService {
       interests: {
         sports: arr(interests.sports, fallback.interests.sports, 8),
         lifestyle: arr(interests.lifestyle, fallback.interests.lifestyle, 8),
-        socialScenes: arr(interests.socialScenes, fallback.interests.socialScenes, 8),
+        socialScenes: arr(
+          interests.socialScenes,
+          fallback.interests.socialScenes,
+          8,
+        ),
       },
       preferences: {
-        wantToMeet: arr(preferences.wantToMeet, fallback.preferences.wantToMeet, 8),
+        wantToMeet: arr(
+          preferences.wantToMeet,
+          fallback.preferences.wantToMeet,
+          8,
+        ),
         preferredTraits: arr(
           preferences.preferredTraits,
           fallback.preferences.preferredTraits,
@@ -995,13 +1042,20 @@ export class AIService {
         avoid: arr(preferences.avoid, fallback.preferences.avoid, 8),
       },
       relationshipIntent: {
-        goals: arr(relationshipIntent.goals, fallback.relationshipIntent.goals, 8),
+        goals: arr(
+          relationshipIntent.goals,
+          fallback.relationshipIntent.goals,
+          8,
+        ),
         openness:
-          stringValue(relationshipIntent.openness) || fallback.relationshipIntent.openness,
+          stringValue(relationshipIntent.openness) ||
+          fallback.relationshipIntent.openness,
       },
       availability: {
-        weekdays: stringValue(availability.weekdays) || fallback.availability.weekdays,
-        weekends: stringValue(availability.weekends) || fallback.availability.weekends,
+        weekdays:
+          stringValue(availability.weekdays) || fallback.availability.weekdays,
+        weekends:
+          stringValue(availability.weekends) || fallback.availability.weekends,
       },
       visibility: {
         profileDiscoverable: bool(
@@ -1141,10 +1195,9 @@ export class AIService {
   }
 
   private cleanStrings(values: string[], limit = 30): string[] {
-    return Array.from(new Set(values.map((v) => v.trim()).filter(Boolean))).slice(
-      0,
-      limit,
-    );
+    return Array.from(
+      new Set(values.map((v) => v.trim()).filter(Boolean)),
+    ).slice(0, limit);
   }
 
   private normalizeSocialRequestCard(
@@ -1176,7 +1229,7 @@ export class AIService {
       }
     }
 
-    let riskNotes = asStringArray(parsed.riskNotes);
+    const riskNotes = asStringArray(parsed.riskNotes);
     if (riskNotes.length < 2) {
       for (const r of fallback.riskNotes) {
         if (!riskNotes.includes(r)) riskNotes.push(r);
@@ -1184,7 +1237,7 @@ export class AIService {
       }
     }
 
-    let privacyNotes = asStringArray(parsed.privacyNotes);
+    const privacyNotes = asStringArray(parsed.privacyNotes);
     if (privacyNotes.length < 2) {
       for (const p of fallback.privacyNotes) {
         if (!privacyNotes.includes(p)) privacyNotes.push(p);
@@ -1206,8 +1259,7 @@ export class AIService {
         (typeof parsed.title === 'string' && parsed.title.trim()) ||
         fallback.title,
       description:
-        (typeof parsed.description === 'string' &&
-          parsed.description.trim()) ||
+        (typeof parsed.description === 'string' && parsed.description.trim()) ||
         fallback.description ||
         rawText,
       interestTags: tags,
@@ -1237,10 +1289,7 @@ export class AIService {
 
     // interestTags: rich.tags + profile.interestTags + 关键词兜底，clamp 5..8
     const tagPool: string[] = [];
-    for (const v of [
-      ...rich.interestTags,
-      ...(profile.interestTags ?? []),
-    ]) {
+    for (const v of [...rich.interestTags, ...(profile.interestTags ?? [])]) {
       const x = (v || '').trim();
       if (x && !tagPool.includes(x)) tagPool.push(x);
     }
@@ -1261,7 +1310,14 @@ export class AIService {
     const personalityPreference = (() => {
       const found: string[] = [];
       const map = [
-        '安静', '外向', '内向', '健谈', '佛系', '认真', '轻松', '休闲',
+        '安静',
+        '外向',
+        '内向',
+        '健谈',
+        '佛系',
+        '认真',
+        '轻松',
+        '休闲',
       ];
       for (const w of map) if (t.includes(w)) found.push(w);
       return found.length > 0 ? found : ['友善', '尊重边界'];
@@ -1304,22 +1360,25 @@ export class AIService {
       this.config.get<string>('DEEPSEEK_MODEL'),
     );
 
-    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${apiKey}`,
+    const res = await fetch(
+      `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.4,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+        }),
       },
-      body: JSON.stringify({
-        model,
-        temperature: 0.4,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-      }),
-    });
+    );
     if (!res.ok) {
       throw new Error(`DeepSeek HTTP ${res.status}`);
     }
@@ -1343,8 +1402,17 @@ export class AIService {
     else if (/(散步|city\s*walk|遛弯)/.test(t)) activityType = 'city_walk';
 
     const tagCandidates = [
-      '跑步', '健身', '瑜伽', '骑行', '篮球', '羽毛球', '咖啡',
-      '电影', '摄影', '读书', '自习',
+      '跑步',
+      '健身',
+      '瑜伽',
+      '骑行',
+      '篮球',
+      '羽毛球',
+      '咖啡',
+      '电影',
+      '摄影',
+      '读书',
+      '自习',
     ];
     const tags = tagCandidates.filter((c) => text.includes(c));
     return { activityType, tags, summary: text.slice(0, 120) };
@@ -1435,7 +1503,9 @@ export class AIService {
       );
     }
     if (typeof input.score === 'number') {
-      reasons.push(`综合匹配度 ${Math.round(input.score)}%，兴趣、时间和安全边界较接近。`);
+      reasons.push(
+        `综合匹配度 ${Math.round(input.score)}%，兴趣、时间和安全边界较接近。`,
+      );
     }
     if (input.candidate.verified) {
       reasons.push('对方资料已有认证信号，适合优先尝试站内沟通。');
@@ -1470,9 +1540,12 @@ export class AIService {
         const text = stringValue(value);
         const lower = text.toLowerCase();
         if (!text) return '';
-        if (lower.includes('not verified')) return '对方尚未完成认证，建议先通过站内消息确认基本信息。';
-        if (lower.includes('profile is incomplete')) return '对方资料还不完整，建议先了解活动边界和时间地点。';
-        if (lower.includes('verified-only')) return '本次偏好要求认证用户，请优先等待已认证候选人。';
+        if (lower.includes('not verified'))
+          return '对方尚未完成认证，建议先通过站内消息确认基本信息。';
+        if (lower.includes('profile is incomplete'))
+          return '对方资料还不完整，建议先了解活动边界和时间地点。';
+        if (lower.includes('verified-only'))
+          return '本次偏好要求认证用户，请优先等待已认证候选人。';
         if (lower.includes('privacy') || lower.includes('boundary')) {
           return '双方隐私边界需要保留，避免交换联系方式或详细住址。';
         }
@@ -1489,7 +1562,8 @@ export class AIService {
     commonTags: string[],
     city?: string | null,
   ): string {
-    const title = stringValue(requestTitle) || stringValue(activityType) || '这次约练';
+    const title =
+      stringValue(requestTitle) || stringValue(activityType) || '这次约练';
     const tagPart =
       commonTags.length > 0
         ? `我也对 ${commonTags.slice(0, 2).join('、')} 感兴趣，`
@@ -1542,7 +1616,9 @@ export class AIService {
       `参与 ${participants} 人，签到 ${checked} 人，证明 ${proofs} 条。`,
     );
     if (avg !== null) {
-      parts.push(`平均评分 ${avg.toFixed(1)} 分（共 ${ratings.length} 条评价）。`);
+      parts.push(
+        `平均评分 ${avg.toFixed(1)} 分（共 ${ratings.length} 条评价）。`,
+      );
     } else {
       parts.push('暂无评价。');
     }
@@ -1576,21 +1652,24 @@ export class AIService {
       this.config.get<string>('DEEPSEEK_MODEL'),
     );
 
-    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${apiKey}`,
+    const res = await fetch(
+      `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.4,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+        }),
       },
-      body: JSON.stringify({
-        model,
-        temperature: 0.4,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-      }),
-    });
+    );
     if (!res.ok) {
       throw new Error(`DeepSeek HTTP ${res.status}`);
     }

@@ -2,64 +2,66 @@ import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
 
+type NestCommon = typeof import('@nestjs/common');
+
 jest.mock('../activities/activities.module', () => {
-  const { Module } = jest.requireActual('@nestjs/common');
+  const { Module } = jest.requireActual<NestCommon>('@nestjs/common');
   class ActivitiesModule {}
   Module({})(ActivitiesModule);
   return { ActivitiesModule };
 });
 
 jest.mock('../friends/friends.module', () => {
-  const { Module } = jest.requireActual('@nestjs/common');
+  const { Module } = jest.requireActual<NestCommon>('@nestjs/common');
   class FriendsModule {}
   Module({})(FriendsModule);
   return { FriendsModule };
 });
 
 jest.mock('../match/match.module', () => {
-  const { Module } = jest.requireActual('@nestjs/common');
+  const { Module } = jest.requireActual<NestCommon>('@nestjs/common');
   class MatchModule {}
   Module({})(MatchModule);
   return { MatchModule };
 });
 
 jest.mock('../meets/meets.module', () => {
-  const { Module } = jest.requireActual('@nestjs/common');
+  const { Module } = jest.requireActual<NestCommon>('@nestjs/common');
   class MeetsModule {}
   Module({})(MeetsModule);
   return { MeetsModule };
 });
 
 jest.mock('../messages/messages.module', () => {
-  const { Module } = jest.requireActual('@nestjs/common');
+  const { Module } = jest.requireActual<NestCommon>('@nestjs/common');
   class MessagesModule {}
   Module({})(MessagesModule);
   return { MessagesModule };
 });
 
 jest.mock('../notifications/notifications.module', () => {
-  const { Module } = jest.requireActual('@nestjs/common');
+  const { Module } = jest.requireActual<NestCommon>('@nestjs/common');
   class NotificationsModule {}
   Module({})(NotificationsModule);
   return { NotificationsModule };
 });
 
 jest.mock('../safety/safety.module', () => {
-  const { Module } = jest.requireActual('@nestjs/common');
+  const { Module } = jest.requireActual<NestCommon>('@nestjs/common');
   class SafetyModule {}
   Module({})(SafetyModule);
   return { SafetyModule };
 });
 
 jest.mock('../social-requests/social-requests.module', () => {
-  const { Module } = jest.requireActual('@nestjs/common');
+  const { Module } = jest.requireActual<NestCommon>('@nestjs/common');
   class SocialRequestsModule {}
   Module({})(SocialRequestsModule);
   return { SocialRequestsModule };
 });
 
 jest.mock('../users/users.module', () => {
-  const { Module } = jest.requireActual('@nestjs/common');
+  const { Module } = jest.requireActual<NestCommon>('@nestjs/common');
   class UsersModule {}
   Module({})(UsersModule);
   return { UsersModule };
@@ -94,11 +96,11 @@ function createRepositoryMock() {
 
   return {
     count: jest.fn().mockResolvedValue(0),
-    create: jest.fn((value) => value),
+    create: jest.fn(<T>(value: T): T => value),
     createQueryBuilder: jest.fn(() => queryBuilder),
     find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn().mockResolvedValue(null),
-    save: jest.fn(async (value) => value),
+    save: jest.fn(<T>(value: T): Promise<T> => Promise.resolve(value)),
     update: jest.fn().mockResolvedValue({ affected: 0 }),
   };
 }
@@ -113,13 +115,13 @@ function createDataSourceMock() {
   };
 }
 
-function createGenericMock() {
-  return new Proxy<Record<string | symbol, unknown>>(
+function createGenericMock(): Record<string | symbol, jest.Mock | undefined> {
+  return new Proxy<Record<string | symbol, jest.Mock | undefined>>(
     {},
     {
       get(target, prop) {
         if (prop === 'then') return undefined;
-        if (!(prop in target)) target[prop] = jest.fn();
+        if (!target[prop]) target[prop] = jest.fn();
         return target[prop];
       },
     },

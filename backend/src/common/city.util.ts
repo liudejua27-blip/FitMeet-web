@@ -55,11 +55,14 @@ const CITY_PREFIX_PATTERN =
   /^(?:在|想在|希望在|优先在|优先匹配|优先找|匹配|城市|地区|地点|位置|目标城市|所在城市|常驻城市|城市是哪里|城市在哪里|在哪个城市|城市是哪)[：:，,\s-]*/;
 
 function normalizeCityToken(value: string): string {
-  return value
-    .replace(/[“”"'\[\]【】()（）{}<>《》]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/市$/u, '');
+  return (
+    value
+      // eslint-disable-next-line no-useless-escape
+      .replace(/[“”"'\[\]【】()（）{}<>《》]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/市$/u, '')
+  );
 }
 
 export function sanitizeCity(raw: unknown, fallback = ''): string {

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await */
 import { SocialAgentBrainService } from './social-agent-brain.service';
 import { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
 
@@ -194,7 +195,9 @@ describe('SocialAgentBrainService', () => {
                 userIntent: 'social_search',
                 reason: 'User explicitly asked to search candidates now.',
                 shouldCallTool: true,
-                tools: [{ name: 'search_candidates', arguments: { city: 'Qingdao' } }],
+                tools: [
+                  { name: 'search_candidates', arguments: { city: 'Qingdao' } },
+                ],
                 needUserConfirmation: false,
                 responseGoal: 'Search candidates and summarize results.',
               }),

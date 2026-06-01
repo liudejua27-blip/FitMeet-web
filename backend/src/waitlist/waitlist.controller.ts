@@ -23,7 +23,10 @@ export class WaitlistController {
   constructor(private readonly waitlist: WaitlistService) {}
 
   @Post('waitlist/app')
-  submitAppWaitlist(@Body() body: SubmitAppWaitlistDto, @Req() req: RequestLike) {
+  submitAppWaitlist(
+    @Body() body: SubmitAppWaitlistDto,
+    @Req() req: RequestLike,
+  ) {
     return this.waitlist.submitAppWaitlist(body, requestMeta(req));
   }
 
@@ -33,7 +36,10 @@ export class WaitlistController {
   }
 
   @Post('waitlist/events')
-  async trackEvent(@Body() body: TrackWaitlistEventDto, @Req() req: RequestLike) {
+  async trackEvent(
+    @Body() body: TrackWaitlistEventDto,
+    @Req() req: RequestLike,
+  ) {
     await this.waitlist.track(
       body.eventName,
       this.waitlist.hashIp(requestMeta(req).ip),
@@ -44,7 +50,10 @@ export class WaitlistController {
 
   @Get('admin/waitlist')
   @UseGuards(JwtAuthGuard)
-  listAdminWaitlist(@Query() query: AdminWaitlistQueryDto, @Req() req: RequestLike) {
+  listAdminWaitlist(
+    @Query() query: AdminWaitlistQueryDto,
+    @Req() req: RequestLike,
+  ) {
     this.assertAdmin(req.user?.id);
     return this.waitlist.listAdminWaitlist(query);
   }

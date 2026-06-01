@@ -104,8 +104,7 @@ export class SafetyService {
       });
 
     request.realName = dto.realName || request.realName || '';
-    request.idNumberMasked =
-      dto.idNumberMasked || request.idNumberMasked || '';
+    request.idNumberMasked = dto.idNumberMasked || request.idNumberMasked || '';
     request.certName = dto.certName || request.certName || '';
     request.certImageUrl = dto.certImageUrl || request.certImageUrl || '';
     request.status = 'approved';

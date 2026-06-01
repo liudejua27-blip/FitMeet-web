@@ -50,7 +50,11 @@ export class MessagesController {
     @Param('id') id: string,
     @Body('text') text?: string,
   ) {
-    return this.messagesService.startPublicIntentConversation(user.id, id, text);
+    return this.messagesService.startPublicIntentConversation(
+      user.id,
+      id,
+      text,
+    );
   }
 
   @Get('unread')

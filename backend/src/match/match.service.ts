@@ -443,7 +443,11 @@ export class MatchService {
           new Set([...view.risk.warnings, ...reasoning.riskWarnings]),
         ),
       };
-      view.emotionalInsight = this.buildEmotionalInsight(c, request, view.reasons);
+      view.emotionalInsight = this.buildEmotionalInsight(
+        c,
+        request,
+        view.reasons,
+      );
       const row = await this.candidateRepo.save(
         this.candidateRepo.create({
           socialRequestId: request.id,
@@ -895,13 +899,20 @@ export class MatchService {
       }
 
       // 4-6) Life rhythm, social energy, and relationship goal.
-      const lifestyleScore = this.scoreLifestyleSync(ctx.ownerProfile, socialProfile);
+      const lifestyleScore = this.scoreLifestyleSync(
+        ctx.ownerProfile,
+        socialProfile,
+      );
       breakdown.lifeRhythm = lifestyleScore;
       if (lifestyleScore >= 9) reasons.push('生活作息或日常场景比较同频。');
 
-      const socialEnergyScore = this.scoreSocialEnergy(ctx.ownerProfile, socialProfile);
+      const socialEnergyScore = this.scoreSocialEnergy(
+        ctx.ownerProfile,
+        socialProfile,
+      );
       breakdown.socialEnergy = socialEnergyScore;
-      if (socialEnergyScore >= 8) reasons.push('社交能量接近，沟通节奏更容易舒服。');
+      if (socialEnergyScore >= 8)
+        reasons.push('社交能量接近，沟通节奏更容易舒服。');
 
       const relationshipGoalScore = this.scoreRelationshipGoal(
         ctx,
@@ -909,7 +920,8 @@ export class MatchService {
         compatibility.breakdown.bidirectionalIntent,
       );
       breakdown.relationshipGoal = relationshipGoalScore;
-      if (relationshipGoalScore >= 9) reasons.push('关系目标接近，双方期待更容易对齐。');
+      if (relationshipGoalScore >= 9)
+        reasons.push('关系目标接近，双方期待更容易对齐。');
 
       // 7-8) Trust and safety-risk, max 10 + 8
       const {
@@ -942,7 +954,10 @@ export class MatchService {
         trustScore +
         safetyRiskScore;
 
-      const riskLevel = this.maxRiskLevel(profileRiskLevel, scenePolicy.riskLevel);
+      const riskLevel = this.maxRiskLevel(
+        profileRiskLevel,
+        scenePolicy.riskLevel,
+      );
 
       out.push({
         user,
@@ -1067,7 +1082,8 @@ export class MatchService {
     if (policy.riskLevel === CandidateRiskLevel.High) score -= 5;
     if (!input.verified) score -= 1;
     if (input.warnings.length >= 2) score -= 1;
-    if (input.distanceKm == null && policy.confirmation !== 'normal') score -= 1;
+    if (input.distanceKm == null && policy.confirmation !== 'normal')
+      score -= 1;
     return Math.max(0, Math.min(8, score));
   }
 
@@ -1076,23 +1092,33 @@ export class MatchService {
     activityType?: string;
     requestText?: string;
   }): MatchScenePolicy {
-    const text = `${ctx.type ?? ''} ${ctx.activityType ?? ''} ${ctx.requestText ?? ''}`.toLowerCase();
-    if (/(支付|付款|转账|钱包|押金|精确定位|实时定位|共享位置|payment|wallet|deposit|precise.?location)/i.test(text)) {
+    const text =
+      `${ctx.type ?? ''} ${ctx.activityType ?? ''} ${ctx.requestText ?? ''}`.toLowerCase();
+    if (
+      /(支付|付款|转账|钱包|押金|精确定位|实时定位|共享位置|payment|wallet|deposit|precise.?location)/i.test(
+        text,
+      )
+    ) {
       return {
         kind: 'general',
         label: '禁止自动执行动作',
         riskLevel: CandidateRiskLevel.High,
         confirmation: 'blocked',
-        warning: '支付、钱包和精确定位永远不能由 Agent 自动执行，只能由用户本人在明确确认后处理。',
+        warning:
+          '支付、钱包和精确定位永远不能由 Agent 自动执行，只能由用户本人在明确确认后处理。',
       };
     }
-    if (/(酒|喝酒|酒搭子|夜店)/i.test(text) || /\b(bar|pub|club|ktv|drinking|drink)\b/i.test(text)) {
+    if (
+      /(酒|喝酒|酒搭子|夜店)/i.test(text) ||
+      /\b(bar|pub|club|ktv|drinking|drink)\b/i.test(text)
+    ) {
       return {
         kind: 'drinking',
         label: '酒局',
         riskLevel: CandidateRiskLevel.High,
         confirmation: 'double_confirm',
-        warning: '酒局属于高风险线下场景，必须双方确认公开地点、结束时间和回家方式，Agent 不应自动推进。',
+        warning:
+          '酒局属于高风险线下场景，必须双方确认公开地点、结束时间和回家方式，Agent 不应自动推进。',
       };
     }
     if (/(相亲|dating|date|恋爱|脱单|对象|婚恋)/i.test(text)) {
@@ -1101,7 +1127,8 @@ export class MatchService {
         label: '相亲/约会',
         riskLevel: CandidateRiskLevel.High,
         confirmation: 'double_confirm',
-        warning: '相亲约会需要更高确认门槛：先站内沟通，避免承诺关系、金钱往来或私密地点见面。',
+        warning:
+          '相亲约会需要更高确认门槛：先站内沟通，避免承诺关系、金钱往来或私密地点见面。',
       };
     }
     if (/(租房|合租|室友|看房|房东|押金|rent|roommate|apartment)/i.test(text)) {
@@ -1110,7 +1137,8 @@ export class MatchService {
         label: '租房',
         riskLevel: CandidateRiskLevel.High,
         confirmation: 'double_confirm',
-        warning: '租房涉及住址和资金风险，Agent 只能辅助筛选，押金、合同和看房必须人工确认。',
+        warning:
+          '租房涉及住址和资金风险，Agent 只能辅助筛选，押金、合同和看房必须人工确认。',
       };
     }
     if (/(旅游|旅行|出游|旅伴|trip|travel|hotel|酒店|民宿|过夜)/i.test(text)) {
@@ -1119,7 +1147,8 @@ export class MatchService {
         label: '旅行',
         riskLevel: CandidateRiskLevel.High,
         confirmation: 'double_confirm',
-        warning: '旅行搭子涉及长时间同行和住宿边界，必须拆成公开短行程并人工确认预算、路线和安全预案。',
+        warning:
+          '旅行搭子涉及长时间同行和住宿边界，必须拆成公开短行程并人工确认预算、路线和安全预案。',
       };
     }
     if (/(麻将|mahjong)/i.test(text)) {
@@ -1128,7 +1157,8 @@ export class MatchService {
         label: '麻将',
         riskLevel: CandidateRiskLevel.Medium,
         confirmation: 'strict',
-        warning: '麻将场景要提前确认是否涉钱、地点是否公开，Agent 不自动组织私密牌局。',
+        warning:
+          '麻将场景要提前确认是否涉钱、地点是否公开，Agent 不自动组织私密牌局。',
       };
     }
     if (/(扑克|德州|牌局|poker|cards|texas)/i.test(text)) {
@@ -1140,16 +1170,23 @@ export class MatchService {
         warning: '牌局场景要提前确认规则和是否涉钱，避免私人封闭场所。',
       };
     }
-    if (ctx.type === SocialRequestType.FitnessPartner || /(健身|gym|workout|撸铁|私教)/i.test(text)) {
+    if (
+      ctx.type === SocialRequestType.FitnessPartner ||
+      /(健身|gym|workout|撸铁|私教)/i.test(text)
+    ) {
       return {
         kind: 'fitness',
         label: '健身',
         riskLevel: CandidateRiskLevel.Medium,
         confirmation: 'strict',
-        warning: '健身约练需先确认强度、场馆和身体边界，不让 Agent 自动承诺训练计划或私教付费。',
+        warning:
+          '健身约练需先确认强度、场馆和身体边界，不让 Agent 自动承诺训练计划或私教付费。',
       };
     }
-    if (ctx.type === SocialRequestType.DogWalking || /(遛狗|宠物|dog)/i.test(text)) {
+    if (
+      ctx.type === SocialRequestType.DogWalking ||
+      /(遛狗|宠物|dog)/i.test(text)
+    ) {
       return {
         kind: 'pet',
         label: '遛狗/宠物',
@@ -1167,7 +1204,10 @@ export class MatchService {
         warning: '',
       };
     }
-    if (ctx.type === SocialRequestType.CityWalk || ctx.type === SocialRequestType.RunningPartner) {
+    if (
+      ctx.type === SocialRequestType.CityWalk ||
+      ctx.type === SocialRequestType.RunningPartner
+    ) {
       return {
         kind: 'walking',
         label: '户外轻活动',
@@ -1207,7 +1247,9 @@ export class MatchService {
   }
 
   private cleanList(values: string[] | undefined): string[] {
-    return (values ?? []).map((item) => item.trim().toLowerCase()).filter(Boolean);
+    return (values ?? [])
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
   }
 
   private overlapCount(a: string[], b: string[]): number {
@@ -1217,7 +1259,8 @@ export class MatchService {
 
   private energyLevel(text: string): number {
     const value = text.toLowerCase();
-    if (/(高|主动|外向|开放|热情|open|active|extrovert|high)/i.test(value)) return 3;
+    if (/(高|主动|外向|开放|热情|open|active|extrovert|high)/i.test(value))
+      return 3;
     if (/(低|安静|慢热|克制|内向|introvert|quiet|low)/i.test(value)) return 1;
     if (/(中|适中|稳定|medium|balanced)/i.test(value)) return 2;
     return 0;
@@ -1226,9 +1269,16 @@ export class MatchService {
   private relationshipGoalTokens(text: string): string[] {
     const value = text.toLowerCase();
     const tokens: string[] = [];
-    if (/(搭子|partner|buddy|约练|跑步|健身|麻将|扑克|散步|旅游|旅行)/i.test(value)) tokens.push('partner');
-    if (/(朋友|交友|聊天|认识|friend|social)/i.test(value)) tokens.push('friendship');
-    if (/(相亲|恋爱|对象|dating|date|relationship)/i.test(value)) tokens.push('dating');
+    if (
+      /(搭子|partner|buddy|约练|跑步|健身|麻将|扑克|散步|旅游|旅行)/i.test(
+        value,
+      )
+    )
+      tokens.push('partner');
+    if (/(朋友|交友|聊天|认识|friend|social)/i.test(value))
+      tokens.push('friendship');
+    if (/(相亲|恋爱|对象|dating|date|relationship)/i.test(value))
+      tokens.push('dating');
     if (/(学习|自习|study)/i.test(value)) tokens.push('study');
     if (/(租房|合租|室友|rent|roommate)/i.test(value)) tokens.push('renting');
     return Array.from(new Set(tokens));
@@ -1476,10 +1526,10 @@ export class MatchService {
     const gender = this.normalizeGender(profile?.gender || user.gender || '');
     if (
       ctx.genderPreference &&
-      ctx.genderPreference !== SocialRequestGenderPreference.Any &&
-      ctx.genderPreference !== SocialRequestGenderPreference.NonSpecified &&
+      String(ctx.genderPreference) !== 'any' &&
+      String(ctx.genderPreference) !== 'non_specified' &&
       gender &&
-      gender !== ctx.genderPreference
+      gender !== String(ctx.genderPreference)
     ) {
       return true;
     }
@@ -1512,9 +1562,7 @@ export class MatchService {
       metadata.locationPreference,
       metadata.timePreference,
       metadata.socialGoal,
-      ...(Array.isArray(metadata.personalityPreference)
-        ? metadata.personalityPreference
-        : []),
+      ...this.stringArray(metadata.personalityPreference),
     ];
     return Array.from(
       new Set(
@@ -1524,6 +1572,11 @@ export class MatchService {
           .filter(Boolean),
       ),
     );
+  }
+
+  private stringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return value.filter((item): item is string => typeof item === 'string');
   }
 
   private scoreSafety(
@@ -1601,7 +1654,10 @@ export class MatchService {
     ) {
       reasons.push(`Both like ${request.activityType}.`);
     }
-    if (cand.commonTags.length === 0 && cand.breakdown.interestSimilarity === 0) {
+    if (
+      cand.commonTags.length === 0 &&
+      cand.breakdown.interestSimilarity === 0
+    ) {
       reasons.push(
         'No shared interest tags yet, but other dimensions look compatible.',
       );
@@ -1616,14 +1672,17 @@ export class MatchService {
   ): string {
     const name = cand.user.name || '你好';
     const activity =
-      this.activityLabel(request?.type, request?.activityType) || '一次轻松活动';
+      this.activityLabel(request?.type, request?.activityType) ||
+      '一次轻松活动';
     const city = request?.city || cand.user.city || '';
     const where = city ? `在${city}` : '在附近';
     const when = request?.timeStart
       ? this.formatTimeWindow(request.timeStart, request.timeEnd)
       : '最近';
     const tags = cand.commonTags.slice(0, 2).join('、');
-    const tagPart = tags ? `看到你也对「${tags}」感兴趣，感觉我们节奏可能挺合适。` : '';
+    const tagPart = tags
+      ? `看到你也对「${tags}」感兴趣，感觉我们节奏可能挺合适。`
+      : '';
     return `你好 ${name}，${tagPart}我最近想${where}${when}约一次${activity}，不着急定，先在 FitMeet 上简单聊聊时间和公开地点可以吗？`;
   }
 
@@ -1632,11 +1691,13 @@ export class MatchService {
     request?: UserSocialRequest,
     reasons: string[] = [],
   ): SocialEmotionalInsight {
-    const name = cand.user.name || 'TA';
     const tags = cand.commonTags.slice(0, 2);
-    const city = request?.city || cand.socialProfile?.city || cand.user.city || '';
+    const city =
+      request?.city || cand.socialProfile?.city || cand.user.city || '';
     const activity = this.activityLabel(request?.type, request?.activityType);
-    const hasRisk = cand.risk.level !== CandidateRiskLevel.Low || cand.risk.warnings.length > 0;
+    const hasRisk =
+      cand.risk.level !== CandidateRiskLevel.Low ||
+      cand.risk.warnings.length > 0;
     const fitSignal = tags.length
       ? `TA 和你都提到过 ${tags.join('、')}，共同话题比较自然`
       : reasons[0] || 'TA 在时间、地点或社交边界上和这次需求有交集';
@@ -1666,7 +1727,10 @@ export class MatchService {
     ) {
       return `第一步建议只约公开场地的短时${activity}，比如 30-45 分钟；路线、强度和结束点先说清楚，不交换私人联系方式。`;
     }
-    if (type === SocialRequestType.CoffeeChat || type === SocialRequestType.CityWalk) {
+    if (
+      type === SocialRequestType.CoffeeChat ||
+      type === SocialRequestType.CityWalk
+    ) {
       return `第一步建议选人多、好离开的公开地点，先聊 30-60 分钟；不合适也能自然结束，双方都轻松。`;
     }
     if (type === SocialRequestType.DogWalking) {
@@ -1714,7 +1778,7 @@ export class MatchService {
     const suggestedMessage = this.generateIcebreakerMessage(cand, request);
     const emotionalInsight = this.buildEmotionalInsight(cand, request, reasons);
     const source: MatchResultSource =
-      request?.source === 'public' || cand.activeRequest
+      String(request?.source) === 'public' || cand.activeRequest
         ? 'public_intent'
         : 'social_request';
     const riskWarning = cand.risk.warnings.join(' ');

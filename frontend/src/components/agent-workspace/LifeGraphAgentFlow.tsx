@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import clsx from 'clsx';
 import {
   lifeGraphApi,
@@ -11,7 +11,7 @@ import {
 } from '../../api/lifeGraphApi';
 
 type SignalType = 'core_signal' | 'weak_signal' | 'entertainment_signal' | 'sensitive_signal';
-type QuickResult = 'rhythm' | 'weekly' | 'changes' | null;
+export type QuickResult = 'rhythm' | 'weekly' | 'changes' | null;
 type FormState = {
   nickname: string;
   birthDate: string;
@@ -139,7 +139,7 @@ export function LifeGraphOnboardingModal({
 
   useEffect(() => {
     if (!open) return;
-    setStatus('');
+    queueMicrotask(() => setStatus(''));
     void lifeGraphApi.getMe().then((data) => {
       setCompleteness(data.completeness);
       setForm((current) => ({
@@ -493,30 +493,6 @@ export function EntertainmentSignalNotice({ enabled }: { enabled: boolean }) {
       {enabled ? ' 当前允许参与轻量推荐。' : ' 当前不会参与推荐排序。'}
     </aside>
   );
-}
-
-export function useLifeGraphAgentResults() {
-  const [result, setResult] = useState<QuickResult>(null);
-  const [graph, setGraph] = useState<LifeGraphResponse | null>(null);
-  const [auditLogs, setAuditLogs] = useState<LifeGraphAuditLog[]>([]);
-
-  useEffect(() => {
-    if (!result) return;
-    if (result === 'changes') {
-      void lifeGraphApi.getAudit().then(setAuditLogs).catch(() => setAuditLogs([]));
-      return;
-    }
-    void lifeGraphApi.getMe().then(setGraph).catch(() => setGraph(null));
-  }, [result]);
-
-  const resultNode = useMemo(() => {
-    if (result === 'rhythm') return <LifeRhythmAnalysisResult graph={graph} />;
-    if (result === 'weekly') return <WeeklyActivityRecommendation graph={graph} />;
-    if (result === 'changes') return <LifeGraphChangeSummary auditLogs={auditLogs} />;
-    return null;
-  }, [auditLogs, graph, result]);
-
-  return { result, setResult, resultNode };
 }
 
 function TextField({

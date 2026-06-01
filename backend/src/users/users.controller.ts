@@ -131,7 +131,10 @@ export class UsersController {
       profile?: AiProfileBuilderCard;
       enableMatching?: boolean;
       sensitiveTagsConfirmed?: boolean;
-      sensitiveTagDecisions?: Record<string, 'confirmed' | 'rejected' | 'hidden'>;
+      sensitiveTagDecisions?: Record<
+        string,
+        'confirmed' | 'rejected' | 'hidden'
+      >;
     },
   ) {
     return this.socialProfileService.saveAiDraft(req.user.id, body ?? {});

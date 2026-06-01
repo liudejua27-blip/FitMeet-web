@@ -59,10 +59,7 @@ export class AgentOwnerSocialActionsController {
   /** POST /api/agent/social-requests/:id/publish */
   @Post(':id/publish')
   @RequirePermission(AgentAction.CreateSocialRequest)
-  publish(
-    @Req() req: AgentRequest,
-    @Param('id', ParseIntPipe) id: number,
-  ) {
+  publish(@Req() req: AgentRequest, @Param('id', ParseIntPipe) id: number) {
     const agent = req[AGENT_CONNECTION_KEY]!;
     return this.socialRequests.syncPublicIntentById(id, agent.userId);
   }
@@ -84,10 +81,7 @@ export class AgentOwnerSocialActionsController {
   /** GET /api/agent/social-requests/:id/candidates */
   @Get(':id/candidates')
   @RequirePermission(AgentAction.SearchProfiles)
-  candidates(
-    @Req() req: AgentRequest,
-    @Param('id', ParseIntPipe) id: number,
-  ) {
+  candidates(@Req() req: AgentRequest, @Param('id', ParseIntPipe) id: number) {
     const agent = req[AGENT_CONNECTION_KEY]!;
     return this.matchService.listCandidates(id, agent.userId);
   }

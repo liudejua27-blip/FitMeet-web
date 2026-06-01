@@ -12,10 +12,7 @@ import {
   ActionResult,
   LoggedAction,
 } from './entities/agent-activity-log.entity';
-import {
-  AgentActionStatus,
-  AgentActionType,
-} from './entities/agent-action-log.entity';
+import { AgentActionStatus } from './entities/agent-action-log.entity';
 import { AgentActionLogService } from './agent-action-log.service';
 import {
   mapApprovalToActionType,
@@ -126,7 +123,7 @@ export class AgentApprovalDispatcherService {
       switch (approval.type) {
         case ApprovalType.SendMessage:
         case ApprovalType.FirstMessage: {
-          const p = approval.payload as Record<string, unknown>;
+          const p = approval.payload;
           const dto: SendMessageDto = {
             toUserId: p.toUserId as number | undefined,
             content: p.content as string | undefined,
@@ -169,7 +166,7 @@ export class AgentApprovalDispatcherService {
 
         case ApprovalType.ContactRequest:
         case ApprovalType.ContactExchange: {
-          const p = approval.payload as Record<string, unknown>;
+          const p = approval.payload;
           if (approval.actionType === 'add_friend') {
             const targetUserId = p.targetUserId as number | undefined;
             if (!targetUserId) {
@@ -266,7 +263,7 @@ export class AgentApprovalDispatcherService {
         }
 
         case ApprovalType.JoinActivity: {
-          const p = approval.payload as Record<string, unknown>;
+          const p = approval.payload;
           const activityId = p.activityId as number | undefined;
           if (!activityId) {
             throw new Error('JoinActivity payload missing activityId');
@@ -300,7 +297,7 @@ export class AgentApprovalDispatcherService {
 
         case ApprovalType.SubmitCompletionProof:
         case ApprovalType.PhotoUpload: {
-          const p = approval.payload as Record<string, unknown>;
+          const p = approval.payload;
           const activityId = p.activityId as number | undefined;
           if (!activityId) {
             throw new Error('SubmitCompletionProof payload missing activityId');
@@ -535,7 +532,7 @@ export class AgentApprovalDispatcherService {
       reason?: string;
     } = {},
   ) {
-    const payloadAny = (approval.payload ?? {}) as Record<string, unknown>;
+    const payloadAny = approval.payload;
     const targetUserId =
       (payloadAny.toUserId as number | undefined) ??
       (payloadAny.targetUserId as number | undefined) ??

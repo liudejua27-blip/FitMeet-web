@@ -17,9 +17,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  *     override that with `transaction = false`. Each ADD VALUE is also
  *     guarded with a `NOT EXISTS` check so the migration is replay-safe.
  */
-export class AlignAgentApprovalRequests1771400000000
-  implements MigrationInterface
-{
+export class AlignAgentApprovalRequests1771400000000 implements MigrationInterface {
   name = 'AlignAgentApprovalRequests1771400000000';
   /**
    * `ALTER TYPE ... ADD VALUE` cannot run inside a transaction in older

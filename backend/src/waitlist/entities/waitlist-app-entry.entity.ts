@@ -15,7 +15,10 @@ import {
 
 @Entity('waitlist_app_entries')
 @Index(['email'], { unique: true })
-@Index(['phone'], { unique: true, where: '"phone" IS NOT NULL AND "phone" <> \'\'' })
+@Index(['phone'], {
+  unique: true,
+  where: '"phone" IS NOT NULL AND "phone" <> \'\'',
+})
 @Index(['status', 'createdAt'])
 @Index(['qualityLevel', 'createdAt'])
 @Index(['city', 'createdAt'])

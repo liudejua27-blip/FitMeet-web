@@ -109,7 +109,11 @@ export class LifeGraphExtractionService {
         );
       }
     }
-    if (/不太?想晚上见|不接受晚上|晚上不方便|no night|not at night|avoid night/i.test(text)) {
+    if (
+      /不太?想晚上见|不接受晚上|晚上不方便|no night|not at night|avoid night/i.test(
+        text,
+      )
+    ) {
       fields.push(
         this.field(
           LifeGraphFieldCategory.Lifestyle,
@@ -172,7 +176,9 @@ export class LifeGraphExtractionService {
 
   private extractStyleAndBoundaries(text: string): LifeGraphExtractedField[] {
     const fields: LifeGraphExtractedField[] = [];
-    if (/先聊聊?再约|先聊天后见面|先聊.*再见|chat first|talk first/i.test(text)) {
+    if (
+      /先聊聊?再约|先聊天后见面|先聊.*再见|chat first|talk first/i.test(text)
+    ) {
       fields.push(
         this.field(
           LifeGraphFieldCategory.SocialIntent,
@@ -242,11 +248,20 @@ export class LifeGraphExtractionService {
     });
   }
 
+  /* eslint-disable @typescript-eslint/no-base-to-string, @typescript-eslint/restrict-template-expressions */
   private summaryFor(fields: LifeGraphExtractedField[]): string {
-    const area = fields.find((item) => item.fieldKey === 'nearbyArea')?.fieldValue;
-    const time = fields.find((item) => item.fieldKey === 'weekendAvailability')?.fieldValue;
-    const sports = fields.find((item) => item.fieldKey === 'sportsPreferences')?.fieldValue;
-    const goal = fields.find((item) => item.fieldKey === 'currentSocialGoal')?.fieldValue;
+    const area = fields.find(
+      (item) => item.fieldKey === 'nearbyArea',
+    )?.fieldValue;
+    const time = fields.find(
+      (item) => item.fieldKey === 'weekendAvailability',
+    )?.fieldValue;
+    const sports = fields.find(
+      (item) => item.fieldKey === 'sportsPreferences',
+    )?.fieldValue;
+    const goal = fields.find(
+      (item) => item.fieldKey === 'currentSocialGoal',
+    )?.fieldValue;
     const parts = [
       area ? `你常在${area}活动` : '',
       time ? `${time}比较有空` : '',
@@ -259,7 +274,9 @@ export class LifeGraphExtractionService {
   }
 
   private missingFieldsFor(fields: LifeGraphExtractedField[]) {
-    const keys = new Set(fields.map((item) => `${item.category}:${item.fieldKey}`));
+    const keys = new Set(
+      fields.map((item) => `${item.category}:${item.fieldKey}`),
+    );
     return [
       {
         category: LifeGraphFieldCategory.Identity,
@@ -287,4 +304,5 @@ export class LifeGraphExtractionService {
       },
     ].filter((item) => !keys.has(`${item.category}:${item.fieldKey}`));
   }
+  /* eslint-enable @typescript-eslint/no-base-to-string, @typescript-eslint/restrict-template-expressions */
 }

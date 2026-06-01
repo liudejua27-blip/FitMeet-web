@@ -164,8 +164,8 @@ export class ProfileMatchService {
   /**
    * Recommendation-card action dispatch helper.
    *
-  * Writes to `agent_tasks`, `agent_task_events`, `agent_action_logs`, and
-  * emits an Agent Inbox event with the
+   * Writes to `agent_tasks`, `agent_task_events`, `agent_action_logs`, and
+   * emits an Agent Inbox event with the
    * standard metadata shape ({ recommendationId, targetUserId, action,
    * status, requiresOwnerConfirmation, approvalId, conversationId,
    * messageId, ...extra }) and fire-and-forgets a webhook per action.
@@ -264,8 +264,7 @@ export class ProfileMatchService {
             agentConnectionId: conn.id,
             ownerUserId,
             eventType: action,
-            contentPreview:
-              extra.contentPreview ?? `${action}:${session.id}`,
+            contentPreview: extra.contentPreview ?? `${action}:${session.id}`,
             dedupeKey: `${conn.id}:${action}:${session.id}:${Date.now()}`,
             metadata,
           });
@@ -290,7 +289,10 @@ export class ProfileMatchService {
     const debugEvents: ProfileMatchDebugEvent[] = [];
     const recordSkip = (
       reason: ProfileMatchSkippedReason,
-      event: Omit<ProfileMatchDebugEvent, 'scope' | 'ownerUserId' | 'reason'> = {},
+      event: Omit<
+        ProfileMatchDebugEvent,
+        'scope' | 'ownerUserId' | 'reason'
+      > = {},
     ) => {
       incrementProfileMatchSkippedReason(skippedReasons, reason);
       if (options.debug === true) {
@@ -325,7 +327,7 @@ export class ProfileMatchService {
       ownerProfile.agentCanStartChatAfterApproval = true;
       ownerProfile = await this.socialProfileRepo.save(ownerProfile);
     }
-    const owner = ownerProfile as UserSocialProfile;
+    const owner = ownerProfile;
 
     const blocked = await this.safety.getMutualBlockUserIds(ownerUserId);
     const candidates = await this.socialProfileRepo
@@ -397,7 +399,9 @@ export class ProfileMatchService {
         }
         return { profile, user, score };
       })
-      .filter((item) => item.user && item.score.score >= PROFILE_MATCH_THRESHOLD)
+      .filter(
+        (item) => item.user && item.score.score >= PROFILE_MATCH_THRESHOLD,
+      )
       .sort((a, b) => b.score.score - a.score.score)
       .slice(0, Math.max(1, Math.min(limit, 20)));
 
@@ -484,7 +488,9 @@ export class ProfileMatchService {
         : Promise.resolve([]),
       this.fetchUsers(targetIds),
     ]);
-    const profileMap = new Map(profiles.map((profile) => [profile.userId, profile]));
+    const profileMap = new Map(
+      profiles.map((profile) => [profile.userId, profile]),
+    );
     return {
       recommendations: sessions
         .map((session) => {
@@ -621,7 +627,9 @@ export class ProfileMatchService {
       throw new ForbiddenException('Contact is blocked by safety settings');
     }
     if (options.ownerConfirmed !== true) {
-      throw new BadRequestException('Owner confirmation is required before requesting contact');
+      throw new BadRequestException(
+        'Owner confirmation is required before requesting contact',
+      );
     }
 
     const existing = await this.contactRepo.findOne({
@@ -821,7 +829,9 @@ export class ProfileMatchService {
       throw new BadRequestException('Intro text is required');
     }
     if (body.ownerConfirmed !== true) {
-      throw new BadRequestException('Owner confirmation is required before sending an intro');
+      throw new BadRequestException(
+        'Owner confirmation is required before sending an intro',
+      );
     }
 
     const connection = await this.connectionRepo.findOne({
@@ -862,21 +872,17 @@ export class ProfileMatchService {
         },
       );
       messageId =
-        (msg as { _id?: { toString(): string }; id?: string })._id?.toString() ??
+        (
+          msg as { _id?: { toString(): string }; id?: string }
+        )._id?.toString() ??
         (msg as { id?: string }).id ??
         null;
     } catch (err) {
-      await this.logAndDispatch(
-        'intro.sent',
-        ownerUserId,
-        session,
-        'failed',
-        {
-          requiresOwnerConfirmation: false,
-          contentPreview: 'intro.sent failed',
-          payload: { error: (err as Error).message },
-        },
-      );
+      await this.logAndDispatch('intro.sent', ownerUserId, session, 'failed', {
+        requiresOwnerConfirmation: false,
+        contentPreview: 'intro.sent failed',
+        payload: { error: (err as Error).message },
+      });
       throw err;
     }
 
@@ -884,18 +890,12 @@ export class ProfileMatchService {
     session.contactedAt = new Date();
     await this.sessionRepo.save(session);
 
-    await this.logAndDispatch(
-      'intro.sent',
-      ownerUserId,
-      session,
-      'sent',
-      {
-        requiresOwnerConfirmation: false,
-        conversationId,
-        messageId,
-        contentPreview: text.slice(0, 200),
-      },
-    );
+    await this.logAndDispatch('intro.sent', ownerUserId, session, 'sent', {
+      requiresOwnerConfirmation: false,
+      conversationId,
+      messageId,
+      contentPreview: text.slice(0, 200),
+    });
 
     return {
       ok: true,
@@ -1019,8 +1019,13 @@ export class ProfileMatchService {
         order: { createdAt: 'DESC' },
       });
       const sessionId = input.session?.id ?? input.sessionId ?? null;
-      const targetUserId = input.session?.targetUserId ?? input.targetUserId ?? null;
-      const taskStatus = this.taskStatusForAction(input.action, input.status, input.requiresOwnerConfirmation);
+      const targetUserId =
+        input.session?.targetUserId ?? input.targetUserId ?? null;
+      const taskStatus = this.taskStatusForAction(
+        input.action,
+        input.status,
+        input.requiresOwnerConfirmation,
+      );
       const task = await this.taskRepo.save(
         this.taskRepo.create({
           ownerUserId: input.ownerUserId,
@@ -1050,7 +1055,12 @@ export class ProfileMatchService {
         }),
       );
 
-      await this.writeTaskEvent(task, AgentTaskEventType.TaskCreated, '已创建画像推荐动作任务', input.metadata);
+      await this.writeTaskEvent(
+        task,
+        AgentTaskEventType.TaskCreated,
+        '已创建画像推荐动作任务',
+        input.metadata,
+      );
       if (input.requiresOwnerConfirmation) {
         await this.writeTaskEvent(
           task,
@@ -1113,14 +1123,19 @@ export class ProfileMatchService {
     requiresOwnerConfirmation: boolean,
   ): AgentTaskStatus {
     if (requiresOwnerConfirmation) return AgentTaskStatus.AwaitingConfirmation;
-    if (status.includes('pending_target_consent')) return AgentTaskStatus.AwaitingFeedback;
+    if (status.includes('pending_target_consent'))
+      return AgentTaskStatus.AwaitingFeedback;
     if (status.includes('failed')) return AgentTaskStatus.Failed;
     if (this.isOutboundAction(action)) return AgentTaskStatus.WaitingResult;
     return AgentTaskStatus.Succeeded;
   }
 
   private isOutboundAction(action: string) {
-    return ['contact.confirmed', 'contact.exchange_requested', 'intro.sent'].includes(action);
+    return [
+      'contact.confirmed',
+      'contact.exchange_requested',
+      'intro.sent',
+    ].includes(action);
   }
 
   private toTaskRiskLevel(risk: AgentActionRiskLevel): AgentTaskRiskLevel {
@@ -1144,8 +1159,10 @@ export class ProfileMatchService {
       .filter((item) => item.speaker === 'private_reason')
       .map((item) => item.text);
     if (resolvedReasoner) {
-      if (resolvedReasoner.publicReason) publicReasons.unshift(resolvedReasoner.publicReason);
-      if (resolvedReasoner.privateReason) privateReasons.unshift(resolvedReasoner.privateReason);
+      if (resolvedReasoner.publicReason)
+        publicReasons.unshift(resolvedReasoner.publicReason);
+      if (resolvedReasoner.privateReason)
+        privateReasons.unshift(resolvedReasoner.privateReason);
     }
     const riskTips = (session.transcript ?? [])
       .filter((item) => item.speaker === 'risk_tip')
@@ -1217,8 +1234,7 @@ export class ProfileMatchService {
     const ownerPub = this.publicTags(owner);
     const candPub = this.publicTags(candidate);
     const shared = this.overlapExpanded(ownerPub, candPub);
-    const candSignals = (candidate.matchSignals ??
-      {}) as ProfileMatchSignals;
+    const candSignals = (candidate.matchSignals ?? {}) as ProfileMatchSignals;
     const candDecisions = candidate.sensitiveTagDecisions ?? {};
     const confirmedSensitive = (candSignals.sensitivePrivateTags ?? []).filter(
       (tag) => candDecisions[tag]?.status === 'confirmed',
@@ -1240,8 +1256,8 @@ export class ProfileMatchService {
         score: score.score,
         cityMatch: Boolean(
           owner.city &&
-            candidate.city &&
-            owner.city.trim() === candidate.city.trim(),
+          candidate.city &&
+          owner.city.trim() === candidate.city.trim(),
         ),
         mbtiMatch: Boolean(
           owner.mbti && candidate.mbti && owner.mbti === candidate.mbti,
@@ -1249,19 +1265,20 @@ export class ProfileMatchService {
         zodiacMatch: Boolean(
           owner.zodiac && candidate.zodiac && owner.zodiac === candidate.zodiac,
         ),
-        traitOverlap: this.overlapExpanded(owner.traits ?? [], candidate.traits ?? []),
-        privateOverlap: this.overlapExpanded(
-          this.privateTags(owner),
-          [...candPub, ...this.privateTags(candidate)],
+        traitOverlap: this.overlapExpanded(
+          owner.traits ?? [],
+          candidate.traits ?? [],
         ),
+        privateOverlap: this.overlapExpanded(this.privateTags(owner), [
+          ...candPub,
+          ...this.privateTags(candidate),
+        ]),
       },
     };
   }
 
   private reasonerToTranscript(reasoner: MatchReasonerOutput) {
-    return [
-      { speaker: 'reasoner', text: JSON.stringify(reasoner) },
-    ];
+    return [{ speaker: 'reasoner', text: JSON.stringify(reasoner) }];
   }
 
   private extractReasonerFromTranscript(
@@ -1278,7 +1295,9 @@ export class ProfileMatchService {
     }
   }
 
-  private extractScoreBreakdown(session: AiMatchSession): Record<string, number> {
+  private extractScoreBreakdown(
+    session: AiMatchSession,
+  ): Record<string, number> {
     const fallback = { score: session.score };
     const entry = (session.transcript ?? []).find(
       (item) => item.speaker === 'ai_score_second_pass',
@@ -1292,9 +1311,12 @@ export class ProfileMatchService {
       };
       return {
         profileRuleScore:
-          typeof parsed.baseScore === 'number' ? parsed.baseScore : session.score,
+          typeof parsed.baseScore === 'number'
+            ? parsed.baseScore
+            : session.score,
         aiSecondPass:
-          typeof parsed.score === 'number' && typeof parsed.baseScore === 'number'
+          typeof parsed.score === 'number' &&
+          typeof parsed.baseScore === 'number'
             ? parsed.score - parsed.baseScore
             : 0,
         aiConfidence:
@@ -1308,7 +1330,10 @@ export class ProfileMatchService {
     }
   }
 
-  private scoreProfilePair(owner: UserSocialProfile, candidate: UserSocialProfile) {
+  private scoreProfilePair(
+    owner: UserSocialProfile,
+    candidate: UserSocialProfile,
+  ) {
     const ownerPublic = this.publicTags(owner);
     const candidatePublic = this.publicTags(candidate);
     const ownerPrivate = this.privateTags(owner);
@@ -1320,7 +1345,10 @@ export class ProfileMatchService {
       candidatePrivateTags: candidatePrivate,
       ownerTraits: owner.traits ?? [],
       candidateTraits: candidate.traits ?? [],
-      ownerScenes: [...(owner.fitnessGoals ?? []), ...(owner.socialScenes ?? [])],
+      ownerScenes: [
+        ...(owner.fitnessGoals ?? []),
+        ...(owner.socialScenes ?? []),
+      ],
       candidateScenes: [
         ...(candidate.fitnessGoals ?? []),
         ...(candidate.socialScenes ?? []),
@@ -1346,14 +1374,26 @@ export class ProfileMatchService {
           'Profile signals suggest this person is worth owner review before contact.',
       ),
       transcript: [
-        ...scored.publicReasons.map((text) => ({ speaker: 'public_reason', text })),
-        ...scored.privateReasons.map((text) => ({ speaker: 'private_reason', text })),
+        ...scored.publicReasons.map((text) => ({
+          speaker: 'public_reason',
+          text,
+        })),
+        ...scored.privateReasons.map((text) => ({
+          speaker: 'private_reason',
+          text,
+        })),
         ...scored.riskTips.map((text) => ({
           speaker: 'risk_tip',
           text,
         })),
-        { speaker: 'next_step', text: 'Review the safe profile before taking any outbound action.' },
-        { speaker: 'next_step', text: 'Use draft opener or confirm contact only after owner confirmation.' },
+        {
+          speaker: 'next_step',
+          text: 'Review the safe profile before taking any outbound action.',
+        },
+        {
+          speaker: 'next_step',
+          text: 'Use draft opener or confirm contact only after owner confirmation.',
+        },
       ],
     };
   }
@@ -1369,13 +1409,16 @@ export class ProfileMatchService {
         source: PROFILE_MATCH_SOURCE,
       },
     });
-    if (!session) throw new NotFoundException('Profile recommendation not found');
+    if (!session)
+      throw new NotFoundException('Profile recommendation not found');
     return session;
   }
 
   private async toRecommendationFromSession(session: AiMatchSession) {
     const [profile, user] = await Promise.all([
-      this.socialProfileRepo.findOne({ where: { userId: session.targetUserId } }),
+      this.socialProfileRepo.findOne({
+        where: { userId: session.targetUserId },
+      }),
       this.userRepo.findOne({ where: { id: session.targetUserId } }),
     ]);
     if (!profile || !user) {
@@ -1406,10 +1449,10 @@ export class ProfileMatchService {
     ].filter(Boolean);
     return Boolean(
       profile.aiSummary ||
-        tags.length >= 2 ||
-        Object.keys(profile.aiProfileCard ?? {}).length > 0 ||
-        profile.city ||
-        profile.socialPreference,
+      tags.length >= 2 ||
+      Object.keys(profile.aiProfileCard ?? {}).length > 0 ||
+      profile.city ||
+      profile.socialPreference,
     );
   }
 
@@ -1434,13 +1477,17 @@ export class ProfileMatchService {
 
   private privateTags(profile: UserSocialProfile): string[] {
     const signals = (profile.matchSignals ?? {}) as ProfileMatchSignals;
-    const confirmedSensitive = (signals.sensitivePrivateTags ?? []).filter((tag) =>
-      this.isConfirmedMatchOnlySensitiveTag(profile, tag),
+    const confirmedSensitive = (signals.sensitivePrivateTags ?? []).filter(
+      (tag) => this.isConfirmedMatchOnlySensitiveTag(profile, tag),
     );
     return this.cleanTags([
       ...(profile.wantToMeet ?? []).filter((tag) => !this.isSensitiveTag(tag)),
-      ...(profile.preferredTraits ?? []).filter((tag) => !this.isSensitiveTag(tag)),
-      ...(profile.relationshipGoals ?? []).filter((tag) => !this.isSensitiveTag(tag)),
+      ...(profile.preferredTraits ?? []).filter(
+        (tag) => !this.isSensitiveTag(tag),
+      ),
+      ...(profile.relationshipGoals ?? []).filter(
+        (tag) => !this.isSensitiveTag(tag),
+      ),
       ...(signals.privatePreferenceTags ?? []).filter(
         (tag) => !this.isSensitiveTag(tag),
       ),
@@ -1494,19 +1541,26 @@ export class ProfileMatchService {
         ? 'Cities differ; avoid suggesting offline plans until both sides confirm logistics.'
         : '',
     ].filter(Boolean);
-    return tips.length ? tips.slice(0, 3) : ['No high-risk signal detected in public profile data.'];
+    return tips.length
+      ? tips.slice(0, 3)
+      : ['No high-risk signal detected in public profile data.'];
   }
 
   private sanitizePublicText(text: string): string {
     return (text ?? '')
       .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[redacted]')
       .replace(/(?:\+?\d[\d\s-]{6,}\d)/g, '[redacted]')
-      .replace(/(微信|wechat|手机号|电话|身份证|住址|地址|单位|公司|学校|收入|年薪|月薪)[:：]?\s*[^，。；;\n]{2,}/gi, '$1已隐藏')
+      .replace(
+        /(微信|wechat|手机号|电话|身份证|住址|地址|单位|公司|学校|收入|年薪|月薪)[:：]?\s*[^，。；;\n]{2,}/gi,
+        '$1已隐藏',
+      )
       .slice(0, 500);
   }
 
   private previewText(text: string, max = 160): string {
-    const normalized = this.sanitizePublicText(text).replace(/\s+/g, ' ').trim();
+    const normalized = this.sanitizePublicText(text)
+      .replace(/\s+/g, ' ')
+      .trim();
     return normalized.length > max
       ? `${normalized.slice(0, Math.max(0, max - 3))}...`
       : normalized;
@@ -1514,7 +1568,9 @@ export class ProfileMatchService {
 
   private overlap(a: string[], b: string[]) {
     const bSet = new Set(b.map((item) => this.normalizeTag(item)));
-    return this.cleanTags(a).filter((item) => bSet.has(this.normalizeTag(item)));
+    return this.cleanTags(a).filter((item) =>
+      bSet.has(this.normalizeTag(item)),
+    );
   }
 
   private overlapExpanded(a: string[], b: string[]) {
@@ -1554,11 +1610,7 @@ export class ProfileMatchService {
     ) {
       tags.add('business_builder');
     }
-    if (
-      /(status_signal|high.?status|elite|vip)/i.test(
-        normalized,
-      )
-    ) {
+    if (/(status_signal|high.?status|elite|vip)/i.test(normalized)) {
       tags.add('status_signal');
     }
     return Array.from(tags);

@@ -24,8 +24,14 @@ describe('SocialProfileService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SocialProfileService,
-        { provide: getRepositoryToken(UserSocialProfile), useValue: profileRepo },
-        { provide: getRepositoryToken(AiDelegateProfile), useValue: delegateRepo },
+        {
+          provide: getRepositoryToken(UserSocialProfile),
+          useValue: profileRepo,
+        },
+        {
+          provide: getRepositoryToken(AiDelegateProfile),
+          useValue: delegateRepo,
+        },
         { provide: getRepositoryToken(User), useValue: mockRepo() },
         {
           provide: AIService,
@@ -190,7 +196,11 @@ describe('SocialProfileService', () => {
             communicationStyle: '',
           },
           interests: { sports: ['running'], lifestyle: [], socialScenes: [] },
-          preferences: { wantToMeet: ['runner'], preferredTraits: [], avoid: [] },
+          preferences: {
+            wantToMeet: ['runner'],
+            preferredTraits: [],
+            avoid: [],
+          },
           relationshipIntent: { goals: [], openness: '' },
           availability: { weekdays: '', weekends: '' },
           visibility: {
@@ -209,7 +219,9 @@ describe('SocialProfileService', () => {
           summary: '',
         },
       }),
-    ).rejects.toThrow('Enabling AI profile matching requires explicit owner confirmation.');
+    ).rejects.toThrow(
+      'Enabling AI profile matching requires explicit owner confirmation.',
+    );
   });
 
   it('keeps a saved AI draft out of the matching pool when enableMatching is false', async () => {

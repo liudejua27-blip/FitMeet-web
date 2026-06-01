@@ -40,7 +40,6 @@ import {
 } from './entities/agent-activity-log.entity';
 import {
   AgentApprovalRequest,
-  ApprovalRiskLevel,
   ApprovalStatus,
   ApprovalType,
 } from './entities/agent-approval-request.entity';
@@ -702,12 +701,12 @@ export class AgentGatewayService {
   }
 
   private providerFromKnownAgent(agentName: KnownAgent | string) {
-    switch (agentName) {
-      case KnownAgent.OpenClaw:
+    switch (String(agentName)) {
+      case 'openclaw':
         return AgentProvider.OpenClaw;
-      case KnownAgent.Codex:
+      case 'codex':
         return AgentProvider.Codex;
-      case KnownAgent.QClaw:
+      case 'qclaw':
         return AgentProvider.QClaw;
       default:
         return AgentProvider.Custom;
@@ -3069,10 +3068,10 @@ export class AgentGatewayService {
    * @deprecated retained for git-history grep; no longer called anywhere.
    * Replaced by AgentSocialRequestAdapter.getMatchesForRequest.
    */
-  private async __legacyGetSocialRequestMatchesUnused(
+  private __legacyGetSocialRequestMatchesUnused(
     _conn: AgentConnection,
     _requestId: number,
-  ): Promise<void> {
+  ): void {
     void _conn;
     void _requestId;
   }
@@ -3171,7 +3170,7 @@ export class AgentGatewayService {
         ownerUserId: conn.userId,
         actorUserId: conn.userId,
         metadata: {
-          source: conn.agentName === KnownAgent.OpenClaw ? 'openclaw' : 'agent',
+          source: String(conn.agentName) === 'openclaw' ? 'openclaw' : 'agent',
           requestId: request.id,
         },
       },
@@ -3188,7 +3187,7 @@ export class AgentGatewayService {
         ownerUserId: conn.userId,
         actorUserId: conn.userId,
         metadata: {
-          source: conn.agentName === KnownAgent.OpenClaw ? 'openclaw' : 'agent',
+          source: String(conn.agentName) === 'openclaw' ? 'openclaw' : 'agent',
           actorType: 'agent',
           actorUserId: conn.userId,
           agentConnectionId: conn.id,
@@ -3597,7 +3596,7 @@ export class AgentGatewayService {
             metadata: dto.metadata,
           },
           summary: verdict.summary,
-          riskLevel: verdict.riskLevel as ApprovalRiskLevel,
+          riskLevel: verdict.riskLevel,
           reason: isFirstContact
             ? '首次联系陌生用户，需要主人确认后再发送。'
             : `权限策略要求审批：${verdict.reasons.join(', ')}`,
@@ -3625,9 +3624,7 @@ export class AgentGatewayService {
           actionType: AgentActionType.SendMessage,
           actionStatus: AgentActionStatus.PendingApproval,
           agentTaskId,
-          riskLevel: mapApprovalRiskToActionRisk(
-            verdict.riskLevel as ApprovalRiskLevel,
-          ),
+          riskLevel: mapApprovalRiskToActionRisk(verdict.riskLevel),
           targetUserId,
           relatedSocialRequestId: dto.socialRequestId ?? null,
           relatedActivityId: dto.activityId ?? null,
@@ -4041,16 +4038,16 @@ export class AgentGatewayService {
       const latDelta = (radiusKm / 111) * 1.25;
       const lngDelta =
         (radiusKm /
-          (111 * Math.max(Math.cos((ownerLat! * Math.PI) / 180), 0.01))) *
+          (111 * Math.max(Math.cos((ownerLat * Math.PI) / 180), 0.01))) *
         1.25;
       qb.andWhere('u.lat IS NOT NULL AND u.lng IS NOT NULL')
         .andWhere('u.lat BETWEEN :latMin AND :latMax', {
-          latMin: ownerLat! - latDelta,
-          latMax: ownerLat! + latDelta,
+          latMin: ownerLat - latDelta,
+          latMax: ownerLat + latDelta,
         })
         .andWhere('u.lng BETWEEN :lngMin AND :lngMax', {
-          lngMin: ownerLng! - lngDelta,
-          lngMax: ownerLng! + lngDelta,
+          lngMin: ownerLng - lngDelta,
+          lngMax: ownerLng + lngDelta,
         });
     } else if (city) {
       // No coords on either side → degrade to city ILIKE.
@@ -4099,7 +4096,7 @@ export class AgentGatewayService {
           typeof user.lat === 'number' &&
           typeof user.lng === 'number'
         ) {
-          distanceKm = haversineKm(ownerLat!, ownerLng!, user.lat, user.lng);
+          distanceKm = haversineKm(ownerLat, ownerLng, user.lat, user.lng);
           if (distanceKm > radiusKm) return null; // hard radius filter
         }
 

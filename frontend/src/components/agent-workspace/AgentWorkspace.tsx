@@ -12,10 +12,8 @@ import {
 import { agentInboxApi, type AgentInboxEvent } from '../../api/agentInboxApi';
 import { lifeGraphApi, type LifeGraphResponse } from '../../api/lifeGraphApi';
 import { useAuthStore } from '../../stores';
-import {
-  LifeGraphOnboardingModal,
-  useLifeGraphAgentResults,
-} from './LifeGraphAgentFlow';
+import { LifeGraphOnboardingModal } from './LifeGraphAgentFlow';
+import { useLifeGraphAgentResults } from './useLifeGraphAgentResults';
 
 type AgentView = 'home' | 'chat' | 'settings' | 'projects' | 'history';
 type Message = { id: string; role: 'user' | 'assistant'; content: string };

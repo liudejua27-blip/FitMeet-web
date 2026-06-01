@@ -5,7 +5,7 @@ import { AgentComposer } from './AgentComposer';
 import { AgentMessageList } from './AgentMessageBubble';
 import { AgentRunTrace } from './AgentRunTrace';
 import { MobileMatchResults } from './MatchWorkspace';
-import { permissionModeLabel } from './PermissionModeSelector';
+import { permissionModeLabel } from './permissionModeLabel';
 import { QuickPromptCards } from './QuickPromptCards';
 
 export function AgentChatPanel({

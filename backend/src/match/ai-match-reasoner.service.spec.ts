@@ -9,7 +9,9 @@ import { User } from '../users/user.entity';
 import { AiMatchReasonerService } from './ai-match-reasoner.service';
 import { MatchPrivacySanitizer } from './match-privacy-sanitizer.service';
 
-function request(overrides: Partial<UserSocialRequest> = {}): UserSocialRequest {
+function request(
+  overrides: Partial<UserSocialRequest> = {},
+): UserSocialRequest {
   return {
     id: 1,
     userId: 10,
@@ -73,7 +75,9 @@ function user(overrides: Partial<User> = {}): User {
   } as User;
 }
 
-function profile(overrides: Partial<UserSocialProfile> = {}): UserSocialProfile {
+function profile(
+  overrides: Partial<UserSocialProfile> = {},
+): UserSocialProfile {
   return {
     userId: 20,
     nickname: 'Runner',
@@ -139,7 +143,10 @@ describe('AiMatchReasonerService', () => {
     await service.explainSocialRequestCandidate({
       request: request(),
       source: 'social_request',
-      ownerProfile: profile({ userId: 10, privacyBoundary: '不公开手机号 13900000000' }),
+      ownerProfile: profile({
+        userId: 10,
+        privacyBoundary: '不公开手机号 13900000000',
+      }),
       candidateUser: user({ name: 'Runner', phone: '13800000000' }),
       candidateProfile: profile({
         matchSignals: {
@@ -165,12 +172,16 @@ describe('AiMatchReasonerService', () => {
       (ai.rescoreCompatibility as jest.Mock).mock.calls[0][0],
     );
     expect(payload).toContain('running');
-    expect(payload).not.toMatch(/rich|50000|13800000000|runner_123|中关村大街1号/);
+    expect(payload).not.toMatch(
+      /rich|50000|13800000000|runner_123|中关村大街1号/,
+    );
   });
 
   it('falls back when DeepSeek adapters fail', async () => {
     const ai = {
-      rescoreCompatibility: jest.fn().mockRejectedValue(new Error('DeepSeek down')),
+      rescoreCompatibility: jest
+        .fn()
+        .mockRejectedValue(new Error('DeepSeek down')),
       generateCandidateMatchContent: jest.fn(),
     } as unknown as AIService;
     const service = new AiMatchReasonerService(ai, new MatchPrivacySanitizer());

@@ -144,9 +144,7 @@ export class AddAgentTaskRuntime1773200000000 implements MigrationInterface {
     await queryRunner.query(
       `DROP TYPE IF EXISTS "agent_task_event_actor_enum"`,
     );
-    await queryRunner.query(
-      `DROP TYPE IF EXISTS "agent_task_event_type_enum"`,
-    );
+    await queryRunner.query(`DROP TYPE IF EXISTS "agent_task_event_type_enum"`);
     await queryRunner.query(`DROP TYPE IF EXISTS "agent_task_risk_level_enum"`);
     await queryRunner.query(
       `DROP TYPE IF EXISTS "agent_task_permission_mode_enum"`,

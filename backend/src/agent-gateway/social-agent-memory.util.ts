@@ -1,4 +1,5 @@
 import { AgentTask } from './entities/agent-task.entity';
+import { cleanDisplayText } from '../common/display-text.util';
 
 export type SocialAgentShortTermStep = Record<string, unknown> & {
   id: string;
@@ -70,7 +71,10 @@ export function rememberSocialAgentShortTerm(
 
 export function shortTermMemoryList<T extends Record<string, unknown>>(
   task: AgentTask,
-  key: keyof Pick<SocialAgentShortTermMemory, 'steps' | 'candidates' | 'sentMessages' | 'receivedReplies'>,
+  key: keyof Pick<
+    SocialAgentShortTermMemory,
+    'steps' | 'candidates' | 'sentMessages' | 'receivedReplies'
+  >,
 ): T[] {
   const memory = isRecord(task.memory) ? task.memory : {};
   const shortTerm = isRecord(memory.shortTerm)
@@ -82,7 +86,10 @@ export function shortTermMemoryList<T extends Record<string, unknown>>(
 
 export function appendShortTermMemoryItem<T extends Record<string, unknown>>(
   task: AgentTask,
-  key: keyof Pick<SocialAgentShortTermMemory, 'steps' | 'sentMessages' | 'receivedReplies'>,
+  key: keyof Pick<
+    SocialAgentShortTermMemory,
+    'steps' | 'sentMessages' | 'receivedReplies'
+  >,
   item: T,
   limit = 20,
 ): T[] {
@@ -110,7 +117,7 @@ export function appendSocialAgentShortTermTurn(
       ...turns,
       {
         ...turn,
-        text: String(turn.text ?? '').slice(0, 500),
+        text: cleanDisplayText(turn.text, '').slice(0, 500),
         at: turn.at ?? new Date().toISOString(),
       },
     ].slice(-limit) as SocialAgentShortTermTurn[],
@@ -307,7 +314,12 @@ function defaultTaskMemory(): SocialAgentTaskMemory {
       noAutoMessage: false,
       noContactExchange: false,
     },
-    candidateState: { recommendedIds: [], savedIds: [], messagedIds: [], rejectedIds: [] },
+    candidateState: {
+      recommendedIds: [],
+      savedIds: [],
+      messagedIds: [],
+      rejectedIds: [],
+    },
     activityState: { recommendedIds: [], joinedIds: [], dismissedIds: [] },
     pendingActions: [],
     lastUserMessages: [],
@@ -329,47 +341,66 @@ function defaultTaskMemory(): SocialAgentTaskMemory {
   };
 }
 
-export function readSocialAgentTaskMemory(task: AgentTask): SocialAgentTaskMemory {
+export function readSocialAgentTaskMemory(
+  task: AgentTask,
+): SocialAgentTaskMemory {
   const memory = isRecord(task.memory) ? task.memory : {};
-  const stored = isRecord(memory.taskMemory) ? (memory.taskMemory as Record<string, unknown>) : {};
+  const stored = isRecord(memory.taskMemory) ? memory.taskMemory : {};
   const base = defaultTaskMemory();
   return {
-    currentGoal: typeof stored.currentGoal === 'string' ? stored.currentGoal : base.currentGoal,
+    currentGoal:
+      typeof stored.currentGoal === 'string'
+        ? stored.currentGoal
+        : base.currentGoal,
     activeEntities: {
       ...base.activeEntities,
-      ...(isRecord(stored.activeEntities) ? coerceStringMap(stored.activeEntities) : {}),
+      ...(isRecord(stored.activeEntities)
+        ? coerceStringMap(stored.activeEntities)
+        : {}),
     },
     preferences: {
       ...base.preferences,
-      ...(isRecord(stored.preferences) ? coercePreferences(stored.preferences) : {}),
+      ...(isRecord(stored.preferences)
+        ? coercePreferences(stored.preferences)
+        : {}),
     },
     boundaries: {
       ...base.boundaries,
-      ...(isRecord(stored.boundaries) ? coerceBoundaries(stored.boundaries) : {}),
+      ...(isRecord(stored.boundaries)
+        ? coerceBoundaries(stored.boundaries)
+        : {}),
     },
     candidateState: {
       ...base.candidateState,
-      ...(isRecord(stored.candidateState) ? coerceNumberLists(stored.candidateState) : {}),
+      ...(isRecord(stored.candidateState)
+        ? coerceNumberLists(stored.candidateState)
+        : {}),
     },
     activityState: {
       ...base.activityState,
-      ...(isRecord(stored.activityState) ? coerceStringLists(stored.activityState) : {}),
+      ...(isRecord(stored.activityState)
+        ? coerceStringLists(stored.activityState)
+        : {}),
     },
     pendingActions: Array.isArray(stored.pendingActions)
       ? stored.pendingActions.filter(isRecord).map((entry) => ({
           id: typeof entry.id === 'number' ? entry.id : 0,
           type: typeof entry.type === 'string' ? entry.type : '',
-          actionType: typeof entry.actionType === 'string' ? entry.actionType : '',
+          actionType:
+            typeof entry.actionType === 'string' ? entry.actionType : '',
           summary: typeof entry.summary === 'string' ? entry.summary : '',
-          riskLevel: typeof entry.riskLevel === 'string' ? entry.riskLevel : 'low',
-          at: typeof entry.at === 'string' ? entry.at : new Date(0).toISOString(),
+          riskLevel:
+            typeof entry.riskLevel === 'string' ? entry.riskLevel : 'low',
+          at:
+            typeof entry.at === 'string' ? entry.at : new Date(0).toISOString(),
         }))
       : base.pendingActions,
     lastUserMessages: Array.isArray(stored.lastUserMessages)
       ? stored.lastUserMessages.filter(isRecord).map((entry) => ({
           text: typeof entry.text === 'string' ? entry.text : '',
           intent: typeof entry.intent === 'string' ? entry.intent : '',
-          at: typeof entry.at === 'string' ? entry.at : new Date(0).toISOString(),
+          at:
+            typeof entry.at === 'string' ? entry.at : new Date(0).toISOString(),
         }))
       : base.lastUserMessages,
     currentTask: {
@@ -391,7 +422,9 @@ export function readSocialAgentTaskMemory(task: AgentTask): SocialAgentTaskMemor
             previousState: isSocialAgentState(stored.currentTask.previousState)
               ? stored.currentTask.previousState
               : '',
-            stateReason: isSocialAgentStateReason(stored.currentTask.stateReason)
+            stateReason: isSocialAgentStateReason(
+              stored.currentTask.stateReason,
+            )
               ? stored.currentTask.stateReason
               : '',
             stateUpdatedAt:
@@ -415,7 +448,8 @@ export function readSocialAgentTaskMemory(task: AgentTask): SocialAgentTaskMemor
     stableProfileFacts: isRecord(stored.stableProfileFacts)
       ? coerceProfileFacts(stored.stableProfileFacts)
       : base.stableProfileFacts,
-    updatedAt: typeof stored.updatedAt === 'string' ? stored.updatedAt : base.updatedAt,
+    updatedAt:
+      typeof stored.updatedAt === 'string' ? stored.updatedAt : base.updatedAt,
   };
 }
 
@@ -460,7 +494,9 @@ export function mergeSocialAgentActiveEntities(
 ): SocialAgentTaskMemory {
   const memory = readSocialAgentTaskMemory(task);
   const next = { ...memory.activeEntities };
-  for (const key of Object.keys(memory.activeEntities) as Array<keyof SocialAgentActiveEntities>) {
+  for (const key of Object.keys(memory.activeEntities) as Array<
+    keyof SocialAgentActiveEntities
+  >) {
     const value = entities[key];
     if (typeof value === 'string' && value.trim()) {
       next[key] = value.trim();
@@ -485,15 +521,27 @@ export function mergeSocialAgentPreferences(
   }
   const interests = extractInterestKeywords(text);
   if (interests.length > 0) {
-    memory.preferences.interests = mergeUnique(memory.preferences.interests, interests, 16);
+    memory.preferences.interests = mergeUnique(
+      memory.preferences.interests,
+      interests,
+      16,
+    );
   }
-  if (/(慢热|内向|安静)/.test(text)) memory.preferences.socialStyle = 'slow_warm';
-  else if (/(外向|健谈|社牛|话多)/.test(text)) memory.preferences.socialStyle = 'outgoing';
-  if (/(简短|直接|少寒暄)/.test(text)) memory.preferences.communicationStyle = 'concise';
-  else if (/(详细|聊得久|喜欢聊)/.test(text)) memory.preferences.communicationStyle = 'verbose';
+  if (/(慢热|内向|安静)/.test(text))
+    memory.preferences.socialStyle = 'slow_warm';
+  else if (/(外向|健谈|社牛|话多)/.test(text))
+    memory.preferences.socialStyle = 'outgoing';
+  if (/(简短|直接|少寒暄)/.test(text))
+    memory.preferences.communicationStyle = 'concise';
+  else if (/(详细|聊得久|喜欢聊)/.test(text))
+    memory.preferences.communicationStyle = 'verbose';
   const traits = extractTraitKeywords(text);
   if (traits.length > 0) {
-    memory.preferences.preferredTraits = mergeUnique(memory.preferences.preferredTraits, traits, 12);
+    memory.preferences.preferredTraits = mergeUnique(
+      memory.preferences.preferredTraits,
+      traits,
+      12,
+    );
   }
   writeSocialAgentTaskMemory(task, memory);
   return memory;
@@ -509,9 +557,12 @@ export function mergeSocialAgentBoundaries(
     writeSocialAgentTaskMemory(task, memory);
     return memory;
   }
-  if (/(不要夜间|别夜间|不晚上|不要晚上)/.test(text)) memory.boundaries.noNightMeet = true;
-  if (/(公开场所|公共场合|公开地点)/.test(text)) memory.boundaries.publicPlaceOnly = true;
-  if (/(不要自动发消息|不要自动私信|别自动发)/.test(text)) memory.boundaries.noAutoMessage = true;
+  if (/(不要夜间|别夜间|不晚上|不要晚上)/.test(text))
+    memory.boundaries.noNightMeet = true;
+  if (/(公开场所|公共场合|公开地点)/.test(text))
+    memory.boundaries.publicPlaceOnly = true;
+  if (/(不要自动发消息|不要自动私信|别自动发)/.test(text))
+    memory.boundaries.noAutoMessage = true;
   if (/(不要联系方式|不交换联系方式|不留电话|不留微信)/.test(text)) {
     memory.boundaries.noContactExchange = true;
   }
@@ -535,7 +586,9 @@ export function recordSocialAgentPendingAction(
 ): SocialAgentTaskMemory {
   const memory = readSocialAgentTaskMemory(task);
   const dedup = memory.pendingActions.filter((item) => item.id !== action.id);
-  memory.pendingActions = [...dedup, action].slice(-TASK_MEMORY_PENDING_ACTION_LIMIT);
+  memory.pendingActions = [...dedup, action].slice(
+    -TASK_MEMORY_PENDING_ACTION_LIMIT,
+  );
   writeSocialAgentTaskMemory(task, memory);
   return memory;
 }
@@ -695,7 +748,9 @@ function mergeUnique<T>(prev: T[], next: T[], limit: number): T[] {
   return result.slice(-limit);
 }
 
-function coerceStringMap(input: Record<string, unknown>): Record<string, string> {
+function coerceStringMap(
+  input: Record<string, unknown>,
+): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(input)) {
     if (typeof value === 'string') out[key] = value;
@@ -703,43 +758,70 @@ function coerceStringMap(input: Record<string, unknown>): Record<string, string>
   return out;
 }
 
-function coercePreferences(input: Record<string, unknown>): Partial<SocialAgentPreferences> {
+function coercePreferences(
+  input: Record<string, unknown>,
+): Partial<SocialAgentPreferences> {
   const out: Partial<SocialAgentPreferences> = {};
   if (Array.isArray(input.interests)) {
-    out.interests = input.interests.filter((v): v is string => typeof v === 'string');
+    out.interests = input.interests.filter(
+      (v): v is string => typeof v === 'string',
+    );
   }
-  if (typeof input.socialStyle === 'string') out.socialStyle = input.socialStyle;
-  if (typeof input.communicationStyle === 'string') out.communicationStyle = input.communicationStyle;
+  if (typeof input.socialStyle === 'string')
+    out.socialStyle = input.socialStyle;
+  if (typeof input.communicationStyle === 'string')
+    out.communicationStyle = input.communicationStyle;
   if (Array.isArray(input.preferredTraits)) {
-    out.preferredTraits = input.preferredTraits.filter((v): v is string => typeof v === 'string');
+    out.preferredTraits = input.preferredTraits.filter(
+      (v): v is string => typeof v === 'string',
+    );
   }
   return out;
 }
 
-function coerceBoundaries(input: Record<string, unknown>): Partial<SocialAgentBoundaries> {
+function coerceBoundaries(
+  input: Record<string, unknown>,
+): Partial<SocialAgentBoundaries> {
   const out: Partial<SocialAgentBoundaries> = {};
   if (Array.isArray(input.excludedGenders)) {
-    out.excludedGenders = input.excludedGenders.filter((v): v is string => typeof v === 'string');
+    out.excludedGenders = input.excludedGenders.filter(
+      (v): v is string => typeof v === 'string',
+    );
   }
-  if (typeof input.noNightMeet === 'boolean') out.noNightMeet = input.noNightMeet;
-  if (typeof input.publicPlaceOnly === 'boolean') out.publicPlaceOnly = input.publicPlaceOnly;
-  if (typeof input.noAutoMessage === 'boolean') out.noAutoMessage = input.noAutoMessage;
-  if (typeof input.noContactExchange === 'boolean') out.noContactExchange = input.noContactExchange;
+  if (typeof input.noNightMeet === 'boolean')
+    out.noNightMeet = input.noNightMeet;
+  if (typeof input.publicPlaceOnly === 'boolean')
+    out.publicPlaceOnly = input.publicPlaceOnly;
+  if (typeof input.noAutoMessage === 'boolean')
+    out.noAutoMessage = input.noAutoMessage;
+  if (typeof input.noContactExchange === 'boolean')
+    out.noContactExchange = input.noContactExchange;
   return out;
 }
 
-function coerceNumberLists(input: Record<string, unknown>): Partial<SocialAgentCandidateState> {
+function coerceNumberLists(
+  input: Record<string, unknown>,
+): Partial<SocialAgentCandidateState> {
   const out: Partial<SocialAgentCandidateState> = {};
-  for (const key of ['recommendedIds', 'savedIds', 'messagedIds', 'rejectedIds'] as const) {
+  for (const key of [
+    'recommendedIds',
+    'savedIds',
+    'messagedIds',
+    'rejectedIds',
+  ] as const) {
     const value = input[key];
     if (Array.isArray(value)) {
-      out[key] = value.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+      out[key] = value.filter(
+        (v): v is number => typeof v === 'number' && Number.isFinite(v),
+      );
     }
   }
   return out;
 }
 
-function coerceStringLists(input: Record<string, unknown>): Partial<SocialAgentActivityState> {
+function coerceStringLists(
+  input: Record<string, unknown>,
+): Partial<SocialAgentActivityState> {
   const out: Partial<SocialAgentActivityState> = {};
   for (const key of ['recommendedIds', 'joinedIds', 'dismissedIds'] as const) {
     const value = input[key];

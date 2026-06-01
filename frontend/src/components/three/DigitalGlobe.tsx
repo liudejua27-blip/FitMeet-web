@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { ArcConnections } from './ArcConnections';
 import { pointerProgress } from './cameraMotion';
 
-export const globeRadius = 2.08;
+const globeRadius = 2.08;
 
 const asiaFocusRotationY = -3.42;
 const asiaFocusRotationX = 0.08;
@@ -81,7 +81,7 @@ function isAsiaLng(lon: number) {
   return lon > 48 && lon < 150;
 }
 
-export function latLonToVector(lat: number, lon: number, offset = 0) {
+function latLonToVector(lat: number, lon: number, offset = 0) {
   const phi = THREE.MathUtils.degToRad(90 - lat);
   const theta = THREE.MathUtils.degToRad(lon + 180);
   const radius = globeRadius + offset;
@@ -330,8 +330,8 @@ export function DigitalGlobe({
     return lines;
   }, []);
 
-  const landPoints = useMemo(buildLandPointCloud, []);
-  const asiaNetwork = useMemo(buildAsiaMeshNetwork, []);
+  const landPoints = useMemo(() => buildLandPointCloud(), []);
+  const asiaNetwork = useMemo(() => buildAsiaMeshNetwork(), []);
   const asiaCityNodes = useMemo(() => buildCityNodePositions(ASIA_NODES), []);
 
   useFrame(({ clock }) => {

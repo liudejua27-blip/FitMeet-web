@@ -2,6 +2,7 @@ import {
   CandidateRiskLevel,
   SocialRequestCandidateStatus,
 } from './social-request-candidate.entity';
+/* eslint-disable @typescript-eslint/require-await */
 import { MatchService } from './match.service';
 import { CompatibilityScorerService } from './compatibility-scorer.service';
 import {

@@ -135,10 +135,7 @@ export class AgentSocialRequestsController {
    * envelope so existing OpenClaw integrations keep working.
    */
   @Post()
-  create(
-    @Req() req: AgentRequest,
-    @Body() dto: LegacyCreateSocialRequestDto,
-  ) {
+  create(@Req() req: AgentRequest, @Body() dto: LegacyCreateSocialRequestDto) {
     const agent = req[AGENT_CONNECTION_KEY]!;
     return this.adapter.createFromLegacy(agent.userId, dto, agent);
   }

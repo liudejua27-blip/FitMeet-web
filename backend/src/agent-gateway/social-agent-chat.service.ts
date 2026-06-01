@@ -56,10 +56,7 @@ import {
   type SocialAgentReplyStrategy,
 } from './social-agent-intent-router.service';
 import { SocialAgentBrainService } from './social-agent-brain.service';
-import type {
-  SocialAgentBrainPlannedTool,
-  SocialAgentBrainTurnDecision,
-} from './social-agent-brain.service';
+import type { SocialAgentBrainTurnDecision } from './social-agent-brain.service';
 import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
 import {
   SocialAgentModelRouterService,
@@ -123,6 +120,7 @@ import type {
   FitMeetAlphaTurnDecision,
 } from './fitmeet-alpha-agent.types';
 import { TonePolicyService } from './response-quality/tone-policy.service';
+import { AgentQualityEvaluatorService } from './agent-quality/agent-quality-evaluator.service';
 
 export interface SocialAgentVisibleStep {
   id: string;
@@ -467,7 +465,8 @@ export class SocialAgentChatService {
     private readonly rag: SocialAgentRagService,
     private readonly config: ConfigService,
     @Optional() private readonly brain?: SocialAgentBrainService,
-    @Optional() private readonly memoryContext?: SocialAgentMemoryContextService,
+    @Optional()
+    private readonly memoryContext?: SocialAgentMemoryContextService,
     @Optional()
     private readonly finalResponses?: SocialAgentFinalResponseService,
     @Optional()
@@ -482,6 +481,8 @@ export class SocialAgentChatService {
     private readonly alphaAgent?: FitMeetAlphaAgentSdkService,
     @Optional()
     private readonly tonePolicy?: TonePolicyService,
+    @Optional()
+    private readonly agentQuality?: AgentQualityEvaluatorService,
   ) {}
 
   run(
@@ -652,10 +653,7 @@ export class SocialAgentChatService {
       }),
     ]);
     task = freshTask;
-    let memoryContext = this.buildMemoryContext(
-      task,
-      longTermSnapshot,
-    );
+    let memoryContext = this.buildMemoryContext(task, longTermSnapshot);
     let route = await this.intentRouter.route({
       message,
       taskContext: this.buildTaskContext(
@@ -684,7 +682,10 @@ export class SocialAgentChatService {
       route = brainDecision.route;
       this.rememberConversationBrainDecision(task, brainDecision);
       if (brainDecision.conversationMode === 'profile_correction') {
-        recordSocialAgentMisunderstanding(task, brainDecision.reason || 'user_correction');
+        recordSocialAgentMisunderstanding(
+          task,
+          brainDecision.reason || 'user_correction',
+        );
         transitionSocialAgentState(task, 'user_correction', {
           objective: 'profile_enrichment',
           nextStep: '重新理解上一段画像信息并继续补齐',
@@ -847,7 +848,9 @@ export class SocialAgentChatService {
         shouldSearchNow: false,
         awaitingSearchConfirmation: false,
         waitingFor:
-          activityResults.length > 0 ? 'activity_selection' : 'search_refinement',
+          activityResults.length > 0
+            ? 'activity_selection'
+            : 'search_refinement',
         lastCompletedStep: 'activity_search_completed',
       });
       if (activityResults.length > 0) {
@@ -1643,9 +1646,16 @@ export class SocialAgentChatService {
       payload: Record<string, unknown> = {},
     ) => {
       const publicLabel = this.userVisibleStepLabel(id, label);
-      await emit?.({ type: 'step', step: { id, label: publicLabel, status: 'running' } });
+      await emit?.({
+        type: 'step',
+        step: { id, label: publicLabel, status: 'running' },
+      });
       this.rememberShortTermStep(task, id, publicLabel, 'running');
-      const step: SocialAgentVisibleStep = { id, label: publicLabel, status: 'done' };
+      const step: SocialAgentVisibleStep = {
+        id,
+        label: publicLabel,
+        status: 'done',
+      };
       visibleSteps.push(step);
       this.rememberShortTermStep(task, id, publicLabel, 'done');
       await this.writeEvent(task, eventType, label, payload);
@@ -1727,9 +1737,13 @@ export class SocialAgentChatService {
       toolName: SocialAgentToolName.CreateSocialRequest,
       status: 'started',
     });
-    await recordTool('fitmeet_create_social_intent', FitMeetAgentToolStatus.Running, {
-      taskId: task.id,
-    });
+    await recordTool(
+      'fitmeet_create_social_intent',
+      FitMeetAgentToolStatus.Running,
+      {
+        taskId: task.id,
+      },
+    );
     const draftResult = await this.generateDraftWithTool(task, goal);
     await recordTool(
       'fitmeet_create_social_intent',
@@ -1767,10 +1781,14 @@ export class SocialAgentChatService {
       toolName: SocialAgentToolName.SearchMatches,
       status: 'started',
     });
-    await recordTool('fitmeet_search_candidates', FitMeetAgentToolStatus.Running, {
-      taskId: task.id,
-      socialRequestId: draft.socialRequestId ?? null,
-    });
+    await recordTool(
+      'fitmeet_search_candidates',
+      FitMeetAgentToolStatus.Running,
+      {
+        taskId: task.id,
+        socialRequestId: draft.socialRequestId ?? null,
+      },
+    );
     const searchResult = await this.searchCandidates(task, draft);
     const candidates = searchResult.candidates;
     await recordTool(
@@ -1788,7 +1806,12 @@ export class SocialAgentChatService {
       { taskId: task.id },
       {
         candidateCount: candidates.length,
-        scoringInputs: ['life_graph', 'time_overlap', 'interest', 'safety_boundary'],
+        scoringInputs: [
+          'life_graph',
+          'time_overlap',
+          'interest',
+          'safety_boundary',
+        ],
       },
     );
     this.realtime?.emitAgentEvent(ownerUserId, 'agent:candidates', {
@@ -1834,10 +1857,15 @@ export class SocialAgentChatService {
       toolName: SocialAgentToolName.ExplainMatches,
       topCandidateUserId: candidates[0]?.userId ?? null,
     });
-    await done('icebreaker', '正在生成高情商开场白', AgentTaskEventType.ToolReturned, {
-      toolName: 'fitmeet_generate_icebreaker',
-      candidateCount: candidates.length,
-    });
+    await done(
+      'icebreaker',
+      '正在生成高情商开场白',
+      AgentTaskEventType.ToolReturned,
+      {
+        toolName: 'fitmeet_generate_icebreaker',
+        candidateCount: candidates.length,
+      },
+    );
     await recordTool(
       'fitmeet_generate_icebreaker',
       FitMeetAgentToolStatus.Succeeded,
@@ -1874,7 +1902,8 @@ export class SocialAgentChatService {
       runId: runtimeRun?.id,
       userId: ownerUserId,
       status:
-        result.approvalRequiredActions.length > 0 || result.candidates.length > 0
+        result.approvalRequiredActions.length > 0 ||
+        result.candidates.length > 0
           ? FitMeetAgentRunStatus.WaitingConfirmation
           : FitMeetAgentRunStatus.Completed,
       assistantMessage: result.assistantMessage,
@@ -2117,12 +2146,12 @@ export class SocialAgentChatService {
       requiresApproval ? 'confirmation_required' : 'message_action',
       {
         objective: 'candidate_messaging',
-        nextStep: requiresApproval
-          ? '等待用户确认发送消息'
-          : '等待候选人回复',
+        nextStep: requiresApproval ? '等待用户确认发送消息' : '等待候选人回复',
         shouldSearchNow: false,
         awaitingSearchConfirmation: false,
-        waitingFor: requiresApproval ? 'message_confirmation' : 'candidate_reply',
+        waitingFor: requiresApproval
+          ? 'message_confirmation'
+          : 'candidate_reply',
         lastCompletedStep: requiresApproval
           ? 'message_approval_created'
           : 'message_sent',
@@ -2710,9 +2739,9 @@ export class SocialAgentChatService {
     route: SocialAgentIntentRouterResult;
     profile: Record<string, unknown> | null;
     task: AgentTask;
-    longTermSnapshot:
-      | Awaited<ReturnType<SocialAgentLongTermMemoryService['readSnapshot']>>
-      | null;
+    longTermSnapshot: Awaited<
+      ReturnType<SocialAgentLongTermMemoryService['readSnapshot']>
+    > | null;
     toolResults?: Array<Record<string, unknown>>;
   }): Promise<string> {
     const fallbackReply = this.conversationalFallbackReply(
@@ -2763,9 +2792,9 @@ export class SocialAgentChatService {
     route: SocialAgentIntentRouterResult;
     profile: Record<string, unknown> | null;
     task: AgentTask;
-    longTermSnapshot:
-      | Awaited<ReturnType<SocialAgentLongTermMemoryService['readSnapshot']>>
-      | null;
+    longTermSnapshot: Awaited<
+      ReturnType<SocialAgentLongTermMemoryService['readSnapshot']>
+    > | null;
   }): Promise<string | null> {
     const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
     if (!apiKey) return null;
@@ -3002,7 +3031,8 @@ export class SocialAgentChatService {
   }
 
   private chatDeepSeekTimeoutMs(useCase?: SocialAgentModelUseCase): number {
-    if (useCase && this.modelRouter) return this.modelRouter.getTimeout(useCase);
+    if (useCase && this.modelRouter)
+      return this.modelRouter.getTimeout(useCase);
     const configured = Number(
       this.config.get<string>('SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS') ?? '5000',
     );
@@ -3034,7 +3064,11 @@ export class SocialAgentChatService {
   }
 
   private productHelpFallbackReply(message: string): string {
-    if (/(先.*画像.*约练|直接发布需求|怎么开始约练|下一步|需要怎么做|怎么做|流程)/i.test(message)) {
+    if (
+      /(先.*画像.*约练|直接发布需求|怎么开始约练|下一步|需要怎么做|怎么做|流程)/i.test(
+        message,
+      )
+    ) {
       return this.workflowHelpReply();
     }
     if (/(人物画像|ai画像|画像是什么|画像.*是什么)/i.test(message)) {
@@ -3109,7 +3143,11 @@ export class SocialAgentChatService {
       ...extractedProfile,
       ...llmExtractedProfile,
     };
-    this.rememberExtractedProfileInTaskMemory(task, mergedProfile, sourceMessage);
+    this.rememberExtractedProfileInTaskMemory(
+      task,
+      mergedProfile,
+      sourceMessage,
+    );
     await this.taskRepo.save(task);
 
     if (this.lifeGraph && Object.keys(mergedProfile).length > 0) {
@@ -3141,11 +3179,13 @@ export class SocialAgentChatService {
 
     const shouldSave = this.shouldSaveProfileFromMessage(message);
     const brainMode = this.currentConversationBrainMode(task);
-    const brainWantsProfileTool = this.currentConversationBrainTools(task).includes(
-      SocialAgentToolName.UpdateProfileFromAgentContext,
-    );
+    const brainWantsProfileTool = this.currentConversationBrainTools(
+      task,
+    ).includes(SocialAgentToolName.UpdateProfileFromAgentContext);
     if (
-      (shouldSave || brainMode === 'profile_update_tool' || brainWantsProfileTool) &&
+      (shouldSave ||
+        brainMode === 'profile_update_tool' ||
+        brainWantsProfileTool) &&
       Object.keys(mergedProfile).length > 0
     ) {
       const call = await this.executor.executeToolAction(
@@ -3266,12 +3306,18 @@ export class SocialAgentChatService {
     ownerUserId: number,
     message: string,
   ): Promise<string | null> {
-    if (!this.lifeGraph || !/找|匹配|推荐|搭子|candidate|match|find/i.test(message)) {
+    if (
+      !this.lifeGraph ||
+      !/找|匹配|推荐|搭子|candidate|match|find/i.test(message)
+    ) {
       return null;
     }
     const signals = await this.lifeGraph.getUnifiedMatchSignals(ownerUserId);
     const missing: string[] = [];
-    if (!signals.lifestyleSignals.availableTimes && !signals.lifestyleSignals.weekendAvailability) {
+    if (
+      !signals.lifestyleSignals.availableTimes &&
+      !signals.lifestyleSignals.weekendAvailability
+    ) {
       missing.push('你一般什么时候有空');
     }
     if (
@@ -3296,16 +3342,18 @@ export class SocialAgentChatService {
     );
   }
 
-  private alphaClarifyingMessage(
-    alphaTurn?: FitMeetAlphaTurnDecision,
-  ): string {
+  private alphaClarifyingMessage(alphaTurn?: FitMeetAlphaTurnDecision): string {
     const intent = this.isRecord(alphaTurn?.structuredIntent)
       ? alphaTurn?.structuredIntent
       : {};
     const question = cleanDisplayText(intent.clarifyingQuestion, '');
     const fallback =
       '可以。我先帮你找轻松一点、不需要太强社交压力的人。你更想今晚附近试试，还是周末下午找个时间？';
-    return this.tonePolicy?.safeAssistantMessage(question, fallback) || question || fallback;
+    return (
+      this.tonePolicy?.safeAssistantMessage(question, fallback) ||
+      question ||
+      fallback
+    );
   }
 
   private userVisibleStepLabel(id: string, label: string): string {
@@ -3328,10 +3376,7 @@ export class SocialAgentChatService {
     message: string;
     task: AgentTask;
     intent: SocialAgentIntentType;
-    mode:
-      | 'profile_extraction'
-      | 'profile_correction'
-      | 'profile_updated';
+    mode: 'profile_extraction' | 'profile_correction' | 'profile_updated';
     extractedProfile: ExtractedProfileFields;
     sourceMessage: string;
     toolOutput?: Record<string, unknown>;
@@ -3377,10 +3422,7 @@ export class SocialAgentChatService {
     message: string;
     task: AgentTask;
     intent: SocialAgentIntentType;
-    mode:
-      | 'profile_extraction'
-      | 'profile_correction'
-      | 'profile_updated';
+    mode: 'profile_extraction' | 'profile_correction' | 'profile_updated';
     extractedProfile: ExtractedProfileFields;
     sourceMessage: string;
     toolOutput?: Record<string, unknown>;
@@ -3436,8 +3478,12 @@ export class SocialAgentChatService {
                   extractedProfile: input.extractedProfile,
                   toolOutput: input.toolOutput ?? null,
                   toolResult: input.toolOutput ?? null,
-                  plannedTools: this.currentConversationBrainPlannedTools(input.task),
-                  lastToolResult: this.currentConversationBrainLastToolResult(input.task),
+                  plannedTools: this.currentConversationBrainPlannedTools(
+                    input.task,
+                  ),
+                  lastToolResult: this.currentConversationBrainLastToolResult(
+                    input.task,
+                  ),
                   memoryContext: this.buildMemoryContext(input.task, null),
                   availableTools: [
                     'update_profile_from_agent_context',
@@ -3613,7 +3659,11 @@ export class SocialAgentChatService {
       .slice(-5)
       .reverse();
     return (
-      userTurns.find((text) => Object.keys(this.extractProfileFieldsFromConversation([text])).length >= 2) ??
+      userTurns.find(
+        (text) =>
+          Object.keys(this.extractProfileFieldsFromConversation([text]))
+            .length >= 2,
+      ) ??
       userTurns[0] ??
       null
     );
@@ -3625,8 +3675,11 @@ export class SocialAgentChatService {
     const text = messages.map((item) => cleanDisplayText(item, '')).join('。');
     const fields: ExtractedProfileFields = {};
     const genderMatch = text.match(/(男生|女生|男|女)/);
-    if (genderMatch) fields.gender = genderMatch[1].includes('女') ? '女' : '男';
-    const ageMatch = text.match(/(?:^|[，。,.\s])(\d{1,2})\s*(?:岁)?(?:[，。,.\s]|$)/);
+    if (genderMatch)
+      fields.gender = genderMatch[1].includes('女') ? '女' : '男';
+    const ageMatch = text.match(
+      /(?:^|[，。,.\s])(\d{1,2})\s*(?:岁)?(?:[，。,.\s]|$)/,
+    );
     if (ageMatch) fields.ageRange = ageMatch[1];
     const heightMatch = text.match(/身高\s*(\d{2,3})\s*(?:cm|厘米)?/i);
     if (heightMatch) fields.height = `${heightMatch[1]}cm`;
@@ -3636,16 +3689,25 @@ export class SocialAgentChatService {
       /(白羊|金牛|双子|巨蟹|狮子|处女|天秤|天蝎|射手|摩羯|水瓶|双鱼)(?:座)?/,
     );
     if (zodiacMatch) fields.zodiac = `${zodiacMatch[1]}座`;
-    const mbtiMatch = text.match(/\b(infp|enfp|intj|entj|intp|entp|isfp|istp|isfj|istj|esfp|estp|esfj|estj|infj|enfj)\b/i);
+    const mbtiMatch = text.match(
+      /\b(infp|enfp|intj|entj|intp|entp|isfp|istp|isfj|istj|esfp|estp|esfj|estj|infj|enfj)\b/i,
+    );
     if (mbtiMatch) fields.mbti = mbtiMatch[1].toUpperCase();
-    const cityMatch = text.match(/(青岛|北京|上海|深圳|广州|杭州|南京|成都|武汉|西安|重庆|苏州|厦门|天津|长沙|郑州|济南|宁波|合肥)/);
+    const cityMatch = text.match(
+      /(青岛|北京|上海|深圳|广州|杭州|南京|成都|武汉|西安|重庆|苏州|厦门|天津|长沙|郑州|济南|宁波|合肥)/,
+    );
     if (cityMatch) fields.city = sanitizeCity(cityMatch[1]);
     const schoolMatch = text.match(/([\u4e00-\u9fa5]{2,20}大学)/);
     if (schoolMatch) {
-      fields.school = schoolMatch[1].replace(/^.*?(?=[\u4e00-\u9fa5]{2,8}大学$)/, '');
+      fields.school = schoolMatch[1].replace(
+        /^.*?(?=[\u4e00-\u9fa5]{2,8}大学$)/,
+        '',
+      );
       if (schoolMatch[1].includes('青岛大学')) fields.school = '青岛大学';
     }
-    const nearbyMatch = text.match(/(?:常住在|住在|在)([^，。,.]{2,30}(?:区|大学|校区|附近))/);
+    const nearbyMatch = text.match(
+      /(?:常住在|住在|在)([^，。,.]{2,30}(?:区|大学|校区|附近))/,
+    );
     if (nearbyMatch) fields.nearbyArea = nearbyMatch[1];
     const personalityMatch = text.match(/性格([^，。,.]{1,30})/);
     const personalityParts = [
@@ -3657,10 +3719,15 @@ export class SocialAgentChatService {
       fields.traits = personalityParts;
     }
     const interestMatches = Array.from(
-      text.matchAll(/(跑步|咖啡|健身|羽毛球|瑜伽|徒步|骑行|游泳|拍照|篮球|足球|网球)/g),
+      text.matchAll(
+        /(跑步|咖啡|健身|羽毛球|瑜伽|徒步|骑行|游泳|拍照|篮球|足球|网球)/g,
+      ),
     ).map((match) => match[1]);
-    if (interestMatches.length > 0) fields.interestTags = Array.from(new Set(interestMatches));
-    const timeMatch = text.match(/(周末[^，。,.]{0,12}|下午|晚上|工作日[^，。,.]{0,12})/);
+    if (interestMatches.length > 0)
+      fields.interestTags = Array.from(new Set(interestMatches));
+    const timeMatch = text.match(
+      /(周末[^，。,.]{0,12}|下午|晚上|工作日[^，。,.]{0,12})/,
+    );
     if (timeMatch) fields.availableTimes = [timeMatch[1]];
     const targetMatch = text.match(/想(?:找|认识)([^，。,.]{1,30})/);
     if (targetMatch) {
@@ -3670,7 +3737,9 @@ export class SocialAgentChatService {
       fields.wantToMeet = [target];
       fields.preferredTraits = [target];
     }
-    const rejectMatch = text.match(/(?:不喜欢|不接受|不想|拒绝|避免)([^，。,.]{1,40})/);
+    const rejectMatch = text.match(
+      /(?:不喜欢|不接受|不想|拒绝|避免)([^，。,.]{1,40})/,
+    );
     if (rejectMatch) fields.rejectRules = rejectMatch[0];
     const privacyMatch = text.match(/(?:隐私|不公开|不透露)([^，。,.]{1,60})/);
     if (privacyMatch) fields.privacyBoundary = privacyMatch[0];
@@ -3835,7 +3904,10 @@ export class SocialAgentChatService {
       transitionSocialAgentState(task, 'workflow_help');
       return;
     }
-    if (route.intent === 'social_search' || route.intent === 'activity_search') {
+    if (
+      route.intent === 'social_search' ||
+      route.intent === 'activity_search'
+    ) {
       rememberSocialAgentCurrentTask(task, {
         objective: 'search',
         nextStep: '调用搜索工具并基于真实结果回复',
@@ -3899,12 +3971,11 @@ export class SocialAgentChatService {
       ? memory.conversationBrain
       : {};
     const tools = Array.isArray(brain.tools) ? brain.tools : [];
-    return tools
-      .flatMap((tool) => {
-        if (!this.isRecord(tool)) return [];
-        const name = cleanDisplayText(tool.name, '');
-        return name ? [name] : [];
-      });
+    return tools.flatMap((tool) => {
+      if (!this.isRecord(tool)) return [];
+      const name = cleanDisplayText(tool.name, '');
+      return name ? [name] : [];
+    });
   }
 
   private currentConversationBrainPlannedTools(
@@ -3942,11 +4013,10 @@ export class SocialAgentChatService {
         if (text) fields[key] = text;
         continue;
       }
-      if (
-        Array.isArray(raw) &&
-        raw.every((item) => typeof item === 'string')
-      ) {
-        const list = raw.map((item) => cleanDisplayText(item, '')).filter(Boolean);
+      if (Array.isArray(raw) && raw.every((item) => typeof item === 'string')) {
+        const list = raw
+          .map((item) => cleanDisplayText(item, ''))
+          .filter(Boolean);
         if (list.length > 0) fields[key] = list;
       }
     }
@@ -3995,7 +4065,9 @@ export class SocialAgentChatService {
       ? lastToolResult.output
       : {};
     const missingFields = Array.isArray(output.missingFields)
-      ? output.missingFields.map((item) => cleanDisplayText(item, '')).filter(Boolean)
+      ? output.missingFields
+          .map((item) => cleanDisplayText(item, ''))
+          .filter(Boolean)
       : [];
     const knownMissing =
       missingFields.length > 0
@@ -4019,7 +4091,9 @@ export class SocialAgentChatService {
       : '我已提取到这些画像信息，先不直接搜索候选人。';
     return [
       intro,
-      lines.length > 0 ? `已提取：${lines.join('；')}` : '我还没有提取到足够明确的画像字段。',
+      lines.length > 0
+        ? `已提取：${lines.join('；')}`
+        : '我还没有提取到足够明确的画像字段。',
       '你要我把这些信息保存到 AI 画像里吗？保存后，我也可以继续问你可约时间、边界要求，再基于画像开始搜索。',
       '你也可以直接补充：城市/区域、兴趣、可约时间、想认识的人和边界。',
     ].join('\n');
@@ -4030,16 +4104,24 @@ export class SocialAgentChatService {
     output: Record<string, unknown>,
   ): string {
     const updatedFields = Array.isArray(output.updatedFields)
-      ? output.updatedFields.map((item) => cleanDisplayText(item, '')).filter(Boolean)
+      ? output.updatedFields
+          .map((item) => cleanDisplayText(item, ''))
+          .filter(Boolean)
       : [];
     const memoryFields = Array.isArray(output.memoryFields)
-      ? output.memoryFields.map((item) => cleanDisplayText(item, '')).filter(Boolean)
+      ? output.memoryFields
+          .map((item) => cleanDisplayText(item, ''))
+          .filter(Boolean)
       : [];
     const lines = this.profileFieldLines(extractedProfile);
     return [
       '已帮你把刚才的信息写入 AI 画像。',
-      updatedFields.length > 0 ? `已保存到画像字段：${updatedFields.join('、')}` : '',
-      memoryFields.length > 0 ? `作为补充偏好记录：${memoryFields.join('、')}` : '',
+      updatedFields.length > 0
+        ? `已保存到画像字段：${updatedFields.join('、')}`
+        : '',
+      memoryFields.length > 0
+        ? `作为补充偏好记录：${memoryFields.join('、')}`
+        : '',
       lines.length > 0 ? `本次识别：${lines.join('；')}` : '',
       '还缺少可约时间、明确边界和具体约练偏好。你可以继续补充，或者告诉我“现在开始搜索”。',
     ]
@@ -4305,10 +4387,7 @@ export class SocialAgentChatService {
     });
     await this.taskRepo.save(task);
 
-    const name = cleanDisplayText(
-      candidate.nickname,
-      `用户 #${targetUserId}`,
-    );
+    const name = cleanDisplayText(candidate.nickname, `用户 #${targetUserId}`);
     return {
       task,
       assistantMessage: `已确认发送给${name}：${text}`,
@@ -4926,12 +5005,15 @@ export class SocialAgentChatService {
     await this.writeEvent(
       task,
       AgentTaskEventType.SocialAgentCandidatesReturned,
-      candidates.length > 0 ? 'Social Agent 返回候选卡片' : 'Social Agent 返回空候选结果',
+      candidates.length > 0
+        ? 'Social Agent 返回候选卡片'
+        : 'Social Agent 返回空候选结果',
       {
         candidates,
         activityResults: candidates.filter(
           (candidate) =>
-            candidate.source === 'public_intent' || candidate.source === 'activity',
+            candidate.source === 'public_intent' ||
+            candidate.source === 'activity',
         ),
         socialRequestDraft: this.safeDraftForEvent(draft),
         candidateCount: candidates.length,
@@ -4948,20 +5030,23 @@ export class SocialAgentChatService {
       take: 500,
     });
     const lifeGraphSignals = this.lifeGraph
-      ? await this.lifeGraph.getUnifiedMatchSignals(ownerUserId).catch(() => null)
+      ? await this.lifeGraph
+          .getUnifiedMatchSignals(ownerUserId)
+          .catch(() => null)
       : null;
     const fallbackAssistantMessage =
       searchResult.message || this.assistantMessage(candidates);
-    const assistantMessage = this.tonePolicy?.safeAssistantMessage(
-      await this.generateRecommendationAssistantMessage({
-      task,
-      draft,
-      candidates,
-      searchResult,
-      fallbackReply: fallbackAssistantMessage,
-      }),
-      fallbackAssistantMessage,
-    ) ?? fallbackAssistantMessage;
+    const assistantMessage =
+      this.tonePolicy?.safeAssistantMessage(
+        await this.generateRecommendationAssistantMessage({
+          task,
+          draft,
+          candidates,
+          searchResult,
+          fallbackReply: fallbackAssistantMessage,
+        }),
+        fallbackAssistantMessage,
+      ) ?? fallbackAssistantMessage;
 
     const result = {
       taskId: task.id,
@@ -4979,7 +5064,11 @@ export class SocialAgentChatService {
         taskId: task.id,
         socialRequestDraft: draft as unknown as Record<string, unknown>,
         candidates: candidates as unknown as Array<Record<string, unknown>>,
-        approvalRequiredActions: this.approvalActions(task.id, draft, candidates),
+        approvalRequiredActions: this.approvalActions(
+          task.id,
+          draft,
+          candidates,
+        ),
         safety: alphaTurn?.safety,
         traceId: alphaTurn?.traceId,
         lifeGraphSignals: lifeGraphSignals as Record<string, unknown> | null,
@@ -4989,8 +5078,38 @@ export class SocialAgentChatService {
       agentTrace: alphaTurn?.agentTrace,
       structuredIntent: alphaTurn?.structuredIntent,
     };
+    this.evaluateAgentQuality(result);
     await emit?.({ type: 'result', result });
     return result;
+  }
+
+  private evaluateAgentQuality(result: SocialAgentChatRunResult): void {
+    const report = this.agentQuality?.evaluate({
+      assistantMessage: result.assistantMessage,
+      cards: result.cards,
+      safety: result.safety,
+      structuredIntent: result.structuredIntent,
+      approvalRequiredActions: result.approvalRequiredActions,
+      visibleSteps: result.visibleSteps,
+      candidates: result.candidates as unknown as Array<
+        Record<string, unknown>
+      >,
+      socialRequestDraft: result.socialRequestDraft as unknown as Record<
+        string,
+        unknown
+      > | null,
+    });
+    if (!report || report.passed) return;
+    this.logger.warn(
+      JSON.stringify({
+        event: 'fitmeet_agent.quality.failed',
+        taskId: result.taskId,
+        score: report.score,
+        failedChecks: report.checks
+          .filter((check) => check.status === 'fail')
+          .map((check) => check.id),
+      }),
+    );
   }
 
   private async generateRecommendationAssistantMessage(input: {
@@ -5134,7 +5253,9 @@ export class SocialAgentChatService {
       candidateExplanation: this.candidateExplanationFromRecord(
         record.candidateExplanation,
       ),
-      emotionalInsight: this.emotionalInsightFromRecord(record.emotionalInsight),
+      emotionalInsight: this.emotionalInsightFromRecord(
+        record.emotionalInsight,
+      ),
       status: candidate.status ? String(candidate.status) : undefined,
     };
   }
@@ -5147,7 +5268,8 @@ export class SocialAgentChatService {
     const awkwardPoints = this.stringList(value.awkwardPoints);
     const suggestedOpener = cleanDisplayText(value.suggestedOpener, '');
     const safeFirstStep = cleanDisplayText(value.safeFirstStep, '');
-    if (!fitReasons.length || !suggestedOpener || !safeFirstStep) return undefined;
+    if (!fitReasons.length || !suggestedOpener || !safeFirstStep)
+      return undefined;
     return {
       fitReasons,
       suggestedOpener,
@@ -5176,7 +5298,9 @@ export class SocialAgentChatService {
       possibleAwkwardness,
       safeFirstStep,
       tone:
-        value.tone === 'active' || value.tone === 'careful' || value.tone === 'gentle'
+        value.tone === 'active' ||
+        value.tone === 'careful' ||
+        value.tone === 'gentle'
           ? value.tone
           : undefined,
     };
@@ -5774,10 +5898,7 @@ export class SocialAgentChatService {
 
   private buildTimelineMessages(
     task: AgentTask,
-    result:
-      | SocialAgentChatRunResult
-      | SocialAgentChatReplanRunResult
-      | null,
+    result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null,
     pendingApprovals: SocialAgentPendingApprovalSnapshot[],
     events: Array<Record<string, unknown>>,
   ): SocialAgentTimelineMessage[] {
@@ -5785,27 +5906,31 @@ export class SocialAgentChatService {
       task,
       result,
       pendingApprovals,
-    ).map((message): SocialAgentTimelineMessage => ({
-      id: cleanDisplayText(message.id, `task_${task.id}_memory_message`),
-      role: message.role,
-      kind: message.kind === 'approval' || message.kind === 'risk' ? message.kind : 'text',
-      text: cleanDisplayText(message.content, ''),
-      createdAt: message.createdAt,
-      ...(message.activityResults?.length
-        ? { activityResults: message.activityResults }
-        : {}),
-      ...(message.pendingApproval
-        ? { pendingApproval: message.pendingApproval }
-        : {}),
-    }));
+    ).map(
+      (message): SocialAgentTimelineMessage => ({
+        id: cleanDisplayText(message.id, `task_${task.id}_memory_message`),
+        role: message.role,
+        kind:
+          message.kind === 'approval' || message.kind === 'risk'
+            ? message.kind
+            : 'text',
+        text: cleanDisplayText(message.content, ''),
+        createdAt: message.createdAt,
+        ...(message.activityResults?.length
+          ? { activityResults: message.activityResults }
+          : {}),
+        ...(message.pendingApproval
+          ? { pendingApproval: message.pendingApproval }
+          : {}),
+      }),
+    );
     const eventMessages = events
       .map((event) => this.timelineMessageFromEvent(task, event))
       .filter((message): message is SocialAgentTimelineMessage => !!message);
 
     return this.dedupeTimelineMessages([...memoryMessages, ...eventMessages])
       .sort(
-        (a, b) =>
-          Date.parse(a.createdAt ?? '') - Date.parse(b.createdAt ?? ''),
+        (a, b) => Date.parse(a.createdAt ?? '') - Date.parse(b.createdAt ?? ''),
       )
       .slice(-120);
   }
@@ -5814,12 +5939,12 @@ export class SocialAgentChatService {
     task: AgentTask,
     event: Record<string, unknown>,
   ): SocialAgentTimelineMessage | null {
-    const eventType = cleanDisplayText(event.eventType, '');
+    const rawEventType = cleanDisplayText(event.eventType, '');
+    const eventType = this.normalizeAgentTaskEventType(rawEventType);
     const payload = this.isRecord(event.payload) ? event.payload : {};
-    const id = `event_${this.number(event.id) ?? eventType}_${this.timelineCreatedAt(
-      payload,
-      event,
-    ) ?? 'unknown'}`;
+    const id = `event_${this.number(event.id) ?? rawEventType}_${
+      this.timelineCreatedAt(payload, event) ?? 'unknown'
+    }`;
     const createdAt = this.timelineCreatedAt(payload, event);
     const summary = cleanDisplayText(event.summary, '');
 
@@ -5884,7 +6009,7 @@ export class SocialAgentChatService {
         id,
         role: 'system',
         kind: 'tool',
-        text: summary || toolName || eventType,
+        text: summary || toolName || rawEventType,
         createdAt,
         toolCalls: [
           sanitizeForDisplay({
@@ -5923,7 +6048,7 @@ export class SocialAgentChatService {
         id,
         role: 'system',
         kind: 'status',
-        text: summary || eventType,
+        text: summary || rawEventType,
         createdAt,
       };
     }
@@ -5939,7 +6064,9 @@ export class SocialAgentChatService {
     return value
       .filter((item): item is Record<string, unknown> => this.isRecord(item))
       .map((item) => this.candidateFromStoredSummary(task, item))
-      .filter((candidate): candidate is SocialAgentChatCandidate => !!candidate);
+      .filter(
+        (candidate): candidate is SocialAgentChatCandidate => !!candidate,
+      );
   }
 
   private timelineCreatedAt(
@@ -5947,8 +6074,10 @@ export class SocialAgentChatService {
     event: Record<string, unknown>,
   ): string | null {
     return (
-      cleanDisplayText(payload.createdAt ?? payload.at ?? event.createdAt, '') ||
-      null
+      cleanDisplayText(
+        payload.createdAt ?? payload.at ?? event.createdAt,
+        '',
+      ) || null
     );
   }
 
@@ -5961,12 +6090,24 @@ export class SocialAgentChatService {
       const textKey = `${message.role}:${message.kind}:${
         message.createdAt ?? ''
       }:${cleanDisplayText(message.text, '').slice(0, 50)}`;
-      const key = message.kind === 'tool' || message.kind === 'status' ? message.id : textKey;
+      const key =
+        message.kind === 'tool' || message.kind === 'status'
+          ? message.id
+          : textKey;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push(message);
     }
     return out;
+  }
+
+  private normalizeAgentTaskEventType(
+    value: unknown,
+  ): AgentTaskEventType | null {
+    const text = cleanDisplayText(value, '');
+    if (!text) return null;
+    const knownValues: string[] = Object.values(AgentTaskEventType);
+    return knownValues.includes(text) ? (text as AgentTaskEventType) : null;
   }
 
   private toSessionTaskSummary(task: AgentTask): SocialAgentSessionTaskSummary {
@@ -5984,10 +6125,7 @@ export class SocialAgentChatService {
 
   private buildSessionMessages(
     task: AgentTask,
-    result:
-      | SocialAgentChatRunResult
-      | SocialAgentChatReplanRunResult
-      | null,
+    result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null,
     pendingApprovals: SocialAgentPendingApprovalSnapshot[],
   ): SocialAgentSessionMessage[] {
     const messages = this.readConversationHistory(task)
@@ -6081,7 +6219,9 @@ export class SocialAgentChatService {
     events: Array<Record<string, unknown>>,
   ): SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null {
     if (latestRun?.result && this.isRecord(latestRun.result)) {
-      const runResult = latestRun.result as SocialAgentChatRunResult | SocialAgentChatReplanRunResult;
+      const runResult = latestRun.result as
+        | SocialAgentChatRunResult
+        | SocialAgentChatReplanRunResult;
       return sanitizeForDisplay({
         ...runResult,
         taskId: task.id,
@@ -6117,11 +6257,13 @@ export class SocialAgentChatService {
           : null;
     const storedCandidates = this.readStoredCandidateSummaries(task)
       .map((candidate) => this.candidateFromStoredSummary(task, candidate))
-      .filter((candidate): candidate is SocialAgentChatCandidate => !!candidate);
+      .filter(
+        (candidate): candidate is SocialAgentChatCandidate => !!candidate,
+      );
     const candidates =
       storedCandidates.length > 0
         ? storedCandidates
-        : eventResult?.candidates ?? [];
+        : (eventResult?.candidates ?? []);
 
     if (!rawDraft && candidates.length === 0) return null;
     const socialRequestDraft = rawDraft
@@ -6147,9 +6289,10 @@ export class SocialAgentChatService {
       emptyReason:
         cleanDisplayText(chatRun.emptyReason, '') === 'no_real_candidates'
           ? 'no_real_candidates'
-          : cleanDisplayText(eventResult?.emptyReason, '') === 'no_real_candidates'
-          ? 'no_real_candidates'
-          : null,
+          : cleanDisplayText(eventResult?.emptyReason, '') ===
+              'no_real_candidates'
+            ? 'no_real_candidates'
+            : null,
       message:
         cleanDisplayText(chatRun.message, '') ||
         cleanDisplayText(eventResult?.message, '') ||
@@ -6169,19 +6312,17 @@ export class SocialAgentChatService {
   private readCandidateResultFromEvents(
     task: AgentTask,
     events: Array<Record<string, unknown>>,
-  ):
-    | {
-        candidates: SocialAgentChatCandidate[];
-        socialRequestDraft: Record<string, unknown> | null;
-        message: string | null;
-        emptyReason: string | null;
-      }
-    | null {
+  ): {
+    candidates: SocialAgentChatCandidate[];
+    socialRequestDraft: Record<string, unknown> | null;
+    message: string | null;
+    emptyReason: string | null;
+  } | null {
     const event = [...events]
       .reverse()
       .find(
         (item) =>
-          cleanDisplayText(item.eventType, '') ===
+          this.normalizeAgentTaskEventType(item.eventType) ===
           AgentTaskEventType.SocialAgentCandidatesReturned,
       );
     if (!event || !this.isRecord(event.payload)) return null;
@@ -6189,7 +6330,7 @@ export class SocialAgentChatService {
     return {
       candidates: this.readTimelineCandidates(task, payload.candidates),
       socialRequestDraft: this.isRecord(payload.socialRequestDraft)
-        ? (payload.socialRequestDraft as Record<string, unknown>)
+        ? payload.socialRequestDraft
         : null,
       message: cleanDisplayText(payload.message, '') || null,
       emptyReason: cleanDisplayText(payload.emptyReason, '') || null,
@@ -6218,7 +6359,9 @@ export class SocialAgentChatService {
       source:
         cleanDisplayText(candidate.source, '') === 'public_intent' ||
         cleanDisplayText(candidate.source, '') === 'activity'
-          ? (cleanDisplayText(candidate.source, '') as 'public_intent' | 'activity')
+          ? (cleanDisplayText(candidate.source, '') as
+              | 'public_intent'
+              | 'activity')
           : 'profile_candidate',
       isRealData: candidate.isRealData === true,
       socialRequestId: this.number(candidate.socialRequestId),
@@ -6233,13 +6376,15 @@ export class SocialAgentChatService {
       avatar: cleanDisplayText(candidate.avatar, ''),
       color: cleanDisplayText(candidate.color, '#202124'),
       city: cleanDisplayText(candidate.city, ''),
-      score: this.number(candidate.score) ?? this.number(candidate.matchScore) ?? 0,
+      score:
+        this.number(candidate.score) ?? this.number(candidate.matchScore) ?? 0,
       level: cleanDisplayText(candidate.level, 'medium'),
       distanceKm: this.number(candidate.distanceKm),
       commonTags: this.stringList(candidate.commonTags),
       reasons: this.stringList(candidate.reasons ?? candidate.matchReasons),
       interestTags: this.stringList(candidate.interestTags),
-      profileCompleteness: this.number(candidate.profileCompleteness) ?? undefined,
+      profileCompleteness:
+        this.number(candidate.profileCompleteness) ?? undefined,
       dataQuality:
         candidate.dataQuality === 'complete' ||
         candidate.dataQuality === 'partial' ||
@@ -6258,7 +6403,9 @@ export class SocialAgentChatService {
       candidateExplanation: this.candidateExplanationFromRecord(
         candidate.candidateExplanation,
       ),
-      emotionalInsight: this.emotionalInsightFromRecord(candidate.emotionalInsight),
+      emotionalInsight: this.emotionalInsightFromRecord(
+        candidate.emotionalInsight,
+      ),
       status: cleanDisplayText(candidate.status, '') || undefined,
     };
   }
@@ -6326,13 +6473,16 @@ export class SocialAgentChatService {
       const latest = this.readStoredRun(task, latestRunId);
       if (latest) return latest;
     }
-    return Object.keys(this.storedRunMap(task.result))
-      .map((runId) => this.readStoredRun(task, runId))
-      .filter((run): run is SocialAgentAsyncRunSnapshot => !!run)
-      .sort(
-        (a, b) =>
-          Date.parse(b.updatedAt || b.queuedAt) - Date.parse(a.updatedAt || a.queuedAt),
-      )[0] ?? null;
+    return (
+      Object.keys(this.storedRunMap(task.result))
+        .map((runId) => this.readStoredRun(task, runId))
+        .filter((run): run is SocialAgentAsyncRunSnapshot => !!run)
+        .sort(
+          (a, b) =>
+            Date.parse(b.updatedAt || b.queuedAt) -
+            Date.parse(a.updatedAt || a.queuedAt),
+        )[0] ?? null
+    );
   }
 
   private toPendingApprovalSnapshot(
@@ -6355,7 +6505,9 @@ export class SocialAgentChatService {
     if (!this.isRecord(value)) return undefined;
     const id = this.number(value.id);
     if (!id) return undefined;
-    const type = Object.values(ApprovalType).includes(value.type as ApprovalType)
+    const type = Object.values(ApprovalType).includes(
+      value.type as ApprovalType,
+    )
       ? (value.type as ApprovalType)
       : ApprovalType.Custom;
     const riskLevel = Object.values(ApprovalRiskLevel).includes(
@@ -6496,7 +6648,8 @@ export class SocialAgentChatService {
           : '等待用户放宽条件或补充偏好',
       shouldSearchNow: false,
       awaitingSearchConfirmation: false,
-      waitingFor: candidates.length > 0 ? 'candidate_selection' : 'search_refinement',
+      waitingFor:
+        candidates.length > 0 ? 'candidate_selection' : 'search_refinement',
       lastCompletedStep: 'search_completed',
     });
   }

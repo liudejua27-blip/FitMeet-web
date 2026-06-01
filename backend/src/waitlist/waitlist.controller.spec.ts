@@ -42,10 +42,13 @@ describe('WaitlistController', () => {
       headers: { 'user-agent': 'vitest' },
     });
 
-    expect(service.submitAppWaitlist).toHaveBeenCalledWith(dto, {
-      ip: '127.0.0.1',
-      userAgent: 'vitest',
-    });
+    expect(service.submitAppWaitlist.mock.calls[0]).toEqual([
+      dto,
+      {
+        ip: '127.0.0.1',
+        userAgent: 'vitest',
+      },
+    ]);
   });
 
   it('validates invite codes through the public API', () => {
@@ -53,7 +56,7 @@ describe('WaitlistController', () => {
 
     void controller.validateInvite({ inviteCode: 'QDU2026' });
 
-    expect(service.validateInvite).toHaveBeenCalledWith('QDU2026');
+    expect(service.validateInvite.mock.calls[0]).toEqual(['QDU2026']);
   });
 
   it('records analytics events without raw user identifiers', async () => {
@@ -64,10 +67,14 @@ describe('WaitlistController', () => {
       { ip: '127.0.0.1', headers: {} },
     );
 
-    expect(service.hashIp).toHaveBeenCalledWith('127.0.0.1');
-    expect(service.track).toHaveBeenCalledWith('app_page_view', 'ip_hash', {
-      source: 'app_page',
-    });
+    expect(service.hashIp.mock.calls[0]).toEqual(['127.0.0.1']);
+    expect(service.track.mock.calls[0]).toEqual([
+      'app_page_view',
+      'ip_hash',
+      {
+        source: 'app_page',
+      },
+    ]);
   });
 
   it('allows configured admins to read waitlist stats and invite codes', () => {
@@ -78,14 +85,14 @@ describe('WaitlistController', () => {
     void controller.getAdminStats(req);
     void controller.listInviteCodes(req);
 
-    expect(service.getStats).toHaveBeenCalledTimes(1);
-    expect(service.listInviteCodes).toHaveBeenCalledTimes(1);
+    expect(service.getStats.mock.calls).toHaveLength(1);
+    expect(service.listInviteCodes.mock.calls).toHaveLength(1);
   });
 
   it('blocks non-admin users from admin waitlist APIs', () => {
-    expect(() => controller.listAdminWaitlist({}, { user: { id: 999 }, headers: {} })).toThrow(
-      ForbiddenException,
-    );
-    expect(service.listAdminWaitlist).not.toHaveBeenCalled();
+    expect(() =>
+      controller.listAdminWaitlist({}, { user: { id: 999 }, headers: {} }),
+    ).toThrow(ForbiddenException);
+    expect(service.listAdminWaitlist.mock.calls).toHaveLength(0);
   });
 });

@@ -1,5 +1,5 @@
 import type { AgentConfirmAction } from './agentWorkbenchTypes';
-import { permissionModeLabel } from './PermissionModeSelector';
+import { permissionModeLabel } from './permissionModeLabel';
 
 export function ActionConfirmDialog({
   action,

@@ -29,9 +29,15 @@ export class ConfirmationCopyService {
     }
   }
 
-  body(action: ConfirmationAction, input: Record<string, unknown> = {}): string {
+  body(
+    action: ConfirmationAction,
+    input: Record<string, unknown> = {},
+  ): string {
     const name = cleanDisplayText(input.displayName ?? input.nickname, '对方');
-    const message = cleanDisplayText(input.message ?? input.suggestedOpener, '');
+    const message = cleanDisplayText(
+      input.message ?? input.suggestedOpener,
+      '',
+    );
     switch (action) {
       case 'send_message':
         return message

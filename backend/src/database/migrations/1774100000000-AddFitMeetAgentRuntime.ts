@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddFitMeetAgentRuntime1774100000000
-  implements MigrationInterface
-{
+export class AddFitMeetAgentRuntime1774100000000 implements MigrationInterface {
   name = 'AddFitMeetAgentRuntime1774100000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -136,24 +134,50 @@ export class AddFitMeetAgentRuntime1774100000000
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_agent_memory_updates_user_type"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_agent_memory_updates_run_created"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_agent_memory_updates_user_type"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_agent_memory_updates_run_created"`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS "agent_memory_updates"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_agent_messages_user_created"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_agent_messages_run_created"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_agent_messages_user_created"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_agent_messages_run_created"`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS "agent_messages"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_agent_tool_calls_user_tool_status"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_agent_tool_calls_run_created"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_agent_tool_calls_user_tool_status"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_agent_tool_calls_run_created"`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS "agent_tool_calls"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_agent_run_steps_user_created"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_agent_run_steps_run_order"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_agent_run_steps_user_created"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_agent_run_steps_run_order"`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS "agent_run_steps"`);
     await queryRunner.query(`DROP INDEX IF EXISTS "idx_agent_runs_task"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_agent_runs_user_status_updated"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_agent_runs_user_status_updated"`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS "agent_runs"`);
-    await queryRunner.query(`DROP TYPE IF EXISTS "fitmeet_agent_tool_status_enum"`);
-    await queryRunner.query(`DROP TYPE IF EXISTS "fitmeet_agent_step_status_enum"`);
-    await queryRunner.query(`DROP TYPE IF EXISTS "fitmeet_agent_run_status_enum"`);
-    await queryRunner.query(`DROP TYPE IF EXISTS "fitmeet_agent_permission_mode_enum"`);
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "fitmeet_agent_tool_status_enum"`,
+    );
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "fitmeet_agent_step_status_enum"`,
+    );
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "fitmeet_agent_run_status_enum"`,
+    );
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "fitmeet_agent_permission_mode_enum"`,
+    );
   }
 }

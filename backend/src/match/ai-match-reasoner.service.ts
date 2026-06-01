@@ -5,7 +5,10 @@ import { UserSocialProfile } from '../users/user-social-profile.entity';
 import { User } from '../users/user.entity';
 import { MatchPrivacySanitizer } from './match-privacy-sanitizer.service';
 
-export type MatchResultSource = 'profile_pool' | 'social_request' | 'public_intent';
+export type MatchResultSource =
+  | 'profile_pool'
+  | 'social_request'
+  | 'public_intent';
 
 export type MatchReasoningResult = {
   score: number;
@@ -182,12 +185,13 @@ export class AiMatchReasonerService {
     return {
       score: Math.max(0, Math.min(100, Math.round(input.baseScore))),
       scoreBreakdown: { ...input.scoreBreakdown },
-      matchedSignals: this.unique([...tags, ...input.deterministicReasons]).slice(
-        0,
-        8,
-      ),
+      matchedSignals: this.unique([
+        ...tags,
+        ...input.deterministicReasons,
+      ]).slice(0, 8),
       publicReason,
-      privateReason: '当前候选由后端硬过滤和 MatchService 规则评分产生，AI 仅参与解释和话术。',
+      privateReason:
+        '当前候选由后端硬过滤和 MatchService 规则评分产生，AI 仅参与解释和话术。',
       riskWarning: this.sanitizer.sanitizeText(riskWarnings.join(' '), 320),
       riskWarnings,
       suggestedOpener: this.sanitizer.sanitizeText(

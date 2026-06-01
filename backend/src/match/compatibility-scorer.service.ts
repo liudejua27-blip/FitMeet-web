@@ -46,8 +46,12 @@ type ProfilePairInput = {
 
 @Injectable()
 export class CompatibilityScorerService {
-  scoreRequestCandidate(input: RequestCandidateInput): CompatibilityScoreResult {
-    const desired = new Set(input.desiredTags.flatMap((tag) => this.expandMatchTag(tag)));
+  scoreRequestCandidate(
+    input: RequestCandidateInput,
+  ): CompatibilityScoreResult {
+    const desired = new Set(
+      input.desiredTags.flatMap((tag) => this.expandMatchTag(tag)),
+    );
     const publicOverlap = this.overlapExpanded(input.candidatePublicTags, [
       ...desired,
     ]);
@@ -94,7 +98,9 @@ export class CompatibilityScorerService {
         agentAcceptance,
       },
       publicReasons: [
-        commonTags.length ? `Shared public tags: ${commonTags.slice(0, 3).join(', ')}` : '',
+        commonTags.length
+          ? `Shared public tags: ${commonTags.slice(0, 3).join(', ')}`
+          : '',
         traitOverlap.length
           ? `Similar traits: ${traitOverlap.slice(0, 3).join(', ')}`
           : '',
@@ -126,10 +132,10 @@ export class CompatibilityScorerService {
       ...input.candidatePublicTags,
       ...input.candidatePrivateTags,
     ]);
-    const candidateWantsOwner = this.overlapExpanded(input.candidatePrivateTags, [
-      ...input.ownerPublicTags,
-      ...input.ownerPrivateTags,
-    ]);
+    const candidateWantsOwner = this.overlapExpanded(
+      input.candidatePrivateTags,
+      [...input.ownerPublicTags, ...input.ownerPrivateTags],
+    );
     const traitOverlap = this.overlapExpanded(
       input.ownerTraits ?? [],
       input.candidateTraits ?? [],
@@ -140,13 +146,13 @@ export class CompatibilityScorerService {
     );
     const cityMatch = Boolean(
       input.ownerCity &&
-        input.candidateCity &&
-        input.ownerCity.trim() === input.candidateCity.trim(),
+      input.candidateCity &&
+      input.ownerCity.trim() === input.candidateCity.trim(),
     );
     const nearbyMatch = Boolean(
       input.ownerNearbyArea &&
-        input.candidateNearbyArea &&
-        input.ownerNearbyArea.trim() === input.candidateNearbyArea.trim(),
+      input.candidateNearbyArea &&
+      input.ownerNearbyArea.trim() === input.candidateNearbyArea.trim(),
     );
     const geography = (cityMatch ? 14 : 0) + (nearbyMatch ? 6 : 0);
     const interest = Math.min(sharedPublic.length, 4) * 6;
@@ -185,7 +191,9 @@ export class CompatibilityScorerService {
         agentAcceptance,
       },
       publicReasons: [
-        cityMatch && input.candidateCity ? `Same city: ${input.candidateCity}` : '',
+        cityMatch && input.candidateCity
+          ? `Same city: ${input.candidateCity}`
+          : '',
         nearbyMatch ? 'Nearby activity area aligns.' : '',
         sharedPublic.length
           ? `Shared tags: ${sharedPublic.slice(0, 3).join(', ')}`
@@ -212,7 +220,9 @@ export class CompatibilityScorerService {
         input.ownerPrivacyBoundary
           ? 'Owner privacy boundaries must be respected before any intro or contact exchange.'
           : '',
-        input.ownerCity && input.candidateCity && input.ownerCity !== input.candidateCity
+        input.ownerCity &&
+        input.candidateCity &&
+        input.ownerCity !== input.candidateCity
           ? 'Cities differ; avoid suggesting offline plans until both sides confirm logistics.'
           : '',
       ].filter(Boolean),
@@ -230,7 +240,9 @@ export class CompatibilityScorerService {
   }
 
   overlapExpanded(a: string[], b: string[]): string[] {
-    const bSet = new Set(this.cleanTags(b).flatMap((item) => this.expandMatchTag(item)));
+    const bSet = new Set(
+      this.cleanTags(b).flatMap((item) => this.expandMatchTag(item)),
+    );
     return this.cleanTags(a).filter((item) =>
       this.expandMatchTag(item).some((tag) => bSet.has(tag)),
     );
@@ -261,10 +273,9 @@ export class CompatibilityScorerService {
   }
 
   cleanTags(tags: string[]): string[] {
-    return this.unique(tags.map((tag) => (tag ?? '').trim()).filter(Boolean)).slice(
-      0,
-      80,
-    );
+    return this.unique(
+      tags.map((tag) => (tag ?? '').trim()).filter(Boolean),
+    ).slice(0, 80);
   }
 
   private unique<T>(items: T[]): T[] {

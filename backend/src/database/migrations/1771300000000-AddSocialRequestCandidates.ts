@@ -10,9 +10,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  *
  * MUST run AFTER 1771200000000-AddUserSocialRequests (FK target).
  */
-export class AddSocialRequestCandidates1771300000000
-  implements MigrationInterface
-{
+export class AddSocialRequestCandidates1771300000000 implements MigrationInterface {
   name = 'AddSocialRequestCandidates1771300000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

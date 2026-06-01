@@ -376,6 +376,7 @@ export class AgentApprovalService {
       'Agent';
     const target =
       (payload._targetDisplayName as string) ||
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string, @typescript-eslint/restrict-template-expressions
       (payload.toUserId !== undefined ? `用户 #${payload.toUserId}` : '对方');
     switch (type) {
       case ApprovalType.SendMessage:
@@ -520,7 +521,7 @@ export class AgentApprovalService {
   async approve(
     id: number,
     userId: number,
-    dispatcher?: (approval: AgentApprovalRequest) => Promise<unknown> | unknown,
+    dispatcher?: (approval: AgentApprovalRequest) => Promise<unknown>,
   ): Promise<{
     approval: AgentApprovalRequest;
     dispatched: boolean;

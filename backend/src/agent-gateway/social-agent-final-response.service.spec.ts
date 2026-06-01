@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await */
 import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
 
 function makeConfig(values: Record<string, string | undefined> = {}) {
@@ -21,8 +22,7 @@ describe('SocialAgentFinalResponseService', () => {
         choices: [
           {
             message: {
-              content:
-                '我已经帮你完善了画像，还缺可约时间和见面边界。',
+              content: '我已经帮你完善了画像，还缺可约时间和见面边界。',
             },
           },
         ],

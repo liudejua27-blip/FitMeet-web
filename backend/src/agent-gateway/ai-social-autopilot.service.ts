@@ -1,9 +1,4 @@
-import {
-  Inject,
-  Injectable,
-  Logger,
-  forwardRef,
-} from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, In, Repository } from 'typeorm';
@@ -14,7 +9,6 @@ import {
   AgentAutonomyLevel,
 } from './entities/agent-profile.entity';
 import {
-  AgentApprovalRequest,
   ApprovalRiskLevel,
   ApprovalType,
 } from './entities/agent-approval-request.entity';
@@ -206,11 +200,10 @@ export class AiSocialAutopilotService {
   ): Promise<void> {
     const ownerUserId = profile.ownerUserId as number;
     const dailyCap = dailyCapFor(profile.autonomyLevel);
-    if (dailyCap <= 0 && !canAutoExecute(
-      'send_message',
-      profile.autonomyLevel,
-      'low',
-    )) {
+    if (
+      dailyCap <= 0 &&
+      !canAutoExecute('send_message', profile.autonomyLevel, 'low')
+    ) {
       // Assisted/sandbox modes: only suggestion-only path applies.
     }
 
@@ -405,26 +398,30 @@ export class AiSocialAutopilotService {
     }
 
     // Branch 3: Needs approval — queue PendingAction.
-    if (this.shouldQueueAutopilotApproval()) await this.approvals.create({
-      userId: ownerUserId,
-      agentConnectionId: profile.agentConnectionId,
-      type: ApprovalType.SendMessage,
-      actionType: 'send_message',
-      skillName: 'autopilot.send_message',
-      payload: {
-        toUserId: candidate.candidateUserId,
-        content: sanitizedMessage,
-        socialRequestId: request.id,
-        candidateRecordId: candidate.id,
-      },
-      summary: truncate(sanitizedMessage, 200),
-      riskLevel: approvalRisk,
-      reason: remainingCap <= 0 ? 'autopilot_daily_cap_reached' : 'autopilot_needs_approval',
-      createdBy: 'agent',
-      relatedSocialRequestId: request.id,
-      relatedCandidateId: candidate.id,
-      rationale: 'AI Social Autopilot 建议向该用户发送破冰消息，等待你的确认',
-    });
+    if (this.shouldQueueAutopilotApproval())
+      await this.approvals.create({
+        userId: ownerUserId,
+        agentConnectionId: profile.agentConnectionId,
+        type: ApprovalType.SendMessage,
+        actionType: 'send_message',
+        skillName: 'autopilot.send_message',
+        payload: {
+          toUserId: candidate.candidateUserId,
+          content: sanitizedMessage,
+          socialRequestId: request.id,
+          candidateRecordId: candidate.id,
+        },
+        summary: truncate(sanitizedMessage, 200),
+        riskLevel: approvalRisk,
+        reason:
+          remainingCap <= 0
+            ? 'autopilot_daily_cap_reached'
+            : 'autopilot_needs_approval',
+        createdBy: 'agent',
+        relatedSocialRequestId: request.id,
+        relatedCandidateId: candidate.id,
+        rationale: 'AI Social Autopilot 建议向该用户发送破冰消息，等待你的确认',
+      });
 
     await this.actionLogs.logAgentAction({
       ownerUserId,
@@ -436,13 +433,19 @@ export class AiSocialAutopilotService {
       relatedSocialRequestId: request.id,
       relatedCandidateId: candidate.id,
       inputSummary: sanitizedMessage,
-      outputSummary: remainingCap <= 0 ? 'autopilot_daily_cap_reached' : 'autopilot_not_auto_executable',
+      outputSummary:
+        remainingCap <= 0
+          ? 'autopilot_daily_cap_reached'
+          : 'autopilot_not_auto_executable',
       payload: {
         autonomyLevel: profile.autonomyLevel,
         score: candidate.score,
         capRemaining: remainingCap,
       },
-      reason: remainingCap <= 0 ? 'autopilot_daily_cap_reached' : 'autopilot_not_auto_executable',
+      reason:
+        remainingCap <= 0
+          ? 'autopilot_daily_cap_reached'
+          : 'autopilot_not_auto_executable',
     });
     this.emitAutopilotWebhook(profile.agentConnectionId, {
       ownerUserId,
@@ -502,7 +505,9 @@ export interface AutopilotRunSummary {
 type DecisionOutcome = 'executed' | 'pending' | 'planned' | 'skipped';
 
 function isEnabled(): boolean {
-  return (process.env.ENABLE_AI_SOCIAL_AUTOPILOT ?? '').toLowerCase() === 'true';
+  return (
+    (process.env.ENABLE_AI_SOCIAL_AUTOPILOT ?? '').toLowerCase() === 'true'
+  );
 }
 
 function configuredIntervalMs(): number {
@@ -523,7 +528,9 @@ function dailyCapFor(level: AgentAutonomyLevel): number {
   }
 }
 
-function mapCandidateToApprovalRisk(level: CandidateRiskLevel): ApprovalRiskLevel {
+function mapCandidateToApprovalRisk(
+  level: CandidateRiskLevel,
+): ApprovalRiskLevel {
   switch (level) {
     case CandidateRiskLevel.High:
       return ApprovalRiskLevel.High;
@@ -534,7 +541,9 @@ function mapCandidateToApprovalRisk(level: CandidateRiskLevel): ApprovalRiskLeve
   }
 }
 
-function mapCandidateToActionRisk(level: CandidateRiskLevel): AgentActionRiskLevel {
+function mapCandidateToActionRisk(
+  level: CandidateRiskLevel,
+): AgentActionRiskLevel {
   switch (level) {
     case CandidateRiskLevel.High:
       return AgentActionRiskLevel.High;
@@ -558,7 +567,10 @@ function stripPii(text: string): string {
   // International-ish phone numbers
   out = out.replace(/\+?\d[\d\s-]{7,}\d/g, '[已隐藏]');
   // WeChat / QQ / Line / Telegram handles
-  out = out.replace(/(微信|wechat|wx|qq|line|telegram|tg)[\s:：是号id]*[\w.-]{3,}/gi, '[联系方式已隐藏]');
+  out = out.replace(
+    /(微信|wechat|wx|qq|line|telegram|tg)[\s:：是号id]*[\w.-]{3,}/gi,
+    '[联系方式已隐藏]',
+  );
   // Email
   out = out.replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '[已隐藏]');
   // Detailed address hints (number + 号/室/楼/室号)

@@ -1,5 +1,9 @@
 import { WaitlistQualityScoringService } from './waitlist-quality-scoring.service';
-import { WaitlistDeviceType, WaitlistQualityLevel, WaitlistUserRole } from './waitlist.enums';
+import {
+  WaitlistDeviceType,
+  WaitlistQualityLevel,
+  WaitlistUserRole,
+} from './waitlist.enums';
 
 describe('WaitlistQualityScoringService', () => {
   const service = new WaitlistQualityScoringService();

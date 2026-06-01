@@ -11,6 +11,7 @@ import {
   AgentConnection,
   ConnectionStatus,
 } from './entities/agent-connection.entity';
+/* eslint-disable @typescript-eslint/require-await */
 import { ProfileMatchService } from './profile-match.service';
 import { ContactRequest } from './entities/contact-request.entity';
 import { AgentActionLogService } from './agent-action-log.service';
@@ -71,7 +72,9 @@ describe('ProfileMatchService', () => {
     taskEventRepo = mockRepo();
     messages = {
       createAgentInboxEvent: jest.fn(),
-      startConversation: jest.fn().mockResolvedValue({ conversationId: 'conv-1' }),
+      startConversation: jest
+        .fn()
+        .mockResolvedValue({ conversationId: 'conv-1' }),
       sendMessage: jest.fn().mockResolvedValue({ id: 'msg-1' }),
     };
     webhooks = { emitToConnection: jest.fn().mockResolvedValue(undefined) };
@@ -85,13 +88,22 @@ describe('ProfileMatchService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ProfileMatchService,
-        { provide: getRepositoryToken(UserSocialProfile), useValue: profileRepo },
+        {
+          provide: getRepositoryToken(UserSocialProfile),
+          useValue: profileRepo,
+        },
         { provide: getRepositoryToken(User), useValue: userRepo },
         { provide: getRepositoryToken(AiMatchSession), useValue: sessionRepo },
-        { provide: getRepositoryToken(AgentConnection), useValue: connectionRepo },
+        {
+          provide: getRepositoryToken(AgentConnection),
+          useValue: connectionRepo,
+        },
         { provide: getRepositoryToken(ContactRequest), useValue: contactRepo },
         { provide: getRepositoryToken(AgentTask), useValue: taskRepo },
-        { provide: getRepositoryToken(AgentTaskEvent), useValue: taskEventRepo },
+        {
+          provide: getRepositoryToken(AgentTaskEvent),
+          useValue: taskEventRepo,
+        },
         { provide: SafetyService, useValue: safety },
         { provide: MessagesService, useValue: messages },
         { provide: AgentWebhookService, useValue: webhooks },
@@ -197,7 +209,9 @@ describe('ProfileMatchService', () => {
       profileDiscoverable: true,
       agentCanRecommendMe: true,
     });
-    profileRepo.createQueryBuilder.mockReturnValue(qbReturning([{ userId: 2 }]));
+    profileRepo.createQueryBuilder.mockReturnValue(
+      qbReturning([{ userId: 2 }]),
+    );
     safety.getMutualBlockUserIds.mockResolvedValue(new Set([2]));
 
     const result = await service.runOnce(1);

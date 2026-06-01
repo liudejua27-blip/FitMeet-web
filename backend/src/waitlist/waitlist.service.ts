@@ -37,7 +37,10 @@ export class WaitlistService {
     private readonly scoring: WaitlistQualityScoringService,
   ) {}
 
-  async submitAppWaitlist(input: SubmitAppWaitlistDto, meta: WaitlistRequestMeta = {}) {
+  async submitAppWaitlist(
+    input: SubmitAppWaitlistDto,
+    meta: WaitlistRequestMeta = {},
+  ) {
     const email = normalizeEmail(input.email);
     const phone = normalizePhone(input.phone);
     const ipHash = this.hashIp(meta.ip);
@@ -53,12 +56,16 @@ export class WaitlistService {
       ? await this.entries.findOne({ where: { phone } })
       : null;
     if (existingByPhone && existingByPhone.email !== email) {
-      await this.track('waitlist_submit_failed', ipHash, { reason: 'duplicate_phone' });
+      await this.track('waitlist_submit_failed', ipHash, {
+        reason: 'duplicate_phone',
+      });
       throw new ConflictException('这个手机号已经提交过内测申请。');
     }
 
     const inviteCode = normalizeInviteCode(input.inviteCode);
-    const invite = inviteCode ? await this.getUsableInviteOrThrow(inviteCode) : null;
+    const invite = inviteCode
+      ? await this.getUsableInviteOrThrow(inviteCode)
+      : null;
     const quality = this.scoring.score({
       city: input.city,
       scenarios: cleanList(input.scenarios),
@@ -117,7 +124,9 @@ export class WaitlistService {
   async validateInvite(code: string) {
     const normalized = normalizeInviteCode(code);
     if (!normalized) throw new BadRequestException('请输入邀请码。');
-    const invite = await this.inviteCodes.findOne({ where: { code: normalized } });
+    const invite = await this.inviteCodes.findOne({
+      where: { code: normalized },
+    });
     if (!invite) return { valid: false, reason: '邀请码不存在' };
     const reason = this.inviteInvalidReason(invite);
     if (reason) return { valid: false, reason };
@@ -163,8 +172,9 @@ export class WaitlistService {
   async listAdminWaitlist(query: AdminWaitlistQueryDto) {
     const page = Math.max(1, Number(query.page ?? 1));
     const limit = Math.min(100, Math.max(1, Number(query.limit ?? 30)));
-    const where: FindOptionsWhere<WaitlistAppEntry>[] | FindOptionsWhere<WaitlistAppEntry> =
-      this.adminWhere(query);
+    const where:
+      | FindOptionsWhere<WaitlistAppEntry>[]
+      | FindOptionsWhere<WaitlistAppEntry> = this.adminWhere(query);
     const [items, total] = await this.entries.findAndCount({
       where,
       order: { createdAt: 'DESC', id: 'DESC' },
@@ -185,8 +195,11 @@ export class WaitlistService {
     const inviteCodes = await this.inviteCodes.find({ take: 1000 });
     return {
       total: entries.length,
-      highQuality: entries.filter((entry) => entry.qualityLevel === 'high').length,
-      interviewWilling: entries.filter((entry) => entry.interviewWilling).length,
+      highQuality: entries.filter(
+        (entry) => String(entry.qualityLevel) === 'high',
+      ).length,
+      interviewWilling: entries.filter((entry) => entry.interviewWilling)
+        .length,
       byCountry: countBy(entries, (entry) => entry.country || '未填写'),
       byCity: countBy(entries, (entry) => entry.city || '未填写'),
       byDevice: countBy(entries, (entry) => entry.deviceType),
@@ -202,7 +215,11 @@ export class WaitlistService {
     };
   }
 
-  async track(eventName: string, ipHash = '', metadata: Record<string, unknown> = {}) {
+  async track(
+    eventName: string,
+    ipHash = '',
+    metadata: Record<string, unknown> = {},
+  ) {
     const allowed = new Set([
       'app_page_view',
       'waitlist_submit',
@@ -224,10 +241,14 @@ export class WaitlistService {
 
   hashIp(value?: string | string[]): string {
     const raw = Array.isArray(value) ? value[0] : value;
-    const text = String(raw ?? '').split(',')[0].trim();
+    const text = String(raw ?? '')
+      .split(',')[0]
+      .trim();
     if (!text) return '';
     return createHash('sha256')
-      .update(`${text}:${process.env.WAITLIST_IP_HASH_SALT ?? 'fitmeet_waitlist'}`)
+      .update(
+        `${text}:${process.env.WAITLIST_IP_HASH_SALT ?? 'fitmeet_waitlist'}`,
+      )
       .digest('hex');
   }
 
@@ -250,7 +271,8 @@ export class WaitlistService {
 
   private inviteInvalidReason(invite: InviteCode) {
     if (!invite.active) return '邀请码已停用。';
-    if (invite.expiresAt && invite.expiresAt.getTime() < Date.now()) return '邀请码已过期。';
+    if (invite.expiresAt && invite.expiresAt.getTime() < Date.now())
+      return '邀请码已过期。';
     if (invite.usedCount >= invite.maxUses) return '邀请码使用次数已满。';
     return '';
   }
@@ -341,7 +363,9 @@ export class WaitlistService {
 }
 
 function normalizeEmail(value: string) {
-  return String(value ?? '').trim().toLowerCase();
+  return String(value ?? '')
+    .trim()
+    .toLowerCase();
 }
 
 function normalizePhone(value?: string | null) {
@@ -350,11 +374,20 @@ function normalizePhone(value?: string | null) {
 }
 
 function normalizeInviteCode(value?: string | null) {
-  return String(value ?? '').trim().toUpperCase();
+  return String(value ?? '')
+    .trim()
+    .toUpperCase();
 }
 
 function cleanText(value: unknown, maxLength: number) {
-  return String(value ?? '').trim().slice(0, maxLength);
+  if (
+    typeof value !== 'string' &&
+    typeof value !== 'number' &&
+    typeof value !== 'boolean'
+  ) {
+    return '';
+  }
+  return String(value).trim().slice(0, maxLength);
 }
 
 function cleanList(value: unknown[]) {
@@ -376,7 +409,9 @@ function maskEmail(value: string) {
 
 function maskPhone(value: string | null) {
   if (!value) return null;
-  return value.length > 7 ? `${value.slice(0, 3)}****${value.slice(-4)}` : '****';
+  return value.length > 7
+    ? `${value.slice(0, 3)}****${value.slice(-4)}`
+    : '****';
 }
 
 function redactMetadata(metadata: Record<string, unknown>) {

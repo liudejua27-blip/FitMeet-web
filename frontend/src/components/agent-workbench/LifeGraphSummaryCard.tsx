@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import type { SocialAgentPermissionMode } from '../../api/socialAgentApi';
-import { permissionModeLabel } from './PermissionModeSelector';
+import { permissionModeLabel } from './permissionModeLabel';
 
 export function LifeGraphSummaryCard({
   mode,

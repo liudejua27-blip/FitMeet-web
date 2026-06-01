@@ -57,9 +57,12 @@ describe('AgentGatewayService public social intents', () => {
     expect(queryBuilder.andWhere).toHaveBeenCalledWith('intent.mode = :mode', {
       mode: 'public',
     });
-    expect(queryBuilder.andWhere).toHaveBeenCalledWith('intent.status = :status', {
-      status: SocialRequestStatus.Active,
-    });
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      'intent.status = :status',
+      {
+        status: SocialRequestStatus.Active,
+      },
+    );
     expect(result.metadata.filters.status).toBe(SocialRequestStatus.Active);
   });
 
@@ -69,13 +72,18 @@ describe('AgentGatewayService public social intents', () => {
       createQueryBuilder: jest.fn(() => queryBuilder),
     });
 
-    await service.listPublicSocialIntents({ status: SocialRequestStatus.Matched });
+    await service.listPublicSocialIntents({
+      status: SocialRequestStatus.Matched,
+    });
 
     expect(queryBuilder.andWhere).toHaveBeenCalledWith('intent.mode = :mode', {
       mode: 'public',
     });
-    expect(queryBuilder.andWhere).toHaveBeenCalledWith('intent.status = :status', {
-      status: SocialRequestStatus.Matched,
-    });
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      'intent.status = :status',
+      {
+        status: SocialRequestStatus.Matched,
+      },
+    );
   });
 });

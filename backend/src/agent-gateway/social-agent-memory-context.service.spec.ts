@@ -1,4 +1,8 @@
-import { AgentTask, AgentTaskPermissionMode, AgentTaskStatus } from './entities/agent-task.entity';
+import {
+  AgentTask,
+  AgentTaskPermissionMode,
+  AgentTaskStatus,
+} from './entities/agent-task.entity';
 import { SocialAgentMemoryContextService } from './social-agent-memory-context.service';
 import {
   mergeSocialAgentStableProfileFacts,

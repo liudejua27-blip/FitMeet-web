@@ -118,22 +118,28 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
 
     let code = 'REQUEST_FAILED';
-    if (status === HttpStatus.BAD_REQUEST) code = 'VALIDATION_FAILED';
-    if (status === HttpStatus.UNAUTHORIZED) code = 'UNAUTHORIZED';
-    if (status === HttpStatus.FORBIDDEN) code = 'PERMISSION_DENIED';
-    if (status === HttpStatus.NOT_FOUND) code = 'NOT_FOUND';
-    if (status === HttpStatus.TOO_MANY_REQUESTS) code = 'RATE_LIMITED';
+    if (status === Number(HttpStatus.BAD_REQUEST)) code = 'VALIDATION_FAILED';
+    if (status === Number(HttpStatus.UNAUTHORIZED)) code = 'UNAUTHORIZED';
+    if (status === Number(HttpStatus.FORBIDDEN)) code = 'PERMISSION_DENIED';
+    if (status === Number(HttpStatus.NOT_FOUND)) code = 'NOT_FOUND';
+    if (status === Number(HttpStatus.TOO_MANY_REQUESTS)) code = 'RATE_LIMITED';
     if (status >= 500) code = 'INTERNAL_ERROR';
 
     if (path.includes('/agent')) {
-      if (status === HttpStatus.UNAUTHORIZED && normalized.includes('missing')) {
+      if (
+        status === Number(HttpStatus.UNAUTHORIZED) &&
+        normalized.includes('missing')
+      ) {
         code = 'AGENT_TOKEN_MISSING';
       } else if (
-        status === HttpStatus.UNAUTHORIZED &&
+        status === Number(HttpStatus.UNAUTHORIZED) &&
         normalized.includes('invalid')
       ) {
         code = 'AGENT_TOKEN_INVALID';
-      } else if (status === HttpStatus.FORBIDDEN && normalized.includes('revoked')) {
+      } else if (
+        status === Number(HttpStatus.FORBIDDEN) &&
+        normalized.includes('revoked')
+      ) {
         code = 'AGENT_TOKEN_REVOKED';
       } else if (normalized.includes('approval')) {
         code = 'OWNER_CONFIRMATION_REQUIRED';
@@ -153,7 +159,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
   private isRetryable(status: number, code: string) {
     return (
-      status === HttpStatus.TOO_MANY_REQUESTS ||
+      status === Number(HttpStatus.TOO_MANY_REQUESTS) ||
       status >= 500 ||
       code === 'OWNER_CONFIRMATION_REQUIRED'
     );

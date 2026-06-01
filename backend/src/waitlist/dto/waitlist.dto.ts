@@ -11,7 +11,11 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { WaitlistDeviceType, WaitlistStatus, WaitlistUserRole } from '../waitlist.enums';
+import {
+  WaitlistDeviceType,
+  WaitlistStatus,
+  WaitlistUserRole,
+} from '../waitlist.enums';
 
 export class SubmitAppWaitlistDto {
   @IsEmail()

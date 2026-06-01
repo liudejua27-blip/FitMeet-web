@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from 'react';
+import { type FormEvent, useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import { useModalA11y } from '../../hooks/useModalA11y';
@@ -23,19 +23,25 @@ export function LoginModal() {
   const [name, setName] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
 
+  const resetLocalState = useCallback(() => {
+    setPassword('');
+    setLocalError(null);
+  }, []);
+
+  const handleClose = useCallback(() => {
+    resetLocalState();
+    closeLogin();
+  }, [closeLogin, resetLocalState]);
+
   const { containerRef, handleBackdropClick } = useModalA11y({
     open: showLoginModal,
-    onClose: closeLogin,
+    onClose: handleClose,
   });
 
-  useEffect(() => {
-    if (!showLoginModal) {
-      setPassword('');
-      setLocalError(null);
-      return;
-    }
+  const handleModeChange = (nextMode: AuthMode) => {
+    setMode(nextMode);
     setLocalError(null);
-  }, [showLoginModal, mode]);
+  };
 
   if (!showLoginModal) return null;
 
@@ -98,7 +104,7 @@ export function LoginModal() {
             type="button"
             className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 text-xl leading-none text-textMuted transition hover:border-lime/40 hover:text-cream"
             aria-label="关闭登录窗口"
-            onClick={closeLogin}
+            onClick={handleClose}
           >
             x
           </button>
@@ -115,7 +121,7 @@ export function LoginModal() {
                   ? 'bg-lime text-white shadow-glow'
                   : 'text-textMuted hover:text-cream',
               )}
-              onClick={() => setMode(item)}
+              onClick={() => handleModeChange(item)}
             >
               {item === 'login' ? '登录' : '注册'}
             </button>
@@ -181,14 +187,16 @@ export function LoginModal() {
           <button
             type="button"
             className="font-bold text-lime transition hover:text-brand2"
-            onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
+            onClick={() =>
+              handleModeChange(mode === 'login' ? 'register' : 'login')
+            }
           >
             {mode === 'login' ? '没有账号？立即注册' : '已有账号？去登录'}
           </button>
           <Link
             to="/forgot-password"
             className="font-bold text-textMuted transition hover:text-cream"
-            onClick={closeLogin}
+            onClick={handleClose}
           >
             忘记密码
           </Link>

@@ -136,7 +136,11 @@ export class FitMeetAgentRunStep {
 
 @Entity('agent_tool_calls')
 @Index('idx_agent_tool_calls_run_created', ['runId', 'createdAt'])
-@Index('idx_agent_tool_calls_user_tool_status', ['userId', 'toolName', 'status'])
+@Index('idx_agent_tool_calls_user_tool_status', [
+  'userId',
+  'toolName',
+  'status',
+])
 export class FitMeetAgentToolCall {
   @PrimaryGeneratedColumn()
   id: number;

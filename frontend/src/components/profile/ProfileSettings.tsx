@@ -34,7 +34,7 @@ export const ProfileSettings = memo(function ProfileSettings({
   }, []);
 
   useEffect(() => {
-    void refreshSafety();
+    void Promise.resolve().then(refreshSafety);
   }, [refreshSafety]);
 
   const submitRealName = useCallback(async () => {

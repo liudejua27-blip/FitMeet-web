@@ -74,6 +74,7 @@ import { ConfirmationCopyService } from './response-quality/confirmation-copy.se
 import { PersonalizationService } from './response-quality/personalization.service';
 import { SafetyCopyService } from './response-quality/safety-copy.service';
 import { TonePolicyService } from './response-quality/tone-policy.service';
+import { AgentQualityEvaluatorService } from './agent-quality/agent-quality-evaluator.service';
 import { MatchModule } from '../match/match.module';
 import { AgentApprovalRequest } from './entities/agent-approval-request.entity';
 import { AgentSettings } from './entities/agent-settings.entity';
@@ -163,6 +164,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     ConfirmationCopyService,
     PersonalizationService,
     CardCopywriterService,
+    AgentQualityEvaluatorService,
     FitMeetAgentToolRegistryService,
     SocialAgentPlannerService,
     SocialAgentIntentRouterService,
@@ -217,6 +219,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     AgentPermissionService,
     CandidateExplanationService,
     SceneRiskPolicyService,
+    AgentQualityEvaluatorService,
     FitMeetAgentToolRegistryService,
     SocialAgentPlannerService,
     SocialAgentIntentRouterService,

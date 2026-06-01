@@ -102,7 +102,9 @@ describe('FitMeetAlphaAgentSdkService', () => {
 
       expect(decision.safety.blocked).toBe(false);
       expect(decision.structuredIntent).toMatchObject({ intent });
-      expect(decision.structuredIntent?.['betaScore']).toBeGreaterThanOrEqual(60);
+      expect(decision.structuredIntent?.['betaScore']).toBeGreaterThanOrEqual(
+        60,
+      );
     }
   });
 
@@ -139,13 +141,23 @@ describe('FitMeetAlphaAgentSdkService', () => {
         'audit_update',
       ]),
     );
-    expect(cards.find((card) => card.type === 'candidate_card')?.actions).toEqual(
+    expect(
+      cards.find((card) => card.type === 'candidate_card')?.actions,
+    ).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ action: 'generate_opener', requiresConfirmation: false }),
-        expect.objectContaining({ action: 'create_activity', requiresConfirmation: true }),
+        expect.objectContaining({
+          action: 'generate_opener',
+          requiresConfirmation: false,
+        }),
+        expect.objectContaining({
+          action: 'create_activity',
+          requiresConfirmation: true,
+        }),
       ]),
     );
-    expect(cards.find((card) => card.type === 'candidate_card')?.data).toMatchObject({
+    expect(
+      cards.find((card) => card.type === 'candidate_card')?.data,
+    ).toMatchObject({
       recommendationLine: expect.any(String),
       whyNow: expect.any(String),
       safetyBoundary: expect.any(String),

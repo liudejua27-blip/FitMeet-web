@@ -61,14 +61,19 @@ export class CandidateExplanationService {
     const publicReasons = reasons.filter(
       (item) => !this.isEntertainmentDisclosure(item),
     );
-    const sceneType = this.sceneRisk.normalizeScene(input.sceneType, requestText);
+    const sceneType = this.sceneRisk.normalizeScene(
+      input.sceneType,
+      requestText,
+    );
     const policy = this.sceneRisk.evaluate({
       sceneType,
       actionType: 'send_message',
       text: requestText,
       safetySignals: this.safetySignals(input.lifeGraphSignals),
     });
-    const lifeGraphExplanation = this.lifeGraphExplanation(input.lifeGraphSignals);
+    const lifeGraphExplanation = this.lifeGraphExplanation(
+      input.lifeGraphSignals,
+    );
 
     const fitReasons = this.fitReasons({
       displayName,
@@ -90,7 +95,10 @@ export class CandidateExplanationService {
       suggestedOpener: this.opener(displayName, sceneType, tags, city),
       awkwardPoints,
       safeFirstStep: this.safeFirstStep(sceneType),
-      nextActionSuggestion: this.nextAction(sceneType, policy.requiresConfirmation),
+      nextActionSuggestion: this.nextAction(
+        sceneType,
+        policy.requiresConfirmation,
+      ),
       requiresConfirmation: policy.requiresConfirmation,
       lifeGraphExplanation,
     };
@@ -111,15 +119,28 @@ export class CandidateExplanationService {
     const fitness = signals.fitnessSignals ?? {};
     const social = signals.socialIntentSignals ?? {};
     const safety = signals.safetySignals ?? {};
-    if (this.string(identity.nearbyArea)) usedSignals.push(`常活动区域：${this.string(identity.nearbyArea)}`);
-    if (this.string(identity.city)) usedSignals.push(`城市：${this.string(identity.city)}`);
-    if (this.textValue(lifestyle.availableTimes)) usedSignals.push(`可约时间：${this.textValue(lifestyle.availableTimes)}`);
-    if (this.textValue(fitness.sportsPreferences)) usedSignals.push(`运动偏好：${this.textValue(fitness.sportsPreferences)}`);
-    if (this.string(social.preferredSocialStyle)) usedSignals.push(`社交方式：${this.string(social.preferredSocialStyle)}`);
-    if (safety.publicPlaceOnly === true) boundaryNotes.push('你设置了公共场所优先，第一次见面要选公开、人多、好离开的地点。');
-    if (safety.locationSharingAllowed === false) boundaryNotes.push('你不允许共享精确定位，Agent 不会自动发送位置。');
-    if (safety.acceptsNightMeet === false) boundaryNotes.push('你不接受夜间活动，建议优先改到白天。');
-    if (safety.strictConfirmationRequired === true) boundaryNotes.push('你要求严格确认，发消息、加好友和见面都需要先确认。');
+    if (this.string(identity.nearbyArea))
+      usedSignals.push(`常活动区域：${this.string(identity.nearbyArea)}`);
+    if (this.string(identity.city))
+      usedSignals.push(`城市：${this.string(identity.city)}`);
+    if (this.textValue(lifestyle.availableTimes))
+      usedSignals.push(`可约时间：${this.textValue(lifestyle.availableTimes)}`);
+    if (this.textValue(fitness.sportsPreferences))
+      usedSignals.push(
+        `运动偏好：${this.textValue(fitness.sportsPreferences)}`,
+      );
+    if (this.string(social.preferredSocialStyle))
+      usedSignals.push(`社交方式：${this.string(social.preferredSocialStyle)}`);
+    if (safety.publicPlaceOnly === true)
+      boundaryNotes.push(
+        '你设置了公共场所优先，第一次见面要选公开、人多、好离开的地点。',
+      );
+    if (safety.locationSharingAllowed === false)
+      boundaryNotes.push('你不允许共享精确定位，Agent 不会自动发送位置。');
+    if (safety.acceptsNightMeet === false)
+      boundaryNotes.push('你不接受夜间活动，建议优先改到白天。');
+    if (safety.strictConfirmationRequired === true)
+      boundaryNotes.push('你要求严格确认，发消息、加好友和见面都需要先确认。');
     const confidenceLevel =
       usedSignals.length >= 4 && missingSignals.length === 0
         ? 'high'
@@ -156,10 +177,14 @@ export class CandidateExplanationService {
   }): string[] {
     const output = input.reasons.slice(0, 2);
     if (input.tags.length > 0) {
-      output.push(`你们都提到 ${input.tags.slice(0, 2).join('、')}，开场不用硬聊，可以从共同兴趣轻轻切入。`);
+      output.push(
+        `你们都提到 ${input.tags.slice(0, 2).join('、')}，开场不用硬聊，可以从共同兴趣轻轻切入。`,
+      );
     }
     if (input.city) {
-      output.push(`${input.displayName} 的常活动城市在 ${input.city}，更适合先约公开、低压力的小范围见面。`);
+      output.push(
+        `${input.displayName} 的常活动城市在 ${input.city}，更适合先约公开、低压力的小范围见面。`,
+      );
     }
     if (output.length === 0) {
       output.push(this.defaultFitReason(input.sceneType, input.displayName));
@@ -176,32 +201,50 @@ export class CandidateExplanationService {
     const output = [...input.riskWarnings];
     switch (input.sceneType) {
       case 'fitness':
-        output.push('健身强度、训练目标和是否需要教练式指导可能不一致，别一开始就安排高强度训练。');
+        output.push(
+          '健身强度、训练目标和是否需要教练式指导可能不一致，别一开始就安排高强度训练。',
+        );
         break;
       case 'walking':
-        output.push('散步节奏和聊天密度可能不同，建议先约短时间、可提前结束的路线。');
+        output.push(
+          '散步节奏和聊天密度可能不同，建议先约短时间、可提前结束的路线。',
+        );
         break;
       case 'photo':
-        output.push('拍照审美、出片期待和肖像使用边界可能不同，先确认风格和是否公开发布。');
+        output.push(
+          '拍照审美、出片期待和肖像使用边界可能不同，先确认风格和是否公开发布。',
+        );
         break;
       case 'travel':
-        output.push('旅游涉及时间、预算和安全边界，不能因为兴趣相同就直接确定同行。');
+        output.push(
+          '旅游涉及时间、预算和安全边界，不能因为兴趣相同就直接确定同行。',
+        );
         break;
       case 'drinking':
-        output.push('酒局容易出现边界不清、返程不便和安全感不足，建议先确认人数与地点。');
+        output.push(
+          '酒局容易出现边界不清、返程不便和安全感不足，建议先确认人数与地点。',
+        );
         break;
       case 'dating':
-        output.push('相亲容易让对方感到被审视，开场别像面试，先确认关系目标和沟通节奏。');
+        output.push(
+          '相亲容易让对方感到被审视，开场别像面试，先确认关系目标和沟通节奏。',
+        );
         break;
       case 'renting':
-        output.push('租房/合租涉及身份、押金和生活习惯，任何转账都要放到线下核验之后。');
+        output.push(
+          '租房/合租涉及身份、押金和生活习惯，任何转账都要放到线下核验之后。',
+        );
         break;
       case 'mahjong':
       case 'poker':
-        output.push('牌局要先确认是否涉钱、公开地点和娱乐边界，避免把轻松局变成压力局。');
+        output.push(
+          '牌局要先确认是否涉钱、公开地点和娱乐边界，避免把轻松局变成压力局。',
+        );
         break;
       default:
-        output.push('对方资料或时间偏好可能还不完整，先用一句轻量开场给彼此选择空间。');
+        output.push(
+          '对方资料或时间偏好可能还不完整，先用一句轻量开场给彼此选择空间。',
+        );
     }
     return [...new Set(output)].slice(0, 3);
   }
@@ -261,7 +304,10 @@ export class CandidateExplanationService {
     }
   }
 
-  private nextAction(sceneType: SocialSceneType, requiresConfirmation: boolean) {
+  private nextAction(
+    sceneType: SocialSceneType,
+    requiresConfirmation: boolean,
+  ) {
     const verb =
       sceneType === 'renting'
         ? '确认区域和预算'
@@ -270,7 +316,9 @@ export class CandidateExplanationService {
           : sceneType === 'drinking'
             ? '确认公开地点和返程'
             : '发送轻量开场';
-    return requiresConfirmation ? `建议先由用户确认后再${verb}` : `可以先${verb}`;
+    return requiresConfirmation
+      ? `建议先由用户确认后再${verb}`
+      : `可以先${verb}`;
   }
 
   private defaultFitReason(sceneType: SocialSceneType, displayName: string) {
@@ -297,8 +345,11 @@ export class CandidateExplanationService {
     if (!value) return '';
     if (typeof value === 'string') return value;
     return Object.values(value)
-      .filter((item) => typeof item === 'string' || Array.isArray(item))
-      .flatMap((item) => (Array.isArray(item) ? item : [item]))
+      .flatMap((item): string[] => {
+        if (typeof item === 'string') return [item];
+        if (Array.isArray(item)) return this.stringList(item);
+        return [];
+      })
       .join(' ');
   }
 
@@ -315,7 +366,10 @@ export class CandidateExplanationService {
 
   private textValue(value: unknown): string {
     if (Array.isArray(value)) {
-      return value.map((item) => this.string(item)).filter(Boolean).join('、');
+      return value
+        .map((item) => this.string(item))
+        .filter(Boolean)
+        .join('、');
     }
     return this.string(value);
   }

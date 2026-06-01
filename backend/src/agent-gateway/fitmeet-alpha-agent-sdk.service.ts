@@ -49,7 +49,9 @@ const StructuredIntentSchema = z.object({
     ])
     .default('explicit_search'),
   socialPressureLevel: z.enum(['low', 'medium', 'high']).default('medium'),
-  readiness: z.enum(['clarify', 'search', 'answer', 'block', 'confirm']).default('search'),
+  readiness: z
+    .enum(['clarify', 'search', 'answer', 'block', 'confirm'])
+    .default('search'),
   clarifyingQuestion: z.string().default(''),
   requiresSearch: z.boolean().default(true),
   requiresSafetyBoundary: z.boolean().default(true),
@@ -252,8 +254,12 @@ export class FitMeetAlphaAgentSdkService {
         this.text(candidate.displayName) ||
         this.text(candidate.nickname) ||
         '候选人';
+      const cardIdentity =
+        typeof targetUserId === 'string' || typeof targetUserId === 'number'
+          ? String(targetUserId)
+          : displayName;
       cards.push({
-        id: `candidate_card:${taskId}:${targetUserId ?? displayName}`,
+        id: `candidate_card:${taskId}:${cardIdentity}`,
         type: 'candidate_card',
         title: displayName,
         body: `匹配度 ${Math.round(score)}。推荐前先确认安全边界，首次见面建议选择公共场所。`,
@@ -288,7 +294,14 @@ export class FitMeetAlphaAgentSdkService {
             [],
           whyNow: '现在适合先用低压力方式开场，再根据回复决定下一步。',
           safetyBoundary: '第一次建议选择公共场所，不共享精确位置。',
-          nextActions: ['生成开场白', '看看更多', '只看同校', '只看女生', '创建约练', '不喜欢这个推荐'],
+          nextActions: [
+            '生成开场白',
+            '看看更多',
+            '只看同校',
+            '只看女生',
+            '创建约练',
+            '不喜欢这个推荐',
+          ],
           lifeGraphUpdatePreview:
             '完成后会更新你的低压力运动社交偏好和同区域搭子权重。',
         },
@@ -411,20 +424,19 @@ export class FitMeetAlphaAgentSdkService {
     const inputGuardrail = {
       name: 'fitmeet-main-agent-input-safety',
       runInParallel: false,
-      execute: async ({ input }) => {
+      execute: ({ input }) => {
         const text = typeof input === 'string' ? input : JSON.stringify(input);
         const safety = this.evaluateSafety(text);
-        return {
+        return Promise.resolve({
           tripwireTriggered: safety.blocked,
           outputInfo: safety,
-        };
+        });
       },
     };
 
     const mainAgent = new Agent({
       name: 'FitMeet Main Agent',
-      handoffDescription:
-        'FitMeet Agent 总入口、总调度器和安全边界控制器。',
+      handoffDescription: 'FitMeet Agent 总入口、总调度器和安全边界控制器。',
       instructions:
         '你是 FitMeet Main Agent。先做安全过滤，再判断意图，必要时 handoff 给 Life Graph Agent、Social Match Agent 或 Meet Loop Agent。不要直接执行数据库或外部动作；所有发消息、加好友、创建线下活动和敏感画像更新都必须用户确认。输出必须符合结构化 schema，并给出 Beta 阶段可执行的 agentPlan。',
       handoffs: [lifeGraphAgent, socialMatchAgent, meetLoopAgent],
@@ -484,22 +496,47 @@ export class FitMeetAlphaAgentSdkService {
   private evaluateSafety(message: string): FitMeetAgentSafety {
     const text = cleanDisplayText(message, '').toLowerCase();
     const checks: Array<{ re: RegExp; reason: string }> = [
-      { re: /(未成年|小学生|初中生|高中生|幼女|幼男|minor|underage)/i, reason: '涉及未成年人风险' },
-      { re: /(约炮|色情|裸照|性交易|卖淫|嫖|porn|escort)/i, reason: '涉及色情或性交易风险' },
-      { re: /(人肉|跟踪|骚扰|堵门|偷拍|尾随|stalk|harass)/i, reason: '涉及骚扰或跟踪风险' },
-      { re: /(诈骗|洗钱|套现|网赌|引流|杀猪盘|骗钱|scam)/i, reason: '涉及诈骗或违法引导' },
-      { re: /(打人|威胁|报复|弄死|砍|knife|kill|violence)/i, reason: '涉及暴力威胁风险' },
-      { re: /(批量私信|群发骚扰|轰炸|自动加.*好友|spam)/i, reason: '涉及批量骚扰或滥用' },
-      { re: /(精确定位|实时位置|跟踪位置|查.*位置|定位.*她|定位.*他|住址|宿舍号)/i, reason: '涉及精确位置或隐私风险' },
-      { re: /(深夜|凌晨).*(私密|酒店|宾馆|家里|单独房间|偏僻)/i, reason: '涉及深夜私密场所风险' },
-      { re: /(要.*微信|要.*手机号|交换.*联系方式|私下转账)/i, reason: '涉及联系方式或站外交易，需要严格确认' },
+      {
+        re: /(未成年|小学生|初中生|高中生|幼女|幼男|minor|underage)/i,
+        reason: '涉及未成年人风险',
+      },
+      {
+        re: /(约炮|色情|裸照|性交易|卖淫|嫖|porn|escort)/i,
+        reason: '涉及色情或性交易风险',
+      },
+      {
+        re: /(人肉|跟踪|骚扰|堵门|偷拍|尾随|stalk|harass)/i,
+        reason: '涉及骚扰或跟踪风险',
+      },
+      {
+        re: /(诈骗|洗钱|套现|网赌|引流|杀猪盘|骗钱|scam)/i,
+        reason: '涉及诈骗或违法引导',
+      },
+      {
+        re: /(打人|威胁|报复|弄死|砍|knife|kill|violence)/i,
+        reason: '涉及暴力威胁风险',
+      },
+      {
+        re: /(批量私信|群发骚扰|轰炸|自动加.*好友|spam)/i,
+        reason: '涉及批量骚扰或滥用',
+      },
+      {
+        re: /(精确定位|实时位置|跟踪位置|查.*位置|定位.*她|定位.*他|住址|宿舍号)/i,
+        reason: '涉及精确位置或隐私风险',
+      },
+      {
+        re: /(深夜|凌晨).*(私密|酒店|宾馆|家里|单独房间|偏僻)/i,
+        reason: '涉及深夜私密场所风险',
+      },
+      {
+        re: /(要.*微信|要.*手机号|交换.*联系方式|私下转账)/i,
+        reason: '涉及联系方式或站外交易，需要严格确认',
+      },
     ];
     const reasons = checks
       .filter((check) => check.re.test(text))
       .map((check) => check.reason);
-    const blocked = reasons.some(
-      (reason) => !reason.includes('联系方式'),
-    );
+    const blocked = reasons.some((reason) => !reason.includes('联系方式'));
     return {
       blocked,
       level: blocked ? 'blocked' : reasons.length > 0 ? 'medium' : 'low',
@@ -611,7 +648,12 @@ export class FitMeetAlphaAgentSdkService {
         timePreference,
         relationshipGoal,
         targetPeople,
-        missingInformation: ['常活动区域', '可见面时间', '社交边界', '常见活动类型'],
+        missingInformation: [
+          '常活动区域',
+          '可见面时间',
+          '社交边界',
+          '常见活动类型',
+        ],
         requiredConstraints,
         optionalPreferences,
         agentPlan: [
@@ -727,7 +769,7 @@ export class FitMeetAlphaAgentSdkService {
     if (parsed.success) return parsed.data;
     if (typeof output === 'string') {
       try {
-        const json = JSON.parse(output);
+        const json: unknown = JSON.parse(output);
         const jsonParsed = StructuredIntentSchema.safeParse(json);
         if (jsonParsed.success) return jsonParsed.data;
       } catch {
@@ -755,7 +797,8 @@ export class FitMeetAlphaAgentSdkService {
       status: safety.blocked ? 'blocked' : 'ready',
       data: {
         ...(safety as unknown as Record<string, unknown>),
-        boundaryNotes: this.safetyCopy?.boundaryNotes(safety) ?? safety.boundaryNotes,
+        boundaryNotes:
+          this.safetyCopy?.boundaryNotes(safety) ?? safety.boundaryNotes,
       },
       actions: [],
     };
@@ -797,8 +840,9 @@ export class FitMeetAlphaAgentSdkService {
     locationText: string;
   }): { question: string; missingInformation: string[] } | null {
     const wantsCompanion =
-      /(无聊|有点闷|走走|散步|陪|找个人|认识人|同频|聊聊|低压力|轻松)/.test(input.text) &&
-      /(找|想|帮我|有没有|认识|约|一起)/.test(input.text);
+      /(无聊|有点闷|走走|散步|陪|找个人|认识人|同频|聊聊|低压力|轻松)/.test(
+        input.text,
+      ) && /(找|想|帮我|有没有|认识|约|一起)/.test(input.text);
     if (!wantsCompanion) return null;
     const explicitEnough =
       Boolean(input.timePreference) &&
@@ -881,7 +925,8 @@ export class FitMeetAlphaAgentSdkService {
     if (!input.timePreference) missing.push('期望时间');
     if (!input.locationText) missing.push('活动区域');
     if (!/距离|公里|km|附近|同城/.test(input.text)) missing.push('可接受距离');
-    if (!/公共|人多|安全|边界|不接受|只接受/.test(input.text)) missing.push('首次见面边界');
+    if (!/公共|人多|安全|边界|不接受|只接受/.test(input.text))
+      missing.push('首次见面边界');
     return missing;
   }
 

@@ -177,7 +177,8 @@ export class AgentDiscoveryService {
 
     if (target.ownerUserId === null) {
       const targetConnectionId = target.agentConnectionId ?? target.id;
-      const sourceConnectionId = source?.agentConnectionId ?? source?.id ?? null;
+      const sourceConnectionId =
+        source?.agentConnectionId ?? source?.id ?? null;
       const { conversationId } = await this.messages.startAgentConversation(
         requestUserId,
         targetConnectionId,
@@ -344,7 +345,10 @@ export class AgentDiscoveryService {
     );
   }
 
-  async searchForAgentConnection(conn: AgentConnection, opts: SearchAgentsOpts) {
+  async searchForAgentConnection(
+    conn: AgentConnection,
+    opts: SearchAgentsOpts,
+  ) {
     return this.search(conn.userId, opts);
   }
 
@@ -486,7 +490,7 @@ export class AgentDiscoveryService {
       {
         ownerUserId: conn.userId,
         metadata: {
-          source: conn.agentName === KnownAgent.OpenClaw ? 'openclaw' : 'agent',
+          source: String(conn.agentName) === 'openclaw' ? 'openclaw' : 'agent',
           sourceAgentConnectionId: conn.id,
           agentConnectionId: conn.id,
           ownerUserId: conn.userId,
@@ -581,7 +585,8 @@ export class AgentDiscoveryService {
       return {
         agentProfileId: conn.id,
         agentConnectionId: conn.id,
-        agentName: conn.agentDisplayName || String(conn.agentName || 'OpenClaw'),
+        agentName:
+          conn.agentDisplayName || String(conn.agentName || 'OpenClaw'),
         conversations: safe,
         events,
         total: safe.length,
@@ -654,7 +659,9 @@ export class AgentDiscoveryService {
     return {
       agentProfileId: inbox.agentProfileId,
       agentConnectionId:
-        'agentConnectionId' in inbox ? inbox.agentConnectionId : inbox.agentProfileId,
+        'agentConnectionId' in inbox
+          ? inbox.agentConnectionId
+          : inbox.agentProfileId,
       agentName: inbox.agentName,
       events: inbox.events ?? [],
       total: Array.isArray(inbox.events) ? inbox.events.length : 0,
@@ -667,7 +674,10 @@ export class AgentDiscoveryService {
     dto: { agentProfileId?: number; eventIds?: string[] },
   ) {
     if (dto.agentProfileId) {
-      const profile = await this.getOwnedInboxAgent(ownerUserId, dto.agentProfileId);
+      const profile = await this.getOwnedInboxAgent(
+        ownerUserId,
+        dto.agentProfileId,
+      );
       return this.messages.ackAgentInboxEvents(profile.id, dto.eventIds ?? []);
     }
     const conn = await this.connectionRepo.findOne({
@@ -679,7 +689,10 @@ export class AgentDiscoveryService {
       order: { updatedAt: 'DESC' },
     });
     if (!conn) {
-      return this.messages.ackAgentInboxEventsForOwner(ownerUserId, dto.eventIds ?? []);
+      return this.messages.ackAgentInboxEventsForOwner(
+        ownerUserId,
+        dto.eventIds ?? [],
+      );
     }
     return this.messages.ackAgentInboxEvents(conn.id, dto.eventIds ?? []);
   }
@@ -716,12 +729,16 @@ export class AgentDiscoveryService {
       return {
         agentProfileId: conn.id,
         agentConnectionId: conn.id,
-        agentName: conn.agentDisplayName || String(conn.agentName || 'OpenClaw'),
+        agentName:
+          conn.agentDisplayName || String(conn.agentName || 'OpenClaw'),
         conversationId,
         messages,
       };
     }
-    const profile = await this.getOwnedInboxAgent(ownerUserId, opts.agentProfileId);
+    const profile = await this.getOwnedInboxAgent(
+      ownerUserId,
+      opts.agentProfileId,
+    );
     const messages = await this.messages.getAgentInboxMessages(
       conversationId,
       profile.id,
@@ -751,7 +768,8 @@ export class AgentDiscoveryService {
         },
         order: { updatedAt: 'DESC' },
       });
-      if (!conn) throw new NotFoundException('Agent token not found for this owner');
+      if (!conn)
+        throw new NotFoundException('Agent token not found for this owner');
       const message = await this.messages.sendAgentReply(
         conversationId,
         conn.id,
@@ -759,7 +777,8 @@ export class AgentDiscoveryService {
         {
           ownerUserId,
           metadata: {
-            source: conn.agentName === KnownAgent.OpenClaw ? 'openclaw' : 'agent',
+            source:
+              String(conn.agentName) === 'openclaw' ? 'openclaw' : 'agent',
             ownerConsoleReply: true,
             sourceAgentConnectionId: conn.id,
             agentConnectionId: conn.id,
@@ -794,13 +813,17 @@ export class AgentDiscoveryService {
         status: 'sent' as const,
         agentProfileId: conn.id,
         agentConnectionId: conn.id,
-        agentName: conn.agentDisplayName || String(conn.agentName || 'OpenClaw'),
+        agentName:
+          conn.agentDisplayName || String(conn.agentName || 'OpenClaw'),
         conversationId,
         socketPushed,
         message,
       };
     }
-    const profile = await this.getOwnedInboxAgent(ownerUserId, dto.agentProfileId);
+    const profile = await this.getOwnedInboxAgent(
+      ownerUserId,
+      dto.agentProfileId,
+    );
     const message = await this.messages.sendAgentReply(
       conversationId,
       profile.id,

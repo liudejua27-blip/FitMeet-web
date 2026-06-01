@@ -211,11 +211,12 @@ export class MatchReasonerService {
       ? `星座一致（${owner.zodiac}），相处时可作为破冰话题。`
       : '';
 
+    void mbtiLine;
+    void zodiacLine;
+
     const sharedPoints = this.takeList(
       [
-        shared.length
-          ? `共同兴趣：${shared.slice(0, 3).join('、')}`
-          : '',
+        shared.length ? `共同兴趣：${shared.slice(0, 3).join('、')}` : '',
         breakdown.traitOverlap?.length
           ? `相似性格：${breakdown.traitOverlap.slice(0, 3).join('、')}`
           : '',
@@ -226,10 +227,12 @@ export class MatchReasonerService {
     const complementaryPoints = this.takeList(
       [
         ownerPub.length && candPub.length
-          ? `你常出现的标签是「${ownerPub.slice(0, 2).join('、')}」，对方的画像中能看到「${candPub
-              .filter((t) => !shared.includes(t))
-              .slice(0, 2)
-              .join('、') || candPub.slice(0, 2).join('、')}」，可作为互补的切入点。`
+          ? `你常出现的标签是「${ownerPub.slice(0, 2).join('、')}」，对方的画像中能看到「${
+              candPub
+                .filter((t) => !shared.includes(t))
+                .slice(0, 2)
+                .join('、') || candPub.slice(0, 2).join('、')
+            }」，可作为互补的切入点。`
           : '',
         priv.length
           ? '你设置的私密偏好与对方公开的标签存在交集，建议先以兴趣话题切入。'
@@ -252,7 +255,7 @@ export class MatchReasonerService {
           ? '画像有一定契合度，可以先用轻松的话题打开。'
           : '画像信号较弱，建议先了解一下再判断是否继续。',
     ].filter(Boolean);
-    const publicReason = this.clipReason(publicLines.join(' ')) ;
+    const publicReason = this.clipReason(publicLines.join(' '));
 
     const privateLines = [
       priv.length
@@ -409,7 +412,9 @@ export class MatchReasonerService {
     if (!raw) return null;
     let parsed: Record<string, unknown>;
     try {
-      parsed = JSON.parse(raw);
+      const parsedJson: unknown = JSON.parse(raw);
+      if (!this.isRecord(parsedJson)) return null;
+      parsed = parsedJson;
     } catch {
       return null;
     }
@@ -509,7 +514,9 @@ export class MatchReasonerService {
     if (!raw) return null;
     let parsed: Record<string, unknown>;
     try {
-      parsed = JSON.parse(raw);
+      const parsedJson: unknown = JSON.parse(raw);
+      if (!this.isRecord(parsedJson)) return null;
+      parsed = parsedJson;
     } catch {
       return null;
     }
@@ -623,6 +630,10 @@ export class MatchReasonerService {
       .map((v) => v.trim())
       .filter(Boolean);
     return list.length ? list : def;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   /** Strip out anything that could leak from the raw entity in prompts. */

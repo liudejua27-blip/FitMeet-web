@@ -12,6 +12,7 @@ import {
   FitMeetAgentToolCall,
   FitMeetAgentToolStatus,
 } from './entities/fitmeet-agent-runtime.entity';
+import { cleanDisplayText } from '../common/display-text.util';
 
 const HIGH_RISK_TOOLS = new Set([
   'fitmeet_send_friend_request',
@@ -135,7 +136,9 @@ export class FitMeetAgentRuntimeService {
           safeInput: this.safePayload(input.safeInput ?? {}),
           safeOutput: this.safePayload(input.safeOutput ?? {}),
           errorCode: input.errorCode ?? null,
-          errorMessage: input.errorMessage ? this.safeText(input.errorMessage) : null,
+          errorMessage: input.errorMessage
+            ? this.safeText(input.errorMessage)
+            : null,
           durationMs: input.durationMs ?? null,
         }),
       );
@@ -166,7 +169,11 @@ export class FitMeetAgentRuntimeService {
         }),
       );
     } catch (error) {
-      this.warn('agent_runtime.memory_update_write_failed', error, input.userId);
+      this.warn(
+        'agent_runtime.memory_update_write_failed',
+        error,
+        input.userId,
+      );
       return null;
     }
   }
@@ -211,7 +218,7 @@ export class FitMeetAgentRuntimeService {
   }
 
   private safeText(value: unknown) {
-    return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, 5000);
+    return cleanDisplayText(value, '').slice(0, 5000);
   }
 
   private safePayload(payload: Record<string, unknown>) {

@@ -77,7 +77,11 @@ describe('SocialAgentRagService', () => {
       activityType: 'running',
     });
     expect(ctx.retrievedKinds).toEqual(
-      expect.arrayContaining(['opening_templates', 'successful_match_cases', 'user_memory_summary']),
+      expect.arrayContaining([
+        'opening_templates',
+        'successful_match_cases',
+        'user_memory_summary',
+      ]),
     );
     expect(ctx.openingTemplates.length).toBeGreaterThan(0);
     expect(ctx.successfulMatchCases.length).toBeGreaterThan(0);

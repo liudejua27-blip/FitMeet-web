@@ -537,7 +537,15 @@ export class SocialAgentCandidatePoolService {
         input.filtered.boundaryMismatch += 1;
         continue;
       }
-      out.push(this.toProfileCandidate(user, profile, delegate, input.query, input.lifeGraphSignals));
+      out.push(
+        this.toProfileCandidate(
+          user,
+          profile,
+          delegate,
+          input.query,
+          input.lifeGraphSignals,
+        ),
+      );
     }
     return out.sort((a, b) => b.matchScore - a.matchScore);
   }
@@ -1129,7 +1137,12 @@ export class SocialAgentCandidatePoolService {
   }): Record<string, number> {
     const sceneType = this.sceneRisk.normalizeScene(
       null,
-      [input.query.rawText, input.query.activityType, ...input.query.interestTags, ...input.tags].join(' '),
+      [
+        input.query.rawText,
+        input.query.activityType,
+        ...input.query.interestTags,
+        ...input.tags,
+      ].join(' '),
     );
     const policy = this.sceneRisk.evaluate({
       sceneType,
@@ -1139,21 +1152,48 @@ export class SocialAgentCandidatePoolService {
       safetySignals: input.lifeGraphSignals?.safetySignals,
     });
     return {
-      distance: Math.min(18, (this.cityMatches(input.query.city, input.city) ? 14 : 6) + this.lifeGraphLocationBoost(input.city, input.lifeGraphSignals)),
-      timeOverlap: Math.min(15, this.timeMatches(
-        input.query.timePreference,
-        input.profile,
-        input.delegate,
-      ) + this.lifeGraphTimeBoost(input.lifeGraphSignals)),
-      interestSimilarity: Math.min(20, input.commonTags.length * 10 + this.lifeGraphSportBoost(input.tags, input.lifeGraphSignals)),
-      lifeRhythm: Math.min(10, this.lifeRhythmScore(input.profile, input.delegate) + this.lifeGraphRhythmBoost(input.lifeGraphSignals)),
+      distance: Math.min(
+        18,
+        (this.cityMatches(input.query.city, input.city) ? 14 : 6) +
+          this.lifeGraphLocationBoost(input.city, input.lifeGraphSignals),
+      ),
+      timeOverlap: Math.min(
+        15,
+        this.timeMatches(
+          input.query.timePreference,
+          input.profile,
+          input.delegate,
+        ) + this.lifeGraphTimeBoost(input.lifeGraphSignals),
+      ),
+      interestSimilarity: Math.min(
+        20,
+        input.commonTags.length * 10 +
+          this.lifeGraphSportBoost(input.tags, input.lifeGraphSignals),
+      ),
+      lifeRhythm: Math.min(
+        10,
+        this.lifeRhythmScore(input.profile, input.delegate) +
+          this.lifeGraphRhythmBoost(input.lifeGraphSignals),
+      ),
       socialEnergy: this.socialEnergyScore(input.profile, input.delegate),
-      relationshipGoal: Math.min(10, this.relationshipGoalScore(input.query, input.tags) + this.lifeGraphGoalBoost(input.query, input.tags, input.lifeGraphSignals)),
+      relationshipGoal: Math.min(
+        10,
+        this.relationshipGoalScore(input.query, input.tags) +
+          this.lifeGraphGoalBoost(
+            input.query,
+            input.tags,
+            input.lifeGraphSignals,
+          ),
+      ),
       trustworthiness: Math.min(
         10,
         Math.round(input.completeness * 5) + (input.user.verified ? 5 : 0),
       ),
-      safetyRisk: Math.max(0, this.safetyRiskScore(policy.riskLevel) - this.lifeGraphSafetyPenalty(input.user, input.lifeGraphSignals)),
+      safetyRisk: Math.max(
+        0,
+        this.safetyRiskScore(policy.riskLevel) -
+          this.lifeGraphSafetyPenalty(input.user, input.lifeGraphSignals),
+      ),
     };
   }
 
@@ -1168,7 +1208,12 @@ export class SocialAgentCandidatePoolService {
   }): Record<string, number> {
     const sceneType = this.sceneRisk.normalizeScene(
       null,
-      [input.query.rawText, input.query.activityType, ...input.query.interestTags, ...input.tags].join(' '),
+      [
+        input.query.rawText,
+        input.query.activityType,
+        ...input.query.interestTags,
+        ...input.tags,
+      ].join(' '),
     );
     const policy = this.sceneRisk.evaluate({
       sceneType,
@@ -1178,15 +1223,40 @@ export class SocialAgentCandidatePoolService {
       safetySignals: input.lifeGraphSignals?.safetySignals,
     });
     return {
-      distance: Math.min(18, (this.cityMatches(input.query.city, input.city) ? 14 : 6) + this.lifeGraphLocationBoost(input.city, input.lifeGraphSignals)),
-      timeOverlap: Math.min(15, (input.query.timePreference ? 10 : 6) + this.lifeGraphTimeBoost(input.lifeGraphSignals)),
-      interestSimilarity: Math.min(20, input.commonTags.length * 10 + this.lifeGraphSportBoost(input.tags, input.lifeGraphSignals)),
-      lifeRhythm: Math.min(10, (input.query.timePreference ? 7 : 4) + this.lifeGraphRhythmBoost(input.lifeGraphSignals)),
+      distance: Math.min(
+        18,
+        (this.cityMatches(input.query.city, input.city) ? 14 : 6) +
+          this.lifeGraphLocationBoost(input.city, input.lifeGraphSignals),
+      ),
+      timeOverlap: Math.min(
+        15,
+        (input.query.timePreference ? 10 : 6) +
+          this.lifeGraphTimeBoost(input.lifeGraphSignals),
+      ),
+      interestSimilarity: Math.min(
+        20,
+        input.commonTags.length * 10 +
+          this.lifeGraphSportBoost(input.tags, input.lifeGraphSignals),
+      ),
+      lifeRhythm: Math.min(
+        10,
+        (input.query.timePreference ? 7 : 4) +
+          this.lifeGraphRhythmBoost(input.lifeGraphSignals),
+      ),
       socialEnergy: 5,
-      relationshipGoal: Math.min(10, this.relationshipGoalScore(input.query, input.tags) + this.lifeGraphGoalBoost(input.query, input.tags, input.lifeGraphSignals)),
+      relationshipGoal: Math.min(
+        10,
+        this.relationshipGoalScore(input.query, input.tags) +
+          this.lifeGraphGoalBoost(
+            input.query,
+            input.tags,
+            input.lifeGraphSignals,
+          ),
+      ),
       trustworthiness: Math.min(
         10,
-        Math.round(input.completeness * 5) + this.recentScore(input.updatedAt, 5),
+        Math.round(input.completeness * 5) +
+          this.recentScore(input.updatedAt, 5),
       ),
       safetyRisk: this.safetyRiskScore(policy.riskLevel),
     };
@@ -1217,7 +1287,8 @@ export class SocialAgentCandidatePoolService {
     if (!signals) return 0;
     const city = this.textSignal(signals.identitySignals.city);
     const nearbyArea = this.textSignal(signals.identitySignals.nearbyArea);
-    if (city && candidateCity && this.cityMatches(city, candidateCity)) return nearbyArea ? 4 : 3;
+    if (city && candidateCity && this.cityMatches(city, candidateCity))
+      return nearbyArea ? 4 : 3;
     return nearbyArea ? 1 : 0;
   }
 
@@ -1230,7 +1301,8 @@ export class SocialAgentCandidatePoolService {
       this.textSignal(signals.lifestyleSignals.weekendAvailability),
       this.textSignal(signals.lifestyleSignals.activeHours),
     ].join(' ');
-    if (/周末|下午|上午|晚上|weekend|morning|afternoon|evening/i.test(text)) return 3;
+    if (/周末|下午|上午|晚上|weekend|morning|afternoon|evening/i.test(text))
+      return 3;
     return 0;
   }
 
@@ -1241,7 +1313,11 @@ export class SocialAgentCandidatePoolService {
     const sports = this.signalList(signals?.fitnessSignals.sportsPreferences);
     if (sports.length === 0) return 0;
     return sports.some((sport) =>
-      tags.some((tag) => tag.toLowerCase().includes(sport.toLowerCase()) || sport.toLowerCase().includes(tag.toLowerCase())),
+      tags.some(
+        (tag) =>
+          tag.toLowerCase().includes(sport.toLowerCase()) ||
+          sport.toLowerCase().includes(tag.toLowerCase()),
+      ),
     )
       ? 5
       : 0;
@@ -1266,7 +1342,12 @@ export class SocialAgentCandidatePoolService {
       this.textSignal(signals?.socialIntentSignals.relationshipGoal),
     ].join(' ');
     if (!goal.trim()) return 0;
-    const text = [query.rawText, query.activityType, ...query.interestTags, ...tags].join(' ');
+    const text = [
+      query.rawText,
+      query.activityType,
+      ...query.interestTags,
+      ...tags,
+    ].join(' ');
     return goal
       .split(/[、,\s]+/)
       .filter(Boolean)
@@ -1281,13 +1362,18 @@ export class SocialAgentCandidatePoolService {
   ): number {
     if (!signals) return 0;
     let penalty = 0;
-    if (signals.safetySignals.realNameRequired && !candidate.verified) penalty += 2;
+    if (signals.safetySignals.realNameRequired && !candidate.verified)
+      penalty += 2;
     if (signals.safetySignals.acceptsNightMeet === false) penalty += 1;
     return penalty;
   }
 
   private textSignal(value: unknown): string {
-    if (Array.isArray(value)) return value.map((item) => this.firstText(item)).filter(Boolean).join(' ');
+    if (Array.isArray(value))
+      return value
+        .map((item) => this.firstText(item))
+        .filter(Boolean)
+        .join(' ');
     return this.firstText(value);
   }
 
@@ -1330,13 +1416,16 @@ export class SocialAgentCandidatePoolService {
       ...tags,
     ].join(' ');
     if (/相亲|恋爱|对象|dating|date/i.test(text)) return 10;
-    if (/搭子|约练|跑步|健身|麻将|扑克|旅行|旅游|partner|buddy/i.test(text)) return 9;
+    if (/搭子|约练|跑步|健身|麻将|扑克|旅行|旅游|partner|buddy/i.test(text))
+      return 9;
     if (/朋友|聊天|认识|friend|social/i.test(text)) return 8;
     if (/学习|自习|study/i.test(text)) return 7;
     return 5;
   }
 
-  private safetyRiskScore(riskLevel: ReturnType<SceneRiskPolicyService['evaluate']>['riskLevel']): number {
+  private safetyRiskScore(
+    riskLevel: ReturnType<SceneRiskPolicyService['evaluate']>['riskLevel'],
+  ): number {
     if (riskLevel === 'critical') return 0;
     if (riskLevel === 'high') return 3;
     if (riskLevel === 'medium') return 6;
@@ -1519,7 +1608,9 @@ export class SocialAgentCandidatePoolService {
     highRisk: boolean,
   ): CandidateEmotionalInsight {
     return {
-      fitReason: explanation.fitReasons[0] || 'TA 和这次需求有可对齐的地方，适合先轻量沟通。',
+      fitReason:
+        explanation.fitReasons[0] ||
+        'TA 和这次需求有可对齐的地方，适合先轻量沟通。',
       openerAdvice: explanation.suggestedOpener,
       possibleAwkwardness:
         explanation.awkwardPoints[0] || '对方资料或时间偏好还需要进一步确认。',
@@ -1550,7 +1641,10 @@ export class SocialAgentCandidatePoolService {
       permissionMode: 'limited_auto',
     });
     return this.candidateExplanation.explain({
-      userRequest: { rawText: requestText, interestTags: input.query.interestTags },
+      userRequest: {
+        rawText: requestText,
+        interestTags: input.query.interestTags,
+      },
       candidate: {
         displayName: input.title,
         city: input.city,
@@ -1743,7 +1837,9 @@ export class SocialAgentCandidatePoolService {
     ownerUserId: number,
   ): Promise<LifeGraphUnifiedMatchSignalsDto | null> {
     try {
-      return (await this.lifeGraph?.getUnifiedMatchSignals(ownerUserId)) ?? null;
+      return (
+        (await this.lifeGraph?.getUnifiedMatchSignals(ownerUserId)) ?? null
+      );
     } catch {
       return null;
     }

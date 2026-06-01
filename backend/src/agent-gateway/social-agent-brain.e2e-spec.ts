@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await */
 import { UserSocialProfile } from '../users/user-social-profile.entity';
 import { CandidateExplanationService } from './candidate-explanation.service';
 import { SceneRiskPolicyService } from './scene-risk-policy.service';
@@ -45,23 +46,24 @@ function repo<T extends Record<string, unknown>>(initialRows: T[] = []) {
           ),
         ) ?? null,
     ),
-    find: jest.fn(
-      async ({ where }: { where?: Record<string, unknown> } = {}) =>
-        rows.filter((row) =>
-          Object.entries(where ?? {}).every(
-            ([key, value]) => (row as Record<string, unknown>)[key] === value,
-          ),
-        ),
-    ),
-    update: jest.fn(async (where: Record<string, unknown>, patch: Partial<T>) => {
-      for (const row of rows) {
-        const matches = Object.entries(where).every(
+    find: jest.fn(async ({ where }: { where?: Record<string, unknown> } = {}) =>
+      rows.filter((row) =>
+        Object.entries(where ?? {}).every(
           ([key, value]) => (row as Record<string, unknown>)[key] === value,
-        );
-        if (matches) Object.assign(row, patch, { updatedAt: now });
-      }
-      return { affected: 1 };
-    }),
+        ),
+      ),
+    ),
+    update: jest.fn(
+      async (where: Record<string, unknown>, patch: Partial<T>) => {
+        for (const row of rows) {
+          const matches = Object.entries(where).every(
+            ([key, value]) => (row as Record<string, unknown>)[key] === value,
+          );
+          if (matches) Object.assign(row, patch, { updatedAt: now });
+        }
+        return { affected: 1 };
+      },
+    ),
   };
 }
 

@@ -58,35 +58,87 @@ export class CompleteAiSocialLoop1771900000000 implements MigrationInterface {
       `);
     }
 
-    await queryRunner.query(`ALTER TABLE "public_social_intents" ADD COLUMN IF NOT EXISTS "userId" int`);
-    await queryRunner.query(`ALTER TABLE "public_social_intents" ADD COLUMN IF NOT EXISTS "linkedSocialRequestId" int`);
-    await queryRunner.query(`ALTER TABLE "public_social_intents" ADD COLUMN IF NOT EXISTS "source" varchar NOT NULL DEFAULT 'public_social_skills'`);
-    await queryRunner.query(`ALTER TABLE "public_social_intents" ADD COLUMN IF NOT EXISTS "interestTags" jsonb NOT NULL DEFAULT '[]'`);
-    await queryRunner.query(`ALTER TABLE "public_social_intents" ADD COLUMN IF NOT EXISTS "locationPreference" text NOT NULL DEFAULT ''`);
-    await queryRunner.query(`ALTER TABLE "public_social_intents" ADD COLUMN IF NOT EXISTS "socialGoal" text NOT NULL DEFAULT ''`);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "idx_public_social_intents_user_status" ON "public_social_intents" ("userId", "status")`);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "idx_public_social_intents_linked_request" ON "public_social_intents" ("linkedSocialRequestId")`);
+    await queryRunner.query(
+      `ALTER TABLE "public_social_intents" ADD COLUMN IF NOT EXISTS "userId" int`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "public_social_intents" ADD COLUMN IF NOT EXISTS "linkedSocialRequestId" int`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "public_social_intents" ADD COLUMN IF NOT EXISTS "source" varchar NOT NULL DEFAULT 'public_social_skills'`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "public_social_intents" ADD COLUMN IF NOT EXISTS "interestTags" jsonb NOT NULL DEFAULT '[]'`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "public_social_intents" ADD COLUMN IF NOT EXISTS "locationPreference" text NOT NULL DEFAULT ''`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "public_social_intents" ADD COLUMN IF NOT EXISTS "socialGoal" text NOT NULL DEFAULT ''`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS "idx_public_social_intents_user_status" ON "public_social_intents" ("userId", "status")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS "idx_public_social_intents_linked_request" ON "public_social_intents" ("linkedSocialRequestId")`,
+    );
 
-    await queryRunner.query(`ALTER TABLE "agent_approval_requests" ADD COLUMN IF NOT EXISTS "actionType" varchar(80) NOT NULL DEFAULT ''`);
-    await queryRunner.query(`ALTER TABLE "agent_approval_requests" ADD COLUMN IF NOT EXISTS "reason" text NOT NULL DEFAULT ''`);
-    await queryRunner.query(`ALTER TABLE "agent_approval_requests" ADD COLUMN IF NOT EXISTS "createdBy" varchar(32) NOT NULL DEFAULT 'agent'`);
-    await queryRunner.query(`ALTER TABLE "agent_approval_requests" ADD COLUMN IF NOT EXISTS "relatedSocialRequestId" int`);
-    await queryRunner.query(`ALTER TABLE "agent_approval_requests" ADD COLUMN IF NOT EXISTS "relatedCandidateId" int`);
+    await queryRunner.query(
+      `ALTER TABLE "agent_approval_requests" ADD COLUMN IF NOT EXISTS "actionType" varchar(80) NOT NULL DEFAULT ''`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "agent_approval_requests" ADD COLUMN IF NOT EXISTS "reason" text NOT NULL DEFAULT ''`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "agent_approval_requests" ADD COLUMN IF NOT EXISTS "createdBy" varchar(32) NOT NULL DEFAULT 'agent'`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "agent_approval_requests" ADD COLUMN IF NOT EXISTS "relatedSocialRequestId" int`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "agent_approval_requests" ADD COLUMN IF NOT EXISTS "relatedCandidateId" int`,
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "agent_approval_requests" DROP COLUMN IF EXISTS "relatedCandidateId"`);
-    await queryRunner.query(`ALTER TABLE "agent_approval_requests" DROP COLUMN IF EXISTS "relatedSocialRequestId"`);
-    await queryRunner.query(`ALTER TABLE "agent_approval_requests" DROP COLUMN IF EXISTS "createdBy"`);
-    await queryRunner.query(`ALTER TABLE "agent_approval_requests" DROP COLUMN IF EXISTS "reason"`);
-    await queryRunner.query(`ALTER TABLE "agent_approval_requests" DROP COLUMN IF EXISTS "actionType"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_public_social_intents_linked_request"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_public_social_intents_user_status"`);
-    await queryRunner.query(`ALTER TABLE "public_social_intents" DROP COLUMN IF EXISTS "socialGoal"`);
-    await queryRunner.query(`ALTER TABLE "public_social_intents" DROP COLUMN IF EXISTS "locationPreference"`);
-    await queryRunner.query(`ALTER TABLE "public_social_intents" DROP COLUMN IF EXISTS "interestTags"`);
-    await queryRunner.query(`ALTER TABLE "public_social_intents" DROP COLUMN IF EXISTS "source"`);
-    await queryRunner.query(`ALTER TABLE "public_social_intents" DROP COLUMN IF EXISTS "linkedSocialRequestId"`);
-    await queryRunner.query(`ALTER TABLE "public_social_intents" DROP COLUMN IF EXISTS "userId"`);
+    await queryRunner.query(
+      `ALTER TABLE "agent_approval_requests" DROP COLUMN IF EXISTS "relatedCandidateId"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "agent_approval_requests" DROP COLUMN IF EXISTS "relatedSocialRequestId"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "agent_approval_requests" DROP COLUMN IF EXISTS "createdBy"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "agent_approval_requests" DROP COLUMN IF EXISTS "reason"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "agent_approval_requests" DROP COLUMN IF EXISTS "actionType"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_public_social_intents_linked_request"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_public_social_intents_user_status"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "public_social_intents" DROP COLUMN IF EXISTS "socialGoal"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "public_social_intents" DROP COLUMN IF EXISTS "locationPreference"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "public_social_intents" DROP COLUMN IF EXISTS "interestTags"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "public_social_intents" DROP COLUMN IF EXISTS "source"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "public_social_intents" DROP COLUMN IF EXISTS "linkedSocialRequestId"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "public_social_intents" DROP COLUMN IF EXISTS "userId"`,
+    );
   }
 }

@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddLifeGraphSignalMetadata1774200000000
-  implements MigrationInterface
-{
+export class AddLifeGraphSignalMetadata1774200000000 implements MigrationInterface {
   name = 'AddLifeGraphSignalMetadata1774200000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

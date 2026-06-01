@@ -1,9 +1,5 @@
 import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
-import {
-  IsInt,
-  IsOptional,
-  Min,
-} from 'class-validator';
+import { IsInt, IsOptional, Min } from 'class-validator';
 import type { Request } from 'express';
 import { MatchService } from './match.service';
 import { NearbySearchDto } from './dto/match.dto';

@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   waitlistApi,
   type InviteCodeDto,
@@ -16,7 +16,7 @@ export const AdminWaitlistPage = memo(function AdminWaitlistPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -33,11 +33,11 @@ export const AdminWaitlistPage = memo(function AdminWaitlistPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [q, qualityLevel]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   const csv = useMemo(() => buildCsv(entries), [entries]);
 

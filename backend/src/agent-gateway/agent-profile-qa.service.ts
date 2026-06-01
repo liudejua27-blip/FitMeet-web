@@ -27,13 +27,13 @@ import { AgentSettingsService } from './agent-settings.service';
  * to know about backend column names.
  */
 export type ProfileQuestionKey =
-  | 'wanted_people'        // 你想认识什么样的人 → AgentProfile.preferredTargets
-  | 'unwanted_people'      // 你不想认识什么样的人 → AgentProfile.boundaries + rejectRules
-  | 'social_style'         // 你喜欢什么社交方式 → UserSocialProfile.socialPreference
-  | 'autonomy_level'       // AI 自动做到什么程度 → AgentProfile.autonomyLevel + AgentSettings.mode
-  | 'allow_auto_chat'      // 允许 AI 主动聊天 → AgentSettings.allowSendMessage
-  | 'allow_auto_add_friend'// 允许 AI 加好友 → AgentSettings.allowContactExchange
-  | 'allow_auto_organize'  // 允许 AI 组织活动 → AgentSettings.allowCreateActivity
+  | 'wanted_people' // 你想认识什么样的人 → AgentProfile.preferredTargets
+  | 'unwanted_people' // 你不想认识什么样的人 → AgentProfile.boundaries + rejectRules
+  | 'social_style' // 你喜欢什么社交方式 → UserSocialProfile.socialPreference
+  | 'autonomy_level' // AI 自动做到什么程度 → AgentProfile.autonomyLevel + AgentSettings.mode
+  | 'allow_auto_chat' // 允许 AI 主动聊天 → AgentSettings.allowSendMessage
+  | 'allow_auto_add_friend' // 允许 AI 加好友 → AgentSettings.allowContactExchange
+  | 'allow_auto_organize' // 允许 AI 组织活动 → AgentSettings.allowCreateActivity
   // 复用 UserSocialProfile 已有字段，方便基础画像也能问
   | 'city'
   | 'nearbyArea'
@@ -240,7 +240,9 @@ export class AgentProfileQAService {
     });
   }
 
-  private computeMissingKeys(ctx: Awaited<ReturnType<AgentProfileQAService['loadContext']>>): ProfileQuestionKey[] {
+  private computeMissingKeys(
+    ctx: Awaited<ReturnType<AgentProfileQAService['loadContext']>>,
+  ): ProfileQuestionKey[] {
     return ORDERED_KEYS.filter((k) => !this.isFilled(k, ctx));
   }
 
@@ -287,7 +289,10 @@ export class AgentProfileQAService {
    * any auto-execute flag was enabled.
    */
   private settingsTouched(s: AgentSettings): boolean {
-    if (s.mode !== AgentSettingsMode.Assisted && s.mode !== AgentSettingsMode.Basic) {
+    if (
+      s.mode !== AgentSettingsMode.Assisted &&
+      s.mode !== AgentSettingsMode.Basic
+    ) {
       return true;
     }
     return Boolean(
@@ -428,7 +433,12 @@ export class AgentProfileQAService {
 
   private async updatePrimaryAgent(
     userId: number,
-    patch: Partial<Pick<AgentProfile, 'preferredTargets' | 'boundaries' | 'personality' | 'autonomyLevel'>>,
+    patch: Partial<
+      Pick<
+        AgentProfile,
+        'preferredTargets' | 'boundaries' | 'personality' | 'autonomyLevel'
+      >
+    >,
   ): Promise<void> {
     const existing = await this.findPrimaryAgent(userId);
     if (!existing) {
@@ -455,7 +465,12 @@ function toStringArray(value: unknown): string[] {
   }
   if (typeof value === 'string') {
     return Array.from(
-      new Set(value.split(/[,，、;；\n]+/).map((s) => s.trim()).filter(Boolean)),
+      new Set(
+        value
+          .split(/[,，、;；\n]+/)
+          .map((s) => s.trim())
+          .filter(Boolean),
+      ),
     ).slice(0, 30);
   }
   return [];
@@ -467,7 +482,8 @@ function toTrimmedString(value: unknown): string {
 
 function toAnswerText(value: unknown): string {
   if (typeof value === 'string') return value.trim();
-  if (Array.isArray(value)) return value.filter((v) => typeof v === 'string').join(',');
+  if (Array.isArray(value))
+    return value.filter((v) => typeof v === 'string').join(',');
   return '';
 }
 

@@ -113,7 +113,9 @@ export class AddLifeGraph1773900000000 implements MigrationInterface {
     await queryRunner.query(
       `DROP INDEX IF EXISTS "idx_life_graph_audit_logs_created_at"`,
     );
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_life_graph_proposals_user"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_life_graph_proposals_user"`,
+    );
     await queryRunner.query(
       `DROP INDEX IF EXISTS "idx_life_graph_fields_user_field_key"`,
     );
@@ -123,8 +125,12 @@ export class AddLifeGraph1773900000000 implements MigrationInterface {
     await queryRunner.query(
       `DROP INDEX IF EXISTS "idx_life_graph_fields_user_category_key"`,
     );
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_life_graph_fields_user"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "idx_life_graph_profiles_user"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_life_graph_fields_user"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "idx_life_graph_profiles_user"`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS "life_graph_audit_logs"`);
     await queryRunner.query(`DROP TABLE IF EXISTS "life_graph_proposals"`);
     await queryRunner.query(`DROP TABLE IF EXISTS "life_graph_fields"`);

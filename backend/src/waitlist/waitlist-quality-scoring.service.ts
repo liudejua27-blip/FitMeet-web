@@ -20,7 +20,15 @@ export interface WaitlistQualityResult {
   qualityReasons: string[];
 }
 
-const TARGET_CITIES = new Set(['青岛', '北京', '上海', '深圳', '广州', '杭州', '成都']);
+const TARGET_CITIES = new Set([
+  '青岛',
+  '北京',
+  '上海',
+  '深圳',
+  '广州',
+  '杭州',
+  '成都',
+]);
 const CORE_SCENARIOS = [
   '跑步搭子',
   '健身约练',
@@ -57,7 +65,11 @@ export class WaitlistQualityScoringService {
       score += 18;
       reasons.push('选择了明确使用场景');
     }
-    if (scenarios.some((scenario) => CORE_SCENARIOS.some((core) => scenario.includes(core)))) {
+    if (
+      scenarios.some((scenario) =>
+        CORE_SCENARIOS.some((core) => scenario.includes(core)),
+      )
+    ) {
       score += 18;
       reasons.push('场景匹配 FitMeet 早期核心方向');
     }

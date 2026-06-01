@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AlignAgentAutonomyModes1772000000000
-  implements MigrationInterface
-{
+export class AlignAgentAutonomyModes1772000000000 implements MigrationInterface {
   name = 'AlignAgentAutonomyModes1772000000000';
   transaction = false as const;
 

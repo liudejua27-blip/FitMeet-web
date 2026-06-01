@@ -44,11 +44,15 @@ export function isDisplayableText(value: unknown): boolean {
 }
 
 export function sanitizeForDisplay(value: unknown): unknown {
-  if (typeof value === 'string') return cleanDisplayText(value, SANITIZED_TEXT_FALLBACK);
+  if (typeof value === 'string')
+    return cleanDisplayText(value, SANITIZED_TEXT_FALLBACK);
   if (Array.isArray(value)) {
     return value
       .map(sanitizeForDisplay)
-      .filter((item) => !(typeof item === 'string' && item === SANITIZED_TEXT_FALLBACK));
+      .filter(
+        (item) =>
+          !(typeof item === 'string' && item === SANITIZED_TEXT_FALLBACK),
+      );
   }
   if (value && typeof value === 'object') {
     return Object.fromEntries(

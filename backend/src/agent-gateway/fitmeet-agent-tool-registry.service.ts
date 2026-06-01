@@ -332,7 +332,13 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
       {
         memoryType: {
           type: 'string',
-          enum: ['preference', 'boundary', 'profile_fact', 'social_goal', 'note'],
+          enum: [
+            'preference',
+            'boundary',
+            'profile_fact',
+            'social_goal',
+            'note',
+          ],
         },
         text: { type: 'string' },
         sourceMessage: { type: 'string' },
@@ -1390,7 +1396,8 @@ export class FitMeetAgentToolRegistryService {
       permission: tool.permission ?? this.inferPermission(tool),
       requiresConfirmation:
         tool.requiresConfirmation ?? tool.requiresApproval === true,
-      failureFallback: tool.failureFallback ?? this.defaultFailureFallback(tool),
+      failureFallback:
+        tool.failureFallback ?? this.defaultFailureFallback(tool),
       permissionMode: [...tool.permissionMode],
       inputSchema: this.cloneRecord(tool.inputSchema),
       outputSchema: this.cloneRecord(tool.outputSchema),
@@ -1415,10 +1422,7 @@ export class FitMeetAgentToolRegistryService {
     if (tool.permissionAction === SocialAgentAction.SendMessage) {
       return 'limited_auto_or_confirmed';
     }
-    if (
-      tool.requiresApproval ||
-      tool.riskLevel === AgentActionRiskLevel.High
-    ) {
+    if (tool.requiresApproval || tool.riskLevel === AgentActionRiskLevel.High) {
       return 'confirmed_action';
     }
     if (tool.sideEffects.some((item) => item.includes('memory'))) {

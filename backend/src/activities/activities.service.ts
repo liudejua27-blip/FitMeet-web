@@ -140,7 +140,9 @@ export class ActivitiesService implements OnModuleInit {
     return this.templateRepo.find({ order: { id: 'ASC' } });
   }
 
-  async getTemplateByType(type: ActivityType): Promise<ActivityTemplate | null> {
+  async getTemplateByType(
+    type: ActivityType,
+  ): Promise<ActivityTemplate | null> {
     return this.templateRepo.findOne({ where: { type } });
   }
 
@@ -190,7 +192,7 @@ export class ActivitiesService implements OnModuleInit {
     const icebreakerSource =
       dto.icebreakerTasks && dto.icebreakerTasks.length > 0
         ? dto.icebreakerTasks
-        : template?.defaultIcebreakers ?? [];
+        : (template?.defaultIcebreakers ?? []);
     const icebreakers: IcebreakerTask[] = icebreakerSource.map((text) => ({
       id: randomUUID(),
       text,
@@ -274,7 +276,10 @@ export class ActivitiesService implements OnModuleInit {
         ) {
           req.status = UserSocialRequestStatus.ActivityCreated;
           await this.socialRequestRepo.save(req);
-          await this.updatePublicIntentStatus(req.id, PublicSocialIntentStatus.Active);
+          await this.updatePublicIntentStatus(
+            req.id,
+            PublicSocialIntentStatus.Active,
+          );
         }
       } catch (err) {
         this.logger.warn(
@@ -310,7 +315,9 @@ export class ActivitiesService implements OnModuleInit {
 
   private assertParticipant(activity: SocialActivity, userId: number): void {
     if (!activity.participantIds.includes(userId)) {
-      throw new ForbiddenException('You are not a participant of this activity.');
+      throw new ForbiddenException(
+        'You are not a participant of this activity.',
+      );
     }
   }
 
@@ -407,7 +414,9 @@ export class ActivitiesService implements OnModuleInit {
     const activity = await this.findOne(id);
     this.assertParticipant(activity, userId);
     if (activity.status === SocialActivityStatus.Cancelled) {
-      throw new BadRequestException('Cannot submit proof for cancelled activity.');
+      throw new BadRequestException(
+        'Cannot submit proof for cancelled activity.',
+      );
     }
 
     const privacyMode = dto.privacyMode ?? this.inferPrivacyMode(dto);
@@ -625,7 +634,7 @@ export class ActivitiesService implements OnModuleInit {
     this.emitActivityEvent(saved, 'activity:completed', actingUserId, {
       completedByUserId: actingUserId,
     });
-    await this.applyTrustOnCompletion(saved, actingUserId);
+    await this.applyTrustOnCompletion(saved);
     await this.propagateCompletionToSocialRequest(saved);
     if (saved.meetId) {
       try {
@@ -642,7 +651,6 @@ export class ActivitiesService implements OnModuleInit {
   /** +2 trust + +1 socialTrustCount for every participant on completion. */
   private async applyTrustOnCompletion(
     activity: SocialActivity,
-    _actingUserId: number,
   ): Promise<void> {
     for (const uid of activity.participantIds) {
       try {
@@ -685,7 +693,10 @@ export class ActivitiesService implements OnModuleInit {
       if (req.status === UserSocialRequestStatus.Completed) return;
       req.status = UserSocialRequestStatus.Completed;
       await this.socialRequestRepo.save(req);
-      await this.updatePublicIntentStatus(req.id, PublicSocialIntentStatus.Completed);
+      await this.updatePublicIntentStatus(
+        req.id,
+        PublicSocialIntentStatus.Completed,
+      );
     } catch (err) {
       this.logger.warn(
         `Failed to write back socialRequest ${activity.socialRequestId}: ${(err as Error).message}`,
@@ -706,7 +717,9 @@ export class ActivitiesService implements OnModuleInit {
   async cancel(id: number, userId: number): Promise<SocialActivity> {
     const activity = await this.findOne(id);
     if (activity.creatorId !== userId) {
-      throw new ForbiddenException('Only the creator can cancel this activity.');
+      throw new ForbiddenException(
+        'Only the creator can cancel this activity.',
+      );
     }
     activity.status = SocialActivityStatus.Cancelled;
     const saved = await this.activityRepo.save(activity);
@@ -730,10 +743,14 @@ export class ActivitiesService implements OnModuleInit {
   ): Promise<{ ok: true }> {
     const activity = await this.findOne(id);
     if (!activity.participantIds.includes(reviewerId)) {
-      throw new ForbiddenException('Only participants can review this activity.');
+      throw new ForbiddenException(
+        'Only participants can review this activity.',
+      );
     }
     if (activity.status !== SocialActivityStatus.Completed) {
-      throw new BadRequestException('Only completed activities can be reviewed.');
+      throw new BadRequestException(
+        'Only completed activities can be reviewed.',
+      );
     }
     activity.reviewByUserId = {
       ...(activity.reviewByUserId ?? {}),

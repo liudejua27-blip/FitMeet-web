@@ -448,10 +448,7 @@ function profileFacts(value: unknown): Record<string, string | string[]> {
       out[key] = raw.trim();
       continue;
     }
-    if (
-      Array.isArray(raw) &&
-      raw.every((item) => typeof item === 'string')
-    ) {
+    if (Array.isArray(raw) && raw.every((item) => typeof item === 'string')) {
       const list = raw.map((item) => item.trim()).filter(Boolean);
       if (list.length > 0) out[key] = list;
     }

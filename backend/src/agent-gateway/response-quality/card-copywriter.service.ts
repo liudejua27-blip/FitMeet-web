@@ -28,7 +28,10 @@ export class CardCopywriterService {
   }): FitMeetAlphaCard {
     const draft = input.draft;
     const activityType = cleanDisplayText(draft.activityType, '活动');
-    const time = cleanDisplayText(draft.timePreference ?? draft.preferredTime, '待确认时间');
+    const time = cleanDisplayText(
+      draft.timePreference ?? draft.preferredTime,
+      '待确认时间',
+    );
     const city = cleanDisplayText(draft.city, '同城');
     const description =
       this.tone.cleanUserText(draft.description, '') ||
@@ -47,8 +50,11 @@ export class CardCopywriterService {
         activityType,
         time,
         safetyBoundary: this.safety.activityBoundary(),
-        lifeGraphSummary: this.personalization.lifeGraphSummary(input.lifeGraphSignals),
-        lifeGraphUpdatePreview: this.personalization.lifeGraphUpdatePreview(activityType),
+        lifeGraphSummary: this.personalization.lifeGraphSummary(
+          input.lifeGraphSignals,
+        ),
+        lifeGraphUpdatePreview:
+          this.personalization.lifeGraphUpdatePreview(activityType),
       },
       actions: [
         {
@@ -78,29 +84,35 @@ export class CardCopywriterService {
     const reasons = this.stringList(
       explanation.fitReasons ?? candidate.matchReasons ?? candidate.reasons,
     );
-    const activityType = cleanDisplayText(input.draft?.activityType, '') || this.inferActivity(candidate);
+    const activityType =
+      cleanDisplayText(input.draft?.activityType, '') ||
+      this.inferActivity(candidate);
     const opener =
       cleanDisplayText(explanation.suggestedOpener, '') ||
       cleanDisplayText(candidate.suggestedOpener, '') ||
       cleanDisplayText(candidate.suggestedMessage, '');
     const targetUserId =
       candidate.targetUserId ?? candidate.candidateUserId ?? candidate.userId;
-    const recommendationLine = this.personalization.candidateRecommendationLine({
-      displayName,
-      activityType: activityType || '见面',
-      reasons,
-    });
+    const recommendationLine = this.personalization.candidateRecommendationLine(
+      {
+        displayName,
+        activityType: activityType || '见面',
+        reasons,
+      },
+    );
     const safetyBoundary =
-      this.stringList(candidate.riskWarnings ?? this.record(candidate.risk).warnings)[0] ||
-      '第一次建议选择公共场所，先站内沟通，不共享精确位置。';
+      this.stringList(
+        candidate.riskWarnings ?? this.record(candidate.risk).warnings,
+      )[0] || '第一次建议选择公共场所，先站内沟通，不共享精确位置。';
     const whyNow = this.personalization.whyNow({
       timePreference: input.draft?.timePreference,
       locationText: input.draft?.city ?? input.draft?.locationText,
       candidateCity: candidate.city,
       distanceKm: candidate.distanceKm,
     });
+    const cardIdentity = cleanDisplayText(targetUserId, displayName);
     return {
-      id: `candidate_card:${input.taskId}:${targetUserId ?? displayName}`,
+      id: `candidate_card:${input.taskId}:${cardIdentity}`,
       type: 'candidate_card',
       title: displayName,
       body: `${recommendationLine} ${whyNow}`,
@@ -117,9 +129,19 @@ export class CardCopywriterService {
         whyNow,
         safetyBoundary,
         suggestedOpener: opener,
-        nextActions: ['生成开场白', '看看更多', '只看同校', '只看女生', '创建约练', '不喜欢这个推荐'],
-        lifeGraphSummary: this.personalization.lifeGraphSummary(input.lifeGraphSignals),
-        lifeGraphUpdatePreview: this.personalization.lifeGraphUpdatePreview(activityType),
+        nextActions: [
+          '生成开场白',
+          '看看更多',
+          '只看同校',
+          '只看女生',
+          '创建约练',
+          '不喜欢这个推荐',
+        ],
+        lifeGraphSummary: this.personalization.lifeGraphSummary(
+          input.lifeGraphSignals,
+        ),
+        lifeGraphUpdatePreview:
+          this.personalization.lifeGraphUpdatePreview(activityType),
       },
       actions: this.candidateActions(input.taskId, targetUserId, candidate),
     };
@@ -130,8 +152,12 @@ export class CardCopywriterService {
     candidate: Record<string, unknown>;
     message: string;
   }): FitMeetAlphaCard {
+    const candidateIdentity = cleanDisplayText(
+      input.candidate.targetUserId ?? input.candidate.userId,
+      'draft',
+    );
     return {
-      id: `opener_approval:${input.taskId}:${input.candidate.targetUserId ?? input.candidate.userId ?? 'draft'}`,
+      id: `opener_approval:${input.taskId}:${candidateIdentity}`,
       type: 'opener_approval',
       title: this.confirmation.title('send_message'),
       body: this.confirmation.body('send_message', {
@@ -150,7 +176,11 @@ export class CardCopywriterService {
           label: '确认发送',
           action: 'send_message',
           requiresConfirmation: true,
-          payload: { taskId: input.taskId, candidate: input.candidate, message: input.message },
+          payload: {
+            taskId: input.taskId,
+            candidate: input.candidate,
+            message: input.message,
+          },
         },
       ],
     };
@@ -161,7 +191,9 @@ export class CardCopywriterService {
       id: `safety_boundary:${id}`,
       type: 'safety_boundary',
       title: safety.blocked ? '我不能继续这个请求' : '本次匹配的安全边界',
-      body: safety.blocked ? this.safety.refusal(safety) : this.safety.boundaryIntro(),
+      body: safety.blocked
+        ? this.safety.refusal(safety)
+        : this.safety.boundaryIntro(),
       status: safety.blocked ? 'blocked' : 'ready',
       data: {
         blocked: safety.blocked,
@@ -244,7 +276,9 @@ export class CardCopywriterService {
   }
 
   private inferActivity(candidate: Record<string, unknown>): string {
-    const tags = this.stringList(candidate.commonTags ?? candidate.interestTags);
+    const tags = this.stringList(
+      candidate.commonTags ?? candidate.interestTags,
+    );
     return tags[0] || '轻松见面';
   }
 

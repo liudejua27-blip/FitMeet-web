@@ -1,17 +1,20 @@
+/* eslint-disable @typescript-eslint/require-await */
 import { ConfigService } from '@nestjs/config';
 import { AIService } from './ai.service';
 
 describe('AIService profile builder fallback', () => {
   it('keeps sensitive wealth tags private in match signals', async () => {
-    const config = { get: jest.fn().mockReturnValue(undefined) } as unknown as
-      ConfigService;
+    const config = {
+      get: jest.fn().mockReturnValue(undefined),
+    } as unknown as ConfigService;
     const service = new AIService(config);
 
     const card = await service.generateProfileBuilderCard({
       answers: [
         {
           question: 'What kind of person do you want to meet?',
-          answer: 'I want to meet someone rich, entrepreneurial, and into running.',
+          answer:
+            'I want to meet someone rich, entrepreneurial, and into running.',
         },
       ],
       source: 'test',
@@ -23,8 +26,9 @@ describe('AIService profile builder fallback', () => {
   });
 
   it('returns polished Chinese candidate content without DeepSeek', async () => {
-    const config = { get: jest.fn().mockReturnValue(undefined) } as unknown as
-      ConfigService;
+    const config = {
+      get: jest.fn().mockReturnValue(undefined),
+    } as unknown as ConfigService;
     const service = new AIService(config);
 
     const content = await service.generateCandidateMatchContent({
@@ -72,8 +76,7 @@ describe('AIService profile builder fallback', () => {
                   '都喜欢轻松跑步',
                   '邮箱: runner@example.com',
                 ],
-                icebreakerMessage:
-                  '你好，电话: 13800138000，今晚一起跑步吗？',
+                icebreakerMessage: '你好，电话: 13800138000，今晚一起跑步吗？',
                 riskWarnings: ['手机号: 13800138000'],
               }),
             },

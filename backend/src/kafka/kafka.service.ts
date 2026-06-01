@@ -1,4 +1,10 @@
-import { Injectable, Inject, OnModuleInit, Optional, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  OnModuleInit,
+  Optional,
+  Logger,
+} from '@nestjs/common';
 import { ClientKafka } from '@nestjs/microservices';
 
 /**
@@ -19,7 +25,9 @@ export class KafkaService implements OnModuleInit {
 
   async onModuleInit() {
     if (!this.client) {
-      this.logger.log('Kafka disabled (ENABLE_KAFKA!=true) — using no-op client');
+      this.logger.log(
+        'Kafka disabled (ENABLE_KAFKA!=true) — using no-op client',
+      );
       return;
     }
     try {

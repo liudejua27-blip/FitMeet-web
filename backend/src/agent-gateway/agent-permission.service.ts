@@ -60,7 +60,10 @@ const ALL_SOCIAL_ACTIONS: readonly SocialAgentAction[] = [
   SocialAgentAction.Payment,
 ];
 
-const ACTIONS_BY_MODE: Record<CanonicalPermissionMode, readonly SocialAgentAction[]> = {
+const ACTIONS_BY_MODE: Record<
+  CanonicalPermissionMode,
+  readonly SocialAgentAction[]
+> = {
   manual_confirm: ALL_SOCIAL_ACTIONS,
   limited_auto: ALL_SOCIAL_ACTIONS,
   open: ALL_SOCIAL_ACTIONS,
@@ -162,9 +165,11 @@ export class AgentPermissionService {
   normalizeMode(
     mode: SocialAgentPermissionMode,
   ): CanonicalPermissionMode | null {
-    const raw = String(mode ?? '').trim().toLowerCase();
+    const raw = String(mode ?? '')
+      .trim()
+      .toLowerCase();
     if (
-      raw === AgentTaskPermissionMode.LimitedAuto ||
+      raw === String(AgentTaskPermissionMode.LimitedAuto) ||
       raw === 'normal' ||
       raw === 'standard'
     ) {
@@ -173,8 +178,8 @@ export class AgentPermissionService {
     if (raw === 'open') return 'open';
     if (raw === 'lab' || raw === 'sandbox_internal') return 'lab';
     if (
-      raw === AgentTaskPermissionMode.Assist ||
-      raw === AgentTaskPermissionMode.Confirm ||
+      raw === String(AgentTaskPermissionMode.Assist) ||
+      raw === String(AgentTaskPermissionMode.Confirm) ||
       raw === 'manual_confirm'
     ) {
       return 'manual_confirm';

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await */
 import { SocialActivityStatus } from '../activities/entities/activity.entity';
 import { ActivityType } from '../activities/entities/activity-template.entity';
 import { SocialRequestCandidateStatus } from '../match/social-request-candidate.entity';
@@ -561,6 +562,8 @@ describe('SocialAgentCandidatePoolService', () => {
         expect.stringContaining('公共场所'),
       ]),
     });
-    expect(result.candidates[0].scoreBreakdown.interestSimilarity).toBeGreaterThan(10);
+    expect(
+      result.candidates[0].scoreBreakdown.interestSimilarity,
+    ).toBeGreaterThan(10);
   });
 });

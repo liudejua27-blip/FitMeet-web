@@ -25,7 +25,6 @@ import {
   CreateApprovalDto,
   UpdateAgentPermissionsDto,
 } from './dto/agent-control.dto';
-import { ApprovalRiskLevel } from './entities/agent-approval-request.entity';
 import type { AgentConnection } from './entities/agent-connection.entity';
 
 interface JwtReq {
@@ -118,7 +117,7 @@ export class AgentControlController {
       skillName: dto.skillName,
       payload: dto.payload,
       summary: dto.summary || verdict.summary,
-      riskLevel: verdict.riskLevel as ApprovalRiskLevel,
+      riskLevel: verdict.riskLevel,
       rationale: dto.rationale,
     });
     return {
@@ -150,7 +149,7 @@ export class AgentControlController {
     const skipped = out?.skipped === true;
     const dispatchError = out?.errorMessage ?? result.dispatchError;
     const approval = result.approval;
-    const payloadAny = (approval.payload ?? {}) as Record<string, unknown>;
+    const payloadAny = approval.payload ?? {};
     await this.actionLogs.logAgentAction({
       ownerUserId: actor.userId,
       agentId: approval.agentConnectionId ?? actor.agentConnectionId ?? null,
@@ -195,7 +194,10 @@ export class AgentControlController {
 
   /** POST /api/agent/owner/approvals/:id/approve */
   @Post('owner/approvals/:id/approve')
-  async approveOwner(@Req() req: JwtReq, @Param('id', ParseIntPipe) id: number) {
+  async approveOwner(
+    @Req() req: JwtReq,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
     return this.approve(req, id);
   }
 
@@ -204,7 +206,7 @@ export class AgentControlController {
   async reject(@Req() req: JwtReq, @Param('id', ParseIntPipe) id: number) {
     const actor = this.resolveActor(req);
     const row = await this.approvals.reject(id, actor.userId);
-    const payloadAny = (row.payload ?? {}) as Record<string, unknown>;
+    const payloadAny = row.payload ?? {};
     await this.actionLogs.logAgentAction({
       ownerUserId: actor.userId,
       agentId: row.agentConnectionId ?? actor.agentConnectionId ?? null,

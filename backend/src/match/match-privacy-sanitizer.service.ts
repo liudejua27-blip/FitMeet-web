@@ -61,11 +61,23 @@ export type SanitizedAiRequest = {
 const CONTACT_OR_ID_RULES: Array<[RegExp, string]> = [
   [/([\w.+-]+)@([\w.-]+)\.[A-Za-z]{2,}/g, '[已隐藏]'],
   [/(?:\+?\d[\d\s-]{6,}\d)/g, '[已隐藏]'],
-  [/(?:￥|¥|RMB|CNY|USD|\$|EUR|€)\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:万|千|百|w|k|m))?/gi, '[金额已隐藏]'],
+  [
+    /(?:￥|¥|RMB|CNY|USD|\$|EUR|€)\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:万|千|百|w|k|m))?/gi,
+    '[金额已隐藏]',
+  ],
   [/\d[\d,]*\s?(?:元|块|万|w|k|RMB)\b/gi, '[金额已隐藏]'],
-  [/(身份证|护照|证件号|手机号|电话|微信|wechat|qq|邮箱|email)[:：]?\s*[^，。；;\n\s]{2,}/gi, '$1已隐藏'],
-  [/(住址|地址|门牌|楼栋|单元|房间|单位|公司|学校|大学|学院|收入|年薪|月薪|工资)[:：]?\s*[^，。；;\n]{2,}/gi, '$1已隐藏'],
-  [/([\u4e00-\u9fa5A-Za-z0-9_-]+(?:路|街|大道|巷|弄|小区|公寓|宿舍|酒店|楼|栋|单元|号楼|室)\s*\d+[\w-]*)/g, '[精确地址已隐藏]'],
+  [
+    /(身份证|护照|证件号|手机号|电话|微信|wechat|qq|邮箱|email)[:：]?\s*[^，。；;\n\s]{2,}/gi,
+    '$1已隐藏',
+  ],
+  [
+    /(住址|地址|门牌|楼栋|单元|房间|单位|公司|学校|大学|学院|收入|年薪|月薪|工资)[:：]?\s*[^，。；;\n]{2,}/gi,
+    '$1已隐藏',
+  ],
+  [
+    /([\u4e00-\u9fa5A-Za-z0-9_-]+(?:路|街|大道|巷|弄|小区|公寓|宿舍|酒店|楼|栋|单元|号楼|室)\s*\d+[\w-]*)/g,
+    '[精确地址已隐藏]',
+  ],
 ];
 
 @Injectable()
@@ -105,7 +117,6 @@ export class MatchPrivacySanitizer {
     profile: UserSocialProfile | null | undefined,
   ): SanitizedAiProfile | null {
     if (!profile) return null;
-    const signals = this.matchSignals(profile);
     return {
       nickname: this.sanitizeText(profile.nickname, 60),
       ageRange: this.sanitizeText(profile.ageRange, 30),
@@ -118,7 +129,10 @@ export class MatchPrivacySanitizer {
       lifestyleTags: this.cleanSafeTags(profile.lifestyleTags ?? [], 12),
       socialScenes: this.cleanSafeTags(profile.socialScenes ?? [], 12),
       fitnessGoals: this.cleanSafeTags(profile.fitnessGoals ?? [], 12),
-      relationshipGoals: this.cleanSafeTags(profile.relationshipGoals ?? [], 10),
+      relationshipGoals: this.cleanSafeTags(
+        profile.relationshipGoals ?? [],
+        10,
+      ),
       availableTimes: this.cleanSafeTags(profile.availableTimes ?? [], 10),
       socialStyle: this.sanitizeText(profile.socialStyle, 80),
       communicationStyle: this.sanitizeText(profile.communicationStyle, 80),
@@ -173,13 +187,17 @@ export class MatchPrivacySanitizer {
         ...(profile.socialScenes ?? []),
         ...(profile.traits ?? []),
         ...(signals.publicTags ?? []),
-        ...(signals.matchKeywords ?? []).filter((tag) => !this.isSensitiveTag(tag)),
+        ...(signals.matchKeywords ?? []).filter(
+          (tag) => !this.isSensitiveTag(tag),
+        ),
       ],
       40,
     );
   }
 
-  privatePreferenceTags(profile: UserSocialProfile | null | undefined): string[] {
+  privatePreferenceTags(
+    profile: UserSocialProfile | null | undefined,
+  ): string[] {
     if (!profile) return [];
     const signals = this.matchSignals(profile);
     return this.cleanSafeTags(
@@ -214,9 +232,9 @@ export class MatchPrivacySanitizer {
     tag: string,
   ): boolean {
     if (!profile || !tag) return false;
-    const decision = (profile.sensitiveTagDecisions ?? {})[
-      tag
-    ] as SensitiveDecision | undefined;
+    const decision = (profile.sensitiveTagDecisions ?? {})[tag] as
+      | SensitiveDecision
+      | undefined;
     if (decision?.status !== 'confirmed') return false;
     if (!this.isWealthOrResourceTag(tag)) return true;
     const source = (decision.source ?? '').toLowerCase();
@@ -231,7 +249,12 @@ export class MatchPrivacySanitizer {
 
   sanitizeText(value: unknown, max = 220): string {
     if (value == null) return '';
-    let text = String(value).replace(/\s+/g, ' ').trim();
+    let text =
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+        ? String(value).replace(/\s+/g, ' ').trim()
+        : '';
     for (const [pattern, replacement] of CONTACT_OR_ID_RULES) {
       text = text.replace(pattern, replacement);
     }
@@ -242,7 +265,9 @@ export class MatchPrivacySanitizer {
   sanitizeCoarseLocation(value: unknown): string {
     const text = this.sanitizeText(value, 80);
     if (!text) return '';
-    if (/(门牌|房间|单元|楼栋|身份证|手机号|微信|电话|邮箱|详细地址)/i.test(text)) {
+    if (
+      /(门牌|房间|单元|楼栋|身份证|手机号|微信|电话|邮箱|详细地址)/i.test(text)
+    ) {
       return '';
     }
     return text.replace(/\d+[\w-]*(?:号|室|单元|楼|栋)/g, '').trim();

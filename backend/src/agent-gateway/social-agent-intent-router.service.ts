@@ -124,8 +124,8 @@ export class SocialAgentIntentRouterService {
     const wantsSocialSearch =
       !profileOnlyUpdate &&
       /(帮我找|给我找|想找|想认识|找一个|找个|找人|找.*搭子|搭子.*有吗|有合适的人吗|合适的人|伙伴|好友|对象|同城朋友|匹配|搜索候选|推荐.*人|附近.*人|同城.*人|真实用户|约练用户|发布过约练|约练卡片|跑步搭子|拍照搭子|一起.*(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|骑行|city\s*walk|citywalk)|周末.*(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|骑行|city\s*walk|citywalk))/i.test(
-          text,
-        );
+        text,
+      );
     const wantsActivitySearch =
       /(活动|局|约练活动|羽毛球局|跑团|课程|场地|报名|参加约练|附近有什么|有没有.*局|有什么.*活动)/i.test(
         text,
@@ -307,7 +307,9 @@ export class SocialAgentIntentRouterService {
     const text = cleanDisplayText(message, '').trim().toLowerCase();
     if (!text) return false;
     if (
-      /(\u8fd8\u7f3a\u4ec0\u4e48|\u8fd8\u5dee\u4ec0\u4e48|\u7f3a\u54ea\u4e9b|\u7f3a\u5c11\u54ea\u4e9b|\u753b\u50cf.*\u7f3a|\u8d44\u6599.*\u7f3a|\u8fd8\u9700\u8981\u8865\u5145\u4ec0\u4e48)/i.test(text)
+      /(\u8fd8\u7f3a\u4ec0\u4e48|\u8fd8\u5dee\u4ec0\u4e48|\u7f3a\u54ea\u4e9b|\u7f3a\u5c11\u54ea\u4e9b|\u753b\u50cf.*\u7f3a|\u8d44\u6599.*\u7f3a|\u8fd8\u9700\u8981\u8865\u5145\u4ec0\u4e48)/i.test(
+        text,
+      )
     ) {
       return true;
     }
@@ -515,12 +517,11 @@ export class SocialAgentIntentRouterService {
         intent: fallback.intent,
         latencyMs: Date.now() - startedAt,
         success: false,
-        reason:
-          this.isAbortError(error)
-            ? 'deepseek_timeout'
-            : error instanceof Error
-              ? error.message
-              : String(error),
+        reason: this.isAbortError(error)
+          ? 'deepseek_timeout'
+          : error instanceof Error
+            ? error.message
+            : String(error),
       });
       if (this.isAbortError(error)) throw new Error('deepseek_timeout');
       throw error;
@@ -707,7 +708,8 @@ export class SocialAgentIntentRouterService {
   }
 
   private deepSeekTimeoutMs(useCase?: 'planner'): number {
-    if (useCase && this.modelRouter) return this.modelRouter.getTimeout(useCase);
+    if (useCase && this.modelRouter)
+      return this.modelRouter.getTimeout(useCase);
     const configured = Number(
       this.config.get<string>('SOCIAL_AGENT_INTENT_TIMEOUT_MS') ?? '2500',
     );

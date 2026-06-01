@@ -11,6 +11,7 @@ import {
   AgentTaskPermissionMode,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
+/* eslint-disable @typescript-eslint/require-await */
 import { SocialAgentAutopilotService } from './social-agent-autopilot.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 
@@ -50,7 +51,9 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   } as AgentTask;
 }
 
-function makeRequest(overrides: Partial<UserSocialRequest> = {}): UserSocialRequest {
+function makeRequest(
+  overrides: Partial<UserSocialRequest> = {},
+): UserSocialRequest {
   return {
     id: 55,
     userId: 1,
@@ -143,7 +146,8 @@ describe('SocialAgentAutopilotService', () => {
   });
 
   it('runs waiting tasks once and writes started/completed logs', async () => {
-    const { service, taskRepo, requestRepo, messages, executor, actionLogs } = makeService();
+    const { service, taskRepo, requestRepo, messages, executor, actionLogs } =
+      makeService();
     const task = makeTask();
     taskRepo.find.mockResolvedValue([task]);
     taskRepo.findOne.mockResolvedValue(task);
@@ -166,12 +170,15 @@ describe('SocialAgentAutopilotService', () => {
       expect.objectContaining({ eventType: 'social_agent_autopilot.started' }),
     );
     expect(actionLogs.logAgentAction).toHaveBeenCalledWith(
-      expect.objectContaining({ eventType: 'social_agent_autopilot.completed' }),
+      expect.objectContaining({
+        eventType: 'social_agent_autopilot.completed',
+      }),
     );
   });
 
   it('skips a recent message when the task already processed its messageId', async () => {
-    const { service, taskRepo, requestRepo, messages, executor } = makeService();
+    const { service, taskRepo, requestRepo, messages, executor } =
+      makeService();
     const task = makeTask({
       memory: {
         socialLoop: {
@@ -204,22 +211,34 @@ describe('SocialAgentAutopilotService', () => {
   });
 
   it('creates and plans a task for a recent social request', async () => {
-    const { service, taskRepo, requestRepo, connectionRepo, messages, planner, executor } = makeService();
+    const {
+      service,
+      taskRepo,
+      requestRepo,
+      connectionRepo,
+      messages,
+      planner,
+      executor,
+    } = makeService();
     const request = makeRequest();
     let createdTask: AgentTask | null = null;
 
     taskRepo.find.mockResolvedValue([]);
-    taskRepo.findOne.mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
-      if (where.idempotencyKey) return null;
-      if (where.id && createdTask) return createdTask;
-      return null;
-    });
+    taskRepo.findOne.mockImplementation(
+      async ({ where }: { where: Record<string, unknown> }) => {
+        if (where.idempotencyKey) return null;
+        if (where.id && createdTask) return createdTask;
+        return null;
+      },
+    );
     taskRepo.save.mockImplementation(async (value) => {
       createdTask = makeTask({
         ...value,
         id: 200,
         status: AgentTaskStatus.Pending,
-        plan: [{ id: 'planned_1', toolName: SocialAgentToolName.SearchMatches }],
+        plan: [
+          { id: 'planned_1', toolName: SocialAgentToolName.SearchMatches },
+        ],
       });
       return createdTask;
     });

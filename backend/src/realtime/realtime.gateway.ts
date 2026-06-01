@@ -72,8 +72,8 @@ export class RealtimeGateway
       return;
     }
 
-    client.data.userId = userId;
-    client.join(this.userRoom(userId));
+    this.socketData(client).userId = userId;
+    void client.join(this.userRoom(userId));
     this.addSocket(userId, client.id);
     this.logger.log(
       JSON.stringify({
@@ -90,7 +90,7 @@ export class RealtimeGateway
   }
 
   handleDisconnect(client: AuthenticatedSocket) {
-    const userId = client.data.userId;
+    const userId = this.socketData(client).userId;
     if (!userId) return;
     this.removeSocket(userId, client.id);
     this.logger.log(
@@ -112,14 +112,16 @@ export class RealtimeGateway
     },
     @ConnectedSocket() client: AuthenticatedSocket,
   ) {
-    const userId = client.data.userId;
+    const userId = this.socketData(client).userId;
     if (!userId) return { ok: false, message: 'Authentication required' };
     const rooms = [
       this.roomFromValue('agent_task', body.agentTaskId),
       this.roomFromValue('conversation', body.conversationId),
       this.roomFromValue('activity', body.activityId),
     ].filter((room): room is string => Boolean(room));
-    rooms.forEach((room) => client.join(room));
+    for (const room of rooms) {
+      void client.join(room);
+    }
     return { ok: true, rooms };
   }
 
@@ -130,7 +132,7 @@ export class RealtimeGateway
   ) {
     const room = this.safeRoom(body.room);
     if (!room) return { ok: false };
-    client.leave(room);
+    void client.leave(room);
     return { ok: true, room };
   }
 
@@ -139,7 +141,9 @@ export class RealtimeGateway
     const userRoom = this.userRoom(envelope.userId);
     this.server.to(userRoom).emit(envelope.eventType, envelope);
     this.server.to(userRoom).emit('realtime:event', envelope);
-    for (const room of rooms.map((item) => this.safeRoom(item)).filter(Boolean)) {
+    for (const room of rooms
+      .map((item) => this.safeRoom(item))
+      .filter(Boolean)) {
       this.server.to(room as string).emit(envelope.eventType, envelope);
       this.server.to(room as string).emit('realtime:event', envelope);
     }
@@ -167,7 +171,10 @@ export class RealtimeGateway
     return `user:${userId}`;
   }
 
-  private roomFromValue(prefix: 'agent_task' | 'conversation' | 'activity', value: unknown) {
+  private roomFromValue(
+    prefix: 'agent_task' | 'conversation' | 'activity',
+    value: unknown,
+  ) {
     if (typeof value !== 'string' && typeof value !== 'number') return null;
     const normalized = String(value).trim();
     if (!/^[a-zA-Z0-9_-]{1,80}$/.test(normalized)) return null;
@@ -200,5 +207,9 @@ export class RealtimeGateway
     } catch {
       return null;
     }
+  }
+
+  private socketData(client: AuthenticatedSocket): { userId?: number } {
+    return client.data as { userId?: number };
   }
 }

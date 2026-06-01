@@ -70,7 +70,7 @@ export class SocialAgentFinalResponseService {
                 content: JSON.stringify(this.payload(input)),
               },
             ],
-            }),
+          }),
         },
       );
       if (!response.ok) throw new Error(`DeepSeek HTTP ${response.status}`);

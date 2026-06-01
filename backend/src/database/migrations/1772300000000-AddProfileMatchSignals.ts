@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddProfileMatchSignals1772300000000
-  implements MigrationInterface
-{
+export class AddProfileMatchSignals1772300000000 implements MigrationInterface {
   name = 'AddProfileMatchSignals1772300000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

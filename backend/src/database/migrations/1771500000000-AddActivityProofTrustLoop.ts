@@ -8,9 +8,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  *
  * No new enums; safe to run inside the default transaction.
  */
-export class AddActivityProofTrustLoop1771500000000
-  implements MigrationInterface
-{
+export class AddActivityProofTrustLoop1771500000000 implements MigrationInterface {
   name = 'AddActivityProofTrustLoop1771500000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

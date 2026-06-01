@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { recentConversations } from './agentWorkbenchMock';
-import { PermissionModeSelector, permissionModeLabel } from './PermissionModeSelector';
+import { PermissionModeSelector } from './PermissionModeSelector';
+import { permissionModeLabel } from './permissionModeLabel';
 import type { SocialAgentPermissionMode } from '../../api/socialAgentApi';
 
 export function AgentSidebar({

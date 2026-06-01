@@ -54,7 +54,8 @@ export class TonePolicyService {
     const cleanedLabel = this.cleanUserText(label, '');
     if (!cleanedLabel) return '正在理解你的需求';
     if (/Life Graph|画像/.test(cleanedLabel)) return '正在结合你的 Life Graph';
-    if (/候选|筛选|匹配|搜索|检索/.test(cleanedLabel)) return '正在筛选合适的人';
+    if (/候选|筛选|匹配|搜索|检索/.test(cleanedLabel))
+      return '正在筛选合适的人';
     if (/安全|边界|风险/.test(cleanedLabel)) return '正在检查安全边界';
     if (/开场|消息/.test(cleanedLabel)) return '正在生成开场白';
     if (/活动|约练|计划/.test(cleanedLabel)) return '正在创建约练计划';
@@ -68,9 +69,14 @@ export class TonePolicyService {
   }
 
   private looksLikeRawPayload(value: string): boolean {
-    if (/^\s*[{[]/.test(value) && /["']?(traceId|stack|planner|tool|error)["']?/i.test(value)) {
+    if (
+      /^\s*[{[]/.test(value) &&
+      /["']?(traceId|stack|planner|tool|error)["']?/i.test(value)
+    ) {
       return true;
     }
-    return /(TypeError|ReferenceError|QueryFailedError|UnhandledPromiseRejection)/i.test(value);
+    return /(TypeError|ReferenceError|QueryFailedError|UnhandledPromiseRejection)/i.test(
+      value,
+    );
   }
 }

@@ -74,6 +74,8 @@ export class AddPaymentIntents1773300000000 implements MigrationInterface {
       `DROP INDEX IF EXISTS "idx_payment_intents_owner_created"`,
     );
     await queryRunner.query(`DROP TABLE IF EXISTS "payment_intents"`);
-    await queryRunner.query(`DROP TYPE IF EXISTS "payment_intents_status_enum"`);
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "payment_intents_status_enum"`,
+    );
   }
 }

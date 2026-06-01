@@ -16,7 +16,11 @@ interface JwtPayload {
   sub: number;
 }
 
-type AuthenticatedSocket = Socket & { data: { userId?: number } };
+interface SocketUserData {
+  userId?: number;
+}
+
+type AuthenticatedSocket = Socket;
 
 function getSocketCorsOrigins(): string[] {
   const origins = process.env.ALLOWED_ORIGINS?.split(',')
@@ -62,7 +66,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const payload = this.jwtService.verify<JwtPayload>(token);
       const userId = payload.sub;
-      client.data.userId = userId;
+      this.setUserId(client, userId);
 
       void client.join(`user:${userId}`);
 
@@ -75,7 +79,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   async handleDisconnect(client: AuthenticatedSocket) {
-    const userId = client.data.userId;
+    const userId = this.getUserId(client);
     if (userId) {
       await this.redisService.getClient().del(`user:online:${userId}`);
       this.logger.log(`Client disconnected: ${userId}`);
@@ -88,7 +92,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() roomId: string,
   ) {
     void client.join(roomId);
-    this.logger.log(`User ${client.data.userId} joined room ${roomId}`);
+    this.logger.log(`User ${this.getUserId(client)} joined room ${roomId}`);
   }
 
   @SubscribeMessage('leave_room')
@@ -105,7 +109,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: { roomId: string; text: string },
   ) {
     this.server.to(payload.roomId).emit('new_message', {
-      senderId: client.data.userId,
+      senderId: this.getUserId(client),
       text: payload.text,
       timestamp: new Date(),
     });
@@ -119,5 +123,15 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     if (!rawToken) return undefined;
     return rawToken.replace(/^Bearer\s+/i, '');
+  }
+
+  private getUserId(client: Socket): number | undefined {
+    const data = client.data as SocketUserData;
+    return data.userId;
+  }
+
+  private setUserId(client: Socket, userId: number): void {
+    const data = client.data as SocketUserData;
+    data.userId = userId;
   }
 }

@@ -3,7 +3,13 @@ import { Document } from 'mongoose';
 
 @Schema({ timestamps: true })
 export class Conversation extends Document {
-  @Prop({ type: String, default: null, unique: true, sparse: true, index: true })
+  @Prop({
+    type: String,
+    default: null,
+    unique: true,
+    sparse: true,
+    index: true,
+  })
   directKey: string | null;
 
   @Prop({ required: true })

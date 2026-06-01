@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -247,8 +252,8 @@ export class SocialAgentPlannerService {
           authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-            model,
-            temperature: this.modelRouter?.getTemperature(useCase) ?? 0.15,
+          model,
+          temperature: this.modelRouter?.getTemperature(useCase) ?? 0.15,
           response_format: { type: 'json_object' },
           messages: [
             { role: 'system', content: this.buildSystemPrompt() },
@@ -673,7 +678,8 @@ export class SocialAgentPlannerService {
   }
 
   private deepSeekTimeoutMs(useCase?: 'planner'): number {
-    if (useCase && this.modelRouter) return this.modelRouter.getTimeout(useCase);
+    if (useCase && this.modelRouter)
+      return this.modelRouter.getTimeout(useCase);
     const configured = Number(
       this.config.get<string>('SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS') ??
         this.config.get<string>('DEEPSEEK_TIMEOUT_MS'),

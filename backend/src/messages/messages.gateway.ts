@@ -16,7 +16,11 @@ interface JwtPayload {
   email: string;
 }
 
-type AuthenticatedSocket = Socket & { data: { userId?: number } };
+interface SocketUserData {
+  userId?: number;
+}
+
+type AuthenticatedSocket = Socket;
 
 function getSocketCorsOrigins(): string[] {
   const origins = process.env.ALLOWED_ORIGINS?.split(',')
@@ -67,11 +71,11 @@ export class MessagesGateway
     }
 
     this.userSockets.set(userId, client.id);
-    client.data.userId = userId;
+    this.setUserId(client, userId);
   }
 
   handleDisconnect(client: AuthenticatedSocket) {
-    const userId = client.data.userId;
+    const userId = this.getUserId(client);
     if (userId) {
       this.userSockets.delete(userId);
     }
@@ -83,7 +87,7 @@ export class MessagesGateway
     data: { conversationId: string; content?: string; text?: string },
     @ConnectedSocket() client: AuthenticatedSocket,
   ) {
-    const userId = client.data.userId;
+    const userId = this.getUserId(client);
     const text = data.content ?? data.text ?? '';
 
     if (!userId) return { error: '未登录' };
@@ -143,5 +147,15 @@ export class MessagesGateway
     } catch {
       return null;
     }
+  }
+
+  private getUserId(client: Socket): number | undefined {
+    const data = client.data as SocketUserData;
+    return data.userId;
+  }
+
+  private setUserId(client: Socket, userId: number): void {
+    const data = client.data as SocketUserData;
+    data.userId = userId;
   }
 }

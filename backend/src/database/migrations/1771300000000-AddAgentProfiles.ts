@@ -97,7 +97,11 @@ export class AddAgentProfiles1771300000000 implements MigrationInterface {
     await queryRunner.query(
       `DROP TYPE IF EXISTS "agent_profiles_autonomyLevel_enum"`,
     );
-    await queryRunner.query(`DROP TYPE IF EXISTS "agent_profiles_provider_enum"`);
-    await queryRunner.query(`DROP TYPE IF EXISTS "agent_profiles_agentType_enum"`);
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "agent_profiles_provider_enum"`,
+    );
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "agent_profiles_agentType_enum"`,
+    );
   }
 }

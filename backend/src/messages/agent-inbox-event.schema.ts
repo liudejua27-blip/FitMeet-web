@@ -22,9 +22,14 @@ export class AgentInboxEvent extends Document {
   ownerUserId: number;
 
   @Prop({ required: true, index: true })
-  eventType: AgentInboxEventType | string;
+  eventType: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'Conversation', default: null, index: true })
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'Conversation',
+    default: null,
+    index: true,
+  })
   conversationId: Types.ObjectId | null;
 
   @Prop({ type: Types.ObjectId, ref: 'Message', default: null, index: true })

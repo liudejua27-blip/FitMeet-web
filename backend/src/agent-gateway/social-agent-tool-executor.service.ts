@@ -821,7 +821,8 @@ export class SocialAgentToolExecutorService {
       relatedSocialRequestId: this.relatedSocialRequestIdFor(input, null),
       relatedCandidateId: this.relatedCandidateIdFor(toolName, input, null),
       relatedActivityId: this.relatedActivityIdFor(toolName, input, null),
-      rationale: policy.safetyPrompts.join('；') || 'Agent 已按场景风险策略暂停执行。',
+      rationale:
+        policy.safetyPrompts.join('；') || 'Agent 已按场景风险策略暂停执行。',
     });
 
     return {
@@ -1072,16 +1073,20 @@ export class SocialAgentToolExecutorService {
       Object.keys(dto).length > 0
         ? await this.socialProfiles.upsert(task.ownerUserId, dto)
         : await this.socialProfiles.get(task.ownerUserId);
-    await this.createTaskEvent(task, AgentTaskEventType.SocialAgentContextAppended, {
-      summary: 'Updated social profile from agent context',
-      payload: {
-        extractedProfile: extracted,
-        updatedFields,
-        memoryFields,
-        missingFields,
-        sourceMessage,
+    await this.createTaskEvent(
+      task,
+      AgentTaskEventType.SocialAgentContextAppended,
+      {
+        summary: 'Updated social profile from agent context',
+        payload: {
+          extractedProfile: extracted,
+          updatedFields,
+          memoryFields,
+          missingFields,
+          sourceMessage,
+        },
       },
-    });
+    );
     return {
       success: true,
       updatedFields,
@@ -1344,7 +1349,11 @@ export class SocialAgentToolExecutorService {
         where: { id: publicIntentId },
       });
       const publicIntentUserId = this.number(publicIntent?.userId);
-      if (targetUserId && publicIntentUserId && targetUserId !== publicIntentUserId) {
+      if (
+        targetUserId &&
+        publicIntentUserId &&
+        targetUserId !== publicIntentUserId
+      ) {
         throw this.targetBadRequest(
           'MISSING_TARGET_USER',
           '公开约练卡片目标用户不一致',
@@ -2730,7 +2739,7 @@ export class SocialAgentToolExecutorService {
     }
 
     const useCase = this.modelUseCaseForPurpose(purpose);
-    let model = this.modelFor(useCase);
+    const model = this.modelFor(useCase);
     const startedAt = Date.now();
     try {
       const baseUrl =
@@ -3538,7 +3547,9 @@ export class SocialAgentToolExecutorService {
     };
   }
 
-  private isUserConfirmedCandidateAction(toolName: SocialAgentToolName): boolean {
+  private isUserConfirmedCandidateAction(
+    toolName: SocialAgentToolName,
+  ): boolean {
     return [
       SocialAgentToolName.SendMessage,
       SocialAgentToolName.SendMessageToCandidate,
@@ -3799,7 +3810,10 @@ export class SocialAgentToolExecutorService {
       mode === 'open' || mode === 'lab' || mode === 'manual_confirm'
         ? AgentTaskPermissionMode.LimitedAuto
         : (mode as AgentTaskPermissionMode);
-    if (registeredTool && !registeredTool.permissionMode.includes(registryMode)) {
+    if (
+      registeredTool &&
+      !registeredTool.permissionMode.includes(registryMode)
+    ) {
       throw new ForbiddenException(
         `Tool ${toolName} is not registered for permission mode ${mode}`,
       );
@@ -3850,13 +3864,19 @@ export class SocialAgentToolExecutorService {
     const limit = HIGH_RISK_TOOL_DAILY_LIMITS[toolName] ?? null;
     const registeredTool = this.toolRegistry.getToolByExecutorName(toolName);
     const sceneRisk = this.sceneRisk.evaluate({
-      sceneType: this.string(input.sceneType ?? input.activityType ?? input.type),
+      sceneType: this.string(
+        input.sceneType ?? input.activityType ?? input.type,
+      ),
       actionType: this.sceneActionTypeForTool(toolName),
       text: `${task.goal ?? ''} ${task.title ?? ''} ${this.safeUnknownText(input)}`,
       permissionMode: task.permissionMode,
-      involvesMoney: this.bool(input.involvesMoney ?? input.hasMoney ?? input.money),
+      involvesMoney: this.bool(
+        input.involvesMoney ?? input.hasMoney ?? input.money,
+      ),
       preciseLocation: this.bool(
-        input.preciseLocation ?? input.sharePreciseLocation ?? input.exactLocation,
+        input.preciseLocation ??
+          input.sharePreciseLocation ??
+          input.exactLocation,
       ),
     });
     const highRisk =
@@ -3873,7 +3893,9 @@ export class SocialAgentToolExecutorService {
       registryToolName: registeredTool?.name ?? null,
       category: registeredTool?.category ?? null,
       requiresApproval:
-        sceneRisk.requiresConfirmation || registeredTool?.requiresApproval || false,
+        sceneRisk.requiresConfirmation ||
+        registeredTool?.requiresApproval ||
+        false,
       requiresDoubleConfirmation: sceneRisk.requiresDoubleConfirmation,
       riskLevel: this.riskLevelForPolicy(sceneRisk.riskLevel),
       sceneRisk,
@@ -3928,7 +3950,7 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.AddFriend:
         return SocialAgentAction.AddFriend;
       case SocialAgentToolName.InviteActivity:
-        return mode === AgentTaskPermissionMode.LimitedAuto
+        return String(mode) === 'limited_auto'
           ? SocialAgentAction.OfflineMeet
           : SocialAgentAction.SendInvite;
       case SocialAgentToolName.CreateActivity:
@@ -4121,8 +4143,14 @@ export class SocialAgentToolExecutorService {
       } catch {
         text = '[unserializable]';
       }
-    } else {
+    } else if (
+      typeof value === 'number' ||
+      typeof value === 'boolean' ||
+      typeof value === 'bigint'
+    ) {
       text = String(value);
+    } else {
+      text = '[unsupported]';
     }
 
     if (max <= 0) return '';

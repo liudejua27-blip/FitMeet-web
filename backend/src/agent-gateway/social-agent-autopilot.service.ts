@@ -3,7 +3,10 @@ import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, MoreThan, Repository } from 'typeorm';
 
-import { MessagesService, RecentAgentConversationSignal } from '../messages/messages.service';
+import {
+  MessagesService,
+  RecentAgentConversationSignal,
+} from '../messages/messages.service';
 import {
   UserSocialRequest,
   UserSocialRequestStatus,
@@ -157,7 +160,12 @@ export class SocialAgentAutopilotService {
         maxTasks,
         summary,
       );
-      await this.collectSocialRequestTasks(tasks, ownerUserId, maxTasks, summary);
+      await this.collectSocialRequestTasks(
+        tasks,
+        ownerUserId,
+        maxTasks,
+        summary,
+      );
 
       summary.queuedTasks = tasks.size;
       for (const task of [...tasks.values()].slice(0, maxTasks)) {
@@ -188,9 +196,10 @@ export class SocialAgentAutopilotService {
         new Date(summary.startedAt).getTime();
       await this.writeAutopilotLog('social_agent_autopilot.completed', {
         ownerUserId,
-        actionStatus: summary.errors > 0
-          ? AgentActionStatus.Failed
-          : AgentActionStatus.Executed,
+        actionStatus:
+          summary.errors > 0
+            ? AgentActionStatus.Failed
+            : AgentActionStatus.Executed,
         status: summary.errors > 0 ? 'completed_with_errors' : 'completed',
         payload: summary as unknown as Record<string, unknown>,
       });
@@ -448,9 +457,12 @@ export class SocialAgentAutopilotService {
       .andWhere('task.agentConnectionId = :agentConnectionId', {
         agentConnectionId: signal.agentConnectionId,
       })
-      .andWhere(`"task"."memory" -> 'socialLoop' ->> 'conversationId' = :conversationId`, {
-        conversationId: signal.conversationId,
-      })
+      .andWhere(
+        `"task"."memory" -> 'socialLoop' ->> 'conversationId' = :conversationId`,
+        {
+          conversationId: signal.conversationId,
+        },
+      )
       .orderBy('task.updatedAt', 'DESC')
       .getOne();
   }
@@ -460,9 +472,7 @@ export class SocialAgentAutopilotService {
     signal: RecentAgentConversationSignal,
   ): Promise<AgentTask> {
     const memory = this.isRecord(task.memory) ? task.memory : {};
-    const loop = this.isRecord(memory.socialLoop)
-      ? (memory.socialLoop as Record<string, unknown>)
-      : {};
+    const loop = this.isRecord(memory.socialLoop) ? memory.socialLoop : {};
 
     task.memory = {
       ...memory,
@@ -488,9 +498,7 @@ export class SocialAgentAutopilotService {
 
   private hasProcessedMessage(task: AgentTask, messageId: string): boolean {
     const memory = this.isRecord(task.memory) ? task.memory : {};
-    const loop = this.isRecord(memory.socialLoop)
-      ? (memory.socialLoop as Record<string, unknown>)
-      : {};
+    const loop = this.isRecord(memory.socialLoop) ? memory.socialLoop : {};
     const processed = Array.isArray(loop.processedMessageIds)
       ? loop.processedMessageIds
       : [];
@@ -531,12 +539,15 @@ export class SocialAgentAutopilotService {
   private permissionModeFromMetadata(
     metadata: Record<string, unknown> | null | undefined,
   ): AgentTaskPermissionMode | null {
-    const raw = typeof metadata?.permissionMode === 'string'
-      ? metadata.permissionMode
-      : null;
+    const raw =
+      typeof metadata?.permissionMode === 'string'
+        ? metadata.permissionMode
+        : null;
     if (
       raw &&
-      Object.values(AgentTaskPermissionMode).includes(raw as AgentTaskPermissionMode)
+      Object.values(AgentTaskPermissionMode).includes(
+        raw as AgentTaskPermissionMode,
+      )
     ) {
       return raw as AgentTaskPermissionMode;
     }
@@ -551,7 +562,8 @@ export class SocialAgentAutopilotService {
       SocialAgentToolName.ReadInbox,
     ]);
     return result.toolCalls.filter(
-      (call) => call.status === 'succeeded' && !internalTools.has(call.toolName),
+      (call) =>
+        call.status === 'succeeded' && !internalTools.has(call.toolName),
     ).length;
   }
 
@@ -623,9 +635,11 @@ export class SocialAgentAutopilotService {
 }
 
 function isEnabled(): boolean {
-  return String(process.env.ENABLE_SOCIAL_AGENT_AUTOPILOT ?? '')
-    .trim()
-    .toLowerCase() === 'true';
+  return (
+    String(process.env.ENABLE_SOCIAL_AGENT_AUTOPILOT ?? '')
+      .trim()
+      .toLowerCase() === 'true'
+  );
 }
 
 function configuredIntervalMs(): number {
@@ -641,7 +655,9 @@ function configuredMaxTasksPerRun(): number {
 }
 
 function recentMessageSince(): Date {
-  return new Date(Date.now() - Math.max(configuredIntervalMs() * 3, 5 * 60 * 1000));
+  return new Date(
+    Date.now() - Math.max(configuredIntervalMs() * 3, 5 * 60 * 1000),
+  );
 }
 
 function recentSocialRequestSince(): Date {

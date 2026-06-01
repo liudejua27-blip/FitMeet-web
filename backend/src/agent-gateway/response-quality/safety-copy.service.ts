@@ -22,14 +22,13 @@ export class SafetyCopyService {
   }
 
   boundaryNotes(safety?: FitMeetAgentSafety): string[] {
-    const notes =
-      safety?.boundaryNotes?.length
-        ? safety.boundaryNotes
-        : [
-            '第一次见面建议选择白天、公开、人多、方便离开的地点。',
-            '不会自动共享手机号、微信或精确位置。',
-            '任何线下邀请都需要你确认后才会继续。',
-          ];
+    const notes = safety?.boundaryNotes?.length
+      ? safety.boundaryNotes
+      : [
+          '第一次见面建议选择白天、公开、人多、方便离开的地点。',
+          '不会自动共享手机号、微信或精确位置。',
+          '任何线下邀请都需要你确认后才会继续。',
+        ];
     return notes
       .map((item) => this.tone.cleanUserText(item, ''))
       .filter(Boolean)

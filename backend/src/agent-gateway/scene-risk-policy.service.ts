@@ -84,10 +84,7 @@ const DOUBLE_CONFIRM_SCENES = new Set<SocialSceneType>([
   'travel',
 ]);
 
-const STRICT_CONFIRM_SCENES = new Set<SocialSceneType>([
-  'fitness',
-  'walking',
-]);
+const STRICT_CONFIRM_SCENES = new Set<SocialSceneType>(['fitness', 'walking']);
 
 @Injectable()
 export class SceneRiskPolicyService {
@@ -99,7 +96,8 @@ export class SceneRiskPolicyService {
     const involvesMoney =
       input.involvesMoney === true || this.hasMoneySignal(text);
     const preciseLocation =
-      input.preciseLocation === true || /精确定位|实时定位|共享位置|当前位置|定位共享/i.test(text);
+      input.preciseLocation === true ||
+      /精确定位|实时定位|共享位置|当前位置|定位共享/i.test(text);
 
     let riskLevel = this.baseRisk(actionType);
     const safetyPrompts: string[] = [];
@@ -115,7 +113,9 @@ export class SceneRiskPolicyService {
     ) {
       riskLevel = 'critical';
       blockedActions.push('auto_execute');
-      safetyPrompts.push('支付、钱包、精确定位和交换联系方式必须由用户亲自确认，Agent 不能自动执行。');
+      safetyPrompts.push(
+        '支付、钱包、精确定位和交换联系方式必须由用户亲自确认，Agent 不能自动执行。',
+      );
     }
 
     if (
@@ -124,12 +124,16 @@ export class SceneRiskPolicyService {
     ) {
       riskLevel = 'critical';
       blockedActions.push('auto_execute', 'precise_location');
-      safetyPrompts.push('你的 Life Graph 不允许共享精确定位，Agent 不能自动发送位置。');
+      safetyPrompts.push(
+        '你的 Life Graph 不允许共享精确定位，Agent 不能自动发送位置。',
+      );
     }
 
     if (safetySignals.publicPlaceOnly && actionType === 'offline_meeting') {
       riskLevel = this.maxRisk(riskLevel, 'high');
-      safetyPrompts.push('你的 Life Graph 设置了公共场所优先，第一次见面必须选择公开、人多、好离开的地点。');
+      safetyPrompts.push(
+        '你的 Life Graph 设置了公共场所优先，第一次见面必须选择公开、人多、好离开的地点。',
+      );
     }
 
     if (
@@ -141,12 +145,19 @@ export class SceneRiskPolicyService {
         actionType === 'send_message')
     ) {
       riskLevel = this.maxRisk(riskLevel, 'high');
-      safetyPrompts.push('你的 Life Graph 显示不接受夜间活动，夜间约见需要高风险提醒并建议改到白天。');
+      safetyPrompts.push(
+        '你的 Life Graph 显示不接受夜间活动，夜间约见需要高风险提醒并建议改到白天。',
+      );
     }
 
-    if (safetySignals.strictConfirmationRequired && !LOW_ACTIONS.has(actionType)) {
+    if (
+      safetySignals.strictConfirmationRequired &&
+      !LOW_ACTIONS.has(actionType)
+    ) {
       riskLevel = this.maxRisk(riskLevel, 'medium');
-      safetyPrompts.push('你的 Life Graph 要求严格确认，所有关键社交动作都需要进入待确认。');
+      safetyPrompts.push(
+        '你的 Life Graph 要求严格确认，所有关键社交动作都需要进入待确认。',
+      );
     }
 
     if (actionType === 'offline_meeting') {
@@ -161,16 +172,25 @@ export class SceneRiskPolicyService {
 
     if (STRICT_CONFIRM_SCENES.has(sceneType) && !LOW_ACTIONS.has(actionType)) {
       riskLevel = this.maxRisk(riskLevel, 'medium');
-      safetyPrompts.push('健身、散步属于线下同伴场景，发消息、约练和见面都需要先让用户确认。');
+      safetyPrompts.push(
+        '健身、散步属于线下同伴场景，发消息、约练和见面都需要先让用户确认。',
+      );
     }
 
-    if ((sceneType === 'mahjong' || sceneType === 'poker') && !LOW_ACTIONS.has(actionType)) {
+    if (
+      (sceneType === 'mahjong' || sceneType === 'poker') &&
+      !LOW_ACTIONS.has(actionType)
+    ) {
       if (involvesMoney) {
         riskLevel = this.maxRisk(riskLevel, 'high');
-        safetyPrompts.push('麻将/扑克涉及金钱时必须提示高风险，并确认只在公开合规地点进行。');
+        safetyPrompts.push(
+          '麻将/扑克涉及金钱时必须提示高风险，并确认只在公开合规地点进行。',
+        );
       } else {
         riskLevel = this.maxRisk(riskLevel, 'medium');
-        safetyPrompts.push('麻将/扑克需要先确认是否涉钱、是否公开地点、是否只是娱乐局。');
+        safetyPrompts.push(
+          '麻将/扑克需要先确认是否涉钱、是否公开地点、是否只是娱乐局。',
+        );
       }
     }
 
@@ -184,16 +204,20 @@ export class SceneRiskPolicyService {
       requiresDoubleConfirmation,
     });
     const lifeGraphRequiresConfirmation =
-      Boolean(safetySignals.strictConfirmationRequired) && !LOW_ACTIONS.has(actionType);
+      Boolean(safetySignals.strictConfirmationRequired) &&
+      !LOW_ACTIONS.has(actionType);
 
     if (permissionMode === 'lab') {
       blockedActions.push('execute_real_action');
-      safetyPrompts.push('实验室模式只模拟结果，不会真实发消息、加好友、创建活动、共享定位或支付。');
+      safetyPrompts.push(
+        '实验室模式只模拟结果，不会真实发消息、加好友、创建活动、共享定位或支付。',
+      );
     }
 
     return {
       riskLevel,
-      requiresConfirmation: requiresConfirmation || lifeGraphRequiresConfirmation,
+      requiresConfirmation:
+        requiresConfirmation || lifeGraphRequiresConfirmation,
       requiresDoubleConfirmation,
       blockedActions: [...new Set(blockedActions)],
       safetyPrompts: [...new Set(safetyPrompts)],
@@ -217,7 +241,8 @@ export class SceneRiskPolicyService {
 
   normalizeScene(sceneType?: string | null, text = ''): SocialSceneType {
     const raw = `${sceneType ?? ''} ${text}`.toLowerCase();
-    if (/健身|约练|撸铁|gym|fitness|workout|跑步|运动/.test(raw)) return 'fitness';
+    if (/健身|约练|撸铁|gym|fitness|workout|跑步|运动/.test(raw))
+      return 'fitness';
     if (/散步|walk|walking/.test(raw)) return 'walking';
     if (/拍照|摄影|photo|camera/.test(raw)) return 'photo';
     if (/旅游|旅行|出游|travel|trip/.test(raw)) return 'travel';
@@ -233,12 +258,15 @@ export class SceneRiskPolicyService {
     const raw = `${actionType ?? ''} ${text}`.toLowerCase();
     if (/wallet|钱包/.test(raw)) return 'wallet';
     if (/payment|pay|支付|付款|转账/.test(raw)) return 'payment';
-    if (/precise_location|精确定位|实时定位/.test(raw)) return 'precise_location';
+    if (/precise_location|精确定位|实时定位/.test(raw))
+      return 'precise_location';
     if (/share_location|定位|位置共享/.test(raw)) return 'share_location';
-    if (/contact_exchange|phone|wechat|微信|手机号|联系方式/.test(raw)) return 'contact_exchange';
+    if (/contact_exchange|phone|wechat|微信|手机号|联系方式/.test(raw))
+      return 'contact_exchange';
     if (/offline|meet|见面|线下/.test(raw)) return 'offline_meeting';
     if (/add_friend|friend|connect|加好友|好友/.test(raw)) return 'add_friend';
-    if (/send_message|message|发消息|私信|聊天/.test(raw)) return 'send_message';
+    if (/send_message|message|发消息|私信|聊天/.test(raw))
+      return 'send_message';
     if (/create_workout|workout|约练/.test(raw)) return 'create_workout';
     if (/create_activity|invite_activity|join_activity|活动|报名/.test(raw)) {
       return 'create_activity';
@@ -265,8 +293,10 @@ export class SceneRiskPolicyService {
   }): boolean {
     if (input.permissionMode === 'lab') return false;
     if (input.riskLevel === 'critical') return true;
-    if (input.permissionMode === 'manual_confirm') return !LOW_ACTIONS.has(input.actionType);
-    if (input.permissionMode === 'limited_auto') return !LOW_ACTIONS.has(input.actionType);
+    if (input.permissionMode === 'manual_confirm')
+      return !LOW_ACTIONS.has(input.actionType);
+    if (input.permissionMode === 'limited_auto')
+      return !LOW_ACTIONS.has(input.actionType);
     if (input.permissionMode === 'open') return input.riskLevel !== 'low';
     return true;
   }
@@ -277,7 +307,9 @@ export class SceneRiskPolicyService {
   }
 
   private hasMoneySignal(text: string): boolean {
-    return /钱|金额|押金|AA|转账|付款|支付|赌|筹码|牌费|房租|deposit|money|cash|fee/i.test(text);
+    return /钱|金额|押金|AA|转账|付款|支付|赌|筹码|牌费|房租|deposit|money|cash|fee/i.test(
+      text,
+    );
   }
 
   private doubleConfirmPrompt(sceneType: SocialSceneType): string {

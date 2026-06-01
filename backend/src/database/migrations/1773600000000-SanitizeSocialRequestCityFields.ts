@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class SanitizeSocialRequestCityFields1773600000000
-  implements MigrationInterface
-{
+export class SanitizeSocialRequestCityFields1773600000000 implements MigrationInterface {
   name = 'SanitizeSocialRequestCityFields1773600000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

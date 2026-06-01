@@ -1,7 +1,9 @@
 import { ConfigService } from '@nestjs/config';
 import { SocialAgentModelRouterService } from './social-agent-model-router.service';
 
-function makeConfig(env: Record<string, string | undefined> = {}): ConfigService {
+function makeConfig(
+  env: Record<string, string | undefined> = {},
+): ConfigService {
   return {
     get: jest.fn((key: string) => env[key]),
   } as unknown as ConfigService;

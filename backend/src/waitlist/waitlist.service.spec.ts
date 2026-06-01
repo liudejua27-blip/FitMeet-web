@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await */
 import { InviteCode } from './entities/invite-code.entity';
 import { WaitlistAnalyticsEvent } from './entities/waitlist-analytics-event.entity';
 import { WaitlistAppEntry } from './entities/waitlist-app-entry.entity';
@@ -17,7 +18,11 @@ function repo<T extends Record<string, unknown>>(initialRows: T[] = []) {
   let nextId = rows.length + 1;
   const matches = (row: T, where?: Record<string, unknown>) =>
     Object.entries(where ?? {}).every(([key, value]) => {
-      if (value && typeof value === 'object' && '_type' in (value as Record<string, unknown>)) {
+      if (
+        value &&
+        typeof value === 'object' &&
+        '_type' in (value as Record<string, unknown>)
+      ) {
         return true;
       }
       return (row as Record<string, unknown>)[key] === value;
@@ -46,19 +51,32 @@ function repo<T extends Record<string, unknown>>(initialRows: T[] = []) {
       async ({ where }: { where?: Record<string, unknown> } = {}) =>
         rows.find((row) => matches(row, where)) ?? null,
     ),
-    find: jest.fn(async ({ where, take }: { where?: Record<string, unknown>; take?: number } = {}) =>
-      rows.filter((row) => matches(row, where)).slice(0, take),
+    find: jest.fn(
+      async ({
+        where,
+        take,
+      }: { where?: Record<string, unknown>; take?: number } = {}) =>
+        rows.filter((row) => matches(row, where)).slice(0, take),
     ),
     findAndCount: jest.fn(
-      async ({ where, skip = 0, take = 30 }: { where?: Record<string, unknown>; skip?: number; take?: number } = {}) => {
+      async ({
+        where,
+        skip = 0,
+        take = 30,
+      }: {
+        where?: Record<string, unknown>;
+        skip?: number;
+        take?: number;
+      } = {}) => {
         const filtered = Array.isArray(where)
           ? rows.filter((row) => where.some((item) => matches(row, item)))
           : rows.filter((row) => matches(row, where));
         return [filtered.slice(skip, skip + take), filtered.length];
       },
     ),
-    count: jest.fn(async ({ where }: { where?: Record<string, unknown> } = {}) =>
-      rows.filter((row) => matches(row, where)).length,
+    count: jest.fn(
+      async ({ where }: { where?: Record<string, unknown> } = {}) =>
+        rows.filter((row) => matches(row, where)).length,
     ),
   };
 }
@@ -146,7 +164,10 @@ describe('WaitlistService', () => {
       valid: true,
       remainingUses: 2,
     });
-    await service.submitAppWaitlist({ ...input, inviteCode: 'QDU2026' }, { ip: '127.0.0.1' });
+    await service.submitAppWaitlist(
+      { ...input, inviteCode: 'QDU2026' },
+      { ip: '127.0.0.1' },
+    );
 
     expect(inviteCodes.rows[0].usedCount).toBe(1);
   });
@@ -159,7 +180,10 @@ describe('WaitlistService', () => {
     });
 
     await expect(
-      service.submitAppWaitlist({ ...input, inviteCode: 'OLD2026' }, { ip: '127.0.0.1' }),
+      service.submitAppWaitlist(
+        { ...input, inviteCode: 'OLD2026' },
+        { ip: '127.0.0.1' },
+      ),
     ).rejects.toThrow('邀请码已过期');
   });
 

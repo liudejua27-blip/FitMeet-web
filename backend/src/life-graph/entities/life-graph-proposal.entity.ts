@@ -25,7 +25,11 @@ export class LifeGraphProposal {
   @Column({ type: 'jsonb', default: [] })
   proposedFields: unknown[];
 
-  @Column({ type: 'varchar', length: 48, default: LifeGraphProposalStatus.Proposed })
+  @Column({
+    type: 'varchar',
+    length: 48,
+    default: LifeGraphProposalStatus.Proposed,
+  })
   status: LifeGraphProposalStatus;
 
   @Column({ type: 'text', default: '' })

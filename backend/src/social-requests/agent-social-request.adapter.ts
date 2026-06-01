@@ -9,7 +9,6 @@ import { Repository } from 'typeorm';
 import { SocialRequestsService } from './social-requests.service';
 import {
   SocialRequestSafety,
-  SocialRequestSource,
   SocialRequestType,
   SocialRequestVisibility,
   UserSocialRequest,
@@ -19,7 +18,10 @@ import { CreateSocialRequestDto as NewCreateSocialRequestDto } from './dto/creat
 import { CreateSocialRequestDto as LegacyCreateSocialRequestDto } from '../agent-gateway/dto/agent-gateway.dto';
 import { MatchService, MatchedCandidateView } from '../match/match.service';
 import { AgentConnection } from '../agent-gateway/entities/agent-connection.entity';
-import { SocialRequestStatus as LegacyStatus, SocialRequestRiskLevel as LegacyRiskLevel } from '../agent-gateway/entities/social-request.entity';
+import {
+  SocialRequestStatus as LegacyStatus,
+  SocialRequestRiskLevel as LegacyRiskLevel,
+} from '../agent-gateway/entities/social-request.entity';
 import { SocialRequestCandidate } from '../match/social-request-candidate.entity';
 import {
   AgentActivityLog,
@@ -86,21 +88,21 @@ export class AgentSocialRequestAdapter {
       };
       try {
         await this.logRepo.save(
-        this.logRepo.create({
-          agentConnectionId: agent.id,
-          userId: agent.userId,
-          ownerUserId: agent.userId,
-          action: LoggedAction.CreateSocialRequest,
-          eventType: 'match.completed',
-          status: 'success',
-          payload: {
-            requestType: dto.requestType,
-            requestId: request.id,
-            resultCount: candidates.length,
-          },
-          result: ActionResult.Success,
-          riskScore: 0,
-        }),
+          this.logRepo.create({
+            agentConnectionId: agent.id,
+            userId: agent.userId,
+            ownerUserId: agent.userId,
+            action: LoggedAction.CreateSocialRequest,
+            eventType: 'match.completed',
+            status: 'success',
+            payload: {
+              requestType: dto.requestType,
+              requestId: request.id,
+              resultCount: candidates.length,
+            },
+            result: ActionResult.Success,
+            riskScore: 0,
+          }),
         );
       } catch (err) {
         this.logger.warn(
@@ -111,25 +113,25 @@ export class AgentSocialRequestAdapter {
       }
       try {
         await this.messages.createAgentInboxEvent({
-        agentConnectionId: agent.id,
-        ownerUserId: agent.userId,
-        eventType: 'match.completed',
-        requestId: request.id,
-        contentPreview: `已为你匹配到 ${candidates.length} 位候选人`,
-        dedupeKey: `${agent.id}:match.completed:${request.id}`,
-        metadata: {
+          agentConnectionId: agent.id,
+          ownerUserId: agent.userId,
+          eventType: 'match.completed',
           requestId: request.id,
-          candidateCount: candidates.length,
-          candidates: candidates.slice(0, 10).map((candidate) => ({
-            candidateUserId: candidate.userId,
-            candidateRecordId: candidate.candidateRecordId ?? null,
-            score: candidate.score,
-            level: candidate.level,
-            reasonTags: candidate.commonTags ?? [],
-          })),
-          ...handoff,
-        },
-      });
+          contentPreview: `已为你匹配到 ${candidates.length} 位候选人`,
+          dedupeKey: `${agent.id}:match.completed:${request.id}`,
+          metadata: {
+            requestId: request.id,
+            candidateCount: candidates.length,
+            candidates: candidates.slice(0, 10).map((candidate) => ({
+              candidateUserId: candidate.userId,
+              candidateRecordId: candidate.candidateRecordId ?? null,
+              score: candidate.score,
+              level: candidate.level,
+              reasonTags: candidate.commonTags ?? [],
+            })),
+            ...handoff,
+          },
+        });
       } catch (err) {
         this.logger.warn(
           `agent match inbox event failed: ${
@@ -256,7 +258,10 @@ export class AgentSocialRequestAdapter {
     };
   }
 
-  private inferType(requestType: string, description?: string): SocialRequestType {
+  private inferType(
+    requestType: string,
+    description?: string,
+  ): SocialRequestType {
     const haystack = `${requestType ?? ''} ${description ?? ''}`.toLowerCase();
     if (/run|跑步/.test(haystack)) return SocialRequestType.RunningPartner;
     if (/gym|健身|workout|训练/.test(haystack))
@@ -294,7 +299,8 @@ export class AgentSocialRequestAdapter {
   ) {
     const candidateUserIds =
       candidates?.map((c) => c.userId) ??
-      ((r.metadata?.candidateUserIds as number[] | undefined) ?? []);
+      (r.metadata?.candidateUserIds as number[] | undefined) ??
+      [];
     return {
       id: r.id,
       userId: r.userId,
