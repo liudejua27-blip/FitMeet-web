@@ -191,10 +191,28 @@ GitHub Actions 工作流在 `.github/workflows/ci.yml`。当前基线包含：
 容器化部署以根目录 `docker-compose.yml` 和 `.env.example` 为参考：
 
 1. 准备生产 `.env`，替换所有 `CHANGE_ME`。
-2. 确认 `JWT_SECRET`、数据库密码、Redis 密码、对象存储密钥、微信/短信/AI key 不使用默认值。
-3. 后端构建后运行 `pnpm migration:run:prod` 或等价迁移流程。
-4. 前端生产环境设置 `VITE_API_BASE_URL=/api` 或目标 API 域名。
-5. 配置反向代理，把 `/api` 转发到 Nest 服务，把 Web 静态资源指向对应构建产物。
+2. 运行生产环境变量检查，不会打印密钥值，只报告缺失项和风险项：
+
+```bash
+cd backend
+pnpm check:prod-env -- ../.env.production
+```
+
+3. 确认 `JWT_SECRET`、数据库密码、Redis 密码、对象存储密钥、微信/短信/AI key 不使用默认值。
+4. 后端构建后运行 `pnpm migration:run:prod` 或等价迁移流程。
+5. 前端生产环境设置 `VITE_API_BASE_URL=/api` 或目标 API 域名。
+6. 配置反向代理，把 `/api` 转发到 Nest 服务，把 Web 静态资源指向对应构建产物。
+
+部署前建议按这个顺序收口：
+
+```bash
+cd backend && pnpm lint && pnpm build && pnpm test
+cd backend && pnpm check:prod-env -- ../.env.production
+cd backend && pnpm migration:run:prod
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+```
+
+如果检查器报 `OBJECT_STORAGE`，头像上传和朋友圈图片会在生产环境被禁用；如果报 `DEEPSEEK_API_KEY`，Social Agent 会退回确定性 fallback，不满足企业级 Agent 发布标准。
 
 Next 落地页可以独立部署到 Vercel、Node 服务或容器，和主 Web 的发布节奏可以分开。
 

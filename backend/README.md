@@ -50,6 +50,14 @@ pnpm build
 pnpm test
 ```
 
+Production env readiness:
+
+```bash
+pnpm check:prod-env -- ../.env.production
+```
+
+The readiness command validates required production keys, HTTPS origins, migration/synchronize policy, object storage for uploads, and Agent model keys without printing secret values.
+
 Focused checks:
 
 ```bash

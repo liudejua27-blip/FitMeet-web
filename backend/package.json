@@ -14,6 +14,7 @@
     "migration:status": "ts-node -r tsconfig-paths/register scripts/migration-status.ts",
     "migration:generate": "typeorm-ts-node-commonjs migration:generate src/database/migrations/GeneratedMigration -d src/database/data-source.ts",
     "migration:create": "typeorm migration:create src/database/migrations/ManualMigration",
+    "check:prod-env": "ts-node -r tsconfig-paths/register scripts/check-production-env.ts",
     "db:repair:agent-modes": "node scripts/repair-agent-mode-enums-20260521.js",
     "seed:living-social-data": "ts-node -r tsconfig-paths/register scripts/seed-living-social-data.ts",
     "start": "nest start",
