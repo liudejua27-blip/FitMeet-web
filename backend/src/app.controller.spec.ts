@@ -108,5 +108,51 @@ describe('AppController', () => {
         contract.components.schemas.ConversationMessage.required,
       ).toContain('conversationId');
     });
+
+    it('documents the iOS moment feed contract used by staging E2E', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+      const feedPath = contract.paths['/feed'];
+      const limitParam = feedPath.get.parameters.find(
+        (param) => param.name === 'limit',
+      );
+
+      expect(limitParam?.schema).toMatchObject({ maximum: 50 });
+      expect(contract.components.schemas.FeedPage).toMatchObject({
+        required: ['data', 'metadata'],
+        properties: {
+          metadata: { $ref: '#/components/schemas/FeedMetadata' },
+        },
+      });
+      expect(contract.components.schemas.FeedMetadata.required).toEqual([
+        'total',
+        'page',
+        'lastPage',
+      ]);
+      expect(contract.components.schemas.CreatePostInput).toMatchObject({
+        required: ['type', 'sport', 'text'],
+        properties: {
+          title: { type: 'string' },
+          tags: { type: 'array', items: { type: 'string' } },
+          images: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/FeedImage' },
+          },
+          city: { type: 'string' },
+          loc: { type: 'string' },
+          address: { type: 'string' },
+        },
+      });
+      expect(contract.components.schemas.Post.properties).toMatchObject({
+        userId: { type: 'integer' },
+        type: { type: 'string' },
+        sport: { type: 'string' },
+        title: { type: 'string' },
+        username: { type: 'string' },
+        images: {
+          type: 'array',
+          items: { $ref: '#/components/schemas/FeedImage' },
+        },
+      });
+    });
   });
 });
