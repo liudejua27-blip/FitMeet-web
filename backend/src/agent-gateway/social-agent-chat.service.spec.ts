@@ -452,6 +452,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
       approvals as never,
       executor as never,
       options.sessionAssembler as never,
+      longTermMemory as never,
     );
 
   const service = new SocialAgentChatService(

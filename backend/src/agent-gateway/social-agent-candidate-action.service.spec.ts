@@ -51,29 +51,82 @@ function makeHarness(initialTask = makeTask()) {
       }),
     ),
   };
+  const longTermMemory = {
+    summarizeTask: jest.fn().mockResolvedValue(undefined),
+  };
   const executor = {
-    executeToolAction: jest.fn().mockResolvedValue({
-      id: 'action_send_candidate_message_1',
-      toolName: SocialAgentToolName.SendMessageToCandidate,
-      status: 'succeeded',
-      output: {
-        id: 'msg-1',
-        messageId: 'msg-1',
-        conversationId: 'conv-1',
-      },
-      error: null,
+    resolveCandidateTargetUser: jest.fn((input: Record<string, unknown>) => {
+      const candidate =
+        typeof input.candidate === 'object' && input.candidate !== null
+          ? (input.candidate as Record<string, unknown>)
+          : {};
+      return Promise.resolve(
+        Number(
+          input.targetUserId ??
+            input.candidateUserId ??
+            input.userId ??
+            candidate.targetUserId ??
+            candidate.candidateUserId ??
+            candidate.userId,
+        ),
+      );
     }),
+    executeToolAction: jest.fn(
+      (_taskId: number, toolName: SocialAgentToolName) => {
+        if (toolName === SocialAgentToolName.AddFriend) {
+          return Promise.resolve({
+            id: 'action_add_friend_1',
+            toolName,
+            status: 'succeeded',
+            output: {
+              id: '601',
+              friendRequestId: '601',
+              conversationId: 'conv-22',
+            },
+            error: null,
+          });
+        }
+        if (toolName === SocialAgentToolName.SendMessage) {
+          return Promise.resolve({
+            id: 'action_send_message_1',
+            toolName,
+            status: 'succeeded',
+            output: {
+              id: 'msg-22',
+              messageId: 'msg-22',
+              conversationId: 'conv-22',
+              candidate: { status: 'messaged' },
+            },
+            error: null,
+          });
+        }
+        return Promise.resolve({
+          id: 'action_send_candidate_message_1',
+          toolName,
+          status: 'succeeded',
+          output: {
+            id: 'msg-1',
+            messageId: 'msg-1',
+            conversationId: 'conv-1',
+          },
+          error: null,
+        });
+      },
+    ),
   };
   const service = new SocialAgentCandidateActionService(
     taskRepo as never,
     eventRepo as never,
     approvals as never,
     executor as never,
+    undefined,
+    longTermMemory as never,
   );
   return {
     approvals,
     eventRepo,
     executor,
+    longTermMemory,
     savedEvents,
     service,
     taskRepo,
@@ -271,13 +324,180 @@ describe('SocialAgentCandidateActionService', () => {
     expect(result).toMatchObject({
       assistantMessage: '已确认发送给小林：今晚先在青岛大学操场轻松跑一段吗？',
     });
-    expect(task.result).toMatchObject({
-      candidateActions: {
-        '22': expect.objectContaining({
-          send: 'sent',
-          conversationId: 'conv-1',
-          messageId: 'msg-1',
+    expect(task.memory).toMatchObject({
+      shortTerm: {
+        candidateActions: {
+          '22': expect.objectContaining({
+            send: 'sent',
+            conversationId: 'conv-1',
+            messageId: 'msg-1',
+          }),
+        },
+      },
+    });
+  });
+
+  it('saves a persisted candidate through the SaveCandidate tool', async () => {
+    const { executor, service } = makeHarness();
+
+    await service.saveCandidate(7, 101, {
+      socialRequestId: 301,
+      candidateRecordId: 501,
+      targetUserId: 22,
+    });
+
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.SaveCandidate,
+      expect.objectContaining({
+        candidateRecordId: 501,
+        socialRequestId: 301,
+        targetUserId: 22,
+      }),
+      7,
+    );
+  });
+
+  it('connects a candidate through AddFriend and records the conversation', async () => {
+    const { executor, longTermMemory, savedEvents, service, task } =
+      makeHarness();
+
+    const result = await service.connectCandidate(7, 101, {
+      socialRequestId: 301,
+      candidateRecordId: 501,
+      targetUserId: 22,
+    });
+
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.AddFriend,
+      expect.objectContaining({
+        targetUserId: 22,
+        candidateRecordId: 501,
+        openConversation: true,
+      }),
+      7,
+    );
+    expect(result).toMatchObject({
+      success: true,
+      taskId: 101,
+      targetUserId: 22,
+      candidateUserId: 22,
+      status: 'connected',
+      following: true,
+      friendRequestId: '601',
+      conversationId: 'conv-22',
+      friendAction: {
+        success: true,
+        status: 'connected',
+        targetUserId: 22,
+        candidateUserId: 22,
+        following: true,
+        conversationId: 'conv-22',
+        friendRequestId: '601',
+      },
+      toolCall: expect.objectContaining({
+        toolName: SocialAgentToolName.AddFriend,
+        status: 'succeeded',
+      }),
+    });
+    expect(task.memory).toMatchObject({
+      shortTerm: {
+        candidateActions: {
+          '22': expect.objectContaining({
+            connect: 'connected',
+            conversationId: 'conv-22',
+          }),
+        },
+      },
+    });
+    expect(savedEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: 'confirmation.received',
         }),
+      ]),
+    );
+    expect(longTermMemory.summarizeTask).toHaveBeenCalledWith(task);
+  });
+
+  it('resolves nested candidate user ids when connecting from a card payload', async () => {
+    const { executor, service } = makeHarness();
+
+    await service.connectCandidate(7, 101, {
+      socialRequestId: 301,
+      candidateRecordId: 501,
+      candidate: { candidateUserId: 23 },
+    });
+
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.AddFriend,
+      expect.objectContaining({
+        targetUserId: 23,
+        candidateRecordId: 501,
+        socialRequestId: 301,
+        openConversation: true,
+      }),
+      7,
+    );
+  });
+
+  it('surfaces send-message tool failures to callers', async () => {
+    const { executor, service } = makeHarness();
+    executor.executeToolAction.mockResolvedValueOnce({
+      id: 'action_send_message_1',
+      toolName: SocialAgentToolName.SendMessage,
+      status: 'failed',
+      output: undefined,
+      error: { message: 'Mongo conversation write failed' },
+    } as never);
+
+    await expect(
+      service.sendCandidateMessage(7, 101, {
+        targetUserId: 22,
+        message: '你好，今晚一起跑步吗？',
+      }),
+    ).rejects.toThrow('Mongo conversation write failed');
+  });
+
+  it('returns normalized send candidate message success details', async () => {
+    const { service, task } = makeHarness();
+
+    const result = await service.sendCandidateMessage(7, 101, {
+      targetUserId: 22,
+      candidateUserId: 22,
+      message: 'hello, run tonight?',
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      taskId: 101,
+      targetUserId: 22,
+      candidateUserId: 22,
+      messageId: 'msg-22',
+      conversationId: 'conv-22',
+      status: 'sent',
+      candidateStatus: 'messaged',
+      messageAction: {
+        status: 'sent',
+        conversationId: 'conv-22',
+        messageId: 'msg-22',
+      },
+      toolCall: expect.objectContaining({
+        id: 'action_send_message_1',
+        status: 'succeeded',
+      }),
+    });
+    expect(task.memory).toMatchObject({
+      shortTerm: {
+        candidateActions: {
+          '22': expect.objectContaining({
+            send: 'sent',
+            conversationId: 'conv-22',
+            messageId: 'msg-22',
+          }),
+        },
       },
     });
   });

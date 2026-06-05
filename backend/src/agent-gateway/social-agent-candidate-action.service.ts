@@ -1,5 +1,8 @@
 import {
+  BadRequestException,
+  ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
   Optional,
@@ -32,15 +35,19 @@ import {
 import { appendSocialAgentConversationTurn } from './social-agent-chat-memory.presenter';
 import { readSocialAgentStoredCandidateSummaries } from './social-agent-chat-session.presenter';
 import type {
+  CandidateTargetBody,
   SocialAgentCardActionBody,
   SocialAgentIntentRouteResult,
   SocialAgentPendingApprovalSnapshot,
 } from './social-agent-chat.types';
+import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import {
   appendSocialAgentShortTermTurn,
+  appendShortTermMemoryItem,
   readSocialAgentTaskMemory,
   recordSocialAgentPendingAction,
   recordSocialAgentShortTermAction,
+  rememberSocialAgentShortTerm,
   transitionSocialAgentState,
 } from './social-agent-memory.util';
 import {
@@ -64,6 +71,8 @@ export class SocialAgentCandidateActionService {
     private readonly executor: SocialAgentToolExecutorService,
     @Optional()
     private readonly sessionAssembler?: AgentSessionAssemblerService,
+    @Optional()
+    private readonly longTermMemory?: SocialAgentLongTermMemoryService,
   ) {}
 
   async createActionApproval(input: {
@@ -312,6 +321,285 @@ export class SocialAgentCandidateActionService {
     };
   }
 
+  async saveCandidate(
+    ownerUserId: number,
+    taskId: number,
+    body: CandidateTargetBody & {
+      candidateRecordId?: number | null;
+      socialRequestId?: number | null;
+      targetUserId?: number | null;
+      candidateUserId?: number | null;
+      candidate?: Record<string, unknown>;
+    },
+  ): Promise<SocialAgentToolCallRecord> {
+    let task = await this.assertTaskOwner(taskId, ownerUserId);
+    const candidateRecordId = this.number(body.candidateRecordId);
+    const socialRequestId = this.number(body.socialRequestId);
+    const targetUserId = await this.executor.resolveCandidateTargetUser(
+      body as Record<string, unknown>,
+      ownerUserId,
+    );
+    if (!candidateRecordId && (!socialRequestId || !targetUserId)) {
+      throw new BadRequestException('候选人缺少可收藏的持久化记录');
+    }
+
+    const action = await this.executor.executeToolAction(
+      taskId,
+      SocialAgentToolName.SaveCandidate,
+      {
+        candidateRecordId,
+        socialRequestId,
+        targetUserId,
+        candidate: body.candidate ?? {},
+        metadata: {
+          confirmationSource: 'social_agent_chat',
+        },
+      },
+      ownerUserId,
+    );
+    if (action.status === 'succeeded') {
+      task = await this.assertTaskOwner(taskId, ownerUserId);
+      this.rememberCandidateAction(task, targetUserId, {
+        save: 'saved',
+        candidateRecordId,
+        socialRequestId,
+        toolCallId: action.id,
+      });
+      await this.taskRepo.save(task);
+    }
+    return action;
+  }
+
+  async sendCandidateMessage(
+    ownerUserId: number,
+    taskId: number,
+    body: CandidateTargetBody & {
+      targetUserId?: number;
+      candidateUserId?: number;
+      message?: string;
+      suggestedOpener?: string;
+      candidateRecordId?: number | null;
+      socialRequestId?: number | null;
+      candidate?: Record<string, unknown>;
+    },
+  ): Promise<Record<string, unknown>> {
+    await this.assertTaskOwner(taskId, ownerUserId);
+    const targetUserId = await this.executor.resolveCandidateTargetUser(
+      body as Record<string, unknown>,
+      ownerUserId,
+    );
+    const text = cleanDisplayText(
+      body.message ?? body.suggestedOpener,
+      '',
+    ).trim();
+    if (!targetUserId || !text) {
+      throw new BadRequestException('请选择候选人并填写要发送的消息');
+    }
+    const candidateRecordId = this.number(
+      body.candidateRecordId ?? body.candidate?.candidateRecordId,
+    );
+    const socialRequestId = this.number(
+      body.socialRequestId ?? body.candidate?.socialRequestId,
+    );
+
+    const messageAction = await this.executor.executeToolAction(
+      taskId,
+      SocialAgentToolName.SendMessage,
+      {
+        targetUserId,
+        candidateUserId: targetUserId,
+        text,
+        message: text,
+        suggestedOpener: text,
+        candidateRecordId,
+        socialRequestId,
+        candidate: body.candidate ?? {},
+        metadata: {
+          confirmationSource: 'social_agent_chat',
+        },
+      },
+      ownerUserId,
+    );
+    this.assertToolActionSucceeded(messageAction, '发送消息失败，请稍后再试');
+    const output = this.isRecord(messageAction.output)
+      ? messageAction.output
+      : {};
+    const messageId =
+      cleanDisplayText(output.id ?? output.messageId, '') || null;
+    const conversationId = cleanDisplayText(output.conversationId, '') || null;
+    const candidate = this.isRecord(output.candidate) ? output.candidate : null;
+    const outputStatus = cleanDisplayText(output.status, '') || null;
+    const requiresApproval =
+      outputStatus === 'pending_approval' ||
+      outputStatus === 'pending' ||
+      output.requiresApproval === true;
+
+    const task = await this.assertTaskOwner(taskId, ownerUserId);
+    this.rememberCandidateAction(task, targetUserId, {
+      send: requiresApproval ? 'pendingApproval' : 'sent',
+      conversationId,
+      messageId,
+      candidateRecordId,
+      socialRequestId,
+      toolCallId: messageAction.id,
+    });
+    transitionSocialAgentState(
+      task,
+      requiresApproval ? 'confirmation_required' : 'message_action',
+      {
+        objective: 'candidate_messaging',
+        nextStep: requiresApproval ? '等待用户确认发送消息' : '等待候选人回复',
+        shouldSearchNow: false,
+        awaitingSearchConfirmation: false,
+        waitingFor: requiresApproval
+          ? 'message_confirmation'
+          : 'candidate_reply',
+        lastCompletedStep: requiresApproval
+          ? 'message_approval_created'
+          : 'message_sent',
+      },
+    );
+    await this.taskRepo.save(task);
+
+    return {
+      success: messageAction.status === 'succeeded' || requiresApproval,
+      taskId,
+      targetUserId,
+      candidateUserId: targetUserId,
+      status: requiresApproval
+        ? 'pending_approval'
+        : messageAction.status === 'succeeded'
+          ? 'sent'
+          : 'failed',
+      messageId,
+      conversationId,
+      approvalId: this.number(output.approvalId),
+      requiresApproval: requiresApproval || undefined,
+      message: requiresApproval ? '发送消息需要你确认' : undefined,
+      candidateStatus: cleanDisplayText(candidate?.status, '') || null,
+      messageAction: {
+        status: requiresApproval ? 'pending_approval' : 'sent',
+        conversationId,
+        messageId,
+      },
+      toolCall: messageAction,
+    };
+  }
+
+  async connectCandidate(
+    ownerUserId: number,
+    taskId: number,
+    body: CandidateTargetBody & {
+      targetUserId?: number | null;
+      candidateUserId?: number | null;
+      candidateRecordId?: number | null;
+      socialRequestId?: number | null;
+      candidate?: Record<string, unknown>;
+    },
+  ): Promise<Record<string, unknown>> {
+    let task = await this.assertTaskOwner(taskId, ownerUserId);
+    const targetUserId = await this.executor.resolveCandidateTargetUser(
+      body as Record<string, unknown>,
+      ownerUserId,
+    );
+
+    const friendAction = await this.executor.executeToolAction(
+      taskId,
+      SocialAgentToolName.AddFriend,
+      {
+        targetUserId,
+        candidateRecordId: this.number(body.candidateRecordId),
+        socialRequestId: this.number(body.socialRequestId),
+        openConversation: true,
+        candidate: body.candidate ?? {},
+        metadata: {
+          confirmationSource: 'social_agent_chat',
+        },
+      },
+      ownerUserId,
+    );
+    this.assertToolActionSucceeded(friendAction, '加好友失败，请稍后再试');
+
+    const friendOutput = this.isRecord(friendAction.output)
+      ? friendAction.output
+      : {};
+    const friendRequestId =
+      cleanDisplayText(
+        friendOutput.friendRequestId ??
+          friendOutput.followId ??
+          friendOutput.id,
+        '',
+      ) || null;
+    task = await this.assertTaskOwner(taskId, ownerUserId);
+    const conversationId =
+      cleanDisplayText(friendOutput.conversationId, '') || null;
+
+    await this.writeEvent(
+      task,
+      AgentTaskEventType.ConfirmationReceived,
+      '用户确认加好友并进入聊天',
+      {
+        targetUserId,
+        conversationId,
+        friendActionId: friendAction.id,
+      },
+    );
+    this.rememberShortTermStep(
+      task,
+      'connect_candidate',
+      '用户确认加好友并进入聊天',
+      'done',
+    );
+    rememberSocialAgentShortTerm(task, {
+      conversationId,
+      targetUserId,
+      connectedCandidate: {
+        targetUserId,
+        candidateRecordId: this.number(body.candidateRecordId),
+        socialRequestId: this.number(body.socialRequestId),
+      },
+    });
+    this.rememberCandidateAction(task, targetUserId, {
+      connect: 'connected',
+      conversationId,
+      friendRequestId,
+      candidateRecordId: this.number(body.candidateRecordId),
+      socialRequestId: this.number(body.socialRequestId),
+      toolCallId: friendAction.id,
+    });
+    transitionSocialAgentState(task, 'message_action', {
+      objective: 'candidate_messaging',
+      nextStep: '进入候选人会话，等待继续沟通',
+      shouldSearchNow: false,
+      awaitingSearchConfirmation: false,
+      waitingFor: 'candidate_conversation',
+      lastCompletedStep: 'candidate_connected',
+    });
+    await this.taskRepo.save(task);
+    void this.longTermMemory?.summarizeTask(task).catch(() => undefined);
+
+    return {
+      taskId,
+      targetUserId,
+      candidateUserId: targetUserId,
+      success: true,
+      status: 'connected',
+      following: true,
+      friendRequestId,
+      conversationId,
+      friendAction: {
+        success: true,
+        status: 'connected',
+        targetUserId,
+        candidateUserId: targetUserId,
+        following: true,
+        conversationId,
+        friendRequestId,
+      },
+      toolCall: friendAction,
+    };
+  }
+
   candidateMessageDraft(task: AgentTask): string {
     const draft = this.cardActionDraft(task);
     const draftMessage = cleanDisplayText(
@@ -442,11 +730,41 @@ export class SocialAgentCandidateActionService {
 
   private assertToolActionSucceeded(
     action: SocialAgentToolCallRecord,
-    fallbackMessage: string,
+    fallback: string,
   ): void {
     if (action.status === 'succeeded') return;
-    const error = action.error?.message ?? fallbackMessage;
-    throw new NotFoundException(error);
+
+    const message = this.toolActionErrorMessage(action, fallback);
+    const error = this.isRecord(action.error) ? action.error : {};
+    const code = cleanDisplayText(error.code, '') || 'TOOL_EXECUTION_FAILED';
+    const statusCode = this.number(error.statusCode);
+    if (action.status === 'blocked' || statusCode === 403) {
+      throw new ForbiddenException({
+        success: false,
+        code: code === 'tool_permission_blocked' ? 'TARGET_BLOCKED' : code,
+        message,
+      });
+    }
+    if (
+      statusCode === 400 ||
+      code === 'MISSING_TARGET_USER' ||
+      code === 'TARGET_IS_SELF'
+    ) {
+      throw new BadRequestException({ success: false, code, message });
+    }
+    throw new InternalServerErrorException({
+      success: false,
+      code: 'TOOL_EXECUTION_FAILED',
+      message,
+    });
+  }
+
+  private toolActionErrorMessage(
+    action: SocialAgentToolCallRecord,
+    fallback: string,
+  ): string {
+    const error = this.isRecord(action.error) ? action.error : {};
+    return cleanDisplayText(error.message, '') || fallback;
   }
 
   private rememberCandidateAction(
@@ -454,17 +772,27 @@ export class SocialAgentCandidateActionService {
     candidateUserId: number,
     patch: Record<string, unknown>,
   ): void {
-    const result = this.isRecord(task.result) ? task.result : {};
-    const candidateActions = this.isRecord(result.candidateActions)
-      ? { ...result.candidateActions }
-      : {};
-    const key = String(candidateUserId);
-    candidateActions[key] = {
-      ...(this.isRecord(candidateActions[key]) ? candidateActions[key] : {}),
-      ...patch,
+    (
+      this.sessionAssembler ?? this.fallbackSessionAssembler
+    ).rememberCandidateAction(task, candidateUserId, patch);
+  }
+
+  private rememberShortTermStep(
+    task: AgentTask,
+    id: string,
+    label: string,
+    status: string,
+  ): void {
+    const step = {
+      id,
+      label,
+      status,
       updatedAt: new Date().toISOString(),
     };
-    task.result = { ...result, candidateActions };
+    rememberSocialAgentShortTerm(task, {
+      currentStep: step,
+      steps: appendShortTermMemoryItem(task, 'steps', step, 40),
+    });
   }
 
   private looksLikeMessageSendConfirmation(message: string): boolean {
