@@ -12,6 +12,7 @@ import {
 } from './entities/agent-task.entity';
 import { SocialAgentAction } from './agent-permission.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
+import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
@@ -387,6 +388,14 @@ function makeHarness(options: Record<string, unknown> = {}) {
   const config = {
     get: jest.fn().mockReturnValue(undefined),
   };
+  const chatLlm =
+    (options.chatLlm as SocialAgentChatLlmService | undefined) ??
+    new SocialAgentChatLlmService(
+      config as never,
+      metrics as never,
+      options.finalResponses as never,
+      options.modelRouter as never,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
@@ -403,11 +412,10 @@ function makeHarness(options: Record<string, unknown> = {}) {
     metrics as never,
     longTermMemory as never,
     rag as never,
-    config as never,
+    chatLlm as never,
     options.brain as never,
     undefined,
     options.finalResponses as never,
-    undefined,
     options.lifeGraph as never,
     undefined,
     options.fitMeetRuntime as never,
@@ -432,6 +440,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     publicIntentRepo,
     candidatePool,
     metrics,
+    chatLlm,
     longTermMemory,
     rag,
     config,
@@ -704,7 +713,7 @@ describe('SocialAgentChatService', () => {
   });
 
   it('uses deepseek-v4-flash for structured profile extraction', async () => {
-    const { service, config } = makeHarness();
+    const { chatLlm, config } = makeHarness();
     const originalFetch = global.fetch;
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
@@ -732,14 +741,7 @@ describe('SocialAgentChatService', () => {
     });
 
     try {
-      const extracted = await (
-        service as unknown as {
-          extractProfileFieldsWithLlm(
-            task: AgentTask,
-            sourceMessage: string,
-          ): Promise<Record<string, unknown>>;
-        }
-      ).extractProfileFieldsWithLlm(
+      const extracted = await chatLlm.extractProfileFieldsWithLlm(
         makeTask(),
         '我是白羊男，18，青岛大学，INFP，想找同校女生。',
       );

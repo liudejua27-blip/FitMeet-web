@@ -9,7 +9,6 @@ import {
   Optional,
   forwardRef,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Not, Repository } from 'typeorm';
 
@@ -46,10 +45,7 @@ import {
 import { SocialAgentBrainService } from './social-agent-brain.service';
 import type { SocialAgentBrainTurnDecision } from './social-agent-brain.service';
 import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
-import {
-  SocialAgentModelRouterService,
-  SocialAgentModelUseCase,
-} from './social-agent-model-router.service';
+import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import {
   SocialAgentToolCallRecord,
   SocialAgentToolExecutorService,
@@ -85,8 +81,6 @@ import {
   SocialAgentCandidatePoolService,
 } from './social-agent-candidate-pool.service';
 import {
-  conversationalFallbackReply,
-  directReplySystemPrompt,
   productHelpFallbackReply,
   workflowHelpReply,
 } from './social-agent-chat-replies';
@@ -108,7 +102,6 @@ import {
   readSocialAgentConversationBrainDecision,
   readSocialAgentConversationBrainLastToolResult,
   readSocialAgentConversationBrainMode,
-  readSocialAgentConversationBrainPlannedTools,
   readSocialAgentConversationBrainToolArguments,
   readSocialAgentConversationBrainToolNames,
   readSocialAgentCurrentAgentState,
@@ -216,14 +209,12 @@ export class SocialAgentChatService {
     private readonly metrics: SocialAgentMetricsService,
     private readonly longTermMemory: SocialAgentLongTermMemoryService,
     private readonly rag: SocialAgentRagService,
-    private readonly config: ConfigService,
+    private readonly chatLlm: SocialAgentChatLlmService,
     @Optional() private readonly brain?: SocialAgentBrainService,
     @Optional()
     private readonly memoryContext?: SocialAgentMemoryContextService,
     @Optional()
     private readonly finalResponses?: SocialAgentFinalResponseService,
-    @Optional()
-    private readonly modelRouter?: SocialAgentModelRouterService,
     @Optional()
     private readonly lifeGraph?: LifeGraphService,
     @Optional()
@@ -535,12 +526,13 @@ export class SocialAgentChatService {
       profileUpdateProposal = handled.profileUpdateProposal ?? null;
       task = handled.task;
     } else if (this.shouldUseLlmDirectReply(route)) {
-      assistantMessage = await this.generateConversationalAnswer({
+      assistantMessage = await this.chatLlm.generateConversationalAnswer({
         message,
         route,
         profile,
         task,
         longTermSnapshot,
+        memoryContext: this.buildMemoryContext(task, longTermSnapshot),
         toolResults: brainToolResults,
       });
     }
@@ -2524,254 +2516,6 @@ export class SocialAgentChatService {
     );
   }
 
-  private async generateConversationalAnswer(input: {
-    message: string;
-    route: SocialAgentIntentRouterResult;
-    profile: Record<string, unknown> | null;
-    task: AgentTask;
-    longTermSnapshot: Awaited<
-      ReturnType<SocialAgentLongTermMemoryService['readSnapshot']>
-    > | null;
-    toolResults?: Array<Record<string, unknown>>;
-  }): Promise<string> {
-    const fallbackReply = conversationalFallbackReply(
-      input.message,
-      input.route.intent,
-    );
-    if (this.finalResponses) {
-      return this.finalResponses.generate({
-        userMessage: input.message,
-        intent: input.route.intent,
-        route: input.route as unknown as Record<string, unknown>,
-        agentState: readSocialAgentCurrentAgentState(input.task),
-        conversationHistory: buildSocialAgentLlmConversationHistory(input.task),
-        memoryContext: this.buildMemoryContext(
-          input.task,
-          input.longTermSnapshot,
-        ) as unknown as Record<string, unknown>,
-        taskContext: summarizeSocialAgentTaskMemoryForLlm(input.task),
-        plannerDecision: readSocialAgentConversationBrainDecision(input.task),
-        toolResults:
-          input.toolResults && input.toolResults.length > 0
-            ? input.toolResults
-            : [
-                readSocialAgentConversationBrainLastToolResult(input.task),
-              ].filter(Boolean),
-        safetyRules: socialAgentFinalResponseSafetyRules(),
-        responseGoal: '直接回答用户问题，并根据当前状态自然推进下一步。',
-        fallbackReply,
-      });
-    }
-    try {
-      const answer = await this.callDeepSeekForDirectReply(input);
-      if (answer) return answer;
-    } catch (error) {
-      this.metrics.recordError('social_agent_chat_deepseek_failed');
-      this.logger.warn(
-        JSON.stringify({
-          event: 'social_agent.chat.deepseek_failed',
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
-    return fallbackReply;
-  }
-
-  private async callDeepSeekForDirectReply(input: {
-    message: string;
-    route: SocialAgentIntentRouterResult;
-    profile: Record<string, unknown> | null;
-    task: AgentTask;
-    longTermSnapshot: Awaited<
-      ReturnType<SocialAgentLongTermMemoryService['readSnapshot']>
-    > | null;
-  }): Promise<string | null> {
-    const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
-    if (!apiKey) return null;
-    const baseUrl =
-      this.config.get<string>('DEEPSEEK_BASE_URL') ||
-      'https://api.deepseek.com';
-    const useCase =
-      input.route.intent === 'casual_chat' ? 'casual_chat' : 'final_response';
-    const model = this.modelFor(useCase);
-    const startedAt = Date.now();
-    const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.chatDeepSeekTimeoutMs(useCase),
-    );
-    try {
-      const response = await fetch(
-        `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
-        {
-          method: 'POST',
-          signal: controller.signal,
-          headers: {
-            'content-type': 'application/json',
-            authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            temperature: this.modelRouter?.getTemperature(useCase) ?? 0.6,
-            max_tokens: 700,
-            messages: [
-              {
-                role: 'system',
-                content: directReplySystemPrompt(),
-              },
-              {
-                role: 'user',
-                content: JSON.stringify({
-                  userMessage: input.message,
-                  intent: input.route.intent,
-                  profileSummary: input.profile ?? {},
-                  taskMemory: summarizeSocialAgentTaskMemoryForLlm(input.task),
-                  memoryContext: this.buildMemoryContext(
-                    input.task,
-                    input.longTermSnapshot,
-                  ),
-                  longTermMemory: input.longTermSnapshot
-                    ? {
-                        taskCount: input.longTermSnapshot.taskCount,
-                        profileFacts: input.longTermSnapshot.profileFacts,
-                        preferences: input.longTermSnapshot.preferences,
-                        boundaries: input.longTermSnapshot.boundaries,
-                        socialGoals: input.longTermSnapshot.socialGoals,
-                        availability: input.longTermSnapshot.availability,
-                        activityPreferences:
-                          input.longTermSnapshot.activityPreferences,
-                        matchSignals: input.longTermSnapshot.matchSignals,
-                      }
-                    : null,
-                  conversationHistory: buildSocialAgentLlmConversationHistory(
-                    input.task,
-                    8,
-                  ),
-                }),
-              },
-            ],
-          }),
-        },
-      );
-      if (!response.ok) {
-        this.logModelCall({
-          useCase,
-          model,
-          taskId: input.task.id,
-          intent: input.route.intent,
-          latencyMs: Date.now() - startedAt,
-          success: false,
-          reason: `DeepSeek HTTP ${response.status}`,
-        });
-        throw new Error(`DeepSeek HTTP ${response.status}`);
-      }
-      const payload = (await response.json()) as Record<string, unknown>;
-      const content = this.readChatDeepSeekContent(payload);
-      this.logModelCall({
-        useCase,
-        model,
-        taskId: input.task.id,
-        intent: input.route.intent,
-        latencyMs: Date.now() - startedAt,
-        success: true,
-      });
-      return cleanDisplayText(content, '').trim() || null;
-    } catch (error) {
-      this.logModelCall({
-        useCase,
-        model,
-        taskId: input.task.id,
-        intent: input.route.intent,
-        latencyMs: Date.now() - startedAt,
-        success: false,
-        reason:
-          error instanceof Error && error.name === 'AbortError'
-            ? 'deepseek_timeout'
-            : error instanceof Error
-              ? error.message
-              : String(error),
-      });
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error('deepseek_timeout');
-      }
-      throw error;
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  private readChatDeepSeekContent(payload: Record<string, unknown>): string {
-    const choices = Array.isArray(payload.choices) ? payload.choices : [];
-    const first = this.isRecord(choices[0]) ? choices[0] : {};
-    const message = this.isRecord(first.message) ? first.message : {};
-    return cleanDisplayText(message.content, '').trim();
-  }
-
-  private modelFor(useCase: SocialAgentModelUseCase): string {
-    if (this.modelRouter) return this.modelRouter.getModel(useCase);
-    const legacy = this.config.get<string>('DEEPSEEK_MODEL');
-    if (useCase === 'casual_chat') {
-      return (
-        this.config.get<string>('AGENT_CASUAL_CHAT_MODEL') ||
-        this.config.get<string>('DEEPSEEK_CHAT_MODEL') ||
-        this.chatCompatibleLegacyModel(legacy) ||
-        'deepseek-chat'
-      );
-    }
-    if (useCase === 'final_response') {
-      return (
-        this.config.get<string>('AGENT_FINAL_RESPONSE_MODEL') ||
-        this.config.get<string>('DEEPSEEK_CHAT_MODEL') ||
-        this.chatCompatibleLegacyModel(legacy) ||
-        'deepseek-chat'
-      );
-    }
-    return (
-      this.config.get<string>('DEEPSEEK_FAST_MODEL') ||
-      legacy ||
-      'deepseek-v4-flash'
-    );
-  }
-
-  private chatCompatibleLegacyModel(value?: string | null): string | null {
-    const legacy = `${value ?? ''}`.trim();
-    if (!legacy || legacy === 'deepseek-v4') return null;
-    return /chat/i.test(legacy) ? legacy : null;
-  }
-
-  private chatDeepSeekTimeoutMs(useCase?: SocialAgentModelUseCase): number {
-    if (useCase && this.modelRouter)
-      return this.modelRouter.getTimeout(useCase);
-    const configured = Number(
-      this.config.get<string>('SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS') ?? '5000',
-    );
-    if (!Number.isFinite(configured) || configured <= 0) return 5000;
-    return Math.min(configured, 8000);
-  }
-
-  private logModelCall(input: {
-    useCase: string;
-    model: string;
-    taskId: number | null;
-    intent?: unknown;
-    latencyMs: number;
-    success: boolean;
-    reason?: string;
-  }): void {
-    this.logger.log(
-      JSON.stringify({
-        event: 'social_agent.model_call',
-        useCase: input.useCase,
-        model: input.model,
-        taskId: input.taskId,
-        intent: typeof input.intent === 'string' ? input.intent : null,
-        latencyMs: input.latencyMs,
-        success: input.success,
-        ...(input.reason ? { reason: input.reason } : {}),
-      }),
-    );
-  }
-
   private async handleProfileEnrichmentTurn(
     ownerUserId: number,
     task: AgentTask,
@@ -2801,11 +2545,11 @@ export class SocialAgentChatService {
     const extractedProfile = this.extractProfileFieldsFromConversation([
       sourceMessage,
     ]);
-    const llmExtractedProfile = await this.extractProfileFieldsWithLlm(
+    const llmExtractedProfile = await this.chatLlm.extractProfileFieldsWithLlm(
       task,
       sourceMessage,
     );
-    const plannedProfile = this.profileFieldsFromRecord(
+    const plannedProfile = this.chatLlm.profileFieldsFromRecord(
       readSocialAgentConversationBrainToolArguments(
         task,
         SocialAgentToolName.UpdateProfileFromAgentContext,
@@ -2895,7 +2639,7 @@ export class SocialAgentChatService {
       await this.taskRepo.save(task);
       const fallbackReply = this.profileUpdatedReply(mergedProfile, output);
       return {
-        assistantMessage: await this.generateAgentBrainReply({
+        assistantMessage: await this.chatLlm.generateAgentBrainReply({
           message,
           task,
           intent,
@@ -2904,6 +2648,7 @@ export class SocialAgentChatService {
           sourceMessage,
           toolOutput: output,
           fallbackReply,
+          memoryContext: this.buildMemoryContext(task, null),
         }),
         savedContext: true,
         profileUpdated: call.status === 'succeeded',
@@ -2927,7 +2672,7 @@ export class SocialAgentChatService {
     });
     transitionSocialAgentState(task, 'profile_detected');
     return {
-      assistantMessage: await this.generateAgentBrainReply({
+      assistantMessage: await this.chatLlm.generateAgentBrainReply({
         message,
         task,
         intent,
@@ -2938,6 +2683,7 @@ export class SocialAgentChatService {
         extractedProfile: mergedProfile,
         sourceMessage,
         fallbackReply,
+        memoryContext: this.buildMemoryContext(task, null),
       }),
       savedContext: true,
       profileUpdated: false,
@@ -3043,278 +2789,6 @@ export class SocialAgentChatService {
     return /(\u8fd8\u7f3a\u4ec0\u4e48|\u8fd8\u5dee\u4ec0\u4e48|\u7f3a\u54ea\u4e9b|\u7f3a\u5c11\u54ea\u4e9b|\u753b\u50cf.*\u7f3a|\u8d44\u6599.*\u7f3a|\u8fd8\u9700\u8981\u8865\u5145\u4ec0\u4e48)/i.test(
       message,
     );
-  }
-
-  private async generateAgentBrainReply(input: {
-    message: string;
-    task: AgentTask;
-    intent: SocialAgentIntentType;
-    mode: 'profile_extraction' | 'profile_correction' | 'profile_updated';
-    extractedProfile: ExtractedProfileFields;
-    sourceMessage: string;
-    toolOutput?: Record<string, unknown>;
-    fallbackReply: string;
-  }): Promise<string> {
-    if (this.finalResponses) {
-      return this.finalResponses.generate({
-        userMessage: input.message,
-        intent: input.intent,
-        agentState: readSocialAgentCurrentAgentState(input.task),
-        conversationHistory: buildSocialAgentLlmConversationHistory(input.task),
-        memoryContext: this.buildMemoryContext(
-          input.task,
-          null,
-        ) as unknown as Record<string, unknown>,
-        taskContext: summarizeSocialAgentTaskMemoryForLlm(input.task),
-        plannerDecision: readSocialAgentConversationBrainDecision(input.task),
-        toolResults: input.toolOutput ? [input.toolOutput] : [],
-        safetyRules: socialAgentFinalResponseSafetyRules(),
-        responseGoal:
-          input.mode === 'profile_updated'
-            ? '告诉用户画像已保存，说明已更新字段、补充记忆和缺失信息，并询问下一步。'
-            : '告诉用户已提取画像信息，说明暂未自动搜索，并询问是否保存、补充或开始搜索。',
-        fallbackReply: input.fallbackReply,
-      });
-    }
-    try {
-      const answer = await this.callDeepSeekForAgentBrain(input);
-      if (answer) return answer;
-    } catch (error) {
-      this.metrics.recordError('social_agent_brain_deepseek_failed');
-      this.logger.warn(
-        JSON.stringify({
-          event: 'social_agent.brain.deepseek_failed',
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
-    return input.fallbackReply;
-  }
-
-  private async callDeepSeekForAgentBrain(input: {
-    message: string;
-    task: AgentTask;
-    intent: SocialAgentIntentType;
-    mode: 'profile_extraction' | 'profile_correction' | 'profile_updated';
-    extractedProfile: ExtractedProfileFields;
-    sourceMessage: string;
-    toolOutput?: Record<string, unknown>;
-  }): Promise<string | null> {
-    const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
-    if (!apiKey) return null;
-    const baseUrl =
-      this.config.get<string>('DEEPSEEK_BASE_URL') ||
-      'https://api.deepseek.com';
-    const useCase = 'final_response' as const;
-    const model = this.modelFor(useCase);
-    const startedAt = Date.now();
-    const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.chatDeepSeekTimeoutMs(useCase),
-    );
-    try {
-      const response = await fetch(
-        `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
-        {
-          method: 'POST',
-          signal: controller.signal,
-          headers: {
-            'content-type': 'application/json',
-            authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            temperature: this.modelRouter?.getTemperature(useCase) ?? 0.6,
-            max_tokens: 650,
-            messages: [
-              {
-                role: 'system',
-                content: [
-                  '你是 FitMeet 的主 Agent 大脑，不是关键词模板机器人。',
-                  '你要完整理解最近上下文、用户纠正和当前动作状态，再生成自然、具体的中文回复。',
-                  '如果 mode=profile_extraction：说明已提取画像信息，不要立刻搜索；询问用户是先保存/继续补齐，还是现在开始搜索。',
-                  '如果 mode=profile_correction：先承认理解修正，说明上一段是画像信息不是搜索需求；展示提取字段；不要重复解释“人物画像是什么”。',
-                  '如果 mode=profile_updated：说明已经调用工具保存画像；区分已写入画像字段和作为补充记忆记录的字段；继续询问缺少的可约时间、约练类型和边界要求。',
-                  '如果用户的画像信息里带有“想找某类人”，这只是社交目标；除非用户明确说现在搜索，否则不要声称已经搜索。',
-                  '不要暴露 DeepSeek、API、模型失败、后端、工具日志等技术细节。',
-                  '不要编造候选人、会话、消息或已经执行的工具结果。',
-                ].join('\n'),
-              },
-              {
-                role: 'user',
-                content: JSON.stringify({
-                  userMessage: input.message,
-                  intent: input.intent,
-                  mode: input.mode,
-                  sourceProfileMessage: input.sourceMessage,
-                  extractedProfile: input.extractedProfile,
-                  toolOutput: input.toolOutput ?? null,
-                  toolResult: input.toolOutput ?? null,
-                  plannedTools: readSocialAgentConversationBrainPlannedTools(
-                    input.task,
-                  ),
-                  lastToolResult:
-                    readSocialAgentConversationBrainLastToolResult(input.task),
-                  memoryContext: this.buildMemoryContext(input.task, null),
-                  availableTools: [
-                    'update_profile_from_agent_context',
-                    'search_real_candidates',
-                    'create_social_request',
-                    'send_message_to_candidate',
-                    'connect_candidate',
-                    'create_activity',
-                    'get_user_profile',
-                    'get_conversation_history',
-                  ],
-                  taskMemory: summarizeSocialAgentTaskMemoryForLlm(input.task),
-                  conversationHistory: buildSocialAgentLlmConversationHistory(
-                    input.task,
-                    8,
-                  ),
-                }),
-              },
-            ],
-          }),
-        },
-      );
-      if (!response.ok) {
-        this.logModelCall({
-          useCase,
-          model,
-          taskId: input.task.id,
-          intent: input.intent,
-          latencyMs: Date.now() - startedAt,
-          success: false,
-          reason: `DeepSeek HTTP ${response.status}`,
-        });
-        throw new Error(`DeepSeek HTTP ${response.status}`);
-      }
-      const payload = (await response.json()) as Record<string, unknown>;
-      this.logModelCall({
-        useCase,
-        model,
-        taskId: input.task.id,
-        intent: input.intent,
-        latencyMs: Date.now() - startedAt,
-        success: true,
-      });
-      return this.readChatDeepSeekContent(payload) || null;
-    } catch (error) {
-      this.logModelCall({
-        useCase,
-        model,
-        taskId: input.task.id,
-        intent: input.intent,
-        latencyMs: Date.now() - startedAt,
-        success: false,
-        reason:
-          error instanceof Error && error.name === 'AbortError'
-            ? 'deepseek_timeout'
-            : error instanceof Error
-              ? error.message
-              : String(error),
-      });
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error('deepseek_timeout');
-      }
-      throw error;
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  private async extractProfileFieldsWithLlm(
-    task: AgentTask,
-    sourceMessage: string,
-  ): Promise<ExtractedProfileFields> {
-    const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
-    if (!apiKey || !cleanDisplayText(sourceMessage, '').trim()) return {};
-    const useCase = 'profile_extraction' as const;
-    const model = this.modelFor(useCase);
-    const startedAt = Date.now();
-    const baseUrl =
-      this.config.get<string>('DEEPSEEK_BASE_URL') ||
-      'https://api.deepseek.com';
-    const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.chatDeepSeekTimeoutMs(useCase),
-    );
-
-    try {
-      const response = await fetch(
-        `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
-        {
-          method: 'POST',
-          signal: controller.signal,
-          headers: {
-            'content-type': 'application/json',
-            authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            temperature: this.modelRouter?.getTemperature(useCase) ?? 0.15,
-            response_format: { type: 'json_object' },
-            messages: [
-              {
-                role: 'system',
-                content: [
-                  'You extract FitMeet user profile facts.',
-                  'Return only one valid JSON object.',
-                  'Allowed keys: gender, age, heightCm, weightKg, city, school, area, mbti, zodiac, personality, targetPreference, activityType, availableTimes, boundaries.',
-                  'Use strings or string arrays only. Do not invent missing facts.',
-                ].join('\n'),
-              },
-              {
-                role: 'user',
-                content: JSON.stringify({
-                  taskId: task.id,
-                  message: sourceMessage,
-                  outputSchema: {
-                    city: 'Qingdao',
-                    school: 'Qingdao University',
-                    mbti: 'INFP',
-                    targetPreference: 'same-school women',
-                  },
-                }),
-              },
-            ],
-          }),
-        },
-      );
-      if (!response.ok) throw new Error(`DeepSeek HTTP ${response.status}`);
-      const payload = (await response.json()) as Record<string, unknown>;
-      const content = this.readChatDeepSeekContent(payload);
-      const parsed = this.parseJsonObject(content);
-      this.logModelCall({
-        useCase,
-        model,
-        taskId: task.id,
-        intent: 'profile_enrichment',
-        latencyMs: Date.now() - startedAt,
-        success: true,
-      });
-      return this.profileFieldsFromRecord(parsed);
-    } catch (error) {
-      this.logModelCall({
-        useCase,
-        model,
-        taskId: task.id,
-        intent: 'profile_enrichment',
-        latencyMs: Date.now() - startedAt,
-        success: false,
-        reason:
-          error instanceof Error && error.name === 'AbortError'
-            ? 'deepseek_timeout'
-            : error instanceof Error
-              ? error.message
-              : String(error),
-      });
-      return {};
-    } finally {
-      clearTimeout(timeout);
-    }
   }
 
   private findRecentProfileSourceMessage(
@@ -3562,26 +3036,6 @@ export class SocialAgentChatService {
       });
       transitionSocialAgentState(task, 'search_started');
     }
-  }
-
-  private profileFieldsFromRecord(
-    value: Record<string, unknown>,
-  ): ExtractedProfileFields {
-    const fields: ExtractedProfileFields = {};
-    for (const [key, raw] of Object.entries(value)) {
-      if (typeof raw === 'string') {
-        const text = cleanDisplayText(raw, '');
-        if (text) fields[key] = text;
-        continue;
-      }
-      if (Array.isArray(raw) && raw.every((item) => typeof item === 'string')) {
-        const list = raw
-          .map((item) => cleanDisplayText(item, ''))
-          .filter(Boolean);
-        if (list.length > 0) fields[key] = list;
-      }
-    }
-    return fields;
   }
 
   private profileMissingFieldsReply(task: AgentTask): string {
@@ -6178,11 +5632,6 @@ export class SocialAgentChatService {
 
   private safeDraftForEvent(value: unknown): Record<string, unknown> {
     return sanitizeForDisplay(value) as Record<string, unknown>;
-  }
-
-  private parseJsonObject(content: string): Record<string, unknown> {
-    const parsed = JSON.parse(content) as unknown;
-    return this.isRecord(parsed) ? parsed : {};
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {
