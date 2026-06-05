@@ -13,7 +13,6 @@ import {
   sanitizeForDisplay,
 } from '../common/display-text.util';
 import { sanitizeCity } from '../common/city.util';
-import type { MatchedCandidateView } from '../match/match.service';
 import { MessagesService } from '../messages/messages.service';
 import { RealtimeEventService } from '../realtime/realtime-event.service';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
@@ -65,10 +64,7 @@ import {
 import { AgentApprovalService } from './agent-approval.service';
 import { AgentApprovalRequest } from './entities/agent-approval-request.entity';
 import { PublicSocialIntent } from './entities/public-social-intent.entity';
-import {
-  CandidatePoolDebugReasons,
-  SocialAgentCandidatePoolService,
-} from './social-agent-candidate-pool.service';
+import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import {
   productHelpFallbackReply,
   workflowHelpReply,
@@ -77,8 +73,6 @@ import {
   buildApprovalActions,
   buildRecommendationAssistantMessage,
   buildSocialAgentRequestDraft,
-  toSocialAgentChatCandidate,
-  toSocialAgentDraftDto,
 } from './social-agent-chat-result.presenter';
 import {
   appendSocialAgentConversationTurn,
@@ -105,6 +99,7 @@ import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enri
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
+import { SocialAgentDraftSearchService } from './social-agent-draft-search.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentRagService } from './social-agent-rag.service';
@@ -185,6 +180,7 @@ export class SocialAgentChatService {
     private readonly meetLoop: SocialAgentMeetLoopService,
     private readonly candidateActions: SocialAgentCandidateActionService,
     private readonly draftPublication: SocialAgentDraftPublicationService,
+    private readonly draftSearch: SocialAgentDraftSearchService,
     @Optional() private readonly brain?: SocialAgentBrainService,
     @Optional()
     private readonly memoryContext?: SocialAgentMemoryContextService,
@@ -2530,68 +2526,14 @@ export class SocialAgentChatService {
     card: unknown;
     profileUsed: unknown;
   }> {
-    const call = await this.executor.executeToolAction(
-      task.id,
-      SocialAgentToolName.CreateSocialRequest,
-      {
-        mode: 'ai_draft',
-        rawText: goal,
-        goal,
-        metadata: {
-          agentTaskId: task.id,
-          source: 'social_agent_chat',
-        },
-      },
-      task.ownerUserId,
-    );
-    if (call.status !== 'succeeded') {
-      throw new BadRequestException(
-        cleanDisplayText(call.error?.message, '生成约练草稿失败'),
-      );
-    }
-    const output = this.isRecord(call.output) ? call.output : {};
-    if (!this.isRecord(output.draft)) {
-      throw new BadRequestException('生成约练草稿失败：缺少 draft');
-    }
-    return {
-      draft: output.draft as unknown as CreateSocialRequestDto,
-      card: output.card,
-      profileUsed: output.profileUsed,
-    };
+    return this.draftSearch.generateDraftWithTool(task, goal);
   }
 
   private async createPrivateDraftRequest(
     task: AgentTask,
     draft: SocialAgentRequestDraft,
   ): Promise<number> {
-    const call = await this.executor.executeToolAction(
-      task.id,
-      SocialAgentToolName.CreateSocialRequest,
-      {
-        ...toSocialAgentDraftDto(draft),
-        mode: 'private_draft',
-        metadata: {
-          ...(draft.metadata ?? {}),
-          agentTaskId: task.id,
-          source: 'social_agent_chat',
-          publishPolicy: 'requires_user_confirmation',
-        },
-      },
-      task.ownerUserId,
-    );
-    if (call.status !== 'succeeded') {
-      throw new BadRequestException(
-        cleanDisplayText(call.error?.message, '创建私有约练草稿失败'),
-      );
-    }
-    const output = this.isRecord(call.output) ? call.output : {};
-    const socialRequestId = this.number(output.socialRequestId ?? output.id);
-    if (!socialRequestId) {
-      throw new BadRequestException(
-        '创建私有约练草稿失败：缺少 socialRequestId',
-      );
-    }
-    return socialRequestId;
+    return this.draftSearch.createPrivateDraftRequest(task, draft);
   }
 
   private async readProfileSummary(
@@ -2615,69 +2557,7 @@ export class SocialAgentChatService {
     task: AgentTask,
     draft: SocialAgentRequestDraft,
   ): Promise<SocialAgentCandidateSearchResult> {
-    const input = draft.socialRequestId
-      ? {
-          socialRequestId: draft.socialRequestId,
-          rawText: draft.rawText,
-          limit: 10,
-        }
-      : {
-          city: sanitizeCity(draft.city),
-          activityType: cleanDisplayText(draft.activityType, ''),
-          interestTags: Array.isArray(draft.interestTags)
-            ? draft.interestTags
-            : [],
-          radiusKm: typeof draft.radiusKm === 'number' ? draft.radiusKm : 5,
-          safetyRequirement: draft.safetyRequirement,
-          rawText: draft.rawText,
-          limit: 10,
-        };
-    const call = await this.executor.executeToolAction(
-      task.id,
-      SocialAgentToolName.SearchMatches,
-      input,
-      task.ownerUserId,
-    );
-    if (call.status !== 'succeeded') {
-      throw new BadRequestException(
-        cleanDisplayText(call.error?.message, '检索候选人失败'),
-      );
-    }
-    const matchedCandidates = this.readMatchedCandidates(call.output);
-    const output = this.isRecord(call.output) ? call.output : {};
-    const emptyReason =
-      cleanDisplayText(output.emptyReason, '') === 'no_real_candidates'
-        ? 'no_real_candidates'
-        : null;
-    const message = cleanDisplayText(output.message, '') || null;
-    const debugReasons = this.isRecord(output.debugReasons)
-      ? (output.debugReasons as CandidatePoolDebugReasons)
-      : null;
-    const socialRequestId = draft.socialRequestId ?? null;
-    return {
-      candidates: matchedCandidates.map((candidate) =>
-        toSocialAgentChatCandidate(
-          draft.agentTaskId,
-          socialRequestId,
-          candidate,
-        ),
-      ),
-      emptyReason,
-      message,
-      debugReasons,
-    };
-  }
-
-  private readMatchedCandidates(output: unknown): MatchedCandidateView[] {
-    const record = this.isRecord(output) ? output : {};
-    const candidates = Array.isArray(record.candidates)
-      ? record.candidates
-      : Array.isArray(record.value)
-        ? record.value
-        : [];
-    return candidates.filter((candidate): candidate is MatchedCandidateView =>
-      this.isRecord(candidate),
-    );
+    return this.draftSearch.searchCandidates(task, draft);
   }
 
   private async completeRecommendationResult(
