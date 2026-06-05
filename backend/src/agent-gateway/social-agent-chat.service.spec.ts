@@ -15,6 +15,7 @@ import { SocialAgentChatService } from './social-agent-chat.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentFollowUpContextService } from './social-agent-follow-up-context.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
+import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 import { SocialAgentReplanProgressService } from './social-agent-replan-progress.service';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
@@ -417,6 +418,17 @@ function makeHarness(options: Record<string, unknown> = {}) {
   const replanProgress =
     (options.replanProgress as SocialAgentReplanProgressService | undefined) ??
     new SocialAgentReplanProgressService(eventRepo as never, runState as never);
+  const profileEnrichment =
+    (options.profileEnrichment as
+      | SocialAgentProfileEnrichmentService
+      | undefined) ??
+    new SocialAgentProfileEnrichmentService(
+      taskRepo as never,
+      executor as never,
+      chatLlm as never,
+      metrics as never,
+      options.lifeGraph as never,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
@@ -437,6 +449,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     runState as never,
     followUpContext as never,
     replanProgress as never,
+    profileEnrichment as never,
     options.brain as never,
     undefined,
     options.finalResponses as never,
@@ -468,6 +481,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     longTermMemory,
     rag,
     config,
+    profileEnrichment,
   };
 }
 
