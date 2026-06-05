@@ -175,7 +175,13 @@ import type {
   StreamEmit,
 } from './social-agent-chat.types';
 import {
+  buildSocialAgentActivityCompletionCard,
+  buildSocialAgentActivityPlanCard,
   buildSocialAgentCardActionRouteResult,
+  buildSocialAgentCheckinCard,
+  buildSocialAgentLifeGraphUpdateCard,
+  buildSocialAgentOpenerApprovalCard,
+  buildSocialAgentReviewCard,
   createSocialAgentActivityDtoFromPayload,
   mergeSocialAgentActivityPayload,
   messageForSocialAgentSchemaAction,
@@ -3385,47 +3391,15 @@ export class SocialAgentChatService {
     const displayName =
       cleanDisplayText(candidate.displayName ?? candidate.nickname, '') ||
       '对方';
-    const card: FitMeetAlphaCard = {
-      id: `opener_approval:${task.id}:${targetUserId ?? approval.id}`,
-      type: 'opener_approval',
-      title: '这条消息会发送给对方。我先帮你写好了，你确认后我再发。',
-      body: draft,
-      status: 'waiting_confirmation',
-      data: {
-        taskId: task.id,
-        targetUserId,
-        displayName,
-        message: draft,
-        loopStage: 'opener_draft_created',
-        safetyBoundary: '确认前不会发送。建议先站内沟通，不急着交换联系方式。',
-      },
-      actions: [
-        {
-          id: 'opener_confirm_send',
-          label: '确认发送',
-          action: 'send_message',
-          schemaAction: 'opener.confirm_send',
-          loopStage: 'opener_draft_created',
-          requiresConfirmation: true,
-          payload: {
-            taskId: task.id,
-            targetUserId,
-            candidate,
-            message: draft,
-            approvalId: approval.id,
-          },
-        },
-        {
-          id: 'opener_regenerate',
-          label: '重新生成',
-          action: 'generate_opener',
-          schemaAction: 'opener.regenerate',
-          loopStage: 'opener_draft_created',
-          requiresConfirmation: false,
-          payload,
-        },
-      ],
-    };
+    const card = buildSocialAgentOpenerApprovalCard({
+      taskId: task.id,
+      targetUserId,
+      approvalId: approval.id,
+      candidate,
+      displayName,
+      draft,
+      regeneratePayload: payload,
+    });
 
     const assistantMessage =
       '我先帮你写了一条低压力的开场白。你确认前，我不会替你发送。';
@@ -3504,40 +3478,11 @@ export class SocialAgentChatService {
     });
     await this.taskRepo.save(task);
 
-    const card: FitMeetAlphaCard = {
-      id: `activity_plan:${task.id}:${approval.id}`,
-      type: 'activity_plan',
-      title: '我可以帮你创建一个约练计划',
-      body: '确认前不会创建活动。第一次见面建议选择公共场所，我不会共享你的精确位置。',
-      status: 'waiting_confirmation',
-      data: {
-        taskId: task.id,
-        loopStage: 'activity_draft_created',
-        publicPlaceOnly: true,
-        noPreciseLocation: true,
-        safetyBoundary: '公共场所见面，不共享精确位置。',
-        checkinReminder: '活动开始前我会提醒你确认是否到达。',
-        lifeGraphUpdatePreview:
-          '完成后会把这次活动结果用于更新你的 Life Graph。',
-        trustScoreUpdatePreview:
-          '完成与评价会写入 trust score，用来提升后续推荐可信度。',
-      },
-      actions: [
-        {
-          id: 'activity_confirm_create',
-          label: '确认创建',
-          action: 'create_activity',
-          schemaAction: 'activity.confirm_create',
-          loopStage: 'activity_draft_created',
-          requiresConfirmation: true,
-          payload: {
-            taskId: task.id,
-            approvalId: approval.id,
-            ...payload,
-          },
-        },
-      ],
-    };
+    const card = buildSocialAgentActivityPlanCard({
+      taskId: task.id,
+      approvalId: approval.id,
+      payload,
+    });
 
     const assistantMessage =
       '我整理好了约练计划草稿。你确认前，我不会创建线下活动，也不会共享精确位置。';
@@ -3622,38 +3567,12 @@ export class SocialAgentChatService {
     });
     await this.taskRepo.save(task);
 
-    const card: FitMeetAlphaCard = {
-      id: `checkin_card:${task.id}:${resolvedActivityId ?? 'draft'}`,
-      type: 'checkin_card',
-      title: '约练计划已创建。开始前，我会提醒你确认是否到达。',
-      body: '第一次见面仍建议选择校园操场、公园等公共场所。这里不会共享你的精确位置。',
-      status: 'ready',
-      data: {
-        taskId: task.id,
-        activityId: resolvedActivityId,
-        candidateUserId: resolvedCandidateUserId,
-        realActivityPersisted: Boolean(realActivity),
-        loopStage: 'activity_confirmed',
-        publicPlaceOnly: true,
-        noPreciseLocation: true,
-        safetyBoundary: '公共场所见面，不共享精确位置。',
-      },
-      actions: [
-        {
-          id: 'activity_check_in',
-          label: '我已到达，签到',
-          action: 'check_in',
-          schemaAction: 'activity.check_in',
-          loopStage: 'activity_confirmed',
-          requiresConfirmation: false,
-          payload: {
-            taskId: task.id,
-            activityId: resolvedActivityId,
-            candidateUserId: resolvedCandidateUserId,
-          },
-        },
-      ],
-    };
+    const card = buildSocialAgentCheckinCard({
+      taskId: task.id,
+      activityId: resolvedActivityId,
+      candidateUserId: resolvedCandidateUserId,
+      realActivityPersisted: Boolean(realActivity),
+    });
 
     const assistantMessage =
       '约练计划已经创建好了。等你到达公共场所后，再点签到；我不会共享你的精确位置。';
@@ -3720,36 +3639,13 @@ export class SocialAgentChatService {
     });
     await this.taskRepo.save(task);
 
-    const card: FitMeetAlphaCard = {
-      id: `activity_complete:${task.id}:${resolvedActivityId ?? 'draft'}`,
-      type: 'checkin_card',
-      title: '已签到。活动结束后，告诉我是否完成。',
-      body: '如果临时不舒服或现场环境不合适，可以直接取消，不需要勉强完成。',
-      status: 'ready',
-      data: {
-        taskId: task.id,
-        activityId: resolvedActivityId,
-        candidateUserId,
-        realActivityPersisted: Boolean(checkinResult),
-        loopStage: 'activity_checked_in',
-        checkedInAt: now,
-      },
-      actions: [
-        {
-          id: 'activity_complete',
-          label: '活动已完成',
-          action: 'submit_review',
-          schemaAction: 'activity.complete',
-          loopStage: 'activity_checked_in',
-          requiresConfirmation: false,
-          payload: {
-            taskId: task.id,
-            activityId: resolvedActivityId,
-            candidateUserId,
-          },
-        },
-      ],
-    };
+    const card = buildSocialAgentActivityCompletionCard({
+      taskId: task.id,
+      activityId: resolvedActivityId,
+      candidateUserId,
+      realActivityPersisted: Boolean(checkinResult),
+      checkedInAt: now,
+    });
 
     const assistantMessage =
       '签到已记录。活动结束后你确认完成，我再帮你生成评价卡，并说明 Life Graph 会更新什么。';
@@ -3827,42 +3723,12 @@ export class SocialAgentChatService {
     });
     await this.taskRepo.save(task);
 
-    const card: FitMeetAlphaCard = {
-      id: `review_card:${task.id}:${resolvedActivityId ?? 'draft'}`,
-      type: 'review_card',
-      title: '这次约练完成了吗？我可以帮你记录一个简短评价。',
-      body: '评价会帮助我调整后续推荐，也会用于更新你的 Life Graph 和履约可信度。',
-      status: 'ready',
-      data: {
-        taskId: task.id,
-        activityId: resolvedActivityId,
-        candidateUserId,
-        realActivityPersisted: Boolean(completedActivity),
-        loopStage: 'activity_completed',
-        defaultRating: 5,
-        lifeGraphUpdatePreview:
-          '会记录你完成了一次低压力运动社交，并提高类似时间、地点和运动强度的推荐权重。',
-        trustScoreUpdatePreview:
-          '完成记录会提升你的履约可信度；正向评价会让后续推荐更相信这类搭子适合你。',
-      },
-      actions: [
-        {
-          id: 'review_submit',
-          label: '提交评价',
-          action: 'submit_review',
-          schemaAction: 'review.submit',
-          loopStage: 'activity_completed',
-          requiresConfirmation: false,
-          payload: {
-            taskId: task.id,
-            activityId: resolvedActivityId,
-            candidateUserId,
-            rating: 5,
-            comment: '这次约练顺利完成，节奏比较轻松。',
-          },
-        },
-      ],
-    };
+    const card = buildSocialAgentReviewCard({
+      taskId: task.id,
+      activityId: resolvedActivityId,
+      candidateUserId,
+      realActivityPersisted: Boolean(completedActivity),
+    });
 
     const assistantMessage =
       '太好了，这次约练我先标记为完成。你可以提交一个简短评价，我再把 Life Graph 和 trust score 更新说明给你看。';
@@ -3952,56 +3818,16 @@ export class SocialAgentChatService {
     });
     await this.taskRepo.save(task);
 
-    const card: FitMeetAlphaCard = {
-      id: `life_graph_update:${task.id}:${activityId ?? 'draft'}`,
-      type: 'audit_update',
-      title: '这次约练已经记录到你的 Life Graph。',
-      body: '我会用这次真实完成和评价，优化之后推荐给你的运动搭子和活动时间。',
-      status: 'completed',
-      data: {
-        taskId: task.id,
-        activityId,
-        candidateUserId,
-        realActivityPersisted: Boolean(reviewResult),
-        loopStage: 'trust_score_updated',
-        review: { rating, comment },
-        lifeGraphUpdatePreview: positive
-          ? '你近期更适合低压力运动社交；公共场所、轻松强度和相近活动区域的权重会提高。'
-          : '我会降低这类候选和活动安排的权重，并优先寻找更合适的节奏。',
-        trustScoreUpdatePreview: `本次完成记录会让履约可信度 +${trustScoreDelta}。`,
-        canView: true,
-        canCorrect: true,
-        canRevoke: true,
-      },
-      actions: [
-        {
-          id: 'life_graph_accept_update',
-          label: '保留这次更新',
-          action: 'confirm_profile_update',
-          schemaAction: 'life_graph.accept_update',
-          loopStage: 'trust_score_updated',
-          requiresConfirmation: false,
-          payload: {
-            taskId: task.id,
-            activityId,
-            candidateUserId,
-          },
-        },
-        {
-          id: 'life_graph_reject_update',
-          label: '不要用于推荐',
-          action: 'confirm_profile_update',
-          schemaAction: 'life_graph.reject_update',
-          loopStage: 'trust_score_updated',
-          requiresConfirmation: false,
-          payload: {
-            taskId: task.id,
-            activityId,
-            candidateUserId,
-          },
-        },
-      ],
-    };
+    const card = buildSocialAgentLifeGraphUpdateCard({
+      taskId: task.id,
+      activityId,
+      candidateUserId,
+      realActivityPersisted: Boolean(reviewResult),
+      rating,
+      comment,
+      positive,
+      trustScoreDelta,
+    });
 
     const assistantMessage =
       '评价已提交。这次完成记录已经用于更新你的 Life Graph，并生成了 trust score 更新说明；你之后仍然可以查看、纠正或撤回这次画像影响。';
