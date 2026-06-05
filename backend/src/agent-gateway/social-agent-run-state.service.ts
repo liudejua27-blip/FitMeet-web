@@ -14,7 +14,10 @@ import {
   AgentTaskEventType,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
-import type { SocialAgentAsyncRunSnapshot } from './social-agent-chat.types';
+import type {
+  SocialAgentAsyncRunSnapshot,
+  SocialAgentFollowUpContext,
+} from './social-agent-chat.types';
 import {
   readLatestSocialAgentStoredRun,
   readSocialAgentStoredRun,
@@ -39,6 +42,98 @@ export class SocialAgentRunStateService {
     private readonly eventRepo: Repository<AgentTaskEvent>,
     private readonly messages: MessagesService,
   ) {}
+
+  async queueChatRun(input: {
+    task: AgentTask;
+    runId: string;
+    goal: string;
+  }): Promise<SocialAgentAsyncRunSnapshot> {
+    const { task, runId, goal } = input;
+    const now = new Date().toISOString();
+    const queuedRun: SocialAgentAsyncRunSnapshot = {
+      taskId: task.id,
+      runId,
+      status: 'queued',
+      phase: 'queued',
+      message: '已收到需求，正在后台搜索候选人。',
+      visibleSteps: [
+        {
+          id: 'task.created',
+          label: '已创建 Social Agent 任务',
+          status: 'done',
+        },
+      ],
+      queuedAt: now,
+      startedAt: null,
+      updatedAt: now,
+      completedAt: null,
+      failedAt: null,
+      pollAfterMs: 1500,
+      taskStatus: task.status,
+      error: null,
+      replan: null,
+      result: null,
+    };
+    task.status = AgentTaskStatus.Planning;
+    task.statusReason = 'chat_run_queued';
+    task.result = withSocialAgentStoredRun(task.result, queuedRun);
+    await this.taskRepo.save(task);
+    await this.writeEvent(
+      task,
+      AgentTaskEventType.Note,
+      'Social Agent 任务已进入后台队列',
+      { runId, goal },
+    );
+    return queuedRun;
+  }
+
+  async queueReplanRun(input: {
+    task: AgentTask;
+    runId: string;
+    followUp: SocialAgentFollowUpContext;
+  }): Promise<SocialAgentAsyncRunSnapshot> {
+    const { task, runId, followUp } = input;
+    const now = new Date().toISOString();
+    const queuedRun: SocialAgentAsyncRunSnapshot = {
+      taskId: task.id,
+      runId,
+      status: 'queued',
+      phase: 'queued',
+      message: '已收到补充，正在后台重新规划。',
+      visibleSteps: [
+        {
+          id: 'append_context',
+          label: '已写入当前任务上下文',
+          status: 'done',
+        },
+      ],
+      queuedAt: now,
+      startedAt: null,
+      updatedAt: now,
+      completedAt: null,
+      failedAt: null,
+      pollAfterMs: 1500,
+      error: null,
+      replan: null,
+      result: null,
+    };
+    task.status = AgentTaskStatus.Planning;
+    task.statusReason = 'follow_up_replan_queued';
+    task.result = withSocialAgentStoredRun(task.result, queuedRun);
+    await this.taskRepo.save(task);
+    await this.writeEvent(
+      task,
+      AgentTaskEventType.SocialAgentReplanQueued,
+      '已进入后台重新规划队列',
+      {
+        runId,
+        userMessage: followUp.userMessage,
+        refreshedGoal: followUp.refreshedGoal,
+      },
+      AgentTaskEventActor.System,
+    );
+    return queuedRun;
+  }
 
   async updateRunSnapshot(
     ownerUserId: number,

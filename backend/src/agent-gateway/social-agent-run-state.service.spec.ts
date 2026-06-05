@@ -2,6 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 
 import {
   AgentTask,
+  AgentTaskEventActor,
   AgentTaskEventType,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
@@ -72,6 +73,107 @@ function makeHarness(task = makeTask()) {
 }
 
 describe('SocialAgentRunStateService', () => {
+  it('queues initial chat runs with pollable state and a task event', async () => {
+    const task = makeTask({
+      result: {},
+      status: AgentTaskStatus.Pending,
+    });
+    const { savedEvents, service, taskRepo } = makeHarness(task);
+
+    const queued = await service.queueChatRun({
+      task,
+      runId: 'sar_chat_1',
+      goal: '今晚想找一个跑步搭子',
+    });
+
+    expect(queued).toMatchObject({
+      taskId: 101,
+      runId: 'sar_chat_1',
+      status: 'queued',
+      phase: 'queued',
+      message: '已收到需求，正在后台搜索候选人。',
+      taskStatus: AgentTaskStatus.Pending,
+      visibleSteps: [
+        {
+          id: 'task.created',
+          label: '已创建 Social Agent 任务',
+          status: 'done',
+        },
+      ],
+    });
+    expect(task.status).toBe(AgentTaskStatus.Planning);
+    expect(task.statusReason).toBe('chat_run_queued');
+    expect(task.result).toMatchObject({
+      latestRunId: 'sar_chat_1',
+      chatRuns: { sar_chat_1: expect.objectContaining({ status: 'queued' }) },
+    });
+    expect(taskRepo.save).toHaveBeenCalledWith(task);
+    expect(savedEvents).toEqual([
+      expect.objectContaining({
+        actor: AgentTaskEventActor.Agent,
+        eventType: AgentTaskEventType.Note,
+        payload: { runId: 'sar_chat_1', goal: '今晚想找一个跑步搭子' },
+        taskId: 101,
+      }),
+    ]);
+  });
+
+  it('queues follow-up replan runs with the saved follow-up context', async () => {
+    const task = makeTask({
+      result: {},
+      status: AgentTaskStatus.AwaitingFeedback,
+    });
+    const { savedEvents, service } = makeHarness(task);
+
+    const queued = await service.queueReplanRun({
+      task,
+      runId: 'sar_replan_1',
+      followUp: {
+        task,
+        userMessage: '改成周末下午',
+        previousGoal: '今晚跑步',
+        refreshedGoal: '今晚跑步 + 周末下午',
+        appendedAt: '2026-06-05T00:00:00.000Z',
+        alreadyAppended: false,
+      },
+    });
+
+    expect(queued).toMatchObject({
+      taskId: 101,
+      runId: 'sar_replan_1',
+      status: 'queued',
+      phase: 'queued',
+      message: '已收到补充，正在后台重新规划。',
+      visibleSteps: [
+        {
+          id: 'append_context',
+          label: '已写入当前任务上下文',
+          status: 'done',
+        },
+      ],
+    });
+    expect(task.status).toBe(AgentTaskStatus.Planning);
+    expect(task.statusReason).toBe('follow_up_replan_queued');
+    expect(task.result).toMatchObject({
+      latestRunId: 'sar_replan_1',
+      chatRuns: {
+        sar_replan_1: expect.objectContaining({ status: 'queued' }),
+      },
+    });
+    expect(savedEvents).toEqual([
+      expect.objectContaining({
+        actor: AgentTaskEventActor.System,
+        eventType: AgentTaskEventType.SocialAgentReplanQueued,
+        payload: {
+          runId: 'sar_replan_1',
+          userMessage: '改成周末下午',
+          refreshedGoal: '今晚跑步 + 周末下午',
+        },
+        taskId: 101,
+      }),
+    ]);
+  });
+
   it('updates run snapshots and mirrors running status onto the task', async () => {
     const { service, task, taskRepo } = makeHarness();
 
