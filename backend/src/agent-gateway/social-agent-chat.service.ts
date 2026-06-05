@@ -116,10 +116,9 @@ import {
 } from './social-agent-chat-session.presenter';
 import {
   createSocialAgentRunId,
-  readLatestSocialAgentStoredRun,
-  readSocialAgentStoredRun,
   withSocialAgentStoredRun,
 } from './social-agent-chat-run.presenter';
+import { SocialAgentRunStateService } from './social-agent-run-state.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentRagService } from './social-agent-rag.service';
@@ -216,6 +215,7 @@ export class SocialAgentChatService {
     private readonly longTermMemory: SocialAgentLongTermMemoryService,
     private readonly rag: SocialAgentRagService,
     private readonly chatLlm: SocialAgentChatLlmService,
+    private readonly runState: SocialAgentRunStateService,
     @Optional() private readonly brain?: SocialAgentBrainService,
     @Optional()
     private readonly memoryContext?: SocialAgentMemoryContextService,
@@ -4862,35 +4862,13 @@ export class SocialAgentChatService {
     runId: string,
     patch: Partial<SocialAgentAsyncRunSnapshot>,
   ): Promise<AgentTask> {
-    const task = await this.assertTaskOwner(taskId, ownerUserId);
-    const existing = this.readStoredRun(task, runId);
-    if (!existing)
-      throw new NotFoundException(`Social agent run ${runId} not found`);
-    const now = new Date().toISOString();
-    const next: SocialAgentAsyncRunSnapshot = {
-      ...existing,
-      ...patch,
+    return this.runState.updateRunSnapshot(
+      ownerUserId,
       taskId,
       runId,
-      updatedAt: now,
-      pollAfterMs: patch.pollAfterMs ?? existing.pollAfterMs ?? 1500,
-      visibleSteps: patch.visibleSteps ?? existing.visibleSteps ?? [],
-    };
-    if (next.status === 'running' && !next.startedAt) next.startedAt = now;
-    if (next.status === 'failed' && !next.failedAt) next.failedAt = now;
-    if (next.status === 'completed' && !next.completedAt)
-      next.completedAt = now;
-    task.result = withSocialAgentStoredRun(task.result, next);
-    if (next.status === 'running' || next.status === 'queued') {
-      task.status = AgentTaskStatus.Planning;
-      task.statusReason = `follow_up_replan_${next.phase}`;
-    }
-    if (next.status === 'failed') {
-      task.status = AgentTaskStatus.AwaitingFeedback;
-      task.statusReason = 'follow_up_replan_failed_context_saved';
-      task.error = this.errorPayload(next.error ?? '重新规划失败');
-    }
-    return this.taskRepo.save(task);
+      patch,
+      (id, label) => this.userVisibleStepLabel(id, label),
+    );
   }
 
   private async markRunFailed(
@@ -4900,36 +4878,21 @@ export class SocialAgentChatService {
     error: unknown,
     options: { message?: string; statusReason?: string } = {},
   ): Promise<void> {
-    const errorPayload = this.errorPayload(error);
-    const task = await this.updateRunSnapshot(ownerUserId, taskId, runId, {
-      status: 'failed',
-      phase: 'failed',
-      message:
-        options.message ?? '重新规划失败，已保留你的补充信息。你可以重试。',
-      error: errorPayload,
-    });
-    if (options.statusReason) {
-      task.statusReason = options.statusReason;
-      await this.taskRepo.save(task);
-    }
-    await this.writeEvent(
-      task,
-      AgentTaskEventType.SocialAgentReplanFailed,
-      '异步重新规划失败，补充信息已保留',
-      { runId, error: errorPayload },
-      AgentTaskEventActor.System,
-    );
-    await this.writeInboxEventBestEffort(task, 'social_agent.replan.failed', {
+    await this.runState.markRunFailed(
+      ownerUserId,
+      taskId,
       runId,
-      error: errorPayload,
-    });
+      error,
+      (id, label) => this.userVisibleStepLabel(id, label),
+      options,
+    );
   }
 
   private readStoredRun(
     task: AgentTask,
     runId: string,
   ): SocialAgentAsyncRunSnapshot | null {
-    return readSocialAgentStoredRun(task, runId, (id, label) =>
+    return this.runState.readStoredRun(task, runId, (id, label) =>
       this.userVisibleStepLabel(id, label),
     );
   }
@@ -4975,20 +4938,6 @@ export class SocialAgentChatService {
       ? value.filter((entry) => this.isRecord(entry))
       : [];
     return [...previous, item].slice(-limit);
-  }
-
-  private errorPayload(error: unknown): Record<string, unknown> {
-    const rawMessage = this.isRecord(error)
-      ? cleanDisplayText(error.message, '')
-      : error instanceof Error
-        ? error.message
-        : safeUnknownText(error);
-    return {
-      code: this.isRecord(error)
-        ? cleanDisplayText(error.code, 'social_agent_replan_failed')
-        : 'social_agent_replan_failed',
-      message: cleanDisplayText(rawMessage, '重新规划失败'),
-    };
   }
 
   private isRecentIsoTime(value: string, maxAgeMs: number): boolean {
@@ -5146,7 +5095,7 @@ export class SocialAgentChatService {
   private readLatestStoredRun(
     task: AgentTask,
   ): SocialAgentAsyncRunSnapshot | null {
-    return readLatestSocialAgentStoredRun(task, (id, label) =>
+    return this.runState.readLatestStoredRun(task, (id, label) =>
       this.userVisibleStepLabel(id, label),
     );
   }

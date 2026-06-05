@@ -14,6 +14,7 @@ import { SocialAgentAction } from './agent-permission.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
+import { SocialAgentRunStateService } from './social-agent-run-state.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 
@@ -396,6 +397,13 @@ function makeHarness(options: Record<string, unknown> = {}) {
       options.finalResponses as never,
       options.modelRouter as never,
     );
+  const runState =
+    (options.runState as SocialAgentRunStateService | undefined) ??
+    new SocialAgentRunStateService(
+      taskRepo as never,
+      eventRepo as never,
+      messages as never,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
@@ -413,6 +421,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     longTermMemory as never,
     rag as never,
     chatLlm as never,
+    runState as never,
     options.brain as never,
     undefined,
     options.finalResponses as never,
