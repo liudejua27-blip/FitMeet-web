@@ -73,7 +73,13 @@ import {
   readSocialAgentRestorableResult,
   readSocialAgentStoredCandidateSummaries,
 } from './social-agent-chat-session.presenter';
-import { createSocialAgentRunId } from './social-agent-chat-run.presenter';
+import {
+  buildSocialAgentBlockedRunResult,
+  buildSocialAgentClarificationRunResult,
+  createSocialAgentRunId,
+  socialAgentClarificationStep,
+  socialAgentSafetyBlockedStep,
+} from './social-agent-chat-run.presenter';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
 import { SocialAgentFollowUpContextService } from './social-agent-follow-up-context.service';
 import { SocialAgentReplanProgressService } from './social-agent-replan-progress.service';
@@ -1203,11 +1209,7 @@ export class SocialAgentChatService {
       context: { flow: 'run_stream' },
     });
     if (alphaTurn?.safety.blocked) {
-      const blockedStep: SocialAgentVisibleStep = {
-        id: 'main_agent_safety',
-        label: 'Main Agent 已拦截不安全请求',
-        status: 'failed',
-      };
+      const blockedStep = socialAgentSafetyBlockedStep();
       visibleSteps.push(blockedStep);
       task.status = AgentTaskStatus.Failed;
       task.riskLevel = AgentTaskRiskLevel.Blocked;
@@ -1239,35 +1241,19 @@ export class SocialAgentChatService {
         order: { createdAt: 'ASC', id: 'ASC' },
         take: 500,
       });
-      const result: SocialAgentChatRunResult = {
-        taskId: task.id,
-        status: task.status,
+      const result = buildSocialAgentBlockedRunResult({
+        task,
         visibleSteps,
-        assistantMessage:
-          alphaTurn.assistantMessage ||
-          '这个请求不符合 FitMeet 的安全边界，我不能继续执行。',
-        emptyReason: null,
-        message: null,
-        debugReasons: null,
-        socialRequestDraft: null,
-        candidates: [],
-        approvalRequiredActions: [],
+        alphaTurn,
         events: events.map((event) => this.toEventDto(event)),
-        cards: alphaTurn.cards,
-        safety: alphaTurn.safety,
-        traceId: alphaTurn.traceId,
-        agentTrace: alphaTurn.agentTrace,
-        structuredIntent: alphaTurn.structuredIntent,
-      };
+      });
       await emit?.({ type: 'result', result });
       return result;
     }
     if (socialAgentAlphaNeedsClarification(alphaTurn)) {
-      const clarifyStep: SocialAgentVisibleStep = {
-        id: 'clarify',
-        label: this.userVisibleStepLabel('clarify', '正在等待你补充需求'),
-        status: 'done',
-      };
+      const clarifyStep = socialAgentClarificationStep(
+        this.userVisibleStepLabel('clarify', '正在等待你补充需求'),
+      );
       visibleSteps.push(clarifyStep);
       task.status = AgentTaskStatus.AwaitingFeedback;
       task.statusReason = 'main_agent_waiting_for_clarification';
@@ -1295,28 +1281,17 @@ export class SocialAgentChatService {
         order: { createdAt: 'ASC', id: 'ASC' },
         take: 500,
       });
-      const result: SocialAgentChatRunResult = {
-        taskId: task.id,
-        status: task.status,
+      const result = buildSocialAgentClarificationRunResult({
+        task,
         visibleSteps,
         assistantMessage: socialAgentAlphaClarifyingMessage(
           alphaTurn,
           (question, fallback) =>
             this.tonePolicy?.safeAssistantMessage(question, fallback) ?? '',
         ),
-        emptyReason: null,
-        message: null,
-        debugReasons: null,
-        socialRequestDraft: null,
-        candidates: [],
-        approvalRequiredActions: [],
+        alphaTurn,
         events: events.map((event) => this.toEventDto(event)),
-        cards: alphaTurn?.cards ?? [],
-        safety: alphaTurn?.safety,
-        traceId: alphaTurn?.traceId,
-        agentTrace: alphaTurn?.agentTrace,
-        structuredIntent: alphaTurn?.structuredIntent,
-      };
+      });
       await this.fitMeetRuntime?.completeRun({
         runId: runtimeRun?.id,
         userId: ownerUserId,
