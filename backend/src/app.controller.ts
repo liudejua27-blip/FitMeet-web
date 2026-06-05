@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { AppService } from './app.service';
+import { fitMeetCoreOpenApi } from './openapi/fitmeet-core.openapi';
 
 @Controller()
 export class AppController {
@@ -17,5 +18,10 @@ export class AppController {
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
     };
+  }
+
+  @Get('openapi/fitmeet-core.json')
+  getFitMeetCoreOpenApi() {
+    return fitMeetCoreOpenApi;
   }
 }

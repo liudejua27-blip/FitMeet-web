@@ -29,4 +29,25 @@ describe('AppController', () => {
       });
     });
   });
+
+  describe('FitMeet core OpenAPI', () => {
+    it('covers auth, feed, Social Agent chat, and uploads', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+
+      expect(contract.openapi).toBe('3.1.0');
+      expect(Object.keys(contract.paths)).toEqual(
+        expect.arrayContaining([
+          '/auth/login',
+          '/auth/refresh',
+          '/auth/profile',
+          '/feed',
+          '/feed/{postId}/comments',
+          '/social-agent/chat/messages',
+          '/social-agent/chat/stream-user',
+          '/uploads/image',
+          '/uploads/video',
+        ]),
+      );
+    });
+  });
 });
