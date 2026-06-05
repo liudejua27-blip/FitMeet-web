@@ -60,6 +60,7 @@ export function EcosystemGateways() {
             return (
               <motion.a
                 key={g.id}
+                id={`gateway-${g.id}`}
                 href={g.href}
                 onMouseEnter={() => setActive(g.id)}
                 onFocus={() => setActive(g.id)}

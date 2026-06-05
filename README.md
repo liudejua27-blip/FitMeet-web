@@ -184,7 +184,7 @@ GitHub Actions 工作流在 `.github/workflows/ci.yml`。当前基线包含：
 - frontend：install、lint、build、test
 - fitmeet-landing：install、lint、build、test
 
-注意：`fitmeet-landing` 目前的 `pnpm test` 是显式 no-op，用来让三项目基线命令一致。真正业务测试需要后续补 Playwright 或 React component tests。
+`fitmeet-landing` 的 `pnpm test` 已覆盖公开落地页组成、导航锚点、gateway 数据和 Agent Hub 产品入口。后续仍应继续补 Playwright 交互和视觉回归测试。
 
 ## 部署
 
