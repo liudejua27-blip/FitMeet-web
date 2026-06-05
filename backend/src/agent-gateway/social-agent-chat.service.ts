@@ -134,14 +134,7 @@ import {
 import { LifeGraphService } from '../life-graph/life-graph.service';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 import { ActivitiesService } from '../activities/activities.service';
-import type {
-  CheckinActivityDto,
-  CreateActivityDto,
-} from '../activities/dto/activity.dto';
-import {
-  ActivityProofPolicy,
-  ActivityType,
-} from '../activities/entities/activity-template.entity';
+import type { CheckinActivityDto } from '../activities/dto/activity.dto';
 import {
   FitMeetAgentRunStatus,
   FitMeetAgentStepStatus,
@@ -150,7 +143,6 @@ import {
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
 import type {
-  FitMeetAgentSchemaAction,
   FitMeetAlphaCard,
   FitMeetAlphaTurnDecision,
 } from './fitmeet-alpha-agent.types';
@@ -182,6 +174,14 @@ import type {
   SocialAgentVisibleStep,
   StreamEmit,
 } from './social-agent-chat.types';
+import {
+  buildSocialAgentCardActionRouteResult,
+  createSocialAgentActivityDtoFromPayload,
+  mergeSocialAgentActivityPayload,
+  messageForSocialAgentSchemaAction,
+  readSocialAgentCardActionCandidate,
+  readSocialAgentMeetLoopState,
+} from './social-agent-card-action.presenter';
 export type * from './social-agent-chat.types';
 
 @Injectable()
@@ -785,7 +785,7 @@ export class SocialAgentChatService {
 
     return this.handleMessage(ownerUserId, {
       taskId,
-      message: this.messageForSchemaAction(action),
+      message: messageForSocialAgentSchemaAction(action),
       hasCandidates: true,
     });
   }
@@ -3309,7 +3309,11 @@ export class SocialAgentChatService {
   ): Promise<SocialAgentIntentRouteResult> {
     const task = await this.assertTaskOwner(taskId, ownerUserId);
     const payload = body.payload ?? {};
-    const candidate = this.cardActionCandidate(payload, task);
+    const candidate = readSocialAgentCardActionCandidate({
+      payload,
+      task,
+      isRecord: (value) => this.isRecord(value),
+    });
     const targetUserId =
       this.number(payload.targetUserId) ??
       this.number(candidate.targetUserId) ??
@@ -3596,7 +3600,7 @@ export class SocialAgentChatService {
     task.result = {
       ...(task.result ?? {}),
       meetLoop: {
-        ...this.meetLoopState(task),
+        ...readSocialAgentMeetLoopState(task, (value) => this.isRecord(value)),
         ...payload,
         activityId: resolvedActivityId,
         candidateUserId: resolvedCandidateUserId,
@@ -3696,7 +3700,7 @@ export class SocialAgentChatService {
     task.result = {
       ...(task.result ?? {}),
       meetLoop: {
-        ...this.meetLoopState(task),
+        ...readSocialAgentMeetLoopState(task, (value) => this.isRecord(value)),
         ...payload,
         activityId: resolvedActivityId,
         candidateUserId,
@@ -3803,7 +3807,7 @@ export class SocialAgentChatService {
     task.result = {
       ...(task.result ?? {}),
       meetLoop: {
-        ...this.meetLoopState(task),
+        ...readSocialAgentMeetLoopState(task, (value) => this.isRecord(value)),
         ...payload,
         activityId: resolvedActivityId,
         candidateUserId,
@@ -3926,7 +3930,7 @@ export class SocialAgentChatService {
     task.result = {
       ...(task.result ?? {}),
       meetLoop: {
-        ...this.meetLoopState(task),
+        ...readSocialAgentMeetLoopState(task, (value) => this.isRecord(value)),
         ...payload,
         activityId,
         candidateUserId,
@@ -4025,30 +4029,13 @@ export class SocialAgentChatService {
     cards: FitMeetAlphaCard[],
     pendingApproval: SocialAgentPendingApprovalSnapshot | null = null,
   ): SocialAgentIntentRouteResult {
-    return {
-      intent: 'action_request',
-      confidence: 1,
-      entities: this.emptyIntentEntities(),
-      shouldSearch: false,
-      shouldReplan: false,
-      shouldUpdateProfile: false,
-      shouldExecuteAction: true,
-      replyStrategy: 'execute_action',
-      source: 'rules',
-      action: pendingApproval ? 'await_confirmation' : 'reply',
-      taskId: task.id,
+    return buildSocialAgentCardActionRouteResult({
+      task,
       assistantMessage,
-      savedContext: true,
-      profileUpdated: false,
-      shouldQueueRun: false,
-      runMode: null,
-      queuedRun: null,
-      pendingApproval,
-      activityResults: [],
-      profileUpdateProposal: null,
       cards,
-      permissionMode: task.permissionMode,
-    };
+      emptyIntentEntities: this.emptyIntentEntities(),
+      pendingApproval,
+    });
   }
 
   private async createOrConfirmRealActivity(
@@ -4065,11 +4052,11 @@ export class SocialAgentChatService {
       )) as unknown as Record<string, unknown>;
     }
 
-    const dto = this.createActivityDtoFromPayload(
-      ownerUserId,
+    const dto = createSocialAgentActivityDtoFromPayload({
       payload,
       candidateUserId,
-    );
+      number: (value) => this.number(value),
+    });
     const created = await this.activities.create(ownerUserId, dto);
     let confirmed = created;
     try {
@@ -4090,96 +4077,15 @@ export class SocialAgentChatService {
     };
   }
 
-  private createActivityDtoFromPayload(
-    _ownerUserId: number,
-    payload: Record<string, unknown>,
-    candidateUserId?: number | null,
-  ): CreateActivityDto {
-    const title =
-      cleanDisplayText(payload.title, '') ||
-      cleanDisplayText(payload.activityTitle, '') ||
-      '轻松约练';
-    const locationName =
-      cleanDisplayText(
-        payload.locationName ?? payload.location ?? payload.loc,
-        '',
-      ) || '公共场所';
-    const city = cleanDisplayText(payload.city, '') || '青岛';
-    const startTime = this.readActivityStartTime(payload);
-    const durationMinutes =
-      this.number(payload.durationMinutes) ??
-      this.number(payload.duration) ??
-      45;
-    const socialRequestId = this.number(payload.socialRequestId);
-    const meetId = this.number(payload.meetId);
-    const matchedCandidateId = this.number(
-      payload.matchedCandidateId ?? payload.candidateRecordId,
-    );
-    return {
-      type: this.activityTypeFromPayload(payload),
-      title,
-      description:
-        cleanDisplayText(payload.description, '') ||
-        '公共场所、低压力、先站内沟通的 FitMeet 约练。',
-      locationName,
-      city,
-      ...(startTime ? { startTime } : {}),
-      durationMinutes,
-      ...(socialRequestId ? { socialRequestId } : {}),
-      ...(meetId ? { meetId } : {}),
-      ...(matchedCandidateId ? { matchedCandidateId } : {}),
-      ...(candidateUserId ? { invitedUserId: candidateUserId } : {}),
-      proofRequired: true,
-      proofPolicy: ActivityProofPolicy.MutualOrProof,
-    };
-  }
-
-  private activityTypeFromPayload(
-    payload: Record<string, unknown>,
-  ): ActivityType {
-    const raw = cleanDisplayText(
-      payload.activityType ?? payload.type ?? payload.requestType,
-      '',
-    ).toLowerCase();
-    if (/running|run|跑步|慢跑/.test(raw)) return ActivityType.Running;
-    if (/fitness|gym|健身|训练/.test(raw)) return ActivityType.Fitness;
-    if (/dog|遛狗/.test(raw)) return ActivityType.DogWalking;
-    if (/coffee|咖啡/.test(raw)) return ActivityType.CoffeeChat;
-    if (/walk|散步|city/.test(raw)) return ActivityType.CityWalk;
-    return ActivityType.Running;
-  }
-
-  private readActivityStartTime(
-    payload: Record<string, unknown>,
-  ): string | undefined {
-    const raw = cleanDisplayText(
-      payload.startTime ?? payload.startsAt ?? payload.dateTime,
-      '',
-    );
-    if (!raw) return undefined;
-    const date = new Date(raw);
-    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
-  }
-
   private mergeActivityPayload(
     task: AgentTask,
     payload: Record<string, unknown>,
   ): Record<string, unknown> {
-    return {
-      ...this.activityDraft(task),
-      ...this.meetLoopState(task),
-      ...payload,
-    };
-  }
-
-  private activityDraft(task: AgentTask): Record<string, unknown> {
-    const result = this.isRecord(task.result) ? task.result : {};
-    return this.isRecord(result.activityDraft) ? result.activityDraft : {};
-  }
-
-  private meetLoopState(task: AgentTask): Record<string, unknown> {
-    const result = this.isRecord(task.result) ? task.result : {};
-    return this.isRecord(result.meetLoop) ? result.meetLoop : {};
+    return mergeSocialAgentActivityPayload({
+      task,
+      payload,
+      isRecord: (value) => this.isRecord(value),
+    });
   }
 
   private async recordLifeGraphBehaviorEvent(
@@ -4199,38 +4105,6 @@ export class SocialAgentChatService {
           message: error instanceof Error ? error.message : String(error),
         }),
       );
-    }
-  }
-
-  private cardActionCandidate(
-    payload: Record<string, unknown>,
-    task: AgentTask,
-  ): Record<string, unknown> {
-    const nested = this.isRecord(payload.candidate) ? payload.candidate : null;
-    if (nested) return nested;
-    return readSocialAgentStoredCandidateSummaries(task)[0] ?? {};
-  }
-
-  private messageForSchemaAction(action: FitMeetAgentSchemaAction): string {
-    switch (action) {
-      case 'opener.regenerate':
-        return '重新生成开场白';
-      case 'activity.modify_time':
-        return '修改约练时间';
-      case 'activity.modify_location':
-        return '修改约练地点';
-      case 'activity.check_in':
-        return '我已到达，签到';
-      case 'activity.complete':
-        return '活动已完成';
-      case 'review.submit':
-        return '提交活动评价';
-      case 'life_graph.accept_update':
-        return '确认更新 Life Graph';
-      case 'life_graph.reject_update':
-        return '不要更新 Life Graph';
-      default:
-        return action;
     }
   }
 
