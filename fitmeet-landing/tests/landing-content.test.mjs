@@ -18,6 +18,22 @@ function assertContainsAll(source, values, label) {
   }
 }
 
+function gatewayIdsFromSource(source) {
+  return [
+    ...new Set(
+      [...source.matchAll(/id:\s*['"]([^'"]+)['"]/g)].map(
+        (match) => match[1],
+      ),
+    ),
+  ];
+}
+
+function gatewayHrefsFromSource(source) {
+  return [...source.matchAll(/href:\s*['"](\/[^'"]+)['"]/g)].map(
+    (match) => match[1],
+  );
+}
+
 test('home route composes the public landing experience', async () => {
   const page = await readSource('app/page.tsx');
   const requiredSections = [
@@ -94,6 +110,8 @@ test('primary navigation and CTAs keep gateway anchors reachable', async () => {
   const gatewaysData = await readSource('data/gateways.ts');
   const ecosystemGateways = await readSource('components/EcosystemGateways.tsx');
   const finalCta = await readSource('components/FinalCTA.tsx');
+  const footer = await readSource('components/Footer.tsx');
+  const gatewayRoute = await readSource('app/[gateway]/page.tsx');
 
   for (const anchor of ['#gateways', '#gateway-human', '#gateway-pet', '#gateway-ai']) {
     assert.match(nav, new RegExp(`href:\\s*['"]${anchor}['"]`));
@@ -115,6 +133,47 @@ test('primary navigation and CTAs keep gateway anchors reachable', async () => {
   assert.match(hero, /href=["']#gateways["']/);
   assert.match(hero, /href=["']#philosophy["']/);
   assert.match(finalCta, /GATEWAYS\.map/);
+  assert.match(gatewayRoute, /generateStaticParams/);
+  assert.match(gatewayRoute, /notFound\(\)/);
+
+  const gatewayIds = gatewayIdsFromSource(gatewaysData);
+  const gatewayHrefs = gatewayHrefsFromSource(gatewaysData);
+  assert.deepEqual(gatewayIds, ['human', 'pet', 'ai']);
+  assert.deepEqual(gatewayHrefs, ['/human', '/pet', '/ai']);
+  for (const id of gatewayIds) {
+    assert.match(
+      gatewayRoute,
+      new RegExp(`gateway:\\s*gateway\\.id`),
+      'dynamic gateway route should generate params from GATEWAYS ids',
+    );
+    assert.match(footer, new RegExp(`href=["']/${id}["']`));
+  }
+});
+
+test('gateway detail route covers every ecosystem CTA with real content', async () => {
+  const gatewaysData = await readSource('data/gateways.ts');
+  const gatewayRoute = await readSource('app/[gateway]/page.tsx');
+
+  assertContainsAll(
+    gatewayRoute,
+    [
+      'Connect Agent',
+      'Back to ecosystem',
+      'What it covers',
+      'readGateway',
+      'GATEWAYS.find',
+    ],
+    'gateway detail route',
+  );
+
+  for (const id of gatewayIdsFromSource(gatewaysData)) {
+    assert.match(
+      gatewayRoute,
+      new RegExp(`${id}:\\s*\\{`),
+      `gateway detail route should define detail copy for ${id}`,
+    );
+  }
+  assert.doesNotMatch(gatewayRoute, /placeholder|stub|mock-only|coming soon/i);
 });
 
 test('root engineering handbook documents landing tests as real baseline', async () => {
