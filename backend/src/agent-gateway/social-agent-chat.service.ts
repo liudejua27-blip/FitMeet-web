@@ -101,7 +101,6 @@ import { LifeGraphProposalDto } from '../life-graph/dto/life-graph.dto';
 import { LifeGraphService } from '../life-graph/life-graph.service';
 import {
   FitMeetAgentRunStatus,
-  FitMeetAgentStepStatus,
   FitMeetAgentToolStatus,
 } from './entities/fitmeet-agent-runtime.entity';
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
@@ -133,6 +132,7 @@ import type {
   StreamEmit,
 } from './social-agent-chat.types';
 import { messageForSocialAgentSchemaAction } from './social-agent-card-action.presenter';
+import { SocialAgentRunProgressTracker } from './social-agent-run-progress.tracker';
 import {
   applySocialAgentTaskMemoryForIntent,
   profileKeyForSocialAgentIntent,
@@ -1174,7 +1174,6 @@ export class SocialAgentChatService {
     const permissionMode = this.normalizePermissionMode(body.permissionMode);
     const idempotencyKey = cleanDisplayText(body.idempotencyKey, '');
     const visibleSteps: SocialAgentVisibleStep[] = [];
-    let runtimeStepOrder = 0;
     const runtimeRun = await this.fitMeetRuntime?.startRun({
       userId: ownerUserId,
       userMessage: goal,
@@ -1303,55 +1302,31 @@ export class SocialAgentChatService {
       return result;
     }
 
-    const done = async (
-      id: string,
-      label: string,
-      eventType: AgentTaskEventType,
-      payload: Record<string, unknown> = {},
-    ) => {
-      const publicLabel = this.userVisibleStepLabel(id, label);
-      await emit?.({
-        type: 'step',
-        step: { id, label: publicLabel, status: 'running' },
-      });
-      this.rememberShortTermStep(task, id, publicLabel, 'running');
-      const step: SocialAgentVisibleStep = {
-        id,
-        label: publicLabel,
-        status: 'done',
-      };
-      visibleSteps.push(step);
-      this.rememberShortTermStep(task, id, publicLabel, 'done');
-      await this.writeEvent(task, eventType, label, payload);
-      await this.fitMeetRuntime?.recordStep({
-        runId: runtimeRun?.id,
-        userId: ownerUserId,
-        stepOrder: ++runtimeStepOrder,
-        stepKey: id,
-        title: publicLabel,
-        status: FitMeetAgentStepStatus.Completed,
-        safePayload: payload,
-      });
-      await emit?.({ type: 'step', step });
-    };
+    const progress = new SocialAgentRunProgressTracker({
+      visibleSteps,
+      emit,
+      visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
+      rememberStep: (id, label, status) =>
+        this.rememberShortTermStep(task, id, label, status),
+      writeEvent: (eventType, summary, payload) =>
+        this.writeEvent(task, eventType, summary, payload),
+      recordRuntimeStep: async (input) => {
+        await this.fitMeetRuntime?.recordStep({
+          runId: runtimeRun?.id,
+          userId: ownerUserId,
+          ...input,
+        });
+      },
+      recordRuntimeTool: async (input) => {
+        await this.fitMeetRuntime?.recordToolCall({
+          runId: runtimeRun?.id,
+          userId: ownerUserId,
+          ...input,
+        });
+      },
+    });
 
-    const recordTool = async (
-      toolName: string,
-      status: FitMeetAgentToolStatus,
-      safeInput: Record<string, unknown> = {},
-      safeOutput: Record<string, unknown> = {},
-    ) => {
-      await this.fitMeetRuntime?.recordToolCall({
-        runId: runtimeRun?.id,
-        userId: ownerUserId,
-        toolName,
-        status,
-        safeInput,
-        safeOutput,
-      });
-    };
-
-    await done(
+    await progress.completeStep(
       'understand',
       '正在理解你的社交需求',
       AgentTaskEventType.GoalUnderstood,
@@ -1361,7 +1336,7 @@ export class SocialAgentChatService {
       },
     );
 
-    await done(
+    await progress.completeStep(
       'permission',
       `正在检查权限模式：${this.modeLabel(permissionMode)}`,
       AgentTaskEventType.Note,
@@ -1371,18 +1346,22 @@ export class SocialAgentChatService {
       },
     );
 
-    await recordTool('fitmeet_get_my_profile', FitMeetAgentToolStatus.Running, {
-      taskId: task.id,
-    });
+    await progress.recordTool(
+      'fitmeet_get_my_profile',
+      FitMeetAgentToolStatus.Running,
+      {
+        taskId: task.id,
+      },
+    );
     const profileSummary = await this.readProfileSummary(ownerUserId);
-    await recordTool(
+    await progress.recordTool(
       'fitmeet_get_my_profile',
       FitMeetAgentToolStatus.Succeeded,
       { taskId: task.id },
       { hasProfileSummary: Boolean(profileSummary) },
     );
     const planResult = await this.planner.planExistingTask(task);
-    await done(
+    await progress.completeStep(
       'deepseek',
       planResult.source === 'fallback'
         ? '正在使用本地策略生成匹配意图'
@@ -1401,7 +1380,7 @@ export class SocialAgentChatService {
       toolName: SocialAgentToolName.CreateSocialRequest,
       status: 'started',
     });
-    await recordTool(
+    await progress.recordTool(
       'fitmeet_create_social_intent',
       FitMeetAgentToolStatus.Running,
       {
@@ -1409,7 +1388,7 @@ export class SocialAgentChatService {
       },
     );
     const draftResult = await this.generateDraftWithTool(task, goal);
-    await recordTool(
+    await progress.recordTool(
       'fitmeet_create_social_intent',
       FitMeetAgentToolStatus.Succeeded,
       { taskId: task.id },
@@ -1430,7 +1409,7 @@ export class SocialAgentChatService {
 
     draft.socialRequestId = await this.createPrivateDraftRequest(task, draft);
     task = await this.assertTaskOwner(task.id, ownerUserId);
-    await recordTool(
+    await progress.recordTool(
       'fitmeet_create_social_intent',
       FitMeetAgentToolStatus.WaitingConfirmation,
       { taskId: task.id, mode: 'private_draft' },
@@ -1445,7 +1424,7 @@ export class SocialAgentChatService {
       toolName: SocialAgentToolName.SearchMatches,
       status: 'started',
     });
-    await recordTool(
+    await progress.recordTool(
       'fitmeet_search_candidates',
       FitMeetAgentToolStatus.Running,
       {
@@ -1455,7 +1434,7 @@ export class SocialAgentChatService {
     );
     const searchResult = await this.searchCandidates(task, draft);
     const candidates = searchResult.candidates;
-    await recordTool(
+    await progress.recordTool(
       'fitmeet_search_candidates',
       FitMeetAgentToolStatus.Succeeded,
       {
@@ -1464,7 +1443,7 @@ export class SocialAgentChatService {
       },
       { candidateCount: candidates.length },
     );
-    await recordTool(
+    await progress.recordTool(
       'fitmeet_score_candidates',
       FitMeetAgentToolStatus.Succeeded,
       { taskId: task.id },
@@ -1484,7 +1463,7 @@ export class SocialAgentChatService {
       candidates,
     });
     task = await this.assertTaskOwner(task.id, ownerUserId);
-    await done(
+    await progress.completeStep(
       'search',
       '正在检索附近候选人',
       AgentTaskEventType.ToolReturned,
@@ -1495,14 +1474,14 @@ export class SocialAgentChatService {
       },
     );
 
-    await done(
+    await progress.completeStep(
       'rank',
       '正在根据时间、地点、兴趣和安全边界排序',
       AgentTaskEventType.StepCompleted,
       { candidateCount: candidates.length },
     );
 
-    await done(
+    await progress.completeStep(
       'safety_filter',
       '正在进行隐私、骚扰、诈骗和线下见面风险过滤',
       AgentTaskEventType.StepCompleted,
@@ -1512,16 +1491,26 @@ export class SocialAgentChatService {
       },
     );
 
-    await done('draft', '正在生成约练草稿', AgentTaskEventType.ToolReturned, {
-      toolName: SocialAgentToolName.CreateSocialRequest,
-      draft: this.safeDraftForEvent(draft),
-    });
+    await progress.completeStep(
+      'draft',
+      '正在生成约练草稿',
+      AgentTaskEventType.ToolReturned,
+      {
+        toolName: SocialAgentToolName.CreateSocialRequest,
+        draft: this.safeDraftForEvent(draft),
+      },
+    );
 
-    await done('reason', '正在生成推荐理由', AgentTaskEventType.ToolReturned, {
-      toolName: SocialAgentToolName.ExplainMatches,
-      topCandidateUserId: candidates[0]?.userId ?? null,
-    });
-    await done(
+    await progress.completeStep(
+      'reason',
+      '正在生成推荐理由',
+      AgentTaskEventType.ToolReturned,
+      {
+        toolName: SocialAgentToolName.ExplainMatches,
+        topCandidateUserId: candidates[0]?.userId ?? null,
+      },
+    );
+    await progress.completeStep(
       'icebreaker',
       '正在生成高情商开场白',
       AgentTaskEventType.ToolReturned,
@@ -1530,7 +1519,7 @@ export class SocialAgentChatService {
         candidateCount: candidates.length,
       },
     );
-    await recordTool(
+    await progress.recordTool(
       'fitmeet_generate_icebreaker',
       FitMeetAgentToolStatus.Succeeded,
       { taskId: task.id },
@@ -1540,10 +1529,15 @@ export class SocialAgentChatService {
       },
     );
 
-    await done('done', '已完成', AgentTaskEventType.TaskSucceeded, {
-      candidateCount: candidates.length,
-      requiresConfirmation: true,
-    });
+    await progress.completeStep(
+      'done',
+      '已完成',
+      AgentTaskEventType.TaskSucceeded,
+      {
+        candidateCount: candidates.length,
+        requiresConfirmation: true,
+      },
+    );
 
     const result = await this.completeRecommendationResult(
       ownerUserId,
