@@ -97,12 +97,15 @@ import {
   buildApprovalActions,
   buildRecommendationAssistantMessage,
   buildSocialAgentRequestDraft,
-  candidateExplanationFromRecord,
-  emotionalInsightFromRecord,
   toSocialAgentChatCandidate,
   toSocialAgentDraftDto,
   toSocialAgentPublishDto,
 } from './social-agent-chat-result.presenter';
+import {
+  buildSocialAgentTimelineSnapshot,
+  readSocialAgentRestorableResult,
+  readSocialAgentStoredCandidateSummaries,
+} from './social-agent-chat-session.presenter';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentRagService } from './social-agent-rag.service';
@@ -161,11 +164,8 @@ import type {
   SocialAgentPendingApprovalSnapshot,
   SocialAgentRequestDraft,
   SocialAgentRouteMessageBody,
-  SocialAgentSessionMessage,
   SocialAgentSessionSnapshot,
-  SocialAgentSessionTaskSummary,
   SocialAgentTaskTimelineSnapshot,
-  SocialAgentTimelineMessage,
   SocialAgentVisibleStep,
   StreamEmit,
 } from './social-agent-chat.types';
@@ -2373,7 +2373,7 @@ export class SocialAgentChatService {
       | null,
     memoryContext?: SocialAgentMemoryContext | null,
   ): Record<string, unknown> {
-    const candidates = this.readStoredCandidateSummaries(task);
+    const candidates = readSocialAgentStoredCandidateSummaries(task);
     const result = this.isRecord(task.result) ? task.result : {};
     const chatRun = this.isRecord(result.chatRun) ? result.chatRun : {};
     const hasSearchContext = this.hasSearchContext(task);
@@ -3981,7 +3981,7 @@ export class SocialAgentChatService {
   ): Promise<SocialAgentPendingApprovalSnapshot | null> {
     try {
       const inferred = this.inferApprovalTypeFromMessage(message);
-      const candidates = this.readStoredCandidateSummaries(task);
+      const candidates = readSocialAgentStoredCandidateSummaries(task);
       const firstCandidate = candidates[0] as
         | Record<string, unknown>
         | undefined;
@@ -4946,7 +4946,7 @@ export class SocialAgentChatService {
   ): Record<string, unknown> {
     const nested = this.isRecord(payload.candidate) ? payload.candidate : null;
     if (nested) return nested;
-    return this.readStoredCandidateSummaries(task)[0] ?? {};
+    return readSocialAgentStoredCandidateSummaries(task)[0] ?? {};
   }
 
   private messageForSchemaAction(action: FitMeetAgentSchemaAction): string {
@@ -4985,7 +4985,7 @@ export class SocialAgentChatService {
     if (!pendingMessageAction) return null;
 
     const candidate =
-      this.readStoredCandidateSummaries(task)[0] ??
+      readSocialAgentStoredCandidateSummaries(task)[0] ??
       this.cardActionDraftCandidate(task);
     if (!candidate) return null;
     const targetUserId =
@@ -5066,7 +5066,7 @@ export class SocialAgentChatService {
       '',
     ).trim();
     if (draftMessage) return draftMessage;
-    const candidate = this.readStoredCandidateSummaries(task)[0];
+    const candidate = readSocialAgentStoredCandidateSummaries(task)[0];
     const suggested = cleanDisplayText(candidate?.suggestedMessage, '').trim();
     if (suggested) return suggested;
     return '你好，看到你也在附近，想先站内聊聊看看是否方便一起约练。';
@@ -5124,7 +5124,7 @@ export class SocialAgentChatService {
   }
 
   private hasSearchContext(task: AgentTask): boolean {
-    if (this.readStoredCandidateSummaries(task).length > 0) return true;
+    if (readSocialAgentStoredCandidateSummaries(task).length > 0) return true;
     const result = this.isRecord(task.result) ? task.result : {};
     const chatRun = this.isRecord(result.chatRun) ? result.chatRun : {};
     return Boolean(
@@ -5135,7 +5135,7 @@ export class SocialAgentChatService {
   }
 
   private candidateFollowupReply(task: AgentTask, message: string): string {
-    const candidates = this.readStoredCandidateSummaries(task);
+    const candidates = readSocialAgentStoredCandidateSummaries(task);
     if (candidates.length === 0) {
       return '我还没有可参考的候选人。你可以先告诉我想找谁或找什么活动，我再开始匹配。';
     }
@@ -5175,31 +5175,6 @@ export class SocialAgentChatService {
         : `${name} 当前没有明显风险提示，但我仍建议先站内聊、公开地点见面，发送消息或加好友都需要你手动确认。`;
     }
     return `${name} 当前是我优先参考的候选。你可以问“为什么匹配”，也可以点击候选卡片上的确认按钮执行收藏、发送或加好友。`;
-  }
-
-  private readStoredCandidateSummaries(
-    task: AgentTask,
-  ): Array<Record<string, unknown>> {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    const shortTerm = this.isRecord(memory.shortTerm) ? memory.shortTerm : {};
-    const candidates = Array.isArray(shortTerm.candidates)
-      ? shortTerm.candidates
-      : [];
-    if (candidates.length > 0) {
-      return candidates.filter(
-        (candidate): candidate is Record<string, unknown> =>
-          this.isRecord(candidate),
-      );
-    }
-    const chat = this.isRecord(memory.socialAgentChat)
-      ? memory.socialAgentChat
-      : {};
-    return Array.isArray(chat.candidates)
-      ? chat.candidates.filter(
-          (candidate): candidate is Record<string, unknown> =>
-            this.isRecord(candidate),
-        )
-      : [];
   }
 
   private applyTaskMemoryForIntent(
@@ -6200,7 +6175,12 @@ export class SocialAgentChatService {
       this.toPendingApprovalSnapshot(approval),
     );
     const latestRun = this.readLatestStoredRun(task);
-    const result = this.readRestorableResult(task, latestRun, eventDtos);
+    const result = readSocialAgentRestorableResult({
+      task,
+      latestRun,
+      events: eventDtos,
+      visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
+    });
 
     return this.sessions().buildSessionSnapshot({
       task,
@@ -6240,17 +6220,22 @@ export class SocialAgentChatService {
       this.toPendingApprovalSnapshot(approval),
     );
     const latestRun = this.readLatestStoredRun(task);
-    const result = this.readRestorableResult(task, latestRun, eventDtos);
+    const result = readSocialAgentRestorableResult({
+      task,
+      latestRun,
+      events: eventDtos,
+      visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
+    });
 
-    return {
-      taskId: task.id,
-      messages: this.buildTimelineMessages(
+    return buildSocialAgentTimelineSnapshot({
+      task,
+      taskSummary: this.sessions().toSessionTaskSummary(task),
+      sessionMessages: this.sessions().buildSessionMessages({
         task,
         result,
         pendingApprovals,
-        eventDtos,
-      ),
-      task: this.toSessionTaskSummary(task),
+        conversationHistory: this.readConversationHistory(task),
+      }),
       memory: sanitizeForDisplay(task.memory) as Record<string, unknown>,
       result,
       events: eventDtos,
@@ -6258,450 +6243,7 @@ export class SocialAgentChatService {
       pendingApprovals,
       candidateActions: this.readCandidateActions(task),
       restoredAt,
-    };
-  }
-
-  private buildTimelineMessages(
-    task: AgentTask,
-    result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null,
-    pendingApprovals: SocialAgentPendingApprovalSnapshot[],
-    events: Array<Record<string, unknown>>,
-  ): SocialAgentTimelineMessage[] {
-    const memoryMessages = this.buildSessionMessages(
-      task,
-      result,
-      pendingApprovals,
-    ).map(
-      (message): SocialAgentTimelineMessage => ({
-        id: cleanDisplayText(message.id, `task_${task.id}_memory_message`),
-        role: message.role,
-        kind:
-          message.kind === 'approval' || message.kind === 'risk'
-            ? message.kind
-            : 'text',
-        text: cleanDisplayText(message.content, ''),
-        createdAt: message.createdAt,
-        ...(message.activityResults?.length
-          ? { activityResults: message.activityResults }
-          : {}),
-        ...(message.pendingApproval
-          ? { pendingApproval: message.pendingApproval }
-          : {}),
-      }),
-    );
-    const eventMessages = events
-      .map((event) => this.timelineMessageFromEvent(task, event))
-      .filter((message): message is SocialAgentTimelineMessage => !!message);
-
-    return this.dedupeTimelineMessages([...memoryMessages, ...eventMessages])
-      .sort(
-        (a, b) => Date.parse(a.createdAt ?? '') - Date.parse(b.createdAt ?? ''),
-      )
-      .slice(-120);
-  }
-
-  private timelineMessageFromEvent(
-    task: AgentTask,
-    event: Record<string, unknown>,
-  ): SocialAgentTimelineMessage | null {
-    const rawEventType = cleanDisplayText(event.eventType, '');
-    const eventType = this.normalizeAgentTaskEventType(rawEventType);
-    const payload = this.isRecord(event.payload) ? event.payload : {};
-    const id = `event_${this.number(event.id) ?? rawEventType}_${
-      this.timelineCreatedAt(payload, event) ?? 'unknown'
-    }`;
-    const createdAt = this.timelineCreatedAt(payload, event);
-    const summary = cleanDisplayText(event.summary, '');
-
-    if (eventType === AgentTaskEventType.SocialAgentMessageUser) {
-      const text = cleanDisplayText(payload.message, summary);
-      if (!text) return null;
-      return { id, role: 'user', kind: 'text', text, createdAt };
-    }
-
-    if (eventType === AgentTaskEventType.SocialAgentMessageAssistant) {
-      const text = cleanDisplayText(payload.message, summary);
-      if (!text) return null;
-      const pendingApproval = this.normalizePendingApprovalSnapshot(
-        payload.pendingApproval,
-      );
-      const activityResults = this.readActivityResults(payload.activityResults);
-      return {
-        id,
-        role: 'assistant',
-        kind: pendingApproval
-          ? 'approval'
-          : activityResults.length > 0
-            ? 'activityResults'
-            : cleanDisplayText(payload.riskAdvice, '')
-              ? 'risk'
-              : 'text',
-        text,
-        createdAt,
-        ...(activityResults.length > 0 ? { activityResults } : {}),
-        ...(pendingApproval ? { pendingApproval } : {}),
-      };
-    }
-
-    if (eventType === AgentTaskEventType.SocialAgentCandidatesReturned) {
-      const candidates = this.readTimelineCandidates(task, payload.candidates);
-      const activityResults = this.readActivityResults(payload.activityResults);
-      const text =
-        cleanDisplayText(payload.message, '') ||
-        summary ||
-        (candidates.length > 0 ? '已返回候选卡片' : '没有找到候选卡片');
-      return {
-        id,
-        role: 'assistant',
-        kind:
-          candidates.length === 0 && activityResults.length > 0
-            ? 'activityResults'
-            : 'candidates',
-        text,
-        createdAt,
-        candidates,
-        activityResults,
-      };
-    }
-
-    if (
-      eventType === AgentTaskEventType.ToolCalled ||
-      eventType === AgentTaskEventType.ToolReturned ||
-      eventType === AgentTaskEventType.ToolFailed
-    ) {
-      const toolName = cleanDisplayText(payload.toolName ?? payload.tool, '');
-      return {
-        id,
-        role: 'system',
-        kind: 'tool',
-        text: summary || toolName || rawEventType,
-        createdAt,
-        toolCalls: [
-          sanitizeForDisplay({
-            id: cleanDisplayText(event.toolCallId, '') || id,
-            stepId: cleanDisplayText(event.stepId, '') || null,
-            toolName,
-            status:
-              cleanDisplayText(payload.status, '') ||
-              (eventType === AgentTaskEventType.ToolCalled
-                ? 'running'
-                : eventType === AgentTaskEventType.ToolFailed
-                  ? 'failed'
-                  : 'succeeded'),
-            output: this.isRecord(payload.output) ? payload.output : null,
-            error: this.isRecord(payload.error) ? payload.error : null,
-            createdAt,
-          }) as Record<string, unknown>,
-        ],
-      };
-    }
-
-    if (
-      eventType === AgentTaskEventType.GoalUnderstood ||
-      eventType === AgentTaskEventType.PlanGenerated ||
-      eventType === AgentTaskEventType.PlanUpdated ||
-      eventType === AgentTaskEventType.StepStarted ||
-      eventType === AgentTaskEventType.StepCompleted ||
-      eventType === AgentTaskEventType.SocialAgentContextAppended ||
-      eventType === AgentTaskEventType.SocialAgentReplanQueued ||
-      eventType === AgentTaskEventType.SocialAgentReplanStarted ||
-      eventType === AgentTaskEventType.SocialAgentReplanCompleted ||
-      eventType === AgentTaskEventType.SocialAgentReplanFailed ||
-      eventType === AgentTaskEventType.SocialAgentLlmTimeout
-    ) {
-      return {
-        id,
-        role: 'system',
-        kind: 'status',
-        text: summary || rawEventType,
-        createdAt,
-      };
-    }
-
-    return null;
-  }
-
-  private readTimelineCandidates(
-    task: AgentTask,
-    value: unknown,
-  ): SocialAgentChatCandidate[] {
-    if (!Array.isArray(value)) return [];
-    return value
-      .filter((item): item is Record<string, unknown> => this.isRecord(item))
-      .map((item) => this.candidateFromStoredSummary(task, item))
-      .filter(
-        (candidate): candidate is SocialAgentChatCandidate => !!candidate,
-      );
-  }
-
-  private timelineCreatedAt(
-    payload: Record<string, unknown>,
-    event: Record<string, unknown>,
-  ): string | null {
-    return (
-      cleanDisplayText(
-        payload.createdAt ?? payload.at ?? event.createdAt,
-        '',
-      ) || null
-    );
-  }
-
-  private dedupeTimelineMessages(
-    messages: SocialAgentTimelineMessage[],
-  ): SocialAgentTimelineMessage[] {
-    const seen = new Set<string>();
-    const out: SocialAgentTimelineMessage[] = [];
-    for (const message of messages) {
-      const textKey = `${message.role}:${message.kind}:${
-        message.createdAt ?? ''
-      }:${cleanDisplayText(message.text, '').slice(0, 50)}`;
-      const key =
-        message.kind === 'tool' || message.kind === 'status'
-          ? message.id
-          : textKey;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(message);
-    }
-    return out;
-  }
-
-  private normalizeAgentTaskEventType(
-    value: unknown,
-  ): AgentTaskEventType | null {
-    const text = cleanDisplayText(value, '');
-    if (!text) return null;
-    const knownValues: string[] = Object.values(AgentTaskEventType);
-    return knownValues.includes(text) ? (text as AgentTaskEventType) : null;
-  }
-
-  private toSessionTaskSummary(task: AgentTask): SocialAgentSessionTaskSummary {
-    return this.sessions().toSessionTaskSummary(task);
-  }
-
-  private buildSessionMessages(
-    task: AgentTask,
-    result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null,
-    pendingApprovals: SocialAgentPendingApprovalSnapshot[],
-  ): SocialAgentSessionMessage[] {
-    return this.sessions().buildSessionMessages({
-      task,
-      result,
-      pendingApprovals,
-      conversationHistory: this.readConversationHistory(task),
     });
-  }
-
-  private readRestorableResult(
-    task: AgentTask,
-    latestRun: SocialAgentAsyncRunSnapshot | null,
-    events: Array<Record<string, unknown>>,
-  ): SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null {
-    if (latestRun?.result && this.isRecord(latestRun.result)) {
-      const runResult = latestRun.result as
-        | SocialAgentChatRunResult
-        | SocialAgentChatReplanRunResult;
-      return sanitizeForDisplay({
-        ...runResult,
-        taskId: task.id,
-        status: task.status,
-        visibleSteps:
-          runResult.visibleSteps?.length > 0
-            ? runResult.visibleSteps
-            : latestRun.visibleSteps,
-        events,
-      }) as SocialAgentChatRunResult | SocialAgentChatReplanRunResult;
-    }
-
-    return this.readResultFromTaskMemory(task, events);
-  }
-
-  private readResultFromTaskMemory(
-    task: AgentTask,
-    events: Array<Record<string, unknown>>,
-  ): SocialAgentChatRunResult | null {
-    const result = this.isRecord(task.result) ? task.result : {};
-    const chatRun = this.isRecord(result.chatRun) ? result.chatRun : {};
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    const chat = this.isRecord(memory.socialAgentChat)
-      ? memory.socialAgentChat
-      : {};
-    const eventResult = this.readCandidateResultFromEvents(task, events);
-    const rawDraft = this.isRecord(chatRun.socialRequestDraft)
-      ? chatRun.socialRequestDraft
-      : this.isRecord(chat.socialRequestDraft)
-        ? chat.socialRequestDraft
-        : this.isRecord(eventResult?.socialRequestDraft)
-          ? eventResult.socialRequestDraft
-          : null;
-    const storedCandidates = this.readStoredCandidateSummaries(task)
-      .map((candidate) => this.candidateFromStoredSummary(task, candidate))
-      .filter(
-        (candidate): candidate is SocialAgentChatCandidate => !!candidate,
-      );
-    const candidates =
-      storedCandidates.length > 0
-        ? storedCandidates
-        : (eventResult?.candidates ?? []);
-
-    if (!rawDraft && candidates.length === 0) return null;
-    const socialRequestDraft = rawDraft
-      ? ({
-          ...rawDraft,
-          agentTaskId: task.id,
-          socialRequestId:
-            this.number(rawDraft.socialRequestId) ??
-            this.number(chatRun.socialRequestId) ??
-            this.number(chat.socialRequestId) ??
-            null,
-          mode: 'draft',
-        } as SocialAgentRequestDraft)
-      : null;
-    return {
-      taskId: task.id,
-      status: task.status,
-      visibleSteps: this.readStoredVisibleSteps(task),
-      assistantMessage:
-        cleanDisplayText(chatRun.message, '') ||
-        cleanDisplayText(eventResult?.message, '') ||
-        buildRecommendationAssistantMessage(candidates),
-      emptyReason:
-        cleanDisplayText(chatRun.emptyReason, '') === 'no_real_candidates'
-          ? 'no_real_candidates'
-          : cleanDisplayText(eventResult?.emptyReason, '') ===
-              'no_real_candidates'
-            ? 'no_real_candidates'
-            : null,
-      message:
-        cleanDisplayText(chatRun.message, '') ||
-        cleanDisplayText(eventResult?.message, '') ||
-        null,
-      debugReasons: this.isRecord(chatRun.debugReasons)
-        ? (chatRun.debugReasons as CandidatePoolDebugReasons)
-        : null,
-      socialRequestDraft,
-      candidates,
-      approvalRequiredActions: socialRequestDraft
-        ? buildApprovalActions(task.id, socialRequestDraft, candidates)
-        : [],
-      events,
-    };
-  }
-
-  private readCandidateResultFromEvents(
-    task: AgentTask,
-    events: Array<Record<string, unknown>>,
-  ): {
-    candidates: SocialAgentChatCandidate[];
-    socialRequestDraft: Record<string, unknown> | null;
-    message: string | null;
-    emptyReason: string | null;
-  } | null {
-    const event = [...events]
-      .reverse()
-      .find(
-        (item) =>
-          this.normalizeAgentTaskEventType(item.eventType) ===
-          AgentTaskEventType.SocialAgentCandidatesReturned,
-      );
-    if (!event || !this.isRecord(event.payload)) return null;
-    const payload = event.payload;
-    return {
-      candidates: this.readTimelineCandidates(task, payload.candidates),
-      socialRequestDraft: this.isRecord(payload.socialRequestDraft)
-        ? payload.socialRequestDraft
-        : null,
-      message: cleanDisplayText(payload.message, '') || null,
-      emptyReason: cleanDisplayText(payload.emptyReason, '') || null,
-    };
-  }
-
-  private candidateFromStoredSummary(
-    task: AgentTask,
-    candidate: Record<string, unknown>,
-  ): SocialAgentChatCandidate | null {
-    const targetUserId =
-      this.number(candidate.targetUserId) ??
-      this.number(candidate.candidateUserId) ??
-      this.number(candidate.userId);
-    if (!targetUserId) return null;
-    const warnings = this.stringList(candidate.riskWarnings);
-    const risk = this.isRecord(candidate.risk) ? candidate.risk : {};
-    const riskWarnings =
-      warnings.length > 0 ? warnings : this.stringList(risk.warnings);
-    const nickname = cleanDisplayText(
-      candidate.displayName ?? candidate.nickname,
-      `用户 #${targetUserId}`,
-    );
-    return {
-      agentTaskId: task.id,
-      source:
-        cleanDisplayText(candidate.source, '') === 'public_intent' ||
-        cleanDisplayText(candidate.source, '') === 'activity'
-          ? (cleanDisplayText(candidate.source, '') as
-              | 'public_intent'
-              | 'activity')
-          : 'profile_candidate',
-      isRealData: candidate.isRealData === true,
-      socialRequestId: this.number(candidate.socialRequestId),
-      targetUserId,
-      userId: targetUserId,
-      candidateUserId: targetUserId,
-      publicIntentId: cleanDisplayText(candidate.publicIntentId, '') || null,
-      activityId: this.number(candidate.activityId),
-      displayName: nickname,
-      candidateRecordId: this.number(candidate.candidateRecordId),
-      nickname,
-      avatar: cleanDisplayText(candidate.avatar, ''),
-      color: cleanDisplayText(candidate.color, '#202124'),
-      city: cleanDisplayText(candidate.city, ''),
-      score:
-        this.number(candidate.score) ?? this.number(candidate.matchScore) ?? 0,
-      level: cleanDisplayText(candidate.level, 'medium'),
-      distanceKm: this.number(candidate.distanceKm),
-      commonTags: this.stringList(candidate.commonTags),
-      reasons: this.stringList(candidate.reasons ?? candidate.matchReasons),
-      interestTags: this.stringList(candidate.interestTags),
-      profileCompleteness:
-        this.number(candidate.profileCompleteness) ?? undefined,
-      dataQuality:
-        candidate.dataQuality === 'complete' ||
-        candidate.dataQuality === 'partial' ||
-        candidate.dataQuality === 'incomplete'
-          ? candidate.dataQuality
-          : undefined,
-      matchScore: this.number(candidate.matchScore) ?? undefined,
-      matchReasons: this.stringList(candidate.matchReasons),
-      riskWarnings,
-      risk: {
-        level: cleanDisplayText(risk.level ?? candidate.riskLevel, 'low'),
-        warnings: riskWarnings,
-      },
-      suggestedOpener: cleanDisplayText(candidate.suggestedOpener, ''),
-      suggestedMessage: cleanDisplayText(candidate.suggestedMessage, ''),
-      candidateExplanation: candidateExplanationFromRecord(
-        candidate.candidateExplanation,
-      ),
-      emotionalInsight: emotionalInsightFromRecord(candidate.emotionalInsight),
-      status: cleanDisplayText(candidate.status, '') || undefined,
-    };
-  }
-
-  private readStoredVisibleSteps(task: AgentTask): SocialAgentVisibleStep[] {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    const shortTerm = this.isRecord(memory.shortTerm) ? memory.shortTerm : {};
-    const steps = Array.isArray(shortTerm.steps) ? shortTerm.steps : [];
-    return steps
-      .filter((step): step is Record<string, unknown> => this.isRecord(step))
-      .map((step) => ({
-        id: cleanDisplayText(step.id, ''),
-        label: this.userVisibleStepLabel(
-          cleanDisplayText(step.id, ''),
-          cleanDisplayText(step.label, '正在处理任务'),
-        ),
-        status: this.normalizeStepStatus(step.status),
-      }))
-      .filter((step) => step.id);
   }
 
   private readCandidateActions(
@@ -6743,25 +6285,6 @@ export class SocialAgentChatService {
     approval: AgentApprovalRequest,
   ): SocialAgentPendingApprovalSnapshot {
     return this.sessions().toPendingApprovalSnapshot(approval);
-  }
-
-  private normalizePendingApprovalSnapshot(
-    value: unknown,
-  ): SocialAgentPendingApprovalSnapshot | undefined {
-    return this.sessions().normalizePendingApprovalSnapshot(value);
-  }
-
-  private readActivityResults(value: unknown): SocialAgentActivityResult[] {
-    return this.sessions().readActivityResults(value);
-  }
-
-  private stringList(value: unknown): string[] {
-    return Array.isArray(value)
-      ? value
-          .map((item) => cleanDisplayText(item, ''))
-          .filter(Boolean)
-          .slice(0, 20)
-      : [];
   }
 
   private isoDate(value: unknown): string {
