@@ -17,6 +17,7 @@ import { SocialAgentCandidateActionService } from './social-agent-candidate-acti
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { SocialAgentDraftSearchService } from './social-agent-draft-search.service';
 import { SocialAgentRecommendationResultService } from './social-agent-recommendation-result.service';
+import { SocialAgentActivitySearchService } from './social-agent-activity-search.service';
 import { SocialAgentFollowUpContextService } from './social-agent-follow-up-context.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
@@ -483,6 +484,11 @@ function makeHarness(options: Record<string, unknown> = {}) {
       options.tonePolicy as never,
       options.agentQuality as never,
     );
+  const activitySearch = new SocialAgentActivitySearchService(
+    candidatePool as never,
+    metrics as never,
+    options.finalResponses as never,
+  );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
@@ -495,7 +501,6 @@ function makeHarness(options: Record<string, unknown> = {}) {
     messages as never,
     approvals as never,
     publicIntentRepo as never,
-    candidatePool as never,
     metrics as never,
     longTermMemory as never,
     rag as never,
@@ -509,16 +514,15 @@ function makeHarness(options: Record<string, unknown> = {}) {
     draftPublication as never,
     draftSearch as never,
     recommendationResults as never,
+    activitySearch as never,
     options.brain as never,
     undefined,
-    options.finalResponses as never,
     options.lifeGraph as never,
     undefined,
     options.fitMeetRuntime as never,
     options.alphaAgent as never,
     options.tonePolicy as never,
     options.sessionAssembler as never,
-    options.activities as never,
   );
 
   return {
@@ -545,6 +549,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     draftPublication,
     draftSearch,
     recommendationResults,
+    activitySearch,
   };
 }
 

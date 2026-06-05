@@ -63,6 +63,7 @@ import { SocialAgentCandidateActionService } from './social-agent-candidate-acti
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { SocialAgentDraftSearchService } from './social-agent-draft-search.service';
 import { SocialAgentRecommendationResultService } from './social-agent-recommendation-result.service';
+import { SocialAgentActivitySearchService } from './social-agent-activity-search.service';
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
@@ -206,6 +207,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentDraftPublicationService,
     SocialAgentDraftSearchService,
     SocialAgentRecommendationResultService,
+    SocialAgentActivitySearchService,
     SocialAgentChatService,
     FitMeetAgentRuntimeService,
     SocialAgentCandidatePoolService,
