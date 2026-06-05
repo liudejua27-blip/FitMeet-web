@@ -102,6 +102,12 @@ import {
   toSocialAgentPublishDto,
 } from './social-agent-chat-result.presenter';
 import {
+  appendSocialAgentConversationTurn,
+  buildSocialAgentLlmConversationHistory,
+  readSocialAgentConversationHistory,
+  summarizeSocialAgentTaskMemoryForLlm,
+} from './social-agent-chat-memory.presenter';
+import {
   buildSocialAgentTimelineSnapshot,
   readSocialAgentRestorableResult,
   readSocialAgentStoredCandidateSummaries,
@@ -407,7 +413,7 @@ export class SocialAgentChatService {
         memoryContext,
       ),
       profile: profile ?? {},
-      conversationHistory: this.readConversationHistory(task),
+      conversationHistory: readSocialAgentConversationHistory(task),
     });
     const brainDecision = await this.brain?.planTurn({
       message,
@@ -419,7 +425,7 @@ export class SocialAgentChatService {
         longTermSnapshot,
         memoryContext,
       ),
-      conversationHistory: this.readConversationHistory(task),
+      conversationHistory: readSocialAgentConversationHistory(task),
       memoryContext: memoryContext ?? undefined,
     });
     if (brainDecision) {
@@ -2248,7 +2254,7 @@ export class SocialAgentChatService {
     message: string,
   ): Promise<void> {
     const now = new Date().toISOString();
-    this.appendConversationTurn(task, {
+    appendSocialAgentConversationTurn(task, {
       role: 'user',
       text: message,
       at: now,
@@ -2303,7 +2309,7 @@ export class SocialAgentChatService {
     route: SocialAgentIntentRouteResult,
   ): Promise<void> {
     const now = new Date().toISOString();
-    this.appendConversationTurn(task, {
+    appendSocialAgentConversationTurn(task, {
       role: 'assistant',
       text: message,
       intent: route.intent,
@@ -2425,53 +2431,10 @@ export class SocialAgentChatService {
     return (
       this.memoryContext?.build({
         task,
-        conversationHistory: this.readConversationHistory(task),
+        conversationHistory: readSocialAgentConversationHistory(task),
         longTermSnapshot,
       }) ?? null
     );
-  }
-
-  private readConversationHistory(
-    task: AgentTask,
-  ): Array<Record<string, unknown>> {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    const conversation = this.isRecord(memory.socialAgentConversation)
-      ? memory.socialAgentConversation
-      : {};
-    return Array.isArray(conversation.turns)
-      ? conversation.turns
-          .filter((turn): turn is Record<string, unknown> =>
-            this.isRecord(turn),
-          )
-          .slice(-20)
-      : [];
-  }
-
-  private appendConversationTurn(
-    task: AgentTask,
-    turn: Record<string, unknown>,
-  ): void {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    const conversation = this.isRecord(memory.socialAgentConversation)
-      ? memory.socialAgentConversation
-      : {};
-    const turns = Array.isArray(conversation.turns)
-      ? conversation.turns.filter((turn): turn is Record<string, unknown> =>
-          this.isRecord(turn),
-        )
-      : [];
-    const last = turns.at(-1);
-    const isDuplicate =
-      cleanDisplayText(last?.role, '') === cleanDisplayText(turn.role, '') &&
-      cleanDisplayText(last?.text, '') === cleanDisplayText(turn.text, '');
-    task.memory = {
-      ...memory,
-      socialAgentConversation: {
-        ...conversation,
-        turns: (isDuplicate ? turns : [...turns, turn]).slice(-60),
-        updatedAt: cleanDisplayText(turn.at, new Date().toISOString()),
-      },
-    };
   }
 
   private toRouteAction(
@@ -2567,12 +2530,12 @@ export class SocialAgentChatService {
         intent: input.route.intent,
         route: input.route as unknown as Record<string, unknown>,
         agentState: this.currentAgentState(input.task),
-        conversationHistory: this.llmConversationHistory(input.task),
+        conversationHistory: buildSocialAgentLlmConversationHistory(input.task),
         memoryContext: this.buildMemoryContext(
           input.task,
           input.longTermSnapshot,
         ) as unknown as Record<string, unknown>,
-        taskContext: this.summarizeTaskMemoryForLlm(input.task),
+        taskContext: summarizeSocialAgentTaskMemoryForLlm(input.task),
         plannerDecision: this.currentConversationBrainDecision(input.task),
         toolResults:
           input.toolResults && input.toolResults.length > 0
@@ -2648,7 +2611,7 @@ export class SocialAgentChatService {
                   userMessage: input.message,
                   intent: input.route.intent,
                   profileSummary: input.profile ?? {},
-                  taskMemory: this.summarizeTaskMemoryForLlm(input.task),
+                  taskMemory: summarizeSocialAgentTaskMemoryForLlm(input.task),
                   memoryContext: this.buildMemoryContext(
                     input.task,
                     input.longTermSnapshot,
@@ -2666,12 +2629,10 @@ export class SocialAgentChatService {
                         matchSignals: input.longTermSnapshot.matchSignals,
                       }
                     : null,
-                  conversationHistory: this.readConversationHistory(input.task)
-                    .slice(-8)
-                    .map((turn) => ({
-                      role: cleanDisplayText(turn.role, ''),
-                      text: cleanDisplayText(turn.text ?? turn.content, ''),
-                    })),
+                  conversationHistory: buildSocialAgentLlmConversationHistory(
+                    input.task,
+                    8,
+                  ),
                 }),
               },
             ],
@@ -2723,26 +2684,6 @@ export class SocialAgentChatService {
     } finally {
       clearTimeout(timeout);
     }
-  }
-
-  private summarizeTaskMemoryForLlm(task: AgentTask): Record<string, unknown> {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    const taskMemory = this.isRecord(memory.taskMemory)
-      ? memory.taskMemory
-      : {};
-    const socialAgentChat = this.isRecord(memory.socialAgentChat)
-      ? memory.socialAgentChat
-      : {};
-    const shortTerm = this.isRecord(memory.shortTerm) ? memory.shortTerm : {};
-    return {
-      goal: cleanDisplayText(task.goal, ''),
-      preferences: taskMemory.preferences ?? socialAgentChat.preferences ?? [],
-      boundaries: taskMemory.boundaries ?? socialAgentChat.boundaries ?? [],
-      activeEntities: taskMemory.activeEntities ?? {},
-      candidateCount: Array.isArray(shortTerm.candidates)
-        ? shortTerm.candidates.length
-        : 0,
-    };
   }
 
   private readChatDeepSeekContent(payload: Record<string, unknown>): string {
@@ -3105,12 +3046,12 @@ export class SocialAgentChatService {
         userMessage: input.message,
         intent: input.intent,
         agentState: this.currentAgentState(input.task),
-        conversationHistory: this.llmConversationHistory(input.task),
+        conversationHistory: buildSocialAgentLlmConversationHistory(input.task),
         memoryContext: this.buildMemoryContext(
           input.task,
           null,
         ) as unknown as Record<string, unknown>,
-        taskContext: this.summarizeTaskMemoryForLlm(input.task),
+        taskContext: summarizeSocialAgentTaskMemoryForLlm(input.task),
         plannerDecision: this.currentConversationBrainDecision(input.task),
         toolResults: input.toolOutput ? [input.toolOutput] : [],
         safetyRules: this.finalResponseSafetyRules(),
@@ -3213,13 +3154,11 @@ export class SocialAgentChatService {
                     'get_user_profile',
                     'get_conversation_history',
                   ],
-                  taskMemory: this.summarizeTaskMemoryForLlm(input.task),
-                  conversationHistory: this.readConversationHistory(input.task)
-                    .slice(-8)
-                    .map((turn) => ({
-                      role: cleanDisplayText(turn.role, ''),
-                      text: cleanDisplayText(turn.text ?? turn.content, ''),
-                    })),
+                  taskMemory: summarizeSocialAgentTaskMemoryForLlm(input.task),
+                  conversationHistory: buildSocialAgentLlmConversationHistory(
+                    input.task,
+                    8,
+                  ),
                 }),
               },
             ],
@@ -3370,7 +3309,7 @@ export class SocialAgentChatService {
     currentMessage: string,
   ): string | null {
     const current = cleanDisplayText(currentMessage, '');
-    const userTurns = this.readConversationHistory(task)
+    const userTurns = readSocialAgentConversationHistory(task)
       .filter((turn) => cleanDisplayText(turn.role, '') === 'user')
       .map((turn) => cleanDisplayText(turn.text ?? turn.content, ''))
       .filter((text) => text && text !== current)
@@ -3663,17 +3602,6 @@ export class SocialAgentChatService {
     return brain;
   }
 
-  private llmConversationHistory(
-    task: AgentTask,
-  ): Array<Record<string, unknown>> {
-    return this.readConversationHistory(task)
-      .slice(-12)
-      .map((turn) => ({
-        role: cleanDisplayText(turn.role, ''),
-        text: cleanDisplayText(turn.text ?? turn.content, ''),
-      }));
-  }
-
   private finalResponseSafetyRules(): string[] {
     return [
       '私信、加好友、连接候选人、创建公开需求或活动，必须遵守工具权限和用户确认要求。',
@@ -3945,12 +3873,12 @@ export class SocialAgentChatService {
       intent: input.route.intent,
       route: input.route as unknown as Record<string, unknown>,
       agentState: this.currentAgentState(input.task),
-      conversationHistory: this.llmConversationHistory(input.task),
+      conversationHistory: buildSocialAgentLlmConversationHistory(input.task),
       memoryContext: this.buildMemoryContext(
         input.task,
         null,
       ) as unknown as Record<string, unknown>,
-      taskContext: this.summarizeTaskMemoryForLlm(input.task),
+      taskContext: summarizeSocialAgentTaskMemoryForLlm(input.task),
       plannerDecision: this.currentConversationBrainDecision(input.task),
       toolResults: [
         {
@@ -5331,7 +5259,7 @@ export class SocialAgentChatService {
     intent: SocialAgentIntentType,
   ): Promise<void> {
     const now = new Date().toISOString();
-    this.appendConversationTurn(task, {
+    appendSocialAgentConversationTurn(task, {
       role: 'user',
       text: message,
       intent,
@@ -5773,12 +5701,12 @@ export class SocialAgentChatService {
       userMessage: cleanDisplayText(input.draft.rawText, input.task.goal),
       intent: 'candidate_search',
       agentState: this.currentAgentState(input.task),
-      conversationHistory: this.llmConversationHistory(input.task),
+      conversationHistory: buildSocialAgentLlmConversationHistory(input.task),
       memoryContext: this.buildMemoryContext(
         input.task,
         null,
       ) as unknown as Record<string, unknown>,
-      taskContext: this.summarizeTaskMemoryForLlm(input.task),
+      taskContext: summarizeSocialAgentTaskMemoryForLlm(input.task),
       plannerDecision: this.currentConversationBrainDecision(input.task),
       toolResults: [
         {
@@ -6188,7 +6116,7 @@ export class SocialAgentChatService {
       result,
       latestRun,
       pendingApprovals,
-      conversationHistory: this.readConversationHistory(task),
+      conversationHistory: readSocialAgentConversationHistory(task),
       restoredAt,
     });
   }
@@ -6234,7 +6162,7 @@ export class SocialAgentChatService {
         task,
         result,
         pendingApprovals,
-        conversationHistory: this.readConversationHistory(task),
+        conversationHistory: readSocialAgentConversationHistory(task),
       }),
       memory: sanitizeForDisplay(task.memory) as Record<string, unknown>,
       result,
