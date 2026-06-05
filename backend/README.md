@@ -64,6 +64,7 @@ Focused checks:
 pnpm test -- app.controller.spec.ts
 pnpm test:agent-beta
 pnpm test:e2e
+APP_SMOKE_DRY_RUN=true pnpm smoke:app-core
 ```
 
 ## API Contract
@@ -75,6 +76,8 @@ GET /api/openapi/fitmeet-core.json
 ```
 
 Update this contract before adding or changing App-facing routes under `/auth`, `/feed`, `/social-agent/chat`, or `/uploads`.
+
+Run `pnpm smoke:app-core` against a live backend for App-facing API smoke checks. It is local-only by default; staging runs must set `APP_SMOKE_API_BASE_URL`, `APP_SMOKE_ALLOW_REMOTE=true`, and test credentials. Mutating App flow checks for avatar upload and feed publishing require `APP_SMOKE_RUN_MUTATIONS=true`.
 
 ## Social Agent Notes
 

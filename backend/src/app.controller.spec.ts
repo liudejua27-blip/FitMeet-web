@@ -72,13 +72,21 @@ describe('AppController', () => {
         '/uploads/image': 'post',
         '/messages/start': 'post',
         '/messages/conversations/{conversationId}/send': 'post',
-        '/feed': 'post',
+        '/feed': ['get', 'post'],
+        '/feed/interactions': 'get',
         '/social-agent/chat/session': 'get',
+        '/social-agent/chat/messages': 'post',
+        '/social-agent/chat/route-message': 'post',
       } as const;
 
-      for (const [path, method] of Object.entries(requiredPaths)) {
+      for (const [path, methodOrMethods] of Object.entries(requiredPaths)) {
+        const methods = Array.isArray(methodOrMethods)
+          ? methodOrMethods
+          : [methodOrMethods];
         expect(contract.paths[path]).toBeDefined();
-        expect(contract.paths[path][method]).toBeDefined();
+        for (const method of methods) {
+          expect(contract.paths[path][method]).toBeDefined();
+        }
       }
     });
   });
