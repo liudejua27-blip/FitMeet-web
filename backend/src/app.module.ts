@@ -55,7 +55,7 @@ import { FutureSkillsGatewayModule } from './future-skills-gateway/future-skills
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => {
         const nodeEnv = configService.get<string>('NODE_ENV');
-        const defaultSynchronize = nodeEnv === 'production' ? 'false' : 'true';
+        const defaultSynchronize = 'false';
 
         return {
           type: 'postgres',
