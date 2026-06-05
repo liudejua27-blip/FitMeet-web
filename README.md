@@ -214,6 +214,16 @@ docker compose --env-file .env.production -f docker-compose.prod.yml up -d --bui
 
 如果检查器报 `OBJECT_STORAGE`，头像上传和朋友圈图片会在生产环境被禁用；如果报 `DEEPSEEK_API_KEY`，Social Agent 会退回确定性 fallback，不满足企业级 Agent 发布标准。
 
+容器启动后检查：
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml ps
+curl -fsS https://www.ourfitmeet.cn/health
+curl -fsS https://www.ourfitmeet.cn/api/health
+```
+
+`nginx` 会等 `backend` 的 `/api/health` 通过后再进入 healthy 状态；如果这里失败，先看 `docker compose ... logs backend nginx`，再排查数据库、Redis、Mongo、Kafka 的 healthcheck。
+
 Next 落地页可以独立部署到 Vercel、Node 服务或容器，和主 Web 的发布节奏可以分开。
 
 ## 当前已知技术债
