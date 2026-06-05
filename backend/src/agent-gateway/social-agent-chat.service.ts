@@ -36,10 +36,7 @@ import {
   AgentTaskRiskLevel,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
-import {
-  SocialAgentPlannerResult,
-  SocialAgentPlannerService,
-} from './social-agent-planner.service';
+import { SocialAgentPlannerService } from './social-agent-planner.service';
 import {
   SocialAgentIntentRouterService,
   type SocialAgentIntentEntities,
@@ -124,6 +121,12 @@ import {
   readSocialAgentRestorableResult,
   readSocialAgentStoredCandidateSummaries,
 } from './social-agent-chat-session.presenter';
+import {
+  createSocialAgentRunId,
+  readLatestSocialAgentStoredRun,
+  readSocialAgentStoredRun,
+  withSocialAgentStoredRun,
+} from './social-agent-chat-run.presenter';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentRagService } from './social-agent-rag.service';
@@ -167,7 +170,6 @@ import type {
   SocialAgentActivityResult,
   SocialAgentAppendContextResult,
   SocialAgentAsyncRunSnapshot,
-  SocialAgentAsyncRunStatus,
   SocialAgentCandidateSearchResult,
   SocialAgentCardActionBody,
   SocialAgentChatCandidate,
@@ -812,7 +814,7 @@ export class SocialAgentChatService {
       permissionMode,
       idempotencyKey,
     });
-    const runId = this.createRunId();
+    const runId = createSocialAgentRunId();
     const now = new Date().toISOString();
     const queuedRun: SocialAgentAsyncRunSnapshot = {
       taskId: task.id,
@@ -840,7 +842,7 @@ export class SocialAgentChatService {
     };
     task.status = AgentTaskStatus.Planning;
     task.statusReason = 'chat_run_queued';
-    task.result = this.withStoredRun(task.result, queuedRun);
+    task.result = withSocialAgentStoredRun(task.result, queuedRun);
     await this.taskRepo.save(task);
     await this.writeEvent(
       task,
@@ -964,7 +966,7 @@ export class SocialAgentChatService {
     if (!followUp) throw new BadRequestException('请输入补充要求');
     task = followUp.task;
 
-    const runId = this.createRunId();
+    const runId = createSocialAgentRunId();
     const now = new Date().toISOString();
     const queuedRun: SocialAgentAsyncRunSnapshot = {
       taskId,
@@ -991,7 +993,7 @@ export class SocialAgentChatService {
     };
     task.status = AgentTaskStatus.Planning;
     task.statusReason = 'follow_up_replan_queued';
-    task.result = this.withStoredRun(task.result, queuedRun);
+    task.result = withSocialAgentStoredRun(task.result, queuedRun);
     await this.taskRepo.save(task);
     await this.writeEvent(
       task,
@@ -5724,7 +5726,7 @@ export class SocialAgentChatService {
     if (next.status === 'failed' && !next.failedAt) next.failedAt = now;
     if (next.status === 'completed' && !next.completedAt)
       next.completedAt = now;
-    task.result = this.withStoredRun(task.result, next);
+    task.result = withSocialAgentStoredRun(task.result, next);
     if (next.status === 'running' || next.status === 'queued') {
       task.status = AgentTaskStatus.Planning;
       task.statusReason = `follow_up_replan_${next.phase}`;
@@ -5769,72 +5771,13 @@ export class SocialAgentChatService {
     });
   }
 
-  private withStoredRun(
-    result: Record<string, unknown> | null | undefined,
-    run: SocialAgentAsyncRunSnapshot,
-  ): Record<string, unknown> {
-    const base = this.isRecord(result) ? result : {};
-    return {
-      ...base,
-      latestRunId: run.runId,
-      chatRuns: {
-        ...this.storedRunMap(base),
-        [run.runId]: sanitizeForDisplay(run),
-      },
-    };
-  }
-
   private readStoredRun(
     task: AgentTask,
     runId: string,
   ): SocialAgentAsyncRunSnapshot | null {
-    const raw = this.storedRunMap(task.result)[runId];
-    if (!this.isRecord(raw)) return null;
-    const status = this.normalizeRunStatus(raw.status);
-    return {
-      taskId: this.number(raw.taskId) ?? task.id,
-      runId,
-      status,
-      phase: cleanDisplayText(raw.phase, status),
-      message: cleanDisplayText(raw.message, ''),
-      visibleSteps: this.readVisibleSteps(raw.visibleSteps),
-      queuedAt: cleanDisplayText(raw.queuedAt, '') || new Date().toISOString(),
-      startedAt: cleanDisplayText(raw.startedAt, '') || null,
-      updatedAt:
-        cleanDisplayText(raw.updatedAt, '') || new Date().toISOString(),
-      completedAt: cleanDisplayText(raw.completedAt, '') || null,
-      failedAt: cleanDisplayText(raw.failedAt, '') || null,
-      pollAfterMs: this.number(raw.pollAfterMs) ?? 1500,
-      error: this.isRecord(raw.error) ? raw.error : null,
-      replan: this.isRecord(raw.replan)
-        ? (raw.replan as unknown as SocialAgentPlannerResult)
-        : null,
-      result: this.isRecord(raw.result)
-        ? (raw.result as unknown as
-            | SocialAgentChatRunResult
-            | SocialAgentChatReplanRunResult)
-        : null,
-    };
-  }
-
-  private storedRunMap(result: unknown): Record<string, unknown> {
-    const base = this.isRecord(result) ? result : {};
-    return this.isRecord(base.chatRuns) ? base.chatRuns : {};
-  }
-
-  private readVisibleSteps(value: unknown): SocialAgentVisibleStep[] {
-    if (!Array.isArray(value)) return [];
-    return value
-      .filter((step) => this.isRecord(step))
-      .map((step) => ({
-        id: cleanDisplayText(step.id, ''),
-        label: this.userVisibleStepLabel(
-          cleanDisplayText(step.id, ''),
-          cleanDisplayText(step.label, '正在处理任务'),
-        ),
-        status: this.normalizeStepStatus(step.status),
-      }))
-      .filter((step) => step.id);
+    return readSocialAgentStoredRun(task, runId, (id, label) =>
+      this.userVisibleStepLabel(id, label),
+    );
   }
 
   private async writeInboxEventBestEffort(
@@ -5892,26 +5835,6 @@ export class SocialAgentChatService {
         : 'social_agent_replan_failed',
       message: cleanDisplayText(rawMessage, '重新规划失败'),
     };
-  }
-
-  private createRunId(): string {
-    const randomSuffix = Math.random().toString(36).slice(2, 10);
-    return `sar_${Date.now()}_${randomSuffix}`;
-  }
-
-  private normalizeRunStatus(value: unknown): SocialAgentAsyncRunStatus {
-    if (value === 'running' || value === 'completed' || value === 'failed') {
-      return value;
-    }
-    return 'queued';
-  }
-
-  private normalizeStepStatus(
-    value: unknown,
-  ): SocialAgentVisibleStep['status'] {
-    if (value === 'running' || value === 'done' || value === 'failed')
-      return value;
-    return 'pending';
   }
 
   private isRecentIsoTime(value: string, maxAgeMs: number): boolean {
@@ -6069,21 +5992,8 @@ export class SocialAgentChatService {
   private readLatestStoredRun(
     task: AgentTask,
   ): SocialAgentAsyncRunSnapshot | null {
-    const result = this.isRecord(task.result) ? task.result : {};
-    const latestRunId = cleanDisplayText(result.latestRunId, '');
-    if (latestRunId) {
-      const latest = this.readStoredRun(task, latestRunId);
-      if (latest) return latest;
-    }
-    return (
-      Object.keys(this.storedRunMap(task.result))
-        .map((runId) => this.readStoredRun(task, runId))
-        .filter((run): run is SocialAgentAsyncRunSnapshot => !!run)
-        .sort(
-          (a, b) =>
-            Date.parse(b.updatedAt || b.queuedAt) -
-            Date.parse(a.updatedAt || a.queuedAt),
-        )[0] ?? null
+    return readLatestSocialAgentStoredRun(task, (id, label) =>
+      this.userVisibleStepLabel(id, label),
     );
   }
 
