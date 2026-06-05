@@ -498,7 +498,6 @@ function makeHarness(options: Record<string, unknown> = {}) {
     intentRouter,
     executor as never,
     socialProfiles as never,
-    messages as never,
     approvals as never,
     publicIntentRepo as never,
     metrics as never,

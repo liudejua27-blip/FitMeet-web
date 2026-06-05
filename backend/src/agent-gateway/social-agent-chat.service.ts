@@ -13,7 +13,6 @@ import {
   sanitizeForDisplay,
 } from '../common/display-text.util';
 import { sanitizeCity } from '../common/city.util';
-import { MessagesService } from '../messages/messages.service';
 import { RealtimeEventService } from '../realtime/realtime-event.service';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
 import { SocialProfileService } from '../users/social-profile.service';
@@ -163,7 +162,6 @@ export class SocialAgentChatService {
     private readonly intentRouter: SocialAgentIntentRouterService,
     private readonly executor: SocialAgentToolExecutorService,
     private readonly socialProfiles: SocialProfileService,
-    private readonly messages: MessagesService,
     private readonly approvals: AgentApprovalService,
     @InjectRepository(PublicSocialIntent)
     private readonly publicIntentRepo: Repository<PublicSocialIntent>,
@@ -1126,36 +1124,16 @@ export class SocialAgentChatService {
       undefined,
       undefined,
     );
-    const finalResult = { ...result, replan };
-    task = await this.updateRunSnapshot(ownerUserId, taskId, runId, {
-      status: 'completed',
-      phase: 'completed',
-      completedAt: new Date().toISOString(),
-      message: '已根据补充要求刷新计划和候选人',
-      visibleSteps: [...visibleSteps],
+    const finalResult: SocialAgentChatReplanRunResult = { ...result, replan };
+    await this.runState.completeReplanRun({
+      ownerUserId,
+      taskId,
+      runId,
+      visibleSteps,
       replan,
       result: finalResult,
-      error: null,
+      visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
     });
-    await this.writeEvent(
-      task,
-      AgentTaskEventType.SocialAgentReplanCompleted,
-      '异步重新规划已完成',
-      {
-        runId,
-        candidateCount: result.candidates.length,
-        replanAttempt: replan.replanAttempt,
-      },
-      AgentTaskEventActor.System,
-    );
-    await this.writeInboxEventBestEffort(
-      task,
-      'social_agent.replan.completed',
-      {
-        runId,
-        candidateCount: result.candidates.length,
-      },
-    );
     return finalResult;
   }
 
@@ -2194,38 +2172,6 @@ export class SocialAgentChatService {
     return this.runState.readStoredRun(task, runId, (id, label) =>
       this.userVisibleStepLabel(id, label),
     );
-  }
-
-  private async writeInboxEventBestEffort(
-    task: AgentTask,
-    eventType: string,
-    metadata: Record<string, unknown>,
-  ): Promise<void> {
-    if (!task.agentConnectionId) return;
-    try {
-      await this.messages.createAgentInboxEvent({
-        agentConnectionId: task.agentConnectionId,
-        ownerUserId: task.ownerUserId,
-        eventType,
-        contentPreview:
-          cleanDisplayText(metadata.error, '') || 'Social Agent 任务已更新',
-        unread: true,
-        dedupeKey: `${task.agentConnectionId}:${eventType}:${task.id}:${cleanDisplayText(metadata.runId, 'run')}`,
-        metadata: {
-          ...metadata,
-          agentTaskId: task.id,
-        },
-      });
-    } catch (error) {
-      this.logger.warn(
-        JSON.stringify({
-          event: 'social_agent.inbox_event_failed',
-          taskId: task.id,
-          eventType,
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
   }
 
   private async findLatestRestorableTask(

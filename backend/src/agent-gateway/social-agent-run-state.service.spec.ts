@@ -243,6 +243,75 @@ describe('SocialAgentRunStateService', () => {
     expect(taskRepo.save).toHaveBeenCalledTimes(2);
   });
 
+  it('completes replan runs, writes a system event, and notifies the agent inbox', async () => {
+    const { messages, savedEvents, service, task, taskRepo } = makeHarness();
+    const replan = {
+      replanAttempt: 2,
+      source: 'fallback',
+      fallbackReason: null,
+      plan: [],
+    };
+    const result = {
+      taskId: 101,
+      status: AgentTaskStatus.AwaitingConfirmation,
+      visibleSteps: [{ id: 'done', label: '已完成', status: 'done' }],
+      assistantMessage: '已刷新候选人',
+      socialRequestDraft: null,
+      candidates: [{ userId: 22 }],
+      approvalRequiredActions: [],
+      events: [],
+      replan,
+    };
+
+    const saved = await service.completeReplanRun({
+      ownerUserId: 7,
+      taskId: 101,
+      runId: 'sar_test_1',
+      visibleSteps: result.visibleSteps,
+      replan: replan as never,
+      result: result as never,
+      visibleStepLabel: (_, label) => label,
+    });
+
+    const run = service.readStoredRun(task, 'sar_test_1', (_, label) => label);
+    expect(saved).toBe(task);
+    expect(run).toMatchObject({
+      status: 'completed',
+      phase: 'completed',
+      message: '已根据补充要求刷新计划和候选人',
+      visibleSteps: result.visibleSteps,
+      replan,
+      result,
+      error: null,
+    });
+    expect(run?.completedAt).toEqual(expect.any(String));
+    expect(savedEvents).toEqual([
+      expect.objectContaining({
+        actor: AgentTaskEventActor.System,
+        eventType: AgentTaskEventType.SocialAgentReplanCompleted,
+        taskId: 101,
+        payload: {
+          runId: 'sar_test_1',
+          candidateCount: 1,
+          replanAttempt: 2,
+        },
+      }),
+    ]);
+    expect(messages.createAgentInboxEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentConnectionId: 11,
+        eventType: 'social_agent.replan.completed',
+        ownerUserId: 7,
+        metadata: expect.objectContaining({
+          runId: 'sar_test_1',
+          candidateCount: 1,
+          agentTaskId: 101,
+        }),
+      }),
+    );
+    expect(taskRepo.save).toHaveBeenCalledWith(task);
+  });
+
   it('throws when the requested run does not exist', async () => {
     const { service } = makeHarness();
 

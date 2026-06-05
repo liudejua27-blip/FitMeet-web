@@ -16,8 +16,11 @@ import {
 } from './entities/agent-task.entity';
 import type {
   SocialAgentAsyncRunSnapshot,
+  SocialAgentChatReplanRunResult,
   SocialAgentFollowUpContext,
+  SocialAgentVisibleStep,
 } from './social-agent-chat.types';
+import type { SocialAgentPlannerResult } from './social-agent-planner.service';
 import {
   readLatestSocialAgentStoredRun,
   readSocialAgentStoredRun,
@@ -214,6 +217,54 @@ export class SocialAgentRunStateService {
       runId,
       error: errorPayload,
     });
+  }
+
+  async completeReplanRun(input: {
+    ownerUserId: number;
+    taskId: number;
+    runId: string;
+    visibleSteps: SocialAgentVisibleStep[];
+    replan: SocialAgentPlannerResult;
+    result: SocialAgentChatReplanRunResult;
+    visibleStepLabel: VisibleStepLabeler;
+  }): Promise<AgentTask> {
+    const candidateCount = input.result.candidates.length;
+    const task = await this.updateRunSnapshot(
+      input.ownerUserId,
+      input.taskId,
+      input.runId,
+      {
+        status: 'completed',
+        phase: 'completed',
+        completedAt: new Date().toISOString(),
+        message: '已根据补充要求刷新计划和候选人',
+        visibleSteps: [...input.visibleSteps],
+        replan: input.replan,
+        result: input.result,
+        error: null,
+      },
+      input.visibleStepLabel,
+    );
+    await this.writeEvent(
+      task,
+      AgentTaskEventType.SocialAgentReplanCompleted,
+      '异步重新规划已完成',
+      {
+        runId: input.runId,
+        candidateCount,
+        replanAttempt: input.replan.replanAttempt,
+      },
+      AgentTaskEventActor.System,
+    );
+    await this.writeInboxEventBestEffort(
+      task,
+      'social_agent.replan.completed',
+      {
+        runId: input.runId,
+        candidateCount,
+      },
+    );
+    return task;
   }
 
   readStoredRun(
