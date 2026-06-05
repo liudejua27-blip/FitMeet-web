@@ -39,7 +39,7 @@ jobs:
         run: pnpm build
 
       - name: Test
-        run: pnpm test -- --runInBand
+        run: pnpm test
 
   frontend:
     name: Frontend
