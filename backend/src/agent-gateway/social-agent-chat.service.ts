@@ -44,12 +44,10 @@ import {
   SocialAgentToolName,
 } from './social-agent-tool-executor.service';
 import {
-  appendSocialAgentShortTermTurn,
   appendShortTermMemoryItem,
   appendSocialAgentUserMemo,
   readSocialAgentTaskMemory,
   recordSocialAgentPendingAction,
-  recordSocialAgentShortTermAction,
   rememberSocialAgentCurrentTask,
   rememberSocialAgentShortTerm,
   transitionSocialAgentState,
@@ -84,6 +82,7 @@ import { SocialAgentDraftPublicationService } from './social-agent-draft-publica
 import { SocialAgentDraftSearchService } from './social-agent-draft-search.service';
 import { SocialAgentRecommendationResultService } from './social-agent-recommendation-result.service';
 import { SocialAgentActivitySearchService } from './social-agent-activity-search.service';
+import { SocialAgentMessageLogService } from './social-agent-message-log.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentRagService } from './social-agent-rag.service';
@@ -176,6 +175,7 @@ export class SocialAgentChatService {
     private readonly recommendationResults: SocialAgentRecommendationResultService,
     private readonly activitySearch: SocialAgentActivitySearchService,
     private readonly sessionRestore: SocialAgentSessionRestoreService,
+    private readonly messageLog: SocialAgentMessageLogService,
     @Optional() private readonly brain?: SocialAgentBrainService,
     @Optional()
     private readonly memoryContext?: SocialAgentMemoryContextService,
@@ -220,7 +220,7 @@ export class SocialAgentChatService {
     if (!message) throw new BadRequestException('请输入消息');
     const taskId = this.number(body.taskId);
     let task = await this.ensureConversationTask(ownerUserId, taskId, message);
-    await this.recordUserMessage(task, message);
+    await this.messageLog.recordUserMessage(task, message);
 
     const alphaTurn = await this.alphaAgent?.prepareTurn({
       ownerUserId,
@@ -285,7 +285,11 @@ export class SocialAgentChatService {
         },
         AgentTaskEventActor.Agent,
       );
-      await this.recordAssistantMessage(task, assistantMessage, result);
+      await this.messageLog.recordAssistantMessage(
+        task,
+        assistantMessage,
+        result,
+      );
       this.metrics.observeRouteLatency(Date.now() - startedAt);
       return result;
     }
@@ -349,7 +353,11 @@ export class SocialAgentChatService {
         { structuredIntent: alphaTurn?.structuredIntent },
         AgentTaskEventActor.Agent,
       );
-      await this.recordAssistantMessage(task, assistantMessage, result);
+      await this.messageLog.recordAssistantMessage(
+        task,
+        assistantMessage,
+        result,
+      );
       this.metrics.recordAction(result.action);
       this.metrics.observeRouteLatency(Date.now() - startedAt);
       return result;
@@ -408,7 +416,7 @@ export class SocialAgentChatService {
     }
     this.profileEnrichment.rememberCurrentTaskFromBrain(task, route);
     memoryContext = this.buildMemoryContext(task, longTermSnapshot);
-    await this.recordIntentRoute(task, route).catch((error) => {
+    await this.messageLog.recordIntentRoute(task, route).catch((error) => {
       this.metrics.recordError('intent_route_event_failed');
       this.logger.warn(
         JSON.stringify({
@@ -466,7 +474,11 @@ export class SocialAgentChatService {
         permissionMode: task.permissionMode,
       };
       this.metrics.recordAction(result.action);
-      await this.recordAssistantMessage(task, assistantMessage, result);
+      await this.messageLog.recordAssistantMessage(
+        task,
+        assistantMessage,
+        result,
+      );
       this.metrics.observeRouteLatency(Date.now() - startedAt);
       return result;
     }
@@ -647,7 +659,11 @@ export class SocialAgentChatService {
     };
     if (queuedRun && runMode) this.metrics.recordQueuedRun(runMode);
     this.metrics.recordAction(result.action);
-    await this.recordAssistantMessage(task, assistantMessage, result);
+    await this.messageLog.recordAssistantMessage(
+      task,
+      assistantMessage,
+      result,
+    );
     this.metrics.observeRouteLatency(Date.now() - startedAt);
     return result;
   }
@@ -1706,128 +1722,6 @@ export class SocialAgentChatService {
       },
     );
     return task;
-  }
-
-  private async recordUserMessage(
-    task: AgentTask,
-    message: string,
-  ): Promise<void> {
-    const now = new Date().toISOString();
-    appendSocialAgentConversationTurn(task, {
-      role: 'user',
-      text: message,
-      at: now,
-    });
-    appendSocialAgentShortTermTurn(task, {
-      role: 'user',
-      text: message,
-      at: now,
-    });
-    transitionSocialAgentState(task, 'user_message');
-    task.status =
-      task.status === AgentTaskStatus.Pending
-        ? AgentTaskStatus.AwaitingFeedback
-        : task.status;
-    task.statusReason = 'user_message_received';
-    await this.taskRepo.save(task);
-    await this.writeEvent(
-      task,
-      AgentTaskEventType.SocialAgentMessageUser,
-      '用户发送 Social Agent 消息',
-      { message, createdAt: now },
-      AgentTaskEventActor.User,
-    );
-  }
-
-  private async recordIntentRoute(
-    task: AgentTask,
-    route: SocialAgentIntentRouterResult,
-  ): Promise<void> {
-    await this.writeEvent(
-      task,
-      AgentTaskEventType.Note,
-      'Social Agent 已完成意图路由',
-      {
-        intent: route.intent,
-        confidence: route.confidence,
-        entities: route.entities,
-        shouldSearch: route.shouldSearch,
-        shouldReplan: route.shouldReplan,
-        shouldUpdateProfile: route.shouldUpdateProfile,
-        shouldExecuteAction: route.shouldExecuteAction,
-        replyStrategy: route.replyStrategy,
-        source: route.source,
-      },
-      AgentTaskEventActor.System,
-    );
-  }
-
-  private async recordAssistantMessage(
-    task: AgentTask,
-    message: string,
-    route: SocialAgentIntentRouteResult,
-  ): Promise<void> {
-    const now = new Date().toISOString();
-    appendSocialAgentConversationTurn(task, {
-      role: 'assistant',
-      text: message,
-      intent: route.intent,
-      at: now,
-      ...(route.activityResults?.length
-        ? { activityResults: sanitizeForDisplay(route.activityResults) }
-        : {}),
-      ...(route.pendingApproval
-        ? {
-            kind: 'approval',
-            pendingApproval: sanitizeForDisplay(route.pendingApproval),
-          }
-        : {}),
-    });
-    appendSocialAgentShortTermTurn(task, {
-      role: 'assistant',
-      text: message,
-      intent: route.intent,
-      action: route.action,
-      at: now,
-    });
-    recordSocialAgentShortTermAction(task, {
-      action: route.action,
-      intent: route.intent,
-      status: route.shouldQueueRun ? 'queued' : 'completed',
-      at: now,
-    });
-    task.result = {
-      ...(task.result ?? {}),
-      latestMessageRoute: {
-        intent: route.intent,
-        confidence: route.confidence,
-        action: route.action,
-        replyStrategy: route.replyStrategy,
-        shouldQueueRun: route.shouldQueueRun,
-        runId: route.queuedRun?.runId ?? null,
-        at: now,
-      },
-    };
-    await this.taskRepo.save(task);
-    await this.writeEvent(
-      task,
-      AgentTaskEventType.SocialAgentMessageAssistant,
-      'Social Agent 回复消息',
-      {
-        message,
-        intent: route.intent,
-        action: route.action,
-        activityResults: route.activityResults ?? [],
-        pendingApproval: route.pendingApproval ?? null,
-        riskAdvice:
-          route.intent === 'safety_or_boundary'
-            ? '首次线下见面建议选择公开场所，并保留平台内沟通记录。'
-            : null,
-        queuedRunId: route.queuedRun?.runId ?? null,
-        createdAt: now,
-      },
-      AgentTaskEventActor.Agent,
-    );
   }
 
   private buildTaskContext(
