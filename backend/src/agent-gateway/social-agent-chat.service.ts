@@ -108,6 +108,18 @@ import {
   summarizeSocialAgentTaskMemoryForLlm,
 } from './social-agent-chat-memory.presenter';
 import {
+  readSocialAgentConversationBrainDecision,
+  readSocialAgentConversationBrainLastToolResult,
+  readSocialAgentConversationBrainMode,
+  readSocialAgentConversationBrainPlannedTools,
+  readSocialAgentConversationBrainToolArguments,
+  readSocialAgentConversationBrainToolNames,
+  readSocialAgentCurrentAgentState,
+  rememberSocialAgentConversationBrainDecision,
+  rememberSocialAgentConversationBrainToolResult,
+  socialAgentFinalResponseSafetyRules,
+} from './social-agent-chat-brain-memory.presenter';
+import {
   buildSocialAgentTimelineSnapshot,
   readSocialAgentRestorableResult,
   readSocialAgentStoredCandidateSummaries,
@@ -430,7 +442,7 @@ export class SocialAgentChatService {
     });
     if (brainDecision) {
       route = brainDecision.route;
-      this.rememberConversationBrainDecision(task, brainDecision);
+      rememberSocialAgentConversationBrainDecision(task, brainDecision);
       if (brainDecision.conversationMode === 'profile_correction') {
         recordSocialAgentMisunderstanding(
           task,
@@ -2529,21 +2541,21 @@ export class SocialAgentChatService {
         userMessage: input.message,
         intent: input.route.intent,
         route: input.route as unknown as Record<string, unknown>,
-        agentState: this.currentAgentState(input.task),
+        agentState: readSocialAgentCurrentAgentState(input.task),
         conversationHistory: buildSocialAgentLlmConversationHistory(input.task),
         memoryContext: this.buildMemoryContext(
           input.task,
           input.longTermSnapshot,
         ) as unknown as Record<string, unknown>,
         taskContext: summarizeSocialAgentTaskMemoryForLlm(input.task),
-        plannerDecision: this.currentConversationBrainDecision(input.task),
+        plannerDecision: readSocialAgentConversationBrainDecision(input.task),
         toolResults:
           input.toolResults && input.toolResults.length > 0
             ? input.toolResults
-            : [this.currentConversationBrainLastToolResult(input.task)].filter(
-                Boolean,
-              ),
-        safetyRules: this.finalResponseSafetyRules(),
+            : [
+                readSocialAgentConversationBrainLastToolResult(input.task),
+              ].filter(Boolean),
+        safetyRules: socialAgentFinalResponseSafetyRules(),
         responseGoal: '直接回答用户问题，并根据当前状态自然推进下一步。',
         fallbackReply,
       });
@@ -2792,7 +2804,7 @@ export class SocialAgentChatService {
       sourceMessage,
     );
     const plannedProfile = this.profileFieldsFromRecord(
-      this.currentConversationBrainToolArguments(
+      readSocialAgentConversationBrainToolArguments(
         task,
         SocialAgentToolName.UpdateProfileFromAgentContext,
       ),
@@ -2837,8 +2849,8 @@ export class SocialAgentChatService {
     }
 
     const shouldSave = this.shouldSaveProfileFromMessage(message);
-    const brainMode = this.currentConversationBrainMode(task);
-    const brainWantsProfileTool = this.currentConversationBrainTools(
+    const brainMode = readSocialAgentConversationBrainMode(task);
+    const brainWantsProfileTool = readSocialAgentConversationBrainToolNames(
       task,
     ).includes(SocialAgentToolName.UpdateProfileFromAgentContext);
     if (
@@ -2858,7 +2870,7 @@ export class SocialAgentChatService {
         ownerUserId,
       );
       const output = this.isRecord(call.output) ? call.output : {};
-      this.rememberConversationBrainToolResult(task, {
+      rememberSocialAgentConversationBrainToolResult(task, {
         name: SocialAgentToolName.UpdateProfileFromAgentContext,
         status: call.status,
         input: {
@@ -3045,16 +3057,16 @@ export class SocialAgentChatService {
       return this.finalResponses.generate({
         userMessage: input.message,
         intent: input.intent,
-        agentState: this.currentAgentState(input.task),
+        agentState: readSocialAgentCurrentAgentState(input.task),
         conversationHistory: buildSocialAgentLlmConversationHistory(input.task),
         memoryContext: this.buildMemoryContext(
           input.task,
           null,
         ) as unknown as Record<string, unknown>,
         taskContext: summarizeSocialAgentTaskMemoryForLlm(input.task),
-        plannerDecision: this.currentConversationBrainDecision(input.task),
+        plannerDecision: readSocialAgentConversationBrainDecision(input.task),
         toolResults: input.toolOutput ? [input.toolOutput] : [],
-        safetyRules: this.finalResponseSafetyRules(),
+        safetyRules: socialAgentFinalResponseSafetyRules(),
         responseGoal:
           input.mode === 'profile_updated'
             ? '告诉用户画像已保存，说明已更新字段、补充记忆和缺失信息，并询问下一步。'
@@ -3137,12 +3149,11 @@ export class SocialAgentChatService {
                   extractedProfile: input.extractedProfile,
                   toolOutput: input.toolOutput ?? null,
                   toolResult: input.toolOutput ?? null,
-                  plannedTools: this.currentConversationBrainPlannedTools(
+                  plannedTools: readSocialAgentConversationBrainPlannedTools(
                     input.task,
                   ),
-                  lastToolResult: this.currentConversationBrainLastToolResult(
-                    input.task,
-                  ),
+                  lastToolResult:
+                    readSocialAgentConversationBrainLastToolResult(input.task),
                   memoryContext: this.buildMemoryContext(input.task, null),
                   availableTools: [
                     'update_profile_from_agent_context',
@@ -3419,31 +3430,6 @@ export class SocialAgentChatService {
     };
   }
 
-  private rememberConversationBrainDecision(
-    task: AgentTask,
-    decision: SocialAgentBrainTurnDecision,
-  ): void {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    task.memory = {
-      ...memory,
-      conversationBrain: {
-        intent: decision.route.intent,
-        replyStrategy: decision.route.replyStrategy,
-        conversationMode: decision.conversationMode,
-        shouldExecuteTool: decision.shouldExecuteTool,
-        shouldAskClarifyingQuestion: decision.shouldAskClarifyingQuestion,
-        plannerSource: decision.plannerSource,
-        userIntent: decision.userIntent,
-        reason: decision.reason,
-        responseGoal: decision.responseGoal,
-        needUserConfirmation: decision.needUserConfirmation,
-        tools: decision.tools,
-        notes: decision.notes,
-        updatedAt: new Date().toISOString(),
-      },
-    };
-  }
-
   private async executeConversationBrainReadTools(
     ownerUserId: number,
     task: AgentTask,
@@ -3475,7 +3461,7 @@ export class SocialAgentChatService {
           error: call.error,
         };
         results.push(result);
-        this.rememberConversationBrainToolResult(task, result);
+        rememberSocialAgentConversationBrainToolResult(task, result);
       } catch (error) {
         this.metrics.recordError('conversation_brain_read_tool_failed');
         const result = {
@@ -3487,7 +3473,7 @@ export class SocialAgentChatService {
           },
         };
         results.push(result);
-        this.rememberConversationBrainToolResult(task, result);
+        rememberSocialAgentConversationBrainToolResult(task, result);
       }
     }
     return results;
@@ -3520,7 +3506,7 @@ export class SocialAgentChatService {
     task: AgentTask,
     route: SocialAgentIntentRouterResult,
   ): void {
-    const brainMode = this.currentConversationBrainMode(task);
+    const brainMode = readSocialAgentConversationBrainMode(task);
     if (
       route.intent === 'profile_enrichment' ||
       route.intent === 'profile_enrichment_request' ||
@@ -3576,79 +3562,6 @@ export class SocialAgentChatService {
     }
   }
 
-  private currentConversationBrainMode(task: AgentTask): string {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    const brain = this.isRecord(memory.conversationBrain)
-      ? memory.conversationBrain
-      : {};
-    return cleanDisplayText(brain.conversationMode, '');
-  }
-
-  private currentAgentState(task: AgentTask): string {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    const state = cleanDisplayText(memory.agentState, '');
-    if (state) return state;
-    const taskMemory = readSocialAgentTaskMemory(task);
-    return cleanDisplayText(taskMemory.currentTask.state, '') || 'idle';
-  }
-
-  private currentConversationBrainDecision(
-    task: AgentTask,
-  ): Record<string, unknown> | null {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    const brain = this.isRecord(memory.conversationBrain)
-      ? memory.conversationBrain
-      : null;
-    return brain;
-  }
-
-  private finalResponseSafetyRules(): string[] {
-    return [
-      '私信、加好友、连接候选人、创建公开需求或活动，必须遵守工具权限和用户确认要求。',
-      '不得编造候选人、活动、消息发送结果或已经执行的动作。',
-      '涉及线下见面时，优先公共场所、尊重边界，不承诺绝对安全。',
-      '不要暴露 DeepSeek、API、后端、工具日志或内部状态机细节。',
-    ];
-  }
-
-  private currentConversationBrainTools(task: AgentTask): string[] {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    const brain = this.isRecord(memory.conversationBrain)
-      ? memory.conversationBrain
-      : {};
-    const tools = Array.isArray(brain.tools) ? brain.tools : [];
-    return tools.flatMap((tool) => {
-      if (!this.isRecord(tool)) return [];
-      const name = cleanDisplayText(tool.name, '');
-      return name ? [name] : [];
-    });
-  }
-
-  private currentConversationBrainPlannedTools(
-    task: AgentTask,
-  ): Array<Record<string, unknown>> {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    const brain = this.isRecord(memory.conversationBrain)
-      ? memory.conversationBrain
-      : {};
-    return Array.isArray(brain.tools)
-      ? brain.tools.filter((tool): tool is Record<string, unknown> =>
-          this.isRecord(tool),
-        )
-      : [];
-  }
-
-  private currentConversationBrainToolArguments(
-    task: AgentTask,
-    toolName: string,
-  ): Record<string, unknown> {
-    const tool = this.currentConversationBrainPlannedTools(task).find(
-      (item) => cleanDisplayText(item.name, '') === toolName,
-    );
-    if (!tool) return {};
-    return this.isRecord(tool.arguments) ? tool.arguments : {};
-  }
-
   private profileFieldsFromRecord(
     value: Record<string, unknown>,
   ): ExtractedProfileFields {
@@ -3669,44 +3582,9 @@ export class SocialAgentChatService {
     return fields;
   }
 
-  private rememberConversationBrainToolResult(
-    task: AgentTask,
-    result: Record<string, unknown>,
-  ): void {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    const brain = this.isRecord(memory.conversationBrain)
-      ? memory.conversationBrain
-      : {};
-    task.memory = {
-      ...memory,
-      conversationBrain: {
-        ...brain,
-        lastToolResult: {
-          ...result,
-          completedAt: new Date().toISOString(),
-        },
-      },
-    };
-  }
-
-  private currentConversationBrainLastToolResult(
-    task: AgentTask,
-  ): Record<string, unknown> | null {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    const brain = this.isRecord(memory.conversationBrain)
-      ? memory.conversationBrain
-      : {};
-    return this.isRecord(brain.lastToolResult) ? brain.lastToolResult : null;
-  }
-
   private profileMissingFieldsReply(task: AgentTask): string {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    const brain = this.isRecord(memory.conversationBrain)
-      ? memory.conversationBrain
-      : {};
-    const lastToolResult = this.isRecord(brain.lastToolResult)
-      ? brain.lastToolResult
-      : {};
+    const lastToolResult =
+      readSocialAgentConversationBrainLastToolResult(task) ?? {};
     const output = this.isRecord(lastToolResult.output)
       ? lastToolResult.output
       : {};
@@ -3872,14 +3750,14 @@ export class SocialAgentChatService {
       userMessage: input.message,
       intent: input.route.intent,
       route: input.route as unknown as Record<string, unknown>,
-      agentState: this.currentAgentState(input.task),
+      agentState: readSocialAgentCurrentAgentState(input.task),
       conversationHistory: buildSocialAgentLlmConversationHistory(input.task),
       memoryContext: this.buildMemoryContext(
         input.task,
         null,
       ) as unknown as Record<string, unknown>,
       taskContext: summarizeSocialAgentTaskMemoryForLlm(input.task),
-      plannerDecision: this.currentConversationBrainDecision(input.task),
+      plannerDecision: readSocialAgentConversationBrainDecision(input.task),
       toolResults: [
         {
           tool: 'search_public_intents',
@@ -3892,7 +3770,7 @@ export class SocialAgentChatService {
         emptyReason:
           input.activityResults.length === 0 ? 'no_real_candidates' : null,
       },
-      safetyRules: this.finalResponseSafetyRules(),
+      safetyRules: socialAgentFinalResponseSafetyRules(),
       responseGoal:
         input.activityResults.length > 0
           ? '自然说明已找到真实活动或公开意向，并引导用户选择或继续筛选。'
@@ -5700,14 +5578,14 @@ export class SocialAgentChatService {
     return this.finalResponses.generate({
       userMessage: cleanDisplayText(input.draft.rawText, input.task.goal),
       intent: 'candidate_search',
-      agentState: this.currentAgentState(input.task),
+      agentState: readSocialAgentCurrentAgentState(input.task),
       conversationHistory: buildSocialAgentLlmConversationHistory(input.task),
       memoryContext: this.buildMemoryContext(
         input.task,
         null,
       ) as unknown as Record<string, unknown>,
       taskContext: summarizeSocialAgentTaskMemoryForLlm(input.task),
-      plannerDecision: this.currentConversationBrainDecision(input.task),
+      plannerDecision: readSocialAgentConversationBrainDecision(input.task),
       toolResults: [
         {
           tool: 'search_real_candidates',
@@ -5732,7 +5610,7 @@ export class SocialAgentChatService {
         })),
         emptyReason: input.searchResult.emptyReason,
       },
-      safetyRules: this.finalResponseSafetyRules(),
+      safetyRules: socialAgentFinalResponseSafetyRules(),
       responseGoal:
         input.candidates.length > 0
           ? '自然说明搜索结果，突出最相关候选人，并提醒下一步动作需要用户确认。'
