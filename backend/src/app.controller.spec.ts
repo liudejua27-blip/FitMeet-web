@@ -154,5 +154,40 @@ describe('AppController', () => {
         },
       });
     });
+
+    it('documents the iOS session restore auth contract', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+
+      expect(contract.paths['/auth/login'].post.responses['200']).toEqual({
+        $ref: '#/components/responses/AuthResult',
+      });
+      expect(contract.paths['/auth/refresh'].post.responses['200']).toEqual({
+        $ref: '#/components/responses/AuthResult',
+      });
+      expect(
+        contract.paths['/auth/profile'].get.responses['200'],
+      ).toMatchObject({
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/UserProfile' },
+          },
+        },
+      });
+      expect(contract.components.schemas.AuthResult).toMatchObject({
+        required: ['access_token', 'user'],
+        properties: {
+          access_token: { type: 'string' },
+          refresh_token: { type: 'string' },
+          user: { $ref: '#/components/schemas/UserProfile' },
+        },
+      });
+      expect(contract.components.schemas.UserProfile.properties).toMatchObject({
+        id: { type: 'integer' },
+        email: { type: 'string' },
+        name: { type: 'string' },
+        avatar: { type: 'string' },
+        city: { type: 'string' },
+      });
+    });
   });
 });
