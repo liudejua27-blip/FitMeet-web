@@ -14,6 +14,7 @@ import { SocialAgentAction } from './agent-permission.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
+import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -412,6 +413,9 @@ function makeHarness(options: Record<string, unknown> = {}) {
     options.fitMeetRuntime as never,
     options.alphaAgent as never,
     options.tonePolicy as never,
+    options.agentQuality as never,
+    options.sessionAssembler as never,
+    options.activities as never,
   );
 
   return {
@@ -441,6 +445,27 @@ async function flushAsync(times = 8): Promise<void> {
 }
 
 describe('SocialAgentChatService', () => {
+  it.each(['只看同校', '不要晚上', '换成散步', '只看低压力', '不想要这个类型'])(
+    'routes candidate filter refinement "%s" to follow-up replan',
+    (message) => {
+      const router = new SocialAgentIntentRouterService({
+        get: jest.fn().mockReturnValue(undefined),
+      } as never);
+
+      const result = router.routeByRules({
+        message,
+        taskContext: { hasSearchContext: true, hasCandidates: true },
+      });
+
+      expect(result).toMatchObject({
+        intent: 'candidate_followup',
+        shouldSearch: true,
+        shouldReplan: true,
+        replyStrategy: 'search_candidates',
+      });
+    },
+  );
+
   it('routes casual chat without running tools', async () => {
     const { service, executor, socialProfiles, savedEvents } = makeHarness();
 
@@ -1513,6 +1538,207 @@ describe('SocialAgentChatService', () => {
     ]);
   });
 
+  it('keeps the recommendation to opener to activity flow behind user confirmations', async () => {
+    const alphaAgent = {
+      prepareTurn: jest.fn().mockResolvedValue(null),
+      buildResultCards: jest.fn((input: Record<string, unknown>) => {
+        const candidates = Array.isArray(input.candidates)
+          ? (input.candidates as Array<Record<string, unknown>>)
+          : [];
+        const draft =
+          input.socialRequestDraft &&
+          typeof input.socialRequestDraft === 'object'
+            ? (input.socialRequestDraft as Record<string, unknown>)
+            : {};
+        const candidate = candidates[0] ?? {};
+        return [
+          {
+            id: 'candidate_card:101:22',
+            type: 'candidate_card',
+            title: '小林',
+            status: 'waiting_confirmation',
+            data: {
+              targetUserId: candidate.targetUserId ?? candidate.userId,
+              recommendationLine:
+                '我推荐小林，是因为你们的活动区域、时间和运动偏好都比较接近。',
+              fitReasons: ['青岛大学附近活动', '偏轻松跑步', '接受公共场所'],
+              whyNow: '你这次明确想找今晚附近的轻松跑步搭子。',
+              safetyBoundary: '第一次建议选择校园操场或公共公园。',
+              suggestedOpener:
+                candidate.suggestedMessage ?? '这周末方便一起慢跑一圈吗？',
+              nextActions: ['生成开场白', '看看更多', '只看同校', '创建约练'],
+            },
+            actions: [
+              {
+                id: 'generate_opener',
+                label: '生成开场白',
+                action: 'generate_opener',
+                requiresConfirmation: false,
+                payload: { taskId: input.taskId, candidate },
+              },
+              {
+                id: 'create_activity',
+                label: '创建约练',
+                action: 'create_activity',
+                requiresConfirmation: true,
+                payload: { taskId: input.taskId, candidate },
+              },
+            ],
+          },
+          {
+            id: 'activity_plan:101',
+            type: 'activity_plan',
+            title: '约练计划待确认',
+            status: 'waiting_confirmation',
+            data: {
+              taskId: input.taskId,
+              socialRequestId: draft.socialRequestId ?? null,
+              time: '周六 15:00',
+              locationName: '青岛大学附近公共场所',
+              participants: '你和小林',
+              publicPlaceOnly: true,
+              noPreciseLocation: true,
+              safetyBoundary: '不共享精确位置，第一次只选公共场所。',
+              lifeGraphUpdatePreview: '完成后会更新你对周末轻运动社交的偏好。',
+              trustScoreUpdatePreview:
+                '完成和评价会写入 trust score，用于后续推荐可信度。',
+            },
+            actions: [
+              {
+                id: 'confirm_create_activity',
+                label: '确认创建',
+                action: 'create_activity',
+                requiresConfirmation: true,
+                payload: { taskId: input.taskId, draft, candidate },
+              },
+            ],
+          },
+        ];
+      }),
+    };
+    const lifeGraph = {
+      getUnifiedMatchSignals: jest.fn().mockResolvedValue({
+        dynamicSignals: {
+          lifeUnderstandingSummary: '你更适合周末下午的低压力运动社交。',
+          recommendationWeights: {
+            sameSchoolOrArea: 0.9,
+            lowPressure: 0.85,
+            sports: 0.8,
+            safetyBoundary: 0.9,
+          },
+          matchingGuidance: {
+            shouldPreferSameSchoolOrArea: true,
+            shouldPreferLowPressure: true,
+            shouldUsePublicPlace: true,
+            suggestedFilters: ['只看同校', '只看低压力'],
+          },
+        },
+      }),
+    };
+    const { service, executor } = makeHarness({ alphaAgent, lifeGraph });
+
+    const recommendation = await service.run(7, {
+      goal: '今晚想找青岛大学附近跑步搭子',
+      permissionMode: AgentTaskPermissionMode.Confirm,
+    });
+
+    expect(recommendation.candidates[0]).toMatchObject({
+      userId: 22,
+      nickname: '小林',
+    });
+    expect(lifeGraph.getUnifiedMatchSignals).toHaveBeenCalledWith(7);
+    expect(alphaAgent.buildResultCards).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        candidates: expect.arrayContaining([
+          expect.objectContaining({ userId: 22 }),
+        ]),
+        lifeGraphSignals: expect.objectContaining({
+          dynamicSignals: expect.objectContaining({
+            matchingGuidance: expect.objectContaining({
+              shouldPreferSameSchoolOrArea: true,
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(recommendation.cards).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'candidate_card',
+          data: expect.objectContaining({
+            recommendationLine: expect.stringContaining('小林'),
+            fitReasons: expect.arrayContaining(['青岛大学附近活动']),
+            whyNow: expect.stringContaining('今晚'),
+            safetyBoundary: expect.stringContaining('公共'),
+            suggestedOpener: expect.any(String),
+          }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              action: 'create_activity',
+              requiresConfirmation: true,
+            }),
+          ]),
+        }),
+        expect.objectContaining({
+          type: 'activity_plan',
+          data: expect.objectContaining({
+            publicPlaceOnly: true,
+            noPreciseLocation: true,
+            lifeGraphUpdatePreview: expect.stringContaining('更新'),
+            trustScoreUpdatePreview: expect.stringContaining('trust score'),
+          }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              action: 'create_activity',
+              requiresConfirmation: true,
+            }),
+          ]),
+        }),
+      ]),
+    );
+
+    const callsAfterRecommendation =
+      executor.executeToolAction.mock.calls.length;
+    const opener = await service.routeMessage(7, {
+      message: '帮我给第一个人发消息',
+      taskId: recommendation.taskId,
+    });
+
+    expect(opener).toMatchObject({
+      intent: 'action_request',
+      action: 'await_confirmation',
+      shouldQueueRun: false,
+      pendingApproval: expect.objectContaining({
+        actionType: 'send_candidate_message',
+      }),
+    });
+    expect(executor.executeToolAction.mock.calls).toHaveLength(
+      callsAfterRecommendation,
+    );
+
+    const activityPlan = await service.routeMessage(7, {
+      message: '帮我邀请第一个人参加约练',
+      taskId: recommendation.taskId,
+    });
+
+    expect(activityPlan).toMatchObject({
+      intent: 'action_request',
+      action: 'await_confirmation',
+      shouldQueueRun: false,
+      pendingApproval: expect.objectContaining({
+        actionType: 'invite_candidate',
+      }),
+    });
+    expect(
+      executor.executeToolAction.mock.calls.some(
+        (call) =>
+          call[1] === SocialAgentToolName.CreateActivity ||
+          call[1] === SocialAgentToolName.InviteActivity,
+      ),
+    ).toBe(false);
+  });
+
   it('does not search when Main Agent asks a low-pressure clarification', async () => {
     const alphaAgent = {
       prepareTurn: jest.fn().mockResolvedValue({
@@ -2099,6 +2325,408 @@ describe('SocialAgentChatService', () => {
         id: 9001,
         actionType: 'send_candidate_message',
       });
+    });
+
+    it('creates an opener approval from a canonical candidate.generate_opener card action', async () => {
+      const { service, taskRepo, approvals } = makeHarness();
+      taskRepo.findOne.mockResolvedValue(
+        makeTask({
+          memory: {
+            shortTerm: {
+              candidates: [
+                {
+                  userId: 22,
+                  nickname: '小林',
+                  candidateRecordId: 501,
+                  suggestedMessage: '你好，这周末要不要在公共场所慢跑一圈？',
+                },
+              ],
+            },
+          },
+        }),
+      );
+
+      const result = await service.performCardAction(7, 101, {
+        action: 'candidate.generate_opener',
+        payload: {
+          taskId: 101,
+          targetUserId: 22,
+          candidate: {
+            userId: 22,
+            nickname: '小林',
+            candidateRecordId: 501,
+            suggestedOpener: '你好，这周末要不要在公共场所慢跑一圈？',
+          },
+        },
+      });
+
+      expect(approvals.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 7,
+          agentTaskId: 101,
+          type: 'send_message',
+          actionType: 'send_candidate_message',
+        }),
+      );
+      expect(result).toMatchObject({
+        action: 'await_confirmation',
+        pendingApproval: expect.objectContaining({
+          id: 9001,
+          actionType: 'send_candidate_message',
+        }),
+        cards: [
+          expect.objectContaining({
+            type: 'opener_approval',
+            data: expect.objectContaining({
+              loopStage: 'opener_draft_created',
+              targetUserId: 22,
+            }),
+            actions: [
+              expect.objectContaining({
+                schemaAction: 'opener.confirm_send',
+                loopStage: 'opener_draft_created',
+              }),
+              expect.objectContaining({
+                schemaAction: 'opener.regenerate',
+              }),
+            ],
+          }),
+        ],
+      });
+      const memory = readTaskMemory(taskRepo) as {
+        pendingActions: Array<Record<string, unknown>>;
+      };
+      expect(memory.pendingActions.at(-1)).toMatchObject({
+        id: 9001,
+        actionType: 'send_candidate_message',
+      });
+    });
+
+    it('runs the canonical meet loop from activity confirmation to review and Life Graph update', async () => {
+      const lifeGraph = {
+        recordBehaviorEvent: jest.fn().mockResolvedValue({
+          id: 1,
+          eventType: LifeGraphBehaviorEventType.ActivityCreated,
+        }),
+      };
+      const { service, taskRepo, approvals } = makeHarness({ lifeGraph });
+      await taskRepo.save(
+        makeTask({
+          memory: {
+            shortTerm: {
+              candidates: [
+                {
+                  userId: 22,
+                  nickname: '小林',
+                  candidateRecordId: 501,
+                  socialRequestId: 301,
+                },
+              ],
+            },
+          },
+        }),
+      );
+
+      const activityDraft = await service.performCardAction(7, 101, {
+        action: 'activity.confirm_create',
+        payload: {
+          taskId: 101,
+          candidateUserId: 22,
+          socialRequestId: 301,
+          activityType: 'running',
+          locationName: '青岛大学附近公共场所',
+          timeText: '周六 15:00',
+        },
+      });
+
+      expect(approvals.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 7,
+          agentTaskId: 101,
+          type: 'create_activity',
+          actionType: 'create_activity',
+        }),
+      );
+      expect(activityDraft).toMatchObject({
+        action: 'await_confirmation',
+        cards: [
+          expect.objectContaining({
+            type: 'activity_plan',
+            data: expect.objectContaining({
+              loopStage: 'activity_draft_created',
+              publicPlaceOnly: true,
+              noPreciseLocation: true,
+            }),
+            actions: [
+              expect.objectContaining({
+                schemaAction: 'activity.confirm_create',
+                loopStage: 'activity_draft_created',
+                requiresConfirmation: true,
+              }),
+            ],
+          }),
+        ],
+      });
+
+      const confirmPayload = activityDraft.cards?.[0]?.actions[0]?.payload ?? {};
+      const checkinStep = await service.performCardAction(7, 101, {
+        action: 'activity.confirm_create',
+        payload: confirmPayload,
+      });
+
+      expect(checkinStep).toMatchObject({
+        action: 'reply',
+        cards: [
+          expect.objectContaining({
+            type: 'checkin_card',
+            data: expect.objectContaining({
+              loopStage: 'activity_confirmed',
+              publicPlaceOnly: true,
+              noPreciseLocation: true,
+            }),
+            actions: [
+              expect.objectContaining({
+                schemaAction: 'activity.check_in',
+                loopStage: 'activity_confirmed',
+              }),
+            ],
+          }),
+        ],
+      });
+      expect(lifeGraph.recordBehaviorEvent).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({
+          eventType: LifeGraphBehaviorEventType.ActivityCreated,
+          taskId: 101,
+          candidateUserId: 22,
+        }),
+      );
+
+      const checkinPayload = checkinStep.cards?.[0]?.actions[0]?.payload ?? {};
+      const completionStep = await service.performCardAction(7, 101, {
+        action: 'activity.check_in',
+        payload: checkinPayload,
+      });
+
+      expect(completionStep.cards?.[0]).toMatchObject({
+        type: 'checkin_card',
+        data: expect.objectContaining({
+          loopStage: 'activity_checked_in',
+        }),
+        actions: [
+          expect.objectContaining({
+            schemaAction: 'activity.complete',
+            loopStage: 'activity_checked_in',
+          }),
+        ],
+      });
+
+      const completePayload = completionStep.cards?.[0]?.actions[0]?.payload ?? {};
+      const reviewStep = await service.performCardAction(7, 101, {
+        action: 'activity.complete',
+        payload: completePayload,
+      });
+
+      expect(reviewStep.cards?.[0]).toMatchObject({
+        type: 'review_card',
+        data: expect.objectContaining({
+          loopStage: 'activity_completed',
+          lifeGraphUpdatePreview: expect.any(String),
+          trustScoreUpdatePreview: expect.any(String),
+        }),
+        actions: [
+          expect.objectContaining({
+            schemaAction: 'review.submit',
+            loopStage: 'activity_completed',
+          }),
+        ],
+      });
+      expect(lifeGraph.recordBehaviorEvent).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({
+          eventType: LifeGraphBehaviorEventType.ActivityCompleted,
+          taskId: 101,
+          candidateUserId: 22,
+        }),
+      );
+
+      const reviewPayload = reviewStep.cards?.[0]?.actions[0]?.payload ?? {};
+      const updateStep = await service.performCardAction(7, 101, {
+        action: 'review.submit',
+        payload: {
+          ...reviewPayload,
+          rating: 5,
+          comment: '这次约练顺利完成，节奏很舒服。',
+        },
+      });
+
+      expect(updateStep.cards?.[0]).toMatchObject({
+        type: 'audit_update',
+        status: 'completed',
+        data: expect.objectContaining({
+          loopStage: 'trust_score_updated',
+          lifeGraphUpdatePreview: expect.any(String),
+          trustScoreUpdatePreview: expect.stringContaining('+2'),
+          canView: true,
+          canCorrect: true,
+          canRevoke: true,
+        }),
+        actions: [
+          expect.objectContaining({
+            schemaAction: 'life_graph.accept_update',
+            loopStage: 'trust_score_updated',
+          }),
+          expect.objectContaining({
+            schemaAction: 'life_graph.reject_update',
+            loopStage: 'trust_score_updated',
+          }),
+        ],
+      });
+      expect(lifeGraph.recordBehaviorEvent).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({
+          eventType: LifeGraphBehaviorEventType.ActivityReviewedPositive,
+          taskId: 101,
+          candidateUserId: 22,
+          metadata: expect.objectContaining({ rating: 5 }),
+        }),
+      );
+
+      const savedTask = taskRepo.save.mock.calls.at(-1)?.[0] as AgentTask;
+      expect(savedTask.result).toMatchObject({
+        meetLoop: expect.objectContaining({
+          status: 'review_submitted',
+          loopStage: 'trust_score_updated',
+          lifeGraphUpdated: true,
+          trustScoreDelta: 2,
+        }),
+      });
+    });
+
+    it('persists the canonical meet loop through ActivitiesService when a real activity path is available', async () => {
+      const activities = {
+        create: jest.fn().mockResolvedValue({
+          id: 700,
+          participantIds: [7, 22],
+          status: 'pending_confirm',
+        }),
+        confirm: jest.fn().mockResolvedValue({
+          id: 700,
+          participantIds: [7, 22],
+          status: 'pending_confirm',
+          invitedUserId: 22,
+        }),
+        checkin: jest.fn().mockResolvedValue({
+          activity: {
+            id: 700,
+            status: 'in_progress',
+          },
+          proof: { id: 800 },
+        }),
+        complete: jest.fn().mockResolvedValue({
+          id: 700,
+          status: 'completed',
+        }),
+        review: jest.fn().mockResolvedValue({ ok: true }),
+      };
+      const lifeGraph = {
+        recordBehaviorEvent: jest.fn().mockResolvedValue({
+          id: 1,
+          eventType: LifeGraphBehaviorEventType.ActivityCreated,
+        }),
+      };
+      const { service, taskRepo } = makeHarness({ activities, lifeGraph });
+      await taskRepo.save(makeTask());
+
+      const draft = await service.performCardAction(7, 101, {
+        action: 'activity.confirm_create',
+        payload: {
+          taskId: 101,
+          candidateUserId: 22,
+          socialRequestId: 301,
+          candidateRecordId: 501,
+          activityType: 'running',
+          title: '周末慢跑',
+          city: '青岛',
+          locationName: '青岛大学附近公共场所',
+          startTime: '2026-06-06T15:00:00.000Z',
+        },
+      });
+
+      const confirm = await service.performCardAction(7, 101, {
+        action: 'activity.confirm_create',
+        payload: draft.cards?.[0]?.actions[0]?.payload ?? {},
+      });
+
+      expect(activities.create).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({
+          type: 'running',
+          title: '周末慢跑',
+          city: '青岛',
+          locationName: '青岛大学附近公共场所',
+          socialRequestId: 301,
+          matchedCandidateId: 501,
+          invitedUserId: 22,
+          proofRequired: true,
+          proofPolicy: 'mutual_or_proof',
+        }),
+      );
+      expect(activities.confirm).toHaveBeenCalledWith(700, 7);
+      expect(confirm.cards?.[0]).toMatchObject({
+        type: 'checkin_card',
+        data: expect.objectContaining({
+          activityId: 700,
+          realActivityPersisted: true,
+          loopStage: 'activity_confirmed',
+        }),
+        actions: [
+          expect.objectContaining({
+            schemaAction: 'activity.check_in',
+            payload: expect.objectContaining({ activityId: 700 }),
+          }),
+        ],
+      });
+
+      const checkin = await service.performCardAction(7, 101, {
+        action: 'activity.check_in',
+        payload: confirm.cards?.[0]?.actions[0]?.payload ?? {},
+      });
+      expect(activities.checkin).toHaveBeenCalledWith(
+        700,
+        7,
+        expect.objectContaining({ locationApprox: expect.any(String) }),
+      );
+
+      const complete = await service.performCardAction(7, 101, {
+        action: 'activity.complete',
+        payload: checkin.cards?.[0]?.actions[0]?.payload ?? {},
+      });
+      expect(activities.complete).toHaveBeenCalledWith(700, 7);
+
+      await service.performCardAction(7, 101, {
+        action: 'review.submit',
+        payload: {
+          ...(complete.cards?.[0]?.actions[0]?.payload ?? {}),
+          rating: 5,
+          comment: '真实活动顺利完成。',
+        },
+      });
+      expect(activities.review).toHaveBeenCalledWith(
+        700,
+        7,
+        5,
+        '真实活动顺利完成。',
+      );
+      expect(lifeGraph.recordBehaviorEvent).toHaveBeenCalledTimes(1);
+      expect(lifeGraph.recordBehaviorEvent).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({
+          eventType: LifeGraphBehaviorEventType.ActivityCreated,
+          activityId: 700,
+          candidateUserId: 22,
+        }),
+      );
     });
 
     it('reads existing recommendedIds and moves them to rejectedIds when the user asks for a fresh batch', async () => {

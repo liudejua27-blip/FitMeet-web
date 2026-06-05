@@ -206,11 +206,12 @@ export class FitMeetAlphaAgentSdkService {
           id: `activity_plan:${taskId}`,
           type: 'activity_plan',
           title: '约练计划待确认',
-          body:
+          body: `${
             this.text(draft.description) ||
             this.text(draft.rawText) ||
             this.text(draft.title) ||
-            '我已整理好本次社交需求，确认后才会继续创建。',
+            '我已整理好本次社交需求，确认后才会继续创建。'
+          } 我不会共享你的精确位置，第一次建议选择公共场所。活动开始前我会提醒你确认是否到达，结束后会提醒你评价体验。`,
           status: 'waiting_confirmation',
           data: {
             taskId,
@@ -218,15 +219,24 @@ export class FitMeetAlphaAgentSdkService {
             city: draft.city ?? '',
             activityType: draft.activityType ?? '',
             interestTags: draft.interestTags ?? [],
+            publicPlaceOnly: true,
+            noPreciseLocation: true,
+            checkinReminder: '活动开始前我会提醒你确认是否到达。',
+            reviewPrompt: '活动结束后我会提醒你评价体验。',
+            meetLoopStage: 'activity_confirmation',
             safetyBoundary: '优先公共场所，不共享精确位置。',
             lifeGraphUpdatePreview:
               '完成后会更新你的低压力运动社交偏好和同区域搭子权重。',
+            trustScoreUpdatePreview:
+              '完成与评价会写入 trust score，用来提升后续推荐可信度。',
           },
           actions: [
             {
               id: 'confirm_create_activity',
               label: '确认创建约练',
               action: 'create_activity',
+              schemaAction: 'activity.confirm_create',
+              loopStage: 'activity_draft_created',
               requiresConfirmation: true,
               payload: { taskId, socialRequestDraft: draft },
             },
@@ -266,6 +276,7 @@ export class FitMeetAlphaAgentSdkService {
         status: 'waiting_confirmation',
         data: {
           taskId,
+          loopStage: 'candidate_recommendation',
           targetUserId,
           candidateRecordId: candidate.candidateRecordId ?? null,
           publicIntentId: candidate.publicIntentId ?? null,
@@ -310,6 +321,8 @@ export class FitMeetAlphaAgentSdkService {
             id: 'generate_opener',
             label: '生成开场白',
             action: 'generate_opener',
+            schemaAction: 'candidate.generate_opener',
+            loopStage: 'candidate_selected',
             requiresConfirmation: false,
             payload: { taskId, targetUserId, candidate },
           },
@@ -317,6 +330,8 @@ export class FitMeetAlphaAgentSdkService {
             id: 'see_more',
             label: '看看更多',
             action: 'see_more',
+            schemaAction: 'candidate.more_like_this',
+            loopStage: 'candidate_recommendation',
             requiresConfirmation: false,
             payload: { taskId },
           },
@@ -324,6 +339,8 @@ export class FitMeetAlphaAgentSdkService {
             id: 'filter_school',
             label: '只看同校',
             action: 'filter_school',
+            schemaAction: 'candidate.more_like_this',
+            loopStage: 'candidate_recommendation',
             requiresConfirmation: false,
             payload: { taskId },
           },
@@ -331,6 +348,8 @@ export class FitMeetAlphaAgentSdkService {
             id: 'filter_gender_female',
             label: '只看女生',
             action: 'filter_gender_female',
+            schemaAction: 'candidate.more_like_this',
+            loopStage: 'candidate_recommendation',
             requiresConfirmation: false,
             payload: { taskId },
           },
@@ -338,6 +357,8 @@ export class FitMeetAlphaAgentSdkService {
             id: 'create_activity',
             label: '创建约练',
             action: 'create_activity',
+            schemaAction: 'activity.confirm_create',
+            loopStage: 'activity_draft_created',
             requiresConfirmation: true,
             payload: { taskId, targetUserId, candidate },
           },
@@ -345,6 +366,8 @@ export class FitMeetAlphaAgentSdkService {
             id: 'dislike_candidate',
             label: '不喜欢这个推荐',
             action: 'dislike_candidate',
+            schemaAction: 'candidate.skip',
+            loopStage: 'candidate_recommendation',
             requiresConfirmation: false,
             payload: { taskId, targetUserId, candidate },
           },

@@ -1,0 +1,286 @@
+/* GSAP-driven polish layer. It preserves page structure and only enhances motion/surface states. */
+:root {
+  --fm-polish-gold: #d8b56d;
+  --fm-polish-ivory: #fff8eb;
+  --fm-polish-glow: rgba(216, 181, 109, 0.16);
+  --fm-polish-line: rgba(255, 248, 235, 0.14);
+}
+
+.fm-motion-ready
+  :where(
+    .website-nav__actions a,
+    .website-hero__actions a,
+    .website-page-hero__actions a,
+    .concept-button,
+    .website-link-cta,
+    .proof-scenario-card__cta,
+    .agent-gpt-input__submit,
+    .agent-natural-prompts button,
+    .agent-side-card,
+    .concept-panel,
+    .proof-scenario-card,
+    .demand-comparison article
+  ) {
+  backface-visibility: hidden;
+  transform: translateZ(0);
+  transition:
+    transform 220ms ease,
+    border-color 220ms ease,
+    background 220ms ease,
+    box-shadow 220ms ease,
+    color 220ms ease;
+}
+
+.fm-motion-ready
+  :where(
+    .website-nav__actions a,
+    .website-hero__actions a,
+    .website-page-hero__actions a,
+    .concept-button,
+    .website-link-cta,
+    .agent-natural-prompts button
+  ):hover {
+  transform: translateY(-2px);
+}
+
+.fm-motion-ready
+  :where(
+    .concept-panel,
+    .proof-scenario-card,
+    .demand-comparison article,
+    .agent-side-card,
+    .agent-natural-prompts button
+  ):hover {
+  border-color: rgba(216, 181, 109, 0.28);
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.16),
+    0 1px 0 rgba(255, 255, 255, 0.08) inset;
+  transform: translateY(-3px);
+}
+
+.fitmeet-website--earth {
+  --fm-pointer-x: 50;
+  --fm-pointer-y: 42;
+  background:
+    radial-gradient(ellipse at 78% 4%, rgba(216, 181, 109, 0.075), transparent 34rem),
+    radial-gradient(ellipse at 18% 30%, rgba(124, 169, 166, 0.05), transparent 31rem),
+    linear-gradient(180deg, var(--fm-bg), var(--fm-bg-1) 38%, var(--fm-bg-2) 64%, var(--fm-bg));
+}
+
+.fitmeet-website--earth::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle at calc(var(--fm-pointer-x, 50) * 1%) calc(var(--fm-pointer-y, 42) * 1%),
+      rgba(216, 181, 109, 0.115),
+      transparent 20rem
+    ),
+    radial-gradient(
+      circle at calc(var(--fm-pointer-x, 50) * 1%) calc(var(--fm-pointer-y, 42) * 1%),
+      rgba(124, 169, 166, 0.08),
+      transparent 30rem
+    );
+  mix-blend-mode: screen;
+  opacity: 0.72;
+}
+
+.fitmeet-website--earth .website-nav {
+  background:
+    linear-gradient(180deg, rgba(12, 12, 10, 0.78), rgba(12, 12, 10, 0.58)), rgba(5, 7, 10, 0.72);
+  box-shadow: 0 1px 0 rgba(255, 248, 235, 0.035) inset;
+}
+
+.fitmeet-website--earth .website-nav__brand span {
+  border-color: rgba(216, 181, 109, 0.28);
+  background:
+    linear-gradient(145deg, rgba(216, 181, 109, 0.18), rgba(255, 255, 255, 0.035)),
+    rgba(255, 255, 255, 0.025);
+  color: #f0c86f;
+}
+
+.fitmeet-website--earth .concept-home-hero::before,
+.fitmeet-website--earth .website-band::before {
+  content: '';
+  position: absolute;
+  inset-inline: clamp(20px, 5vw, 72px);
+  top: 0;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(216, 181, 109, 0.28), transparent);
+  opacity: 0.55;
+}
+
+.fitmeet-website--earth .concept-home-hero__earth img {
+  filter: saturate(1.04) contrast(1.03) drop-shadow(0 32px 90px rgba(216, 181, 109, 0.1));
+}
+
+.fitmeet-website--earth :where(.concept-panel, .proof-scenario-card, .demand-comparison article) {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.062), rgba(255, 255, 255, 0.016)),
+    rgba(8, 8, 7, 0.91);
+  box-shadow:
+    0 18px 70px rgba(0, 0, 0, 0.22),
+    0 1px 0 rgba(255, 255, 255, 0.06) inset;
+}
+
+.fitmeet-website--earth
+  :where(
+    .concept-button,
+    .website-nav__actions a:last-child,
+    .website-page-hero__actions a.is-primary
+  ) {
+  box-shadow:
+    0 12px 40px rgba(216, 181, 109, 0.12),
+    0 1px 0 rgba(255, 255, 255, 0.36) inset;
+}
+
+.fitmeet-website--earth .concept-demand-rail a {
+  border-color: rgba(216, 181, 109, 0.16);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.018)),
+    rgba(8, 8, 7, 0.48);
+}
+
+.agent-workspace--landing .agent-gpt-main {
+  --fm-pointer-x: 50;
+  --fm-pointer-y: 42;
+  position: relative;
+  background:
+    radial-gradient(circle at 49% 32%, rgba(212, 123, 49, 0.055), transparent 23%),
+    linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.72),
+      rgba(255, 251, 244, 0.86) 44%,
+      rgba(253, 248, 240, 0.98)
+    ),
+    #fffdf9;
+}
+
+.agent-workspace--landing .agent-gpt-main::before {
+  content: '';
+  position: fixed;
+  inset: 103px 0 0 314px;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle at calc(var(--fm-pointer-x, 50) * 1%) calc(var(--fm-pointer-y, 42) * 1%),
+      rgba(213, 146, 70, 0.1),
+      transparent 21rem
+    ),
+    radial-gradient(
+      circle at calc(var(--fm-pointer-x, 50) * 1%) calc(var(--fm-pointer-y, 42) * 1%),
+      rgba(89, 126, 116, 0.055),
+      transparent 34rem
+    );
+  opacity: 0.82;
+}
+
+.agent-workspace--landing .agent-assistant-top,
+.agent-workspace--landing .agent-gpt-stage {
+  position: relative;
+  z-index: 2;
+}
+
+.agent-workspace--landing .agent-gpt-input {
+  position: relative;
+  overflow: hidden;
+}
+
+.agent-workspace--landing .agent-gpt-input::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(
+    115deg,
+    transparent 0 38%,
+    rgba(255, 255, 255, 0.58) 48%,
+    transparent 58% 100%
+  );
+  opacity: 0;
+  transform: translateX(-56%);
+  transition:
+    opacity 260ms ease,
+    transform 620ms ease;
+}
+
+.agent-workspace--landing .agent-gpt-input:focus-within::after {
+  opacity: 0.38;
+  transform: translateX(56%);
+}
+
+.agent-workspace--landing .agent-gpt-input__submit {
+  box-shadow:
+    0 16px 34px rgba(160, 105, 45, 0.24),
+    0 1px 0 rgba(255, 255, 255, 0.46) inset !important;
+}
+
+.agent-workspace--landing .agent-natural-suggestion__icon {
+  box-shadow:
+    0 12px 30px rgba(49, 36, 20, 0.07),
+    0 1px 0 rgba(255, 255, 255, 0.72) inset;
+}
+
+.agent-workspace--landing .agent-sidebar-footer svg {
+  transform-origin: 50% 50%;
+}
+
+.fitmeet-hall-page {
+  background:
+    radial-gradient(circle at 18% 12%, rgba(255, 106, 0, 0.1), transparent 26rem),
+    radial-gradient(circle at 78% 18%, rgba(24, 185, 143, 0.07), transparent 28rem), #0b0c0d;
+}
+
+.fitmeet-hall-page :where(section, main) {
+  position: relative;
+}
+
+.fitmeet-hall-page section:first-of-type {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.01)), #111315;
+}
+
+.fitmeet-hall-page section:first-of-type p {
+  color: rgba(246, 239, 229, 0.72) !important;
+}
+
+.fitmeet-hall-page :where(article, aside button, section:first-of-type [class*='bg-white']) {
+  box-shadow:
+    0 18px 56px rgba(0, 0, 0, 0.18),
+    0 1px 0 rgba(255, 255, 255, 0.055) inset;
+}
+
+.fitmeet-hall-page article:hover {
+  border-color: rgba(255, 138, 31, 0.34);
+  transform: translateY(-2px);
+}
+
+.fm-motion-reduced * {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: 0.001ms !important;
+}
+
+@media (max-width: 760px) {
+  .agent-workspace--landing .agent-gpt-main::before {
+    inset: 86px 0 0;
+  }
+
+  .fm-motion-ready
+    :where(
+      .concept-panel,
+      .proof-scenario-card,
+      .demand-comparison article,
+      .agent-side-card,
+      .agent-natural-prompts button
+    ):hover {
+    transform: none;
+  }
+}

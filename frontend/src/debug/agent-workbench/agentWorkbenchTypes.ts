@@ -2,7 +2,7 @@ import type {
   SocialAgentChatCandidate,
   SocialAgentChatRunResult,
   SocialAgentPermissionMode,
-} from '../../api/socialAgentApi';
+} from '../../api/socialAgentDebugApi';
 
 export type AgentWorkbenchMessage = {
   id: string;

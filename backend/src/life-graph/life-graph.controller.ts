@@ -12,8 +12,10 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../common/types/authenticated-request';
 import {
   ConfirmLifeGraphUpdateDto,
+  CorrectLifeGraphDto,
   ExtractLifeGraphFromChatDto,
   RejectLifeGraphUpdateDto,
+  RecordLifeGraphBehaviorEventDto,
   RevokeLifeGraphFieldDto,
   UpdateLifeGraphDto,
 } from './dto/life-graph.dto';
@@ -57,6 +59,51 @@ export class LifeGraphController {
       limit: limit ? Number(limit) : undefined,
       cursor,
     });
+  }
+
+  @Get('behavior-events')
+  getBehaviorEvents(
+    @Request() req: AuthenticatedRequest,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    return this.lifeGraph.getBehaviorEvents(req.user.id, {
+      limit: limit ? Number(limit) : undefined,
+      cursor,
+    });
+  }
+
+  @Post('behavior-events')
+  recordBehaviorEvent(
+    @Request() req: AuthenticatedRequest,
+    @Body() body: RecordLifeGraphBehaviorEventDto,
+  ) {
+    return this.lifeGraph.recordBehaviorEvent(req.user.id, body);
+  }
+
+  @Get('signal-scores')
+  getSignalScores(@Request() req: AuthenticatedRequest) {
+    return this.lifeGraph.getSignalScores(req.user.id);
+  }
+
+  @Get('update-audits')
+  getUpdateAudits(
+    @Request() req: AuthenticatedRequest,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    return this.lifeGraph.getUpdateAudits(req.user.id, {
+      limit: limit ? Number(limit) : undefined,
+      cursor,
+    });
+  }
+
+  @Post('corrections')
+  correctLifeGraph(
+    @Request() req: AuthenticatedRequest,
+    @Body() body: CorrectLifeGraphDto,
+  ) {
+    return this.lifeGraph.correctLifeGraph(req.user.id, body);
   }
 
   @Post('extract-from-chat')

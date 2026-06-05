@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import type { SocialAgentPermissionMode } from '../../api/socialAgentApi';
+import type { SocialAgentPermissionMode } from '../../api/socialAgentDebugApi';
 
 const modes: Array<{
   value: SocialAgentPermissionMode;

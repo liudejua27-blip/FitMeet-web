@@ -15,6 +15,37 @@ export type FitMeetAlphaCardType =
   | 'audit_update'
   | 'safety_boundary';
 
+export type FitMeetAgentLoopStage =
+  | 'social_search'
+  | 'candidate_recommendation'
+  | 'candidate_selected'
+  | 'opener_draft_created'
+  | 'opener_confirmed'
+  | 'message_sent'
+  | 'activity_draft_created'
+  | 'activity_confirmed'
+  | 'activity_checked_in'
+  | 'activity_completed'
+  | 'review_submitted'
+  | 'life_graph_updated'
+  | 'trust_score_updated';
+
+export type FitMeetAgentSchemaAction =
+  | 'candidate.like'
+  | 'candidate.skip'
+  | 'candidate.more_like_this'
+  | 'candidate.generate_opener'
+  | 'opener.confirm_send'
+  | 'opener.regenerate'
+  | 'activity.confirm_create'
+  | 'activity.modify_time'
+  | 'activity.modify_location'
+  | 'activity.check_in'
+  | 'activity.complete'
+  | 'review.submit'
+  | 'life_graph.accept_update'
+  | 'life_graph.reject_update';
+
 export interface FitMeetAlphaCardAction {
   id: string;
   label: string;
@@ -32,6 +63,8 @@ export interface FitMeetAlphaCardAction {
     | 'check_in'
     | 'submit_review'
     | 'refine_request';
+  schemaAction?: FitMeetAgentSchemaAction;
+  loopStage?: FitMeetAgentLoopStage;
   requiresConfirmation: boolean;
   payload?: Record<string, unknown>;
 }

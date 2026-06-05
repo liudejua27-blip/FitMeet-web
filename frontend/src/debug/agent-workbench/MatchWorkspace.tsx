@@ -1,4 +1,7 @@
-import type { SocialAgentChatCandidate, SocialAgentPermissionMode } from '../../api/socialAgentApi';
+import type {
+  SocialAgentChatCandidate,
+  SocialAgentPermissionMode,
+} from '../../api/socialAgentDebugApi';
 import type { AgentConfirmAction } from './agentWorkbenchTypes';
 import { CandidateCard } from './CandidateCard';
 import { LifeGraphSummaryCard } from './LifeGraphSummaryCard';

@@ -15,10 +15,14 @@ import {
 import { Type } from 'class-transformer';
 import {
   LifeGraphAuditAction,
+  LifeGraphBehaviorEventType,
+  LifeGraphCorrectionType,
   LifeGraphFieldCategory,
   LifeGraphFieldSource,
+  LifeGraphSignalKey,
   LifeGraphProposalStatus,
   LifeGraphSignalType,
+  LifeGraphUpdateAuditStatus,
 } from '../life-graph.enums';
 
 export class LifeGraphProfileDto {
@@ -122,8 +126,90 @@ export class LifeGraphDynamicSignalsDto {
     safetyBoundaryClarity: number;
     reliability: number;
   };
+  recommendationWeights: {
+    sameSchoolOrArea: number;
+    sameCity: number;
+    commonInterest: number;
+    lowPressure: number;
+    sports: number;
+    reliability: number;
+    recency: number;
+    safetyBoundary: number;
+  };
+  matchingGuidance: {
+    shouldPreferSameSchoolOrArea: boolean;
+    shouldPreferSameCity: boolean;
+    shouldPreferCommonInterest: boolean;
+    shouldPreferLowPressure: boolean;
+    shouldPreferSports: boolean;
+    shouldAvoidNight: boolean;
+    shouldUsePublicPlace: boolean;
+    shouldReduceDisturbance: boolean;
+    suggestedFilters: string[];
+    rankingNotes: string[];
+  };
   summary: string;
   insights: string[];
+}
+
+export class LifeGraphBehaviorEventDto {
+  id: number;
+  userId: number;
+  eventType: LifeGraphBehaviorEventType;
+  source: string | null;
+  taskId: number | null;
+  activityId: number | null;
+  candidateUserId: number | null;
+  metadata: Record<string, unknown>;
+  naturalSummary: string;
+  weight: number;
+  createdAt: string;
+}
+
+export class LifeGraphSignalScoreDto {
+  id: number;
+  userId: number;
+  signalKey: LifeGraphSignalKey;
+  score: number;
+  confidence: number;
+  source: string;
+  explanation: string;
+  evidence: Record<string, unknown>;
+  enabledForMatching: boolean;
+  correctionCount: number;
+  lastCalculatedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export class LifeGraphUpdateAuditDto {
+  id: number;
+  userId: number;
+  updateType: string;
+  source: string;
+  status: LifeGraphUpdateAuditStatus;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  userFacingSummary: string;
+  reversible: boolean;
+  eventId: number | null;
+  correctionId: number | null;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
+export class LifeGraphCorrectionDto {
+  id: number;
+  userId: number;
+  correctionType: LifeGraphCorrectionType;
+  signalKey: LifeGraphSignalKey | null;
+  category: LifeGraphFieldCategory | null;
+  fieldKey: string | null;
+  note: string;
+  previousValue: Record<string, unknown>;
+  correctedValue: Record<string, unknown>;
+  applied: boolean;
+  createdAt: string;
 }
 
 export class LifeGraphAuditLogDto {
@@ -232,6 +318,69 @@ export class RevokeLifeGraphFieldDto {
   @IsString()
   @MaxLength(300)
   reason?: string;
+}
+
+export class RecordLifeGraphBehaviorEventDto {
+  @IsEnum(LifeGraphBehaviorEventType)
+  eventType: LifeGraphBehaviorEventType;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  source?: string | null;
+
+  @IsOptional()
+  @IsNumber()
+  taskId?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  activityId?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  candidateUserId?: number | null;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  naturalSummary?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(3)
+  weight?: number;
+}
+
+export class CorrectLifeGraphDto {
+  @IsEnum(LifeGraphCorrectionType)
+  correctionType: LifeGraphCorrectionType;
+
+  @IsOptional()
+  @IsEnum(LifeGraphSignalKey)
+  signalKey?: LifeGraphSignalKey | null;
+
+  @IsOptional()
+  @IsEnum(LifeGraphFieldCategory)
+  category?: LifeGraphFieldCategory | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(96)
+  fieldKey?: string | null;
+
+  @IsString()
+  @MaxLength(500)
+  note: string;
+
+  @IsOptional()
+  @IsObject()
+  correctedValue?: Record<string, unknown>;
 }
 
 export class LifeGraphResponseDto {

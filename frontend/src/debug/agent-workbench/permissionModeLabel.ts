@@ -1,4 +1,4 @@
-import type { SocialAgentPermissionMode } from '../../api/socialAgentApi';
+import type { SocialAgentPermissionMode } from '../../api/socialAgentDebugApi';
 
 export function permissionModeLabel(value: SocialAgentPermissionMode) {
   if (value === 'open') return 'Open Mode';

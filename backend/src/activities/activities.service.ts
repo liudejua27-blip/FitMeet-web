@@ -45,6 +45,8 @@ import {
 import { AIService } from '../ai/ai.service';
 import { PublicSocialIntent } from '../agent-gateway/entities/public-social-intent.entity';
 import { SocialRequestStatus as PublicSocialIntentStatus } from '../agent-gateway/entities/social-request.entity';
+import { LifeGraphService } from '../life-graph/life-graph.service';
+import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 import { RealtimeEventService } from '../realtime/realtime-event.service';
 
 const NIGHT_TIPS = [
@@ -112,6 +114,8 @@ export class ActivitiesService implements OnModuleInit {
     private readonly ai: AIService,
     @Optional()
     private readonly realtime?: RealtimeEventService,
+    @Optional()
+    private readonly lifeGraph?: LifeGraphService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -635,6 +639,7 @@ export class ActivitiesService implements OnModuleInit {
       completedByUserId: actingUserId,
     });
     await this.applyTrustOnCompletion(saved);
+    await this.recordActivityCompletedForLifeGraph(saved, actingUserId);
     await this.propagateCompletionToSocialRequest(saved);
     if (saved.meetId) {
       try {
@@ -726,6 +731,7 @@ export class ActivitiesService implements OnModuleInit {
     this.emitActivityEvent(saved, 'activity:cancelled', userId, {
       cancelledByUserId: userId,
     });
+    await this.recordActivityCancelledForLifeGraph(saved, userId);
     return saved;
   }
 
@@ -762,6 +768,13 @@ export class ActivitiesService implements OnModuleInit {
     };
     await this.activityRepo.save(activity);
     const target = activity.participantIds.find((uid) => uid !== reviewerId);
+    await this.recordActivityReviewForLifeGraph({
+      activity,
+      reviewerId,
+      targetUserId: target ?? null,
+      rating,
+      comment,
+    });
     if (target && rating >= 4) {
       try {
         await this.bumpTrust(target, { score: 1 });
@@ -770,6 +783,121 @@ export class ActivitiesService implements OnModuleInit {
       }
     }
     return { ok: true };
+  }
+
+  private async recordActivityCompletedForLifeGraph(
+    activity: SocialActivity,
+    actingUserId: number,
+  ): Promise<void> {
+    const participantIds = Array.from(new Set(activity.participantIds ?? []));
+    await Promise.all(
+      participantIds.map((userId) =>
+        this.recordActivityLifeGraphEvent(userId, {
+          activity,
+          eventType: LifeGraphBehaviorEventType.ActivityCompleted,
+          source: 'activity_completed',
+          actorUserId: actingUserId,
+          naturalSummary: `你完成了一次${this.activityDisplayName(activity)}活动。`,
+          weight: 1.2,
+        }),
+      ),
+    );
+  }
+
+  private async recordActivityCancelledForLifeGraph(
+    activity: SocialActivity,
+    actorUserId: number,
+  ): Promise<void> {
+    await this.recordActivityLifeGraphEvent(actorUserId, {
+      activity,
+      eventType: LifeGraphBehaviorEventType.ActivityCancelled,
+      source: 'activity_cancelled',
+      actorUserId,
+      naturalSummary: `你取消了一次${this.activityDisplayName(activity)}活动，我会优先考虑更宽松的时间安排。`,
+      weight: 1,
+    });
+  }
+
+  private async recordActivityReviewForLifeGraph(input: {
+    activity: SocialActivity;
+    reviewerId: number;
+    targetUserId: number | null;
+    rating: number;
+    comment: string;
+  }): Promise<void> {
+    const positive = input.rating >= 4;
+    await this.recordActivityLifeGraphEvent(input.reviewerId, {
+      activity: input.activity,
+      eventType: positive
+        ? LifeGraphBehaviorEventType.ActivityReviewedPositive
+        : LifeGraphBehaviorEventType.ActivityReviewedNegative,
+      source: 'activity_reviewed',
+      actorUserId: input.reviewerId,
+      targetUserId: input.targetUserId,
+      naturalSummary: positive
+        ? '你对这次活动给出了正向评价，我会提高类似安排的权重。'
+        : '你对这次活动给出了保留评价，我会降低类似安排的权重。',
+      weight: 1,
+      metadata: {
+        rating: input.rating,
+        comment: input.comment.slice(0, 500),
+      },
+    });
+  }
+
+  private async recordActivityLifeGraphEvent(
+    userId: number,
+    input: {
+      activity: SocialActivity;
+      eventType: LifeGraphBehaviorEventType;
+      source: string;
+      actorUserId: number;
+      targetUserId?: number | null;
+      naturalSummary: string;
+      weight: number;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<void> {
+    try {
+      await this.lifeGraph?.recordBehaviorEvent(userId, {
+        eventType: input.eventType,
+        source: input.source,
+        activityId: input.activity.id,
+        candidateUserId: input.targetUserId ?? null,
+        naturalSummary: input.naturalSummary,
+        weight: input.weight,
+        metadata: {
+          ...this.activityLifeGraphMetadata(input.activity, input.actorUserId),
+          targetUserId: input.targetUserId ?? null,
+          ...(input.metadata ?? {}),
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to record Life Graph event ${input.eventType} for user ${userId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  private activityLifeGraphMetadata(
+    activity: SocialActivity,
+    actorUserId: number,
+  ): Record<string, unknown> {
+    return {
+      activityId: activity.id,
+      activityType: activity.type,
+      title: activity.title,
+      city: activity.city,
+      locationName: activity.locationName,
+      startTime: activity.startTime?.toISOString?.() ?? null,
+      endTime: activity.endTime?.toISOString?.() ?? null,
+      participantCount: activity.participantIds?.length ?? 0,
+      actorUserId,
+    };
+  }
+
+  private activityDisplayName(activity: SocialActivity): string {
+    return activity.title?.trim() || activity.type || '线下';
   }
 
   private emitActivityEvent(

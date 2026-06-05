@@ -162,9 +162,15 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
               array.findIndex((candidate) => candidate.id === item.id) === index,
           );
         const publicItems = publicIntents
-          .filter((intent) =>
-            isPublicHallIntent(intent) &&
-            isDisplayableRecordText([intent.title, intent.description, intent.city, intent.source]),
+          .filter(
+            (intent) =>
+              isPublicHallIntent(intent) &&
+              isDisplayableRecordText([
+                intent.title,
+                intent.description,
+                intent.city,
+                intent.source,
+              ]),
           )
           .map(publicIntentToHallItem);
         const displayableItems = [...publicItems, ...merged].filter((item) =>
@@ -227,9 +233,7 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
         if (!item.publicIntentId) {
           await dataService.sendMessage(result.conversationId, opener);
         }
-        navigate(
-          `/messages?conversationId=${encodeURIComponent(result.conversationId)}&from=hall`,
-        );
+        navigate(`/messages?conversationId=${encodeURIComponent(result.conversationId)}&from=hall`);
       } catch (err) {
         setContactNotice(err instanceof Error ? err.message : '发起聊天失败，请稍后重试。');
       } finally {
@@ -240,7 +244,7 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
   );
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-[#0b0c0d] text-[#f6efe5]">
+    <div className="fitmeet-hall-page min-h-screen overflow-x-hidden bg-[#0b0c0d] text-[#f6efe5]">
       <style>
         {`
           @keyframes hallRail {
@@ -334,20 +338,26 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
       <main className="mx-auto grid max-w-7xl gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[240px_minmax(0,1fr)] lg:px-8">
         <aside className="hidden lg:block">
           <div className="sticky top-24 space-y-3">
-            {['全部机会', '附近约练', '附近活动', '附近用户', '附近教练', '附近商家', '公开需求'].map(
-              (label, index) => (
-                <button
-                  key={label}
-                  className={`w-full rounded-lg border px-4 py-3 text-left text-sm font-black transition ${
-                    index === 0
-                      ? 'border-[#ff6a00]/60 bg-[#ff6a00] text-white'
-                      : 'border-white/10 bg-white/[0.04] text-[#c9b9a7] hover:border-[#ff6a00]/40 hover:text-white'
-                  }`}
-                >
-                  {label}
-                </button>
-              ),
-            )}
+            {[
+              '全部机会',
+              '附近约练',
+              '附近活动',
+              '附近用户',
+              '附近教练',
+              '附近商家',
+              '公开需求',
+            ].map((label, index) => (
+              <button
+                key={label}
+                className={`w-full rounded-lg border px-4 py-3 text-left text-sm font-black transition ${
+                  index === 0
+                    ? 'border-[#ff6a00]/60 bg-[#ff6a00] text-white'
+                    : 'border-white/10 bg-white/[0.04] text-[#c9b9a7] hover:border-[#ff6a00]/40 hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </aside>
 
@@ -383,89 +393,93 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
                     if (!isOwnItem) void handleOpenConversation(item);
                   }}
                 >
-                <div className="flex items-start gap-4">
-                  <div
-                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-lg font-black text-white"
-                    style={{ background: item.accent }}
-                  >
-                    {item.agent[0]}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2 text-xs font-black">
-                      <span className="rounded-md bg-white/10 px-2 py-1 text-[#f6efe5]">
-                        {item.agent}
-                      </span>
-                      <span className="rounded-md border border-[#18b98f]/30 px-2 py-1 text-[#8ff0d1]">
-                        {item.intent}
-                      </span>
-                      <span className="text-[#8d8175]">{item.createdAt}</span>
-                    </div>
-                    <h3 className="mt-3 text-xl font-black leading-snug text-white">
-                      {item.title}
-                    </h3>
-                    <p className="mt-3 line-clamp-3 text-sm leading-7 text-[#c9b9a7]">
-                      {item.body}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <span className="rounded-md bg-[#ff6a00]/12 px-2 py-1 text-xs font-black text-[#ffb36e]">
-                    {item.scene}
-                  </span>
-                  <span className="rounded-md bg-white/[0.08] px-2 py-1 text-xs font-bold text-[#c9b9a7]">
-                    {item.city}
-                  </span>
-                  {item.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-md bg-white/[0.08] px-2 py-1 text-xs font-bold text-[#c9b9a7]"
+                  <div className="flex items-start gap-4">
+                    <div
+                      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-lg font-black text-white"
+                      style={{ background: item.accent }}
                     >
-                      #{tag}
-                    </span>
-                  ))}
-                </div>
-
-                <div className="mt-5 grid gap-3 border-t border-white/10 pt-4 sm:grid-cols-[1fr_auto] sm:items-center">
-                  <div>
-                    <div className="flex items-center justify-between gap-3 text-xs font-bold text-[#8d8175]">
-                      <span>{item.owner}</span>
-                      <span>{item.signalLabel}</span>
+                      {item.agent[0]}
                     </div>
-                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${item.signal ?? 18}%`,
-                          background: item.signal == null ? '#6b7280' : item.accent,
-                        }}
-                      />
-                    </div>
-                    {item.signalReasons.length > 0 && (
-                      <div className="mt-2 line-clamp-1 text-[11px] font-bold text-[#a99b8d]">
-                        {item.signalReasons.slice(0, 3).join(' · ')}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2 text-xs font-black">
+                        <span className="rounded-md bg-white/10 px-2 py-1 text-[#f6efe5]">
+                          {item.agent}
+                        </span>
+                        <span className="rounded-md border border-[#18b98f]/30 px-2 py-1 text-[#8ff0d1]">
+                          {item.intent}
+                        </span>
+                        <span className="text-[#8d8175]">{item.createdAt}</span>
                       </div>
+                      <h3 className="mt-3 text-xl font-black leading-snug text-white">
+                        {item.title}
+                      </h3>
+                      <p className="mt-3 line-clamp-3 text-sm leading-7 text-[#c9b9a7]">
+                        {item.body}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <span className="rounded-md bg-[#ff6a00]/12 px-2 py-1 text-xs font-black text-[#ffb36e]">
+                      {item.scene}
+                    </span>
+                    <span className="rounded-md bg-white/[0.08] px-2 py-1 text-xs font-bold text-[#c9b9a7]">
+                      {item.city}
+                    </span>
+                    {item.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="rounded-md bg-white/[0.08] px-2 py-1 text-xs font-bold text-[#c9b9a7]"
+                      >
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="mt-5 grid gap-3 border-t border-white/10 pt-4 sm:grid-cols-[1fr_auto] sm:items-center">
+                    <div>
+                      <div className="flex items-center justify-between gap-3 text-xs font-bold text-[#8d8175]">
+                        <span>{item.owner}</span>
+                        <span>{item.signalLabel}</span>
+                      </div>
+                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${item.signal ?? 18}%`,
+                            background: item.signal == null ? '#6b7280' : item.accent,
+                          }}
+                        />
+                      </div>
+                      {item.signalReasons.length > 0 && (
+                        <div className="mt-2 line-clamp-1 text-[11px] font-bold text-[#a99b8d]">
+                          {item.signalReasons.slice(0, 3).join(' · ')}
+                        </div>
+                      )}
+                    </div>
+                    {isOwnItem ? (
+                      <span className="rounded-lg border border-white/10 px-4 py-2 text-sm font-black text-[#8d8175]">
+                        自己的发布
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="rounded-lg border border-white/12 px-4 py-2 text-sm font-black text-white transition hover:border-[#18b98f]/50 hover:text-[#8ff0d1] disabled:cursor-wait disabled:opacity-60"
+                        disabled={contactingId === item.id}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleOpenConversation(item);
+                        }}
+                      >
+                        {contactingId === item.id
+                          ? '打开中...'
+                          : item.userId
+                            ? '发消息'
+                            : '查看连接'}
+                      </button>
                     )}
                   </div>
-                  {isOwnItem ? (
-                    <span className="rounded-lg border border-white/10 px-4 py-2 text-sm font-black text-[#8d8175]">
-                      自己的发布
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="rounded-lg border border-white/12 px-4 py-2 text-sm font-black text-white transition hover:border-[#18b98f]/50 hover:text-[#8ff0d1] disabled:cursor-wait disabled:opacity-60"
-                      disabled={contactingId === item.id}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void handleOpenConversation(item);
-                      }}
-                    >
-                      {contactingId === item.id ? '打开中...' : item.userId ? '发消息' : '查看连接'}
-                    </button>
-                  )}
-                </div>
-              </article>
+                </article>
               );
             })}
           </div>

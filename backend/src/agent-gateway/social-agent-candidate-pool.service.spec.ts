@@ -532,6 +532,47 @@ describe('SocialAgentCandidatePoolService', () => {
         },
         lifestyleSignals: { availableTimes: ['周末下午'] },
         fitnessSignals: { sportsPreferences: ['跑步'], publicPlaceOnly: true },
+        behaviorSignals: {
+          activityLevel: 'quiet',
+          socialEnergy: 'sports',
+          completionTrend: 'reliable',
+          cancellationPattern: 'rare',
+          pressurePreference: 'low',
+          nightBoundary: 'avoids_late_private',
+          locationPreference: 'same_school_or_area',
+          feedbackPattern: ['跑步', '同校'],
+          scores: {
+            rhythmConfidence: 0.8,
+            sportsAffinity: 0.9,
+            lowPressureFit: 0.95,
+            safetyBoundaryClarity: 0.9,
+            reliability: 0.85,
+          },
+          recommendationWeights: {
+            sameSchoolOrArea: 88,
+            sameCity: 72,
+            commonInterest: 70,
+            lowPressure: 92,
+            sports: 90,
+            reliability: 86,
+            recency: 38,
+            safetyBoundary: 90,
+          },
+          matchingGuidance: {
+            shouldPreferSameSchoolOrArea: true,
+            shouldPreferSameCity: false,
+            shouldPreferCommonInterest: false,
+            shouldPreferLowPressure: true,
+            shouldPreferSports: true,
+            shouldAvoidNight: true,
+            shouldUsePublicPlace: true,
+            shouldReduceDisturbance: true,
+            suggestedFilters: ['只看同校', '只看低压力', '不要晚上'],
+            rankingNotes: ['优先同校、低压力、公共场所的跑步搭子。'],
+          },
+          summary: '你最近更适合低压力运动社交。',
+          insights: ['你更容易接受同校或活动区域接近的人。'],
+        },
         safetySignals: {
           publicPlaceOnly: true,
           locationSharingAllowed: false,
@@ -565,5 +606,25 @@ describe('SocialAgentCandidatePoolService', () => {
     expect(
       result.candidates[0].scoreBreakdown.interestSimilarity,
     ).toBeGreaterThan(10);
+    expect(
+      result.candidates[0].scoreBreakdown.lifeGraphBehaviorFit,
+    ).toBeGreaterThan(0);
+    expect(result.candidates[0]).toMatchObject({
+      whyYouMayLike: expect.stringContaining('不是只因为分数高'),
+      matchPoints: expect.arrayContaining([expect.stringContaining('低压力')]),
+      boundaryNotes: expect.arrayContaining([
+        expect.stringContaining('公共场所'),
+      ]),
+      openerStrategy: expect.stringContaining('开场'),
+      dynamicSignalReasons: expect.arrayContaining([
+        expect.stringContaining('低压力运动社交'),
+        expect.stringContaining('优先同校'),
+      ]),
+      continuousFilterHints: expect.arrayContaining([
+        '只看同校',
+        '只看低压力',
+        '不要晚上',
+      ]),
+    });
   });
 });

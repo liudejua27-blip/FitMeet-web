@@ -15,7 +15,10 @@ import { AIService } from '../ai/ai.service';
 import { ActivitiesService } from '../activities/activities.service';
 import { CreateActivityDto } from '../activities/dto/activity.dto';
 import { SocialActivity } from '../activities/entities/activity.entity';
-import { ActivityType } from '../activities/entities/activity-template.entity';
+import {
+  ActivityProofPolicy,
+  ActivityType,
+} from '../activities/entities/activity-template.entity';
 import { FriendsService } from '../friends/friends.service';
 import { MatchService } from '../match/match.service';
 import {
@@ -83,6 +86,7 @@ import {
   SceneRiskPolicyResult,
   SceneRiskPolicyService,
 } from './scene-risk-policy.service';
+import { ConfirmationGuardService } from './confirmation-guard.service';
 
 export enum SocialAgentToolName {
   GetMyProfile = 'get_my_profile',
@@ -121,6 +125,7 @@ export enum SocialAgentToolName {
   DecideNextSocialAction = 'decide_next_social_action',
   ReplyMessage = 'reply_message',
   OfflineMeeting = 'offline_meeting',
+  ShareLocation = 'share_location',
   Payment = 'payment',
 }
 
@@ -215,6 +220,7 @@ const HIGH_RISK_TOOL_DAILY_LIMITS: Partial<
 @Injectable()
 export class SocialAgentToolExecutorService {
   private readonly logger = new Logger(SocialAgentToolExecutorService.name);
+  private readonly fallbackConfirmationGuard = new ConfirmationGuardService();
   private toolCallSequence = 0;
 
   constructor(
@@ -252,6 +258,8 @@ export class SocialAgentToolExecutorService {
     private readonly activities: ActivitiesService,
     private readonly safety: SafetyService,
     private readonly sceneRisk: SceneRiskPolicyService,
+    @Optional()
+    private readonly confirmationGuard?: ConfirmationGuardService,
     @Optional()
     private readonly modelRouter?: SocialAgentModelRouterService,
   ) {}
@@ -495,6 +503,66 @@ export class SocialAgentToolExecutorService {
     return call;
   }
 
+  private async rejectUnconfirmedAdhocDangerousAction(
+    task: AgentTask,
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+    stepId: string,
+  ): Promise<SocialAgentToolCallRecord | null> {
+    if (!this.isDangerousAdhocAction(toolName)) return null;
+    if (this.hasExplicitApprovalCredential(input)) return null;
+
+    const startedAt = new Date();
+    const callId = this.safeToolCallId(task.id, toolName, startedAt);
+
+    try {
+      await this.validateDangerousAdhocActionTarget(task, toolName, input);
+    } catch (error) {
+      const blocked = error instanceof ForbiddenException;
+      return this.buildToolCall({
+        id: callId,
+        stepId,
+        toolName,
+        status: blocked ? 'blocked' : 'failed',
+        input,
+        output: null,
+        error: this.errorPayload(error),
+        startedAt,
+      });
+    }
+
+    return this.buildToolCall({
+      id: callId,
+      stepId,
+      toolName,
+      status: 'blocked',
+      input,
+      output: null,
+      error: {
+        code: 'APPROVAL_REQUIRED',
+        message:
+          'This action requires an approved Agent approval request before execution.',
+        statusCode: 403,
+      },
+      startedAt,
+    });
+  }
+
+  private async validateDangerousAdhocActionTarget(
+    task: AgentTask,
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+  ): Promise<void> {
+    if (
+      toolName !== SocialAgentToolName.ConnectCandidate &&
+      toolName !== SocialAgentToolName.AddFriend
+    ) {
+      return;
+    }
+
+    await this.resolveCandidateTargetUser(input, task.ownerUserId);
+  }
+
   async executeToolAction(
     taskId: number,
     toolName: SocialAgentToolName | string,
@@ -522,6 +590,24 @@ export class SocialAgentToolExecutorService {
       ownerUserId,
     );
     const stepId = `action_${normalizedToolName}_${Date.now()}`;
+    const unconfirmedDangerousAction =
+      await this.rejectUnconfirmedAdhocDangerousAction(
+        task,
+        normalizedToolName,
+        actionInput,
+        stepId,
+      );
+    if (unconfirmedDangerousAction) {
+      task.status = AgentTaskStatus.WaitingResult;
+      task.statusReason =
+        this.string(unconfirmedDangerousAction.error?.message) ??
+        'approval_required';
+      task.error = unconfirmedDangerousAction.error;
+      rememberSocialAgentShortTerm(task, {});
+      await this.taskRepo.save(task);
+      return unconfirmedDangerousAction;
+    }
+
     const call = await this.executeAdhocStep(task, {
       id: stepId,
       toolName: normalizedToolName,
@@ -737,6 +823,8 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.InviteActivity:
       case SocialAgentToolName.OfflineMeeting:
         return this.createActivity(task, input, toolName, stepId);
+      case SocialAgentToolName.ShareLocation:
+        return this.shareLocation(task, input);
       case SocialAgentToolName.JoinActivity:
         return this.joinActivity(task, input);
       case SocialAgentToolName.SaveCandidate:
@@ -856,6 +944,16 @@ export class SocialAgentToolExecutorService {
     );
   }
 
+  private hasExplicitApprovalCredential(
+    input: Record<string, unknown>,
+  ): boolean {
+    return this.confirmationRules().hasExplicitApprovalCredential(input);
+  }
+
+  private isDangerousAdhocAction(toolName: SocialAgentToolName): boolean {
+    return this.confirmationRules().requiresExplicitConfirmation(toolName);
+  }
+
   private isConfirmableTool(toolName: SocialAgentToolName): boolean {
     return [
       SocialAgentToolName.SendMessageToCandidate,
@@ -867,6 +965,7 @@ export class SocialAgentToolExecutorService {
       SocialAgentToolName.InviteActivity,
       SocialAgentToolName.JoinActivity,
       SocialAgentToolName.OfflineMeeting,
+      SocialAgentToolName.ShareLocation,
       SocialAgentToolName.Payment,
       SocialAgentToolName.PublishSocialRequest,
       SocialAgentToolName.CreateSocialRequest,
@@ -1295,11 +1394,27 @@ export class SocialAgentToolExecutorService {
   }
 
   private async draftOpener(input: Record<string, unknown>): Promise<unknown> {
+    const candidate = this.isRecord(input.candidate) ? input.candidate : input;
     const message = await this.ai.generateInviteMessage(
       this.isRecord(input.request) ? input.request : input,
-      this.isRecord(input.candidate) ? input.candidate : input,
+      candidate,
     );
-    return { message };
+    const displayName =
+      this.string(candidate.displayName ?? candidate.nickname) ?? '对方';
+    return {
+      message,
+      confirmation: {
+        actionType: 'send_message',
+        title: `这条消息会发送给${displayName}`,
+        body: '我先帮你写好了，你确认后我再发。确认前不会发送、加好友或创建活动。',
+        primaryAction: '确认发送',
+        secondaryActions: ['语气更自然', '更简短', '重新生成', '取消'],
+        safetyBoundary:
+          '建议先站内沟通，第一次见面选择公共场所，不急着交换联系方式。',
+      },
+      meetLoopStage: 'opener_drafted',
+      nextStep: 'user_confirmation_required',
+    };
   }
 
   async resolveCandidateTargetUser(
@@ -1659,9 +1774,10 @@ export class SocialAgentToolExecutorService {
         'targetUserId or invitedUserId is required',
       );
     }
+    const allowPreciseLocation = this.bool(input.allowPreciseLocation) === true;
+    const icebreakerTasks = this.stringArray(input.icebreakerTasks);
 
     const dto: CreateActivityDto = {
-      ...(input as Partial<CreateActivityDto>),
       type:
         this.activityType(input.type ?? input.activityType) ??
         ActivityType.Custom,
@@ -1669,13 +1785,24 @@ export class SocialAgentToolExecutorService {
         this.string(input.title ?? task.title) || this.activityTitle(toolName),
       description: this.string(input.description ?? input.note ?? task.goal),
       city: sanitizeCity(input.city),
-      locationName: this.string(input.locationName ?? input.location),
+      locationName:
+        this.string(input.locationName ?? input.location) ?? '公共场所待确认',
+      lat: allowPreciseLocation ? this.number(input.lat) : undefined,
+      lng: allowPreciseLocation ? this.number(input.lng) : undefined,
       startTime: this.string(input.startTime ?? input.timeStart),
-      durationMinutes: this.number(input.durationMinutes) ?? undefined,
+      durationMinutes: this.number(input.durationMinutes) ?? 45,
       socialRequestId: this.number(input.socialRequestId) ?? undefined,
+      meetId: this.number(input.meetId) ?? undefined,
       matchedCandidateId:
         this.number(input.matchedCandidateId ?? input.candidateRecordId) ??
         undefined,
+      icebreakerTasks: icebreakerTasks.length
+        ? icebreakerTasks
+        : ['到达后先确认彼此状态和活动节奏。', '活动结束后互相确认是否完成。'],
+      proofRequired: this.bool(input.proofRequired) ?? true,
+      proofPolicy:
+        this.activityProofPolicy(input.proofPolicy) ??
+        ActivityProofPolicy.MutualOrProof,
       invitedUserId: invitedUserId ?? undefined,
     };
     const activityDedupeKey = this.activityInviteDedupeKey(toolName, dto);
@@ -1725,6 +1852,20 @@ export class SocialAgentToolExecutorService {
         this.string(inviteMessage.id ?? inviteMessage.messageId) || null,
       activity,
       inviteMessage,
+    };
+  }
+
+  private shareLocation(
+    task: AgentTask,
+    input: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return {
+      success: false,
+      taskId: task.id,
+      status: 'not_implemented',
+      targetUserId: this.number(input.targetUserId) ?? null,
+      message:
+        'Precise location sharing is not implemented for automatic Agent execution.',
     };
   }
 
@@ -2988,6 +3129,9 @@ export class SocialAgentToolExecutorService {
       this.number(messages[messages.length - 1]?.senderId) ??
       null;
     const intent = this.string(summary.intent);
+    const acceptedActivityInput = targetUserId
+      ? this.meetLoopActivityInput(task, summary, latestText, targetUserId)
+      : null;
 
     if (intent === 'decline') {
       return {
@@ -3011,11 +3155,7 @@ export class SocialAgentToolExecutorService {
         nextAction: 'offline_meeting',
         action: SocialAgentAction.OfflineMeet,
         toolName: SocialAgentToolName.OfflineMeeting,
-        input: {
-          targetUserId,
-          title: task.title || '线下见面安排',
-          description: this.string(summary.summary) ?? this.preview(latestText),
-        },
+        input: acceptedActivityInput ?? { targetUserId },
         reason: '对方接受邀约，Limited Auto Mode 可继续安排线下见面。',
         confidence: 0.76,
       };
@@ -3031,11 +3171,7 @@ export class SocialAgentToolExecutorService {
         nextAction: 'invite_activity',
         action: SocialAgentAction.SendInvite,
         toolName: SocialAgentToolName.InviteActivity,
-        input: {
-          targetUserId,
-          title: task.title || '约练邀请',
-          description: this.string(summary.summary) ?? this.preview(latestText),
-        },
+        input: acceptedActivityInput ?? { targetUserId },
         reason: '对方接受邀约，Confirm Mode 可生成活动邀请。',
         confidence: 0.72,
       };
@@ -3053,6 +3189,43 @@ export class SocialAgentToolExecutorService {
       },
       reason: '继续用低压力回复确认细节。',
       confidence: 0.7,
+    };
+  }
+
+  private meetLoopActivityInput(
+    task: AgentTask,
+    summary: Record<string, unknown>,
+    latestText: string,
+    targetUserId: number,
+  ): Record<string, unknown> {
+    const activityType =
+      this.activityType(summary.activityType ?? task.input?.['activityType']) ??
+      ActivityType.Running;
+    return {
+      targetUserId,
+      title: task.title || '约练邀请',
+      description: this.string(summary.summary) ?? this.preview(latestText),
+      type: activityType,
+      locationName:
+        this.string(summary.locationName ?? summary.location) ??
+        '公共场所待确认',
+      city: sanitizeCity(summary.city ?? task.input?.['city']),
+      startTime: this.string(summary.startTime ?? summary.time),
+      durationMinutes: this.number(summary.durationMinutes) ?? 45,
+      proofRequired: true,
+      proofPolicy: ActivityProofPolicy.MutualOrProof,
+      icebreakerTasks: [
+        '到达后先确认彼此状态和活动节奏。',
+        '活动结束后互相确认是否完成。',
+      ],
+      allowPreciseLocation: false,
+      publicPlaceOnly: true,
+      noPreciseLocation: true,
+      meetLoopStage: 'activity_confirmation',
+      lifeGraphUpdatePreview:
+        '完成后我会更新你的近期活动节奏、偏好边界和低压力社交信号。',
+      trustScoreUpdatePreview:
+        '完成与评价会写入 trust score，用来提升后续推荐可信度。',
     };
   }
 
@@ -3089,11 +3262,33 @@ export class SocialAgentToolExecutorService {
         SocialAgentToolName.Payment,
       ].includes(toolName)
     ) {
+      const targetUserId =
+        this.number(input.targetUserId) ?? loop.targetUserId ?? null;
       input = {
-        targetUserId:
-          this.number(input.targetUserId) ?? loop.targetUserId ?? null,
+        targetUserId,
         ...input,
       };
+      if (
+        targetUserId &&
+        [
+          SocialAgentToolName.InviteActivity,
+          SocialAgentToolName.OfflineMeeting,
+        ].includes(toolName)
+      ) {
+        input = {
+          ...this.meetLoopActivityInput(
+            task,
+            raw,
+            this.string(raw.reason) ?? '',
+            targetUserId,
+          ),
+          ...input,
+          targetUserId,
+          allowPreciseLocation: false,
+          publicPlaceOnly: true,
+          noPreciseLocation: true,
+        };
+      }
     }
     if (
       toolName === SocialAgentToolName.Payment &&
@@ -3505,6 +3700,7 @@ export class SocialAgentToolExecutorService {
       SocialAgentToolName.InviteActivity,
       SocialAgentToolName.CreateActivity,
       SocialAgentToolName.OfflineMeeting,
+      SocialAgentToolName.ShareLocation,
       SocialAgentToolName.Payment,
     ].includes(toolName);
     if (!requiresAgentConnection || task.agentConnectionId) return;
@@ -3518,15 +3714,10 @@ export class SocialAgentToolExecutorService {
     toolName: SocialAgentToolName,
     input: Record<string, unknown>,
   ): boolean {
-    const userConfirmedCandidateActions = [
-      SocialAgentToolName.SendMessage,
-      SocialAgentToolName.SendMessageToCandidate,
-      SocialAgentToolName.AddFriend,
-      SocialAgentToolName.ConnectCandidate,
-    ];
-    if (!userConfirmedCandidateActions.includes(toolName)) return false;
-    const metadata = this.isRecord(input.metadata) ? input.metadata : {};
-    return this.string(metadata.confirmationSource) === 'social_agent_chat';
+    return this.confirmationRules().canRunAsConfirmedUserAction(
+      toolName,
+      input,
+    );
   }
 
   private withAdhocConfirmationMetadata(
@@ -3547,14 +3738,16 @@ export class SocialAgentToolExecutorService {
     };
   }
 
+  private confirmationRules(): ConfirmationGuardService {
+    return this.confirmationGuard ?? this.fallbackConfirmationGuard;
+  }
+
   private isUserConfirmedCandidateAction(
     toolName: SocialAgentToolName,
   ): boolean {
     return [
       SocialAgentToolName.SendMessage,
       SocialAgentToolName.SendMessageToCandidate,
-      SocialAgentToolName.AddFriend,
-      SocialAgentToolName.ConnectCandidate,
     ].includes(toolName);
   }
 
@@ -3602,6 +3795,8 @@ export class SocialAgentToolExecutorService {
         return AgentActionType.InviteActivity;
       case SocialAgentToolName.OfflineMeeting:
         return AgentActionType.OfflineMeeting;
+      case SocialAgentToolName.ShareLocation:
+        return AgentActionType.ApproveAction;
       case SocialAgentToolName.JoinActivity:
         return AgentActionType.JoinActivity;
       case SocialAgentToolName.SaveCandidate:
@@ -3658,6 +3853,7 @@ export class SocialAgentToolExecutorService {
       toolName === SocialAgentToolName.OfflineMeeting ||
       toolName === SocialAgentToolName.CreateActivity ||
       toolName === SocialAgentToolName.JoinActivity ||
+      toolName === SocialAgentToolName.ShareLocation ||
       toolName === SocialAgentToolName.ApproveAction
     ) {
       return AgentActionRiskLevel.High;
@@ -3715,6 +3911,8 @@ export class SocialAgentToolExecutorService {
         return 'create_activity';
       case SocialAgentToolName.OfflineMeeting:
         return 'offline_meeting';
+      case SocialAgentToolName.ShareLocation:
+        return 'share_location';
       case SocialAgentToolName.Payment:
         return 'payment';
       default:
@@ -3884,6 +4082,7 @@ export class SocialAgentToolExecutorService {
       toolName === SocialAgentToolName.CreateActivity ||
       toolName === SocialAgentToolName.JoinActivity ||
       toolName === SocialAgentToolName.ApproveAction ||
+      toolName === SocialAgentToolName.ShareLocation ||
       toolName === SocialAgentToolName.Payment ||
       sceneRisk.riskLevel === 'high' ||
       sceneRisk.riskLevel === 'critical';
@@ -3961,6 +4160,7 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.WriteInbox:
         return SocialAgentAction.WriteInbox;
       case SocialAgentToolName.OfflineMeeting:
+      case SocialAgentToolName.ShareLocation:
         return SocialAgentAction.OfflineMeet;
       case SocialAgentToolName.Payment:
         return SocialAgentAction.Payment;
@@ -4442,6 +4642,13 @@ export class SocialAgentToolExecutorService {
     return typeof value === 'string' &&
       Object.values(ActivityType).includes(value as ActivityType)
       ? (value as ActivityType)
+      : undefined;
+  }
+
+  private activityProofPolicy(value: unknown): ActivityProofPolicy | undefined {
+    return typeof value === 'string' &&
+      Object.values(ActivityProofPolicy).includes(value as ActivityProofPolicy)
+      ? (value as ActivityProofPolicy)
       : undefined;
   }
 }

@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import type { SocialAgentChatCandidate } from '../../api/socialAgentApi';
+import type { SocialAgentChatCandidate } from '../../api/socialAgentDebugApi';
 import type { AgentConfirmAction } from './agentWorkbenchTypes';
-import type { SocialAgentPermissionMode } from '../../api/socialAgentApi';
+import type { SocialAgentPermissionMode } from '../../api/socialAgentDebugApi';
 
 export function CandidateCard({
   candidate,

@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { recentConversations } from './agentWorkbenchMock';
 import { PermissionModeSelector } from './PermissionModeSelector';
 import { permissionModeLabel } from './permissionModeLabel';
-import type { SocialAgentPermissionMode } from '../../api/socialAgentApi';
+import type { SocialAgentPermissionMode } from '../../api/socialAgentDebugApi';
 
 export function AgentSidebar({
   mode,

@@ -259,6 +259,10 @@ export type SocialAgentStateTransitionReason =
   | 'confirmation_required'
   | 'message_action'
   | 'activity_planning'
+  | 'activity_confirmed'
+  | 'activity_checked_in'
+  | 'activity_completed'
+  | 'life_graph_updated'
   | 'error'
   | 'reset';
 
@@ -673,6 +677,12 @@ export function stateForTransition(
       return 'messaging_candidate';
     case 'activity_planning':
       return 'activity_planning';
+    case 'activity_confirmed':
+    case 'activity_checked_in':
+    case 'activity_completed':
+      return 'activity_planning';
+    case 'life_graph_updated':
+      return 'profile_saved';
     case 'error':
       return 'error_recovery';
     case 'reset':
@@ -889,6 +899,10 @@ function isSocialAgentStateReason(
       'confirmation_required',
       'message_action',
       'activity_planning',
+      'activity_confirmed',
+      'activity_checked_in',
+      'activity_completed',
+      'life_graph_updated',
       'error',
       'reset',
     ].includes(value)

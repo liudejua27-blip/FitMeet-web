@@ -163,5 +163,22 @@ describe('FitMeetAlphaAgentSdkService', () => {
       safetyBoundary: expect.any(String),
       nextActions: expect.arrayContaining(['生成开场白', '创建约练']),
     });
+    expect(cards.find((card) => card.type === 'activity_plan')).toMatchObject({
+      body: expect.stringContaining('不会共享你的精确位置'),
+      data: expect.objectContaining({
+        publicPlaceOnly: true,
+        noPreciseLocation: true,
+        checkinReminder: expect.stringContaining('确认是否到达'),
+        reviewPrompt: expect.stringContaining('评价体验'),
+        trustScoreUpdatePreview: expect.stringContaining('trust score'),
+        meetLoopStage: 'activity_confirmation',
+      }),
+      actions: expect.arrayContaining([
+        expect.objectContaining({
+          action: 'create_activity',
+          requiresConfirmation: true,
+        }),
+      ]),
+    });
   });
 });

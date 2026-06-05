@@ -2,8 +2,11 @@
 import { LifeGraphController } from './life-graph.controller';
 import {
   LifeGraphAuditAction,
+  LifeGraphBehaviorEventType,
+  LifeGraphCorrectionType,
   LifeGraphFieldCategory,
   LifeGraphFieldSource,
+  LifeGraphSignalKey,
 } from './life-graph.enums';
 
 const req = { user: { id: 7 } } as never;
@@ -40,6 +43,35 @@ function makeService() {
         createdAt: new Date().toISOString(),
       },
     ]),
+    getBehaviorEvents: jest.fn(async () => [
+      {
+        id: 1,
+        userId: 7,
+        eventType: LifeGraphBehaviorEventType.ActivityCompleted,
+        createdAt: new Date().toISOString(),
+      },
+    ]),
+    recordBehaviorEvent: jest.fn(async () => ({
+      id: 1,
+      userId: 7,
+      eventType: LifeGraphBehaviorEventType.ActivityCompleted,
+    })),
+    getSignalScores: jest.fn(async () => [
+      {
+        signalKey: LifeGraphSignalKey.Reliability,
+        score: 82,
+      },
+    ]),
+    getUpdateAudits: jest.fn(async () => [
+      {
+        id: 1,
+        userFacingSummary: 'updated',
+      },
+    ]),
+    correctLifeGraph: jest.fn(async () => ({
+      id: 1,
+      correctionType: LifeGraphCorrectionType.NotTrue,
+    })),
     extractFromChat: jest.fn(async () => ({
       proposalId: 10,
       proposedFields: [],
@@ -150,5 +182,37 @@ describe('LifeGraphController', () => {
       limit: 20,
       cursor: '2026-05-26T00:00:00.000Z',
     });
+  });
+
+  it('handles behavior signals and correction endpoints', async () => {
+    const service = makeService();
+    const controller = new LifeGraphController(service as never);
+    const eventBody = {
+      eventType: LifeGraphBehaviorEventType.ActivityCompleted,
+      naturalSummary: '你完成了一次跑步约练。',
+    };
+    const correctionBody = {
+      correctionType: LifeGraphCorrectionType.NotTrue,
+      signalKey: LifeGraphSignalKey.SameSchoolPreference,
+      note: '同校不是必须。',
+    };
+
+    await controller.recordBehaviorEvent(req, eventBody);
+    await controller.getBehaviorEvents(req, '10', '2026-05-26T00:00:00.000Z');
+    await controller.getSignalScores(req);
+    await controller.getUpdateAudits(req, '10', '2026-05-26T00:00:00.000Z');
+    await controller.correctLifeGraph(req, correctionBody);
+
+    expect(service.recordBehaviorEvent).toHaveBeenCalledWith(7, eventBody);
+    expect(service.getBehaviorEvents).toHaveBeenCalledWith(7, {
+      limit: 10,
+      cursor: '2026-05-26T00:00:00.000Z',
+    });
+    expect(service.getSignalScores).toHaveBeenCalledWith(7);
+    expect(service.getUpdateAudits).toHaveBeenCalledWith(7, {
+      limit: 10,
+      cursor: '2026-05-26T00:00:00.000Z',
+    });
+    expect(service.correctLifeGraph).toHaveBeenCalledWith(7, correctionBody);
   });
 });

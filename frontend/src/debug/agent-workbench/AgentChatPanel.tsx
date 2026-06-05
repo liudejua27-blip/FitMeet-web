@@ -1,5 +1,8 @@
 import type { FormEvent, RefObject } from 'react';
-import type { SocialAgentChatCandidate, SocialAgentPermissionMode } from '../../api/socialAgentApi';
+import type {
+  SocialAgentChatCandidate,
+  SocialAgentPermissionMode,
+} from '../../api/socialAgentDebugApi';
 import type { AgentConfirmAction, AgentRunEvent, AgentWorkbenchMessage } from './agentWorkbenchTypes';
 import { AgentComposer } from './AgentComposer';
 import { AgentMessageList } from './AgentMessageBubble';

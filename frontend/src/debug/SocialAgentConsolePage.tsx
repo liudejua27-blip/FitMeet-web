@@ -1,23 +1,23 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
-  socialAgentApi,
+  socialAgentDebugApi,
   type SocialAgentChatRunResult,
   type SocialAgentChatStreamEvent,
   type SocialAgentPermissionMode,
   type SocialAgentStepStatus,
-} from '../api/socialAgentApi';
-import { ActionConfirmDialog } from '../components/agent-workbench/ActionConfirmDialog';
-import { AgentChatPanel } from '../components/agent-workbench/AgentChatPanel';
-import { AgentSidebar } from '../components/agent-workbench/AgentSidebar';
-import { initialRunEvents } from '../components/agent-workbench/agentWorkbenchMock';
+} from '../api/socialAgentDebugApi';
+import { ActionConfirmDialog } from './agent-workbench/ActionConfirmDialog';
+import { AgentChatPanel } from './agent-workbench/AgentChatPanel';
+import { AgentSidebar } from './agent-workbench/AgentSidebar';
+import { initialRunEvents } from './agent-workbench/agentWorkbenchMock';
 import type {
   AgentConfirmAction,
   AgentRunEvent,
   AgentWorkbenchMessage,
-} from '../components/agent-workbench/agentWorkbenchTypes';
-import { MatchWorkspace } from '../components/agent-workbench/MatchWorkspace';
-import { MobileAgentHome } from '../components/agent-workbench/MobileAgentHome';
+} from './agent-workbench/agentWorkbenchTypes';
+import { MatchWorkspace } from './agent-workbench/MatchWorkspace';
+import { MobileAgentHome } from './agent-workbench/MobileAgentHome';
 
 export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
   const [mode, setMode] = useState<SocialAgentPermissionMode>('limited_auto');
@@ -91,7 +91,7 @@ export const SocialAgentConsolePage = memo(function SocialAgentConsolePage() {
     abortRef.current = controller;
 
     try {
-      const finalResult = await socialAgentApi.runChatStream(
+      const finalResult = await socialAgentDebugApi.runChatStream(
         {
           goal,
           permissionMode: mode,

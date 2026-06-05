@@ -1,4 +1,4 @@
-import {
+﻿import {
   BadRequestException,
   Injectable,
   Logger,
@@ -11,7 +11,10 @@ import { cleanDisplayText } from '../common/display-text.util';
 import { UserSocialProfile } from '../users/user-social-profile.entity';
 import {
   LifeGraphCompletenessDto,
+  CorrectLifeGraphDto,
   LifeGraphDynamicSignalsDto,
+  LifeGraphBehaviorEventDto,
+  LifeGraphCorrectionDto,
   LifeGraphProposalDto,
   LifeGraphProposedFieldDto,
   LifeGraphFieldDto,
@@ -19,25 +22,36 @@ import {
   LifeGraphMissingFieldDto,
   LifeGraphProfileDto,
   LifeGraphUnifiedMatchSignalsDto,
+  LifeGraphSignalScoreDto,
+  LifeGraphUpdateAuditDto,
   ConfirmLifeGraphUpdateDto,
   ExtractLifeGraphFromChatDto,
   RejectLifeGraphUpdateDto,
+  RecordLifeGraphBehaviorEventDto,
   RevokeLifeGraphFieldDto,
   LifeGraphResponseDto,
   UpdateLifeGraphDto,
   UpdateLifeGraphFieldDto,
 } from './dto/life-graph.dto';
 import { LifeGraphAuditLog } from './entities/life-graph-audit-log.entity';
+import { LifeGraphBehaviorEvent } from './entities/life-graph-behavior-event.entity';
+import { LifeGraphCorrection } from './entities/life-graph-correction.entity';
 import { LifeGraphField } from './entities/life-graph-field.entity';
 import { LifeGraphProfile } from './entities/life-graph-profile.entity';
 import { LifeGraphProposal } from './entities/life-graph-proposal.entity';
+import { LifeGraphSignalScore } from './entities/life-graph-signal-score.entity';
+import { LifeGraphUpdateAudit } from './entities/life-graph-update-audit.entity';
 import { LifeGraphExtractionService } from './life-graph-extraction.service';
 import {
   LifeGraphAuditAction,
+  LifeGraphBehaviorEventType,
+  LifeGraphCorrectionType,
   LifeGraphFieldCategory,
   LifeGraphProposalStatus,
   LifeGraphFieldSource,
+  LifeGraphSignalKey,
   LifeGraphSignalType,
+  LifeGraphUpdateAuditStatus,
 } from './life-graph.enums';
 import { RealtimeEventService } from '../realtime/realtime-event.service';
 
@@ -65,6 +79,29 @@ type ImportCandidate = {
 type StoredProposalField = LifeGraphProposedFieldDto & {
   confirmedAt?: string | null;
   rejectedAt?: string | null;
+};
+
+type BehaviorSignalSnapshot = {
+  recentEventCount: number;
+  completed: number;
+  cancelled: number;
+  noShow: number;
+  positiveFeedback: number;
+  negativeFeedback: number;
+  nightDeclines: number;
+  privatePlaceDeclines: number;
+  preciseLocationDeclines: number;
+  scoreByKey: Map<LifeGraphSignalKey, LifeGraphSignalScore>;
+  feedbackPatterns: string[];
+};
+
+type SignalScoreDraft = {
+  signalKey: LifeGraphSignalKey;
+  score: number;
+  confidence: number;
+  explanation: string;
+  evidence: Record<string, unknown>;
+  enabledForMatching?: boolean;
 };
 
 const ENTERTAINMENT_SIGNAL_KEYS = new Set([
@@ -388,6 +425,18 @@ export class LifeGraphService {
     private readonly extraction: LifeGraphExtractionService,
     @Optional()
     private readonly realtime?: RealtimeEventService,
+    @Optional()
+    @InjectRepository(LifeGraphBehaviorEvent)
+    private readonly behaviorEvents?: Repository<LifeGraphBehaviorEvent>,
+    @Optional()
+    @InjectRepository(LifeGraphSignalScore)
+    private readonly signalScores?: Repository<LifeGraphSignalScore>,
+    @Optional()
+    @InjectRepository(LifeGraphUpdateAudit)
+    private readonly updateAudits?: Repository<LifeGraphUpdateAudit>,
+    @Optional()
+    @InjectRepository(LifeGraphCorrection)
+    private readonly corrections?: Repository<LifeGraphCorrection>,
   ) {}
 
   async getLifeGraph(userId: number): Promise<LifeGraphResponseDto> {
@@ -639,6 +688,120 @@ export class LifeGraphService {
     return signals;
   }
 
+  async recordBehaviorEvent(
+    userId: number,
+    input: RecordLifeGraphBehaviorEventDto,
+  ): Promise<LifeGraphBehaviorEventDto> {
+    await this.ensureLifeGraph(userId);
+    if (!this.behaviorEvents) {
+      throw new BadRequestException(
+        'Life Graph behavior events are unavailable',
+      );
+    }
+
+    const event = await this.behaviorEvents.save(
+      this.behaviorEvents.create({
+        userId,
+        eventType: input.eventType,
+        source: input.source ?? 'fitmeet_agent',
+        taskId: input.taskId ?? null,
+        activityId: input.activityId ?? null,
+        candidateUserId: input.candidateUserId ?? null,
+        metadata: input.metadata ?? {},
+        naturalSummary:
+          input.naturalSummary ??
+          this.naturalEventSummary(input.eventType, input.metadata ?? {}),
+        weight: Math.max(0, Math.min(3, input.weight ?? 1)),
+      }),
+    );
+
+    await this.recalculateSignalScores(userId, event.id);
+    this.realtime?.emitToUser({
+      userId,
+      eventType: 'life_graph:updated',
+      payload: {
+        eventType: event.eventType,
+        summary: event.naturalSummary,
+      },
+    });
+    return this.toBehaviorEventDto(event);
+  }
+
+  async getBehaviorEvents(
+    userId: number,
+    options: { limit?: number; cursor?: string } = {},
+  ): Promise<LifeGraphBehaviorEventDto[]> {
+    if (!this.behaviorEvents) return [];
+    const limit = Math.min(Math.max(Number(options.limit) || 50, 1), 100);
+    const cursorDate = options.cursor ? new Date(options.cursor) : null;
+    const events = await this.behaviorEvents.find({
+      where:
+        cursorDate && !Number.isNaN(cursorDate.getTime())
+          ? { userId, createdAt: LessThan(cursorDate) }
+          : { userId },
+      order: { createdAt: 'DESC', id: 'DESC' },
+      take: limit,
+    });
+    return events.map((event) => this.toBehaviorEventDto(event));
+  }
+
+  async getSignalScores(userId: number): Promise<LifeGraphSignalScoreDto[]> {
+    if (!this.signalScores) return [];
+    await this.recalculateSignalScores(userId);
+    const scores = await this.signalScores.find({
+      where: { userId },
+      order: { signalKey: 'ASC' },
+    });
+    return scores.map((score) => this.toSignalScoreDto(score));
+  }
+
+  async getUpdateAudits(
+    userId: number,
+    options: { limit?: number; cursor?: string } = {},
+  ): Promise<LifeGraphUpdateAuditDto[]> {
+    if (!this.updateAudits) return [];
+    const limit = Math.min(Math.max(Number(options.limit) || 50, 1), 100);
+    const cursorDate = options.cursor ? new Date(options.cursor) : null;
+    const audits = await this.updateAudits.find({
+      where:
+        cursorDate && !Number.isNaN(cursorDate.getTime())
+          ? { userId, createdAt: LessThan(cursorDate) }
+          : { userId },
+      order: { createdAt: 'DESC', id: 'DESC' },
+      take: limit,
+    });
+    return audits.map((audit) => this.toUpdateAuditDto(audit));
+  }
+
+  async correctLifeGraph(
+    userId: number,
+    input: CorrectLifeGraphDto,
+  ): Promise<LifeGraphCorrectionDto> {
+    await this.ensureLifeGraph(userId);
+    if (!this.corrections) {
+      throw new BadRequestException('Life Graph corrections are unavailable');
+    }
+
+    const previousValue = await this.readCorrectionTarget(userId, input);
+    const correctedValue = input.correctedValue ?? {};
+    const correction = await this.corrections.save(
+      this.corrections.create({
+        userId,
+        correctionType: input.correctionType,
+        signalKey: input.signalKey ?? null,
+        category: input.category ?? null,
+        fieldKey: input.fieldKey ?? null,
+        note: input.note,
+        previousValue,
+        correctedValue,
+        applied: true,
+      }),
+    );
+
+    await this.applyCorrection(userId, input, correction.id, previousValue);
+    return this.toCorrectionDto(correction);
+  }
+
   private async buildDynamicLifeUnderstanding(
     userId: number,
     fields: LifeGraphField[],
@@ -649,6 +812,12 @@ export class LifeGraphService {
       order: { createdAt: 'DESC', id: 'DESC' },
       take: 40,
     });
+    const behavior = await this.loadBehaviorSignalSnapshot(userId);
+    const scoreValue = (key: LifeGraphSignalKey): number | null => {
+      const score = behavior.scoreByKey.get(key);
+      if (!score || score.enabledForMatching === false) return null;
+      return score.score;
+    };
     const value = (category: LifeGraphFieldCategory, fieldKey: string) =>
       fields.find(
         (field) => field.category === category && field.fieldKey === fieldKey,
@@ -713,11 +882,31 @@ export class LifeGraphService {
       value(LifeGraphFieldCategory.InteractionMemory, 'trustScore'),
       value(LifeGraphFieldCategory.TrustSafety, 'trustScore'),
     );
+    const completedWithBehavior = completed + behavior.completed;
+    const cancelledWithBehavior =
+      cancelled + behavior.cancelled + behavior.noShow;
+    const recentActivityScore = scoreValue(LifeGraphSignalKey.RecentActivity);
+    const sportsAffinityScore = scoreValue(LifeGraphSignalKey.SportsAffinity);
+    const socialOpennessScore = scoreValue(LifeGraphSignalKey.SocialOpenness);
+    const lowPressureScore = scoreValue(
+      LifeGraphSignalKey.LowPressurePreference,
+    );
+    const safetyClarityScore = scoreValue(
+      LifeGraphSignalKey.SafetyBoundaryClarity,
+    );
+    const reliabilityScore = scoreValue(LifeGraphSignalKey.Reliability);
+    const nightBoundaryScore = scoreValue(LifeGraphSignalKey.NightBoundary);
+    const sameSchoolScore = scoreValue(LifeGraphSignalKey.SameSchoolPreference);
+    const sameCityScore = scoreValue(LifeGraphSignalKey.SameCityPreference);
+    const commonInterestScore = scoreValue(
+      LifeGraphSignalKey.CommonInterestPreference,
+    );
 
-    const recentActivityCount = recentLogs.filter((log) => {
-      const createdAt = new Date(log.createdAt);
-      return Date.now() - createdAt.getTime() < 30 * 24 * 60 * 60 * 1000;
-    }).length;
+    const recentActivityCount =
+      recentLogs.filter((log) => {
+        const createdAt = new Date(log.createdAt);
+        return Date.now() - createdAt.getTime() < 30 * 24 * 60 * 60 * 1000;
+      }).length + behavior.recentEventCount;
     const sportsKeywords = /跑步|散步|慢跑|健身|运动|骑行|游泳|球|训练/.test(
       `${sportsText} ${socialText}`,
     );
@@ -784,6 +973,61 @@ export class LifeGraphService {
           ? 'interest_first'
           : 'unknown';
 
+    const finalReliability =
+      reliabilityScore !== null
+        ? this.clampScore(reliabilityScore)
+        : completedWithBehavior + cancelledWithBehavior > 0
+          ? this.clampScore(
+              55 + completedWithBehavior * 10 - cancelledWithBehavior * 14,
+            )
+          : reliability;
+    const finalActivityLevel =
+      recentActivityScore !== null
+        ? recentActivityScore >= 70
+          ? 'active'
+          : recentActivityScore <= 40
+            ? 'quiet'
+            : activityLevel
+        : activityLevel;
+    const finalSocialEnergy =
+      (sportsAffinityScore ?? 0) >= 70 && (socialOpennessScore ?? 0) >= 70
+        ? 'balanced'
+        : (sportsAffinityScore ?? 0) >= 70
+          ? 'sports'
+          : (socialOpennessScore ?? 0) >= 70
+            ? 'social'
+            : socialEnergy;
+    const finalCompletionTrend =
+      completedWithBehavior === 0 && cancelledWithBehavior === 0
+        ? completionTrend
+        : finalReliability >= 72
+          ? 'reliable'
+          : finalReliability >= 48
+            ? 'mixed'
+            : 'fragile';
+    const finalCancellationPattern =
+      cancelledWithBehavior === 0 && completedWithBehavior > 0
+        ? 'rare'
+        : cancelledWithBehavior >= 3
+          ? 'frequent'
+          : cancelledWithBehavior > 0
+            ? 'occasional'
+            : cancellationPattern;
+    const finalPressurePreference =
+      (lowPressureScore ?? 0) >= 65 ? 'low' : pressurePreference;
+    const finalNightBoundary =
+      (nightBoundaryScore ?? 0) >= 70 || behavior.nightDeclines > 0
+        ? 'avoids_late_private'
+        : nightBoundary;
+    const finalLocationPreference =
+      (sameSchoolScore ?? 0) >= 70
+        ? 'same_school_or_area'
+        : (sameCityScore ?? 0) >= 70
+          ? 'same_city'
+          : (commonInterestScore ?? 0) >= 70
+            ? 'interest_first'
+            : locationPreference;
+
     const insights = [
       activityLevel === 'active'
         ? '你最近对社交和活动反馈比较活跃，适合给你更及时的候选机会。'
@@ -813,30 +1057,92 @@ export class LifeGraphService {
           ? '你更适合先看同城、距离明确的人。'
           : '我会先把共同兴趣放在推荐解释里，而不是只看距离。',
     ];
-
-    const summary = `我对你的了解：${insights.slice(0, 4).join('')}`;
+    const finalInsights = [
+      ...this.behaviorSignalInsights({
+        activityLevel: finalActivityLevel,
+        socialEnergy: finalSocialEnergy,
+        completionTrend: finalCompletionTrend,
+        cancellationPattern: finalCancellationPattern,
+        nightBoundary: finalNightBoundary,
+        locationPreference: finalLocationPreference,
+      }),
+      ...insights,
+    ].slice(0, 5);
+    const summary = `我对你的了解：${finalInsights.slice(0, 4).join('')}`;
+    const recommendationWeights = {
+      sameSchoolOrArea: this.clampScore(sameSchoolScore ?? 45),
+      sameCity: this.clampScore(sameCityScore ?? 45),
+      commonInterest: this.clampScore(commonInterestScore ?? 50),
+      lowPressure: this.clampScore(
+        lowPressureScore ?? (finalPressurePreference === 'low' ? 82 : 45),
+      ),
+      sports: this.clampScore(
+        sportsAffinityScore ?? (finalSocialEnergy === 'sports' ? 82 : 45),
+      ),
+      reliability: finalReliability,
+      recency: this.clampScore(
+        recentActivityScore ?? 35 + recentActivityCount * 8,
+      ),
+      safetyBoundary: this.clampScore(
+        safetyClarityScore ??
+          (finalNightBoundary === 'avoids_late_private' || publicBoundary
+            ? 86
+            : 42),
+      ),
+    };
+    const matchingGuidance = {
+      shouldPreferSameSchoolOrArea:
+        finalLocationPreference === 'same_school_or_area',
+      shouldPreferSameCity: finalLocationPreference === 'same_city',
+      shouldPreferCommonInterest: finalLocationPreference === 'interest_first',
+      shouldPreferLowPressure: finalPressurePreference === 'low',
+      shouldPreferSports:
+        finalSocialEnergy === 'sports' || finalSocialEnergy === 'balanced',
+      shouldAvoidNight: finalNightBoundary === 'avoids_late_private',
+      shouldUsePublicPlace:
+        publicBoundary || finalNightBoundary === 'avoids_late_private',
+      shouldReduceDisturbance: finalActivityLevel === 'quiet',
+      suggestedFilters: this.uniqueStrings([
+        finalLocationPreference === 'same_school_or_area' ? '只看同校' : '',
+        finalLocationPreference === 'same_city' ? '只看同城' : '',
+        finalPressurePreference === 'low' ? '只看低压力' : '',
+        finalNightBoundary === 'avoids_late_private' ? '不要晚上' : '',
+        finalSocialEnergy === 'sports' ? '换成散步或慢跑' : '',
+      ]),
+      rankingNotes: finalInsights.slice(0, 4),
+    };
     return {
-      activityLevel,
-      socialEnergy,
-      completionTrend,
-      cancellationPattern,
-      pressurePreference,
-      nightBoundary,
-      locationPreference,
-      feedbackPattern: this.feedbackPatterns(value, socialText),
+      activityLevel: finalActivityLevel,
+      socialEnergy: finalSocialEnergy,
+      completionTrend: finalCompletionTrend,
+      cancellationPattern: finalCancellationPattern,
+      pressurePreference: finalPressurePreference,
+      nightBoundary: finalNightBoundary,
+      locationPreference: finalLocationPreference,
+      feedbackPattern: [
+        ...behavior.feedbackPatterns,
+        ...this.feedbackPatterns(value, socialText),
+      ].slice(0, 4),
       scores: {
-        rhythmConfidence: this.clampScore(35 + recentActivityCount * 8),
-        sportsAffinity: this.clampScore(sportsKeywords ? 82 : 42),
+        rhythmConfidence: this.clampScore(
+          recentActivityScore ?? 35 + recentActivityCount * 8,
+        ),
+        sportsAffinity: this.clampScore(
+          sportsAffinityScore ?? (sportsKeywords ? 82 : 42),
+        ),
         lowPressureFit: this.clampScore(
-          lowPressure ? 86 : publicBoundary ? 70 : 45,
+          lowPressureScore ?? (lowPressure ? 86 : publicBoundary ? 70 : 45),
         ),
         safetyBoundaryClarity: this.clampScore(
-          publicBoundary || avoidsNight ? 86 : safetyText ? 64 : 35,
+          safetyClarityScore ??
+            (publicBoundary || avoidsNight ? 86 : safetyText ? 64 : 35),
         ),
-        reliability,
+        reliability: finalReliability,
       },
+      recommendationWeights,
+      matchingGuidance,
       summary,
-      insights,
+      insights: finalInsights,
     };
   }
 
@@ -864,6 +1170,595 @@ export class LifeGraphService {
       inferred.push('更容易接受同校或同区域的人');
     if (/慢热|低压力|先聊/.test(socialText)) inferred.push('更喜欢低压力开场');
     return inferred.slice(0, 4);
+  }
+
+  private uniqueStrings(values: string[]): string[] {
+    return Array.from(
+      new Set(values.map((value) => value.trim()).filter(Boolean)),
+    );
+  }
+
+  private async loadBehaviorSignalSnapshot(
+    userId: number,
+  ): Promise<BehaviorSignalSnapshot> {
+    const empty: BehaviorSignalSnapshot = {
+      recentEventCount: 0,
+      completed: 0,
+      cancelled: 0,
+      noShow: 0,
+      positiveFeedback: 0,
+      negativeFeedback: 0,
+      nightDeclines: 0,
+      privatePlaceDeclines: 0,
+      preciseLocationDeclines: 0,
+      scoreByKey: new Map<LifeGraphSignalKey, LifeGraphSignalScore>(),
+      feedbackPatterns: [],
+    };
+    const [events, scores] = await Promise.all([
+      this.behaviorEvents
+        ? this.behaviorEvents.find({
+            where: { userId },
+            order: { createdAt: 'DESC', id: 'DESC' },
+            take: 120,
+          })
+        : Promise.resolve([]),
+      this.signalScores
+        ? this.signalScores.find({ where: { userId } })
+        : Promise.resolve([]),
+    ]);
+    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+    const nowMs = Date.now();
+    for (const event of events) {
+      if (nowMs - event.createdAt.getTime() <= thirtyDaysMs) {
+        empty.recentEventCount += 1;
+      }
+      if (event.eventType === LifeGraphBehaviorEventType.ActivityCompleted) {
+        empty.completed += 1;
+      } else if (
+        event.eventType === LifeGraphBehaviorEventType.ActivityCancelled
+      ) {
+        empty.cancelled += 1;
+      } else if (
+        event.eventType === LifeGraphBehaviorEventType.ActivityNoShow
+      ) {
+        empty.noShow += 1;
+      } else if (
+        event.eventType === LifeGraphBehaviorEventType.CandidateLiked ||
+        event.eventType === LifeGraphBehaviorEventType.ActivityReviewedPositive
+      ) {
+        empty.positiveFeedback += 1;
+      } else if (
+        event.eventType === LifeGraphBehaviorEventType.CandidateDisliked ||
+        event.eventType === LifeGraphBehaviorEventType.ActivityReviewedNegative
+      ) {
+        empty.negativeFeedback += 1;
+      } else if (
+        event.eventType === LifeGraphBehaviorEventType.NightMeetDeclined
+      ) {
+        empty.nightDeclines += 1;
+      } else if (
+        event.eventType === LifeGraphBehaviorEventType.PrivatePlaceDeclined
+      ) {
+        empty.privatePlaceDeclines += 1;
+      } else if (
+        event.eventType === LifeGraphBehaviorEventType.PreciseLocationDeclined
+      ) {
+        empty.preciseLocationDeclines += 1;
+      }
+      const pattern = this.feedbackPatternFromEvent(event);
+      if (pattern) empty.feedbackPatterns.push(pattern);
+    }
+    for (const score of scores) empty.scoreByKey.set(score.signalKey, score);
+    empty.feedbackPatterns = Array.from(new Set(empty.feedbackPatterns)).slice(
+      0,
+      4,
+    );
+    return empty;
+  }
+
+  private behaviorSignalInsights(input: {
+    activityLevel: LifeGraphDynamicSignalsDto['activityLevel'];
+    socialEnergy: LifeGraphDynamicSignalsDto['socialEnergy'];
+    completionTrend: LifeGraphDynamicSignalsDto['completionTrend'];
+    cancellationPattern: LifeGraphDynamicSignalsDto['cancellationPattern'];
+    nightBoundary: LifeGraphDynamicSignalsDto['nightBoundary'];
+    locationPreference: LifeGraphDynamicSignalsDto['locationPreference'];
+  }): string[] {
+    const insights: string[] = [];
+    if (input.activityLevel === 'active') {
+      insights.push(
+        '你最近对推荐和活动的反馈更活跃，我会适当提高及时机会的权重。',
+      );
+    } else if (input.activityLevel === 'quiet') {
+      insights.push('你最近互动偏少，我会减少打扰，优先给少量但更准的推荐。');
+    }
+    if (input.socialEnergy === 'sports') {
+      insights.push('你最近更适合从跑步、散步或轻运动开始认识人。');
+    } else if (input.socialEnergy === 'social') {
+      insights.push('你最近更适合轻松聊天和低压力认识新朋友。');
+    }
+    if (input.completionTrend === 'reliable') {
+      insights.push('你的约练完成趋势不错，守时和同区域搭子的权重会更高。');
+    } else if (
+      input.completionTrend === 'fragile' ||
+      input.cancellationPattern === 'frequent'
+    ) {
+      insights.push('你最近更适合可改期、低压力、时间更宽松的安排。');
+    }
+    if (input.nightBoundary === 'avoids_late_private') {
+      insights.push('你对深夜或私人场所有清晰边界，首次见面会优先公共场所。');
+    }
+    if (input.locationPreference === 'same_school_or_area') {
+      insights.push('你更容易接受同校或活动区域接近的人。');
+    }
+    return insights;
+  }
+
+  private async recalculateSignalScores(
+    userId: number,
+    eventId: number | null = null,
+  ): Promise<void> {
+    if (!this.behaviorEvents || !this.signalScores) return;
+    const events = await this.behaviorEvents.find({
+      where: { userId },
+      order: { createdAt: 'DESC', id: 'DESC' },
+      take: 120,
+    });
+    const existing = await this.signalScores.find({ where: { userId } });
+    const existingByKey = new Map(
+      existing.map((score) => [score.signalKey, score]),
+    );
+    const drafts = this.deriveSignalScoreDrafts(events);
+    const before = Object.fromEntries(
+      existing.map((score) => [score.signalKey, score.score]),
+    );
+    const after: Record<string, number> = {};
+
+    for (const draft of drafts) {
+      const current =
+        existingByKey.get(draft.signalKey) ??
+        this.signalScores.create({ userId, signalKey: draft.signalKey });
+      current.score = this.clampScore(draft.score);
+      current.confidence = Math.max(0, Math.min(1, draft.confidence));
+      current.source = 'rules_v1';
+      current.explanation = draft.explanation;
+      current.evidence = draft.evidence;
+      current.enabledForMatching =
+        current.enabledForMatching === false
+          ? false
+          : (draft.enabledForMatching ?? true);
+      current.correctionCount = current.correctionCount ?? 0;
+      current.lastCalculatedAt = new Date();
+      const saved = await this.signalScores.save(current);
+      after[saved.signalKey] = saved.score;
+    }
+
+    await this.writeUpdateAudit({
+      userId,
+      updateType: 'signal_scores_recalculated',
+      source: 'rules_v1',
+      before,
+      after,
+      userFacingSummary:
+        '我根据你最近的行为反馈，更新了生活节奏和推荐偏好判断。',
+      eventId,
+    });
+  }
+
+  private deriveSignalScoreDrafts(
+    events: LifeGraphBehaviorEvent[],
+  ): SignalScoreDraft[] {
+    const count = (type: LifeGraphBehaviorEventType) =>
+      events.filter((event) => event.eventType === type).length;
+    const hasText = (pattern: RegExp) =>
+      events.some((event) =>
+        pattern.test(
+          `${event.naturalSummary} ${this.signalText(event.metadata)}`,
+        ),
+      );
+    const completed = count(LifeGraphBehaviorEventType.ActivityCompleted);
+    const cancelled = count(LifeGraphBehaviorEventType.ActivityCancelled);
+    const noShow = count(LifeGraphBehaviorEventType.ActivityNoShow);
+    const liked = count(LifeGraphBehaviorEventType.CandidateLiked);
+    const disliked = count(LifeGraphBehaviorEventType.CandidateDisliked);
+    const positive = count(LifeGraphBehaviorEventType.ActivityReviewedPositive);
+    const negative = count(LifeGraphBehaviorEventType.ActivityReviewedNegative);
+    const activeEvents = events.filter((event) => {
+      const ageMs = Date.now() - event.createdAt.getTime();
+      return ageMs <= 30 * 24 * 60 * 60 * 1000;
+    }).length;
+    const sportsEvidence = hasText(
+      /跑步|慢跑|散步|运动|健身|训练|球|骑行|游泳/i,
+    );
+    const lowPressureEvidence = hasText(/低压力|轻松|慢热|先聊|散步|慢跑/i);
+    const sameSchoolEvidence = hasText(/同校|学校|大学|校园|青岛大学/i);
+    const sameCityEvidence = hasText(/同城|附近|青岛|城市/i);
+    const commonInterestEvidence = hasText(/同兴趣|共同兴趣|都喜欢|也喜欢/i);
+    const nightDeclines = count(LifeGraphBehaviorEventType.NightMeetDeclined);
+    const privateDeclines = count(
+      LifeGraphBehaviorEventType.PrivatePlaceDeclined,
+    );
+    const locationDeclines = count(
+      LifeGraphBehaviorEventType.PreciseLocationDeclined,
+    );
+
+    return [
+      {
+        signalKey: LifeGraphSignalKey.RecentActivity,
+        score: 30 + activeEvents * 8,
+        confidence: activeEvents > 0 ? 0.75 : 0.35,
+        explanation:
+          activeEvents > 0
+            ? '你最近有真实互动记录，可以更及时地推荐机会。'
+            : '近期行为样本还少，我会先保守推荐。',
+        evidence: { activeEvents },
+      },
+      {
+        signalKey: LifeGraphSignalKey.Reliability,
+        score:
+          completed + cancelled + noShow > 0
+            ? 62 + completed * 14 - cancelled * 18 - noShow * 25
+            : 50,
+        confidence: completed + cancelled + noShow > 0 ? 0.78 : 0.3,
+        explanation: '根据约练完成、取消和爽约记录估算履约稳定度。',
+        evidence: { completed, cancelled, noShow },
+      },
+      {
+        signalKey: LifeGraphSignalKey.CancellationRisk,
+        score: cancelled * 25 + noShow * 35,
+        confidence: cancelled + noShow > 0 ? 0.72 : 0.35,
+        explanation:
+          cancelled + noShow > 0
+            ? '你最近有取消或未完成记录，需要更宽松的活动安排。'
+            : '目前没有明显取消风险。',
+        evidence: { cancelled, noShow },
+      },
+      {
+        signalKey: LifeGraphSignalKey.SportsAffinity,
+        score: sportsEvidence ? 82 : 42,
+        confidence: sportsEvidence ? 0.75 : 0.35,
+        explanation: sportsEvidence
+          ? '你的近期行为更偏运动型社交。'
+          : '还没有足够行为证明你最近偏运动。',
+        evidence: { sportsEvidence },
+      },
+      {
+        signalKey: LifeGraphSignalKey.SocialOpenness,
+        score: 45 + (liked + positive) * 12 - (disliked + negative) * 10,
+        confidence: liked + positive + disliked + negative > 0 ? 0.72 : 0.35,
+        explanation: '根据候选反馈和活动评价估算近期社交开放度。',
+        evidence: { liked, positive, disliked, negative },
+      },
+      {
+        signalKey: LifeGraphSignalKey.LowPressurePreference,
+        score: lowPressureEvidence ? 84 : 46,
+        confidence: lowPressureEvidence ? 0.76 : 0.35,
+        explanation: lowPressureEvidence
+          ? '你最近更适合低压力、轻松开始的社交。'
+          : '低压力偏好还需要更多反馈确认。',
+        evidence: { lowPressureEvidence },
+      },
+      {
+        signalKey: LifeGraphSignalKey.SafetyBoundaryClarity,
+        score: nightDeclines + privateDeclines + locationDeclines > 0 ? 88 : 50,
+        confidence:
+          nightDeclines + privateDeclines + locationDeclines > 0 ? 0.82 : 0.35,
+        explanation:
+          nightDeclines + privateDeclines + locationDeclines > 0
+            ? '你的线下安全边界比较清晰，推荐会优先公共场所。'
+            : '首次见面安全边界还需要继续确认。',
+        evidence: { nightDeclines, privateDeclines, locationDeclines },
+      },
+      {
+        signalKey: LifeGraphSignalKey.NightBoundary,
+        score: nightDeclines > 0 ? 86 : 40,
+        confidence: nightDeclines > 0 ? 0.8 : 0.35,
+        explanation:
+          nightDeclines > 0
+            ? '你经常拒绝深夜活动，我会降低晚间见面推荐。'
+            : '还没有稳定的深夜活动偏好记录。',
+        evidence: { nightDeclines },
+      },
+      {
+        signalKey: LifeGraphSignalKey.SameSchoolPreference,
+        score: sameSchoolEvidence ? 82 : 42,
+        confidence: sameSchoolEvidence ? 0.74 : 0.35,
+        explanation: sameSchoolEvidence
+          ? '你对同校或校园附近的人反馈更好。'
+          : '同校偏好还不明显。',
+        evidence: { sameSchoolEvidence },
+      },
+      {
+        signalKey: LifeGraphSignalKey.SameCityPreference,
+        score: sameCityEvidence ? 74 : 45,
+        confidence: sameCityEvidence ? 0.68 : 0.35,
+        explanation: sameCityEvidence
+          ? '你对同城或附近活动区域更敏感。'
+          : '同城偏好还不明显。',
+        evidence: { sameCityEvidence },
+      },
+      {
+        signalKey: LifeGraphSignalKey.CommonInterestPreference,
+        score: commonInterestEvidence ? 76 : 48,
+        confidence: commonInterestEvidence ? 0.68 : 0.35,
+        explanation: commonInterestEvidence
+          ? '共同兴趣对你最近的推荐解释更重要。'
+          : '共同兴趣权重暂时保持中等。',
+        evidence: { commonInterestEvidence },
+      },
+    ];
+  }
+
+  private feedbackPatternFromEvent(
+    event: LifeGraphBehaviorEvent,
+  ): string | null {
+    const text = `${event.naturalSummary} ${this.signalText(event.metadata)}`;
+    if (/低压力|轻松|慢热|先聊|散步|慢跑/.test(text))
+      return '更喜欢低压力、轻松开始的社交';
+    if (/跑步|慢跑|散步|运动/.test(text)) return '更偏运动型社交';
+    if (/同校|学校|大学|校园|青岛大学/.test(text))
+      return '对同校或校园附近的人反馈更好';
+    if (/公共|公园|操场|不共享精确位置/.test(text))
+      return '更重视公共场所和位置边界';
+    return null;
+  }
+
+  private async readCorrectionTarget(
+    userId: number,
+    input: CorrectLifeGraphDto,
+  ): Promise<Record<string, unknown>> {
+    if (input.signalKey && this.signalScores) {
+      const score = await this.signalScores.findOne({
+        where: { userId, signalKey: input.signalKey },
+      });
+      return score
+        ? {
+            signalKey: score.signalKey,
+            score: score.score,
+            confidence: score.confidence,
+            enabledForMatching: score.enabledForMatching,
+          }
+        : {};
+    }
+    if (input.category && input.fieldKey) {
+      const field = await this.fields.findOne({
+        where: { userId, category: input.category, fieldKey: input.fieldKey },
+      });
+      return field
+        ? {
+            category: field.category,
+            fieldKey: field.fieldKey,
+            fieldValue: field.fieldValue,
+            revoked: field.revoked,
+            enabledForMatching: field.enabledForMatching,
+          }
+        : {};
+    }
+    return {};
+  }
+
+  private async applyCorrection(
+    userId: number,
+    input: CorrectLifeGraphDto,
+    correctionId: number,
+    previousValue: Record<string, unknown>,
+  ): Promise<void> {
+    const correctedValue = input.correctedValue ?? {};
+    if (input.signalKey && this.signalScores) {
+      const score = await this.signalScores.findOne({
+        where: { userId, signalKey: input.signalKey },
+      });
+      if (score) {
+        if (input.correctionType === LifeGraphCorrectionType.NotTrue) {
+          score.enabledForMatching = false;
+          score.confidence = Math.min(score.confidence, 0.35);
+        } else if (
+          input.correctionType === LifeGraphCorrectionType.PreferMore
+        ) {
+          score.score = this.clampScore(score.score + 12);
+          score.confidence = Math.max(score.confidence, 0.75);
+        } else if (
+          input.correctionType === LifeGraphCorrectionType.PreferLess
+        ) {
+          score.score = this.clampScore(score.score - 12);
+          score.confidence = Math.max(score.confidence, 0.75);
+        }
+        score.correctionCount = (score.correctionCount ?? 0) + 1;
+        score.explanation = input.note;
+        await this.signalScores.save(score);
+      }
+    }
+
+    if (
+      input.category &&
+      input.fieldKey &&
+      Object.prototype.hasOwnProperty.call(correctedValue, 'fieldValue')
+    ) {
+      await this.upsertField(
+        userId,
+        {
+          category: input.category,
+          fieldKey: input.fieldKey,
+          fieldValue: correctedValue.fieldValue,
+          confirmedByUser: true,
+          reason: input.note,
+        },
+        {
+          source: LifeGraphFieldSource.Manual,
+          confidence: 1,
+          action: LifeGraphAuditAction.Updated,
+          reason: input.note || 'user_corrected_life_graph',
+          confirmedByUser: true,
+          allowManualOverride: true,
+        },
+      );
+    } else if (
+      input.category &&
+      input.fieldKey &&
+      input.correctionType === LifeGraphCorrectionType.NotTrue
+    ) {
+      const field = await this.fields.findOne({
+        where: {
+          userId,
+          category: input.category,
+          fieldKey: input.fieldKey,
+          revoked: false,
+        },
+      });
+      if (field) {
+        field.revoked = true;
+        field.revokedAt = new Date();
+        await this.fields.save(field);
+      }
+    }
+
+    await this.writeUpdateAudit({
+      userId,
+      updateType: 'user_correction',
+      source: 'user',
+      status: LifeGraphUpdateAuditStatus.Corrected,
+      before: previousValue,
+      after: correctedValue,
+      userFacingSummary: input.note,
+      correctionId,
+    });
+  }
+
+  private naturalEventSummary(
+    eventType: LifeGraphBehaviorEventType,
+    metadata: Record<string, unknown>,
+  ): string {
+    const activity = cleanDisplayText(metadata.activityType, '');
+    if (eventType === LifeGraphBehaviorEventType.ActivityCompleted) {
+      return activity
+        ? `你完成了一次${activity}活动。`
+        : '你完成了一次线下活动。';
+    }
+    if (eventType === LifeGraphBehaviorEventType.ActivityCancelled) {
+      return '你取消了一次活动，我会优先考虑更宽松的时间安排。';
+    }
+    if (eventType === LifeGraphBehaviorEventType.CandidateLiked) {
+      return '你对一个候选人给出了正向反馈。';
+    }
+    if (eventType === LifeGraphBehaviorEventType.CandidateDisliked) {
+      return '你不喜欢这次推荐，我会降低类似推荐权重。';
+    }
+    if (eventType === LifeGraphBehaviorEventType.NightMeetDeclined) {
+      return '你拒绝了深夜见面，我会降低晚间活动推荐。';
+    }
+    if (eventType === LifeGraphBehaviorEventType.PrivatePlaceDeclined) {
+      return '你拒绝了私人场所见面，我会优先公共场所。';
+    }
+    if (eventType === LifeGraphBehaviorEventType.PreciseLocationDeclined) {
+      return '你拒绝共享精确位置，我会继续保护位置边界。';
+    }
+    return '我记录了一条新的生活偏好反馈。';
+  }
+
+  private async writeUpdateAudit(input: {
+    userId: number;
+    updateType: string;
+    source: string;
+    before: Record<string, unknown>;
+    after: Record<string, unknown>;
+    userFacingSummary: string;
+    status?: LifeGraphUpdateAuditStatus;
+    reversible?: boolean;
+    eventId?: number | null;
+    correctionId?: number | null;
+  }): Promise<void> {
+    if (!this.updateAudits) return;
+    await this.updateAudits.save(
+      this.updateAudits.create({
+        userId: input.userId,
+        updateType: input.updateType,
+        source: input.source,
+        status: input.status ?? LifeGraphUpdateAuditStatus.Applied,
+        before: input.before,
+        after: input.after,
+        userFacingSummary: input.userFacingSummary,
+        reversible: input.reversible ?? true,
+        eventId: input.eventId ?? null,
+        correctionId: input.correctionId ?? null,
+        revokedAt: null,
+      }),
+    );
+  }
+
+  private toBehaviorEventDto(
+    event: LifeGraphBehaviorEvent,
+  ): LifeGraphBehaviorEventDto {
+    return {
+      id: event.id,
+      userId: event.userId,
+      eventType: event.eventType,
+      source: event.source,
+      taskId: event.taskId,
+      activityId: event.activityId,
+      candidateUserId: event.candidateUserId,
+      metadata: event.metadata,
+      naturalSummary: event.naturalSummary,
+      weight: event.weight,
+      createdAt: event.createdAt.toISOString(),
+    };
+  }
+
+  private toSignalScoreDto(
+    score: LifeGraphSignalScore,
+  ): LifeGraphSignalScoreDto {
+    return {
+      id: score.id,
+      userId: score.userId,
+      signalKey: score.signalKey,
+      score: score.score,
+      confidence: score.confidence,
+      source: score.source,
+      explanation: score.explanation,
+      evidence: score.evidence,
+      enabledForMatching: score.enabledForMatching,
+      correctionCount: score.correctionCount,
+      lastCalculatedAt: score.lastCalculatedAt?.toISOString() ?? null,
+      createdAt: score.createdAt.toISOString(),
+      updatedAt: score.updatedAt.toISOString(),
+    };
+  }
+
+  private toUpdateAuditDto(
+    audit: LifeGraphUpdateAudit,
+  ): LifeGraphUpdateAuditDto {
+    return {
+      id: audit.id,
+      userId: audit.userId,
+      updateType: audit.updateType,
+      source: audit.source,
+      status: audit.status,
+      before: audit.before,
+      after: audit.after,
+      userFacingSummary: audit.userFacingSummary,
+      reversible: audit.reversible,
+      eventId: audit.eventId,
+      correctionId: audit.correctionId,
+      revokedAt: audit.revokedAt?.toISOString() ?? null,
+      createdAt: audit.createdAt.toISOString(),
+    };
+  }
+
+  private toCorrectionDto(
+    correction: LifeGraphCorrection,
+  ): LifeGraphCorrectionDto {
+    return {
+      id: correction.id,
+      userId: correction.userId,
+      correctionType: correction.correctionType,
+      signalKey: correction.signalKey,
+      category: correction.category,
+      fieldKey: correction.fieldKey,
+      note: correction.note,
+      previousValue: correction.previousValue,
+      correctedValue: correction.correctedValue,
+      applied: correction.applied,
+      createdAt: correction.createdAt.toISOString(),
+    };
   }
 
   private signalText(value: unknown): string {

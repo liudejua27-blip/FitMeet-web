@@ -1,13 +1,20 @@
 import { UserSocialProfile } from '../users/user-social-profile.entity';
 import { LifeGraphAuditLog } from './entities/life-graph-audit-log.entity';
+import { LifeGraphBehaviorEvent } from './entities/life-graph-behavior-event.entity';
+import { LifeGraphCorrection } from './entities/life-graph-correction.entity';
 import { LifeGraphField } from './entities/life-graph-field.entity';
 import { LifeGraphProfile } from './entities/life-graph-profile.entity';
 import { LifeGraphProposal } from './entities/life-graph-proposal.entity';
+import { LifeGraphSignalScore } from './entities/life-graph-signal-score.entity';
+import { LifeGraphUpdateAudit } from './entities/life-graph-update-audit.entity';
 import { LifeGraphExtractionService } from './life-graph-extraction.service';
 import {
   LifeGraphAuditAction,
+  LifeGraphBehaviorEventType,
+  LifeGraphCorrectionType,
   LifeGraphFieldCategory,
   LifeGraphFieldSource,
+  LifeGraphSignalKey,
 } from './life-graph.enums';
 /* eslint-disable @typescript-eslint/require-await */
 import { LifeGraphService } from './life-graph.service';
@@ -131,6 +138,12 @@ function makeService(
   const fields = repo<LifeGraphField & Record<string, unknown>>();
   const auditLogs = repo<LifeGraphAuditLog & Record<string, unknown>>();
   const proposals = repo<LifeGraphProposal & Record<string, unknown>>();
+  const behaviorEvents = repo<
+    LifeGraphBehaviorEvent & Record<string, unknown>
+  >();
+  const signalScores = repo<LifeGraphSignalScore & Record<string, unknown>>();
+  const updateAudits = repo<LifeGraphUpdateAudit & Record<string, unknown>>();
+  const corrections = repo<LifeGraphCorrection & Record<string, unknown>>();
   const socialProfiles = repo<UserSocialProfile & Record<string, unknown>>(
     initialSocialProfile ? [initialSocialProfile as never] : [],
   );
@@ -141,8 +154,23 @@ function makeService(
     proposals as never,
     socialProfiles as never,
     new LifeGraphExtractionService(),
+    undefined,
+    behaviorEvents as never,
+    signalScores as never,
+    updateAudits as never,
+    corrections as never,
   );
-  return { service, profiles, fields, auditLogs, proposals };
+  return {
+    service,
+    profiles,
+    fields,
+    auditLogs,
+    proposals,
+    behaviorEvents,
+    signalScores,
+    updateAudits,
+    corrections,
+  };
 }
 
 describe('LifeGraphService', () => {
@@ -545,6 +573,22 @@ describe('LifeGraphService', () => {
     });
     expect(graph.dynamicInsights?.summary).toContain('我对你的了解');
     expect(signals.behaviorSignals.scores.lowPressureFit).toBeGreaterThan(80);
+    expect(signals.behaviorSignals.recommendationWeights).toMatchObject({
+      lowPressure: expect.any(Number),
+      sports: expect.any(Number),
+      reliability: expect.any(Number),
+      safetyBoundary: expect.any(Number),
+    });
+    expect(signals.behaviorSignals.matchingGuidance).toMatchObject({
+      shouldPreferSameSchoolOrArea: true,
+      shouldPreferLowPressure: true,
+      shouldPreferSports: true,
+      shouldAvoidNight: true,
+      shouldUsePublicPlace: true,
+    });
+    expect(signals.behaviorSignals.matchingGuidance.suggestedFilters).toEqual(
+      expect.arrayContaining(['只看同校', '只看低压力', '不要晚上']),
+    );
     expect(signals.behaviorSignals.insights.join('')).toContain('公共场所');
   });
 
@@ -707,5 +751,127 @@ describe('LifeGraphService', () => {
     expect(logged).toContain('nearbyArea');
     expect(logged).not.toContain('青岛大学宿舍楼');
     logger.mockRestore();
+  });
+
+  it('records behavior events and turns them into dynamic signal scores', async () => {
+    const { service, signalScores, updateAudits } = makeService(null);
+
+    await service.recordBehaviorEvent(1, {
+      eventType: LifeGraphBehaviorEventType.CandidateLiked,
+      metadata: {
+        tags: ['跑步', '低压力', '同校', '青岛大学'],
+      },
+      naturalSummary: '你喜欢了一个同校、低压力跑步候选人。',
+    });
+    await service.recordBehaviorEvent(1, {
+      eventType: LifeGraphBehaviorEventType.ActivityCompleted,
+      metadata: { activityType: '跑步' },
+      naturalSummary: '你完成了一次青岛大学附近的跑步约练。',
+    });
+    await service.recordBehaviorEvent(1, {
+      eventType: LifeGraphBehaviorEventType.NightMeetDeclined,
+      naturalSummary: '你拒绝了深夜见面。',
+    });
+
+    const scores = await service.getSignalScores(1);
+    const graph = await service.getLifeGraph(1);
+
+    expect(signalScores.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          signalKey: LifeGraphSignalKey.SportsAffinity,
+          score: expect.any(Number),
+        }),
+        expect.objectContaining({
+          signalKey: LifeGraphSignalKey.SameSchoolPreference,
+          score: expect.any(Number),
+        }),
+      ]),
+    );
+    expect(scores).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          signalKey: LifeGraphSignalKey.LowPressurePreference,
+        }),
+      ]),
+    );
+    expect(graph.dynamicInsights).toMatchObject({
+      socialEnergy: 'sports',
+      completionTrend: 'reliable',
+      nightBoundary: 'avoids_late_private',
+      locationPreference: 'same_school_or_area',
+      recommendationWeights: expect.objectContaining({
+        sameSchoolOrArea: expect.any(Number),
+        lowPressure: expect.any(Number),
+        sports: expect.any(Number),
+      }),
+      matchingGuidance: expect.objectContaining({
+        shouldPreferSameSchoolOrArea: true,
+        shouldPreferLowPressure: true,
+        shouldAvoidNight: true,
+      }),
+    });
+    expect(graph.dynamicInsights?.feedbackPattern).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('低压力'),
+        expect.stringContaining('运动'),
+      ]),
+    );
+    expect(updateAudits.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          updateType: 'signal_scores_recalculated',
+          userFacingSummary: expect.stringContaining('行为反馈'),
+        }),
+      ]),
+    );
+  });
+
+  it('lets users correct a dynamic signal without deleting history', async () => {
+    const { service, signalScores, corrections, updateAudits } =
+      makeService(null);
+    await service.recordBehaviorEvent(1, {
+      eventType: LifeGraphBehaviorEventType.CandidateLiked,
+      naturalSummary: '你喜欢了一个同校跑步候选人。',
+    });
+
+    const correction = await service.correctLifeGraph(1, {
+      correctionType: LifeGraphCorrectionType.NotTrue,
+      signalKey: LifeGraphSignalKey.SameSchoolPreference,
+      note: '同校不是必须，只是这次刚好合适。',
+    });
+    const scores = await service.getSignalScores(1);
+
+    expect(correction).toMatchObject({
+      correctionType: LifeGraphCorrectionType.NotTrue,
+      signalKey: LifeGraphSignalKey.SameSchoolPreference,
+      applied: true,
+    });
+    expect(corrections.rows).toHaveLength(1);
+    expect(signalScores.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          signalKey: LifeGraphSignalKey.SameSchoolPreference,
+          enabledForMatching: false,
+          correctionCount: 1,
+        }),
+      ]),
+    );
+    expect(scores).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          signalKey: LifeGraphSignalKey.SameSchoolPreference,
+          enabledForMatching: false,
+        }),
+      ]),
+    );
+    expect(updateAudits.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          updateType: 'user_correction',
+          userFacingSummary: '同校不是必须，只是这次刚好合适。',
+        }),
+      ]),
+    );
   });
 });

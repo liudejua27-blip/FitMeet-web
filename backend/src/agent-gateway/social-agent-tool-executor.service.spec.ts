@@ -10,6 +10,7 @@ import {
   SocialAgentToolExecutorService,
   SocialAgentToolName,
 } from './social-agent-tool-executor.service';
+import { ActivityProofPolicy } from '../activities/entities/activity-template.entity';
 import { SceneRiskPolicyService } from './scene-risk-policy.service';
 
 type MockRepository<T extends object = Record<string, unknown>> = {
@@ -1127,6 +1128,7 @@ describe('SocialAgentToolExecutorService', () => {
       {
         targetUserId: 2,
         openConversation: true,
+        approvalId: 501,
         metadata: { confirmationSource: 'social_agent_chat' },
       },
       1,
@@ -1209,6 +1211,7 @@ describe('SocialAgentToolExecutorService', () => {
       {
         targetUserId: 2,
         openConversation: true,
+        approvalId: 501,
         metadata: { confirmationSource: 'social_agent_chat' },
       },
       1,
@@ -1247,6 +1250,7 @@ describe('SocialAgentToolExecutorService', () => {
       {
         candidate: { candidateUserId: 3 },
         openConversation: true,
+        approvalId: 501,
         metadata: { confirmationSource: 'social_agent_chat' },
       },
       1,
@@ -1300,13 +1304,13 @@ describe('SocialAgentToolExecutorService', () => {
     const first = await service.executeToolAction(
       100,
       SocialAgentToolName.ConnectCandidate,
-      { candidateUserId: 2, openConversation: true },
+      { candidateUserId: 2, openConversation: true, approvalId: 501 },
       1,
     );
     const second = await service.executeToolAction(
       100,
       SocialAgentToolName.ConnectCandidate,
-      { candidateUserId: 3, openConversation: true },
+      { candidateUserId: 3, openConversation: true, approvalId: 502 },
       1,
     );
 
@@ -1352,7 +1356,7 @@ describe('SocialAgentToolExecutorService', () => {
     const call = await service.executeToolAction(
       100,
       SocialAgentToolName.ConnectCandidate,
-      { publicIntentId: 'intent_5', openConversation: true },
+      { publicIntentId: 'intent_5', openConversation: true, approvalId: 501 },
       1,
     );
 
@@ -1437,6 +1441,171 @@ describe('SocialAgentToolExecutorService', () => {
       statusCode: 403,
     });
     expect(friends.ensureFollowing).not.toHaveBeenCalled();
+  });
+
+  it('rejects add_friend without an approved confirmation', async () => {
+    const { service, taskRepo, friends, messages } = makeService();
+    taskRepo.findOne.mockResolvedValue(
+      makeTask({
+        agentConnectionId: null,
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      }),
+    );
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.AddFriend,
+      { targetUserId: 2, openConversation: true },
+      1,
+    );
+
+    expect(call.status).toBe('blocked');
+    expect(call.error).toMatchObject({
+      code: 'APPROVAL_REQUIRED',
+      statusCode: 403,
+    });
+    expect(friends.ensureFollowing).not.toHaveBeenCalled();
+    expect(messages.startConversation).not.toHaveBeenCalled();
+  });
+
+  it('rejects create_activity without an approved confirmation', async () => {
+    const { service, taskRepo, activities } = makeService();
+    taskRepo.findOne.mockResolvedValue(
+      makeTask({
+        agentConnectionId: null,
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      }),
+    );
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.CreateActivity,
+      {
+        targetUserId: 2,
+        title: 'Saturday easy run',
+        locationName: 'Qingdao University track',
+        city: 'Qingdao',
+      },
+      1,
+    );
+
+    expect(call.status).toBe('blocked');
+    expect(call.error).toMatchObject({
+      code: 'APPROVAL_REQUIRED',
+      statusCode: 403,
+    });
+    expect(activities.create).not.toHaveBeenCalled();
+  });
+
+  it('creates an approved activity with Meet Loop safety defaults', async () => {
+    const { service, taskRepo, activities } = makeService();
+    taskRepo.findOne.mockResolvedValue(
+      makeTask({
+        agentConnectionId: 7,
+        permissionMode: AgentTaskPermissionMode.LimitedAuto,
+      }),
+    );
+    activities.create.mockResolvedValue({
+      id: 77,
+      status: 'pending_confirm',
+      participantIds: [1, 2],
+    });
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.CreateActivity,
+      {
+        targetUserId: 2,
+        title: 'Saturday easy run',
+        city: 'Qingdao',
+        lat: 36.0671,
+        lng: 120.3826,
+        approvalId: 501,
+      },
+      1,
+    );
+
+    expect(call.status).toBe('succeeded');
+    expect(activities.create).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        title: 'Saturday easy run',
+        city: 'Qingdao',
+        locationName: '公共场所待确认',
+        lat: undefined,
+        lng: undefined,
+        durationMinutes: 45,
+        invitedUserId: 2,
+        proofRequired: true,
+        proofPolicy: ActivityProofPolicy.MutualOrProof,
+        icebreakerTasks: expect.arrayContaining([
+          expect.stringContaining('活动结束后'),
+        ]),
+      }),
+    );
+  });
+
+  it('rejects share_location without an approved confirmation', async () => {
+    const { service, taskRepo } = makeService();
+    taskRepo.findOne.mockResolvedValue(
+      makeTask({
+        agentConnectionId: null,
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      }),
+    );
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.ShareLocation,
+      {
+        targetUserId: 2,
+        preciseLocation: true,
+        locationText: 'current live location',
+      },
+      1,
+    );
+
+    expect(call.status).toBe('blocked');
+    expect(call.error).toMatchObject({
+      code: 'APPROVAL_REQUIRED',
+      statusCode: 403,
+    });
+    expect(call.output).toBeNull();
+  });
+
+  it('drafts an opener as a confirmation-ready Meet Loop step only', async () => {
+    const { service, taskRepo, ai, messages, friends, activities } =
+      makeService();
+    taskRepo.findOne.mockResolvedValue(
+      makeTask({ permissionMode: AgentTaskPermissionMode.Assist }),
+    );
+    ai.generateInviteMessage.mockResolvedValue(
+      '你好，我看到你也喜欢周末下午跑步，可以先在公共场所轻松慢跑一圈。',
+    );
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.DraftOpener,
+      {
+        request: { activityType: 'running' },
+        candidate: { targetUserId: 2, displayName: '小林' },
+      },
+      1,
+    );
+
+    expect(call.status).toBe('succeeded');
+    expect(call.output).toMatchObject({
+      message: expect.stringContaining('公共场所'),
+      meetLoopStage: 'opener_drafted',
+      nextStep: 'user_confirmation_required',
+      confirmation: expect.objectContaining({
+        actionType: 'send_message',
+        primaryAction: '确认发送',
+      }),
+    });
+    expect(messages.sendMessage).not.toHaveBeenCalled();
+    expect(friends.ensureFollowing).not.toHaveBeenCalled();
+    expect(activities.create).not.toHaveBeenCalled();
   });
 
   it('fails real social actions explicitly when the task is not bound to an agent connection', async () => {

@@ -121,6 +121,8 @@ export class SocialAgentIntentRouterService {
       );
     const wantsCandidateRefresh =
       /(换一批|换几个|更多|还有|更近|重新找|再找|扩大|放宽)/i.test(text);
+    const wantsCandidateFilterRefinement =
+      this.hasCandidateFilterRefinement(message);
     const wantsSocialSearch =
       !profileOnlyUpdate &&
       /(帮我找|给我找|想找|想认识|找一个|找个|找人|找.*搭子|搭子.*有吗|有合适的人吗|合适的人|伙伴|好友|对象|同城朋友|匹配|搜索候选|推荐.*人|附近.*人|同城.*人|真实用户|约练用户|发布过约练|约练卡片|跑步搭子|拍照搭子|一起.*(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|骑行|city\s*walk|citywalk)|周末.*(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|骑行|city\s*walk|citywalk))/i.test(
@@ -186,6 +188,14 @@ export class SocialAgentIntentRouterService {
       return this.result('social_search', 0.93, entities, {
         shouldSearch: true,
         shouldReplan: hasTask,
+        replyStrategy: 'search_candidates',
+      });
+    }
+
+    if ((hasCandidates || hasTask) && wantsCandidateFilterRefinement) {
+      return this.result('candidate_followup', 0.9, entities, {
+        shouldSearch: true,
+        shouldReplan: true,
         replyStrategy: 'search_candidates',
       });
     }
@@ -639,6 +649,18 @@ export class SocialAgentIntentRouterService {
       'safety_or_boundary',
       'unknown',
     ].includes(String(value));
+  }
+
+  private hasCandidateFilterRefinement(message: string): boolean {
+    const text = cleanDisplayText(message, '').toLowerCase();
+    return (
+      /(只看|优先|换成|改成|不要|别|不想要|不喜欢|不想看|过滤|筛选)/i.test(
+        text,
+      ) &&
+      /(同校|校内|校园|大学|不要晚上|别太晚|白天|周末下午|散步|走走|慢跑|低压力|轻松|不尴尬|慢热|这个类型|这种类型|school|campus|walk|jog|low\s*pressure)/i.test(
+        text,
+      )
+    );
   }
 
   private allowedReplyStrategy(

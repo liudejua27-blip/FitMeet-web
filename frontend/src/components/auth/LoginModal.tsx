@@ -45,8 +45,12 @@ export function LoginModal() {
 
   if (!showLoginModal) return null;
 
-  const title = mode === 'login' ? '登录 FitMeet' : '创建 FitMeet 账号';
-  const submitLabel = mode === 'login' ? '登录' : '注册并登录';
+  const title = mode === 'login' ? '回到 FitMeet' : '创建你的 FitMeet';
+  const subtitle =
+    mode === 'login'
+      ? '继续你的约练、匹配和 Life Graph。'
+      : '留下一个名字，让别人知道该怎么称呼你。';
+  const submitLabel = mode === 'login' ? '继续进入' : '创建并进入';
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -80,7 +84,7 @@ export function LoginModal() {
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/72 px-4 py-6 backdrop-blur-md"
+      className="login-modal-shell"
       onMouseDown={handleBackdropClick}
     >
       <section
@@ -89,38 +93,39 @@ export function LoginModal() {
         aria-modal="true"
         aria-labelledby="login-modal-title"
         tabIndex={-1}
-        className="w-full max-w-[430px] rounded-xl border border-white/10 bg-[#15100d] p-5 text-cream shadow-2xl outline-none sm:p-6"
+        className="login-modal-card"
       >
-        <div className="mb-5 flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-lime">
-              FitMeet
-            </p>
-            <h2 id="login-modal-title" className="mt-2 text-2xl font-black">
-              {title}
-            </h2>
+        <div className="login-modal-header">
+          <div className="login-modal-brand">
+            <span>F</span>
+            <div>
+              <strong>FitMeet</strong>
+              <small>Human plans, held lightly</small>
+            </div>
           </div>
           <button
             type="button"
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 text-xl leading-none text-textMuted transition hover:border-lime/40 hover:text-cream"
+            className="login-modal-close"
             aria-label="关闭登录窗口"
             onClick={handleClose}
           >
-            x
+            ×
           </button>
         </div>
 
-        <div className="mb-5 grid grid-cols-2 rounded-lg border border-white/10 bg-white/[0.04] p-1">
+        <div className="login-modal-copy">
+          <h2 id="login-modal-title">{title}</h2>
+          <p>{subtitle}</p>
+        </div>
+
+        <div className="login-modal-tabs" role="tablist" aria-label="账号入口">
           {(['login', 'register'] as const).map((item) => (
             <button
               key={item}
               type="button"
-              className={clsx(
-                'rounded-md px-3 py-2 text-sm font-black transition',
-                mode === item
-                  ? 'bg-lime text-white shadow-glow'
-                  : 'text-textMuted hover:text-cream',
-              )}
+              role="tab"
+              aria-selected={mode === item}
+              className={clsx(mode === item && 'is-active')}
               onClick={() => handleModeChange(item)}
             >
               {item === 'login' ? '登录' : '注册'}
@@ -128,12 +133,11 @@ export function LoginModal() {
           ))}
         </div>
 
-        <form className="grid gap-4" onSubmit={handleSubmit}>
+        <form className="login-modal-form" onSubmit={handleSubmit}>
           {mode === 'register' && (
-            <label className="grid gap-2 text-sm font-bold text-textMuted">
-              昵称
+            <label>
+              <span>昵称</span>
               <input
-                className="h-12 rounded-lg border border-white/10 bg-black/30 px-4 text-base text-cream outline-none transition placeholder:text-textSofter focus:border-lime/60"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 autoComplete="name"
@@ -143,10 +147,9 @@ export function LoginModal() {
             </label>
           )}
 
-          <label className="grid gap-2 text-sm font-bold text-textMuted">
-            邮箱
+          <label>
+            <span>邮箱</span>
             <input
-              className="h-12 rounded-lg border border-white/10 bg-black/30 px-4 text-base text-cream outline-none transition placeholder:text-textSofter focus:border-lime/60"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               autoComplete="email"
@@ -155,10 +158,9 @@ export function LoginModal() {
             />
           </label>
 
-          <label className="grid gap-2 text-sm font-bold text-textMuted">
-            密码
+          <label>
+            <span>密码</span>
             <input
-              className="h-12 rounded-lg border border-white/10 bg-black/30 px-4 text-base text-cream outline-none transition placeholder:text-textSofter focus:border-lime/60"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
@@ -169,7 +171,7 @@ export function LoginModal() {
           </label>
 
           {(localError || error) && (
-            <div className="rounded-lg border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-100">
+            <div className="login-modal-error">
               {localError || error}
             </div>
           )}
@@ -177,29 +179,31 @@ export function LoginModal() {
           <button
             type="submit"
             disabled={loading}
-            className="mt-1 h-12 rounded-lg bg-lime px-5 text-sm font-black text-white transition hover:bg-brand2 hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-60"
+            className="login-modal-submit"
           >
-            {loading ? '处理中...' : submitLabel}
+            {loading ? '正在进入...' : submitLabel}
           </button>
         </form>
 
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-sm">
+        <div className="login-modal-footer">
           <button
             type="button"
-            className="font-bold text-lime transition hover:text-brand2"
             onClick={() =>
               handleModeChange(mode === 'login' ? 'register' : 'login')
             }
           >
-            {mode === 'login' ? '没有账号？立即注册' : '已有账号？去登录'}
+            {mode === 'login' ? '还没有账号' : '已有账号'}
           </button>
           <Link
             to="/forgot-password"
-            className="font-bold text-textMuted transition hover:text-cream"
             onClick={handleClose}
           >
             忘记密码
           </Link>
+        </div>
+
+        <div className="login-modal-note" aria-hidden="true">
+          <span>你的联系方式、精确位置和画像更新都不会自动公开。</span>
         </div>
       </section>
     </div>

@@ -75,6 +75,12 @@ import { PersonalizationService } from './response-quality/personalization.servi
 import { SafetyCopyService } from './response-quality/safety-copy.service';
 import { TonePolicyService } from './response-quality/tone-policy.service';
 import { AgentQualityEvaluatorService } from './agent-quality/agent-quality-evaluator.service';
+import { AgentSessionAssemblerService } from './agent-session-assembler.service';
+import { ConfirmationGuardService } from './confirmation-guard.service';
+import { AgentCardAssemblerService } from './response-quality/agent-card-assembler.service';
+import { DebugEnvelopeBuilderService } from './response-quality/debug-envelope-builder.service';
+import { LightStatusMapperService } from './response-quality/light-status-mapper.service';
+import { UserFacingResponseSanitizerService } from './response-quality/user-facing-response-sanitizer.service';
 import { MatchModule } from '../match/match.module';
 import { AgentApprovalRequest } from './entities/agent-approval-request.entity';
 import { AgentSettings } from './entities/agent-settings.entity';
@@ -165,6 +171,12 @@ import { RealtimeModule } from '../realtime/realtime.module';
     PersonalizationService,
     CardCopywriterService,
     AgentQualityEvaluatorService,
+    AgentSessionAssemblerService,
+    AgentCardAssemblerService,
+    LightStatusMapperService,
+    UserFacingResponseSanitizerService,
+    DebugEnvelopeBuilderService,
+    ConfirmationGuardService,
     FitMeetAgentToolRegistryService,
     SocialAgentPlannerService,
     SocialAgentIntentRouterService,
@@ -220,6 +232,12 @@ import { RealtimeModule } from '../realtime/realtime.module';
     CandidateExplanationService,
     SceneRiskPolicyService,
     AgentQualityEvaluatorService,
+    AgentSessionAssemblerService,
+    AgentCardAssemblerService,
+    LightStatusMapperService,
+    UserFacingResponseSanitizerService,
+    DebugEnvelopeBuilderService,
+    ConfirmationGuardService,
     FitMeetAgentToolRegistryService,
     SocialAgentPlannerService,
     SocialAgentIntentRouterService,

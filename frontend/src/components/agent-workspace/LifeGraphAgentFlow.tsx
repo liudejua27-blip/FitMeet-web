@@ -113,7 +113,7 @@ export function LifeGraphQuickActions({
   onShowResult: (type: Exclude<QuickResult, null>) => void;
 }) {
   return (
-    <div className="life-agent-actions" aria-label="Life Graph Agent 快捷任务">
+    <div className="life-agent-actions" aria-label="你可以这样问我">
       <button type="button" onClick={onStartOnboarding}>完善 Life Graph</button>
       <button type="button" onClick={onStartMatch}>找附近搭子</button>
       <button type="button" onClick={() => onShowResult('rhythm')}>分析我的生活节奏</button>
@@ -165,7 +165,7 @@ export function LifeGraphOnboardingModal({
         fields: buildManualFields(form),
       });
       setCompleteness(response.completeness);
-      setStatus('Life Graph 已初步完成。再回答几个关键问题，我会生成可确认的画像更新。');
+      setStatus('我已经初步了解你了。再回答几个关键问题，我会生成可确认的画像更新。');
     } catch {
       setStatus('保存没有成功，请确认已登录后再试一次。');
     }
@@ -176,7 +176,7 @@ export function LifeGraphOnboardingModal({
       setStatus('请先回答 2-3 个关键缺失项。');
       return;
     }
-    setStatus('正在识别可更新的画像字段...');
+    setStatus('正在整理你愿意补充的信息...');
     try {
       const nextProposal = await lifeGraphApi.extractFromChat({
         message: followupAnswer.trim(),
@@ -199,7 +199,7 @@ export function LifeGraphOnboardingModal({
     try {
       const saved = await lifeGraphApi.confirmUpdate({ proposalId: proposal.proposalId });
       setProposal(saved);
-      setStatus('已保存到 Life Graph，并写入 audit log。');
+      setStatus('已保存。你之后可以随时查看、修改或撤回。');
       const latest = await lifeGraphApi.getCompleteness();
       setCompleteness(latest);
     } catch {
@@ -213,7 +213,7 @@ export function LifeGraphOnboardingModal({
     try {
       await lifeGraphApi.rejectUpdate({ proposalId: proposal.proposalId, reason: 'user_rejected_from_agent_onboarding' });
       setProposal(null);
-      setStatus('已不保存这次 AI 识别结果。');
+      setStatus('已不保存这次识别结果。');
     } catch {
       setStatus('暂时无法更新状态，请稍后再试。');
     }
@@ -224,9 +224,9 @@ export function LifeGraphOnboardingModal({
       <section className="life-modal" role="dialog" aria-modal="true" aria-labelledby="life-modal-title">
         <header className="life-modal__header">
           <div>
-            <span>Life Graph Agent</span>
+            <span>我对你的了解</span>
             <h2 id="life-modal-title">完善你的 Life Graph</h2>
-            <p>这些信息只用于帮助 Agent 更准确地理解你、匹配合适的人和活动。你可以随时编辑、撤回或关闭。</p>
+            <p>这些信息只用于帮助我更准确地理解你、匹配合适的人和活动。你可以随时编辑、撤回或关闭。</p>
           </div>
           <button type="button" onClick={onClose} aria-label="关闭 Life Graph 完善弹窗">关闭</button>
         </header>
@@ -317,7 +317,7 @@ export function LifeGraphOnboardingStep({
           <ToggleField label="接受夜间见面" checked={form.acceptsNightMeet} onChange={(value) => set('acceptsNightMeet', value)} />
           <TextField label="不可接受行为" value={form.unacceptableBehaviors} onChange={(value) => set('unacceptableBehaviors', value)} />
           <TextField label="开场白风格偏好" value={form.openerStylePreference} onChange={(value) => set('openerStylePreference', value)} />
-          <TextField label="Agent 语气偏好" value={form.agentTonePreference} onChange={(value) => set('agentTonePreference', value)} />
+          <TextField label="助理语气偏好" value={form.agentTonePreference} onChange={(value) => set('agentTonePreference', value)} />
         </div>
       ) : null}
       {step === 4 ? (
@@ -373,7 +373,7 @@ export function LifeGraphQuestionPrompt({
   const questions = (completeness?.missingFields ?? []).slice(0, 3);
   return (
     <section className="life-followup">
-      <h3>Agent 追问</h3>
+      <h3>我还想确认</h3>
       <p>你的 Life Graph 已初步完成。为了让我更准确地帮你匹配，还缺这些关键信息：</p>
       <ol>
         {(questions.length ? questions : fallbackQuestions).map((item) => (
@@ -426,7 +426,7 @@ export function LifeGraphProposalConfirm({
 export function LifeGraphChangeSummary({ auditLogs }: { auditLogs: LifeGraphAuditLog[] }) {
   return (
     <section className="life-agent-result">
-      <span>Life Graph Changes</span>
+      <span>画像变化</span>
       <h3>最近画像变化</h3>
       <div className="life-change-list">
         {auditLogs.slice(0, 5).map((item) => (
@@ -435,7 +435,7 @@ export function LifeGraphChangeSummary({ auditLogs }: { auditLogs: LifeGraphAudi
             <p>{auditActionText(item.action)} · {displayValue(item.newValue)}</p>
           </article>
         ))}
-        {auditLogs.length === 0 ? <p>暂时没有可展示的画像更新。新的 AI 推断会先进入 proposal，确认后才写入。</p> : null}
+        {auditLogs.length === 0 ? <p>暂时没有可展示的画像更新。新的理解会先让你确认，确认后才保存。</p> : null}
       </div>
     </section>
   );
@@ -450,11 +450,11 @@ export function LifeRhythmAnalysisResult({ graph }: { graph: LifeGraphResponse |
   const weekend = displayValue(fields.get('lifestyle:weekendAvailability'));
   return (
     <section className="life-agent-result">
-      <span>Life Rhythm</span>
+      <span>生活节奏</span>
       <h3>{graph ? '基于 Life Graph 的生活节奏分析' : '正在读取你的生活节奏'}</h3>
       <p>
         {graph
-          ? `当前画像完整度 ${Math.round(graph.completeness.completenessScore)}%。Agent 会优先参考你的作息、活跃时段和周末可约时间，而不是盲目推送陌生人。`
+          ? `当前画像完整度 ${Math.round(graph.completeness.completenessScore)}%。我会优先参考你的作息、活跃时段和周末可约时间，而不是盲目推送陌生人。`
           : '登录并完善 Life Graph 后，这里会用你的真实画像生成节奏分析。'}
       </p>
       <ul>
@@ -475,12 +475,12 @@ export function WeeklyActivityRecommendation({ graph }: { graph: LifeGraphRespon
   const boundary = displayValue(fields.get('privacy_boundary:offlineMeetRequiresApproval'));
   return (
     <section className="life-agent-result">
-      <span>Weekly Suggestions</span>
+      <span>本周建议</span>
       <h3>本周活动建议</h3>
       <div className="life-recommendations">
         <article><strong>优先运动搭子</strong><p>{sports !== '未填写' ? `根据你的运动偏好：${sports}，先推荐低压力约练。` : '先完善运动偏好，再生成更准的约练建议。'}</p></article>
-        <article><strong>兴趣活动破冰</strong><p>{interests !== '未填写' || activities !== '未填写' ? `可以围绕 ${activities !== '未填写' ? activities : interests} 发起活动。` : '补充兴趣后，Agent 会推荐更自然的破冰场景。'}</p></article>
-        <article><strong>安全确认</strong><p>{boundary === '是' || boundary === 'true' ? '线下见面需要你确认，Agent 只会先生成计划。' : '建议保持线下见面确认开关，避免自动推进真实见面。'}</p></article>
+        <article><strong>兴趣活动破冰</strong><p>{interests !== '未填写' || activities !== '未填写' ? `可以围绕 ${activities !== '未填写' ? activities : interests} 发起活动。` : '补充兴趣后，我会推荐更自然的破冰场景。'}</p></article>
+        <article><strong>安全确认</strong><p>{boundary === '是' || boundary === 'true' ? '线下见面需要你确认，我只会先生成计划。' : '建议保持线下见面确认开关，避免自动推进真实见面。'}</p></article>
       </div>
     </section>
   );
