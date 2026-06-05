@@ -6,7 +6,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Not, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
 import {
   cleanDisplayText,
@@ -55,7 +55,6 @@ import {
   transitionSocialAgentState,
 } from './social-agent-memory.util';
 import { AgentApprovalService } from './agent-approval.service';
-import { AgentApprovalRequest } from './entities/agent-approval-request.entity';
 import { PublicSocialIntent } from './entities/public-social-intent.entity';
 import {
   hasSocialAgentSearchContext,
@@ -67,11 +66,7 @@ import {
   readSocialAgentConversationHistory,
 } from './social-agent-chat-memory.presenter';
 import { rememberSocialAgentConversationBrainDecision } from './social-agent-chat-brain-memory.presenter';
-import {
-  buildSocialAgentTimelineSnapshot,
-  readSocialAgentRestorableResult,
-  readSocialAgentStoredCandidateSummaries,
-} from './social-agent-chat-session.presenter';
+import { readSocialAgentStoredCandidateSummaries } from './social-agent-chat-session.presenter';
 import {
   buildSocialAgentBlockedRunResult,
   buildSocialAgentClarificationRunResult,
@@ -132,6 +127,7 @@ import type {
 } from './social-agent-chat.types';
 import { messageForSocialAgentSchemaAction } from './social-agent-card-action.presenter';
 import { SocialAgentRunProgressTracker } from './social-agent-run-progress.tracker';
+import { SocialAgentSessionRestoreService } from './social-agent-session-restore.service';
 import {
   applySocialAgentTaskMemoryForIntent,
   profileKeyForSocialAgentIntent,
@@ -179,6 +175,7 @@ export class SocialAgentChatService {
     private readonly draftSearch: SocialAgentDraftSearchService,
     private readonly recommendationResults: SocialAgentRecommendationResultService,
     private readonly activitySearch: SocialAgentActivitySearchService,
+    private readonly sessionRestore: SocialAgentSessionRestoreService,
     @Optional() private readonly brain?: SocialAgentBrainService,
     @Optional()
     private readonly memoryContext?: SocialAgentMemoryContextService,
@@ -937,8 +934,13 @@ export class SocialAgentChatService {
   async getLatestSession(
     ownerUserId: number,
   ): Promise<SocialAgentSessionSnapshot> {
-    const task = await this.findLatestRestorableTask(ownerUserId);
-    return this.buildSessionSnapshot(ownerUserId, task);
+    const task =
+      await this.sessionRestore.findLatestRestorableTask(ownerUserId);
+    return this.sessionRestore.buildSessionSnapshot({
+      ownerUserId,
+      task,
+      visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
+    });
   }
 
   async getTaskSession(
@@ -946,13 +948,18 @@ export class SocialAgentChatService {
     taskId: number,
   ): Promise<SocialAgentSessionSnapshot> {
     const task = await this.assertTaskOwner(taskId, ownerUserId);
-    return this.buildSessionSnapshot(ownerUserId, task);
+    return this.sessionRestore.buildSessionSnapshot({
+      ownerUserId,
+      task,
+      visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
+    });
   }
 
   async getCurrentTask(
     ownerUserId: number,
   ): Promise<SocialAgentCurrentTaskSnapshot | null> {
-    const task = await this.findLatestRestorableTask(ownerUserId);
+    const task =
+      await this.sessionRestore.findLatestRestorableTask(ownerUserId);
     if (!task) return null;
     const taskMemory = readSocialAgentTaskMemory(task);
     return {
@@ -974,7 +981,11 @@ export class SocialAgentChatService {
     taskId: number,
   ): Promise<SocialAgentTaskTimelineSnapshot> {
     const task = await this.assertTaskOwner(taskId, ownerUserId);
-    return this.buildTaskTimeline(ownerUserId, task);
+    return this.sessionRestore.buildTaskTimeline({
+      ownerUserId,
+      task,
+      visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
+    });
   }
 
   private async executeReplanAndRefresh(
@@ -2172,145 +2183,6 @@ export class SocialAgentChatService {
     return this.runState.readStoredRun(task, runId, (id, label) =>
       this.userVisibleStepLabel(id, label),
     );
-  }
-
-  private async findLatestRestorableTask(
-    ownerUserId: number,
-  ): Promise<AgentTask | null> {
-    return this.taskRepo.findOne({
-      where: {
-        ownerUserId,
-        taskType: In([
-          'social_agent',
-          'social_agent_chat',
-          'social_agent_demo',
-          'social_search',
-          'activity_search',
-        ]),
-        status: Not(AgentTaskStatus.Cancelled),
-      },
-      order: { updatedAt: 'DESC' },
-    });
-  }
-
-  private async buildSessionSnapshot(
-    ownerUserId: number,
-    task: AgentTask | null,
-  ): Promise<SocialAgentSessionSnapshot> {
-    const restoredAt = new Date().toISOString();
-    if (!task) return this.sessions().emptySession(restoredAt);
-
-    const [events, approvalRows] = await Promise.all([
-      this.eventRepo.find({
-        where: { taskId: task.id, ownerUserId },
-        order: { createdAt: 'ASC', id: 'ASC' },
-        take: 500,
-      }),
-      this.approvals.getPendingForTask(ownerUserId, task.id).catch((error) => {
-        this.logger.warn(
-          JSON.stringify({
-            event: 'social_agent.session.pending_approvals_failed',
-            taskId: task.id,
-            message: error instanceof Error ? error.message : String(error),
-          }),
-        );
-        return [] as AgentApprovalRequest[];
-      }),
-    ]);
-    const eventDtos = events.map((event) => this.toEventDto(event));
-    const pendingApprovals = approvalRows.map((approval) =>
-      this.toPendingApprovalSnapshot(approval),
-    );
-    const latestRun = this.readLatestStoredRun(task);
-    const result = readSocialAgentRestorableResult({
-      task,
-      latestRun,
-      events: eventDtos,
-      visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
-    });
-
-    return this.sessions().buildSessionSnapshot({
-      task,
-      events: eventDtos,
-      result,
-      latestRun,
-      pendingApprovals,
-      conversationHistory: readSocialAgentConversationHistory(task),
-      restoredAt,
-    });
-  }
-
-  private async buildTaskTimeline(
-    ownerUserId: number,
-    task: AgentTask,
-  ): Promise<SocialAgentTaskTimelineSnapshot> {
-    const restoredAt = new Date().toISOString();
-    const [events, approvalRows] = await Promise.all([
-      this.eventRepo.find({
-        where: { taskId: task.id, ownerUserId },
-        order: { createdAt: 'ASC', id: 'ASC' },
-        take: 500,
-      }),
-      this.approvals.getPendingForTask(ownerUserId, task.id).catch((error) => {
-        this.logger.warn(
-          JSON.stringify({
-            event: 'social_agent.timeline.pending_approvals_failed',
-            taskId: task.id,
-            message: error instanceof Error ? error.message : String(error),
-          }),
-        );
-        return [] as AgentApprovalRequest[];
-      }),
-    ]);
-    const eventDtos = events.map((event) => this.toEventDto(event));
-    const pendingApprovals = approvalRows.map((approval) =>
-      this.toPendingApprovalSnapshot(approval),
-    );
-    const latestRun = this.readLatestStoredRun(task);
-    const result = readSocialAgentRestorableResult({
-      task,
-      latestRun,
-      events: eventDtos,
-      visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
-    });
-
-    return buildSocialAgentTimelineSnapshot({
-      task,
-      taskSummary: this.sessions().toSessionTaskSummary(task),
-      sessionMessages: this.sessions().buildSessionMessages({
-        task,
-        result,
-        pendingApprovals,
-        conversationHistory: readSocialAgentConversationHistory(task),
-      }),
-      memory: sanitizeForDisplay(task.memory) as Record<string, unknown>,
-      result,
-      events: eventDtos,
-      latestRun,
-      pendingApprovals,
-      candidateActions: this.readCandidateActions(task),
-      restoredAt,
-    });
-  }
-
-  private readCandidateActions(
-    task: AgentTask,
-  ): Record<string, Record<string, unknown>> {
-    return this.sessions().readCandidateActions(task);
-  }
-
-  private readLatestStoredRun(
-    task: AgentTask,
-  ): SocialAgentAsyncRunSnapshot | null {
-    return this.runState.readLatestStoredRun(task, (id, label) =>
-      this.userVisibleStepLabel(id, label),
-    );
-  }
-
-  private toPendingApprovalSnapshot(
-    approval: AgentApprovalRequest,
-  ): SocialAgentPendingApprovalSnapshot {
-    return this.sessions().toPendingApprovalSnapshot(approval);
   }
 
   private isoDate(value: unknown): string {

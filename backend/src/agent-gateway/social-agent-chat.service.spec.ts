@@ -18,12 +18,14 @@ import { SocialAgentDraftPublicationService } from './social-agent-draft-publica
 import { SocialAgentDraftSearchService } from './social-agent-draft-search.service';
 import { SocialAgentRecommendationResultService } from './social-agent-recommendation-result.service';
 import { SocialAgentActivitySearchService } from './social-agent-activity-search.service';
+import { AgentSessionAssemblerService } from './agent-session-assembler.service';
 import { SocialAgentFollowUpContextService } from './social-agent-follow-up-context.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 import { SocialAgentReplanProgressService } from './social-agent-replan-progress.service';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
+import { SocialAgentSessionRestoreService } from './social-agent-session-restore.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 
@@ -435,6 +437,9 @@ function makeHarness(options: Record<string, unknown> = {}) {
       metrics as never,
       options.lifeGraph as never,
     );
+  const sessionAssembler =
+    (options.sessionAssembler as AgentSessionAssemblerService | undefined) ??
+    new AgentSessionAssemblerService();
   const meetLoop =
     (options.meetLoop as SocialAgentMeetLoopService | undefined) ??
     new SocialAgentMeetLoopService(
@@ -442,7 +447,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
       eventRepo as never,
       approvals as never,
       metrics as never,
-      options.sessionAssembler as never,
+      sessionAssembler,
       options.lifeGraph as never,
       options.activities as never,
     );
@@ -455,7 +460,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
       eventRepo as never,
       approvals as never,
       executor as never,
-      options.sessionAssembler as never,
+      sessionAssembler,
       longTermMemory as never,
     );
   const draftPublication =
@@ -489,6 +494,13 @@ function makeHarness(options: Record<string, unknown> = {}) {
     metrics as never,
     options.finalResponses as never,
   );
+  const sessionRestore = new SocialAgentSessionRestoreService(
+    taskRepo as never,
+    eventRepo as never,
+    approvals as never,
+    runState,
+    sessionAssembler,
+  );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
@@ -514,6 +526,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     draftSearch as never,
     recommendationResults as never,
     activitySearch as never,
+    sessionRestore as never,
     options.brain as never,
     undefined,
     options.lifeGraph as never,
@@ -521,7 +534,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     options.fitMeetRuntime as never,
     options.alphaAgent as never,
     options.tonePolicy as never,
-    options.sessionAssembler as never,
+    sessionAssembler,
   );
 
   return {
