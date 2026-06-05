@@ -9,6 +9,9 @@ export const fitMeetCoreEndpoints = {
     refreshToken: '/auth/refresh',
     getProfile: '/auth/profile',
   },
+  users: {
+    updateProfile: '/users/profile',
+  },
   feed: {
     getFeed: '/feed',
     createPost: '/feed',
@@ -18,6 +21,11 @@ export const fitMeetCoreEndpoints = {
     getComments: (postId: number) => `/feed/${postId}/comments` as const,
     addComment: (postId: number) => `/feed/${postId}/comments` as const,
     likeComment: (commentId: number) => `/feed/comments/${commentId}/like` as const,
+  },
+  messages: {
+    startConversation: '/messages/start',
+    sendConversationMessage: (conversationId: string) =>
+      `/messages/conversations/${conversationId}/send` as const,
   },
   socialAgentChat: {
     messages: '/social-agent/chat/messages',
@@ -35,9 +43,11 @@ export const fitMeetCoreEndpoints = {
 export type FitMeetCoreEndpointGroup = keyof typeof fitMeetCoreEndpoints;
 export type FitMeetCoreStaticEndpoint =
   | (typeof fitMeetCoreEndpoints.auth)[keyof typeof fitMeetCoreEndpoints.auth]
+  | (typeof fitMeetCoreEndpoints.users)[keyof typeof fitMeetCoreEndpoints.users]
   | (typeof fitMeetCoreEndpoints.feed)['getFeed']
   | (typeof fitMeetCoreEndpoints.feed)['createPost']
   | (typeof fitMeetCoreEndpoints.feed)['getPostInteractions']
+  | (typeof fitMeetCoreEndpoints.messages)['startConversation']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['messages']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['routeMessage']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['streamUser']

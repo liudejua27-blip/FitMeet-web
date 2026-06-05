@@ -31,7 +31,7 @@ describe('AppController', () => {
   });
 
   describe('FitMeet core OpenAPI', () => {
-    it('covers auth, feed, Social Agent chat, and uploads', () => {
+    it('covers auth, users, feed, messages, Social Agent chat, and uploads', () => {
       const contract = appController.getFitMeetCoreOpenApi();
 
       expect(contract.openapi).toBe('3.1.0');
@@ -40,8 +40,11 @@ describe('AppController', () => {
           '/auth/login',
           '/auth/refresh',
           '/auth/profile',
+          '/users/profile',
           '/feed',
           '/feed/{postId}/comments',
+          '/messages/start',
+          '/messages/conversations/{conversationId}/send',
           '/social-agent/chat/messages',
           '/social-agent/chat/stream-user',
           '/uploads/image',

@@ -4,12 +4,14 @@ export const fitMeetCoreOpenApi = {
     title: 'FitMeet Core Web/App API',
     version: '2026-06-05',
     description:
-      'Shared contract for FitMeet Web and App auth, feed, Social Agent chat, and uploads.',
+      'Shared contract for FitMeet Web and App auth, users, feed, messages, Social Agent chat, and uploads.',
   },
   servers: [{ url: '/api' }],
   tags: [
     { name: 'auth' },
+    { name: 'users' },
     { name: 'feed' },
+    { name: 'messages' },
     { name: 'social-agent-chat' },
     { name: 'uploads' },
   ],
@@ -147,6 +149,32 @@ export const fitMeetCoreOpenApi = {
         responses: {
           '200': {
             description: 'Current user profile',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/UserProfile' },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/users/profile': {
+      put: {
+        tags: ['users'],
+        operationId: 'updateProfile',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UpdateProfileInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated current user profile',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/UserProfile' },
@@ -341,6 +369,70 @@ export const fitMeetCoreOpenApi = {
               },
             },
           },
+        },
+      },
+    },
+    '/messages/start': {
+      post: {
+        tags: ['messages'],
+        operationId: 'startConversation',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/StartConversationInput' },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Conversation start result',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ConversationStartResult',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/messages/conversations/{conversationId}/send': {
+      post: {
+        tags: ['messages'],
+        operationId: 'sendConversationMessage',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'conversationId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/SendMessageInput' },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Sent message',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ConversationMessage' },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
         },
       },
     },
@@ -610,6 +702,17 @@ export const fitMeetCoreOpenApi = {
           city: { type: 'string' },
         },
       },
+      UpdateProfileInput: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string', maxLength: 30 },
+          bio: { type: 'string', maxLength: 200 },
+          gender: { type: 'string', enum: ['♂', '♀', ''] },
+          city: { type: 'string', maxLength: 50 },
+          avatar: { type: 'string', format: 'uri' },
+        },
+      },
       FeedPage: {
         type: 'object',
         required: ['data'],
@@ -667,6 +770,40 @@ export const fitMeetCoreOpenApi = {
         type: 'object',
         required: ['text'],
         properties: { text: { type: 'string' } },
+      },
+      StartConversationInput: {
+        type: 'object',
+        required: ['otherUserId'],
+        properties: { otherUserId: { type: 'integer', minimum: 1 } },
+      },
+      ConversationStartResult: {
+        type: 'object',
+        required: ['conversationId', 'preexisting', 'targetUserId'],
+        properties: {
+          conversationId: { type: 'string' },
+          preexisting: { type: 'boolean' },
+          targetUserId: { type: 'integer' },
+        },
+      },
+      SendMessageInput: {
+        type: 'object',
+        required: ['text'],
+        properties: { text: { type: 'string', minLength: 1 } },
+      },
+      ConversationMessage: {
+        type: 'object',
+        required: ['id', 'text', 'conversationId', 'isMine'],
+        additionalProperties: true,
+        properties: {
+          id: { type: 'string' },
+          text: { type: 'string' },
+          source: { type: 'string' },
+          senderId: { type: 'integer' },
+          senderType: { type: 'string' },
+          conversationId: { type: 'string' },
+          time: { type: 'string' },
+          isMine: { type: 'boolean' },
+        },
       },
       SocialAgentRunInput: {
         type: 'object',

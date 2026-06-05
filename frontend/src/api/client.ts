@@ -10,6 +10,7 @@ import type {
   Review,
 } from '../types';
 import { request } from './baseClient';
+import { fitMeetCoreEndpoints } from './fitmeetCoreContract';
 
 export * from './baseClient';
 export * from './authClient';
@@ -23,7 +24,7 @@ export function getUser(id: number): Promise<UserProfile> {
 }
 
 export function updateProfile(data: Partial<UserProfile>): Promise<UserProfile> {
-  return request<UserProfile>('/users/profile', {
+  return request<UserProfile>(fitMeetCoreEndpoints.users.updateProfile, {
     method: 'PUT',
     body: JSON.stringify(data),
   });
@@ -268,14 +269,14 @@ export function getMessages(conversationId: string): Promise<ApiMessage[]> {
 }
 
 export function sendMessage(conversationId: string, text: string): Promise<ApiMessage> {
-  return request<ApiMessage>(`/messages/conversations/${conversationId}/send`, {
+  return request<ApiMessage>(fitMeetCoreEndpoints.messages.sendConversationMessage(conversationId), {
     method: 'POST',
     body: JSON.stringify({ text }),
   });
 }
 
 export function startConversation(otherUserId: number): Promise<StartConversationResponse> {
-  return request<StartConversationResponse>('/messages/start', {
+  return request<StartConversationResponse>(fitMeetCoreEndpoints.messages.startConversation, {
     method: 'POST',
     body: JSON.stringify({ otherUserId }),
   });
