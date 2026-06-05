@@ -16,6 +16,7 @@ import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { SocialAgentDraftSearchService } from './social-agent-draft-search.service';
+import { SocialAgentRecommendationResultService } from './social-agent-recommendation-result.service';
 import { SocialAgentFollowUpContextService } from './social-agent-follow-up-context.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
@@ -469,6 +470,19 @@ function makeHarness(options: Record<string, unknown> = {}) {
   const draftSearch =
     (options.draftSearch as SocialAgentDraftSearchService | undefined) ??
     new SocialAgentDraftSearchService(executor as never);
+  const recommendationResults =
+    (options.recommendationResults as
+      | SocialAgentRecommendationResultService
+      | undefined) ??
+    new SocialAgentRecommendationResultService(
+      taskRepo as never,
+      eventRepo as never,
+      options.finalResponses as never,
+      options.lifeGraph as never,
+      options.alphaAgent as never,
+      options.tonePolicy as never,
+      options.agentQuality as never,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
@@ -494,6 +508,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     candidateActions as never,
     draftPublication as never,
     draftSearch as never,
+    recommendationResults as never,
     options.brain as never,
     undefined,
     options.finalResponses as never,
@@ -502,7 +517,6 @@ function makeHarness(options: Record<string, unknown> = {}) {
     options.fitMeetRuntime as never,
     options.alphaAgent as never,
     options.tonePolicy as never,
-    options.agentQuality as never,
     options.sessionAssembler as never,
     options.activities as never,
   );
@@ -530,6 +544,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     candidateActions,
     draftPublication,
     draftSearch,
+    recommendationResults,
   };
 }
 
