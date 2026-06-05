@@ -22,14 +22,6 @@ import type { MatchedCandidateView } from '../match/match.service';
 import { MessagesService } from '../messages/messages.service';
 import { RealtimeEventService } from '../realtime/realtime-event.service';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
-import { UpdateSocialRequestDto } from '../social-requests/dto/update-social-request.dto';
-import {
-  SocialRequestSafety,
-  SocialRequestSource,
-  SocialRequestType,
-  SocialRequestVisibility,
-  UserSocialRequestStatus,
-} from '../social-requests/social-request.entity';
 import { SocialProfileService } from '../users/social-profile.service';
 import {
   AgentConnection,
@@ -45,8 +37,6 @@ import {
   AgentTaskStatus,
 } from './entities/agent-task.entity';
 import {
-  SocialAgentPlanFailureContext,
-  SocialAgentPlanReason,
   SocialAgentPlannerResult,
   SocialAgentPlannerService,
 } from './social-agent-planner.service';
@@ -55,7 +45,6 @@ import {
   type SocialAgentIntentEntities,
   type SocialAgentIntentRouterResult,
   type SocialAgentIntentType,
-  type SocialAgentReplyStrategy,
 } from './social-agent-intent-router.service';
 import { SocialAgentBrainService } from './social-agent-brain.service';
 import type { SocialAgentBrainTurnDecision } from './social-agent-brain.service';
@@ -98,7 +87,22 @@ import {
   CandidatePoolDebugReasons,
   SocialAgentCandidatePoolService,
 } from './social-agent-candidate-pool.service';
-import { CandidateExplanation } from './candidate-explanation.service';
+import {
+  conversationalFallbackReply,
+  directReplySystemPrompt,
+  productHelpFallbackReply,
+  workflowHelpReply,
+} from './social-agent-chat-replies';
+import {
+  buildApprovalActions,
+  buildRecommendationAssistantMessage,
+  buildSocialAgentRequestDraft,
+  candidateExplanationFromRecord,
+  emotionalInsightFromRecord,
+  toSocialAgentChatCandidate,
+  toSocialAgentDraftDto,
+  toSocialAgentPublishDto,
+} from './social-agent-chat-result.presenter';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentRagService } from './social-agent-rag.service';
@@ -129,338 +133,43 @@ import {
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
 import type {
-  FitMeetAgentSafety,
   FitMeetAgentSchemaAction,
-  FitMeetAgentTrace,
   FitMeetAlphaCard,
   FitMeetAlphaTurnDecision,
 } from './fitmeet-alpha-agent.types';
 import { TonePolicyService } from './response-quality/tone-policy.service';
 import { AgentQualityEvaluatorService } from './agent-quality/agent-quality-evaluator.service';
 import { AgentSessionAssemblerService } from './agent-session-assembler.service';
-
-export interface SocialAgentVisibleStep {
-  id: string;
-  label: string;
-  status: 'pending' | 'running' | 'done' | 'failed';
-}
-
-export interface SocialAgentChatCandidate {
-  agentTaskId: number;
-  source?: 'profile_candidate' | 'public_intent' | 'activity';
-  isRealData?: boolean;
-  socialRequestId: number | null;
-  targetUserId: number;
-  userId: number;
-  candidateUserId?: number;
-  publicIntentId?: string | null;
-  activityId?: number | null;
-  displayName?: string;
-  candidateRecordId: number | null;
-  nickname: string;
-  avatar: string;
-  color: string;
-  city: string;
-  score: number;
-  level: string;
-  distanceKm: number | null;
-  commonTags: string[];
-  reasons: string[];
-  interestTags?: string[];
-  profileCompleteness?: number;
-  dataQuality?: 'complete' | 'partial' | 'incomplete';
-  matchScore?: number;
-  matchReasons?: string[];
-  riskWarnings?: string[];
-  risk: { level: string; warnings: string[] };
-  suggestedOpener?: string;
-  suggestedMessage: string;
-  candidateExplanation?: CandidateExplanation;
-  emotionalInsight?: {
-    fitReason: string;
-    openerAdvice: string;
-    possibleAwkwardness: string;
-    safeFirstStep: string;
-    tone?: 'gentle' | 'active' | 'careful';
-  };
-  status?: string;
-}
-
-export interface SocialAgentChatRunResult {
-  taskId: number;
-  status: AgentTaskStatus;
-  visibleSteps: SocialAgentVisibleStep[];
-  assistantMessage: string;
-  emptyReason?: 'no_real_candidates' | null;
-  message?: string | null;
-  debugReasons?: CandidatePoolDebugReasons | null;
-  socialRequestDraft:
-    | (CreateSocialRequestDto & {
-        agentTaskId: number;
-        socialRequestId?: number | null;
-        mode: 'draft';
-        card?: Record<string, unknown>;
-        profileUsed?: Record<string, unknown>;
-      })
-    | null;
-  candidates: SocialAgentChatCandidate[];
-  approvalRequiredActions: Array<Record<string, unknown>>;
-  events: Array<Record<string, unknown>>;
-  cards?: FitMeetAlphaCard[];
-  safety?: FitMeetAgentSafety;
-  traceId?: string;
-  agentTrace?: FitMeetAgentTrace;
-  structuredIntent?: Record<string, unknown>;
-}
-
-type CandidateTargetBody = {
-  targetUserId?: unknown;
-  candidateUserId?: unknown;
-  toUserId?: unknown;
-  recipientUserId?: unknown;
-  recipientId?: unknown;
-  receiverId?: unknown;
-  userId?: unknown;
-  followingId?: unknown;
-  publicIntentId?: unknown;
-  socialRequestId?: unknown;
-  candidateRecordId?: unknown;
-  candidate?: Record<string, unknown> | null;
-};
-
-export type SocialAgentChatStreamEvent =
-  | { type: 'task'; taskId: number; status: AgentTaskStatus }
-  | { type: 'step'; step: SocialAgentVisibleStep }
-  | { type: 'result'; result: SocialAgentChatRunResult }
-  | { type: 'error'; message: string };
-
-type SocialAgentRequestDraft = NonNullable<
-  SocialAgentChatRunResult['socialRequestDraft']
->;
-type SocialAgentChatRunBody = {
-  goal?: string;
-  permissionMode?: AgentTaskPermissionMode;
-  idempotencyKey?: string | null;
-};
-type SocialAgentChatReplanRunBody = {
-  userMessage?: string | null;
-  reason?: SocialAgentPlanReason;
-  failure?: SocialAgentPlanFailureContext | null;
-};
-type SocialAgentRouteMessageBody = {
-  message?: string | null;
-  taskId?: number | null;
-  hasCandidates?: boolean;
-};
-export type SocialAgentCardActionBody = {
-  action?: FitMeetAgentSchemaAction | null;
-  payload?: Record<string, unknown> | null;
-};
-type StreamEmit = (event: SocialAgentChatStreamEvent) => void | Promise<void>;
-
-export type SocialAgentIntentAction =
-  | 'answer'
-  | 'reply'
-  | 'save_context'
-  | 'queue_search'
-  | 'queue_replan'
-  | 'await_confirmation'
-  | 'clarify';
-
-export interface SocialAgentIntentRouteResult {
-  intent: SocialAgentIntentType;
-  confidence: number;
-  entities: SocialAgentIntentEntities;
-  shouldSearch: boolean;
-  shouldReplan: boolean;
-  shouldUpdateProfile: boolean;
-  shouldExecuteAction: boolean;
-  replyStrategy: SocialAgentReplyStrategy;
-  source: 'rules' | 'deepseek';
-  action: SocialAgentIntentAction;
-  taskId: number | null;
-  assistantMessage: string;
-  savedContext: boolean;
-  profileUpdated: boolean;
-  shouldQueueRun: boolean;
-  runMode: 'initial' | 'follow_up' | null;
-  queuedRun?: SocialAgentAsyncRunSnapshot | null;
-  pendingApproval?: SocialAgentPendingApprovalSnapshot | null;
-  activityResults?: SocialAgentActivityResult[];
-  profileUpdateProposal?: LifeGraphProposalDto | null;
-  cards?: FitMeetAlphaCard[];
-  safety?: FitMeetAgentSafety;
-  permissionMode?: AgentTaskPermissionMode;
-  traceId?: string;
-  agentTrace?: FitMeetAgentTrace;
-  structuredIntent?: Record<string, unknown>;
-}
-
-export interface SocialAgentPendingApprovalSnapshot {
-  id: number;
-  type: ApprovalType;
-  actionType: string;
-  summary: string;
-  riskLevel: ApprovalRiskLevel;
-  payload: Record<string, unknown>;
-  expiresAt: string | null;
-}
-
-export interface SocialAgentActivityResult {
-  id: string;
-  source: 'public_intent' | 'activity';
-  isRealData?: boolean;
-  activityId?: number | null;
-  publicIntentId?: string | null;
-  title: string;
-  description: string;
-  city: string;
-  loc: string;
-  requestType: string;
-  interestTags: string[];
-  timePreference: string;
-  ownerUserId: number | null;
-  status: string;
-  createdAt: string | null;
-  matchScore?: number;
-  matchReasons?: string[];
-}
-
-type ExtractedProfileFields = Record<string, string | string[]>;
-
-export interface SocialAgentSessionMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  kind?: 'text' | 'risk' | 'approval';
-  content: string;
-  createdAt: string | null;
-  activityResults?: SocialAgentActivityResult[];
-  pendingApproval?: SocialAgentPendingApprovalSnapshot;
-}
-
-export interface SocialAgentSessionTaskSummary {
-  id: number;
-  status: AgentTaskStatus;
-  title: string;
-  goal: string;
-  permissionMode: AgentTaskPermissionMode;
-  statusReason: string | null;
-  updatedAt: string;
-  createdAt: string;
-}
-
-export interface SocialAgentSessionSnapshot {
-  hasSession: boolean;
-  activeTaskId: number | null;
-  task: SocialAgentSessionTaskSummary | null;
-  messages: SocialAgentSessionMessage[];
-  events: Array<Record<string, unknown>>;
-  result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null;
-  latestRun: SocialAgentAsyncRunSnapshot | null;
-  pendingApprovals: SocialAgentPendingApprovalSnapshot[];
-  candidateActions: Record<string, Record<string, unknown>>;
-  restoredAt: string;
-}
-
-export interface SocialAgentCurrentTaskSnapshot {
-  taskId: number;
-  status: AgentTaskStatus;
-  agentState?: string;
-  taskType: string;
-  title: string;
-  goal: string;
-  memory: Record<string, unknown>;
-  result: Record<string, unknown>;
-  updatedAt: string;
-  createdAt: string;
-}
-
-export interface SocialAgentTimelineMessage {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  kind:
-    | 'text'
-    | 'status'
-    | 'candidates'
-    | 'activityResults'
-    | 'approval'
-    | 'risk'
-    | 'tool';
-  text: string;
-  createdAt: string | null;
-  candidates?: SocialAgentChatCandidate[];
-  activityResults?: SocialAgentActivityResult[];
-  pendingApproval?: SocialAgentPendingApprovalSnapshot | null;
-  toolCalls?: Array<Record<string, unknown>>;
-}
-
-export interface SocialAgentTaskTimelineSnapshot {
-  taskId: number;
-  messages: SocialAgentTimelineMessage[];
-  task: SocialAgentSessionTaskSummary;
-  memory: Record<string, unknown>;
-  result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null;
-  events: Array<Record<string, unknown>>;
-  latestRun: SocialAgentAsyncRunSnapshot | null;
-  pendingApprovals: SocialAgentPendingApprovalSnapshot[];
-  candidateActions: Record<string, Record<string, unknown>>;
-  restoredAt: string;
-}
-
-type SocialAgentCandidateSearchResult = {
-  candidates: SocialAgentChatCandidate[];
-  emptyReason: 'no_real_candidates' | null;
-  message: string | null;
-  debugReasons: CandidatePoolDebugReasons | null;
-};
-
-export interface SocialAgentChatReplanRunResult extends SocialAgentChatRunResult {
-  replan: SocialAgentPlannerResult;
-}
-
-export type SocialAgentAsyncRunStatus =
-  | 'queued'
-  | 'running'
-  | 'completed'
-  | 'failed';
-
-export interface SocialAgentAsyncRunSnapshot {
-  taskId: number;
-  runId: string;
-  status: SocialAgentAsyncRunStatus;
-  phase: string;
-  message: string;
-  visibleSteps: SocialAgentVisibleStep[];
-  queuedAt: string;
-  startedAt: string | null;
-  updatedAt: string;
-  completedAt: string | null;
-  failedAt: string | null;
-  pollAfterMs: number;
-  taskStatus?: AgentTaskStatus;
-  error?: Record<string, unknown> | null;
-  replan?: SocialAgentPlannerResult | null;
-  result?: SocialAgentChatRunResult | SocialAgentChatReplanRunResult | null;
-}
-
-export interface SocialAgentAppendContextResult {
-  taskId: number;
-  saved: true;
-  eventType: AgentTaskEventType.SocialAgentContextAppended;
-  userMessage: string;
-  previousGoal: string;
-  refreshedGoal: string;
-  appendedAt: string;
-}
-
-type SocialAgentFollowUpContext = {
-  task: AgentTask;
-  userMessage: string;
-  previousGoal: string;
-  refreshedGoal: string;
-  appendedAt: string;
-  alreadyAppended: boolean;
-};
+import type {
+  CandidateTargetBody,
+  ExtractedProfileFields,
+  SocialAgentActivityResult,
+  SocialAgentAppendContextResult,
+  SocialAgentAsyncRunSnapshot,
+  SocialAgentAsyncRunStatus,
+  SocialAgentCandidateSearchResult,
+  SocialAgentCardActionBody,
+  SocialAgentChatCandidate,
+  SocialAgentChatReplanRunBody,
+  SocialAgentChatReplanRunResult,
+  SocialAgentChatRunBody,
+  SocialAgentChatRunResult,
+  SocialAgentCurrentTaskSnapshot,
+  SocialAgentFollowUpContext,
+  SocialAgentIntentAction,
+  SocialAgentIntentRouteResult,
+  SocialAgentPendingApprovalSnapshot,
+  SocialAgentRequestDraft,
+  SocialAgentRouteMessageBody,
+  SocialAgentSessionMessage,
+  SocialAgentSessionSnapshot,
+  SocialAgentSessionTaskSummary,
+  SocialAgentTaskTimelineSnapshot,
+  SocialAgentTimelineMessage,
+  SocialAgentVisibleStep,
+  StreamEmit,
+} from './social-agent-chat.types';
+export type * from './social-agent-chat.types';
 
 @Injectable()
 export class SocialAgentChatService {
@@ -1043,7 +752,11 @@ export class SocialAgentChatService {
       if (this.number(body.payload?.approvalId)) {
         return this.confirmActivityFromCardAction(ownerUserId, taskId, body);
       }
-      return this.createActivityApprovalFromCardAction(ownerUserId, taskId, body);
+      return this.createActivityApprovalFromCardAction(
+        ownerUserId,
+        taskId,
+        body,
+      );
     }
 
     if (action === 'activity.check_in') {
@@ -1476,12 +1189,12 @@ export class SocialAgentChatService {
 
     const draftResult = await this.generateDraftWithTool(task, refreshedGoal);
     task = await this.assertTaskOwner(taskId, ownerUserId);
-    const draft = this.buildDraft(
-      task.id,
-      draftResult.draft,
-      draftResult.card,
-      draftResult.profileUsed,
-    );
+    const draft = buildSocialAgentRequestDraft({
+      agentTaskId: task.id,
+      draft: draftResult.draft,
+      card: draftResult.card,
+      profileUsed: draftResult.profileUsed,
+    });
     draft.socialRequestId = await this.createPrivateDraftRequest(task, draft);
     task = await this.assertTaskOwner(taskId, ownerUserId);
     await done('draft', '已重新生成约练草稿', AgentTaskEventType.ToolReturned, {
@@ -1857,12 +1570,12 @@ export class SocialAgentChatService {
       status: 'draft_ready',
     });
     task = await this.assertTaskOwner(task.id, ownerUserId);
-    const draft = this.buildDraft(
-      task.id,
-      draftResult.draft,
-      draftResult.card,
-      draftResult.profileUsed,
-    );
+    const draft = buildSocialAgentRequestDraft({
+      agentTaskId: task.id,
+      draft: draftResult.draft,
+      card: draftResult.card,
+      profileUsed: draftResult.profileUsed,
+    });
 
     draft.socialRequestId = await this.createPrivateDraftRequest(task, draft);
     task = await this.assertTaskOwner(task.id, ownerUserId);
@@ -2025,7 +1738,7 @@ export class SocialAgentChatService {
     const requestId = this.number(
       draft.socialRequestId ?? draft.metadata?.socialRequestId,
     );
-    const dto = this.toPublishDto(task, draft);
+    const dto = toSocialAgentPublishDto(task.id, draft);
     const publishAction = await this.executor.executeToolAction(
       taskId,
       SocialAgentToolName.CreateSocialRequest,
@@ -2782,10 +2495,10 @@ export class SocialAgentChatService {
   ): string {
     if (route.intent === 'casual_chat') return this.casualChatReply(message);
     if (route.intent === 'product_help') {
-      return this.productHelpFallbackReply(message);
+      return productHelpFallbackReply(message);
     }
     if (route.intent === 'workflow_help') {
-      return this.workflowHelpReply();
+      return workflowHelpReply();
     }
     if (
       route.intent === 'profile_enrichment' ||
@@ -2844,7 +2557,7 @@ export class SocialAgentChatService {
     > | null;
     toolResults?: Array<Record<string, unknown>>;
   }): Promise<string> {
-    const fallbackReply = this.conversationalFallbackReply(
+    const fallbackReply = conversationalFallbackReply(
       input.message,
       input.route.intent,
     );
@@ -2927,7 +2640,7 @@ export class SocialAgentChatService {
             messages: [
               {
                 role: 'system',
-                content: this.directReplySystemPrompt(),
+                content: directReplySystemPrompt(),
               },
               {
                 role: 'user',
@@ -3010,65 +2723,6 @@ export class SocialAgentChatService {
     } finally {
       clearTimeout(timeout);
     }
-  }
-
-  private conversationalFallbackReply(
-    message: string,
-    intent: SocialAgentIntentType,
-  ): string {
-    if (/(你能做什么|你可以做什么|能力|fitmeet|产品|社交助理)/i.test(message)) {
-      return '我是 FitMeet 的 AI 社交助理，可以正常聊天、解释人物画像和匹配逻辑，也能帮你完善画像、找搭子、推荐候选、发起约练，并生成更自然的开场白。当你明确说要找人、找搭子或找活动时，我再调用搜索工具；发送消息、加好友和邀请见面都需要你确认。';
-    }
-    if (intent === 'workflow_help' || this.looksLikeWorkflowQuestion(message)) {
-      return this.workflowHelpReply();
-    }
-    if (this.looksLikeProfileDefinitionQuestion(message)) {
-      return '人物画像是 FitMeet 用来理解你社交偏好的一组信息，包括城市、常活动区域、兴趣爱好、运动目标、可约时间、想认识什么样的人、隐私边界和不接受的行为。它不是公开简历，而是帮助 Agent 更准确地推荐合适的人、约练卡片和活动。';
-    }
-    if (this.looksLikeProfileCompletionQuestion(message)) {
-      return '可以。我会边聊边帮你补齐画像。你可以先告诉我：你在哪个城市、常活动区域、兴趣爱好、可约时间、想认识什么样的人，以及不接受哪些行为。比如：我在青岛大学，周末下午有空，喜欢跑步和咖啡，想认识同校运动搭子，不喜欢夜间见面。';
-    }
-    if (/(deepseek|api|不会回答|为什么.*回答|回答.*问题)/i.test(message)) {
-      return '你说得对，普通问题我应该直接回答，而不是只返回模板。作为 FitMeet 的 AI 社交助理，我可以回答产品、人物画像、匹配逻辑和社交偏好问题；当你明确要找人、找活动或发起动作时，我再调用对应工具。';
-    }
-    return '可以，我是 FitMeet 的 AI 社交助理，先按最短流程帮你梳理。你不用一次性填写完整画像，只要先告诉我：城市、兴趣、可约时间、常活动区域、想约什么、想认识什么样的人，以及有什么边界要求。后面我会边聊边补齐。';
-  }
-
-  private looksLikeWorkflowQuestion(message: string): boolean {
-    return /(先.*画像.*约练|先.*完善.*画像|直接发布需求|怎么开始约练|下一步|需要怎么做|流程)/i.test(
-      message,
-    );
-  }
-
-  private looksLikeProfileDefinitionQuestion(message: string): boolean {
-    return /(人物画像是什么|AI画像是什么|ai画像是什么|画像是什么|什么是人物画像)/i.test(
-      message,
-    );
-  }
-
-  private looksLikeProfileCompletionQuestion(message: string): boolean {
-    return /(帮我完善.*画像|完善.*人物画像|完善.*AI画像|怎么填写画像|怎么完善画像)/i.test(
-      message,
-    );
-  }
-
-  private directReplySystemPrompt(): string {
-    return [
-      '你是 FitMeet 的主 Agent 大脑。你要像一个真正的社交助理一样完整理解上下文，而不是只按关键词返回模板。',
-      '如果用户问流程，例如“先完善画像再约练，还是直接发布需求”，回答两种路径都可以：直接发布更快，先完善画像更准；建议先补齐城市/区域、兴趣、可约时间、想认识的人和边界。',
-      '如果用户纠正你，例如“不是不是”“上面是我的人物画像”，要承认修正并重新理解上一轮，不要重复解释概念。',
-      '如果用户只是提问或聊天，直接回答问题；只有用户明确要求找人、找活动、发消息、加好友时，才提到工具动作。',
-      '不要暴露 DeepSeek、API、模型失败、后端、工具日志等技术细节。',
-      '你是 FitMeet 的 AI 社交助理。',
-      '你的职责：回答用户关于人物画像、偏好、匹配、社交边界、约练流程、权限模式和产品能力的问题。',
-      '你可以帮助用户完善画像，但不要在用户没提供具体偏好时伪造画像，也不要把提问写成偏好。',
-      '当用户明确说要找人、找搭子、找活动时，才说明可以进入搜索；当前这条链路只负责自然语言回答，不能伪装已经搜索。',
-      '当用户明确说要发消息、加好友、邀请见面时，必须说明需要用户确认，不能声称已经执行。',
-      '不要乱编候选人、消息、会话或工具结果。',
-      '回答要具体、自然、像智能助手，不要只说“等你明确说要找人时再搜索”。',
-      '如果用户问“人物画像是什么”，解释它是 FitMeet 用来理解城市、兴趣、运动习惯、可约时间、想认识的人、隐私边界和不接受行为的偏好信息，不是完整公开简历。',
-      '如果用户问“你可以帮我完善人物画像吗”，先解释可以，并引导用户从城市/区域、兴趣、运动目标、可约时间、想认识的人、不接受行为开始补充。',
-    ].join('\n');
   }
 
   private summarizeTaskMemoryForLlm(task: AgentTask): Record<string, unknown> {
@@ -3161,42 +2815,6 @@ export class SocialAgentChatService {
         ...(input.reason ? { reason: input.reason } : {}),
       }),
     );
-  }
-
-  private productHelpFallbackReply(message: string): string {
-    if (
-      /(先.*画像.*约练|直接发布需求|怎么开始约练|下一步|需要怎么做|怎么做|流程)/i.test(
-        message,
-      )
-    ) {
-      return this.workflowHelpReply();
-    }
-    if (/(人物画像|ai画像|画像是什么|画像.*是什么)/i.test(message)) {
-      return '人物画像是 FitMeet 用来理解你社交偏好的一组信息，包括城市、常活动区域、兴趣爱好、运动目标、可约时间、想认识什么样的人、隐私边界和不接受的行为。它不是公开简历，而是帮助 Agent 更准确地推荐合适的人、约练卡片和活动。';
-    }
-    if (/(完善.*画像|画像.*完善|帮我完善)/i.test(message)) {
-      return '可以。我可以通过几个问题帮你补齐画像。你可以先告诉我：你在哪个城市、常活动区域、兴趣爱好、可约时间、想认识什么样的人，以及不接受哪些行为。';
-    }
-    if (/(deepseek|api|不会回答|回答问题|为什么.*回答)/i.test(message)) {
-      return '你说得对，普通问题应该由大模型回答，而不是只返回模板。如果大模型暂时超时，我也应该给你相关解释。你可以继续问 FitMeet、人物画像、匹配逻辑或社交偏好相关问题。';
-    }
-    if (/(你能做什么|你可以做什么|能力|fitmeet|产品|社交助理)/i.test(message)) {
-      return '我是 FitMeet 的 AI 社交助理，可以正常聊天、解释人物画像和匹配逻辑，也能帮你完善画像、找搭子、推荐候选、发起约练，并生成更自然的开场白。当你明确说要找人、找搭子或找活动时，我再调用搜索工具；发送消息、加好友和邀请见面都需要你确认。';
-    }
-    if (/(你好|hello|hi|嗨)/i.test(message)) {
-      return '你好，我是 FitMeet 的 AI 社交助理。你可以问我人物画像、匹配逻辑、偏好怎么补充，也可以直接告诉我城市、兴趣、可约时间和社交边界，我会帮你整理得更清楚。';
-    }
-    return '我刚才调用大模型失败了，但我仍然可以先帮你梳理。你可以告诉我：城市、兴趣、可约时间、想认识的人和不接受的行为，我会继续完善画像。';
-  }
-
-  private workflowHelpReply(): string {
-    return [
-      '两种都可以。',
-      '如果你想快，可以直接发布需求，比如“我在青岛大学，想找周末下午一起跑步的同校搭子”，Agent 会边匹配边补齐画像。',
-      '如果你想匹配更准，建议先完善画像，至少补齐：城市/区域、兴趣、可约时间、想认识的人、边界要求。',
-      '我建议你现在先用 1 分钟补齐基础画像，然后我再帮你发布约练需求。',
-      '你可以直接按这个格式发我：我在__，平时喜欢__，一般__有空，想认识__，不接受__。',
-    ].join('\n');
   }
 
   private async handleProfileEnrichmentTurn(
@@ -4513,8 +4131,7 @@ export class SocialAgentChatService {
         displayName,
         message: draft,
         loopStage: 'opener_draft_created',
-        safetyBoundary:
-          '确认前不会发送。建议先站内沟通，不急着交换联系方式。',
+        safetyBoundary: '确认前不会发送。建议先站内沟通，不急着交换联系方式。',
       },
       actions: [
         {
@@ -4546,9 +4163,12 @@ export class SocialAgentChatService {
 
     const assistantMessage =
       '我先帮你写了一条低压力的开场白。你确认前，我不会替你发送。';
-    const result = this.cardActionRouteResult(task, assistantMessage, [
-      card,
-    ], pendingApproval);
+    const result = this.cardActionRouteResult(
+      task,
+      assistantMessage,
+      [card],
+      pendingApproval,
+    );
     await this.writeEvent(
       task,
       AgentTaskEventType.ConfirmationRequested,
@@ -4622,8 +4242,7 @@ export class SocialAgentChatService {
       id: `activity_plan:${task.id}:${approval.id}`,
       type: 'activity_plan',
       title: '我可以帮你创建一个约练计划',
-      body:
-        '确认前不会创建活动。第一次见面建议选择公共场所，我不会共享你的精确位置。',
+      body: '确认前不会创建活动。第一次见面建议选择公共场所，我不会共享你的精确位置。',
       status: 'waiting_confirmation',
       data: {
         taskId: task.id,
@@ -4656,9 +4275,12 @@ export class SocialAgentChatService {
 
     const assistantMessage =
       '我整理好了约练计划草稿。你确认前，我不会创建线下活动，也不会共享精确位置。';
-    const result = this.cardActionRouteResult(task, assistantMessage, [
-      card,
-    ], pendingApproval);
+    const result = this.cardActionRouteResult(
+      task,
+      assistantMessage,
+      [card],
+      pendingApproval,
+    );
     await this.writeEvent(
       task,
       AgentTaskEventType.ConfirmationRequested,
@@ -4738,8 +4360,7 @@ export class SocialAgentChatService {
       id: `checkin_card:${task.id}:${resolvedActivityId ?? 'draft'}`,
       type: 'checkin_card',
       title: '约练计划已创建。开始前，我会提醒你确认是否到达。',
-      body:
-        '第一次见面仍建议选择校园操场、公园等公共场所。这里不会共享你的精确位置。',
+      body: '第一次见面仍建议选择校园操场、公园等公共场所。这里不会共享你的精确位置。',
       status: 'ready',
       data: {
         taskId: task.id,
@@ -4837,8 +4458,7 @@ export class SocialAgentChatService {
       id: `activity_complete:${task.id}:${resolvedActivityId ?? 'draft'}`,
       type: 'checkin_card',
       title: '已签到。活动结束后，告诉我是否完成。',
-      body:
-        '如果临时不舒服或现场环境不合适，可以直接取消，不需要勉强完成。',
+      body: '如果临时不舒服或现场环境不合适，可以直接取消，不需要勉强完成。',
       status: 'ready',
       data: {
         taskId: task.id,
@@ -4945,8 +4565,7 @@ export class SocialAgentChatService {
       id: `review_card:${task.id}:${resolvedActivityId ?? 'draft'}`,
       type: 'review_card',
       title: '这次约练完成了吗？我可以帮你记录一个简短评价。',
-      body:
-        '评价会帮助我调整后续推荐，也会用于更新你的 Life Graph 和履约可信度。',
+      body: '评价会帮助我调整后续推荐，也会用于更新你的 Life Graph 和履约可信度。',
       status: 'ready',
       data: {
         taskId: task.id,
@@ -5071,8 +4690,7 @@ export class SocialAgentChatService {
       id: `life_graph_update:${task.id}:${activityId ?? 'draft'}`,
       type: 'audit_update',
       title: '这次约练已经记录到你的 Life Graph。',
-      body:
-        '我会用这次真实完成和评价，优化之后推荐给你的运动搭子和活动时间。',
+      body: '我会用这次真实完成和评价，优化之后推荐给你的运动搭子和活动时间。',
       status: 'completed',
       data: {
         taskId: task.id,
@@ -5456,9 +5074,7 @@ export class SocialAgentChatService {
 
   private cardActionDraft(task: AgentTask): Record<string, unknown> {
     const result = this.isRecord(task.result) ? task.result : {};
-    return this.isRecord(result.cardActionDraft)
-      ? result.cardActionDraft
-      : {};
+    return this.isRecord(result.cardActionDraft) ? result.cardActionDraft : {};
   }
 
   private cardActionDraftCandidate(task: AgentTask): Record<string, unknown> {
@@ -5897,7 +5513,7 @@ export class SocialAgentChatService {
       task.id,
       SocialAgentToolName.CreateSocialRequest,
       {
-        ...this.toDraftDto(draft),
+        ...toSocialAgentDraftDto(draft),
         mode: 'private_draft',
         metadata: {
           ...(draft.metadata ?? {}),
@@ -5985,7 +5601,11 @@ export class SocialAgentChatService {
     const socialRequestId = draft.socialRequestId ?? null;
     return {
       candidates: matchedCandidates.map((candidate) =>
-        this.toChatCandidate(draft.agentTaskId, socialRequestId, candidate),
+        toSocialAgentChatCandidate(
+          draft.agentTaskId,
+          socialRequestId,
+          candidate,
+        ),
       ),
       emptyReason,
       message,
@@ -6089,7 +5709,7 @@ export class SocialAgentChatService {
           .catch(() => null)
       : null;
     const fallbackAssistantMessage =
-      searchResult.message || this.assistantMessage(candidates);
+      searchResult.message || buildRecommendationAssistantMessage(candidates);
     const assistantMessage =
       this.tonePolicy?.safeAssistantMessage(
         await this.generateRecommendationAssistantMessage({
@@ -6112,13 +5732,13 @@ export class SocialAgentChatService {
       debugReasons: searchResult.debugReasons,
       socialRequestDraft: draft,
       candidates,
-      approvalRequiredActions: this.approvalActions(task.id, draft, candidates),
+      approvalRequiredActions: buildApprovalActions(task.id, draft, candidates),
       events: events.map((event) => this.toEventDto(event)),
       cards: this.alphaAgent?.buildResultCards({
         taskId: task.id,
         socialRequestDraft: draft as unknown as Record<string, unknown>,
         candidates: candidates as unknown as Array<Record<string, unknown>>,
-        approvalRequiredActions: this.approvalActions(
+        approvalRequiredActions: buildApprovalActions(
           task.id,
           draft,
           candidates,
@@ -6216,299 +5836,6 @@ export class SocialAgentChatService {
           : '自然说明当前没有找到真实候选人，并给出放宽条件、补充信息或发布需求的下一步。',
       fallbackReply: input.fallbackReply,
     });
-  }
-
-  private toChatCandidate(
-    agentTaskId: number,
-    socialRequestId: number | null,
-    candidate: MatchedCandidateView,
-  ): SocialAgentChatCandidate {
-    const record = candidate as MatchedCandidateView & Record<string, unknown>;
-    const candidateSource = cleanDisplayText(
-      record.source,
-      'profile_candidate',
-    );
-    const displayName = cleanDisplayText(
-      record.displayName ?? candidate.nickname,
-      '用户',
-    );
-    const matchScore =
-      this.number(record.matchScore) ?? Math.round(candidate.score);
-    const matchReasons = Array.isArray(record.matchReasons)
-      ? record.matchReasons
-          .map((reason) => cleanDisplayText(reason, ''))
-          .filter(Boolean)
-      : (candidate.reasons ?? [])
-          .map((reason) => cleanDisplayText(reason, ''))
-          .filter(Boolean);
-    const riskWarnings = Array.isArray(record.riskWarnings)
-      ? record.riskWarnings
-          .map((warning) => cleanDisplayText(warning, ''))
-          .filter(Boolean)
-      : (candidate.risk?.warnings ?? [])
-          .map((warning) => cleanDisplayText(warning, ''))
-          .filter(Boolean);
-    const targetUserId =
-      this.number(record.targetUserId) ??
-      this.number(record.candidateUserId) ??
-      this.number(candidate.candidateUserId) ??
-      this.number(candidate.userId) ??
-      candidate.userId;
-    return {
-      agentTaskId,
-      source:
-        candidateSource === 'public_intent' || candidateSource === 'activity'
-          ? candidateSource
-          : 'profile_candidate',
-      isRealData: record.isRealData === true,
-      socialRequestId: this.number(record.socialRequestId) ?? socialRequestId,
-      targetUserId,
-      userId: targetUserId,
-      candidateUserId: targetUserId,
-      publicIntentId: cleanDisplayText(record.publicIntentId, '') || null,
-      activityId: this.number(record.activityId),
-      displayName,
-      candidateRecordId: candidate.candidateRecordId ?? null,
-      nickname: displayName,
-      avatar: cleanDisplayText(candidate.avatar, ''),
-      color: cleanDisplayText(candidate.color, '#202124'),
-      city: cleanDisplayText(record.city, ''),
-      score: matchScore,
-      level: String(candidate.level),
-      distanceKm: candidate.distanceKm,
-      commonTags: (candidate.commonTags ?? [])
-        .map((tag) => cleanDisplayText(tag, ''))
-        .filter(Boolean),
-      reasons: matchReasons,
-      interestTags: Array.isArray(record.interestTags)
-        ? record.interestTags
-            .map((tag) => cleanDisplayText(tag, ''))
-            .filter(Boolean)
-        : [],
-      profileCompleteness: this.number(record.profileCompleteness) ?? undefined,
-      dataQuality:
-        record.dataQuality === 'complete' ||
-        record.dataQuality === 'partial' ||
-        record.dataQuality === 'incomplete'
-          ? record.dataQuality
-          : undefined,
-      matchScore,
-      matchReasons,
-      riskWarnings,
-      risk: {
-        level: String(candidate.risk?.level ?? 'low'),
-        warnings: riskWarnings,
-      },
-      suggestedOpener: cleanDisplayText(record.suggestedOpener, ''),
-      suggestedMessage: cleanDisplayText(
-        candidate.suggestedMessage ?? record.suggestedOpener,
-        '',
-      ),
-      candidateExplanation: this.candidateExplanationFromRecord(
-        record.candidateExplanation,
-      ),
-      emotionalInsight: this.emotionalInsightFromRecord(
-        record.emotionalInsight,
-      ),
-      status: candidate.status ? String(candidate.status) : undefined,
-    };
-  }
-
-  private candidateExplanationFromRecord(
-    value: unknown,
-  ): CandidateExplanation | undefined {
-    if (!this.isRecord(value)) return undefined;
-    const fitReasons = this.stringList(value.fitReasons);
-    const awkwardPoints = this.stringList(value.awkwardPoints);
-    const suggestedOpener = cleanDisplayText(value.suggestedOpener, '');
-    const safeFirstStep = cleanDisplayText(value.safeFirstStep, '');
-    if (!fitReasons.length || !suggestedOpener || !safeFirstStep)
-      return undefined;
-    return {
-      fitReasons,
-      suggestedOpener,
-      awkwardPoints,
-      safeFirstStep,
-      nextActionSuggestion: cleanDisplayText(
-        value.nextActionSuggestion,
-        '确认后发送轻量开场',
-      ),
-      requiresConfirmation: value.requiresConfirmation === true,
-    };
-  }
-
-  private emotionalInsightFromRecord(
-    value: unknown,
-  ): SocialAgentChatCandidate['emotionalInsight'] {
-    if (!this.isRecord(value)) return undefined;
-    const fitReason = cleanDisplayText(value.fitReason, '');
-    const openerAdvice = cleanDisplayText(value.openerAdvice, '');
-    const possibleAwkwardness = cleanDisplayText(value.possibleAwkwardness, '');
-    const safeFirstStep = cleanDisplayText(value.safeFirstStep, '');
-    if (!fitReason || !openerAdvice || !safeFirstStep) return undefined;
-    return {
-      fitReason,
-      openerAdvice,
-      possibleAwkwardness,
-      safeFirstStep,
-      tone:
-        value.tone === 'active' ||
-        value.tone === 'careful' ||
-        value.tone === 'gentle'
-          ? value.tone
-          : undefined,
-    };
-  }
-
-  private buildDraft(
-    agentTaskId: number,
-    draft: CreateSocialRequestDto,
-    card: unknown,
-    profileUsed: unknown,
-  ): SocialAgentRequestDraft {
-    return {
-      ...draft,
-      type: this.normalizeSocialRequestType(draft.type),
-      rawText: cleanDisplayText(draft.rawText, ''),
-      title: cleanDisplayText(draft.title, '约练草稿'),
-      description: cleanDisplayText(
-        draft.description,
-        cleanDisplayText(draft.rawText, ''),
-      ),
-      city: sanitizeCity(draft.city),
-      radiusKm: typeof draft.radiusKm === 'number' ? draft.radiusKm : 5,
-      interestTags: Array.isArray(draft.interestTags) ? draft.interestTags : [],
-      activityType: cleanDisplayText(draft.activityType, ''),
-      safetyRequirement:
-        draft.safetyRequirement ?? SocialRequestSafety.LowRiskOnly,
-      visibility: SocialRequestVisibility.Private,
-      status: UserSocialRequestStatus.Draft,
-      requireUserConfirmation: true,
-      agentAllowed: true,
-      metadata: {
-        ...(draft.metadata ?? {}),
-        agentTaskId,
-        source: 'social_agent_chat',
-        publishPolicy: 'requires_user_confirmation',
-      },
-      agentTaskId,
-      socialRequestId: null,
-      mode: 'draft',
-      card: this.isRecord(card) ? card : undefined,
-      profileUsed: this.isRecord(profileUsed) ? profileUsed : undefined,
-    };
-  }
-
-  private toDraftDto(draft: SocialAgentRequestDraft): CreateSocialRequestDto {
-    return {
-      ...draft,
-      type: this.normalizeSocialRequestType(draft.type),
-      city: sanitizeCity(draft.city),
-      status: UserSocialRequestStatus.Draft,
-      visibility: SocialRequestVisibility.Private,
-      requireUserConfirmation: true,
-      source: SocialRequestSource.CustomAgent,
-      metadata: {
-        ...(draft.metadata ?? {}),
-        socialRequestId: draft.socialRequestId ?? null,
-      },
-    };
-  }
-
-  private toPublishDto(
-    task: AgentTask,
-    draft: CreateSocialRequestDto & { socialRequestId?: number | null },
-  ): UpdateSocialRequestDto & CreateSocialRequestDto {
-    return {
-      ...draft,
-      type: this.normalizeSocialRequestType(draft.type),
-      status: UserSocialRequestStatus.Matching,
-      visibility: SocialRequestVisibility.Public,
-      requireUserConfirmation: true,
-      source: SocialRequestSource.CustomAgent,
-      metadata: {
-        ...(draft.metadata ?? {}),
-        agentTaskId: task.id,
-        socialRequestId: this.number(
-          draft.socialRequestId ?? draft.metadata?.socialRequestId,
-        ),
-        confirmationSource: 'social_agent_chat',
-      },
-    };
-  }
-
-  private approvalActions(
-    taskId: number,
-    draft: SocialAgentChatRunResult['socialRequestDraft'],
-    candidates: SocialAgentChatCandidate[],
-  ): Array<Record<string, unknown>> {
-    const actions: Array<Record<string, unknown>> = [];
-    if (draft) {
-      actions.push({
-        type: 'publish_social_request',
-        label: '确认发布约练',
-        riskLevel: 'medium',
-        requiresConfirmation: true,
-        agentTaskId: taskId,
-        socialRequestId: draft.socialRequestId ?? null,
-      });
-    }
-    for (const candidate of candidates.slice(0, 3)) {
-      const targetUserId = candidate.candidateUserId ?? candidate.userId;
-      actions.push({
-        type: 'save_candidate',
-        label: `收藏 ${candidate.nickname}`,
-        riskLevel: 'medium',
-        requiresConfirmation: true,
-        agentTaskId: taskId,
-        socialRequestId: candidate.socialRequestId,
-        candidateRecordId: candidate.candidateRecordId,
-        targetUserId,
-      });
-      actions.push({
-        type: 'send_message',
-        label: `确认发送给 ${candidate.nickname}`,
-        riskLevel: 'medium',
-        requiresConfirmation: true,
-        agentTaskId: taskId,
-        socialRequestId: candidate.socialRequestId,
-        candidateRecordId: candidate.candidateRecordId,
-        targetUserId,
-      });
-      actions.push({
-        type: 'add_friend',
-        label: `加好友并聊天：${candidate.nickname}`,
-        riskLevel: 'medium',
-        requiresConfirmation: true,
-        agentTaskId: taskId,
-        socialRequestId: candidate.socialRequestId,
-        candidateRecordId: candidate.candidateRecordId,
-        targetUserId,
-      });
-    }
-    return actions;
-  }
-
-  private assistantMessage(candidates: SocialAgentChatCandidate[]): string {
-    if (candidates.length === 0) {
-      return '当前没有找到符合条件的真实用户，我可以帮你发布一个约练需求，或者你可以放宽城市、时间、兴趣条件。';
-    }
-    const first = candidates[0];
-    const explanation = first.candidateExplanation;
-    const reason =
-      explanation?.fitReasons?.[0] ||
-      first.emotionalInsight?.fitReason ||
-      first.reasons.slice(0, 2).join('；') ||
-      '画像和需求较匹配';
-    const opener =
-      explanation?.suggestedOpener ||
-      first.emotionalInsight?.openerAdvice ||
-      first.suggestedMessage;
-    const safeStep =
-      explanation?.safeFirstStep ||
-      first.emotionalInsight?.safeFirstStep ||
-      '第一次建议选择公开场所，并先在站内确认时间、地点和边界。';
-    return `我找到了 ${candidates.length} 位真实候选人。优先看 ${first.nickname}：${reason} 开场可以这样说：${opener} 第一步建议：${safeStep}`;
   }
 
   private async appendFollowUpContext(
@@ -7237,7 +6564,7 @@ export class SocialAgentChatService {
       assistantMessage:
         cleanDisplayText(chatRun.message, '') ||
         cleanDisplayText(eventResult?.message, '') ||
-        this.assistantMessage(candidates),
+        buildRecommendationAssistantMessage(candidates),
       emptyReason:
         cleanDisplayText(chatRun.emptyReason, '') === 'no_real_candidates'
           ? 'no_real_candidates'
@@ -7255,7 +6582,7 @@ export class SocialAgentChatService {
       socialRequestDraft,
       candidates,
       approvalRequiredActions: socialRequestDraft
-        ? this.approvalActions(task.id, socialRequestDraft, candidates)
+        ? buildApprovalActions(task.id, socialRequestDraft, candidates)
         : [],
       events,
     };
@@ -7352,12 +6679,10 @@ export class SocialAgentChatService {
       },
       suggestedOpener: cleanDisplayText(candidate.suggestedOpener, ''),
       suggestedMessage: cleanDisplayText(candidate.suggestedMessage, ''),
-      candidateExplanation: this.candidateExplanationFromRecord(
+      candidateExplanation: candidateExplanationFromRecord(
         candidate.candidateExplanation,
       ),
-      emotionalInsight: this.emotionalInsightFromRecord(
-        candidate.emotionalInsight,
-      ),
+      emotionalInsight: emotionalInsightFromRecord(candidate.emotionalInsight),
       status: cleanDisplayText(candidate.status, '') || undefined,
     };
   }
@@ -7603,12 +6928,6 @@ export class SocialAgentChatService {
     return mode && Object.values(AgentTaskPermissionMode).includes(mode)
       ? mode
       : AgentTaskPermissionMode.Confirm;
-  }
-
-  private normalizeSocialRequestType(value: unknown): SocialRequestType {
-    return Object.values(SocialRequestType).includes(value as SocialRequestType)
-      ? (value as SocialRequestType)
-      : SocialRequestType.Custom;
   }
 
   private modeLabel(mode: AgentTaskPermissionMode): string {

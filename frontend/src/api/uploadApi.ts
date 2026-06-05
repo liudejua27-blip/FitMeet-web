@@ -1,4 +1,5 @@
-import { API_BASE_URL, ApiError, getToken } from './client';
+import { API_BASE_URL, ApiError, getToken } from './baseClient';
+import { fitMeetCoreEndpoints } from './fitmeetCoreContract';
 
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
@@ -51,7 +52,7 @@ export async function uploadImage(file: File): Promise<{ url: string; width: num
   const formData = new FormData();
   formData.append('file', file);
 
-  return request<{ url: string; width: number; height: number }>('/uploads/image', {
+  return request<{ url: string; width: number; height: number }>(fitMeetCoreEndpoints.uploads.image, {
     method: 'POST',
     body: formData,
     // Do not set Content-Type header; browser sets it with boundary
@@ -63,7 +64,7 @@ export async function uploadVideo(file: File): Promise<{ url: string }> {
   const formData = new FormData();
   formData.append('file', file);
 
-  return request<{ url: string }>('/uploads/video', {
+  return request<{ url: string }>(fitMeetCoreEndpoints.uploads.video, {
     method: 'POST',
     body: formData,
     headers: {},

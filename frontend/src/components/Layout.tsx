@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from 'react';
 import clsx from 'clsx';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { usesFullBleedExperience } from '../routes/routeBoundaries';
 import { useAuthStore, useMessageStore, useNotificationStore } from '../stores';
 import { BackToTop } from './ui';
 
@@ -230,24 +231,7 @@ const Footer = () => (
 export const Layout = ({ children }: { children: ReactNode }) => {
   const location = useLocation();
 
-  const isPlatformRoute =
-    location.pathname === '/' ||
-    location.pathname === '/legacy-home' ||
-    location.pathname === '/ecosystem' ||
-    location.pathname === '/app' ||
-    location.pathname === '/demo' ||
-    location.pathname === '/developers' ||
-    location.pathname === '/developers/social-skills' ||
-    location.pathname === '/safety' ||
-    location.pathname === '/about' ||
-    location.pathname === '/life-graph' ||
-    location.pathname === '/profile/life-graph' ||
-    location.pathname === '/admin/waitlist' ||
-    location.pathname === '/login';
-  const isAgentWorkspace =
-    location.pathname === '/agent' || location.pathname.startsWith('/agent/');
-
-  if (isPlatformRoute || isAgentWorkspace || location.pathname.startsWith('/agent-connect')) {
+  if (usesFullBleedExperience(location.pathname)) {
     return <>{children}</>;
   }
 

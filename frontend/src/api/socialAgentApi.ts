@@ -1,4 +1,5 @@
-import * as api from './client';
+import * as api from './baseClient';
+import { fitMeetCoreEndpoints } from './fitmeetCoreContract';
 import { sanitizeDisplayValue } from '../lib/displayText';
 
 export type SocialAgentPermissionMode =
@@ -163,8 +164,8 @@ export const socialAgentApi = {
   handleMessage: (data: RouteMessageInput) => {
     const taskId = data.taskId ?? null;
     const path = taskId
-      ? `/social-agent/chat/tasks/${taskId}/messages`
-      : '/social-agent/chat/messages';
+      ? fitMeetCoreEndpoints.socialAgentChat.taskMessages(taskId)
+      : fitMeetCoreEndpoints.socialAgentChat.messages;
     return api
       .requestProtected<UserFacingAgentResponse>(path, {
         method: 'POST',
@@ -175,7 +176,7 @@ export const socialAgentApi = {
 
   routeMessage: (data: RouteMessageInput) =>
     api
-      .requestProtected<UserFacingAgentResponse>('/social-agent/chat/route-message', {
+      .requestProtected<UserFacingAgentResponse>(fitMeetCoreEndpoints.socialAgentChat.routeMessage, {
         method: 'POST',
         body: JSON.stringify(data),
       })
@@ -184,7 +185,7 @@ export const socialAgentApi = {
   performAction: (data: AgentCardActionInput) =>
     api
       .requestProtected<UserFacingAgentResponse>(
-        `/social-agent/chat/tasks/${data.taskId}/actions`,
+        fitMeetCoreEndpoints.socialAgentChat.taskActions(data.taskId),
         {
           method: 'POST',
           body: JSON.stringify({
@@ -211,7 +212,7 @@ async function runUserFacingAgentStream(
   onEvent: (event: UserFacingAgentStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<UserFacingAgentResponse> {
-  const response = await api.fetchWithAuth('/social-agent/chat/stream-user', {
+  const response = await api.fetchWithAuth(fitMeetCoreEndpoints.socialAgentChat.streamUser, {
     method: 'POST',
     signal,
     body: JSON.stringify(data),

@@ -2468,7 +2468,8 @@ describe('SocialAgentChatService', () => {
         ],
       });
 
-      const confirmPayload = activityDraft.cards?.[0]?.actions[0]?.payload ?? {};
+      const confirmPayload =
+        activityDraft.cards?.[0]?.actions[0]?.payload ?? {};
       const checkinStep = await service.performCardAction(7, 101, {
         action: 'activity.confirm_create',
         payload: confirmPayload,
@@ -2521,7 +2522,8 @@ describe('SocialAgentChatService', () => {
         ],
       });
 
-      const completePayload = completionStep.cards?.[0]?.actions[0]?.payload ?? {};
+      const completePayload =
+        completionStep.cards?.[0]?.actions[0]?.payload ?? {};
       const reviewStep = await service.performCardAction(7, 101, {
         action: 'activity.complete',
         payload: completePayload,

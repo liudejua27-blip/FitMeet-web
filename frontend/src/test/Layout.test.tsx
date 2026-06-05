@@ -3,7 +3,7 @@ import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 
-function renderWithRouter(ui: React.ReactElement, { route = '/social-agent' } = {}) {
+function renderWithRouter(ui: React.ReactElement, { route = '/hall' } = {}) {
   return render(<MemoryRouter initialEntries={[route]}>{ui}</MemoryRouter>);
 }
 
@@ -25,8 +25,10 @@ describe('Layout', () => {
     );
     const nav = screen.getByRole('navigation', { name: '主导航' });
     expect(within(nav).getByText('首页')).toHaveAttribute('href', '/');
-    expect(within(nav).getByText('社交')).toHaveAttribute('href', '/social-agent');
-    expect(within(nav).getByText('我的')).toHaveAttribute('href', '/profile');
+    expect(within(nav).getByText('附近机会')).toHaveAttribute('href', '/hall');
+    expect(within(nav).getByText('发现')).toHaveAttribute('href', '/discover');
+    expect(within(nav).getByText('约练')).toHaveAttribute('href', '/meet');
+    expect(within(nav).getByText('Agent')).toHaveAttribute('href', '/agent');
     expect(within(nav).queryByText('开发者')).not.toBeInTheDocument();
   });
 
@@ -35,10 +37,10 @@ describe('Layout', () => {
       <Layout>
         <div>test</div>
       </Layout>,
-      { route: '/social-agent' },
+      { route: '/hall' },
     );
     const nav = screen.getByRole('navigation', { name: '主导航' });
-    expect(within(nav).getByRole('link', { name: '社交' })).toHaveAttribute(
+    expect(within(nav).getByRole('link', { name: '附近机会' })).toHaveAttribute(
       'aria-current',
       'page',
     );

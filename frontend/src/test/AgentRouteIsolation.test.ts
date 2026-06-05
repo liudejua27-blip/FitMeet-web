@@ -9,10 +9,13 @@ const srcRoot = join(process.cwd(), 'src');
 describe('Agent user route isolation', () => {
   it('keeps legacy social agent workbench code out of public routes', () => {
     const appSource = readSource('App.tsx');
+    const routeSource = readSource(join('routes', 'AppRoutes.tsx'));
 
     expect(appSource).not.toMatch(/SocialAgentConsolePage|agent-workbench|AgentRunTrace/);
     expect(appSource).not.toMatch(/\.\/debug|src\/debug/);
-    expect(appSource).toMatch(
+    expect(routeSource).not.toMatch(/SocialAgentConsolePage|agent-workbench|AgentRunTrace/);
+    expect(routeSource).not.toMatch(/\.\/debug|src\/debug/);
+    expect(routeSource).toMatch(
       /path="\/social-agent"[\s\S]*element=\{<Navigate to="\/agent" replace \/>}/,
     );
   });

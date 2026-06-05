@@ -11,85 +11,28 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import type { Request, Response } from 'express';
+import type { Response } from 'express';
 
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
 import { AgentTaskPermissionMode } from './entities/agent-task.entity';
 import { UserFacingResponseSanitizerService } from './response-quality/user-facing-response-sanitizer.service';
 import type {
-  SocialAgentPlanFailureContext,
-  SocialAgentPlanReason,
-} from './social-agent-planner.service';
+  FitMeetRequest,
+  SocialAgentConnectCandidateBody,
+  SocialAgentReplanRunBody,
+  SocialAgentRouteMessageBody,
+  SocialAgentRunBody,
+  SocialAgentSaveCandidateBody,
+  SocialAgentSendMessageBody,
+} from './social-agent-chat.controller.types';
+import {
+  lightStatusFromStep,
+  progressFromStep,
+  resolveUserPermissionMode,
+  type UserFacingStreamEvent,
+} from './social-agent-chat-stream.presenter';
 import { SocialAgentChatService } from './social-agent-chat.service';
 import type { SocialAgentCardActionBody } from './social-agent-chat.service';
-
-type FitMeetRequest = Request & {
-  user: { id: number };
-};
-
-type RunBody = {
-  goal?: string;
-  permissionMode?: AgentTaskPermissionMode;
-  idempotencyKey?: string | null;
-};
-
-type ReplanRunBody = {
-  userMessage?: string | null;
-  reason?: SocialAgentPlanReason;
-  failure?: SocialAgentPlanFailureContext | null;
-};
-
-type RouteMessageBody = {
-  message?: string | null;
-  taskId?: number | null;
-  hasCandidates?: boolean;
-};
-
-type UserFacingStreamEvent =
-  | { type: 'status'; lightStatus: string }
-  | {
-      type: 'progress';
-      id: string;
-      kind: 'analysis' | 'tool' | 'status';
-      title: string;
-      detail?: string;
-      state: 'running' | 'done' | 'failed' | 'waiting';
-    }
-  | {
-      type: 'result';
-      result: ReturnType<
-        UserFacingResponseSanitizerService['toUserFacingAgentResponse']
-      >;
-    }
-  | { type: 'error'; message: string };
-
-type SendMessageBody = {
-  targetUserId?: number;
-  candidateUserId?: number;
-  message?: string;
-  suggestedOpener?: string;
-  candidateRecordId?: number | null;
-  publicIntentId?: string | null;
-  socialRequestId?: number | null;
-  candidate?: Record<string, unknown>;
-};
-
-type SaveCandidateBody = {
-  candidateRecordId?: number | null;
-  publicIntentId?: string | null;
-  socialRequestId?: number | null;
-  targetUserId?: number | null;
-  candidate?: Record<string, unknown>;
-};
-
-type ConnectCandidateBody = {
-  targetUserId?: number | null;
-  candidateUserId?: number | null;
-  candidateRecordId?: number | null;
-  publicIntentId?: string | null;
-  socialRequestId?: number | null;
-  candidate?: Record<string, unknown>;
-};
 
 @Controller('social-agent/chat')
 @UseGuards(AuthGuard('jwt'))
@@ -100,13 +43,13 @@ export class SocialAgentChatController {
   ) {}
 
   @Post('run')
-  run(@Req() req: FitMeetRequest, @Body() body: RunBody) {
+  run(@Req() req: FitMeetRequest, @Body() body: SocialAgentRunBody) {
     return this.chat.run(req.user.id, body ?? {});
   }
 
   @Post('run-async')
   @HttpCode(202)
-  runQueued(@Req() req: FitMeetRequest, @Body() body: RunBody) {
+  runQueued(@Req() req: FitMeetRequest, @Body() body: SocialAgentRunBody) {
     return this.chat.runQueued(req.user.id, body ?? {});
   }
 
@@ -114,7 +57,7 @@ export class SocialAgentChatController {
   @HttpCode(200)
   async routeMessage(
     @Req() req: FitMeetRequest,
-    @Body() body: RouteMessageBody,
+    @Body() body: SocialAgentRouteMessageBody,
   ) {
     const result = await this.chat.routeMessage(req.user.id, body ?? {});
     return this.userFacingSanitizer.toUserFacingAgentResponse(
@@ -127,7 +70,7 @@ export class SocialAgentChatController {
   @HttpCode(200)
   async handleMessage(
     @Req() req: FitMeetRequest,
-    @Body() body: RouteMessageBody,
+    @Body() body: SocialAgentRouteMessageBody,
   ) {
     const result = await this.chat.handleMessage(req.user.id, body ?? {});
     return this.userFacingSanitizer.toUserFacingAgentResponse(
@@ -154,7 +97,7 @@ export class SocialAgentChatController {
   async handleTaskMessage(
     @Req() req: FitMeetRequest,
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: RouteMessageBody,
+    @Body() body: SocialAgentRouteMessageBody,
   ) {
     const result = await this.chat.handleMessage(req.user.id, {
       ...(body ?? {}),
@@ -173,7 +116,11 @@ export class SocialAgentChatController {
     @Param('id', ParseIntPipe) id: number,
     @Body() body: SocialAgentCardActionBody,
   ) {
-    const result = await this.chat.performCardAction(req.user.id, id, body ?? {});
+    const result = await this.chat.performCardAction(
+      req.user.id,
+      id,
+      body ?? {},
+    );
     return this.userFacingSanitizer.toUserFacingAgentResponse(
       result,
       result.permissionMode ?? AgentTaskPermissionMode.Confirm,
@@ -183,7 +130,7 @@ export class SocialAgentChatController {
   @Post('stream')
   async streamRun(
     @Req() req: FitMeetRequest,
-    @Body() body: RunBody,
+    @Body() body: SocialAgentRunBody,
     @Res() res: Response,
   ) {
     res.status(200);
@@ -215,7 +162,7 @@ export class SocialAgentChatController {
   @Post('stream-user')
   async streamUserFacingRun(
     @Req() req: FitMeetRequest,
-    @Body() body: RunBody,
+    @Body() body: SocialAgentRunBody,
     @Res() res: Response,
   ) {
     res.status(200);
@@ -236,7 +183,7 @@ export class SocialAgentChatController {
             type: 'result',
             result: this.userFacingSanitizer.toUserFacingAgentResponse(
               payload.result,
-              this.userPermissionMode(body?.permissionMode),
+              resolveUserPermissionMode(body?.permissionMode),
             ),
           });
           return;
@@ -254,11 +201,11 @@ export class SocialAgentChatController {
           type: 'status',
           lightStatus:
             payload.type === 'step'
-              ? this.lightStatusFromStep(payload.step.label)
+              ? lightStatusFromStep(payload.step.label)
               : '正在理解你的需求',
         });
         if (payload.type === 'step') {
-          write('progress', this.progressFromStep(payload.step));
+          write('progress', progressFromStep(payload.step));
         }
       });
     } catch (error) {
@@ -287,7 +234,7 @@ export class SocialAgentChatController {
   replanAndRefresh(
     @Req() req: FitMeetRequest,
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: ReplanRunBody,
+    @Body() body: SocialAgentReplanRunBody,
   ) {
     return this.chat.replanAndRefresh(req.user.id, id, body ?? {});
   }
@@ -296,7 +243,7 @@ export class SocialAgentChatController {
   appendContext(
     @Req() req: FitMeetRequest,
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: ReplanRunBody,
+    @Body() body: SocialAgentReplanRunBody,
   ) {
     return this.chat.appendContext(req.user.id, id, body ?? {});
   }
@@ -315,7 +262,7 @@ export class SocialAgentChatController {
   saveCandidate(
     @Req() req: FitMeetRequest,
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: SaveCandidateBody,
+    @Body() body: SocialAgentSaveCandidateBody,
   ) {
     return this.chat.saveCandidate(req.user.id, id, body ?? {});
   }
@@ -325,7 +272,7 @@ export class SocialAgentChatController {
   sendMessage(
     @Req() req: FitMeetRequest,
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: SendMessageBody,
+    @Body() body: SocialAgentSendMessageBody,
   ) {
     return this.chat.sendCandidateMessage(req.user.id, id, body ?? {});
   }
@@ -335,66 +282,8 @@ export class SocialAgentChatController {
   connectCandidate(
     @Req() req: FitMeetRequest,
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: ConnectCandidateBody,
+    @Body() body: SocialAgentConnectCandidateBody,
   ) {
     return this.chat.connectCandidate(req.user.id, id, body ?? {});
-  }
-
-  private userPermissionMode(
-    value: AgentTaskPermissionMode | undefined,
-  ): AgentTaskPermissionMode {
-    return value && Object.values(AgentTaskPermissionMode).includes(value)
-      ? value
-      : AgentTaskPermissionMode.Confirm;
-  }
-
-  private lightStatusFromStep(label: string): string {
-    if (/Life Graph|画像|profile/i.test(label)) {
-      return '正在结合你的 Life Graph';
-    }
-    if (/筛选|候选|匹配|search|candidate/i.test(label)) {
-      return '正在筛选合适的人';
-    }
-    if (/时间|排除|rank/i.test(label)) {
-      return '正在排除时间不合适的人';
-    }
-    if (/安全|边界|guardrail|risk/i.test(label)) {
-      return '正在检查安全边界';
-    }
-    if (/开场白|message|opener/i.test(label)) {
-      return '正在生成开场白';
-    }
-    if (/确认|approval|confirm/i.test(label)) {
-      return '正在等待你确认';
-    }
-    if (/活动|约练|activity/i.test(label)) {
-      return '正在创建约练计划';
-    }
-    return '正在理解你的需求';
-  }
-
-  private progressFromStep(step: {
-    id: string;
-    label: string;
-    status: 'pending' | 'running' | 'done' | 'failed';
-  }): UserFacingStreamEvent {
-    const key = `${step.id} ${step.label}`.toLowerCase();
-    const isTool =
-      /tool|call|search|candidate|match|activity|message|opener|approval|confirm|life graph|profile|risk|guardrail|rank|filter/i.test(
-        key,
-      );
-    return {
-      type: 'progress',
-      id: isTool ? 'tool' : 'analysis',
-      kind: isTool ? 'tool' : 'analysis',
-      title: isTool ? '正在调用工具' : '分析中',
-      detail: this.lightStatusFromStep(step.label),
-      state:
-        step.status === 'done'
-          ? 'done'
-          : step.status === 'failed'
-            ? 'failed'
-            : 'running',
-    };
   }
 }
