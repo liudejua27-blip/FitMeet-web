@@ -13,6 +13,7 @@ import {
 import { SocialAgentAction } from './agent-permission.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
+import { SocialAgentFollowUpContextService } from './social-agent-follow-up-context.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
@@ -404,6 +405,14 @@ function makeHarness(options: Record<string, unknown> = {}) {
       eventRepo as never,
       messages as never,
     );
+  const followUpContext =
+    (options.followUpContext as
+      | SocialAgentFollowUpContextService
+      | undefined) ??
+    new SocialAgentFollowUpContextService(
+      taskRepo as never,
+      eventRepo as never,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
@@ -422,6 +431,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     rag as never,
     chatLlm as never,
     runState as never,
+    followUpContext as never,
     options.brain as never,
     undefined,
     options.finalResponses as never,
