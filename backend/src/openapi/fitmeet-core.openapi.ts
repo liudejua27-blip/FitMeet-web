@@ -442,7 +442,9 @@ export const fitMeetCoreOpenApi = {
               'application/json': {
                 schema: {
                   type: 'array',
-                  items: { $ref: '#/components/schemas/ConversationMessage' },
+                  items: {
+                    $ref: '#/components/schemas/ConversationHistoryMessage',
+                  },
                 },
               },
             },
@@ -1028,6 +1030,22 @@ export const fitMeetCoreOpenApi = {
           senderId: { type: 'integer' },
           senderType: { type: 'string' },
           conversationId: { type: 'string' },
+          time: { type: 'string' },
+          isMine: { type: 'boolean' },
+        },
+      },
+      ConversationHistoryMessage: {
+        type: 'object',
+        required: ['id', 'text', 'isMine'],
+        additionalProperties: true,
+        properties: {
+          id: { type: 'string' },
+          text: { type: 'string' },
+          source: { type: 'string' },
+          card: {
+            type: ['object', 'null'],
+            additionalProperties: true,
+          },
           time: { type: 'string' },
           isMine: { type: 'boolean' },
         },

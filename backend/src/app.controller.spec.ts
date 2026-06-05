@@ -71,6 +71,7 @@ describe('AppController', () => {
         '/users/profile': 'put',
         '/uploads/image': 'post',
         '/messages/start': 'post',
+        '/messages/conversations/{conversationId}': 'get',
         '/messages/conversations/{conversationId}/send': 'post',
         '/feed': ['get', 'post'],
         '/feed/interactions': 'get',
@@ -88,6 +89,24 @@ describe('AppController', () => {
           expect(contract.paths[path][method]).toBeDefined();
         }
       }
+    });
+
+    it('documents conversation history separately from sent message payloads', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+      const historySchema =
+        contract.paths['/messages/conversations/{conversationId}'].get
+          .responses['200'].content['application/json'].schema;
+
+      expect(historySchema).toMatchObject({
+        type: 'array',
+        items: { $ref: '#/components/schemas/ConversationHistoryMessage' },
+      });
+      expect(
+        contract.components.schemas.ConversationHistoryMessage.required,
+      ).toEqual(['id', 'text', 'isMine']);
+      expect(
+        contract.components.schemas.ConversationMessage.required,
+      ).toContain('conversationId');
     });
   });
 });
