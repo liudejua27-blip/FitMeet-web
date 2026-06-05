@@ -62,10 +62,6 @@ import { AgentApprovalService } from './agent-approval.service';
 import { AgentApprovalRequest } from './entities/agent-approval-request.entity';
 import { PublicSocialIntent } from './entities/public-social-intent.entity';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
-import {
-  productHelpFallbackReply,
-  workflowHelpReply,
-} from './social-agent-chat-replies';
 import { buildSocialAgentRequestDraft } from './social-agent-chat-result.presenter';
 import {
   appendSocialAgentConversationTurn,
@@ -127,7 +123,6 @@ import type {
   SocialAgentChatRunResult,
   SocialAgentCurrentTaskSnapshot,
   SocialAgentFollowUpContext,
-  SocialAgentIntentAction,
   SocialAgentIntentRouteResult,
   SocialAgentPendingApprovalSnapshot,
   SocialAgentRequestDraft,
@@ -142,6 +137,13 @@ import {
   applySocialAgentTaskMemoryForIntent,
   profileKeyForSocialAgentIntent,
 } from './social-agent-intent-memory.presenter';
+import {
+  shouldUseSocialAgentLlmDirectReply,
+  socialAgentAlphaClarifyingMessage,
+  socialAgentAlphaNeedsClarification,
+  socialAgentAssistantMessageForRoute,
+  socialAgentRouteAction,
+} from './social-agent-route-response.presenter';
 export type * from './social-agent-chat.types';
 
 @Injectable()
@@ -294,8 +296,12 @@ export class SocialAgentChatService {
       this.metrics.observeRouteLatency(Date.now() - startedAt);
       return result;
     }
-    if (this.alphaNeedsClarification(alphaTurn)) {
-      const assistantMessage = this.alphaClarifyingMessage(alphaTurn);
+    if (socialAgentAlphaNeedsClarification(alphaTurn)) {
+      const assistantMessage = socialAgentAlphaClarifyingMessage(
+        alphaTurn,
+        (question, fallback) =>
+          this.tonePolicy?.safeAssistantMessage(question, fallback) ?? '',
+      );
       task.status = AgentTaskStatus.AwaitingFeedback;
       task.statusReason = 'main_agent_waiting_for_clarification';
       task.result = {
@@ -433,7 +439,12 @@ export class SocialAgentChatService {
     let profileUpdated = false;
     let queuedRun: SocialAgentAsyncRunSnapshot | null = null;
     let runMode: SocialAgentIntentRouteResult['runMode'] = null;
-    let assistantMessage = this.assistantMessageForRoute(route, task, message);
+    let assistantMessage = socialAgentAssistantMessageForRoute({
+      route,
+      task,
+      message,
+      hasSearchContext: (currentTask) => this.hasSearchContext(currentTask),
+    });
     let activityResults: SocialAgentActivityResult[] = [];
     let profileUpdateProposal: LifeGraphProposalDto | null = null;
 
@@ -486,7 +497,7 @@ export class SocialAgentChatService {
       profileUpdated = handled.profileUpdated;
       profileUpdateProposal = handled.profileUpdateProposal ?? null;
       task = handled.task;
-    } else if (this.shouldUseLlmDirectReply(route)) {
+    } else if (shouldUseSocialAgentLlmDirectReply(route)) {
       assistantMessage = await this.chatLlm.generateConversationalAnswer({
         message,
         route,
@@ -666,7 +677,7 @@ export class SocialAgentChatService {
     const result: SocialAgentIntentRouteResult = {
       ...route,
       shouldReplan: queuedRun ? runMode === 'follow_up' : route.shouldReplan,
-      action: this.toRouteAction(route, queuedRun, runMode),
+      action: socialAgentRouteAction(route, queuedRun, runMode),
       taskId: task.id,
       assistantMessage,
       savedContext,
@@ -1297,7 +1308,7 @@ export class SocialAgentChatService {
       await emit?.({ type: 'result', result });
       return result;
     }
-    if (this.alphaNeedsClarification(alphaTurn)) {
+    if (socialAgentAlphaNeedsClarification(alphaTurn)) {
       const clarifyStep: SocialAgentVisibleStep = {
         id: 'clarify',
         label: this.userVisibleStepLabel('clarify', '正在等待你补充需求'),
@@ -1334,7 +1345,11 @@ export class SocialAgentChatService {
         taskId: task.id,
         status: task.status,
         visibleSteps,
-        assistantMessage: this.alphaClarifyingMessage(alphaTurn),
+        assistantMessage: socialAgentAlphaClarifyingMessage(
+          alphaTurn,
+          (question, fallback) =>
+            this.tonePolicy?.safeAssistantMessage(question, fallback) ?? '',
+        ),
         emptyReason: null,
         message: null,
         debugReasons: null,
@@ -1973,105 +1988,6 @@ export class SocialAgentChatService {
     );
   }
 
-  private toRouteAction(
-    route: SocialAgentIntentRouterResult,
-    queuedRun: SocialAgentAsyncRunSnapshot | null,
-    runMode: SocialAgentIntentRouteResult['runMode'],
-  ): SocialAgentIntentAction {
-    if (queuedRun)
-      return runMode === 'follow_up' ? 'queue_replan' : 'queue_search';
-    if (route.replyStrategy === 'conversational_answer') return 'answer';
-    if (route.replyStrategy === 'append_context') return 'save_context';
-    if (route.replyStrategy === 'execute_action') return 'await_confirmation';
-    if (route.replyStrategy === 'ask_clarifying_question') return 'clarify';
-    return 'reply';
-  }
-
-  private assistantMessageForRoute(
-    route: SocialAgentIntentRouterResult,
-    task: AgentTask,
-    message: string,
-  ): string {
-    if (route.intent === 'casual_chat') return this.casualChatReply(message);
-    if (route.intent === 'product_help') {
-      return productHelpFallbackReply(message);
-    }
-    if (route.intent === 'workflow_help') {
-      return workflowHelpReply();
-    }
-    if (
-      route.intent === 'profile_enrichment' ||
-      route.intent === 'profile_enrichment_request' ||
-      route.intent === 'correction_or_clarification'
-    ) {
-      return '我先按你的画像信息来理解，不会直接搜索候选人。';
-    }
-    if (route.intent === 'profile_update') {
-      return '已记住你的偏好，并写入当前上下文。等你明确说要找人、找活动或找搭子时，我再开始匹配。';
-    }
-    if (route.intent === 'safety_or_boundary') {
-      return '已记住这条安全边界。后续推荐会按这个限制处理，也不会自动发送消息、加好友或发布约练。';
-    }
-    if (route.intent === 'social_search') {
-      const city = route.entities.city ? `${route.entities.city} ` : '';
-      const activity = route.entities.activityType
-        ? `${route.entities.activityType} `
-        : '';
-      return `明白，你是在找${city}${activity}搭子或候选人。我会在后台搜索，结果好了会直接插入聊天流。`;
-    }
-    if (route.intent === 'activity_search') {
-      return '明白，你是在找活动或约练。我会先按活动/公开意图方向搜索，必要时再补充候选人推荐。';
-    }
-    if (route.intent === 'candidate_followup') {
-      return this.hasSearchContext(task)
-        ? '我会基于现有候选继续处理，不会同步阻塞当前聊天。'
-        : '我还没有候选人上下文。你可以先说清楚想找什么样的人，我再帮你匹配。';
-    }
-    if (route.intent === 'action_request') {
-      return this.hasSearchContext(task)
-        ? '可以，但我不会自动执行。请在候选卡片上确认发送、收藏或加好友，我会按你的确认执行并记录审批/动作日志。'
-        : '可以，不过现在还没有候选人。你可以先说想找什么样的人，我找到候选后再由你确认发送、收藏或加好友。';
-    }
-    return '我还不确定你是想继续聊天、补充偏好，还是开始找人/活动。你可以直接说“帮我找青岛拍照搭子”或“记住我不喜欢夜间见面”。';
-  }
-
-  private shouldUseLlmDirectReply(
-    route: SocialAgentIntentRouterResult,
-  ): boolean {
-    return (
-      route.intent === 'product_help' ||
-      route.intent === 'workflow_help' ||
-      route.intent === 'casual_chat' ||
-      route.intent === 'unknown'
-    );
-  }
-
-  private alphaNeedsClarification(
-    alphaTurn?: FitMeetAlphaTurnDecision,
-  ): boolean {
-    const intent = this.isRecord(alphaTurn?.structuredIntent)
-      ? alphaTurn?.structuredIntent
-      : {};
-    return (
-      intent.requiresSearch === false &&
-      cleanDisplayText(intent.readiness, '') === 'clarify'
-    );
-  }
-
-  private alphaClarifyingMessage(alphaTurn?: FitMeetAlphaTurnDecision): string {
-    const intent = this.isRecord(alphaTurn?.structuredIntent)
-      ? alphaTurn?.structuredIntent
-      : {};
-    const question = cleanDisplayText(intent.clarifyingQuestion, '');
-    const fallback =
-      '可以。我先帮你找轻松一点、不需要太强社交压力的人。你更想今晚附近试试，还是周末下午找个时间？';
-    return (
-      this.tonePolicy?.safeAssistantMessage(question, fallback) ||
-      question ||
-      fallback
-    );
-  }
-
   private userVisibleStepLabel(id: string, label: string): string {
     return this.tonePolicy?.userStatus(id, label) ?? label;
   }
@@ -2408,16 +2324,6 @@ export class SocialAgentChatService {
       );
       return false;
     }
-  }
-
-  private casualChatReply(message: string): string {
-    if (/(你能做什么|你可以做什么)/i.test(message)) {
-      return '我可以先和你正常聊天，也可以记住你的偏好和安全边界。只有当你明确说要找人、找活动或找搭子时，我才会开始匹配；发送消息、加好友、发布约练都需要你确认。';
-    }
-    if (/(怎么找搭子|该怎么找|建议)/i.test(message)) {
-      return '可以先说场景、城市、时间和边界，比如“青岛周末拍照搭子，不要夜间见面”。我会先记住你的偏好，等你明确要搜索时再匹配候选人。';
-    }
-    return '你好，我在。你可以随便聊，也可以补充偏好；等你明确说要找人、找活动或找搭子时，我再开始搜索。';
   }
 
   private async generateDraftWithTool(
