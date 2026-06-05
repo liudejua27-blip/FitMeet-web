@@ -61,6 +61,21 @@ describe('production-env-readiness', () => {
     expect(report.errors).toEqual([]);
   });
 
+  it('allows JWT fallback for webhook signing while warning about the risk', () => {
+    const report = buildProductionEnvReport({
+      ...validEnv,
+      AGENT_WEBHOOK_SIGNING_SECRET: '',
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.errors).toEqual([]);
+    expect(report.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'AGENT_WEBHOOK_SIGNING_SECRET' }),
+      ]),
+    );
+  });
+
   it('rejects placeholders, unsafe origins, weak JWT, synchronize, and missing storage', () => {
     const report = buildProductionEnvReport({
       ...validEnv,

@@ -33,7 +33,6 @@ const CORE_REQUIRED_KEYS = [
   'REDIS_PORT',
   'REDIS_PASSWORD',
   'JWT_SECRET',
-  'AGENT_WEBHOOK_SIGNING_SECRET',
 ];
 
 const DOCKER_REQUIRED_KEYS = ['MONGO_USERNAME', 'MONGO_PASSWORD'];
@@ -94,6 +93,7 @@ export function buildProductionEnvReport(env: EnvMap): ProductionEnvReport {
   requireHttpsUrl(env, 'FRONTEND_BASE_URL', error);
   checkAllowedOrigins(env, error);
   checkJwtSecret(env, error);
+  checkAgentWebhookSecret(env, warning);
   checkMongoUri(env, error);
   checkObjectStorage(env, error);
   checkAgentModel(env, error);
@@ -146,6 +146,25 @@ function checkJwtSecret(
   const secret = env.JWT_SECRET ?? '';
   if (secret.length < 32) {
     error('JWT_SECRET', 'must be at least 32 characters.');
+  }
+}
+
+function checkAgentWebhookSecret(
+  env: EnvMap,
+  warning: (key: string, message: string) => void,
+): void {
+  if (!hasConfiguredValue(env.AGENT_WEBHOOK_SIGNING_SECRET)) {
+    warning(
+      'AGENT_WEBHOOK_SIGNING_SECRET',
+      'missing or placeholder; runtime falls back to JWT_SECRET, but a dedicated webhook secret is safer for production.',
+    );
+    return;
+  }
+  if (env.AGENT_WEBHOOK_SIGNING_SECRET === env.JWT_SECRET) {
+    warning(
+      'AGENT_WEBHOOK_SIGNING_SECRET',
+      'matches JWT_SECRET; use a separate value to isolate webhook and auth blast radius.',
+    );
   }
 }
 
