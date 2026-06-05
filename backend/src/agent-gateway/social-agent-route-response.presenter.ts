@@ -6,6 +6,7 @@ import {
   workflowHelpReply,
 } from './social-agent-chat-replies';
 import type { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
+import { hasSocialAgentSearchContext } from './social-agent-candidate-context.presenter';
 import type {
   SocialAgentAsyncRunSnapshot,
   SocialAgentIntentAction,
@@ -31,9 +32,8 @@ export function socialAgentAssistantMessageForRoute(input: {
   route: SocialAgentIntentRouterResult;
   task: AgentTask;
   message: string;
-  hasSearchContext: (task: AgentTask) => boolean;
 }): string {
-  const { route, task, message, hasSearchContext } = input;
+  const { route, task, message } = input;
   if (route.intent === 'casual_chat') return casualChatReply(message);
   if (route.intent === 'product_help') return productHelpFallbackReply(message);
   if (route.intent === 'workflow_help') return workflowHelpReply();
@@ -61,12 +61,12 @@ export function socialAgentAssistantMessageForRoute(input: {
     return '明白，你是在找活动或约练。我会先按活动/公开意图方向搜索，必要时再补充候选人推荐。';
   }
   if (route.intent === 'candidate_followup') {
-    return hasSearchContext(task)
+    return hasSocialAgentSearchContext(task)
       ? '我会基于现有候选继续处理，不会同步阻塞当前聊天。'
       : '我还没有候选人上下文。你可以先说清楚想找什么样的人，我再帮你匹配。';
   }
   if (route.intent === 'action_request') {
-    return hasSearchContext(task)
+    return hasSocialAgentSearchContext(task)
       ? '可以，但我不会自动执行。请在候选卡片上确认发送、收藏或加好友，我会按你的确认执行并记录审批/动作日志。'
       : '可以，不过现在还没有候选人。你可以先说想找什么样的人，我找到候选后再由你确认发送、收藏或加好友。';
   }

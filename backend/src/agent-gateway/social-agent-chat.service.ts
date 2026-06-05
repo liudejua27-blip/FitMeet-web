@@ -62,6 +62,10 @@ import { AgentApprovalService } from './agent-approval.service';
 import { AgentApprovalRequest } from './entities/agent-approval-request.entity';
 import { PublicSocialIntent } from './entities/public-social-intent.entity';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
+import {
+  hasSocialAgentSearchContext,
+  socialAgentCandidateFollowupReply,
+} from './social-agent-candidate-context.presenter';
 import { buildSocialAgentRequestDraft } from './social-agent-chat-result.presenter';
 import {
   appendSocialAgentConversationTurn,
@@ -443,7 +447,6 @@ export class SocialAgentChatService {
       route,
       task,
       message,
-      hasSearchContext: (currentTask) => this.hasSearchContext(currentTask),
     });
     let activityResults: SocialAgentActivityResult[] = [];
     let profileUpdateProposal: LifeGraphProposalDto | null = null;
@@ -608,7 +611,7 @@ export class SocialAgentChatService {
         savedContext = true;
         runMode = null;
         queuedRun = null;
-      } else if (route.shouldReplan && this.hasSearchContext(task)) {
+      } else if (route.shouldReplan && hasSocialAgentSearchContext(task)) {
         queuedRun = await this.replanAndRefresh(ownerUserId, task.id, {
           userMessage: message,
           reason: 'user_follow_up',
@@ -626,7 +629,7 @@ export class SocialAgentChatService {
 
     if (route.intent === 'candidate_followup') {
       if (route.shouldSearch || route.shouldReplan) {
-        if (this.hasSearchContext(task)) {
+        if (hasSocialAgentSearchContext(task)) {
           queuedRun = await this.replanAndRefresh(ownerUserId, task.id, {
             userMessage: message,
             reason: 'user_follow_up',
@@ -641,7 +644,7 @@ export class SocialAgentChatService {
           runMode = 'initial';
         }
       } else {
-        assistantMessage = this.candidateFollowupReply(task, message);
+        assistantMessage = socialAgentCandidateFollowupReply(task, message);
       }
     }
 
@@ -1933,7 +1936,7 @@ export class SocialAgentChatService {
     const candidates = readSocialAgentStoredCandidateSummaries(task);
     const result = this.isRecord(task.result) ? task.result : {};
     const chatRun = this.isRecord(result.chatRun) ? result.chatRun : {};
-    const hasSearchContext = this.hasSearchContext(task);
+    const hasSearchContext = hasSocialAgentSearchContext(task);
     const taskMemory = readSocialAgentTaskMemory(task);
     return {
       taskId: task.id,
@@ -2109,60 +2112,6 @@ export class SocialAgentChatService {
           : '自然说明没有找到真实活动或公开意向，并建议调整城市、时间或活动类型。',
       fallbackReply: input.fallbackReply,
     });
-  }
-
-  private hasSearchContext(task: AgentTask): boolean {
-    if (readSocialAgentStoredCandidateSummaries(task).length > 0) return true;
-    const result = this.isRecord(task.result) ? task.result : {};
-    const chatRun = this.isRecord(result.chatRun) ? result.chatRun : {};
-    return Boolean(
-      this.number(chatRun.socialRequestId) ||
-      this.number(chatRun.candidateCount) ||
-      this.isRecord(chatRun.socialRequestDraft),
-    );
-  }
-
-  private candidateFollowupReply(task: AgentTask, message: string): string {
-    const candidates = readSocialAgentStoredCandidateSummaries(task);
-    if (candidates.length === 0) {
-      return '我还没有可参考的候选人。你可以先告诉我想找谁或找什么活动，我再开始匹配。';
-    }
-    const index = /第二个|第二/.test(message)
-      ? 1
-      : /第三个|第三/.test(message)
-        ? 2
-        : 0;
-    const candidate =
-      candidates[Math.min(index, candidates.length - 1)] ?? candidates[0];
-    const name = cleanDisplayText(
-      candidate.nickname,
-      `用户 #${cleanDisplayText(candidate.userId, '')}`,
-    );
-    const reasons = Array.isArray(candidate.reasons)
-      ? candidate.reasons
-          .map((item) => cleanDisplayText(item, ''))
-          .filter(Boolean)
-      : [];
-    const risk = this.isRecord(candidate.risk) ? candidate.risk : {};
-    const rawWarnings = Array.isArray(candidate.riskWarnings)
-      ? candidate.riskWarnings
-      : Array.isArray(risk.warnings)
-        ? risk.warnings
-        : [];
-    const warnings = rawWarnings
-      .map((item) => cleanDisplayText(item, ''))
-      .filter(Boolean);
-    if (/(为什么|推荐理由|匹配)/.test(message)) {
-      return reasons.length > 0
-        ? `${name} 的主要匹配点是：${reasons.slice(0, 3).join('；')}。是否联系仍需要你确认。`
-        : `${name} 与你的时间、地点或兴趣边界较接近。是否联系仍需要你确认。`;
-    }
-    if (/(靠谱吗|安全|风险)/.test(message)) {
-      return warnings.length > 0
-        ? `${name} 有这些需要注意的点：${warnings.slice(0, 2).join('；')}。建议先站内聊，并选择公开地点。`
-        : `${name} 当前没有明显风险提示，但我仍建议先站内聊、公开地点见面，发送消息或加好友都需要你手动确认。`;
-    }
-    return `${name} 当前是我优先参考的候选。你可以问“为什么匹配”，也可以点击候选卡片上的确认按钮执行收藏、发送或加好友。`;
   }
 
   private async applyRagContext(

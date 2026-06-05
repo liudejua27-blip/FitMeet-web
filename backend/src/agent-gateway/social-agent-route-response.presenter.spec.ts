@@ -61,20 +61,25 @@ describe('social-agent-route-response.presenter', () => {
   });
 
   it('builds route fallback replies with or without search context', () => {
-    const task = { id: 101 } as AgentTask;
+    const task = {
+      id: 101,
+      memory: {
+        shortTerm: {
+          candidates: [{ nickname: '小周', userId: 7 }],
+        },
+      },
+    } as AgentTask;
     const candidateReply = socialAgentAssistantMessageForRoute({
       route: route({ intent: 'candidate_followup' }),
       task,
       message: '为什么推荐第一个',
-      hasSearchContext: () => true,
     });
     expect(candidateReply).toContain('基于现有候选');
 
     const actionReply = socialAgentAssistantMessageForRoute({
       route: route({ intent: 'action_request' }),
-      task,
+      task: { id: 102, memory: {} } as AgentTask,
       message: '帮我发消息',
-      hasSearchContext: () => false,
     });
     expect(actionReply).toContain('现在还没有候选人');
   });
