@@ -401,6 +401,57 @@ export const fitMeetCoreOpenApi = {
         },
       },
     },
+    '/messages/conversations': {
+      get: {
+        tags: ['messages'],
+        operationId: 'getConversations',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Current user conversations',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/ConversationSummary' },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/messages/conversations/{conversationId}': {
+      get: {
+        tags: ['messages'],
+        operationId: 'getConversationMessages',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'conversationId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Conversation messages',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/ConversationMessage' },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
     '/messages/conversations/{conversationId}/send': {
       post: {
         tags: ['messages'],
@@ -433,6 +484,24 @@ export const fitMeetCoreOpenApi = {
           },
           '401': { $ref: '#/components/responses/Error' },
           '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/messages/unread': {
+      get: {
+        tags: ['messages'],
+        operationId: 'getUnreadCount',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Unread message count',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/UnreadCount' },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
         },
       },
     },
@@ -498,6 +567,55 @@ export const fitMeetCoreOpenApi = {
         },
       },
     },
+    '/social-agent/chat/session': {
+      get: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentGetLatestSession',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Latest restorable Social Agent chat session',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentSessionSnapshot',
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/tasks/{taskId}/session': {
+      get: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentGetTaskSession',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Restorable Social Agent task session',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentSessionSnapshot',
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
     '/social-agent/chat/tasks/{taskId}/messages': {
       post: {
         tags: ['social-agent-chat'],
@@ -523,6 +641,107 @@ export const fitMeetCoreOpenApi = {
         },
         responses: {
           '200': { $ref: '#/components/responses/UserFacingAgentResponse' },
+        },
+      },
+    },
+    '/social-agent/chat/tasks/{taskId}/save-candidate': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentSaveCandidate',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SocialAgentCandidateActionInput',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { $ref: '#/components/responses/JsonObject' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/tasks/{taskId}/send-message': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentSendCandidateMessage',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                allOf: [
+                  {
+                    $ref: '#/components/schemas/SocialAgentCandidateActionInput',
+                  },
+                  {
+                    type: 'object',
+                    required: ['message'],
+                    properties: { message: { type: 'string', minLength: 1 } },
+                  },
+                ],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { $ref: '#/components/responses/JsonObject' },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/tasks/{taskId}/connect-candidate': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentConnectCandidate',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SocialAgentCandidateActionInput',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { $ref: '#/components/responses/JsonObject' },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
         },
       },
     },
@@ -623,6 +842,14 @@ export const fitMeetCoreOpenApi = {
         content: {
           'application/json': {
             schema: { $ref: '#/components/schemas/UserFacingAgentResponse' },
+          },
+        },
+      },
+      JsonObject: {
+        description: 'Generic JSON object result',
+        content: {
+          'application/json': {
+            schema: { type: 'object', additionalProperties: true },
           },
         },
       },
@@ -805,6 +1032,25 @@ export const fitMeetCoreOpenApi = {
           isMine: { type: 'boolean' },
         },
       },
+      ConversationSummary: {
+        type: 'object',
+        required: ['id'],
+        additionalProperties: true,
+        properties: {
+          id: { type: 'string' },
+          conversationId: { type: 'string' },
+          title: { type: 'string' },
+          lastMessage: { type: 'string' },
+          unread: { type: 'integer' },
+          updatedAt: { type: 'string' },
+        },
+      },
+      UnreadCount: {
+        type: 'object',
+        required: ['unreadCount'],
+        additionalProperties: true,
+        properties: { unreadCount: { type: 'integer' } },
+      },
       SocialAgentRunInput: {
         type: 'object',
         required: ['goal', 'permissionMode'],
@@ -839,6 +1085,52 @@ export const fitMeetCoreOpenApi = {
         properties: {
           action: { type: 'string' },
           payload: { type: 'object', additionalProperties: true },
+        },
+      },
+      SocialAgentCandidateActionInput: {
+        type: 'object',
+        additionalProperties: true,
+        properties: {
+          targetUserId: { type: 'integer' },
+          candidateUserId: { type: 'integer' },
+          candidateRecordId: { type: 'integer' },
+          publicIntentId: { type: 'string' },
+          socialRequestId: { type: 'integer' },
+          candidate: { type: 'object', additionalProperties: true },
+          suggestedOpener: { type: 'string' },
+        },
+      },
+      SocialAgentSessionSnapshot: {
+        type: 'object',
+        required: ['hasSession', 'activeTaskId', 'messages'],
+        additionalProperties: true,
+        properties: {
+          hasSession: { type: 'boolean' },
+          activeTaskId: { type: 'integer', nullable: true },
+          task: { type: 'object', nullable: true, additionalProperties: true },
+          messages: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          events: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          result: {
+            type: 'object',
+            nullable: true,
+            additionalProperties: true,
+          },
+          latestRun: {
+            type: 'object',
+            nullable: true,
+            additionalProperties: true,
+          },
+          pendingApprovals: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          restoredAt: { type: 'string', format: 'date-time' },
         },
       },
       UserFacingAgentResponse: {

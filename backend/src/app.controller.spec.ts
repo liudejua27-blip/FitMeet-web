@@ -44,13 +44,42 @@ describe('AppController', () => {
           '/feed',
           '/feed/{postId}/comments',
           '/messages/start',
+          '/messages/conversations',
+          '/messages/conversations/{conversationId}',
           '/messages/conversations/{conversationId}/send',
+          '/messages/unread',
+          '/social-agent/chat/session',
           '/social-agent/chat/messages',
           '/social-agent/chat/stream-user',
+          '/social-agent/chat/tasks/{taskId}/session',
+          '/social-agent/chat/tasks/{taskId}/messages',
+          '/social-agent/chat/tasks/{taskId}/save-candidate',
+          '/social-agent/chat/tasks/{taskId}/send-message',
+          '/social-agent/chat/tasks/{taskId}/connect-candidate',
           '/uploads/image',
           '/uploads/video',
         ]),
       );
+    });
+
+    it('keeps the iOS staging E2E contract explicit', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+      const requiredPaths = {
+        '/auth/login': 'post',
+        '/auth/refresh': 'post',
+        '/auth/profile': 'get',
+        '/users/profile': 'put',
+        '/uploads/image': 'post',
+        '/messages/start': 'post',
+        '/messages/conversations/{conversationId}/send': 'post',
+        '/feed': 'post',
+        '/social-agent/chat/session': 'get',
+      } as const;
+
+      for (const [path, method] of Object.entries(requiredPaths)) {
+        expect(contract.paths[path]).toBeDefined();
+        expect(contract.paths[path][method]).toBeDefined();
+      }
     });
   });
 });
