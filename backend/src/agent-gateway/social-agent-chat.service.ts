@@ -49,9 +49,6 @@ import {
   appendSocialAgentShortTermTurn,
   appendShortTermMemoryItem,
   appendSocialAgentUserMemo,
-  mergeSocialAgentActiveEntities,
-  mergeSocialAgentBoundaries,
-  mergeSocialAgentPreferences,
   readSocialAgentTaskMemory,
   recordSocialAgentPendingAction,
   recordSocialAgentRecommendedCandidates,
@@ -141,6 +138,10 @@ import type {
   StreamEmit,
 } from './social-agent-chat.types';
 import { messageForSocialAgentSchemaAction } from './social-agent-card-action.presenter';
+import {
+  applySocialAgentTaskMemoryForIntent,
+  profileKeyForSocialAgentIntent,
+} from './social-agent-intent-memory.presenter';
 export type * from './social-agent-chat.types';
 
 @Injectable()
@@ -419,7 +420,7 @@ export class SocialAgentChatService {
     });
     this.metrics.recordIntent(route.intent, route.source);
     appendSocialAgentUserMemo(task, message, route.intent);
-    this.applyTaskMemoryForIntent(task, message, route);
+    applySocialAgentTaskMemoryForIntent(task, message, route);
     await this.applyRagContext(task, route, message, longTermSnapshot);
     const brainToolResults =
       await this.profileEnrichment.executeConversationBrainReadTools(
@@ -2248,68 +2249,6 @@ export class SocialAgentChatService {
     return `${name} 当前是我优先参考的候选。你可以问“为什么匹配”，也可以点击候选卡片上的确认按钮执行收藏、发送或加好友。`;
   }
 
-  private applyTaskMemoryForIntent(
-    task: AgentTask,
-    message: string,
-    route: SocialAgentIntentRouterResult,
-  ): void {
-    const entities = route.entities ?? {};
-    switch (route.intent) {
-      case 'profile_update':
-        mergeSocialAgentPreferences(task, message);
-        break;
-      case 'safety_or_boundary':
-        mergeSocialAgentBoundaries(task, message);
-        break;
-      case 'social_search':
-      case 'activity_search':
-        mergeSocialAgentActiveEntities(task, entities, message);
-        break;
-      case 'candidate_followup': {
-        // If user asks for a fresh batch, mark current recommendations as rejected so the
-        // next replan does not surface the same people again.
-        if (
-          route.shouldReplan ||
-          /(换一批|再来几个|不喜欢这些|换人|不合适|不喜欢这个类型|不想要这个类型|这个类型不行)/.test(
-            message,
-          )
-        ) {
-          const memory = readSocialAgentTaskMemory(task);
-          const recommended = memory.candidateState.recommendedIds;
-          if (recommended.length > 0) {
-            memory.candidateState.rejectedIds = Array.from(
-              new Set([...memory.candidateState.rejectedIds, ...recommended]),
-            ).slice(-80);
-            memory.candidateState.recommendedIds = [];
-            // direct write so we don't lose the just-rejected ids
-            const root =
-              task.memory &&
-              typeof task.memory === 'object' &&
-              !Array.isArray(task.memory)
-                ? (task.memory as Record<string, unknown>)
-                : {};
-            task.memory = {
-              ...root,
-              taskMemory: { ...memory, updatedAt: new Date().toISOString() },
-            };
-          }
-        }
-        break;
-      }
-      case 'action_request':
-      case 'casual_chat':
-      case 'product_help':
-      case 'workflow_help':
-      case 'profile_enrichment':
-      case 'profile_enrichment_request':
-      case 'correction_or_clarification':
-      case 'unknown':
-      default:
-        // No structured memory change beyond appendSocialAgentUserMemo above.
-        break;
-    }
-  }
-
   private async applyRagContext(
     task: AgentTask,
     route: SocialAgentIntentRouterResult,
@@ -2452,7 +2391,7 @@ export class SocialAgentChatService {
     intent: SocialAgentIntentType,
     message: string,
   ): Promise<boolean> {
-    const key = this.profileKeyForIntent(intent, message);
+    const key = profileKeyForSocialAgentIntent(intent, message);
     if (!key) return false;
     try {
       await this.socialProfiles.saveAnswer(ownerUserId, key, message);
@@ -2469,38 +2408,6 @@ export class SocialAgentChatService {
       );
       return false;
     }
-  }
-
-  private profileKeyForIntent(
-    intent: SocialAgentIntentType,
-    message: string,
-  ): string | null {
-    if (intent === 'safety_or_boundary') {
-      if (
-        /(隐私|手机号|微信|地址|住址|单位|自动发|自动联系|夜间|晚上|男生|女生|不要|别|不想|不喜欢)/i.test(
-          message,
-        )
-      ) {
-        return 'avoidTraits';
-      }
-      return 'privacyBoundary';
-    }
-    if (intent !== 'profile_update') return null;
-    if (
-      /(慢热|外向|内向|主动|被动|真诚|社恐|话少|话多|安静|活泼)/i.test(message)
-    ) {
-      return 'traits';
-    }
-    if (/(时间|周末|工作日|晚上|白天|早上|下午|今晚|明天)/i.test(message)) {
-      return 'availableTimes';
-    }
-    if (/(想认识|希望认识|偏好|更看重|喜欢.*的人)/i.test(message)) {
-      return 'preferredTraits';
-    }
-    if (/(不喜欢|不接受|不要|拒绝|避开)/i.test(message)) {
-      return 'avoidTraits';
-    }
-    return 'interestTags';
   }
 
   private casualChatReply(message: string): string {
