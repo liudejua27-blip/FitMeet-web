@@ -79,7 +79,6 @@ import {
   buildSocialAgentRequestDraft,
   toSocialAgentChatCandidate,
   toSocialAgentDraftDto,
-  toSocialAgentPublishDto,
 } from './social-agent-chat-result.presenter';
 import {
   appendSocialAgentConversationTurn,
@@ -105,6 +104,7 @@ import { SocialAgentReplanProgressService } from './social-agent-replan-progress
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
+import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentRagService } from './social-agent-rag.service';
@@ -184,6 +184,7 @@ export class SocialAgentChatService {
     private readonly profileEnrichment: SocialAgentProfileEnrichmentService,
     private readonly meetLoop: SocialAgentMeetLoopService,
     private readonly candidateActions: SocialAgentCandidateActionService,
+    private readonly draftPublication: SocialAgentDraftPublicationService,
     @Optional() private readonly brain?: SocialAgentBrainService,
     @Optional()
     private readonly memoryContext?: SocialAgentMemoryContextService,
@@ -1648,102 +1649,7 @@ export class SocialAgentChatService {
     taskId: number,
     draft: CreateSocialRequestDto & { socialRequestId?: number | null },
   ) {
-    let task = await this.assertTaskOwner(taskId, ownerUserId);
-    const requestId = this.number(
-      draft.socialRequestId ?? draft.metadata?.socialRequestId,
-    );
-    const dto = toSocialAgentPublishDto(task.id, draft);
-    const publishAction = await this.executor.executeToolAction(
-      taskId,
-      SocialAgentToolName.CreateSocialRequest,
-      {
-        ...dto,
-        socialRequestId: requestId,
-        mode: 'publish',
-        publish: true,
-        syncPublicIntent: true,
-        metadata: {
-          ...(dto.metadata ?? {}),
-          confirmationSource: 'social_agent_chat',
-        },
-      },
-      ownerUserId,
-    );
-    if (publishAction.status !== 'succeeded') {
-      throw new BadRequestException(
-        cleanDisplayText(publishAction.error?.message, '发布约练失败'),
-      );
-    }
-
-    task = await this.assertTaskOwner(taskId, ownerUserId);
-    const output = this.isRecord(publishAction.output)
-      ? publishAction.output
-      : {};
-    const socialRequestId = this.number(
-      output.socialRequestId ?? output.id ?? requestId,
-    );
-    if (!socialRequestId)
-      throw new BadRequestException('发布约练缺少 socialRequestId');
-    const publicIntent = this.isRecord(output.publicIntent)
-      ? output.publicIntent
-      : {};
-    const publicIntentId =
-      cleanDisplayText(output.publicIntentId ?? publicIntent.id, '') || null;
-    const socialRequest = this.isRecord(output.socialRequest)
-      ? output.socialRequest
-      : output;
-
-    await this.writeEvent(
-      task,
-      AgentTaskEventType.ConfirmationReceived,
-      '用户确认发布约练',
-      {
-        socialRequestId,
-        publicIntentId,
-        status: 'published',
-        toolName: SocialAgentToolName.CreateSocialRequest,
-        toolCallId: publishAction.id,
-      },
-    );
-    this.rememberShortTermStep(
-      task,
-      'publish_social_request',
-      '用户确认发布约练',
-      'done',
-    );
-    rememberSocialAgentShortTerm(task, {
-      publishedSocialRequestId: socialRequestId,
-      publicIntentId,
-      socialRequestId,
-      publishStatus: 'published',
-    });
-    task.status = AgentTaskStatus.Succeeded;
-    task.statusReason = 'social_request_published_and_synced';
-    task.completedAt = new Date();
-    task.result = {
-      ...(task.result ?? {}),
-      publishSocialRequest: {
-        socialRequestId,
-        publicIntentId,
-        status: 'published',
-        synced: true,
-        toolCallId: publishAction.id,
-      },
-    };
-    await this.taskRepo.save(task);
-    void this.longTermMemory.summarizeTask(task).catch(() => undefined);
-
-    return {
-      success: true,
-      taskId,
-      socialRequestId,
-      publicIntentId,
-      status: 'published',
-      taskStatus: task.status,
-      synced: true,
-      toolCallId: publishAction.id,
-      socialRequest: sanitizeForDisplay(socialRequest),
-    };
+    return this.draftPublication.publishDraft(ownerUserId, taskId, draft);
   }
 
   async saveCandidate(

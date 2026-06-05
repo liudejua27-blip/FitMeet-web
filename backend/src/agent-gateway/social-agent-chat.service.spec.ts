@@ -14,6 +14,7 @@ import { SocialAgentAction } from './agent-permission.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
+import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { SocialAgentFollowUpContextService } from './social-agent-follow-up-context.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
@@ -454,6 +455,16 @@ function makeHarness(options: Record<string, unknown> = {}) {
       options.sessionAssembler as never,
       longTermMemory as never,
     );
+  const draftPublication =
+    (options.draftPublication as
+      | SocialAgentDraftPublicationService
+      | undefined) ??
+    new SocialAgentDraftPublicationService(
+      taskRepo as never,
+      eventRepo as never,
+      executor as never,
+      longTermMemory as never,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
@@ -477,6 +488,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     profileEnrichment as never,
     meetLoop as never,
     candidateActions as never,
+    draftPublication as never,
     options.brain as never,
     undefined,
     options.finalResponses as never,
@@ -511,6 +523,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     profileEnrichment,
     meetLoop,
     candidateActions,
+    draftPublication,
   };
 }
 
