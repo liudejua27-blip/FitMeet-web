@@ -7,11 +7,13 @@ import { CreateSocialRequestDto } from '../social-requests/dto/create-social-req
 import { AgentTask } from './entities/agent-task.entity';
 import { CandidatePoolDebugReasons } from './social-agent-candidate-pool.service';
 import {
+  buildSocialAgentRequestDraft,
   toSocialAgentChatCandidate,
   toSocialAgentDraftDto,
 } from './social-agent-chat-result.presenter';
 import type {
   SocialAgentCandidateSearchResult,
+  SocialAgentChatCandidate,
   SocialAgentRequestDraft,
 } from './social-agent-chat.types';
 import {
@@ -22,6 +24,39 @@ import {
 @Injectable()
 export class SocialAgentDraftSearchService {
   constructor(private readonly executor: SocialAgentToolExecutorService) {}
+
+  async refreshDraftAndCandidates(input: {
+    task: AgentTask;
+    goal: string;
+    refreshTask?: () => Promise<AgentTask>;
+  }): Promise<{
+    task: AgentTask;
+    draft: SocialAgentRequestDraft;
+    searchResult: SocialAgentCandidateSearchResult;
+    candidates: SocialAgentChatCandidate[];
+  }> {
+    const draftResult = await this.generateDraftWithTool(
+      input.task,
+      input.goal,
+    );
+    let task = input.refreshTask ? await input.refreshTask() : input.task;
+    const draft = buildSocialAgentRequestDraft({
+      agentTaskId: task.id,
+      draft: draftResult.draft,
+      card: draftResult.card,
+      profileUsed: draftResult.profileUsed,
+    });
+    draft.socialRequestId = await this.createPrivateDraftRequest(task, draft);
+    task = input.refreshTask ? await input.refreshTask() : task;
+    const searchResult = await this.searchCandidates(task, draft);
+    task = input.refreshTask ? await input.refreshTask() : task;
+    return {
+      task,
+      draft,
+      searchResult,
+      candidates: searchResult.candidates,
+    };
+  }
 
   async generateDraftWithTool(
     task: AgentTask,

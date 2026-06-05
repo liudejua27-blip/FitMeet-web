@@ -126,6 +126,68 @@ function makeHarness() {
 }
 
 describe('SocialAgentDraftSearchService', () => {
+  it('refreshes a draft and candidates while reloading the task between tool calls', async () => {
+    const { executor, service } = makeHarness();
+    const initialTask = makeTask({ id: 101 });
+    const refreshedTasks = [
+      makeTask({ id: 102, ownerUserId: 7 }),
+      makeTask({ id: 103, ownerUserId: 7 }),
+      makeTask({ id: 104, ownerUserId: 7 }),
+    ];
+    const refreshTask = jest
+      .fn()
+      .mockResolvedValueOnce(refreshedTasks[0])
+      .mockResolvedValueOnce(refreshedTasks[1])
+      .mockResolvedValueOnce(refreshedTasks[2]);
+
+    const result = await service.refreshDraftAndCandidates({
+      task: initialTask,
+      goal: '今晚青岛轻松跑步',
+      refreshTask,
+    });
+
+    expect(refreshTask).toHaveBeenCalledTimes(3);
+    expect(result.task.id).toBe(104);
+    expect(result.draft).toMatchObject({
+      agentTaskId: 102,
+      socialRequestId: 301,
+      title: '今晚青岛轻松跑步',
+      mode: 'draft',
+    });
+    expect(result.searchResult).toMatchObject({
+      message: '找到 1 位候选人',
+      candidates: [
+        expect.objectContaining({
+          agentTaskId: 102,
+          socialRequestId: 301,
+          userId: 22,
+        }),
+      ],
+    });
+    expect(result.candidates).toBe(result.searchResult.candidates);
+    expect(executor.executeToolAction).toHaveBeenNthCalledWith(
+      1,
+      101,
+      SocialAgentToolName.CreateSocialRequest,
+      expect.objectContaining({ mode: 'ai_draft' }),
+      7,
+    );
+    expect(executor.executeToolAction).toHaveBeenNthCalledWith(
+      2,
+      102,
+      SocialAgentToolName.CreateSocialRequest,
+      expect.objectContaining({ mode: 'private_draft' }),
+      7,
+    );
+    expect(executor.executeToolAction).toHaveBeenNthCalledWith(
+      3,
+      103,
+      SocialAgentToolName.SearchMatches,
+      expect.objectContaining({ socialRequestId: 301 }),
+      7,
+    );
+  });
+
   it('generates a social request draft through the AI draft tool', async () => {
     const { executor, service } = makeHarness();
     const task = makeTask();

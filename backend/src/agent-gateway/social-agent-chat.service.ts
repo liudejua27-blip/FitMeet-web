@@ -1065,24 +1065,20 @@ export class SocialAgentChatService {
         : '已更新 Agent 计划，正在刷新候选人。',
     });
 
-    const draftResult = await this.generateDraftWithTool(task, refreshedGoal);
-    task = await this.assertTaskOwner(taskId, ownerUserId);
-    const draft = buildSocialAgentRequestDraft({
-      agentTaskId: task.id,
-      draft: draftResult.draft,
-      card: draftResult.card,
-      profileUsed: draftResult.profileUsed,
+    const refreshed = await this.draftSearch.refreshDraftAndCandidates({
+      task,
+      goal: refreshedGoal,
+      refreshTask: () => this.assertTaskOwner(taskId, ownerUserId),
     });
-    draft.socialRequestId = await this.createPrivateDraftRequest(task, draft);
-    task = await this.assertTaskOwner(taskId, ownerUserId);
+    task = refreshed.task;
+    const draft = refreshed.draft;
+    const searchResult = refreshed.searchResult;
+    const candidates = refreshed.candidates;
     await done('draft', '已重新生成约练草稿', AgentTaskEventType.ToolReturned, {
       toolName: SocialAgentToolName.CreateSocialRequest,
       draft: this.safeDraftForEvent(draft),
     });
 
-    const searchResult = await this.searchCandidates(task, draft);
-    const candidates = searchResult.candidates;
-    task = await this.assertTaskOwner(taskId, ownerUserId);
     await done(
       'search',
       '已重新检索附近候选人',
