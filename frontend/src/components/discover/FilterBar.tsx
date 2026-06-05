@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import clsx from 'clsx';
-import { CATEGORIES, GENDER_FILTERS, DISTANCE_FILTERS, LEVEL_FILTERS } from '../../data/options';
+import { CATEGORIES, DISTANCE_FILTERS, GENDER_FILTERS, LEVEL_FILTERS } from '../../data/options';
 
 interface FilterBarProps {
   active: string;
@@ -15,12 +15,12 @@ interface FilterBarProps {
 
 export const FilterBar = memo(function FilterBar({
   active,
-  onChange,
-  gender,
-  onGenderChange,
   distance,
-  onDistanceChange,
+  gender,
   level,
+  onChange,
+  onDistanceChange,
+  onGenderChange,
   onLevelChange,
 }: FilterBarProps) {
   return (
@@ -44,9 +44,24 @@ export const FilterBar = memo(function FilterBar({
         </div>
 
         <div className="flex gap-4 overflow-x-auto pt-2">
-          <FilterGroup label="性别" options={GENDER_FILTERS} value={gender} onChange={onGenderChange} />
-          <FilterGroup label="距离" options={DISTANCE_FILTERS} value={distance} onChange={onDistanceChange} />
-          <FilterGroup label="水平" options={LEVEL_FILTERS} value={level} onChange={onLevelChange} />
+          <FilterGroup
+            label="性别"
+            options={GENDER_FILTERS}
+            value={gender}
+            onChange={onGenderChange}
+          />
+          <FilterGroup
+            label="距离"
+            options={DISTANCE_FILTERS}
+            value={distance}
+            onChange={onDistanceChange}
+          />
+          <FilterGroup
+            label="水平"
+            options={LEVEL_FILTERS}
+            value={level}
+            onChange={onLevelChange}
+          />
         </div>
       </div>
     </div>
@@ -55,9 +70,9 @@ export const FilterBar = memo(function FilterBar({
 
 const FilterGroup = memo(function FilterGroup({
   label,
+  onChange,
   options,
   value,
-  onChange,
 }: {
   label: string;
   options: readonly { id: string; label: string }[];

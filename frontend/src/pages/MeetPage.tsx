@@ -45,7 +45,7 @@ export const MeetPage = () => {
       const fallback = withMockMeets([]);
       setMeetData(fallback);
       setSelectedMeetId((current) => current ?? fallback[0]?.id ?? null);
-      setError('约练列表加载失败，请稍后重试');
+      setError('约练列表加载失败，请稍后重试。');
     } finally {
       setIsLoading(false);
     }
@@ -82,7 +82,7 @@ export const MeetPage = () => {
       .catch((err: unknown) => {
         if (cancelled) return;
         setTripShareMeet(null);
-        setTripShareError(err instanceof Error ? err.message : '行程分享链接已失效');
+        setTripShareError(err instanceof Error ? err.message : '行程分享链接已失效。');
       });
     return () => {
       cancelled = true;
@@ -94,7 +94,10 @@ export const MeetPage = () => {
       setBlockedUserIds([]);
       return;
     }
-    dataService.getBlockedUserIds().then(setBlockedUserIds).catch(() => setBlockedUserIds([]));
+    dataService
+      .getBlockedUserIds()
+      .then(setBlockedUserIds)
+      .catch(() => setBlockedUserIds([]));
   }, [isLoggedIn]);
 
   const filteredMeets = useMemo(() => {
@@ -103,7 +106,8 @@ export const MeetPage = () => {
       const blocked = new Set(blockedUserIds);
       data = data.filter((meet) => !meet.userId || !blocked.has(meet.userId));
     }
-    if (filter !== 'all') data = data.filter((meet) => normalizeSportGroup(meet.type || meet.sport) === filter);
+    if (filter !== 'all')
+      data = data.filter((meet) => normalizeSportGroup(meet.type || meet.sport) === filter);
     if (distanceFilter !== '不限') {
       const maxKm = parseFloat(distanceFilter.replace(/[^\d.]/g, ''));
       data = data.filter((meet) => {
@@ -136,10 +140,10 @@ export const MeetPage = () => {
     getBrowserLocation()
       .then((coords) => {
         setUserLocation(coords);
-        showToast('已更新附近约练排序');
+        showToast('已更新附近约练排序。');
       })
       .catch((error) => {
-        setError(error instanceof Error ? error.message : '定位失败，请检查浏览器权限');
+        setError(error instanceof Error ? error.message : '定位失败，请检查浏览器权限。');
       })
       .finally(() => setIsLocating(false));
   }, [showToast]);
@@ -153,22 +157,20 @@ export const MeetPage = () => {
       if (joinedMeets.includes(id)) return;
       try {
         const meet = meetData.find((item) => item.id === id);
-        if (!meet?.mock) {
-          await dataService.joinMeet(id);
-        }
+        if (!meet?.mock) await dataService.joinMeet(id);
         setJoinedMeets((prev) => [...prev, id]);
         addNotification({
           type: 'meet',
           username: meet?.username || '约练',
           avatar: (meet?.username || '约')[0],
-          color: '#FF6A00',
-          text: `你已申请加入「${meet?.title || '约练'}」，等待发起人确认`,
+          color: '#ff6a00',
+          text: `你已申请加入「${meet?.title || '约练'}」，等待发起人确认。`,
           time: '刚刚',
         });
         if (!meet?.mock) await loadMeets();
-        showToast(`已申请加入「${meet?.title || '约练'}」`);
+        showToast(`已申请加入「${meet?.title || '约练'}」。`);
       } catch {
-        setError('加入失败，请稍后重试');
+        setError('加入失败，请稍后重试。');
       }
     },
     [addNotification, isLoggedIn, joinedMeets, loadMeets, meetData, openLogin, showToast],
@@ -202,20 +204,22 @@ export const MeetPage = () => {
           startAt: data.startAt || data.time,
           desc: data.desc,
         } as Partial<Meet>);
-        setMeetData((prev) => withMockMeets([created, ...prev.filter((meet) => meet.id !== created.id)]));
+        setMeetData((prev) =>
+          withMockMeets([created, ...prev.filter((meet) => meet.id !== created.id)]),
+        );
         setSelectedMeetId(created.id);
         addNotification({
           type: 'meet',
           username: '系统',
           avatar: 'S',
-          color: '#16C784',
-          text: `你的约练「${data.title}」已发布成功`,
+          color: '#16c784',
+          text: `你的约练「${data.title}」已发布成功。`,
           time: '刚刚',
         });
         setShowCreateModal(false);
-        showToast(`约练「${data.title}」发布成功`);
+        showToast(`约练「${data.title}」发布成功。`);
       } catch {
-        setError('创建约练失败，请稍后重试');
+        setError('创建约练失败，请稍后重试。');
       }
     },
     [addNotification, isLoggedIn, openLogin, showToast],
@@ -226,9 +230,9 @@ export const MeetPage = () => {
       try {
         await dataService.confirmMeetParticipant(meetId, participantId);
         await loadMeets();
-        showToast('已确认加入申请');
+        showToast('已确认加入申请。');
       } catch {
-        setError('确认失败，请稍后重试');
+        setError('确认失败，请稍后重试。');
       }
     },
     [loadMeets, showToast],
@@ -239,9 +243,9 @@ export const MeetPage = () => {
       try {
         await dataService.cancelMeet(meetId);
         await loadMeets();
-        showToast('约练状态已更新');
+        showToast('约练状态已更新。');
       } catch {
-        setError('取消失败，请稍后重试');
+        setError('取消失败，请稍后重试。');
       }
     },
     [loadMeets, showToast],
@@ -256,9 +260,9 @@ export const MeetPage = () => {
       try {
         const result = await dataService.createTripShare(meetId);
         await navigator.clipboard.writeText(result.url);
-        showToast('行程分享链接已复制');
+        showToast('行程分享链接已复制。');
       } catch {
-        setError('行程分享开启失败');
+        setError('行程分享开启失败。');
       }
     },
     [isLoggedIn, openLogin, showToast],
@@ -272,11 +276,11 @@ export const MeetPage = () => {
       }
       try {
         const result = await dataService.createMeetActivity(meetId);
-        showToast(result.reused ? '该约练已绑定活动' : '活动已创建');
+        showToast(result.reused ? '该约练已绑定活动。' : '活动已创建。');
         await loadMeets();
         navigate(`/activity/${result.activityId}`);
       } catch {
-        setError('活动创建失败');
+        setError('活动创建失败。');
       }
     },
     [isLoggedIn, loadMeets, navigate, openLogin, showToast],
@@ -295,9 +299,9 @@ export const MeetPage = () => {
           reason,
           description: `约练发起人：${meet.username}`,
         });
-        showToast('举报已提交');
+        showToast('举报已提交。');
       } catch {
-        setError('举报提交失败');
+        setError('举报提交失败。');
       }
     },
     [isLoggedIn, openLogin, showToast],
@@ -313,40 +317,44 @@ export const MeetPage = () => {
         await dataService.blockUser(userId);
         setBlockedUserIds((prev) => [...new Set([...prev, userId])]);
         setSelectedMeetId(null);
-        showToast('已拉黑该用户');
+        showToast('已拉黑该用户。');
       } catch {
-        setError('拉黑失败');
+        setError('拉黑失败。');
       }
     },
     [isLoggedIn, openLogin, showToast],
   );
 
   return (
-    <div className="min-h-screen bg-[#f7f4f1] text-ink">
-      {/* Safety Notice Banner */}
+    <div className="app-social-page app-social-page--meet min-h-screen bg-[#f7f4f1] text-ink">
       <div className="border-b border-amber-200 bg-amber-50 px-4 py-2.5">
         <div className="mx-auto flex max-w-7xl items-start gap-2 text-xs text-amber-800 sm:items-center">
-          <span className="mt-0.5 shrink-0 text-sm sm:mt-0">⚠️</span>
+          <span className="mt-0.5 shrink-0 text-sm sm:mt-0">!</span>
           <span className="leading-relaxed">
             <span className="font-bold">安全提示：</span>
-            为保障你的人身安全，请选择学校、健身房等距离你住址 10 公里以内的位置，并提前确认对方的为人是否可以交友。
+            首次见面优先选择学校、健身房、商场、公园等公共场所，出发前确认时间、地点和参与者。
           </span>
         </div>
       </div>
 
-      {/* Compact Professional Page Header */}
       <div className="border-b border-[#e5ddd5] bg-white px-4 py-4 sm:px-6 lg:px-8">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-lime text-white shadow-sm">
               <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z"
+                  clipRule="evenodd"
+                />
               </svg>
             </div>
             <div>
               <h1 className="text-lg font-black text-[#1a1208]">附近约练</h1>
               <p className="text-xs text-[#8b6a54]">
-                {filteredMeets.length > 0 ? `${filteredMeets.length} 场活动可加入` : '查找附近的运动约练'}
+                {filteredMeets.length > 0
+                  ? `${filteredMeets.length} 场活动可加入`
+                  : '查找附近的运动约练'}
                 {userLocation && <span className="ml-2 text-lime">· 已定位</span>}
               </p>
             </div>
@@ -357,10 +365,7 @@ export const MeetPage = () => {
               onClick={handleUseMyLocation}
               disabled={isLocating}
             >
-              <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
-                <path fillRule="evenodd" d="M8 1a7 7 0 100 14A7 7 0 008 1zM6.75 8a1.25 1.25 0 112.5 0 1.25 1.25 0 01-2.5 0z" clipRule="evenodd" />
-              </svg>
-              {isLocating ? '定位中…' : '附近排序'}
+              {isLocating ? '定位中' : '附近排序'}
             </button>
             <button
               className="flex items-center gap-1 rounded-lg bg-lime px-4 py-2 text-xs font-black text-white shadow-sm transition hover:bg-brand2"
@@ -392,41 +397,12 @@ export const MeetPage = () => {
             </div>
           ) : tripShareMeet ? (
             <div className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4 shadow-sm sm:p-5">
-              <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.25em] text-amber-700">
-                <span>🎯</span>
-                <span>行程分享 · TRIP SHARE</span>
-              </div>
-              <h3 className="mb-2 text-lg font-black text-[#1a1208]">
-                {tripShareMeet.title}
-              </h3>
-              <dl className="grid grid-cols-1 gap-2 text-xs text-[#5a3f2c] sm:grid-cols-2">
-                <div>
-                  <dt className="font-bold text-[#8b6a54]">时间</dt>
-                  <dd>{tripShareMeet.time || '待定'}</dd>
-                </div>
-                <div>
-                  <dt className="font-bold text-[#8b6a54]">地点</dt>
-                  <dd>
-                    {tripShareMeet.loc}
-                    {tripShareMeet.address ? ` · ${tripShareMeet.address}` : ''}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="font-bold text-[#8b6a54]">参与人</dt>
-                  <dd>
-                    {tripShareMeet.slots}/{tripShareMeet.maxSlots}
-                    {tripShareMeet.participants?.length
-                      ? ` · ${tripShareMeet.participants.join('、')}`
-                      : ''}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="font-bold text-[#8b6a54]">集合说明</dt>
-                  <dd>{tripShareMeet.desc || '未填写，请联系发起人确认'}</dd>
-                </div>
-              </dl>
+              <h3 className="mb-2 text-lg font-black text-[#1a1208]">{tripShareMeet.title}</h3>
+              <p className="text-sm text-[#76543e]">
+                {tripShareMeet.time || '时间待定'} · {tripShareMeet.loc || '地点待定'}
+              </p>
               <p className="mt-3 rounded-lg bg-white/70 px-3 py-2 text-[11px] leading-relaxed text-amber-800">
-                ⚠️ 安全提示：选择白天/公共场所碰面，提前告知亲友行程，遇到风险请立即拨打 110。
+                安全提示：优先选择白天和公共场所见面，提前告知亲友行程。
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
@@ -489,7 +465,11 @@ export const MeetPage = () => {
         </section>
       </div>
 
-      <CreateMeetModal open={showCreateModal} onClose={() => setShowCreateModal(false)} onSubmit={handleCreateSubmit} />
+      <CreateMeetModal
+        open={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSubmit={handleCreateSubmit}
+      />
 
       {successMsg && (
         <div className="fixed left-1/2 top-24 z-[100] -translate-x-1/2 rounded-xl bg-lime px-6 py-3 text-sm font-black text-white shadow-glow">

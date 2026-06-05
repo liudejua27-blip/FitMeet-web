@@ -119,11 +119,6 @@ const CitiesPage = lazy(() =>
 const SportsPage = lazy(() =>
   import('./pages/SportsPage').then((m) => ({ default: m.SportsPage })),
 );
-const SafetyPage = lazy(() =>
-  import('./pages/SafetyPage').then((m) => ({ default: m.SafetyPage })),
-);
-const AboutPage = lazy(() => import('./pages/AboutPage').then((m) => ({ default: m.AboutPage })));
-
 function PageLoader() {
   return (
     <div
@@ -179,6 +174,7 @@ function App() {
                 <Route path="/safety" element={<PlatformPage page="safety" />} />
                 <Route path="/about" element={<PlatformPage page="about" />} />
                 <Route path="/app" element={<PlatformPage page="app" />} />
+                <Route path="/demo" element={<PlatformPage page="demo" />} />
                 <Route path="/life-graph" element={<PlatformPage page="lifeGraph" />} />
                 <Route path="/login" element={<LoginEntry />} />
                 <Route path="/legacy-home" element={<PlatformPage page="home" />} />
@@ -305,12 +301,16 @@ function App() {
                 />
                 {ENABLE_DEMO_ROUTES ? (
                   <>
-                    <Route path="/demo/agent-social-loop" element={<DemoAgentSocialLoopPage />} />
-                    <Route path="/demo/investor" element={<DemoInvestorPage />} />
+                    <Route
+                      path="/internal/demo/agent-social-loop"
+                      element={<DemoAgentSocialLoopPage />}
+                    />
+                    <Route path="/internal/demo/investor" element={<DemoInvestorPage />} />
                   </>
                 ) : (
-                  <Route path="/demo/*" element={<Navigate to="/" replace />} />
+                  <Route path="/internal/demo/*" element={<Navigate to="/" replace />} />
                 )}
+                <Route path="/demo/*" element={<Navigate to="/demo" replace />} />
                 <Route
                   path="/profile"
                   element={
@@ -348,8 +348,6 @@ function App() {
                 <Route path="/sports" element={<SportsPage />} />
                 <Route path="/sports/:slug" element={<GeoLandingPage />} />
                 <Route path="/guides/:slug" element={<GeoLandingPage />} />
-                <Route path="/about" element={<AboutPage />} />
-                <Route path="/safety" element={<SafetyPage />} />
                 <Route path="/ai-hosting" element={<Navigate to="/agent" replace />} />
                 <Route path="/developers/social-skills" element={<SocialSkillsDeveloperPage />} />
                 <Route path="/waitlist" element={<Navigate to="/app" replace />} />

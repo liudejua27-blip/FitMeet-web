@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
+import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { Link, useLocation } from 'react-router-dom';
 import { waitlistApi, type WaitlistDeviceType } from '../../api/waitlistApi';
@@ -6,9 +6,9 @@ import { waitlistApi, type WaitlistDeviceType } from '../../api/waitlistApi';
 const EARTH_ASSET = '/images/fitmeet/concept-earth-asia.png';
 const EARTH_WEBP_SRCSET =
   '/images/fitmeet/concept-earth-asia-960.webp 960w, /images/fitmeet/concept-earth-asia-1400.webp 1400w';
+const SITE_URL = 'https://ourfitmeet.cn';
 const ICP_TEXT = import.meta.env.VITE_ICP_TEXT || '鲁ICP备2026015946号-2';
 const ICP_URL = import.meta.env.VITE_ICP_URL || 'http://beian.miit.gov.cn/';
-const SITE_URL = 'https://ourfitmeet.cn';
 
 export type WebsitePage =
   | 'home'
@@ -17,421 +17,259 @@ export type WebsitePage =
   | 'developers'
   | 'safety'
   | 'about'
-  | 'lifeGraph';
+  | 'lifeGraph'
+  | 'demo';
 
-type PageAction = {
+type Action = {
   label: string;
   to: string;
   variant?: 'primary' | 'secondary';
 };
 
-type PagePanel = {
-  label: string;
+type InfoPage = {
   title: string;
   body: string;
-};
-
-type MarketingPageContent = {
-  label: string;
-  title: string;
-  body: string;
-  actions: PageAction[];
-  panels: PagePanel[];
-  closing: {
+  actions: Action[];
+  sections: {
     label: string;
     title: string;
     body: string;
-    items: string[];
-  };
+  }[];
 };
 
 const navItems = [
   { to: '/', label: '首页' },
-  { to: '/ecosystem', label: '需求流' },
+  { to: '/demo', label: '30 秒 Demo' },
+  { to: '/app', label: 'App' },
+  { to: '/safety', label: 'Safety Center' },
   { to: '/agent', label: 'Agent' },
-  { to: '/app', label: 'App 内测' },
-  { to: '/safety', label: '安全' },
-  { to: '/about', label: '关于' },
 ];
 
-const pageTitles: Record<WebsitePage, string> = {
-  home: 'FitMeet | Social World',
-  ecosystem: 'FitMeet | 需求流社交',
-  app: 'FitMeet App 内测',
-  developers: 'FitMeet | 开发者预览',
-  safety: 'FitMeet | 安全与信任',
-  about: '关于 FitMeet',
-  lifeGraph: 'FitMeet | Life Graph',
-};
-
-const pageSeo: Record<
-  WebsitePage,
-  {
-    title: string;
-    description: string;
-    keywords: string;
-    path: string;
-  }
-> = {
+const seo: Record<WebsitePage, { title: string; description: string; path: string }> = {
   home: {
-    title: 'FitMeet | Social World 需求流社交与 AI 社交平台',
+    title: 'FitMeet | 用 Agent 完成真实生活里的连接',
     description:
-      'FitMeet 是面向真实世界连接的 AI 社交平台，从信息流走向需求流，帮助用户完成同城社交、约练、找搭子、找朋友和相亲恋爱。',
-    keywords: 'FitMeet,Social World,需求流社交,AI社交平台,同城社交,约练,找搭子,找朋友,相亲恋爱,Agent生活助手',
+      'FitMeet 是面向真实生活的 Agent 社交产品。用户说出场景，Agent 理解需求、推荐合适的人或活动，并在关键动作前等待用户确认。',
     path: '/',
   },
   ecosystem: {
-    title: '需求流社交 | FitMeet',
+    title: 'FitMeet | 从信息流到需求流社交',
     description:
-      '了解 FitMeet 如何让用户直接提出需求，由 Agent 理解上下文、匹配候选人、解释推荐理由，并由用户确认关键动作。',
-    keywords: '需求流社交,意图流社交,同城社交,找搭子,约练,AI匹配,FitMeet Agent',
+      '了解 FitMeet 如何把同城社交、约练和找搭子的真实需求变成可解释、可确认、可执行的连接流程。',
     path: '/ecosystem',
   },
   app: {
-    title: 'FitMeet App 内测 | 同城社交、约练、找搭子',
+    title: 'FitMeet App | Beta 预约',
     description:
-      '预约 FitMeet App 内测，在手机上发起同城社交、约练、找搭子、找朋友和相亲恋爱需求，体验 AI Agent 辅助真实连接。',
-    keywords: 'FitMeet App,App内测,同城社交App,约练App,找搭子App,运动搭子,AI社交平台',
+      '预约 FitMeet App Beta，体验移动端 5 Tab、附近机会、Agent 发起需求、安全确认和活动闭环。',
     path: '/app',
   },
   developers: {
-    title: '开发者预览 | FitMeet Agent API',
-    description:
-      'FitMeet 开发者预览展示未来外部 Agent 如何在用户授权、安全审计和权限边界内接入真实生活社交网络。',
-    keywords: 'Agent API,开发者预览,AI Agent,权限边界,安全审计,FitMeet',
+    title: 'FitMeet Developers | Agent 接入预告',
+    description: 'FitMeet 开发者能力将围绕权限、确认、审计和真实生活社交工具开放。',
     path: '/developers',
   },
   safety: {
-    title: '安全与信任 | FitMeet',
+    title: 'FitMeet Safety Center | 隐私、确认、审计与撤回',
     description:
-      'FitMeet 安全体系强调用户确认、隐私边界、可解释推荐和审计记录，确保 Agent 不越权替用户行动。',
-    keywords: '社交安全,用户确认,隐私边界,可解释推荐,安全审计,AI社交平台',
+      'FitMeet Safety Center 说明隐私、用户确认、审计、撤回、举报、数据删除和敏感数据保护机制。',
     path: '/safety',
   },
   about: {
-    title: '关于 FitMeet | 从信息流社交走向需求流社交',
-    description:
-      'FitMeet 的愿景是让社交服务真实生活，从信息流社交走向需求流社交，成为由用户、Agent 和真实关系构成的 Social World。',
-    keywords: '关于FitMeet,Social World,需求流社交,AI社交平台,同城社交,真实连接',
+    title: '关于 FitMeet | Social World',
+    description: 'FitMeet 希望让社交回到真实生活，从刷信息流转向由用户需求驱动的真实连接。',
     path: '/about',
   },
   lifeGraph: {
-    title: 'Life Graph | FitMeet 后台智能画像',
+    title: 'FitMeet Life Graph | 用户可控画像',
     description:
-      'Life Graph 是 FitMeet 的后台智能画像系统，在用户授权下理解兴趣、时间、位置、偏好和边界，让 Agent 匹配更准确。',
-    keywords: 'Life Graph,智能画像,动态人物画像,AI匹配,用户授权,FitMeet Agent',
+      'Life Graph 在用户授权下帮助 Agent 理解节奏、偏好和边界，并保持可编辑、可撤回、可审计。',
     path: '/life-graph',
   },
-};
-
-const pageContent: Record<Exclude<WebsitePage, 'home'>, MarketingPageContent> = {
-  ecosystem: {
-    label: '需求流社交',
-    title: '从刷信息流，到直接提出需求。',
-    body:
-      'FitMeet 第一阶段聚焦用户最真实的线下社交：同城社交、约练、找搭子、找朋友、相亲恋爱。用户不再靠刷动态碰运气，而是把需求交给 Agent 去理解、匹配、解释，并在关键动作前等待确认。',
-    actions: [
-      { label: '进入 Agent', to: '/agent', variant: 'primary' },
-      { label: '预约 App 内测', to: '/app#waitlist' },
-    ],
-    panels: [
-      {
-        label: '说出需求',
-        title: '把“我想找人做什么”说清楚',
-        body: '今晚想跑步、周末想拍照、想认识附近朋友、想认真相亲，需求越真实，匹配越有方向。',
-      },
-      {
-        label: '理解上下文',
-        title: 'Agent 补全时间、地点、偏好和边界',
-        body: '同一个“找搭子”背后可能是运动、拍照、吃饭或户外，不同场景需要不同的匹配方式。',
-      },
-      {
-        label: '推荐候选',
-        title: '不是泛推荐，而是有理由的候选人',
-        body: 'FitMeet 会解释为什么推荐：共同兴趣、距离、时间、生活节奏或社交边界是否匹配。',
-      },
-      {
-        label: '用户确认',
-        title: '关键动作始终由用户决定',
-        body: '发起联系、交换信息、线下见面和共享位置，都需要用户确认后再继续。',
-      },
-      {
-        label: '真实连接',
-        title: '让社交回到现实生活',
-        body: '平台的目标不是让用户停留更久，而是让合适的人更快从线上走到真实场景。',
-      },
-    ],
-    closing: {
-      label: '第一阶段重点',
-      title: '先把用户需求做好，再扩展生态能力。',
-      body: '商家、开发者和外部 Agent 是未来能力。当前官网最重要的任务，是让用户明白：我提出需求，Agent 帮我完成真实连接。',
-      items: ['同城社交', '约练运动', '找搭子', '找朋友', '相亲恋爱'],
-    },
-  },
-  app: {
-    label: 'App 内测',
-    title: '把需求流社交带到每天会发生连接的地方。',
-    body:
-      'FitMeet App 会承载发起需求、附近机会、聊天确认、活动提醒和个人边界管理。Web 让用户理解 FitMeet，App 让用户在真实生活里随时发起连接。',
-    actions: [
-      { label: '预约 App 内测', to: '#waitlist', variant: 'primary' },
-      { label: '先进入 Agent', to: '/agent' },
-    ],
-    panels: [
-      {
-        label: '随时发起',
-        title: '一句话发起真实社交需求',
-        body: '在路上、训练前、周末出门前，都可以直接告诉 Agent 你想找谁、做什么、何时开始。',
-      },
-      {
-        label: '附近机会',
-        title: '把人、活动和地点放进同一条动线',
-        body: '附近的人、可加入的活动、适合见面的地点，会围绕需求组织，而不是散落在不同页面。',
-      },
-      {
-        label: '聊天确认',
-        title: '从推荐到开场，再到是否连接',
-        body: 'Agent 可以生成低压力开场白，但是否联系、是否见面、是否共享信息，始终由用户确认。',
-      },
-      {
-        label: '移动场景',
-        title: '适合即时、附近、线下的真实社交',
-        body: '找跑步搭子、拍照搭子、同城朋友和相亲对象，都需要 App 在用户真实移动场景中出现。',
-      },
-    ],
-    closing: {
-      label: '为什么预约',
-      title: '第一批内测会优先验证真实场景。',
-      body: '我们会优先打磨同城社交、约练、找搭子、找朋友和相亲恋爱五个场景，让 App 成为现实连接的入口。',
-      items: ['附近匹配', '一句话发起需求', '聊天确认', '活动提醒', '安全边界'],
-    },
-  },
-  developers: {
-    label: '开发者预览',
-    title: '未来让外部 Agent 接入真实生活社交网络。',
-    body:
-      '开发者能力不是第一阶段主线，但会成为 FitMeet 后续生态扩展的基础。外部 Agent 必须在用户授权和平台审计边界内接入。',
-    actions: [
-      { label: '查看开发者文档', to: '/developers/social-skills', variant: 'primary' },
-      { label: '进入 Agent', to: '/agent' },
-    ],
-    panels: [
-      {
-        label: 'social-skills',
-        title: '把社交动作变成可授权协议',
-        body: '需求创建、候选读取、消息建议和活动发起，都必须在用户授权范围内执行。',
-      },
-      {
-        label: 'Tool Registry',
-        title: '每个工具都有清晰边界',
-        body: '能力范围、用户授权、生产审核和风险等级需要在接入前明确。',
-      },
-      {
-        label: 'Agent Token',
-        title: '授权不是永久通行证',
-        body: '令牌应当可范围化、可撤回、可审计，并与用户意图绑定。',
-      },
-      {
-        label: 'Webhook',
-        title: '关键状态可回传、可复盘',
-        body: '候选、审批、消息和活动状态通过事件回传，避免黑箱执行。',
-      },
-    ],
-    closing: {
-      label: '接入原则',
-      title: 'Agent 可以提高效率，但不能越过用户边界。',
-      body: '真实世界连接需要比普通软件集成更严格的权限、风控和审计模型。',
-      items: ['Agent API', 'Tool Registry', 'Webhook', 'Agent Token', 'Sandbox'],
-    },
-  },
-  safety: {
-    label: '安全与信任',
-    title: '真实世界社交，必须先建立信任。',
-    body:
-      'FitMeet 的安全设计围绕一个原则：Agent 可以理解、推荐和辅助，但不能越权替用户行动。联系、见面、位置、隐私和敏感信息相关动作，都需要用户确认。',
-    actions: [
-      { label: '了解 Life Graph', to: '/life-graph', variant: 'primary' },
-      { label: '进入 Agent', to: '/agent' },
-    ],
-    panels: [
-      {
-        label: '用户确认',
-        title: '关键社交动作必须由用户决定',
-        body: '发消息、交换联系方式、线下见面、共享位置等动作，都应该先解释，再确认。',
-      },
-      {
-        label: '隐私边界',
-        title: '敏感数据默认不自动共享',
-        body: '精确位置、健康数据、联系方式、支付和身份信息默认关闭或单独授权。',
-      },
-      {
-        label: '可解释推荐',
-        title: '每个推荐都要说清楚原因',
-        body: '用户需要知道为什么推荐这个人、匹配了哪些条件、还有哪些风险边界。',
-      },
-      {
-        label: '审计记录',
-        title: '关键动作可复盘、可撤回、可治理',
-        body: '平台会记录 Agent 的关键决策节点，为用户安全和长期信任负责。',
-      },
-    ],
-    closing: {
-      label: '安全底线',
-      title: 'Agent 不替你社交，只帮助你更好地做决定。',
-      body: '这条边界决定了 FitMeet 能不能成为长期可信的真实世界社交平台。',
-      items: ['位置默认关闭', '联系不自动交换', '见面需要确认', '推荐可解释', '画像可编辑', '授权可撤回'],
-    },
-  },
-  about: {
-    label: '关于 FitMeet',
-    title: '从信息流社交，走向需求流社交。',
-    body:
-      'FitMeet 不是为了让用户花更多时间刷屏，而是帮助用户用更少时间建立更真实、更安全、更合适的现实连接。我们从同城社交、约练、找搭子、找朋友和相亲恋爱开始。',
-    actions: [
-      { label: '了解需求流社交', to: '/ecosystem', variant: 'primary' },
-      { label: '进入 Agent', to: '/agent' },
-    ],
-    panels: [
-      {
-        label: '问题',
-        title: '信息流让人不断浏览，却很难行动',
-        body: '用户需要反复筛选、等待回复、重复解释自己，真实见面的履约成本越来越高。',
-      },
-      {
-        label: '答案',
-        title: 'Agent 成为真实连接的入口',
-        body: '用户说出需求，Agent 理解意图、结合画像、推荐合适的人，并等待用户确认。',
-      },
-      {
-        label: '愿景',
-        title: '社交应该服务现实生活',
-        body: 'FitMeet 的长期目标，是成为全球用户进行真实连接的 Social World。',
-      },
-    ],
-    closing: {
-      label: '品牌锚点',
-      title: 'Social World，改变世界的社交方式。',
-      body: '从一个真实需求开始，逐步形成由用户、Agent 和真实关系共同构成的新社交世界。',
-      items: ['需求流社交', 'Agent 匹配', 'Life Graph', '用户确认', '真实连接'],
-    },
-  },
-  lifeGraph: {
-    label: 'Life Graph',
-    title: '后台动态人物画像，不增加用户负担。',
-    body:
-      'Life Graph 不是让用户填写更多资料，也不是前台炫技功能。它是 FitMeet 的后台智能系统，在用户授权下理解兴趣、时间、位置、社交偏好、生活节奏、边界和反馈。',
-    actions: [
-      { label: '进入 Agent', to: '/agent', variant: 'primary' },
-      { label: '了解安全体系', to: '/safety' },
-    ],
-    panels: [
-      {
-        label: '后台理解',
-        title: '用户不用反复解释自己',
-        body: '每一次需求、确认和反馈，都会帮助 Agent 更好地理解你的真实生活场景。',
-      },
-      {
-        label: '授权使用',
-        title: '画像只在边界内被使用',
-        body: 'Agent 可以用画像帮助匹配，但不会把隐私直接暴露给其他用户。',
-      },
-      {
-        label: '持续校准',
-        title: '匹配会随着反馈变得更准确',
-        body: '选择、拒绝、收藏和确认都会让系统逐步理解什么才适合你。',
-      },
-      {
-        label: '用户控制',
-        title: '可编辑、可关闭、可撤回',
-        body: 'Life Graph 属于用户。平台需要让画像透明、可控、可复盘。',
-      },
-    ],
-    closing: {
-      label: '画像原则',
-      title: 'Life Graph 是智能基础设施，不是用户的新负担。',
-      body: '它的价值不是展示复杂图谱，而是让每一次匹配更贴近真实生活。',
-      items: ['兴趣', '节奏', '位置', '边界', '反馈', '记忆', '隐私', '预测'],
-    },
+  demo: {
+    title: 'FitMeet 30 秒 Demo | 免登录理解产品',
+    description: '不用登录，30 秒看懂 FitMeet：用户场景、Agent 完成、用户确认和安全边界。',
+    path: '/demo',
   },
 };
 
-const proofScenarios = [
+const scenes = [
   {
-    title: '同城社交',
-    example: '想认识附近同频的新朋友',
-    body: '从位置、兴趣和生活节奏出发，找到更自然的真实连接。',
-    image: '/images/fitmeet/proof-city-social.png',
-    webpSrcSet: '/images/fitmeet/proof-city-social-360.webp 360w, /images/fitmeet/proof-city-social-640.webp 640w',
+    scene: '今晚想慢跑，但不想尬聊',
+    agent: 'Agent 询问距离、强度和社交边界，推荐 2 位低压力跑步搭子。',
+    safe: '只展示模糊区域；发送邀请前必须确认。',
   },
   {
-    title: '约练运动',
-    example: '今晚想找一个同城跑步搭子',
-    body: '找到时间、地点、水平都合适的训练伙伴。',
-    image: '/images/fitmeet/proof-workout.png',
-    webpSrcSet: '/images/fitmeet/proof-workout-360.webp 360w, /images/fitmeet/proof-workout-640.webp 640w',
+    scene: '周末想找自然一点的活动',
+    agent: 'Agent 按时间、地点和社交偏好筛选可加入活动。',
+    safe: '活动详情包含地点风险、报名状态和举报入口。',
   },
   {
-    title: '找搭子',
-    example: '周末想找人一起拍照探店',
-    body: '吃饭、拍照、探店、户外，都能直接发起需求。',
-    image: '/images/fitmeet/proof-companion.png',
-    webpSrcSet: '/images/fitmeet/proof-companion-360.webp 360w, /images/fitmeet/proof-companion-528.webp 528w',
-  },
-  {
-    title: '找朋友',
-    example: '想找一个能长期聊天和线下见面的朋友',
-    body: '从兴趣和生活方式出发，建立更自然的关系。',
-    image: '/images/fitmeet/proof-friends.png',
-    webpSrcSet: '/images/fitmeet/proof-friends-360.webp 360w, /images/fitmeet/proof-friends-528.webp 528w',
-  },
-  {
-    title: '相亲恋爱',
-    example: '帮我找一个认真相亲对象',
-    body: '让认真匹配发生在滑卡和尬聊之前。',
-    image: '/images/fitmeet/proof-dating.png',
-    webpSrcSet: '/images/fitmeet/proof-dating-360.webp 360w, /images/fitmeet/proof-dating-528.webp 528w',
+    scene: '最近想认识更同频的人',
+    agent: 'Agent 解释匹配理由：运动类型、生活节奏、聊天方式和边界。',
+    safe: '身体信息、精确位置和联系方式默认隐藏。',
   },
 ];
+
+const safetyItems = [
+  ['隐私', '精确位置、身体信息、联系方式默认隐藏，只在用户本人界面可见。'],
+  ['确认', '发邀请、加入活动、共享位置、写入 Life Graph 前都需要用户确认。'],
+  ['审计', 'Agent 的关键判断、工具调用和权限变化保留可回看记录。'],
+  ['撤回', '授权、画像信号、活动申请和推荐偏好都可以撤回或关闭。'],
+  ['举报', '用户、活动、消息和推荐卡片都提供举报与拉黑入口。'],
+  ['数据删除', '账号数据、画像记录、敏感字段和历史活动支持删除请求。'],
+];
+
+const appTabs = [
+  ['首页', '今天适合发起什么需求'],
+  ['附近', '人、活动和地点按场景组织'],
+  ['Agent', '一句话发起需求和确认动作'],
+  ['消息', '低压力开场、邀请、活动确认'],
+  ['我的', 'Life Graph、隐私开关和安全记录'],
+];
+
+const infoPages: Partial<Record<WebsitePage, InfoPage>> = {
+  ecosystem: {
+    title: '从刷信息流，变成说出真实需求。',
+    body: 'FitMeet 的核心不是展示更多模块，而是把用户的真实场景变成 Agent 可以完成的社交任务。',
+    actions: [
+      { label: '看 30 秒 Demo', to: '/demo', variant: 'primary' },
+      { label: '进入 Agent', to: '/agent' },
+    ],
+    sections: [
+      {
+        label: '用户场景',
+        title: '用户不想研究功能，只想完成一件事。',
+        body: '想跑步、想参加活动、想认识附近同频的人，这些才是产品入口。',
+      },
+      {
+        label: 'Agent 完成',
+        title: 'Agent 负责理解、筛选、解释和准备下一步。',
+        body: 'FitMeet 把时间、地点、运动类型、社交偏好和安全边界整理成可执行动作。',
+      },
+      {
+        label: '为什么安全',
+        title: '关键动作不自动执行。',
+        body: 'Agent 可以建议，但发邀请、加入活动、共享敏感信息都必须由用户确认。',
+      },
+    ],
+  },
+  about: {
+    title: 'FitMeet 让社交回到真实生活。',
+    body: '我们不想做一个让人停留更久的信息流，而是做一个让合适的人更自然见面的 Social World。',
+    actions: [
+      { label: '了解 Safety Center', to: '/safety', variant: 'primary' },
+      { label: '预约 App Beta', to: '/app#waitlist' },
+    ],
+    sections: [
+      {
+        label: '方向',
+        title: '需求流社交',
+        body: '用户先说出真实需求，系统围绕需求组织人、活动和地点。',
+      },
+      {
+        label: '边界',
+        title: 'Agent 不是替你社交',
+        body: 'Agent 只帮助你更好地做决定，最终动作仍由你确认。',
+      },
+      {
+        label: '长期',
+        title: 'Social World',
+        body: '让真实世界里的关系、活动和城市生活被更好地连接。',
+      },
+    ],
+  },
+  lifeGraph: {
+    title: 'Life Graph 是用户可控的后台画像。',
+    body: '它帮助 Agent 理解你的节奏、偏好和边界，但不把敏感数据直接暴露给别人。',
+    actions: [
+      { label: '查看安全原则', to: '/safety', variant: 'primary' },
+      { label: '进入 Agent', to: '/agent' },
+    ],
+    sections: [
+      {
+        label: '可编辑',
+        title: '画像不是黑箱。',
+        body: '兴趣、节奏、区域偏好和社交边界都应该可查看、可调整。',
+      },
+      {
+        label: '需确认',
+        title: '写入重要画像前先确认。',
+        body: '当 Agent 需要更新用户画像，应该弹出确认，不应静默写入数据库。',
+      },
+      {
+        label: '可撤回',
+        title: '用户可以关闭或删除画像信号。',
+        body: 'FitMeet 的画像价值来自信任，而不是不可控的数据积累。',
+      },
+    ],
+  },
+  developers: {
+    title: '开发者能力会围绕安全边界开放。',
+    body: '未来外部 Agent 或工具接入 FitMeet 时，必须遵守权限、确认、审计和撤回机制。',
+    actions: [
+      { label: '查看开发者页', to: '/developers/social-skills', variant: 'primary' },
+      { label: '看 Safety Center', to: '/safety' },
+    ],
+    sections: [
+      {
+        label: '权限',
+        title: '工具能力按范围开放。',
+        body: '读取候选、生成建议、发送邀请和创建活动需要不同授权级别。',
+      },
+      {
+        label: '审计',
+        title: '每次关键调用都有记录。',
+        body: '开发者工具不能成为越权执行的捷径。',
+      },
+      {
+        label: '撤回',
+        title: '授权必须可撤回。',
+        body: '用户和平台都需要能中止不合适的工具访问。',
+      },
+    ],
+  },
+};
 
 export function WebsitePlatform({ page }: { page: WebsitePage }) {
   const location = useLocation();
 
   useEffect(() => {
-    const seo = pageSeo[page];
-    const canonicalPath = location.pathname === '/legacy-home' ? '/' : seo.path;
-    const canonicalUrl = `${SITE_URL}${canonicalPath}`;
-    document.title = seo.title || pageTitles[page];
-    setMetaTag('description', seo.description);
-    setMetaTag('keywords', seo.keywords);
-    setMetaTag('robots', 'index,follow');
-    setMetaProperty('og:title', seo.title);
-    setMetaProperty('og:description', seo.description);
+    const pageSeo = seo[page];
+    const canonicalUrl = `${SITE_URL}${pageSeo.path}`;
+    document.title = pageSeo.title;
+    setMetaTag('description', pageSeo.description);
+    setMetaProperty('og:title', pageSeo.title);
+    setMetaProperty('og:description', pageSeo.description);
     setMetaProperty('og:url', canonicalUrl);
-    setMetaProperty('og:type', 'website');
-    setMetaProperty('og:site_name', 'FitMeet');
-    setMetaProperty('og:locale', 'zh_CN');
-    setMetaTag('twitter:card', 'summary_large_image');
-    setMetaTag('twitter:title', seo.title);
-    setMetaTag('twitter:description', seo.description);
     setCanonical(canonicalUrl);
-  }, [location.pathname, page]);
+  }, [page]);
 
   useEffect(() => {
     if (!location.hash) return;
-    const target = document.getElementById(location.hash.slice(1));
-    target?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    document.getElementById(location.hash.slice(1))?.scrollIntoView({ behavior: 'smooth' });
   }, [location.hash, location.pathname]);
 
   return (
-    <WebsiteLayout>
-      {page === 'home' ? <ConceptHomePage /> : <MarketingPage page={page} />}
-    </WebsiteLayout>
+    <div className="fitmeet-website fm-site">
+      <WebsiteNavbar />
+      <main>
+        {page === 'home' ? <HomePage /> : null}
+        {page === 'safety' ? <SafetyCenterPage /> : null}
+        {page === 'app' ? <AppPreviewPage /> : null}
+        {page === 'demo' ? <PublicDemoPage /> : null}
+        {page !== 'home' && page !== 'safety' && page !== 'app' && page !== 'demo' ? (
+          <InfoPageView page={page} />
+        ) : null}
+      </main>
+      <WebsiteFooter />
+    </div>
   );
 }
 
 export function WebsiteLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="fitmeet-website fitmeet-website--earth">
+    <div className="fitmeet-website fm-site">
       <WebsiteNavbar />
       <main>{children}</main>
       <WebsiteFooter />
@@ -439,311 +277,348 @@ export function WebsiteLayout({ children }: { children: ReactNode }) {
   );
 }
 
-export function WebsiteNavbar() {
+function WebsiteNavbar() {
   const location = useLocation();
 
   return (
-    <header className="website-nav concept-nav">
-      <Link to="/" className="website-nav__brand" aria-label="FitMeet 首页">
+    <header className="fm-nav">
+      <Link to="/" className="fm-brand" aria-label="FitMeet 首页">
         <span>F</span>
         <strong>FitMeet</strong>
       </Link>
       <nav aria-label="FitMeet 官网导航">
-        {navItems.map((item) => (
-          <Link
-            key={item.to}
-            to={item.to}
-            className={clsx(
-              (item.to === '/'
-                ? location.pathname === '/' || location.pathname === '/legacy-home'
-                : location.pathname === item.to) && 'is-active',
-            )}
-          >
-            {item.label}
-          </Link>
-        ))}
+        {navItems.map((item) => {
+          const active =
+            item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to);
+          return (
+            <Link key={item.to} to={item.to} aria-current={active ? 'page' : undefined}>
+              {item.label}
+            </Link>
+          );
+        })}
       </nav>
-      <div className="website-nav__actions">
-        <Link to="/app#waitlist">预约 App</Link>
-        <Link to="/agent">进入 Agent</Link>
+      <div className="fm-nav__actions">
+        <Link to="/app#waitlist" className="fm-button fm-button--ghost">
+          Beta 预约
+        </Link>
+        <Link to="/demo" className="fm-button fm-button--primary">
+          30 秒 Demo
+        </Link>
       </div>
     </header>
   );
 }
 
-function ConceptHomePage() {
+function HomePage() {
   return (
     <>
-      <section className="concept-home-hero" aria-label="FitMeet 首页">
-        <div className="concept-home-hero__earth" aria-hidden="true">
+      <section className="fm-hero">
+        <div className="fm-hero__media" aria-hidden="true">
           <picture>
-            <source type="image/webp" srcSet={EARTH_WEBP_SRCSET} sizes="(max-width: 900px) 100vw, 76vw" />
+            <source
+              type="image/webp"
+              srcSet={EARTH_WEBP_SRCSET}
+              sizes="(max-width: 900px) 100vw, 70vw"
+            />
             <img src={EARTH_ASSET} alt="" decoding="async" />
           </picture>
         </div>
-        <div className="concept-home-hero__copy">
-          <h1>Social World</h1>
-          <p className="concept-hero-subcopy">改变世界的社交方式。</p>
-          <p className="concept-hero-body">
-            FitMeet 将社交从信息流带入需求流。你说出真实生活中的需求，Agent 理解意图、结合动态画像、推荐合适的人，并在关键动作前等待你确认。
+        <div className="fm-hero__copy">
+          <h1>说出你想完成的连接。</h1>
+          <p>
+            FitMeet 不是让你研究一堆功能。你只需要说出真实生活里的场景，Agent
+            会帮你理解需求、筛选合适的人或活动，并在关键动作前等待你确认。
           </p>
-          <div className="concept-rule" aria-hidden="true" />
-          <div className="concept-demand-rail" aria-label="首发社交场景">
-            {['找搭子', '约练运动', '同城交友', '相亲恋爱'].map((item) => (
-              <Link key={item} to="/agent">
-                {item}
-              </Link>
-            ))}
-          </div>
-          <div className="concept-cta-row">
-            <Link to="/agent" className="concept-button concept-button--primary">
-              进入 Agent
-              <ArrowIcon />
+          <div className="fm-actions">
+            <Link to="/demo" className="fm-button fm-button--primary">
+              30 秒看懂 FitMeet
             </Link>
-            <Link to="/app#waitlist" className="concept-button">
-              预约 App 内测
+            <Link to="/safety" className="fm-button fm-button--ghost">
+              为什么安全
             </Link>
           </div>
         </div>
       </section>
-      <HomeDemandFlowSection />
-      <HomeProofSection />
-      <HomeAgentLoopSection />
-      <HomeLifeGraphSection />
-      <HomeSafetySection />
-      <AppWaitlistSection />
-      <DeveloperAccessSection />
+
+      <Section
+        label="新的信息架构"
+        title="用户场景 -> Agent 怎么完成 -> 为什么安全"
+        body="官网只讲一件事：用户在真实生活里想完成什么，FitMeet Agent 如何帮他走到下一步，以及平台为什么不会越过用户边界。"
+      >
+        <div className="fm-flow-grid">
+          {scenes.map((item) => (
+            <article key={item.scene} className="fm-card fm-flow-card">
+              <span>用户场景</span>
+              <h3>{item.scene}</h3>
+              <p>{item.agent}</p>
+              <small>{item.safe}</small>
+            </article>
+          ))}
+        </div>
+      </Section>
+
+      <Section label="Agent 工作闭环" title="Agent 不替你社交，只把下一步准备好。" tone="deep">
+        <div className="fm-step-line">
+          {['说出场景', '补全边界', '推荐候选', '解释理由', '用户确认', '开始连接'].map(
+            (step, index) => (
+              <article key={step}>
+                <span>{String(index + 1).padStart(2, '0')}</span>
+                <strong>{step}</strong>
+              </article>
+            ),
+          )}
+        </div>
+      </Section>
+
+      <SafetySummary />
+      <AppPreviewCompact />
+      <DemoStrip />
     </>
   );
 }
 
-function HomeDemandFlowSection() {
+function SafetyCenterPage() {
   return (
-    <WebsiteBand
-      label="需求流社交"
-      title="别再刷信息流，直接说出你想连接谁。"
-      body="用户不是来消耗内容，而是来完成现实需求：找搭子、约练、认识朋友、认真相亲。FitMeet 让 Agent 把需求变成可解释、可确认、可执行的社交任务。"
-      tone="deep"
-    >
-      <div className="demand-comparison">
-        <article>
-          <span>传统信息流</span>
-          <strong>刷动态、看资料、等回复</strong>
-          <p>用户花时间筛选和试探，却很难把当下需求变成真实见面。</p>
-        </article>
-        <article>
-          <span>FitMeet 需求流</span>
-          <strong>说需求、得推荐、再确认</strong>
-          <p>Agent 理解场景、时间、地点、边界和偏好，直接推荐更合适的人。</p>
-        </article>
-      </div>
-    </WebsiteBand>
+    <>
+      <PageHero
+        title="Safety Center"
+        body="真实世界社交的安全，不是一个设置页，而是一整套默认机制：隐私、确认、审计、撤回、举报和数据删除。"
+        actions={[
+          { label: '体验免登录 Demo', to: '/demo', variant: 'primary' },
+          { label: '预约 App Beta', to: '/app#waitlist' },
+        ]}
+      />
+      <Section label="安全机制" title="每个关键动作都要可解释、可确认、可追溯。">
+        <div className="fm-safety-grid">
+          {safetyItems.map(([title, body]) => (
+            <article key={title} className="fm-card">
+              <span className="fm-status">Safety</span>
+              <h3>{title}</h3>
+              <p>{body}</p>
+            </article>
+          ))}
+        </div>
+      </Section>
+      <Section label="敏感数据" title="默认隐藏，只在本人界面可见。" tone="deep">
+        <div className="fm-policy-panel">
+          {['身体信息', '精确位置', '联系方式', '活动轨迹', 'Life Graph 信号'].map((item) => (
+            <span key={item}>{item}</span>
+          ))}
+        </div>
+      </Section>
+      <Section label="治理闭环" title="出现问题时，用户知道该去哪里。">
+        <div className="fm-governance">
+          {['查看审计记录', '撤回授权', '举报用户或活动', '删除数据请求'].map((item) => (
+            <article key={item} className="fm-card">
+              <h3>{item}</h3>
+              <p>在真实社交产品里，安全入口必须清楚、短路径、可操作，而不是藏在长文档里。</p>
+            </article>
+          ))}
+        </div>
+      </Section>
+    </>
   );
 }
 
-function HomeProofSection() {
+function AppPreviewPage() {
   return (
-    <WebsiteBand
-      label="首发场景"
-      title="五个高频场景，让用户第一眼知道怎么用。"
-      body="每个场景都从一句真实需求开始。用户不需要理解复杂系统，只需要知道自己想找谁、做什么、何时开始。"
-    >
-      <div className="proof-scenario-grid">
-        {proofScenarios.map((scenario) => (
-          <article key={scenario.title} className="proof-scenario-card">
-            <picture>
-              <source type="image/webp" srcSet={scenario.webpSrcSet} sizes="(max-width: 980px) 50vw, 20vw" />
-              <img
-                src={scenario.image}
-                alt={`${scenario.title}场景示意：${scenario.example}`}
-                loading="lazy"
-                decoding="async"
-              />
-            </picture>
-            <div>
-              <span>{scenario.title}</span>
-              <strong className="proof-example">{scenario.example}</strong>
-              <p>{scenario.body}</p>
-              <Link to="/agent" className="proof-scenario-card__cta">
-                用这个需求试试
-              </Link>
-            </div>
-          </article>
-        ))}
-      </div>
-    </WebsiteBand>
+    <>
+      <PageHero
+        title="FitMeet App Beta"
+        body="移动端承载真实生活场景：5 Tab、附近机会、Agent 发起需求、消息确认、个人隐私与 Life Graph 管理。"
+        actions={[
+          { label: '预约 Beta', to: '#waitlist', variant: 'primary' },
+          { label: '先看 Demo', to: '/demo' },
+        ]}
+      />
+      <Section label="移动端 5 Tab" title="用户每天只需要看懂这五个入口。">
+        <PhonePreview />
+      </Section>
+      <Section label="核心截图" title="把复杂能力压缩成三个真实场景。" tone="deep">
+        <div className="fm-screenshot-grid">
+          {['一句话发起需求', '查看附近机会', '确认后再连接'].map((title) => (
+            <article key={title} className="fm-app-shot">
+              <span>{title}</span>
+              <div />
+            </article>
+          ))}
+        </div>
+      </Section>
+      <WaitlistSection />
+    </>
   );
 }
 
-function HomeAgentLoopSection() {
-  const steps = [
-    ['提出需求', '今晚想找一个同城跑步搭子。'],
-    ['理解意图', 'Agent 补全时间、地点、强度和社交边界。'],
-    ['读取画像', 'Life Graph 提供兴趣、节奏和偏好的授权信号。'],
-    ['匹配候选', '推荐更合适的人，并解释推荐理由。'],
-    ['用户确认', '是否联系、是否见面、是否交换信息，都由用户决定。'],
-  ];
+function PublicDemoPage() {
+  const [step, setStep] = useState(0);
+  const demoSteps = useMemo(
+    () => [
+      {
+        title: '用户说出场景',
+        body: '今晚想找一个人慢跑，不想太社交，最好离我 3km 内。',
+      },
+      {
+        title: 'Agent 补全边界',
+        body: '我会优先公共场所、低强度、站内先聊；精确位置不会展示。',
+      },
+      {
+        title: '推荐候选',
+        body: '匹配理由：同区域、今晚有空、都偏好轻松运动、聊天压力低。',
+      },
+      {
+        title: '用户确认',
+        body: '发送邀请前需要确认；你也可以改成加入附近活动。',
+      },
+    ],
+    [],
+  );
 
   return (
-    <WebsiteBand
-      label="Agent 工作流"
-      title="Agent 负责匹配，决定权始终在用户手里。"
-      body="FitMeet 的核心闭环是：提出需求、理解意图、读取画像、匹配候选、用户确认、开始连接。"
-      tone="deep"
-    >
-      <div className="concept-loop-line">
-        {steps.map(([title, body], index) => (
-          <article key={title}>
-            <span>{String(index + 1).padStart(2, '0')}</span>
-            <strong>{title}</strong>
+    <>
+      <PageHero
+        title="30 秒理解 FitMeet"
+        body="不用登录。走完一次用户场景、Agent 完成和安全确认，就能理解 FitMeet 的产品核心。"
+        actions={[
+          { label: '开始 Demo', to: '#demo-flow', variant: 'primary' },
+          { label: '进入 Agent', to: '/agent' },
+        ]}
+      />
+      <section id="demo-flow" className="fm-demo">
+        <div className="fm-demo__rail">
+          {demoSteps.map((item, index) => (
+            <button
+              key={item.title}
+              className={clsx(index === step && 'is-active')}
+              onClick={() => setStep(index)}
+            >
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              {item.title}
+            </button>
+          ))}
+        </div>
+        <div className="fm-demo__screen">
+          <span>FitMeet Agent</span>
+          <h2>{demoSteps[step].title}</h2>
+          <p>{demoSteps[step].body}</p>
+          <div className="fm-demo__controls">
+            <button onClick={() => setStep((value) => Math.max(0, value - 1))}>上一步</button>
+            <button onClick={() => setStep((value) => Math.min(demoSteps.length - 1, value + 1))}>
+              下一步
+            </button>
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function InfoPageView({ page }: { page: WebsitePage }) {
+  const content = infoPages[page] ?? infoPages.ecosystem!;
+
+  return (
+    <>
+      <PageHero title={content.title} body={content.body} actions={content.actions} />
+      <Section label="FitMeet" title="从真实场景开始，而不是从功能列表开始。">
+        <div className="fm-flow-grid">
+          {content.sections.map((section) => (
+            <article key={section.title} className="fm-card">
+              <span>{section.label}</span>
+              <h3>{section.title}</h3>
+              <p>{section.body}</p>
+            </article>
+          ))}
+        </div>
+      </Section>
+    </>
+  );
+}
+
+function SafetySummary() {
+  return (
+    <Section label="为什么安全" title="所有真实世界动作，都先解释再确认。">
+      <div className="fm-safety-grid">
+        {safetyItems.slice(0, 4).map(([title, body]) => (
+          <article key={title} className="fm-card">
+            <span className="fm-status">Protected</span>
+            <h3>{title}</h3>
             <p>{body}</p>
           </article>
         ))}
       </div>
-    </WebsiteBand>
+      <div className="fm-section__after">
+        <Link to="/safety" className="fm-button fm-button--ghost">
+          查看 Safety Center
+        </Link>
+      </div>
+    </Section>
   );
 }
 
-function HomeLifeGraphSection() {
-  const layers = ['兴趣', '时间', '位置', '生活节奏', '社交偏好', '安全边界', '反馈记忆', '匹配预测'];
-
+function AppPreviewCompact() {
   return (
-    <WebsiteBand
-      label="Life Graph"
-      title="后台画像不打扰用户，只让匹配更准确。"
-      body="Life Graph 是后台智能系统，不是新的填写负担。它在用户授权下理解兴趣、节奏、偏好和边界，让 Agent 不是随机推荐，而是有依据地匹配。"
-    >
-      <div className="lifegraph-backing">
-        <div>
-          <strong>用户控制画像，Agent 只在授权范围内使用。</strong>
-          <p>
-            Life Graph 属于用户。用户可以编辑、关闭、撤回或重置关键画像信号，Agent 可以使用它帮助匹配，但不会直接暴露隐私。
-          </p>
-        </div>
-        <div className="concept-module-grid">
-          {layers.map((layer) => (
-            <span key={layer}>{layer}</span>
-          ))}
-        </div>
+    <Section label="App 预告" title="移动端会把复杂能力压进 5 个清晰入口。" tone="deep">
+      <PhonePreview />
+      <div className="fm-section__after">
+        <Link to="/app" className="fm-button fm-button--primary">
+          查看 App 预告页
+        </Link>
       </div>
-    </WebsiteBand>
+    </Section>
   );
 }
 
-function HomeSafetySection() {
-  const rules = ['联系不自动交换', '见面需要确认', '位置默认关闭', '推荐理由可解释', '画像可编辑', '授权可撤回'];
-
+function DemoStrip() {
   return (
-    <WebsiteBand
-      label="安全与确认"
-      title="真实世界社交，必须先解释、再确认。"
-      body="Agent 可以理解、推荐和辅助，但不能越权替用户行动。联系、见面、位置和敏感信息相关动作都需要用户确认。"
-      tone="deep"
-    >
-      <div className="safety-principles">
-        {rules.map((rule) => (
-          <span key={rule}>{rule}</span>
-        ))}
-      </div>
-    </WebsiteBand>
-  );
-}
-
-function MarketingPage({ page }: { page: Exclude<WebsitePage, 'home'> }) {
-  const content = pageContent[page];
-
-  return (
-    <>
-      <PlatformPageHero label={content.label} title={content.title} body={content.body} actions={content.actions} />
-      <WebsiteBand label={content.label} title={content.title} tone="deep">
-        <div className="concept-panel-grid concept-panel-grid--wide">
-          {content.panels.map((panel) => (
-            <article key={panel.title} className="concept-panel">
-              <span>{panel.label}</span>
-              <h3>{panel.title}</h3>
-              <p>{panel.body}</p>
-            </article>
-          ))}
-        </div>
-      </WebsiteBand>
-      <PageClosingSection closing={content.closing} />
-      {page === 'app' ? <AppWaitlistSection /> : null}
-      {page === 'lifeGraph' ? <LifeGraphModelSection /> : null}
-      {page === 'developers' ? <DeveloperAccessSection /> : null}
-      {page === 'safety' ? <SafetyAuditSection /> : null}
-    </>
-  );
-}
-
-function PageClosingSection({ closing }: { closing: MarketingPageContent['closing'] }) {
-  return (
-    <WebsiteBand label={closing.label} title={closing.title} body={closing.body}>
-      <div className="concept-module-grid">
-        {closing.items.map((item) => (
-          <span key={item}>{item}</span>
-        ))}
-      </div>
-    </WebsiteBand>
-  );
-}
-
-export function PlatformPageHero({
-  label,
-  title,
-  body,
-  actions,
-}: {
-  label: string;
-  title: string;
-  body: string;
-  actions: PageAction[];
-}) {
-  return (
-    <section className="website-page-hero concept-page-hero">
-      <div>
-        <span className="platform-label">{label}</span>
-        <h1>{title}</h1>
-      </div>
-      <div>
-        <p>{body}</p>
-        <div className="website-page-hero__actions">
-          {actions.map((action) => (
-            <Link key={action.label} to={action.to} className={clsx(action.variant === 'primary' && 'is-primary')}>
-              {action.label}
-            </Link>
-          ))}
-        </div>
-      </div>
+    <section className="fm-demo-strip">
+      <h2>让新用户 30 秒理解 FitMeet。</h2>
+      <p>不注册、不填资料，先看一次完整闭环：说出需求、Agent 推荐、解释理由、确认后行动。</p>
+      <Link to="/demo" className="fm-button fm-button--primary">
+        打开免登录 Demo
+      </Link>
     </section>
   );
 }
 
-function WebsiteBand({
-  label,
-  title,
-  body,
-  tone = 'default',
-  children,
-}: {
-  label: string;
-  title: string;
-  body?: string;
-  tone?: 'default' | 'deep';
-  children: ReactNode;
-}) {
+function PhonePreview() {
   return (
-    <section className={clsx('website-band', tone === 'deep' && 'website-band--deep')}>
-      <div className="website-band__header">
-        <span className="platform-label">{label}</span>
-        <h2>{title}</h2>
-        {body ? <p>{body}</p> : null}
+    <div className="fm-phone-wrap">
+      <div className="fm-phone" aria-label="FitMeet App 5 Tab 预览">
+        <div className="fm-phone__top">
+          <span>FitMeet</span>
+          <small>Beta</small>
+        </div>
+        <div className="fm-phone__prompt">今晚想找个人慢跑，不尬聊，轻松一点</div>
+        <div className="fm-phone__cards">
+          <article>
+            <strong>低压力跑步搭子</strong>
+            <p>同区域 · 今晚有空 · 强度匹配</p>
+          </article>
+          <article>
+            <strong>附近轻松活动</strong>
+            <p>公共场所 · 需确认后加入</p>
+          </article>
+        </div>
+        <div className="fm-phone__tabs">
+          {appTabs.map(([tab, body]) => (
+            <span key={tab} title={body}>
+              {tab}
+            </span>
+          ))}
+        </div>
       </div>
-      {children}
-    </section>
+      <div className="fm-app-tabs">
+        {appTabs.map(([tab, body]) => (
+          <article key={tab} className="fm-card">
+            <h3>{tab}</h3>
+            <p>{body}</p>
+          </article>
+        ))}
+      </div>
+    </div>
   );
 }
 
-function AppWaitlistSection() {
+function WaitlistSection() {
   const [email, setEmail] = useState('');
   const [deviceType, setDeviceType] = useState<WaitlistDeviceType>('ios');
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -764,119 +639,116 @@ function AppWaitlistSection() {
         interests: ['fitmeet_app_beta'],
         userRole: 'fitness_user',
         interviewWilling: true,
-        source: 'concept_website_app',
+        source: 'public_app_preview',
       });
-      setStatus('success');
       setEmail('');
+      setStatus('success');
     } catch {
       setStatus('error');
     }
   };
 
   return (
-    <WebsiteBand
-      label="App 内测"
-      title="预约 FitMeet App，第一批体验需求流社交。"
-      body="在手机上发起需求、查看附近机会、确认匹配、管理聊天和活动提醒。"
-    >
-      <div className="concept-split">
-        <div className="concept-check-list">
-          {['一句话发起需求', '附近机会推荐', '候选人推荐理由', '聊天与活动提醒', '安全边界确认'].map((item) => (
-            <p key={item}>{item}</p>
-          ))}
-        </div>
-        <form id="waitlist" className="waitlist-form concept-waitlist" onSubmit={handleSubmit}>
-          <label>
-            邮箱
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@fitmeet.world"
-              autoComplete="email"
-              required
-            />
-          </label>
-          <label>
-            设备
-            <select value={deviceType} onChange={(event) => setDeviceType(event.target.value as WaitlistDeviceType)}>
-              <option value="ios">iOS</option>
-              <option value="android">Android</option>
-              <option value="both">都可以</option>
-            </select>
-          </label>
-          <button type="submit" disabled={status === 'loading'}>
-            {status === 'loading' ? '提交中' : '预约 App 内测'}
-          </button>
-          <div aria-live="polite">
-            {status === 'success' ? <p>已预约，我们会在内测开放时联系你。</p> : null}
-            {status === 'error' ? <p>暂时提交失败，请稍后再试。</p> : null}
-          </div>
-        </form>
-      </div>
-    </WebsiteBand>
+    <Section label="Beta 预约" title="加入第一批移动端体验。" id="waitlist">
+      <form className="fm-form" onSubmit={handleSubmit}>
+        <label>
+          邮箱
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="you@example.com"
+            autoComplete="email"
+            required
+          />
+        </label>
+        <label>
+          设备
+          <select
+            value={deviceType}
+            onChange={(event) => setDeviceType(event.target.value as WaitlistDeviceType)}
+          >
+            <option value="ios">iOS</option>
+            <option value="android">Android</option>
+            <option value="both">都可以</option>
+          </select>
+        </label>
+        <button
+          className="fm-button fm-button--primary"
+          type="submit"
+          disabled={status === 'loading'}
+        >
+          {status === 'loading' ? '提交中' : '预约 Beta'}
+        </button>
+        <p aria-live="polite">
+          {status === 'success' ? '已预约，我们会在 Beta 开放时联系你。' : null}
+          {status === 'error' ? '暂时提交失败，请稍后再试。' : null}
+        </p>
+      </form>
+    </Section>
   );
 }
 
-function LifeGraphModelSection() {
-  const nodes = ['兴趣', '位置', '时间', '运动习惯', '社交偏好', '安全边界', '互动记忆', '匹配预测'];
-
+function PageHero({ actions, body, title }: { actions: Action[]; body: string; title: string }) {
   return (
-    <WebsiteBand label="画像结构" title="每一层都必须可解释、可授权、可撤回。">
-      <div className="concept-module-grid">
-        {nodes.map((node) => (
-          <span key={node}>{node}</span>
+    <section className="fm-page-hero">
+      <h1>{title}</h1>
+      <p>{body}</p>
+      <div className="fm-actions">
+        {actions.map((action) => (
+          <Link
+            key={action.label}
+            to={action.to}
+            className={clsx(
+              'fm-button',
+              action.variant === 'primary' ? 'fm-button--primary' : 'fm-button--ghost',
+            )}
+          >
+            {action.label}
+          </Link>
         ))}
       </div>
-    </WebsiteBand>
+    </section>
   );
 }
 
-function DeveloperAccessSection() {
-  const modules = ['Agent API', 'Tool Registry', 'Webhook', 'Agent Token', 'social-skills', 'Sandbox'];
-
+function Section({
+  body,
+  children,
+  id,
+  label,
+  title,
+  tone,
+}: {
+  body?: string;
+  children: ReactNode;
+  id?: string;
+  label: string;
+  title: string;
+  tone?: 'deep';
+}) {
   return (
-    <WebsiteBand label="开发者预览" title="未来让外部 Agent 接入真实生活社交网络。">
-      <div className="concept-terminal">
-        <span>开发者接入模块</span>
-        {modules.map((module) => (
-          <code key={module}>{module}</code>
-        ))}
-        <Link to="/developers/social-skills">查看开发者文档</Link>
+    <section id={id} className={clsx('fm-section', tone === 'deep' && 'fm-section--deep')}>
+      <div className="fm-section__header">
+        <span>{label}</span>
+        <h2>{title}</h2>
+        {body ? <p>{body}</p> : null}
       </div>
-    </WebsiteBand>
-  );
-}
-
-function SafetyAuditSection() {
-  const rows = ['捕获意图', '确认授权边界', '评估场景风险', '等待用户确认'];
-
-  return (
-    <WebsiteBand label="审计序列" title="真实世界行动之前，先建立信任。">
-      <ol className="concept-audit-list">
-        {rows.map((row, index) => (
-          <li key={row}>
-            <span>{String(index + 1).padStart(2, '0')}</span>
-            <strong>{row}</strong>
-          </li>
-        ))}
-      </ol>
-    </WebsiteBand>
+      {children}
+    </section>
   );
 }
 
 function WebsiteFooter() {
   return (
-    <footer className="website-footer concept-footer">
+    <footer className="fm-footer">
       <strong>FitMeet</strong>
-      <span>需求流社交平台，让用户提出真实需求，由 Agent 帮助完成现实世界连接。</span>
+      <p>用 Agent 完成真实生活里的连接。关键动作先解释，再确认。</p>
       <nav aria-label="FitMeet 页脚导航">
-        <Link to="/ecosystem">需求流社交</Link>
-        <Link to="/life-graph">Life Graph</Link>
-        <Link to="/agent">Agent 入口</Link>
-        <Link to="/app#waitlist">预约 App</Link>
-        <Link to="/safety">安全体系</Link>
-        <Link to="/developers">开发者预览</Link>
+        <Link to="/demo">30 秒 Demo</Link>
+        <Link to="/app">App Beta</Link>
+        <Link to="/safety">Safety Center</Link>
+        <Link to="/about">关于</Link>
         <Link to="/privacy">隐私政策</Link>
         <Link to="/terms">用户协议</Link>
         <a href={ICP_URL} target="_blank" rel="noreferrer">
@@ -884,21 +756,6 @@ function WebsiteFooter() {
         </a>
       </nav>
     </footer>
-  );
-}
-
-function ArrowIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-      <path
-        d="M5 10h9M10.5 5.5 15 10l-4.5 4.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }
 

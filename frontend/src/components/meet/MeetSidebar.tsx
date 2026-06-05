@@ -21,7 +21,10 @@ interface MeetSidebarProps {
   onCreate?: () => void;
 }
 
-const typeFilters = [{ id: 'all', label: '全部' }, ...SPORT_GROUP_OPTIONS.map((item) => ({ id: item.id, label: item.shortLabel }))];
+const typeFilters = [
+  { id: 'all', label: '全部' },
+  ...SPORT_GROUP_OPTIONS.map((item) => ({ id: item.id, label: item.shortLabel })),
+];
 const distFilters = ['1km', '3km', '5km', '不限'];
 
 export const MeetSidebar = memo(function MeetSidebar({

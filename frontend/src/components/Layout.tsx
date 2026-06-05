@@ -6,14 +6,18 @@ import { BackToTop } from './ui';
 
 const navItems = [
   { to: '/', label: '首页' },
-  { to: '/social-agent', label: '社交' },
-  { to: '/profile', label: '我的' },
+  { to: '/hall', label: '附近机会' },
+  { to: '/discover', label: '发现' },
+  { to: '/meet', label: '约练' },
+  { to: '/agent', label: 'Agent' },
 ];
 
 const bottomTabs = [
   { id: 'home', to: '/', label: '首页', icon: 'home' as const },
-  { id: 'social', to: '/social-agent', label: '社交', icon: 'create' as const, isCreate: true },
-  { id: 'profile', to: '/profile', label: '我的', icon: 'profile' as const },
+  { id: 'nearby', to: '/hall', label: '附近', icon: 'discover' as const },
+  { id: 'agent', to: '/agent', label: 'Agent', icon: 'create' as const, isCreate: true },
+  { id: 'messages', to: '/messages', label: '消息', icon: 'messages' as const, protected: true },
+  { id: 'profile', to: '/profile', label: '我的', icon: 'profile' as const, protected: true },
 ];
 
 const icpText = import.meta.env.VITE_ICP_TEXT || '鲁ICP备2026015946号-2';
@@ -31,30 +35,23 @@ const Navbar = () => {
     location.pathname === path || (path !== '/' && location.pathname.startsWith(`${path}/`));
 
   return (
-    <nav aria-label="主导航" className="sticky top-0 z-50 border-b border-white/10 bg-[#100b08]/92 backdrop-blur-xl">
+    <nav aria-label="主导航" className="site-shell-nav sticky top-0 z-50">
       <div className="mx-auto flex h-[72px] max-w-7xl items-center gap-4 px-4 sm:px-6 lg:px-8">
-        <Link to="/" className="group flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-lime text-lg font-black text-white shadow-glow">
-            F
-          </span>
+        <Link to="/" className="group flex items-center gap-3" aria-label="FitMeet 首页">
+          <span className="site-shell-mark">F</span>
           <span className="font-display text-xl font-black tracking-tight text-cream">
             Fit<span className="text-lime">Meet</span>
           </span>
         </Link>
 
         <div className="hidden flex-1 items-center justify-center md:flex">
-          <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/[0.04] p-1">
+          <div className="site-shell-nav__links">
             {navItems.map((item) => (
               <Link
                 key={item.to}
                 to={item.to}
                 aria-current={isActive(item.to) ? 'page' : undefined}
-                className={clsx(
-                  'whitespace-nowrap rounded-lg px-3 py-2 text-center font-display text-sm font-bold transition',
-                  isActive(item.to)
-                    ? 'bg-lime text-white shadow-glow'
-                    : 'text-textMuted hover:bg-white/[0.06] hover:text-cream',
-                )}
+                className={clsx('site-shell-nav__link', isActive(item.to) && 'is-active')}
               >
                 {item.label}
               </Link>
@@ -62,10 +59,7 @@ const Navbar = () => {
           </div>
         </div>
 
-        <button
-          className="hidden min-w-[250px] items-center gap-3 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2.5 text-left text-sm text-textMuted transition hover:border-lime/40 hover:text-cream lg:flex"
-          onClick={() => navigate('/search')}
-        >
+        <button className="site-shell-search hidden lg:flex" onClick={() => navigate('/search')}>
           <SearchIcon />
           搜索 Agent、附近机会或城市
         </button>
@@ -73,50 +67,36 @@ const Navbar = () => {
         <div className="hidden items-center gap-2 md:flex">
           {isLoggedIn ? (
             <>
-              <button
-                className="rounded-lg bg-lime px-4 py-2.5 text-sm font-black text-white transition hover:bg-brand2 hover:shadow-glow"
-                onClick={() => navigate('/social-agent')}
-              >
+              <button className="site-shell-primary" onClick={() => navigate('/agent')}>
                 告诉 Agent
               </button>
-              <IconButton label="通知" count={unreadNotifs} onClick={() => navigate('/notifications')}>
+              <IconButton
+                label="通知"
+                count={unreadNotifs}
+                onClick={() => navigate('/notifications')}
+              >
                 <BellIcon />
               </IconButton>
               <IconButton label="消息" count={totalUnread} onClick={() => navigate('/messages')}>
                 <MessageIcon />
               </IconButton>
-              <Link
-                to="/profile"
-                className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 transition hover:border-lime/40"
-              >
-                <span
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-xs font-black text-white"
-                  style={{ background: user?.color || '#FF6A00' }}
-                >
+              <Link to="/profile" className="site-shell-user">
+                <span style={{ background: user?.color || '#ff6a00' }}>
                   {user?.avatar || user?.name?.[0] || 'U'}
                 </span>
-                <span className="max-w-[90px] truncate text-sm font-bold text-cream">{user?.name || '我的主页'}</span>
+                <strong>{user?.name || '我的主页'}</strong>
               </Link>
-              <button
-                className="rounded-lg border border-white/10 px-3 py-2 text-xs font-bold text-textMuted transition hover:border-red-400/40 hover:text-red-200"
-                onClick={logout}
-              >
+              <button className="site-shell-ghost site-shell-ghost--danger" onClick={logout}>
                 退出
               </button>
             </>
           ) : (
             <>
-              <button
-                className="rounded-lg border border-white/10 px-4 py-2.5 text-sm font-bold text-textMuted transition hover:border-lime/40 hover:text-cream"
-                onClick={openLogin}
-              >
+              <button className="site-shell-ghost" onClick={openLogin}>
                 登录
               </button>
-              <button
-                className="rounded-lg bg-lime px-4 py-2.5 text-sm font-black text-white transition hover:bg-brand2 hover:shadow-glow"
-                onClick={() => navigate('/app')}
-              >
-                预约内测
+              <button className="site-shell-primary" onClick={() => navigate('/app')}>
+                预约 App
               </button>
             </>
           )}
@@ -124,29 +104,26 @@ const Navbar = () => {
 
         <div className="flex-1 md:hidden" />
         <button
-          className="flex h-10 w-10 flex-col items-center justify-center gap-1.5 rounded-lg border border-white/10 md:hidden"
+          className="site-shell-menu md:hidden"
           aria-label={mobileOpen ? '关闭菜单' : '打开菜单'}
           aria-expanded={mobileOpen}
           onClick={() => setMobileOpen((value) => !value)}
         >
-          <span className={clsx('h-0.5 w-5 bg-cream transition', mobileOpen && 'translate-y-2 rotate-45')} />
-          <span className={clsx('h-0.5 w-5 bg-cream transition', mobileOpen && 'opacity-0')} />
-          <span className={clsx('h-0.5 w-5 bg-cream transition', mobileOpen && '-translate-y-2 -rotate-45')} />
+          <span className={clsx(mobileOpen && 'translate-y-2 rotate-45')} />
+          <span className={clsx(mobileOpen && 'opacity-0')} />
+          <span className={clsx(mobileOpen && '-translate-y-2 -rotate-45')} />
         </button>
       </div>
 
       {mobileOpen && (
-        <div className="border-t border-white/10 bg-[#100b08]/98 px-4 py-4 md:hidden">
+        <div className="site-shell-mobile md:hidden">
           <div className="grid gap-2">
             {navItems.map((item) => (
               <Link
                 key={item.to}
                 to={item.to}
                 aria-current={isActive(item.to) ? 'page' : undefined}
-                className={clsx(
-                  'rounded-lg px-4 py-3 text-sm font-bold transition',
-                  isActive(item.to) ? 'bg-lime text-white' : 'text-textMuted hover:bg-white/[0.06] hover:text-cream',
-                )}
+                className={clsx('site-shell-mobile__link', isActive(item.to) && 'is-active')}
                 onClick={() => setMobileOpen(false)}
               >
                 {item.label}
@@ -155,16 +132,16 @@ const Navbar = () => {
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2">
             {isLoggedIn ? (
-              <button className="col-span-2 rounded-lg border border-red-400/30 py-3 text-sm font-bold text-red-200" onClick={logout}>
+              <button className="site-shell-mobile__danger col-span-2" onClick={logout}>
                 退出登录
               </button>
             ) : (
               <>
-                <button className="rounded-lg border border-white/10 py-3 text-sm font-bold text-textMuted" onClick={openLogin}>
+                <button className="site-shell-mobile__button" onClick={openLogin}>
                   登录
                 </button>
-                <button className="rounded-lg bg-lime py-3 text-sm font-black text-white" onClick={() => navigate('/app')}>
-                  预约内测
+                <button className="site-shell-mobile__primary" onClick={() => navigate('/app')}>
+                  预约 App
                 </button>
               </>
             )}
@@ -186,17 +163,9 @@ const IconButton = ({
   label: string;
   onClick: () => void;
 }) => (
-  <button
-    aria-label={label}
-    className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-textMuted transition hover:border-lime/40 hover:text-cream"
-    onClick={onClick}
-  >
+  <button aria-label={label} className="site-shell-icon-button" onClick={onClick}>
     {children}
-    {count > 0 && (
-      <span className="absolute -right-1 -top-1 flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full bg-coral px-1 text-[10px] font-black text-white">
-        {count > 99 ? '99+' : count}
-      </span>
-    )}
+    {count > 0 && <span>{count > 99 ? '99+' : count}</span>}
   </button>
 );
 
@@ -206,7 +175,7 @@ const BottomTabBar = () => {
   const { isLoggedIn, openLogin } = useAuthStore();
 
   const handleTabClick = (tab: (typeof bottomTabs)[0]) => {
-    if (tab.to === '/profile' && !isLoggedIn) {
+    if (tab.protected && !isLoggedIn) {
       openLogin();
       return;
     }
@@ -214,30 +183,23 @@ const BottomTabBar = () => {
   };
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/10 bg-[#100b08]/95 backdrop-blur-xl md:hidden">
-      <div className="grid h-16 grid-cols-3">
+    <div className="site-shell-tabbar md:hidden">
+      <div className="grid h-16 grid-cols-5">
         {bottomTabs.map((tab) => {
-          const active = location.pathname === tab.to;
+          const active = location.pathname === tab.to || location.pathname.startsWith(`${tab.to}/`);
           return (
             <button
               key={tab.id}
               aria-label={tab.label}
               className={clsx(
-                'relative flex flex-col items-center justify-center gap-0.5 text-xs font-bold transition',
-                tab.isCreate ? 'text-white' : active ? 'text-lime' : 'text-textMuted',
+                'site-shell-tabbar__item',
+                active && 'is-active',
+                tab.isCreate && 'is-primary',
               )}
               onClick={() => handleTabClick(tab)}
             >
-              {tab.isCreate ? (
-                <span className="-mt-5 flex h-12 w-12 items-center justify-center rounded-xl bg-lime text-2xl font-black shadow-glow transition">
-                  +
-                </span>
-              ) : (
-                <>
-                  <TabIcon icon={tab.icon} />
-                  <span>{tab.label}</span>
-                </>
-              )}
+              {tab.isCreate ? <span>+</span> : <TabIcon icon={tab.icon} />}
+              <small>{tab.label}</small>
             </button>
           );
         })}
@@ -247,18 +209,18 @@ const BottomTabBar = () => {
 };
 
 const Footer = () => (
-  <footer className="border-t border-white/10 bg-[#100b08] px-4 py-8 text-xs text-textSofter">
+  <footer className="site-shell-footer">
     <div className="mx-auto flex max-w-7xl flex-col items-center gap-3 text-center">
       <nav className="flex flex-wrap justify-center gap-5" aria-label="合规链接">
-        <Link className="transition hover:text-lime" to="/hall">附近机会</Link>
-        <Link className="transition hover:text-lime" to="/social-agent">Agent 控制台</Link>
-        <Link className="transition hover:text-lime" to="/agent-control">权限控制台</Link>
-        <Link className="transition hover:text-lime" to="/developers/social-skills">Agent API</Link>
-        <Link className="transition hover:text-lime" to="/safety">安全</Link>
-        <Link className="transition hover:text-lime" to="/terms">用户协议</Link>
-        <Link className="transition hover:text-lime" to="/privacy">隐私政策</Link>
+        <Link to="/hall">附近机会</Link>
+        <Link to="/agent">FitMeet Agent</Link>
+        <Link to="/agent/settings">权限控制</Link>
+        <Link to="/developers/social-skills">Agent API</Link>
+        <Link to="/safety">安全中心</Link>
+        <Link to="/terms">用户协议</Link>
+        <Link to="/privacy">隐私政策</Link>
       </nav>
-      <a className="transition hover:text-lime" href={icpUrl} target="_blank" rel="noreferrer">
+      <a href={icpUrl} target="_blank" rel="noreferrer">
         {icpText}
       </a>
     </div>
@@ -273,6 +235,7 @@ export const Layout = ({ children }: { children: ReactNode }) => {
     location.pathname === '/legacy-home' ||
     location.pathname === '/ecosystem' ||
     location.pathname === '/app' ||
+    location.pathname === '/demo' ||
     location.pathname === '/developers' ||
     location.pathname === '/developers/social-skills' ||
     location.pathname === '/safety' ||
@@ -281,7 +244,8 @@ export const Layout = ({ children }: { children: ReactNode }) => {
     location.pathname === '/profile/life-graph' ||
     location.pathname === '/admin/waitlist' ||
     location.pathname === '/login';
-  const isAgentWorkspace = location.pathname === '/agent' || location.pathname.startsWith('/agent/');
+  const isAgentWorkspace =
+    location.pathname === '/agent' || location.pathname.startsWith('/agent/');
 
   if (isPlatformRoute || isAgentWorkspace || location.pathname.startsWith('/agent-connect')) {
     return <>{children}</>;
@@ -289,14 +253,11 @@ export const Layout = ({ children }: { children: ReactNode }) => {
 
   return (
     <>
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-[100] focus:rounded-lg focus:bg-lime focus:px-4 focus:py-2 focus:text-white focus:font-bold"
-      >
+      <a href="#main-content" className="site-shell-skip">
         跳到主要内容
       </a>
       <Navbar />
-      <main id="main-content" className="min-h-screen bg-base pb-16 text-cream md:pb-0">
+      <main id="main-content" className="site-shell-main">
         {children}
       </main>
       <Footer />
@@ -307,29 +268,62 @@ export const Layout = ({ children }: { children: ReactNode }) => {
 };
 
 const SearchIcon = () => (
-  <svg aria-hidden="true" className="h-4 w-4 shrink-0 text-lime" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+  <svg
+    aria-hidden="true"
+    className="h-4 w-4 shrink-0 text-lime"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+  >
     <circle cx="11" cy="11" r="6.5" />
     <path d="M16 16L21 21" strokeLinecap="round" />
   </svg>
 );
 
 const BellIcon = () => (
-  <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-    <path d="M6.5 9.5a5.5 5.5 0 1 1 11 0v3.1l1.6 2.8a.8.8 0 0 1-.7 1.2H4.6a.8.8 0 0 1-.7-1.2l1.6-2.8z" strokeLinejoin="round" />
+  <svg
+    aria-hidden="true"
+    className="h-4 w-4"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+  >
+    <path
+      d="M6.5 9.5a5.5 5.5 0 1 1 11 0v3.1l1.6 2.8a.8.8 0 0 1-.7 1.2H4.6a.8.8 0 0 1-.7-1.2l1.6-2.8z"
+      strokeLinejoin="round"
+    />
     <path d="M9.5 18.5a2.5 2.5 0 0 0 5 0" strokeLinecap="round" />
   </svg>
 );
 
 const MessageIcon = () => (
-  <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-    <path d="M5 6.5h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H10l-5 3v-3H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z" strokeLinejoin="round" />
+  <svg
+    aria-hidden="true"
+    className="h-4 w-4"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+  >
+    <path
+      d="M5 6.5h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H10l-5 3v-3H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z"
+      strokeLinejoin="round"
+    />
   </svg>
 );
 
 const TabIcon = ({ icon }: { icon: 'home' | 'discover' | 'create' | 'messages' | 'profile' }) => {
   if (icon === 'home') {
     return (
-      <svg aria-hidden="true" className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      >
         <path d="M4 10.5L12 4l8 6.5" strokeLinecap="round" strokeLinejoin="round" />
         <path d="M6.5 9.8V20h11V9.8" strokeLinejoin="round" />
       </svg>
@@ -338,7 +332,13 @@ const TabIcon = ({ icon }: { icon: 'home' | 'discover' | 'create' | 'messages' |
 
   if (icon === 'discover') {
     return (
-      <svg aria-hidden="true" className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      >
         <circle cx="12" cy="12" r="7.5" />
         <path d="M9.7 14.3L14.8 9.2l-1.7 5.9-5.9 1.7z" strokeLinejoin="round" />
       </svg>
@@ -347,15 +347,30 @@ const TabIcon = ({ icon }: { icon: 'home' | 'discover' | 'create' | 'messages' |
 
   if (icon === 'messages') {
     return (
-      <svg aria-hidden="true" className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M5 6.5h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H10l-5 3v-3H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z" strokeLinejoin="round" />
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      >
+        <path
+          d="M5 6.5h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H10l-5 3v-3H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z"
+          strokeLinejoin="round"
+        />
       </svg>
     );
   }
 
   if (icon === 'profile') {
     return (
-      <svg aria-hidden="true" className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      >
         <circle cx="12" cy="8" r="3.5" />
         <path d="M5 19a7 7 0 0 1 14 0" strokeLinecap="round" />
       </svg>
@@ -363,7 +378,7 @@ const TabIcon = ({ icon }: { icon: 'home' | 'discover' | 'create' | 'messages' |
   }
 
   return (
-    <svg aria-hidden="true" className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M12 5v14M5 12h14" strokeLinecap="round" />
     </svg>
   );
