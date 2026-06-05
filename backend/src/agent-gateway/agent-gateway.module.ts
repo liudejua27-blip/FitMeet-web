@@ -56,6 +56,7 @@ import { SocialAgentChatService } from './social-agent-chat.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
 import { SocialAgentFollowUpContextService } from './social-agent-follow-up-context.service';
+import { SocialAgentReplanProgressService } from './social-agent-replan-progress.service';
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
@@ -192,6 +193,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentChatLlmService,
     SocialAgentRunStateService,
     SocialAgentFollowUpContextService,
+    SocialAgentReplanProgressService,
     SocialAgentChatService,
     FitMeetAgentRuntimeService,
     SocialAgentCandidatePoolService,
@@ -256,6 +258,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentChatService,
     SocialAgentRunStateService,
     SocialAgentFollowUpContextService,
+    SocialAgentReplanProgressService,
     FitMeetAgentRuntimeService,
     SocialAgentCandidatePoolService,
     SocialAgentLongTermMemoryService,

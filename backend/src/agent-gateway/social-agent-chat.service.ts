@@ -117,6 +117,7 @@ import {
 import { createSocialAgentRunId } from './social-agent-chat-run.presenter';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
 import { SocialAgentFollowUpContextService } from './social-agent-follow-up-context.service';
+import { SocialAgentReplanProgressService } from './social-agent-replan-progress.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentRagService } from './social-agent-rag.service';
@@ -215,6 +216,7 @@ export class SocialAgentChatService {
     private readonly chatLlm: SocialAgentChatLlmService,
     private readonly runState: SocialAgentRunStateService,
     private readonly followUpContext: SocialAgentFollowUpContextService,
+    private readonly replanProgress: SocialAgentReplanProgressService,
     @Optional() private readonly brain?: SocialAgentBrainService,
     @Optional()
     private readonly memoryContext?: SocialAgentMemoryContextService,
@@ -1081,24 +1083,26 @@ export class SocialAgentChatService {
       AgentTaskEventActor.System,
     );
 
-    const visibleSteps: SocialAgentVisibleStep[] = [];
+    let visibleSteps: SocialAgentVisibleStep[] = [];
     const done = async (
       id: string,
       label: string,
       eventType: AgentTaskEventType,
       payload: Record<string, unknown> = {},
     ) => {
-      this.rememberShortTermStep(task, id, label, 'running');
-      const step: SocialAgentVisibleStep = { id, label, status: 'done' };
-      visibleSteps.push(step);
-      this.rememberShortTermStep(task, id, label, 'done');
-      await this.writeEvent(task, eventType, label, payload);
-      task = await this.updateRunSnapshot(ownerUserId, taskId, runId, {
-        status: 'running',
-        phase: id,
-        message: label,
-        visibleSteps: [...visibleSteps],
+      const progress = await this.replanProgress.completeStep({
+        task,
+        ownerUserId,
+        taskId,
+        runId,
+        visibleSteps,
+        id,
+        label,
+        eventType,
+        payload,
       });
+      task = progress.task;
+      visibleSteps = progress.visibleSteps;
     };
 
     await done(
