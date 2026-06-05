@@ -59,6 +59,7 @@ import { SocialAgentFollowUpContextService } from './social-agent-follow-up-cont
 import { SocialAgentReplanProgressService } from './social-agent-replan-progress.service';
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
+import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
@@ -198,6 +199,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentReplanProgressService,
     SocialAgentProfileEnrichmentService,
     SocialAgentMeetLoopService,
+    SocialAgentCandidateActionService,
     SocialAgentChatService,
     FitMeetAgentRuntimeService,
     SocialAgentCandidatePoolService,

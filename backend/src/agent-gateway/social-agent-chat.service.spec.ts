@@ -13,6 +13,7 @@ import {
 import { SocialAgentAction } from './agent-permission.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
+import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentFollowUpContextService } from './social-agent-follow-up-context.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
@@ -441,6 +442,17 @@ function makeHarness(options: Record<string, unknown> = {}) {
       options.lifeGraph as never,
       options.activities as never,
     );
+  const candidateActions =
+    (options.candidateActions as
+      | SocialAgentCandidateActionService
+      | undefined) ??
+    new SocialAgentCandidateActionService(
+      taskRepo as never,
+      eventRepo as never,
+      approvals as never,
+      executor as never,
+      options.sessionAssembler as never,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
@@ -463,6 +475,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     replanProgress as never,
     profileEnrichment as never,
     meetLoop as never,
+    candidateActions as never,
     options.brain as never,
     undefined,
     options.finalResponses as never,
@@ -496,6 +509,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     config,
     profileEnrichment,
     meetLoop,
+    candidateActions,
   };
 }
 
