@@ -43,6 +43,13 @@ import {
   lifeGraphSportBoost,
   lifeGraphTimeBoost,
 } from './social-agent-candidate-life-graph-scoring';
+import {
+  candidateDataQuality,
+  candidateDisplayName,
+  candidateProfileCompleteness,
+  candidateProfileTags,
+} from './social-agent-candidate-profile-presenter';
+import type { CandidateProfileDataQuality } from './social-agent-candidate-profile-presenter';
 
 export type CandidatePoolSource =
   | 'profile_candidate'
@@ -51,7 +58,7 @@ export type CandidatePoolSource =
 
 export type CandidatePoolIntent = 'social_search' | 'activity_search';
 
-export type CandidatePoolDataQuality = 'complete' | 'partial' | 'incomplete';
+export type CandidatePoolDataQuality = CandidateProfileDataQuality;
 
 export type CandidatePoolDebugReasons = {
   usersTotal: number;
@@ -703,8 +710,8 @@ export class SocialAgentCandidatePoolService {
     lifeGraphSignals: LifeGraphUnifiedMatchSignalsDto | null = null,
   ): CandidatePoolCandidate {
     const city = this.firstText(profile?.city, user.city, delegate?.city);
-    const tags = this.profileTags(user, profile, delegate);
-    const completeness = this.profileCompleteness(user, profile, delegate);
+    const tags = candidateProfileTags(user, profile, delegate);
+    const completeness = candidateProfileCompleteness(user, profile, delegate);
     const commonTags = this.commonTags(query.interestTags, tags);
     const scoreBreakdown = this.scoreProfile({
       user,
@@ -718,7 +725,7 @@ export class SocialAgentCandidatePoolService {
       lifeGraphSignals,
     });
     const matchScore = this.totalScore(scoreBreakdown);
-    const displayName = this.displayName(user, profile, city);
+    const displayName = candidateDisplayName(user, profile, city);
     const matchReasons = this.profileReasons(
       query,
       city,
@@ -762,9 +769,9 @@ export class SocialAgentCandidatePoolService {
     const tags = this.uniqueStrings([
       ...this.normalizeArray(intent.interestTags),
       intent.requestType,
-      ...this.profileTags(user, profile, delegate),
+      ...candidateProfileTags(user, profile, delegate),
     ]);
-    const completeness = this.profileCompleteness(user, profile, delegate);
+    const completeness = candidateProfileCompleteness(user, profile, delegate);
     const commonTags = this.commonTags(query.interestTags, tags);
     const scoreBreakdown = this.scorePublicIntent({
       query,
@@ -776,7 +783,7 @@ export class SocialAgentCandidatePoolService {
       lifeGraphSignals,
     });
     const matchScore = this.totalScore(scoreBreakdown);
-    const displayName = this.displayName(user, profile, city);
+    const displayName = candidateDisplayName(user, profile, city);
     const matchReasons = this.publicIntentReasons(
       intent,
       query,
@@ -819,9 +826,9 @@ export class SocialAgentCandidatePoolService {
     const tags = this.uniqueStrings([
       request.requestType,
       ...this.extractTags(`${request.title} ${request.description}`),
-      ...this.profileTags(user, profile, delegate),
+      ...candidateProfileTags(user, profile, delegate),
     ]);
-    const completeness = this.profileCompleteness(user, profile, delegate);
+    const completeness = candidateProfileCompleteness(user, profile, delegate);
     const commonTags = this.commonTags(query.interestTags, tags);
     const scoreBreakdown = this.scorePublicIntent({
       query,
@@ -832,7 +839,7 @@ export class SocialAgentCandidatePoolService {
       updatedAt: request.updatedAt,
       lifeGraphSignals,
     });
-    const displayName = this.displayName(user, profile, city);
+    const displayName = candidateDisplayName(user, profile, city);
     const matchReasons = this.publicIntentReasons(
       {
         title: request.title,
@@ -880,7 +887,7 @@ export class SocialAgentCandidatePoolService {
     activityId: number | null;
     lifeGraphSignals?: LifeGraphUnifiedMatchSignalsDto | null;
   }): CandidatePoolCandidate {
-    const quality = this.dataQuality(input.profileCompleteness);
+    const quality = candidateDataQuality(input.profileCompleteness);
     const riskWarnings =
       quality === 'incomplete' ? ['资料较少，建议先站内沟通确认。'] : [];
     const sceneText = [
@@ -1454,118 +1461,6 @@ export class SocialAgentCandidatePoolService {
     return reasons;
   }
 
-  private profileCompleteness(
-    user: User,
-    profile: UserSocialProfile | null,
-    delegate: AiDelegateProfile | null,
-  ): number {
-    let score = 0;
-    if (
-      this.firstText(
-        profile?.city,
-        profile?.nearbyArea,
-        user.city,
-        delegate?.city,
-      )
-    )
-      score += 30;
-    if (this.profileTags(user, profile, delegate).length > 0) score += 30;
-    if (
-      this.normalizeArray(profile?.availableTimes).length > 0 ||
-      profile?.weekdayAvailability ||
-      profile?.weekendAvailability ||
-      delegate?.availability
-    ) {
-      score += 15;
-    }
-    if (
-      profile?.socialPreference ||
-      this.normalizeArray(profile?.fitnessGoals).length > 0 ||
-      delegate?.interests ||
-      delegate?.trainingGoals
-    ) {
-      score += 15;
-    }
-    if (cleanDisplayText(profile?.nickname ?? user.name, '') || user.avatar)
-      score += 10;
-    return Math.min(1, score / 100);
-  }
-
-  private dataQuality(completeness: number): CandidatePoolDataQuality {
-    if (completeness >= 0.85) return 'complete';
-    if (completeness >= 0.4) return 'partial';
-    return 'incomplete';
-  }
-
-  private profileTags(
-    user: User,
-    profile: UserSocialProfile | null,
-    delegate: AiDelegateProfile | null,
-  ): string[] {
-    return this.uniqueStrings([
-      ...this.normalizeArray(user.interestTags),
-      ...this.normalizeArray(profile?.interestTags),
-      ...this.normalizeArray(profile?.fitnessGoals),
-      ...this.normalizeArray(profile?.lifestyleTags),
-      ...this.normalizeArray(profile?.socialScenes),
-      ...this.normalizeArray(profile?.wantToMeet),
-      ...this.normalizeArray(profile?.relationshipGoals),
-      ...this.normalizeArray(profile?.traits),
-      ...this.normalizeArray(delegate?.favoriteSports),
-      ...this.extractTags(delegate?.interests ?? ''),
-      ...this.extractTags(delegate?.trainingGoals ?? ''),
-      ...this.extractTags(delegate?.idealPartner ?? ''),
-    ]);
-  }
-
-  private displayName(
-    user: User,
-    profile: UserSocialProfile | null,
-    city: string,
-  ): string {
-    const profileName = cleanDisplayText(profile?.nickname, '');
-    if (profileName && !this.isGeneratedFitMeetName(profileName))
-      return profileName;
-    const userName = cleanDisplayText(user.name, '');
-    if (userName && !this.isGeneratedFitMeetName(userName)) return userName;
-    const cityName = sanitizeCity(city || user.city);
-    return cityName ? `${cityName}用户 ${user.id}` : `已脱敏用户 ${user.id}`;
-  }
-
-  private suggestedOpener(name: string, tags: string[], city: string): string {
-    const tag = tags[0] ? `也喜欢「${tags[0]}」` : '和这次需求比较匹配';
-    const place = city ? `在${city}` : '在附近';
-    return `你好 ${name}，看到你${tag}，感觉可以先轻松认识一下。不急着定见面，方便先${place}聊聊时间和公开地点吗？`;
-  }
-
-  private emotionalInsight(input: {
-    displayName: string;
-    city: string;
-    commonTags: string[];
-    matchReasons: string[];
-    riskWarnings: string[];
-    score: number;
-  }): CandidateEmotionalInsight {
-    const tags = input.commonTags.slice(0, 2);
-    const firstReason = input.matchReasons[0] || 'TA 和这次需求有可对齐的地方';
-    const hasRisk = input.riskWarnings.length > 0;
-    const cityPart = input.city ? `，并且都在${input.city}附近` : '';
-    return {
-      fitReason: tags.length
-        ? `TA 和你都有 ${tags.join('、')} 这些共同信号${cityPart}，适合从轻量话题开始，不需要一上来就很正式。`
-        : `${firstReason}${cityPart}。建议把这次连接当成一次低压力试探，而不是马上推进关系。`,
-      openerAdvice: tags.length
-        ? `开场可以先提「${tags[0]}」，语气像自然搭话：给对方选择空间，不催、不压、不替 TA 做决定。`
-        : '开场先问对方是否方便聊，再说明你的具体需求；把邀请说成“可以一起看看是否合适”，会更舒服。',
-      possibleAwkwardness: hasRisk
-        ? `需要留意：${input.riskWarnings[0]} 所以前几句先确认边界和真实意愿，别急着要联系方式。`
-        : '可能的小尴尬是双方期待不同。先说清楚活动强度、时长和是否只是搭子，会显得真诚也体面。',
-      safeFirstStep:
-        '第一步建议只在站内聊时间、公开地点和活动强度；线下见面选人多、好离开的场所，联系方式等双方确认后再交换。',
-      tone: hasRisk ? 'careful' : input.score >= 80 ? 'active' : 'gentle',
-    };
-  }
-
   private emotionalInsightFromExplanation(
     explanation: CandidateExplanation,
     highRisk: boolean,
@@ -1928,10 +1823,6 @@ export class SocialAgentCandidatePoolService {
       if (text) return text;
     }
     return '';
-  }
-
-  private isGeneratedFitMeetName(value: string): boolean {
-    return /^fitmeet\s+user\b/i.test(value.trim());
   }
 
   private normalizeLimit(value: unknown): number {
