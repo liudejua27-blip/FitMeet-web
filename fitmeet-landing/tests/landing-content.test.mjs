@@ -34,6 +34,18 @@ function gatewayHrefsFromSource(source) {
   );
 }
 
+function agentHubTabsFromSource(source) {
+  return [
+    ...source.matchAll(/\{\s*id:\s*'([^']+)',\s*label:\s*'([^']+)'\s*\}/g),
+  ].map((match) => ({ id: match[1], label: match[2] }));
+}
+
+function securityTitlesFromSource(source) {
+  return [...source.matchAll(/title:\s*'([^']+)'/g)].map(
+    (match) => match[1],
+  );
+}
+
 test('home route composes the public landing experience', async () => {
   const page = await readSource('app/page.tsx');
   const requiredSections = [
@@ -102,6 +114,39 @@ test('agent hub route is a real product surface', async () => {
     'preference studio',
   );
   assert.doesNotMatch(agentHub, /placeholder|stub|mock-only|coming soon/i);
+});
+
+test('agent hub tabs and security controls are wired as a stateful product flow', async () => {
+  const agentHub = await readSource('app/agent-hub/page.tsx');
+
+  assert.deepEqual(agentHubTabsFromSource(agentHub), [
+    { id: 'connect', label: '接入 Agent' },
+    { id: 'prefs', label: '偏好设置' },
+    { id: 'security', label: '安全承诺' },
+  ]);
+  assert.match(agentHub, /useState<Tab>\('connect'\)/);
+  assert.match(agentHub, /onClick=\{\(\) => setTab\(t\.id\)\}/);
+  for (const tab of ['connect', 'prefs', 'security']) {
+    assert.match(
+      agentHub,
+      new RegExp(`tab === '${tab}'`),
+      `${tab} tab should render its own product panel`,
+    );
+  }
+
+  assert.deepEqual(securityTitlesFromSource(agentHub), [
+    '双重确认不可绕过',
+    'Token 永不存储明文',
+    '完整审计日志',
+    '骚扰检测引擎',
+    '随时断联',
+    '每日配额硬上限',
+  ]);
+  assertContainsAll(
+    agentHub,
+    ['服务端强制执行', 'bcrypt', '审计日志', '语义分析', '401', '每日配额'],
+    'agent hub security controls',
+  );
 });
 
 test('primary navigation and CTAs keep gateway anchors reachable', async () => {
