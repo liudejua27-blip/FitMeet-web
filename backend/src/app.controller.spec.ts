@@ -103,6 +103,7 @@ describe('AppController', () => {
           '/messages/unread',
           '/social-agent/chat/session',
           '/social-agent/chat/messages',
+          '/social-agent/chat/stream',
           '/social-agent/chat/stream-user',
           '/social-agent/chat/tasks/{taskId}/session',
           '/social-agent/chat/tasks/{taskId}/messages',

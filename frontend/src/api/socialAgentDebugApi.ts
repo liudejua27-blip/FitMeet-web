@@ -1,4 +1,5 @@
 import * as api from './client';
+import { fitMeetCoreEndpoints } from './fitmeetCoreContract';
 import { sanitizeDisplayValue } from '../lib/displayText';
 
 export type SocialAgentPermissionMode =
@@ -757,11 +758,14 @@ async function runSocialAgentStream(
   onEvent: (event: SocialAgentChatStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<SocialAgentChatRunResult> {
-  const response = await api.fetchWithAuth('/social-agent/chat/stream', {
-    method: 'POST',
-    signal,
-    body: JSON.stringify(data),
-  });
+  const response = await api.fetchWithAuth(
+    fitMeetCoreEndpoints.socialAgentChat.stream,
+    {
+      method: 'POST',
+      signal,
+      body: JSON.stringify(data),
+    },
+  );
 
   if (!response.ok) {
     throw new Error(await resolveStreamError(response));

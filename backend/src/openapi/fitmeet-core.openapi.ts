@@ -617,6 +617,28 @@ export const fitMeetCoreOpenApi = {
         },
       },
     },
+    '/social-agent/chat/stream': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentStream',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/SocialAgentRunInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description:
+              'Server-sent events with raw Social Agent status, progress, result, and error events',
+            content: { 'text/event-stream': { schema: { type: 'string' } } },
+          },
+        },
+      },
+    },
     '/social-agent/chat/stream-user': {
       post: {
         tags: ['social-agent-chat'],
