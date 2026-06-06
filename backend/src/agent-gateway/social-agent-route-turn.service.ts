@@ -1,9 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
-import { LifeGraphProposalDto } from '../life-graph/dto/life-graph.dto';
 import { AgentTask } from './entities/agent-task.entity';
 import type {
-  SocialAgentActivityResult,
   SocialAgentAsyncRunSnapshot,
   SocialAgentChatReplanRunBody,
   SocialAgentIntentRouteResult,
@@ -20,6 +18,12 @@ import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile
 import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
 import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
 import { SocialAgentRouteDecisionService } from './social-agent-route-decision.service';
+import {
+  applyConversationTurnState,
+  applyProfileTurnState,
+  applySearchTurnState,
+  createSocialAgentRouteTurnState,
+} from './social-agent-route-turn-state';
 
 type QueueInitialSearchForTask = (
   ownerUserId: number,
@@ -73,17 +77,13 @@ export class SocialAgentRouteTurnService {
     task = decision.task;
     const { profile, longTermSnapshot, route, brainToolResults } = decision;
 
-    let savedContext = false;
-    let profileUpdated = false;
-    let queuedRun: SocialAgentAsyncRunSnapshot | null = null;
-    let runMode: SocialAgentIntentRouteResult['runMode'] = null;
-    let assistantMessage = socialAgentAssistantMessageForRoute({
-      route,
-      task,
-      message,
-    });
-    let activityResults: SocialAgentActivityResult[] = [];
-    let profileUpdateProposal: LifeGraphProposalDto | null = null;
+    let state = createSocialAgentRouteTurnState(
+      socialAgentAssistantMessageForRoute({
+        route,
+        task,
+        message,
+      }),
+    );
 
     const candidateConfirmation = await this.candidateConfirmations.handle({
       ownerUserId,
@@ -106,10 +106,7 @@ export class SocialAgentRouteTurnService {
     });
     if (conversationTurn.handled) {
       task = conversationTurn.task;
-      assistantMessage = conversationTurn.assistantMessage ?? assistantMessage;
-      savedContext = conversationTurn.savedContext;
-      profileUpdated = conversationTurn.profileUpdated;
-      profileUpdateProposal = conversationTurn.profileUpdateProposal;
+      state = applyConversationTurnState(state, conversationTurn);
     }
 
     const profileTurn = await this.profileTurns.handle({
@@ -120,11 +117,8 @@ export class SocialAgentRouteTurnService {
     });
     if (profileTurn.handled) {
       task = profileTurn.task;
-      savedContext = profileTurn.savedContext;
-      profileUpdated = profileTurn.profileUpdated;
-      profileUpdateProposal = profileTurn.profileUpdateProposal;
-      assistantMessage = profileTurn.assistantMessage ?? assistantMessage;
-      if (!profileUpdateProposal) {
+      state = applyProfileTurnState(state, profileTurn);
+      if (!state.profileUpdateProposal) {
         task = await this.taskLifecycle.assertTaskOwner(task.id, ownerUserId);
       }
     }
@@ -140,14 +134,10 @@ export class SocialAgentRouteTurnService {
         this.routeContext.buildMemoryContext(currentTask, null),
     });
     if (searchTurn.handled) {
-      assistantMessage = searchTurn.assistantMessage ?? assistantMessage;
-      savedContext = searchTurn.savedContext || savedContext;
-      activityResults = searchTurn.activityResults;
-      queuedRun = searchTurn.queuedRun;
-      runMode = searchTurn.runMode;
+      state = applySearchTurnState(state, searchTurn);
     }
 
-    if (queuedRun) {
+    if (state.queuedRun) {
       task = await this.taskLifecycle.assertTaskOwner(task.id, ownerUserId);
     }
 
@@ -156,21 +146,20 @@ export class SocialAgentRouteTurnService {
       task,
       route,
       message,
-      assistantMessage,
+      assistantMessage: state.assistantMessage,
     });
-    assistantMessage = actionTurn.assistantMessage;
 
     return this.completions.complete({
       task,
       route,
-      assistantMessage,
-      savedContext,
-      profileUpdated,
-      queuedRun,
-      runMode,
+      assistantMessage: actionTurn.assistantMessage,
+      savedContext: state.savedContext,
+      profileUpdated: state.profileUpdated,
+      queuedRun: state.queuedRun,
+      runMode: state.runMode,
       pendingApproval: actionTurn.pendingApproval,
-      activityResults,
-      profileUpdateProposal,
+      activityResults: state.activityResults,
+      profileUpdateProposal: state.profileUpdateProposal,
       startedAt,
     });
   }
