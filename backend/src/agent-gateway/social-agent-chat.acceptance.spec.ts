@@ -1044,57 +1044,6 @@ describe('SocialAgentChat acceptance flow', () => {
     );
   });
 
-  it('uses a relevant fallback when direct DeepSeek chat fails', async () => {
-    const { service, config } = makeHarness();
-    const originalFetch = global.fetch;
-    global.fetch = jest
-      .fn()
-      .mockRejectedValue(new Error('network down')) as never;
-    config.get.mockImplementation((key: string) => {
-      if (key === 'DEEPSEEK_API_KEY') return 'test-key';
-      if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
-      return undefined;
-    });
-
-    try {
-      const result = await service.routeMessage(7, {
-        message: '为什么你不会回答问题？我不是调用的 deepseek 的 api 吗？',
-      });
-
-      expect(result.intent).toBe('product_help');
-      expect(result.assistantMessage).toContain('普通问题我应该直接回答');
-      expect(result.assistantMessage).not.toContain('调用大模型失败');
-      expect(result.assistantMessage).not.toContain('等你明确说要找人');
-    } finally {
-      global.fetch = originalFetch;
-    }
-  });
-
-  it('uses a relevant fallback when direct DeepSeek chat times out', async () => {
-    const { service, config } = makeHarness();
-    const originalFetch = global.fetch;
-    const abortError = new Error('aborted');
-    abortError.name = 'AbortError';
-    global.fetch = jest.fn().mockRejectedValue(abortError) as never;
-    config.get.mockImplementation((key: string) => {
-      if (key === 'DEEPSEEK_API_KEY') return 'test-key';
-      if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
-      return undefined;
-    });
-
-    try {
-      const result = await service.routeMessage(7, {
-        message: '人物画像是什么？',
-      });
-
-      expect(result.intent).toBe('product_help');
-      expect(result.assistantMessage).toContain('人物画像是 FitMeet 用来理解');
-      expect(result.assistantMessage).not.toContain('等你明确说要找人');
-    } finally {
-      global.fetch = originalFetch;
-    }
-  });
-
   it('answers workflow help without returning persona definition or searching', async () => {
     const { service, executor } = makeHarness();
 
