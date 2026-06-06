@@ -1112,7 +1112,7 @@ export const fitMeetCoreOpenApi = {
       },
       ConversationSummary: {
         type: 'object',
-        required: ['id'],
+        required: ['id', 'conversationId'],
         additionalProperties: true,
         properties: {
           id: { type: 'string' },

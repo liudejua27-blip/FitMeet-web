@@ -161,8 +161,10 @@ export class MessagesService {
             (Array.isArray(conv.participantAgentIds) &&
               conv.participantAgentIds.length > 0));
         if (isAgentOnlyConversation) {
+          const conversationId = conv._id.toString();
           return {
-            id: conv._id.toString(),
+            id: conversationId,
+            conversationId,
             userId: 0,
             username: 'OpenClaw Agent',
             avatar: 'AI',
@@ -175,8 +177,10 @@ export class MessagesService {
         }
         const peerUserId = otherId ?? userId;
         const other = userMap.get(peerUserId);
+        const conversationId = conv._id.toString();
         return {
-          id: conv._id.toString(),
+          id: conversationId,
+          conversationId,
           userId: peerUserId,
           username: cleanDisplayText(other?.name, '未知用户'),
           avatar: cleanDisplayText(other?.avatar, '?'),

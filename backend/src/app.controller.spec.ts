@@ -148,11 +148,13 @@ describe('AppController', () => {
       const historySchema =
         contract.paths['/messages/conversations/{conversationId}'].get
           .responses['200'].content['application/json'].schema;
+      const summarySchema = contract.components.schemas.ConversationSummary;
 
       expect(historySchema).toMatchObject({
         type: 'array',
         items: { $ref: '#/components/schemas/ConversationHistoryMessage' },
       });
+      expect(summarySchema.required).toEqual(['id', 'conversationId']);
       expect(
         contract.components.schemas.ConversationHistoryMessage.required,
       ).toEqual(['id', 'text', 'isMine']);
