@@ -90,6 +90,26 @@ pnpm dev
 每次提交前至少跑通这组基线：
 
 ```bash
+./scripts/release-preflight.sh
+```
+
+默认会顺序验证 backend、frontend、fitmeet-landing 和 iOS App 单测。只验证 Web 侧可运行：
+
+```bash
+./scripts/release-preflight.sh --web-only
+```
+
+如果 pnpm 不在默认 PATH，可设置 `FITMEET_PNPM_BIN_DIR=/path/to/pnpm/bin`；如果 iOS App 不在默认路径，可设置 `FITMEET_APP_DIR`。
+
+如果要把 iOS UI tests 也纳入发布前检查：
+
+```bash
+./scripts/release-preflight.sh --include-ios-ui
+```
+
+分项目命令如下，便于定位失败点：
+
+```bash
 cd backend && pnpm lint && pnpm build && pnpm test && APP_SMOKE_DRY_RUN=true pnpm smoke:app-core
 cd ../frontend && pnpm lint && pnpm build && pnpm test
 cd ../fitmeet-landing && pnpm lint && pnpm build && pnpm test
@@ -232,7 +252,7 @@ pnpm check:prod-env -- ../.env.production
 部署前建议按这个顺序收口：
 
 ```bash
-cd backend && pnpm lint && pnpm build && pnpm test && APP_SMOKE_DRY_RUN=true pnpm smoke:app-core
+./scripts/release-preflight.sh --web-only
 cd backend && pnpm check:prod-env -- ../.env.production
 cd backend && pnpm migration:run:prod
 docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
