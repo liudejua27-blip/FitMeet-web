@@ -51,6 +51,27 @@ describe('fitMeetCoreEndpoints', () => {
     expect(fitMeetCoreEndpoints.agentInbox.ackEvents).toBe(
       '/agents/inbox/events/ack',
     );
+    expect(fitMeetCoreEndpoints.agentProfileMatches.list).toBe(
+      '/agents/profile-matches',
+    );
+    expect(fitMeetCoreEndpoints.agentProfileMatches.ignore(101)).toBe(
+      '/agents/profile-matches/101/ignore',
+    );
+    expect(fitMeetCoreEndpoints.agentProfileMatches.favorite(101)).toBe(
+      '/agents/profile-matches/101/favorite',
+    );
+    expect(fitMeetCoreEndpoints.agentProfileMatches.draftOpener(101)).toBe(
+      '/agents/profile-matches/101/draft-opener',
+    );
+    expect(fitMeetCoreEndpoints.agentProfileMatches.confirmContact(101)).toBe(
+      '/agents/profile-matches/101/confirm-contact',
+    );
+    expect(
+      fitMeetCoreEndpoints.agentProfileMatches.requestContactExchange(101),
+    ).toBe('/agents/profile-matches/101/request-contact-exchange');
+    expect(fitMeetCoreEndpoints.agentProfileMatches.sendIntro(101)).toBe(
+      '/agents/profile-matches/101/send-intro',
+    );
     expect(
       fitMeetCoreEndpoints.agentInbox.messages('conversation:city run'),
     ).toBe(
@@ -150,6 +171,13 @@ describe('fitMeetCoreEndpoints', () => {
         '/agents/inbox/events/ack',
         '/agents/inbox/conversations/{conversationId}/messages',
         '/agents/inbox/conversations/{conversationId}/reply',
+        '/agents/profile-matches',
+        '/agents/profile-matches/{id}/ignore',
+        '/agents/profile-matches/{id}/favorite',
+        '/agents/profile-matches/{id}/draft-opener',
+        '/agents/profile-matches/{id}/confirm-contact',
+        '/agents/profile-matches/{id}/request-contact-exchange',
+        '/agents/profile-matches/{id}/send-intro',
         '/social-agent/chat/run',
         '/social-agent/chat/run-async',
         '/social-agent/chat/messages',
@@ -227,6 +255,34 @@ describe('fitMeetCoreEndpoints', () => {
       {
         built: fitMeetCoreEndpoints.agentInbox.reply('conversation:city run'),
         template: fitMeetCoreEndpointTemplates.agentInbox.reply,
+      },
+      {
+        built: fitMeetCoreEndpoints.agentProfileMatches.ignore(101),
+        template: fitMeetCoreEndpointTemplates.agentProfileMatches.ignore,
+      },
+      {
+        built: fitMeetCoreEndpoints.agentProfileMatches.favorite(101),
+        template: fitMeetCoreEndpointTemplates.agentProfileMatches.favorite,
+      },
+      {
+        built: fitMeetCoreEndpoints.agentProfileMatches.draftOpener(101),
+        template: fitMeetCoreEndpointTemplates.agentProfileMatches.draftOpener,
+      },
+      {
+        built: fitMeetCoreEndpoints.agentProfileMatches.confirmContact(101),
+        template:
+          fitMeetCoreEndpointTemplates.agentProfileMatches.confirmContact,
+      },
+      {
+        built:
+          fitMeetCoreEndpoints.agentProfileMatches.requestContactExchange(101),
+        template:
+          fitMeetCoreEndpointTemplates.agentProfileMatches
+            .requestContactExchange,
+      },
+      {
+        built: fitMeetCoreEndpoints.agentProfileMatches.sendIntro(101),
+        template: fitMeetCoreEndpointTemplates.agentProfileMatches.sendIntro,
       },
       {
         built: fitMeetCoreEndpoints.socialAgentChat.taskSession(101),

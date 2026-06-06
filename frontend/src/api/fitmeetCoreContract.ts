@@ -48,6 +48,20 @@ export const fitMeetCoreEndpoints = {
         conversationId,
       )}/reply` as const,
   },
+  agentProfileMatches: {
+    list: '/agents/profile-matches',
+    ignore: (id: number) => `/agents/profile-matches/${id}/ignore` as const,
+    favorite: (id: number) =>
+      `/agents/profile-matches/${id}/favorite` as const,
+    draftOpener: (id: number) =>
+      `/agents/profile-matches/${id}/draft-opener` as const,
+    confirmContact: (id: number) =>
+      `/agents/profile-matches/${id}/confirm-contact` as const,
+    requestContactExchange: (id: number) =>
+      `/agents/profile-matches/${id}/request-contact-exchange` as const,
+    sendIntro: (id: number) =>
+      `/agents/profile-matches/${id}/send-intro` as const,
+  },
   socialAgentChat: {
     run: '/social-agent/chat/run',
     runAsync: '/social-agent/chat/run-async',
@@ -133,6 +147,16 @@ export const fitMeetCoreEndpointTemplates = {
     messages: '/agents/inbox/conversations/{conversationId}/messages',
     reply: '/agents/inbox/conversations/{conversationId}/reply',
   },
+  agentProfileMatches: {
+    list: '/agents/profile-matches',
+    ignore: '/agents/profile-matches/{id}/ignore',
+    favorite: '/agents/profile-matches/{id}/favorite',
+    draftOpener: '/agents/profile-matches/{id}/draft-opener',
+    confirmContact: '/agents/profile-matches/{id}/confirm-contact',
+    requestContactExchange:
+      '/agents/profile-matches/{id}/request-contact-exchange',
+    sendIntro: '/agents/profile-matches/{id}/send-intro',
+  },
   socialAgentChat: {
     run: '/social-agent/chat/run',
     runAsync: '/social-agent/chat/run-async',
@@ -178,6 +202,7 @@ export type FitMeetCoreStaticEndpoint =
   | (typeof fitMeetCoreEndpoints.agentInbox)['conversations']
   | (typeof fitMeetCoreEndpoints.agentInbox)['events']
   | (typeof fitMeetCoreEndpoints.agentInbox)['ackEvents']
+  | (typeof fitMeetCoreEndpoints.agentProfileMatches)['list']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['messages']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['run']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['runAsync']

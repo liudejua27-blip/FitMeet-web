@@ -113,6 +113,13 @@ Agent inbox:
 - `GET /agents/inbox/events`
 - `POST /agents/inbox/events/ack`
 - `POST /agents/inbox/conversations/{conversationId}/reply`
+- `GET /agents/profile-matches`
+- `POST /agents/profile-matches/{id}/ignore`
+- `POST /agents/profile-matches/{id}/favorite`
+- `POST /agents/profile-matches/{id}/draft-opener`
+- `POST /agents/profile-matches/{id}/confirm-contact`
+- `POST /agents/profile-matches/{id}/request-contact-exchange`
+- `POST /agents/profile-matches/{id}/send-intro`
 
 Social Agent chat and workspace:
 

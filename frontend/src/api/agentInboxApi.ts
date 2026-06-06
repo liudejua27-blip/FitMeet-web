@@ -238,18 +238,18 @@ export const agentInboxApi = {
     api
       .request<{
         recommendations: ProfileRecommendationItem[];
-      }>(`/agents/profile-matches?limit=${limit}`)
+      }>(`${fitMeetCoreEndpoints.agentProfileMatches.list}?limit=${limit}`)
       .then(sanitizeAgentInboxResponse),
 
   ignoreProfileMatch: (aiMatchSessionId: number) =>
     api.requestProtected<{ ok: boolean; status: string }>(
-      `/agents/profile-matches/${aiMatchSessionId}/ignore`,
+      fitMeetCoreEndpoints.agentProfileMatches.ignore(aiMatchSessionId),
       { method: 'POST' },
     ),
 
   favoriteProfileMatch: (aiMatchSessionId: number) =>
     api.requestProtected<{ ok: boolean; status: string }>(
-      `/agents/profile-matches/${aiMatchSessionId}/favorite`,
+      fitMeetCoreEndpoints.agentProfileMatches.favorite(aiMatchSessionId),
       { method: 'POST' },
     ),
 
@@ -258,10 +258,13 @@ export const agentInboxApi = {
       ok: boolean;
       draft: { type: 'message'; tone: string; content: string };
       requiresOwnerConfirmation: boolean;
-    }>(`/agents/profile-matches/${aiMatchSessionId}/draft-opener`, {
-      method: 'POST',
-      body: JSON.stringify({ tone: 'friendly' }),
-    }),
+    }>(
+      fitMeetCoreEndpoints.agentProfileMatches.draftOpener(aiMatchSessionId),
+      {
+        method: 'POST',
+        body: JSON.stringify({ tone: 'friendly' }),
+      },
+    ),
 
   confirmProfileMatchContact: (aiMatchSessionId: number) =>
     api.requestProtected<{
@@ -269,17 +272,22 @@ export const agentInboxApi = {
       status: string;
       contactRequestId: number;
       requiresTargetConsent: boolean;
-    }>(`/agents/profile-matches/${aiMatchSessionId}/confirm-contact`, {
-      method: 'POST',
-      body: JSON.stringify({
-        ownerConfirmed: true,
-        note: 'Owner confirmed from Agent Inbox recommendation card.',
-      }),
-    }),
+    }>(
+      fitMeetCoreEndpoints.agentProfileMatches.confirmContact(aiMatchSessionId),
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          ownerConfirmed: true,
+          note: 'Owner confirmed from Agent Inbox recommendation card.',
+        }),
+      },
+    ),
 
   requestContactExchange: (aiMatchSessionId: number) =>
     api.requestProtected<{ ok: boolean; status: string; approvalId?: number }>(
-      `/agents/profile-matches/${aiMatchSessionId}/request-contact-exchange`,
+      fitMeetCoreEndpoints.agentProfileMatches.requestContactExchange(
+        aiMatchSessionId,
+      ),
       {
         method: 'POST',
         body: JSON.stringify({
@@ -295,10 +303,13 @@ export const agentInboxApi = {
       status: string;
       conversationId?: string;
       messageId?: string;
-    }>(`/agents/profile-matches/${aiMatchSessionId}/send-intro`, {
-      method: 'POST',
-      body: JSON.stringify({ ownerConfirmed: true, text: content }),
-    }),
+    }>(
+      fitMeetCoreEndpoints.agentProfileMatches.sendIntro(aiMatchSessionId),
+      {
+        method: 'POST',
+        body: JSON.stringify({ ownerConfirmed: true, text: content }),
+      },
+    ),
 
   events: (params?: { limit?: number; unreadOnly?: boolean }) => {
     const search = new URLSearchParams();

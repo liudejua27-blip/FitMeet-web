@@ -812,6 +812,212 @@ export const fitMeetCoreOpenApi = {
         },
       },
     },
+    '/agents/profile-matches': {
+      get: {
+        tags: ['agent-inbox'],
+        operationId: 'listAgentProfileMatches',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'limit',
+            in: 'query',
+            schema: { type: 'integer', minimum: 1, maximum: 100 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Review-only profile match recommendations',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ProfileMatchRecommendationsResult',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/agents/profile-matches/{id}/ignore': {
+      post: {
+        tags: ['agent-inbox'],
+        operationId: 'ignoreAgentProfileMatch',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/ProfileMatchId' }],
+        responses: {
+          '200': {
+            description: 'Profile match ignored',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ProfileMatchActionResult',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/agents/profile-matches/{id}/favorite': {
+      post: {
+        tags: ['agent-inbox'],
+        operationId: 'favoriteAgentProfileMatch',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/ProfileMatchId' }],
+        responses: {
+          '200': {
+            description: 'Profile match saved',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ProfileMatchActionResult',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/agents/profile-matches/{id}/draft-opener': {
+      post: {
+        tags: ['agent-inbox'],
+        operationId: 'draftAgentProfileMatchOpener',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/ProfileMatchId' }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/ProfileMatchDraftOpenerInput',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'AI opener draft for the profile match',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ProfileMatchDraftOpenerResult',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/agents/profile-matches/{id}/confirm-contact': {
+      post: {
+        tags: ['agent-inbox'],
+        operationId: 'confirmAgentProfileMatchContact',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/ProfileMatchId' }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/ProfileMatchOwnerConfirmationInput',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Contact request created for the profile match',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ProfileMatchConfirmContactResult',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/agents/profile-matches/{id}/request-contact-exchange': {
+      post: {
+        tags: ['agent-inbox'],
+        operationId: 'requestAgentProfileMatchContactExchange',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/ProfileMatchId' }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/ProfileMatchOwnerConfirmationInput',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Contact exchange request submitted',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ProfileMatchContactExchangeResult',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/agents/profile-matches/{id}/send-intro': {
+      post: {
+        tags: ['agent-inbox'],
+        operationId: 'sendAgentProfileMatchIntro',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/ProfileMatchId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/ProfileMatchSendIntroInput',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Intro message sent for the profile match',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ProfileMatchSendIntroResult',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
     '/social-agent/chat/run': {
       post: {
         tags: ['social-agent-chat'],
@@ -1520,6 +1726,14 @@ export const fitMeetCoreOpenApi = {
     securitySchemes: {
       bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
     },
+    parameters: {
+      ProfileMatchId: {
+        name: 'id',
+        in: 'path',
+        required: true,
+        schema: { type: 'integer', minimum: 1 },
+      },
+    },
     responses: {
       AuthResult: {
         description: 'Authentication result',
@@ -2075,6 +2289,141 @@ export const fitMeetCoreOpenApi = {
             type: 'array',
             items: { type: 'string' },
           },
+        },
+      },
+      ProfileMatchRecommendation: {
+        type: 'object',
+        required: [
+          'aiMatchSessionId',
+          'targetUserId',
+          'score',
+          'status',
+          'summary',
+          'publicReasons',
+          'riskTips',
+          'nextStepSuggestions',
+          'safeProfile',
+        ],
+        additionalProperties: true,
+        properties: {
+          aiMatchSessionId: { type: 'integer' },
+          targetUserId: { type: 'integer' },
+          score: { type: 'number' },
+          status: { type: 'string' },
+          summary: { type: 'string' },
+          publicReasons: { type: 'array', items: { type: 'string' } },
+          riskTips: { type: 'array', items: { type: 'string' } },
+          nextStepSuggestions: { type: 'array', items: { type: 'string' } },
+          safeProfile: {
+            type: 'object',
+            required: ['id', 'name', 'avatar', 'color'],
+            additionalProperties: true,
+            properties: {
+              id: { type: 'integer' },
+              name: { type: 'string' },
+              avatar: { type: 'string' },
+              color: { type: 'string' },
+              city: { type: 'string' },
+              publicTags: { type: 'array', items: { type: 'string' } },
+              summary: { type: 'string' },
+            },
+          },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      ProfileMatchRecommendationsResult: {
+        type: 'object',
+        required: ['recommendations'],
+        additionalProperties: false,
+        properties: {
+          recommendations: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ProfileMatchRecommendation' },
+          },
+        },
+      },
+      ProfileMatchActionResult: {
+        type: 'object',
+        required: ['ok', 'status'],
+        additionalProperties: true,
+        properties: {
+          ok: { type: 'boolean' },
+          status: { type: 'string' },
+        },
+      },
+      ProfileMatchDraftOpenerInput: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          tone: { type: 'string' },
+        },
+      },
+      ProfileMatchDraftOpenerResult: {
+        type: 'object',
+        required: ['ok', 'draft', 'requiresOwnerConfirmation'],
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean' },
+          draft: {
+            type: 'object',
+            required: ['type', 'tone', 'content'],
+            additionalProperties: false,
+            properties: {
+              type: { type: 'string', enum: ['message'] },
+              tone: { type: 'string' },
+              content: { type: 'string' },
+            },
+          },
+          requiresOwnerConfirmation: { type: 'boolean' },
+        },
+      },
+      ProfileMatchOwnerConfirmationInput: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ownerConfirmed: { type: 'boolean' },
+          note: { type: 'string' },
+        },
+      },
+      ProfileMatchConfirmContactResult: {
+        type: 'object',
+        required: ['ok', 'status', 'contactRequestId', 'requiresTargetConsent'],
+        additionalProperties: true,
+        properties: {
+          ok: { type: 'boolean' },
+          status: { type: 'string' },
+          contactRequestId: { type: 'integer' },
+          requiresTargetConsent: { type: 'boolean' },
+        },
+      },
+      ProfileMatchContactExchangeResult: {
+        type: 'object',
+        required: ['ok', 'status'],
+        additionalProperties: true,
+        properties: {
+          ok: { type: 'boolean' },
+          status: { type: 'string' },
+          approvalId: { type: 'integer' },
+        },
+      },
+      ProfileMatchSendIntroInput: {
+        type: 'object',
+        required: ['text'],
+        additionalProperties: false,
+        properties: {
+          ownerConfirmed: { type: 'boolean' },
+          text: { type: 'string', minLength: 1 },
+        },
+      },
+      ProfileMatchSendIntroResult: {
+        type: 'object',
+        required: ['ok', 'status'],
+        additionalProperties: true,
+        properties: {
+          ok: { type: 'boolean' },
+          status: { type: 'string' },
+          conversationId: { type: 'string' },
+          messageId: { type: 'string' },
         },
       },
       UnreadCount: {

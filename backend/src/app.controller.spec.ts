@@ -80,6 +80,13 @@ const WEB_APP_REQUIRED_PATHS = {
   '/agents/inbox/events': 'get',
   '/agents/inbox/events/ack': 'post',
   '/agents/inbox/conversations/{conversationId}/reply': 'post',
+  '/agents/profile-matches': 'get',
+  '/agents/profile-matches/{id}/ignore': 'post',
+  '/agents/profile-matches/{id}/favorite': 'post',
+  '/agents/profile-matches/{id}/draft-opener': 'post',
+  '/agents/profile-matches/{id}/confirm-contact': 'post',
+  '/agents/profile-matches/{id}/request-contact-exchange': 'post',
+  '/agents/profile-matches/{id}/send-intro': 'post',
 } as const;
 
 const IOS_CORE_ENDPOINT_REGISTRY_PATH = resolve(
@@ -200,6 +207,13 @@ describe('AppController', () => {
           '/agents/inbox/events',
           '/agents/inbox/events/ack',
           '/agents/inbox/conversations/{conversationId}/reply',
+          '/agents/profile-matches',
+          '/agents/profile-matches/{id}/ignore',
+          '/agents/profile-matches/{id}/favorite',
+          '/agents/profile-matches/{id}/draft-opener',
+          '/agents/profile-matches/{id}/confirm-contact',
+          '/agents/profile-matches/{id}/request-contact-exchange',
+          '/agents/profile-matches/{id}/send-intro',
           '/social-agent/chat/run',
           '/social-agent/chat/run-async',
           '/social-agent/chat/session',
@@ -594,6 +608,75 @@ describe('AppController', () => {
             items: { type: 'string', minLength: 1 },
           },
         },
+      });
+    });
+
+    it('documents the Web Agent profile-match recommendation contract', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+      const list = contract.paths['/agents/profile-matches'].get;
+      const ignore = contract.paths['/agents/profile-matches/{id}/ignore'].post;
+      const favorite =
+        contract.paths['/agents/profile-matches/{id}/favorite'].post;
+      const draft =
+        contract.paths['/agents/profile-matches/{id}/draft-opener'].post;
+      const confirm =
+        contract.paths['/agents/profile-matches/{id}/confirm-contact'].post;
+      const exchange =
+        contract.paths['/agents/profile-matches/{id}/request-contact-exchange']
+          .post;
+      const sendIntro =
+        contract.paths['/agents/profile-matches/{id}/send-intro'].post;
+
+      expect(list.security).toEqual([{ bearerAuth: [] }]);
+      expect(list.parameters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'limit', in: 'query' }),
+        ]),
+      );
+      expect(list.responses['200'].content['application/json'].schema).toEqual({
+        $ref: '#/components/schemas/ProfileMatchRecommendationsResult',
+      });
+      for (const operation of [
+        ignore,
+        favorite,
+        draft,
+        confirm,
+        exchange,
+        sendIntro,
+      ]) {
+        expect(operation.security).toEqual([{ bearerAuth: [] }]);
+        expect(operation.parameters).toEqual(
+          expect.arrayContaining([
+            { $ref: '#/components/parameters/ProfileMatchId' },
+          ]),
+        );
+      }
+      expect(draft.requestBody.content['application/json'].schema).toEqual({
+        $ref: '#/components/schemas/ProfileMatchDraftOpenerInput',
+      });
+      expect(draft.responses['200'].content['application/json'].schema).toEqual(
+        {
+          $ref: '#/components/schemas/ProfileMatchDraftOpenerResult',
+        },
+      );
+      expect(confirm.requestBody.content['application/json'].schema).toEqual({
+        $ref: '#/components/schemas/ProfileMatchOwnerConfirmationInput',
+      });
+      expect(exchange.requestBody.content['application/json'].schema).toEqual({
+        $ref: '#/components/schemas/ProfileMatchOwnerConfirmationInput',
+      });
+      expect(sendIntro.requestBody.content['application/json'].schema).toEqual({
+        $ref: '#/components/schemas/ProfileMatchSendIntroInput',
+      });
+      expect(
+        sendIntro.responses['200'].content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/ProfileMatchSendIntroResult',
+      });
+      expect(
+        contract.components.schemas.ProfileMatchRecommendationsResult,
+      ).toMatchObject({
+        required: ['recommendations'],
       });
     });
 
