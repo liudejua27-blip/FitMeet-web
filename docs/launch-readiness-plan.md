@@ -163,7 +163,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - iOS release risk: staging E2E requires real credentials, a second message target user, object storage, and a deployed backend; it cannot pass in a credential-free local run.
 - Performance risk: 1000-concurrency smoke scripts exist, but no current local/staging result is recorded yet.
 - Deployment risk: GitHub push/deploy automation is blocked in the current local environment by missing HTTPS credentials; deployment must run from an authenticated machine or CI.
-- AI risk: `DEEPSEEK_API_KEY` is required for release-quality Social Agent behavior. Fallback responses are useful for local tests but are not release-ready for the final AI experience.
+- AI risk: `DEEPSEEK_API_KEY`, `DEEPSEEK_CHAT_MODEL`, and `DEEPSEEK_FAST_MODEL` are required for release-quality Social Agent behavior. Fallback responses are useful for local tests but are not release-ready for the final AI experience. Production config should use explicit DeepSeek ids such as `deepseek-chat` and `deepseek-v4-flash`; the legacy bare `deepseek-v4` alias is rejected by the production env checker.
 - Upload risk: production uploads require object storage; local filesystem upload fallback is tested as development-only, upload endpoints now reject unsupported image/video mime types while removing multer temporary files, object storage failure paths remove temporary files for both Aliyun OSS and S3, and object storage public URLs/endpoints must stay HTTPS for release traffic.
 
 ## Exact Validation Commands

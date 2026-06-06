@@ -48,6 +48,20 @@ const OPTIONAL_BUT_LAUNCH_CRITICAL_KEYS = [
   'AMAP_WEB_SERVICE_KEY',
 ];
 
+const REQUIRED_DEEPSEEK_MODEL_KEYS = [
+  'DEEPSEEK_CHAT_MODEL',
+  'DEEPSEEK_FAST_MODEL',
+];
+
+const OPTIONAL_DEEPSEEK_MODEL_KEYS = [
+  'DEEPSEEK_MODEL',
+  'AGENT_FINAL_RESPONSE_MODEL',
+  'AGENT_CASUAL_CHAT_MODEL',
+  'AGENT_PLANNER_MODEL',
+  'AGENT_EXTRACTOR_MODEL',
+  'AGENT_CARD_MODEL',
+];
+
 export function parseEnvFile(content: string): EnvMap {
   const env: EnvMap = {};
   for (const rawLine of content.split(/\r?\n/)) {
@@ -249,6 +263,27 @@ function checkAgentModel(
     );
   }
   requireHttpsUrl(env, 'DEEPSEEK_BASE_URL', error);
+  for (const key of REQUIRED_DEEPSEEK_MODEL_KEYS) {
+    requireConfigured(env, key, error);
+    checkDeepSeekModelValue(env, key, error);
+  }
+  for (const key of OPTIONAL_DEEPSEEK_MODEL_KEYS) {
+    checkDeepSeekModelValue(env, key, error);
+  }
+}
+
+function checkDeepSeekModelValue(
+  env: EnvMap,
+  key: string,
+  error: (key: string, message: string) => void,
+): void {
+  if (!hasConfiguredValue(env[key])) return;
+  if (env[key].trim() === 'deepseek-v4') {
+    error(
+      key,
+      'must use an explicit DeepSeek model id such as deepseek-v4-flash or deepseek-chat; bare deepseek-v4 is a legacy alias and not production-safe.',
+    );
+  }
 }
 
 function checkKafka(

@@ -34,6 +34,8 @@ const validEnv = {
     'https://fitmeet-uploads.oss-cn-qingdao.aliyuncs.com',
   DEEPSEEK_API_KEY: 'deepseek-key',
   DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
+  DEEPSEEK_CHAT_MODEL: 'deepseek-chat',
+  DEEPSEEK_FAST_MODEL: 'deepseek-v4-flash',
   KAFKA_BROKERS: 'kafka:29092',
   ENABLE_KAFKA: 'true',
 };
@@ -130,6 +132,36 @@ describe('production-env-readiness', () => {
     expect(insecureRedirect.errors).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ key: 'WECHAT_REDIRECT_URI' }),
+      ]),
+    );
+  });
+
+  it('requires explicit DeepSeek production model ids', () => {
+    const missingModels = buildProductionEnvReport({
+      ...validEnv,
+      DEEPSEEK_CHAT_MODEL: '',
+      DEEPSEEK_FAST_MODEL: '',
+    });
+    const legacyAlias = buildProductionEnvReport({
+      ...validEnv,
+      DEEPSEEK_MODEL: 'deepseek-v4',
+      DEEPSEEK_FAST_MODEL: 'deepseek-v4',
+      AGENT_FINAL_RESPONSE_MODEL: 'deepseek-v4',
+    });
+
+    expect(missingModels.ok).toBe(false);
+    expect(missingModels.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'DEEPSEEK_CHAT_MODEL' }),
+        expect.objectContaining({ key: 'DEEPSEEK_FAST_MODEL' }),
+      ]),
+    );
+    expect(legacyAlias.ok).toBe(false);
+    expect(legacyAlias.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'DEEPSEEK_MODEL' }),
+        expect.objectContaining({ key: 'DEEPSEEK_FAST_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_FINAL_RESPONSE_MODEL' }),
       ]),
     );
   });

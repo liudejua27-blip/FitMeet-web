@@ -293,7 +293,7 @@ APP_DIR=/opt/fitmeet-new ./scripts/deploy-production.sh
 
 该脚本默认会先跑 `./scripts/release-preflight.sh --web-only`，再跑 `pnpm -C backend run check:prod-env -- ../.env.production`。如果已经在构建机或 CI 跑过完整 Web preflight，并且服务器内存紧张，可以显式设置 `RUN_RELEASE_PREFLIGHT=false`，但生产环境变量检查仍会执行。
 
-如果检查器报 `OBJECT_STORAGE`，头像上传和朋友圈图片会在生产环境被禁用；如果报 `DEEPSEEK_API_KEY`，Social Agent 会退回确定性 fallback，不满足企业级 Agent 发布标准。
+如果检查器报 `OBJECT_STORAGE`，头像上传和朋友圈图片会在生产环境被禁用；如果报 `DEEPSEEK_API_KEY`、`DEEPSEEK_CHAT_MODEL` 或 `DEEPSEEK_FAST_MODEL`，Social Agent 会退回确定性 fallback 或使用不明确模型，不满足企业级 Agent 发布标准。生产环境应显式设置 `DEEPSEEK_CHAT_MODEL=deepseek-chat` 和 `DEEPSEEK_FAST_MODEL=deepseek-v4-flash`，不要使用裸 `deepseek-v4` 旧别名。
 
 容器启动后检查：
 
