@@ -84,6 +84,7 @@ import {
   buildSocialAgentInboxEventPayload,
   type SocialAgentInboxEventInput,
 } from './social-agent-inbox-event-payload';
+import { buildSocialAgentFriendActionResult } from './social-agent-friend-action-result';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -1206,25 +1207,13 @@ export class SocialAgentToolExecutorService {
       this.toolInput.string(rawFriendRequestId) ??
       (numericFriendRequestId != null ? String(numericFriendRequestId) : null);
     if (this.toolInput.bool(input.openConversation) !== true) {
-      return {
-        ...friendRecord,
-        success: true,
+      return buildSocialAgentFriendActionResult({
+        friendRecord,
         taskId: task.id,
         targetUserId,
-        candidateUserId: targetUserId,
         friendRequestId,
         conversationId: null,
-        status: 'connected',
-        friendAction: {
-          success: true,
-          status: 'connected',
-          targetUserId,
-          candidateUserId: targetUserId,
-          following: true,
-          conversationId: null,
-          friendRequestId,
-        },
-      };
+      });
     }
 
     const conversation = await this.messages.startConversation(
@@ -1248,25 +1237,13 @@ export class SocialAgentToolExecutorService {
         sourceTool: SocialAgentToolName.AddFriend,
       });
     }
-    return {
-      ...friendRecord,
-      success: true,
+    return buildSocialAgentFriendActionResult({
+      friendRecord,
       taskId: task.id,
       conversationId: conversationId ?? null,
       targetUserId,
-      candidateUserId: targetUserId,
       friendRequestId,
-      status: 'connected',
-      friendAction: {
-        success: true,
-        status: 'connected',
-        targetUserId,
-        candidateUserId: targetUserId,
-        following: true,
-        conversationId: conversationId ?? null,
-        friendRequestId,
-      },
-    };
+    });
   }
 
   private async connectCandidate(
