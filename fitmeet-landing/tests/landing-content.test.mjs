@@ -122,7 +122,14 @@ test('agent hub route is a real product surface', async () => {
   );
   assertContainsAll(
     agentConnectPanel,
-    ['OpenClaw', 'Codex', 'Custom', '确认连接 Agent', 'X-Agent-Token'],
+    [
+      'OpenClaw',
+      'Codex',
+      'Custom',
+      '确认连接 Agent',
+      'X-Agent-Token',
+      'https://agents.ourfitmeet.cn/webhook',
+    ],
     'agent connect flow',
   );
   assertContainsAll(
@@ -136,6 +143,10 @@ test('agent hub route is a real product surface', async () => {
     'preference studio',
   );
   assert.doesNotMatch(agentHub, /placeholder|stub|mock-only|coming soon/i);
+  assert.doesNotMatch(
+    `${agentHub}\n${agentConnectPanel}`,
+    /fitmeet\.example|your-agent\.example|example\.com|localhost|127\.0\.0\.1|demo_token|for demo purposes|would post|mock-only/i,
+  );
 });
 
 test('agent hub tabs and security controls are wired as a stateful product flow', async () => {

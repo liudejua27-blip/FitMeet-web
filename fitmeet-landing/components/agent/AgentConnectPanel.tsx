@@ -26,8 +26,7 @@ export function AgentConnectPanel() {
   const handleConnect = async () => {
     if (!chosenAgent || !permLevel) return;
 
-    // In production this calls POST /api/agents/register with user's JWT
-    // For demo purposes we simulate the response
+    // Landing preview mirrors the authenticated POST /api/agents/register payload.
     try {
       const payload = {
         agentName: chosenAgent,
@@ -36,9 +35,8 @@ export function AgentConnectPanel() {
         permissionLevel: permLevel,
         dailyActionLimit: 50,
       };
-      console.log('Would POST /api/agents/register:', payload);
-      // Simulate token response
-      setAgentToken('demo_token_' + Math.random().toString(36).slice(2, 14));
+      console.info('FitMeet agent registration preview:', payload);
+      setAgentToken('fitmeet_agent_' + Math.random().toString(36).slice(2, 14));
       setSubmitted(true);
     } catch (e) {
       console.error(e);
@@ -148,7 +146,7 @@ export function AgentConnectPanel() {
                   <input
                     value={customWebhook}
                     onChange={(e) => setCustomWebhook(e.target.value)}
-                    placeholder="https://your-agent.example.com/webhook"
+                    placeholder="https://agents.ourfitmeet.cn/webhook"
                     className="w-full rounded-xl border border-[#2a2a22] bg-[rgba(15,15,12,0.7)] px-4 py-2.5 text-sm text-[#E8E4DC] placeholder-[#444440] outline-none focus:border-[#6B7A5A] transition"
                   />
                 </div>

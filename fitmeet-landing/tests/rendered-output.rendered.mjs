@@ -103,6 +103,14 @@ function assertProductionMetadata(html, route) {
   );
 }
 
+function assertNoDemoOrigins(html, route) {
+  assert.doesNotMatch(
+    decodeHtml(html),
+    /fitmeet\.example|your-agent\.example|example\.com|localhost|127\.0\.0\.1/i,
+    `${route} should not render demo or local origins`,
+  );
+}
+
 test('rendered home page exposes the full public landing surface', async () => {
   const html = await readBuilt('index.html');
 
@@ -123,6 +131,7 @@ test('rendered home page exposes the full public landing surface', async () => {
     'home page',
   );
   assertProductionMetadata(html, 'home page');
+  assertNoDemoOrigins(html, 'home page');
   assert.doesNotMatch(html, /No landing tests configured|placeholder|coming soon/i);
 });
 
@@ -145,6 +154,7 @@ test('rendered agent hub is a concrete product entry, not a shell', async () => 
     ],
     'agent hub',
   );
+  assertNoDemoOrigins(html, 'agent hub');
   assert.doesNotMatch(html, /No landing tests configured|placeholder|mock-only/i);
 });
 
