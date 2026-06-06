@@ -31,6 +31,7 @@ import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.s
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
 import { SocialAgentRunRecommendationService } from './social-agent-run-recommendation.service';
+import { SocialAgentReplanRunService } from './social-agent-replan-run.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 
@@ -548,11 +549,24 @@ function makeHarness(options: Record<string, unknown> = {}) {
       routeContext as never,
       undefined,
     );
+  const replanRuns =
+    (options.replanRuns as SocialAgentReplanRunService | undefined) ??
+    new SocialAgentReplanRunService(
+      eventRepo as never,
+      runState as never,
+      followUpContext as never,
+      replanProgress as never,
+      planner as never,
+      draftSearch as never,
+      recommendationResults as never,
+      routeContext as never,
+      taskLifecycle as never,
+      undefined,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
     eventRepo as never,
-    planner as never,
     intentRouter,
     executor as never,
     socialProfiles as never,
@@ -563,13 +577,10 @@ function makeHarness(options: Record<string, unknown> = {}) {
     chatLlm as never,
     runState as never,
     followUpContext as never,
-    replanProgress as never,
     profileEnrichment as never,
     meetLoop as never,
     candidateActions as never,
     draftPublication as never,
-    draftSearch as never,
-    recommendationResults as never,
     activitySearch as never,
     sessionRestore as never,
     messageLog as never,
@@ -577,6 +588,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     routeContext as never,
     mainAgentTurn as never,
     runRecommendations as never,
+    replanRuns as never,
     options.brain as never,
     options.lifeGraph as never,
     undefined,
@@ -614,6 +626,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     routeContext,
     mainAgentTurn,
     runRecommendations,
+    replanRuns,
   };
 }
 
