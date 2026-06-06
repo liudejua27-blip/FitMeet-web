@@ -15,6 +15,7 @@ import { fitMeetCoreEndpoints } from './fitmeetCoreContract';
 export * from './baseClient';
 export * from './authClient';
 export * from './feedClient';
+export * from './messagesClient';
 export * from './socialRequestsClient';
 
 // ── Users ────────────────────────────────────────────────
@@ -222,75 +223,6 @@ export function addCoachReview(
 
 export function getCategories(): Promise<Category[]> {
   return request<Category[]>('/categories');
-}
-
-// ── Messages ─────────────────────────────────────────────
-
-export interface ApiConversation {
-  id: string;
-  userId: number;
-  username: string;
-  avatar: string;
-  color: string;
-  lastMessage: string;
-  time: string;
-  unread: number;
-  online: boolean;
-}
-
-export interface ApiMessage {
-  id: string;
-  text: string;
-  time: string;
-  isMine: boolean;
-  source?: 'user' | 'ai_delegate';
-  card?: {
-    type: 'fitmeet_contact_card';
-    userId: number;
-    name: string;
-    profileUrl: string;
-    sports: string[];
-    city: string;
-  } | null;
-}
-
-export interface StartConversationResponse {
-  conversationId: string;
-  targetUserId?: number;
-  preexisting?: boolean;
-}
-
-export function getConversations(): Promise<ApiConversation[]> {
-  return request<ApiConversation[]>('/messages/conversations');
-}
-
-export function getMessages(conversationId: string): Promise<ApiMessage[]> {
-  return request<ApiMessage[]>(`/messages/conversations/${conversationId}`);
-}
-
-export function sendMessage(conversationId: string, text: string): Promise<ApiMessage> {
-  return request<ApiMessage>(fitMeetCoreEndpoints.messages.sendConversationMessage(conversationId), {
-    method: 'POST',
-    body: JSON.stringify({ text }),
-  });
-}
-
-export function startConversation(otherUserId: number): Promise<StartConversationResponse> {
-  return request<StartConversationResponse>(fitMeetCoreEndpoints.messages.startConversation, {
-    method: 'POST',
-    body: JSON.stringify({ otherUserId }),
-  });
-}
-
-export function startPublicIntentConversation(publicIntentId: string, text: string): Promise<StartConversationResponse> {
-  return request<StartConversationResponse>(`/messages/public-intents/${encodeURIComponent(publicIntentId)}/start`, {
-    method: 'POST',
-    body: JSON.stringify({ text }),
-  });
-}
-
-export function getUnreadMessageCount(): Promise<{ unreadCount: number }> {
-  return request('/messages/unread');
 }
 
 // ── Notifications ────────────────────────────────────────
