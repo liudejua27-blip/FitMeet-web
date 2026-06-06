@@ -55,6 +55,14 @@ import {
   extractCandidateTags,
   extractCandidateTime,
 } from './social-agent-candidate-query-parser';
+import {
+  candidateCityMatches,
+  candidateClampScore,
+  candidateCommonTags,
+  candidateMatchLevel,
+  candidateRecentScore,
+  candidateTotalScore,
+} from './social-agent-candidate-scoring';
 
 export type CandidatePoolSource =
   | 'profile_candidate'
@@ -717,7 +725,7 @@ export class SocialAgentCandidatePoolService {
     const city = this.firstText(profile?.city, user.city, delegate?.city);
     const tags = candidateProfileTags(user, profile, delegate);
     const completeness = candidateProfileCompleteness(user, profile, delegate);
-    const commonTags = this.commonTags(query.interestTags, tags);
+    const commonTags = candidateCommonTags(query.interestTags, tags);
     const scoreBreakdown = this.scoreProfile({
       user,
       profile,
@@ -729,7 +737,7 @@ export class SocialAgentCandidatePoolService {
       commonTags,
       lifeGraphSignals,
     });
-    const matchScore = this.totalScore(scoreBreakdown);
+    const matchScore = candidateTotalScore(scoreBreakdown);
     const displayName = candidateDisplayName(user, profile, city);
     const matchReasons = this.profileReasons(
       query,
@@ -777,7 +785,7 @@ export class SocialAgentCandidatePoolService {
       ...candidateProfileTags(user, profile, delegate),
     ]);
     const completeness = candidateProfileCompleteness(user, profile, delegate);
-    const commonTags = this.commonTags(query.interestTags, tags);
+    const commonTags = candidateCommonTags(query.interestTags, tags);
     const scoreBreakdown = this.scorePublicIntent({
       query,
       city,
@@ -787,7 +795,7 @@ export class SocialAgentCandidatePoolService {
       updatedAt: intent.updatedAt,
       lifeGraphSignals,
     });
-    const matchScore = this.totalScore(scoreBreakdown);
+    const matchScore = candidateTotalScore(scoreBreakdown);
     const displayName = candidateDisplayName(user, profile, city);
     const matchReasons = this.publicIntentReasons(
       intent,
@@ -834,7 +842,7 @@ export class SocialAgentCandidatePoolService {
       ...candidateProfileTags(user, profile, delegate),
     ]);
     const completeness = candidateProfileCompleteness(user, profile, delegate);
-    const commonTags = this.commonTags(query.interestTags, tags);
+    const commonTags = candidateCommonTags(query.interestTags, tags);
     const scoreBreakdown = this.scorePublicIntent({
       query,
       city,
@@ -864,7 +872,7 @@ export class SocialAgentCandidatePoolService {
       displayName,
       interestTags: tags,
       profileCompleteness: completeness,
-      matchScore: this.totalScore(scoreBreakdown),
+      matchScore: candidateTotalScore(scoreBreakdown),
       scoreBreakdown,
       commonTags,
       matchReasons,
@@ -959,7 +967,7 @@ export class SocialAgentCandidatePoolService {
       dataQuality: quality,
       matchScore: input.matchScore,
       score: input.matchScore,
-      level: this.matchLevel(input.matchScore),
+      level: candidateMatchLevel(input.matchScore),
       matchReasons: input.matchReasons,
       reasons: input.matchReasons,
       riskWarnings: [...riskWarnings, ...policy.safetyPrompts],
@@ -1010,13 +1018,13 @@ export class SocialAgentCandidatePoolService {
       String(activity.type),
       ...extractCandidateTags(`${activity.title} ${activity.description}`),
     ]);
-    const commonTags = this.commonTags(query.interestTags, tags);
-    const cityScore = this.cityMatches(query.city, activity.city) ? 35 : 0;
+    const commonTags = candidateCommonTags(query.interestTags, tags);
+    const cityScore = candidateCityMatches(query.city, activity.city) ? 35 : 0;
     const tagScore = Math.min(35, commonTags.length * 15);
     const typeScore =
       query.activityType && tags.includes(query.activityType) ? 15 : 0;
-    const recentScore = this.recentScore(activity.updatedAt, 15);
-    const matchScore = this.clampScore(
+    const recentScore = candidateRecentScore(activity.updatedAt, 15);
+    const matchScore = candidateClampScore(
       cityScore + tagScore + typeScore + recentScore,
     );
     const matchReasons = this.activityReasons(query, activity.city, commonTags);
@@ -1063,13 +1071,13 @@ export class SocialAgentCandidatePoolService {
       intent.requestType,
       ...extractCandidateTags(`${intent.title} ${intent.description}`),
     ]);
-    const commonTags = this.commonTags(query.interestTags, tags);
-    const cityScore = this.cityMatches(query.city, intent.city) ? 35 : 0;
+    const commonTags = candidateCommonTags(query.interestTags, tags);
+    const cityScore = candidateCityMatches(query.city, intent.city) ? 35 : 0;
     const tagScore = Math.min(35, commonTags.length * 15);
     const typeScore =
       query.activityType && tags.includes(query.activityType) ? 15 : 0;
-    const recentScore = this.recentScore(intent.updatedAt, 15);
-    const matchScore = this.clampScore(
+    const recentScore = candidateRecentScore(intent.updatedAt, 15);
+    const matchScore = candidateClampScore(
       cityScore + tagScore + typeScore + recentScore,
     );
     const matchReasons = this.activityReasons(query, intent.city, commonTags);
@@ -1205,12 +1213,11 @@ export class SocialAgentCandidatePoolService {
       permissionMode: 'limited_auto',
       safetySignals: input.lifeGraphSignals?.safetySignals,
     });
-    const cityMatches = (left: string, right: string) =>
-      this.cityMatches(left, right);
+    const cityMatches = candidateCityMatches;
     return {
       distance: Math.min(
         18,
-        (this.cityMatches(input.query.city, input.city) ? 14 : 6) +
+        (candidateCityMatches(input.query.city, input.city) ? 14 : 6) +
           lifeGraphLocationBoost(
             input.city,
             input.lifeGraphSignals,
@@ -1289,12 +1296,11 @@ export class SocialAgentCandidatePoolService {
       permissionMode: 'limited_auto',
       safetySignals: input.lifeGraphSignals?.safetySignals,
     });
-    const cityMatches = (left: string, right: string) =>
-      this.cityMatches(left, right);
+    const cityMatches = candidateCityMatches;
     return {
       distance: Math.min(
         18,
-        (this.cityMatches(input.query.city, input.city) ? 14 : 6) +
+        (candidateCityMatches(input.query.city, input.city) ? 14 : 6) +
           lifeGraphLocationBoost(
             input.city,
             input.lifeGraphSignals,
@@ -1336,7 +1342,7 @@ export class SocialAgentCandidatePoolService {
       trustworthiness: Math.min(
         10,
         Math.round(input.completeness * 5) +
-          this.recentScore(input.updatedAt, 5),
+          candidateRecentScore(input.updatedAt, 5),
       ),
       safetyRisk: this.safetyRiskScore(policy.riskLevel),
     };
@@ -1425,7 +1431,8 @@ export class SocialAgentCandidatePoolService {
     user: User,
   ): string[] {
     const reasons: string[] = ['来自真实注册用户和社交画像。'];
-    if (this.cityMatches(query.city, city)) reasons.push(`城市匹配：${city}。`);
+    if (candidateCityMatches(query.city, city))
+      reasons.push(`城市匹配：${city}。`);
     if (commonTags.length)
       reasons.push(`共同兴趣：${commonTags.slice(0, 3).join('、')}。`);
     if (completeness >= 0.7) reasons.push('画像信息较完整。');
@@ -1444,7 +1451,7 @@ export class SocialAgentCandidatePoolService {
   ): string[] {
     const title = cleanDisplayText(intent.title, '公开约练卡片');
     const reasons = [`来自真实公开约练卡片：${title}。`];
-    if (this.cityMatches(query.city, city))
+    if (candidateCityMatches(query.city, city))
       reasons.push(`卡片城市匹配：${city}。`);
     if (commonTags.length)
       reasons.push(`卡片标签匹配：${commonTags.slice(0, 3).join('、')}。`);
@@ -1460,7 +1467,8 @@ export class SocialAgentCandidatePoolService {
     commonTags: string[],
   ): string[] {
     const reasons = ['来自真实活动或公开约练卡片。'];
-    if (this.cityMatches(query.city, city)) reasons.push(`城市匹配：${city}。`);
+    if (candidateCityMatches(query.city, city))
+      reasons.push(`城市匹配：${city}。`);
     if (commonTags.length)
       reasons.push(`标签匹配：${commonTags.slice(0, 3).join('、')}。`);
     return reasons;
@@ -1564,30 +1572,6 @@ export class SocialAgentCandidatePoolService {
     );
   }
 
-  private commonTags(queryTags: string[], candidateTags: string[]): string[] {
-    const normalizedCandidates = candidateTags.map((tag) => tag.toLowerCase());
-    return this.uniqueStrings(
-      queryTags.filter((tag) => {
-        const normalized = tag.toLowerCase();
-        return normalizedCandidates.some(
-          (candidate) =>
-            candidate === normalized ||
-            candidate.includes(normalized) ||
-            normalized.includes(candidate),
-        );
-      }),
-    );
-  }
-
-  private cityMatches(queryCity: string, candidateCity: string): boolean {
-    if (!queryCity) return true;
-    if (!candidateCity) return false;
-    return (
-      sanitizeCity(candidateCity).includes(queryCity) ||
-      queryCity.includes(sanitizeCity(candidateCity))
-    );
-  }
-
   private timeMatches(
     queryTime: string,
     profile: UserSocialProfile | null,
@@ -1604,31 +1588,6 @@ export class SocialAgentCandidatePoolService {
     return available.includes(queryTime) || queryTime.includes(available)
       ? 15
       : 8;
-  }
-
-  private recentScore(date: Date | null | undefined, max: number): number {
-    if (!date) return 0;
-    const days = (Date.now() - date.getTime()) / 86_400_000;
-    if (days <= 7) return max;
-    if (days <= 30) return Math.round(max * 0.7);
-    if (days <= 90) return Math.round(max * 0.35);
-    return 0;
-  }
-
-  private totalScore(parts: Record<string, number>): number {
-    return this.clampScore(
-      Object.values(parts).reduce((sum, value) => sum + value, 0),
-    );
-  }
-
-  private clampScore(score: number): number {
-    return Math.max(0, Math.min(100, Math.round(score)));
-  }
-
-  private matchLevel(score: number): CandidateMatchLevel {
-    if (score >= 75) return CandidateMatchLevel.High;
-    if (score >= 45) return CandidateMatchLevel.Medium;
-    return CandidateMatchLevel.Low;
   }
 
   private async loadCounts(): Promise<CandidatePoolCounts> {
