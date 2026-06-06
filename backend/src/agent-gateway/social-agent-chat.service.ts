@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -6,14 +6,10 @@ import { cleanDisplayText } from '../common/display-text.util';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
 import {
   AgentTask,
-  AgentTaskEventType,
   AgentTaskPermissionMode,
 } from './entities/agent-task.entity';
 import { SocialAgentToolCallRecord } from './social-agent-tool-executor.service';
 import { transitionSocialAgentState } from './social-agent-memory.util';
-import { createSocialAgentRunId } from './social-agent-chat-run.presenter';
-import { SocialAgentRunStateService } from './social-agent-run-state.service';
-import { SocialAgentFollowUpContextService } from './social-agent-follow-up-context.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { TonePolicyService } from './response-quality/tone-policy.service';
@@ -26,40 +22,33 @@ import type {
   SocialAgentChatRunBody,
   SocialAgentChatRunResult,
   SocialAgentCurrentTaskSnapshot,
-  SocialAgentFollowUpContext,
   SocialAgentIntentRouteResult,
   SocialAgentRouteMessageBody,
   SocialAgentSessionSnapshot,
   SocialAgentTaskTimelineSnapshot,
   StreamEmit,
 } from './social-agent-chat.types';
-import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
-import { SocialAgentReplanRunService } from './social-agent-replan-run.service';
 import { SocialAgentRouteTurnService } from './social-agent-route-turn.service';
 import { SocialAgentQueuedRunService } from './social-agent-queued-run.service';
 import { SocialAgentRunOrchestratorService } from './social-agent-run-orchestrator.service';
 import { SocialAgentSessionQueryService } from './social-agent-session-query.service';
 import { SocialAgentCardActionRouterService } from './social-agent-card-action-router.service';
+import { SocialAgentReplanFacadeService } from './social-agent-replan-facade.service';
 export type * from './social-agent-chat.types';
 
 @Injectable()
 export class SocialAgentChatService {
-  private readonly logger = new Logger(SocialAgentChatService.name);
-
   constructor(
     @InjectRepository(AgentTask)
     private readonly taskRepo: Repository<AgentTask>,
-    private readonly runState: SocialAgentRunStateService,
-    private readonly followUpContext: SocialAgentFollowUpContextService,
     private readonly candidateActions: SocialAgentCandidateActionService,
     private readonly draftPublication: SocialAgentDraftPublicationService,
-    private readonly taskLifecycle: SocialAgentTaskLifecycleService,
-    private readonly replanRuns: SocialAgentReplanRunService,
     private readonly routeTurns: SocialAgentRouteTurnService,
     private readonly queuedRuns: SocialAgentQueuedRunService,
     private readonly runOrchestrator: SocialAgentRunOrchestratorService,
     private readonly sessionQueries: SocialAgentSessionQueryService,
     private readonly cardActionRouter: SocialAgentCardActionRouterService,
+    private readonly replanFacade: SocialAgentReplanFacadeService,
     private readonly tonePolicy?: TonePolicyService,
   ) {}
 
@@ -130,59 +119,7 @@ export class SocialAgentChatService {
     taskId: number,
     body: SocialAgentChatReplanRunBody,
   ): Promise<SocialAgentAsyncRunSnapshot> {
-    let task = await this.taskLifecycle.assertTaskOwner(taskId, ownerUserId);
-    const userMessage = cleanDisplayText(body.userMessage, '').trim();
-    const followUp = userMessage
-      ? await this.appendFollowUpContext(task, userMessage)
-      : this.readLatestFollowUpContext(task);
-    if (!followUp) throw new BadRequestException('请输入补充要求');
-    task = followUp.task;
-
-    const runId = createSocialAgentRunId();
-    const queuedRun = await this.runState.queueReplanRun({
-      task,
-      runId,
-      followUp,
-    });
-
-    void this.replanRuns
-      .execute({
-        ownerUserId,
-        taskId,
-        body: {
-          ...body,
-          userMessage: followUp.userMessage,
-        },
-        runId,
-        visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
-      })
-      .catch((error) => {
-        this.logger.error(
-          JSON.stringify({
-            event: 'social_agent.replan.background_failed',
-            taskId,
-            runId,
-            message: error instanceof Error ? error.message : String(error),
-          }),
-        );
-        void this.markRunFailed(ownerUserId, taskId, runId, error).catch(
-          (markError) => {
-            this.logger.error(
-              JSON.stringify({
-                event: 'social_agent.replan.mark_failed_failed',
-                taskId,
-                runId,
-                message:
-                  markError instanceof Error
-                    ? markError.message
-                    : String(markError),
-              }),
-            );
-          },
-        );
-      });
-
-    return queuedRun;
+    return this.replanFacade.replanAndRefresh(ownerUserId, taskId, body);
   }
 
   async appendContext(
@@ -190,19 +127,7 @@ export class SocialAgentChatService {
     taskId: number,
     body: SocialAgentChatReplanRunBody,
   ): Promise<SocialAgentAppendContextResult> {
-    const userMessage = cleanDisplayText(body.userMessage, '').trim();
-    if (!userMessage) throw new BadRequestException('请输入补充要求');
-    const task = await this.taskLifecycle.assertTaskOwner(taskId, ownerUserId);
-    const context = await this.appendFollowUpContext(task, userMessage);
-    return {
-      taskId,
-      saved: true,
-      eventType: AgentTaskEventType.SocialAgentContextAppended,
-      userMessage: context.userMessage,
-      previousGoal: context.previousGoal,
-      refreshedGoal: context.refreshedGoal,
-      appendedAt: context.appendedAt,
-    };
+    return this.replanFacade.appendContext(ownerUserId, taskId, body);
   }
 
   async getRunStatus(
@@ -329,39 +254,5 @@ export class SocialAgentChatService {
       permissionMode: task.permissionMode ?? AgentTaskPermissionMode.Confirm,
       idempotencyKey,
     });
-  }
-
-  private async appendFollowUpContext(
-    task: AgentTask,
-    userMessage: string,
-  ): Promise<SocialAgentFollowUpContext> {
-    return this.followUpContext.appendFollowUpContext(task, userMessage);
-  }
-
-  private readLatestFollowUpContext(
-    task: AgentTask,
-    expectedMessage?: string,
-  ): SocialAgentFollowUpContext | null {
-    return this.followUpContext.readLatestFollowUpContext(
-      task,
-      expectedMessage,
-    );
-  }
-
-  private async markRunFailed(
-    ownerUserId: number,
-    taskId: number,
-    runId: string,
-    error: unknown,
-    options: { message?: string; statusReason?: string } = {},
-  ): Promise<void> {
-    await this.runState.markRunFailed(
-      ownerUserId,
-      taskId,
-      runId,
-      error,
-      (id, label) => this.userVisibleStepLabel(id, label),
-      options,
-    );
   }
 }

@@ -37,6 +37,7 @@ import { SocialAgentRouteTurnService } from './social-agent-route-turn.service';
 import { SocialAgentQueuedRunService } from './social-agent-queued-run.service';
 import { SocialAgentRunOrchestratorService } from './social-agent-run-orchestrator.service';
 import { SocialAgentSessionQueryService } from './social-agent-session-query.service';
+import { SocialAgentReplanFacadeService } from './social-agent-replan-facade.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 
@@ -623,20 +624,26 @@ function makeHarness(options: Record<string, unknown> = {}) {
       candidateActions as never,
       meetLoop as never,
     );
+  const replanFacade =
+    (options.replanFacade as SocialAgentReplanFacadeService | undefined) ??
+    new SocialAgentReplanFacadeService(
+      runState as never,
+      followUpContext as never,
+      taskLifecycle as never,
+      replanRuns as never,
+      options.tonePolicy as never,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
-    runState as never,
-    followUpContext as never,
     candidateActions as never,
     draftPublication as never,
-    taskLifecycle as never,
-    replanRuns as never,
     routeTurns as never,
     queuedRuns as never,
     runOrchestrator as never,
     sessionQueries as never,
     cardActionRouter as never,
+    replanFacade as never,
     options.tonePolicy as never,
   );
 
@@ -675,6 +682,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     runOrchestrator,
     sessionQueries,
     cardActionRouter,
+    replanFacade,
   };
 }
 
