@@ -94,10 +94,8 @@ import { sanitizeCity } from '../common/city.util';
 import {
   buildPublicIntentMatchSignal,
   buildPublicIntentMatchSignalFromRequest,
-  buildPublicSocialCandidateReason,
   buildPublicSocialRequestTitle,
   classifyPublicSocialRisk,
-  extractPublicRequestKeywords,
   hashPublicIntentBucket,
   hasPublicIntentSensitiveContent,
   normalizePublicIntentHeader,
@@ -118,6 +116,7 @@ import {
   buildExecutedSendMessageActionLog,
   buildPendingApprovalSendMessageActionLog,
 } from './agent-gateway-message-log.mapper';
+import { buildPublicSocialCandidates } from './public-social-candidate.presenter';
 
 // Permission-level capability map
 const LEVEL_CAPABILITIES: Record<AgentPermissionLevel, AgentAction[]> = {
@@ -2034,142 +2033,15 @@ export class AgentGatewayService {
     });
     const prefByUser = new Map(prefs.map((p) => [p.userId, p]));
 
-    // Time-window parsing (best-effort): tokenise dto.timePreference into
-    // morning/afternoon/evening/night/weekend so we can bonus-score users
-    // whose stored interestTags or bio match.
-    const timeTokens = this.parseTimeWindow(dto.timePreference);
-
-    const desiredTags = new Set(
-      [
-        dto.requestType,
-        ...(dto.interests ?? []),
-        ...extractPublicRequestKeywords(dto.description),
-      ]
-        .map((tag) => tag.trim().toLowerCase())
-        .filter(Boolean),
-    );
-
-    const now = Date.now();
-    const STALE_MS = 7 * 24 * 60 * 60 * 1000;
-
-    const candidates = users
-      .map((user) => {
-        // acceptAgentMessages: if the candidate has an explicit pref row and
-        // it's `false`, drop them. Missing pref row = default-true.
-        const pref = prefByUser.get(user.id);
-        if (pref && pref.acceptAgentMessages === false) return null;
-
-        // Distance: haversine when both sides have coords.
-        let distanceKm: number | null = null;
-        if (
-          haveOrigin &&
-          typeof user.lat === 'number' &&
-          typeof user.lng === 'number'
-        ) {
-          distanceKm = haversineKm(ownerLat, ownerLng, user.lat, user.lng);
-          if (distanceKm > radiusKm) return null; // hard radius filter
-        }
-
-        const userTags = (user.interestTags ?? []).map((tag) =>
-          tag.toLowerCase(),
-        );
-        const overlap = userTags.filter((tag) => desiredTags.has(tag));
-
-        let score = 45;
-        const reasonTags: string[] = [];
-
-        // Distance decay: closer = higher bonus, up to +30.
-        if (distanceKm != null) {
-          const decay = Math.max(0, 1 - distanceKm / radiusKm);
-          score += Math.round(decay * 30);
-          reasonTags.push(`within_${radiusKm}km`);
-        } else if (city && user.city === city) {
-          score += 15;
-          reasonTags.push('same_city');
-        }
-
-        if (user.verified) {
-          score += 10;
-          reasonTags.push('verified');
-        }
-        score += Math.min(overlap.length * 10, 25);
-        overlap.forEach((tag) => reasonTags.push(`interest_${tag}`));
-        if (user.bio) score += 5;
-
-        // Stale-fix penalty: discourage surfacing users whose last known
-        // location is more than a week old when caller is geo-searching.
-        if (haveOrigin) {
-          const fixAge = user.locationUpdatedAt
-            ? now - new Date(user.locationUpdatedAt).getTime()
-            : Infinity;
-          if (fixAge > STALE_MS) {
-            score -= 10;
-            reasonTags.push('stale_location');
-          }
-        }
-
-        // Time window: bonus when candidate signals match (interest tag or
-        // bio mentions the same window). No hard filter — availability is
-        // not modelled per user yet.
-        if (timeTokens.length) {
-          const haystack =
-            `${user.bio ?? ''} ${userTags.join(' ')}`.toLowerCase();
-          const matchedWindow = timeTokens.find((t) => haystack.includes(t));
-          if (matchedWindow) {
-            score += 5;
-            reasonTags.push(`time_${matchedWindow}`);
-          }
-        }
-
-        return {
-          profile: {
-            id: user.id,
-            name: user.name,
-            avatar: user.avatar,
-            color: user.color,
-            age: user.age,
-            city: user.city,
-            bio: user.bio,
-            verified: user.verified,
-            interestTags: user.interestTags ?? [],
-            distanceKm:
-              distanceKm != null ? Math.round(distanceKm * 100) / 100 : null,
-          },
-          score: Math.min(Math.max(score, 0), 98),
-          reasonTags,
-          reasonText: buildPublicSocialCandidateReason(
-            user,
-            dto,
-            overlap,
-            distanceKm,
-          ),
-          nextAction: 'draft_invitation',
-        };
-      })
-      .filter((c): c is NonNullable<typeof c> => c !== null)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, dto.limit ?? 10);
-
-    return candidates;
-  }
-
-  /**
-   * Parse a free-text time preference (e.g. "工作日晚上", "weekend morning")
-   * into normalised tokens for scoring.
-   */
-  private parseTimeWindow(text?: string): string[] {
-    if (!text) return [];
-    const lower = text.toLowerCase();
-    const tokens: string[] = [];
-    if (/(早晨|早上|morning|上午|am)/.test(lower)) tokens.push('morning');
-    if (/(中午|noon|午间)/.test(lower)) tokens.push('noon');
-    if (/(下午|afternoon|pm)/.test(lower)) tokens.push('afternoon');
-    if (/(傍晚|晚上|evening|夜里|tonight)/.test(lower)) tokens.push('evening');
-    if (/(深夜|凌晨|night|midnight)/.test(lower)) tokens.push('night');
-    if (/(周末|weekend|周六|周日|saturday|sunday)/.test(lower))
-      tokens.push('weekend');
-    if (/(工作日|weekday|平日)/.test(lower)) tokens.push('weekday');
-    return tokens;
+    return buildPublicSocialCandidates({
+      users,
+      preferencesByUserId: prefByUser,
+      dto,
+      ownerLat,
+      ownerLng,
+      radiusKm,
+      city,
+    });
   }
 
   private buildFitMeetIntroMessage(request: UserSocialRequest) {
@@ -2449,21 +2321,4 @@ export class AgentGatewayService {
       }),
     );
   }
-}
-
-/** Great-circle distance in kilometres. */
-function haversineKm(
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number,
-): number {
-  const R = 6371;
-  const toRad = (n: number) => (n * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
 }

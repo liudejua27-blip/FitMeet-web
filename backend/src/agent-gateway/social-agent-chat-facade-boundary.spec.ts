@@ -49,6 +49,14 @@ const runStorePresenterPath = path.resolve(
   __dirname,
   'social-agent-chat-run-store.presenter.ts',
 );
+const agentGatewayServicePath = path.resolve(
+  __dirname,
+  'agent-gateway.service.ts',
+);
+const publicSocialCandidatePresenterPath = path.resolve(
+  __dirname,
+  'public-social-candidate.presenter.ts',
+);
 
 describe('SocialAgentChatService facade boundary', () => {
   const compatibilitySource = fs.readFileSync(compatibilityExportPath, 'utf8');
@@ -70,6 +78,14 @@ describe('SocialAgentChatService facade boundary', () => {
   const runPresenterSource = fs.readFileSync(runPresenterPath, 'utf8');
   const runStorePresenterSource = fs.readFileSync(
     runStorePresenterPath,
+    'utf8',
+  );
+  const agentGatewayServiceSource = fs.readFileSync(
+    agentGatewayServicePath,
+    'utf8',
+  );
+  const publicSocialCandidatePresenterSource = fs.readFileSync(
+    publicSocialCandidatePresenterPath,
     'utf8',
   );
 
@@ -186,5 +202,19 @@ describe('SocialAgentChatService facade boundary', () => {
     expect(runStorePresenterSource).toContain(
       'function readSocialAgentVisibleSteps',
     );
+  });
+
+  it('keeps public social candidate scoring split from the gateway service', () => {
+    expect(agentGatewayServiceSource).toContain('buildPublicSocialCandidates');
+    expect(agentGatewayServiceSource).not.toContain('function haversineKm');
+    expect(agentGatewayServiceSource).not.toContain(
+      'parsePublicSocialTimeWindow',
+    );
+    expect(publicSocialCandidatePresenterSource).toContain(
+      'function buildPublicSocialCandidates',
+    );
+    expect(
+      publicSocialCandidatePresenterSource.trim().split('\n').length,
+    ).toBeLessThanOrEqual(190);
   });
 });
