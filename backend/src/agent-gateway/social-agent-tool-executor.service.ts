@@ -125,6 +125,12 @@ import type {
   SocialAgentToolCallRecord,
   SocialAgentToolCallStatus,
 } from './social-agent-tool.types';
+import {
+  buildSocialAgentConversationOptions,
+  buildSocialAgentDelegateMessageOptions,
+  buildSocialAgentMessageMetadata,
+  buildSocialAgentMessageSendOptions,
+} from './social-agent-message-options';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -1742,20 +1748,12 @@ export class SocialAgentToolExecutorService {
       conversationId,
       task.ownerUserId,
       text,
-      {
-        senderType: 'agent',
-        senderAgentId: task.agentConnectionId,
-        agentConnectionId: task.agentConnectionId,
-        ownerUserId: task.ownerUserId,
-        actorUserId: task.ownerUserId,
-        source: 'ai_delegate',
-        metadata: this.messageMetadata(task, stepId, {
-          ...(this.isRecord(input.metadata) ? input.metadata : {}),
-          toolName: SocialAgentToolName.OfflineMeeting,
-          activityId: activity.id,
-          targetUserId,
-        }),
-      },
+      buildSocialAgentDelegateMessageOptions(task, stepId, {
+        ...(this.isRecord(input.metadata) ? input.metadata : {}),
+        toolName: SocialAgentToolName.OfflineMeeting,
+        activityId: activity.id,
+        targetUserId,
+      }),
     );
     const messageRecord = this.asRecord(message);
     this.rememberConversation(task, {
@@ -3753,18 +3751,7 @@ export class SocialAgentToolExecutorService {
     stepId: string,
     metadata: Record<string, unknown> = {},
   ) {
-    return {
-      agentConnectionId: task.agentConnectionId,
-      ownerUserId: task.ownerUserId,
-      actorUserId: task.ownerUserId,
-      metadata: {
-        ...metadata,
-        agentTaskId: task.id,
-        stepId,
-        userId: task.ownerUserId,
-        source: 'social_agent_tool_executor',
-      },
-    };
+    return buildSocialAgentConversationOptions(task, stepId, metadata);
   }
 
   private messageSendOptions(
@@ -3772,30 +3759,13 @@ export class SocialAgentToolExecutorService {
     stepId: string,
     input: Record<string, unknown>,
   ) {
-    const metadata = this.messageMetadata(task, stepId, input.metadata);
-    if (
-      !task.agentConnectionId &&
-      this.canRunAsConfirmedUserAction(SocialAgentToolName.SendMessage, input)
-    ) {
-      return {
-        senderType: 'user' as const,
-        senderAgentId: null,
-        agentConnectionId: null,
-        ownerUserId: task.ownerUserId,
-        actorUserId: task.ownerUserId,
-        source: 'user' as const,
-        metadata,
-      };
-    }
-    return {
-      senderType: 'agent' as const,
-      senderAgentId: task.agentConnectionId,
-      agentConnectionId: task.agentConnectionId,
-      ownerUserId: task.ownerUserId,
-      actorUserId: task.ownerUserId,
-      source: 'ai_delegate' as const,
-      metadata,
-    };
+    return buildSocialAgentMessageSendOptions(
+      task,
+      stepId,
+      input,
+      (toolName, currentInput) =>
+        this.canRunAsConfirmedUserAction(toolName, currentInput),
+    );
   }
 
   private messageMetadata(
@@ -3803,13 +3773,7 @@ export class SocialAgentToolExecutorService {
     stepId: string,
     raw: unknown,
   ): Record<string, unknown> {
-    return {
-      ...(this.isRecord(raw) ? raw : {}),
-      agentTaskId: task.id,
-      stepId,
-      userId: task.ownerUserId,
-      source: 'social_agent_tool_executor',
-    };
+    return buildSocialAgentMessageMetadata(task, stepId, raw);
   }
 
   private stepId(step: StepRecord): string {
