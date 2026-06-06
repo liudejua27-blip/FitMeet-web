@@ -70,8 +70,8 @@ Core launch endpoints currently covered:
 - Auth/profile: `/auth/register`, `/auth/login`, `/auth/sms/send`, `/auth/sms/verify`, `/auth/wechat/url`, `/auth/wechat/login`, `/auth/refresh`, `/auth/profile`, `/users/profile`
 - Feed: `GET/POST /feed`, `/feed/interactions`, `/feed/{id}/like`, `/feed/{id}/save`, comments
 - Messages: `/messages/start`, `/messages/public-intents/{id}/start`, `/messages/conversations`, `/messages/conversations/{conversationId}`, `/messages/conversations/{conversationId}/send`, `/messages/unread`
-- Social Agent chat: `/social-agent/chat/messages`, `/route-message`, `/stream`, `/stream-user`, `/session`, task session/message/action/candidate endpoints
-- Social Agent workspace reads: `/social-agent/tasks/current`, `/social-agent/tasks/{taskId}/timeline`
+- Social Agent chat: `/social-agent/chat/messages`, `/route-message`, `/stream`, `/stream-user`, `/session`, task session/message/action/candidate endpoints, publish social request, replan-run, and append-context endpoints
+- Social Agent workspace reads/writes: `/social-agent/tasks/current`, `/social-agent/tasks/{taskId}/timeline`, `/social-agent/tasks/{taskId}/events`, `/social-agent/tasks/{taskId}/replan`
 - Uploads: `/uploads/image`, `/uploads/video`
 
 ## Missing Or Broken Interfaces
@@ -143,6 +143,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - Web error handling risk has been reduced: the shared Web base client now preserves backend `code` and `error.retryable` fields from the standard error envelope so UI flows can distinguish validation, auth, dependency, and retryable failures without parsing raw payloads.
 - Web upload risk has been reduced: multipart uploads now preserve bearer auth headers even when callers pass an empty header object for browser-managed boundaries, and upload failures map the backend standard error envelope into `ApiError.code` and `retryable`.
 - Social Agent workspace restore risk has been reduced: Web/iOS Social Agent run, async run, current-task, task-timeline, and async run-status polling endpoints are now part of the shared core OpenAPI contract and typed endpoint registries instead of living as untracked debug API strings.
+- Social Agent workspace continuation risk has been reduced: Web publish social request, task replan, replan-run, append-context, and task-events endpoints are now documented in OpenAPI and called through the typed Web endpoint registry instead of hardcoded debug API strings.
 - Feed write-path risk has been reduced: like/save/comment operations now confirm the target post or comment exists before writing counters or interaction rows, so Web/iOS get stable 404 errors instead of orphan rows or database constraint leakage.
 - Feed publish validation risk has been reduced: post creation now rejects blank `type`, `sport`, or `text` before moderation/database writes, and the shared OpenAPI create-post schema documents the non-empty required strings used by iOS moment publishing.
 - Web feed pagination contract risk has been reduced: the Web API client now exposes `getFeedPage()` for the shared `/feed` `{ data, metadata }` response while preserving legacy `getFeed()` array behavior for existing pages.
@@ -292,6 +293,7 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- uploads.service.spec.ts app.controller.spec.ts` after documenting upload mime limits and adding unsupported image/video cleanup coverage.
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts` after adding the shared Social Agent async run-status OpenAPI path.
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts` after adding the shared Social Agent run and run-async OpenAPI paths and correcting `SocialAgentRunInput.permissionMode` to optional.
+- Passed: backend `pnpm --dir backend test -- app.controller.spec.ts` after adding Social Agent workspace publish, task replan, replan-run, append-context, and task-events OpenAPI coverage.
 - Passed: backend `pnpm --dir backend lint`
 - Passed: backend `pnpm --dir backend build`
 - Passed: frontend `pnpm --dir frontend test -- feedClient.test.ts`
@@ -305,6 +307,7 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: frontend `pnpm --dir frontend build`
 - Passed: frontend `pnpm --dir frontend test -- fitmeetCoreContract.test.ts` after adding typed async run-status endpoint coverage.
 - Passed: frontend `pnpm --dir frontend test -- fitmeetCoreContract.test.ts` after adding typed Social Agent run and run-async endpoint coverage.
+- Passed: frontend `pnpm --dir frontend test -- fitmeetCoreContract.test.ts` after moving Social Agent workspace publish, replan, append-context, and task-events paths into the typed endpoint registry.
 - Passed: frontend `pnpm --dir frontend exec eslint src/api/fitmeetCoreContract.ts src/api/socialAgentDebugApi.ts src/test/fitmeetCoreContract.test.ts`
 - Passed: frontend `pnpm --dir frontend build`
 - Passed: iOS `xcodebuild build-for-testing -project FitMeetAlpha.xcodeproj -scheme FitMeetAlpha -destination 'platform=iOS Simulator,id=68F37251-71BE-4F42-9849-62D61BFFE7C3'` after adding the Swift async run-status endpoint registry.

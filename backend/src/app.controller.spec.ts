@@ -57,6 +57,11 @@ const IOS_APP_REQUIRED_PATHS = {
 const WEB_APP_REQUIRED_PATHS = {
   '/social-agent/tasks/current': 'get',
   '/social-agent/tasks/{taskId}/timeline': 'get',
+  '/social-agent/tasks/{taskId}/events': 'get',
+  '/social-agent/tasks/{taskId}/replan': 'post',
+  '/social-agent/chat/tasks/{taskId}/publish-social-request': 'post',
+  '/social-agent/chat/tasks/{taskId}/replan-run': 'post',
+  '/social-agent/chat/tasks/{taskId}/append-context': 'post',
 } as const;
 
 const IOS_CORE_ENDPOINT_REGISTRY_PATH = resolve(
@@ -181,11 +186,16 @@ describe('AppController', () => {
           '/social-agent/chat/tasks/{taskId}/session',
           '/social-agent/chat/tasks/{taskId}/runs/{runId}',
           '/social-agent/chat/tasks/{taskId}/messages',
+          '/social-agent/chat/tasks/{taskId}/publish-social-request',
+          '/social-agent/chat/tasks/{taskId}/replan-run',
+          '/social-agent/chat/tasks/{taskId}/append-context',
           '/social-agent/chat/tasks/{taskId}/save-candidate',
           '/social-agent/chat/tasks/{taskId}/send-message',
           '/social-agent/chat/tasks/{taskId}/connect-candidate',
           '/social-agent/tasks/current',
           '/social-agent/tasks/{taskId}/timeline',
+          '/social-agent/tasks/{taskId}/events',
+          '/social-agent/tasks/{taskId}/replan',
           '/uploads/image',
           '/uploads/video',
         ]),
@@ -683,6 +693,113 @@ describe('AppController', () => {
             enum: ['queued', 'running', 'completed', 'failed'],
           },
           pollAfterMs: { type: 'integer' },
+        },
+      });
+    });
+
+    it('documents the Web Social Agent continuation and publish contract', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+
+      expect(
+        contract.paths['/social-agent/tasks/{taskId}/events'].get.responses[
+          '200'
+        ].content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/SocialAgentTaskEventsResult',
+      });
+      expect(
+        contract.paths['/social-agent/tasks/{taskId}/replan'].post.requestBody
+          .content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/SocialAgentReplanInput',
+      });
+      expect(
+        contract.paths['/social-agent/tasks/{taskId}/replan'].post.responses[
+          '200'
+        ].content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/SocialAgentReplanResult',
+      });
+      expect(
+        contract.paths[
+          '/social-agent/chat/tasks/{taskId}/publish-social-request'
+        ].post.requestBody.content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/SocialAgentPublishSocialRequestInput',
+      });
+      expect(
+        contract.paths[
+          '/social-agent/chat/tasks/{taskId}/publish-social-request'
+        ].post.responses['200'].content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/SocialAgentPublishResult',
+      });
+      expect(
+        contract.paths['/social-agent/chat/tasks/{taskId}/replan-run'].post
+          .responses['202'].content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/SocialAgentAsyncRunSnapshot',
+      });
+      expect(
+        contract.paths['/social-agent/chat/tasks/{taskId}/append-context'].post
+          .responses['200'].content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/SocialAgentAppendContextResult',
+      });
+      expect(contract.components.schemas.SocialAgentReplanInput).toMatchObject({
+        required: ['userMessage'],
+        properties: {
+          userMessage: { type: 'string', minLength: 1 },
+          reason: {
+            type: 'string',
+            enum: [
+              'user_follow_up',
+              'failure_recovery',
+              'manual_replan',
+              'initial',
+            ],
+          },
+        },
+      });
+      expect(
+        contract.components.schemas.SocialAgentPublishResult,
+      ).toMatchObject({
+        required: [
+          'success',
+          'taskId',
+          'socialRequestId',
+          'publicIntentId',
+          'status',
+          'taskStatus',
+          'synced',
+          'socialRequest',
+        ],
+        properties: {
+          success: { type: 'boolean' },
+          taskId: { type: 'integer' },
+          socialRequestId: { type: 'integer' },
+          synced: { type: 'boolean' },
+        },
+      });
+      expect(
+        contract.components.schemas.SocialAgentAppendContextResult,
+      ).toMatchObject({
+        required: [
+          'taskId',
+          'saved',
+          'eventType',
+          'userMessage',
+          'previousGoal',
+          'refreshedGoal',
+          'appendedAt',
+        ],
+        properties: {
+          taskId: { type: 'integer' },
+          saved: { type: 'boolean', enum: [true] },
+          eventType: {
+            type: 'string',
+            enum: ['social_agent.context.appended'],
+          },
         },
       });
     });

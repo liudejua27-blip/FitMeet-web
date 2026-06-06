@@ -595,17 +595,20 @@ export const socialAgentDebugApi = {
 
   routeMessage: (data: RouteMessageInput) =>
     api
-      .requestProtected<UserFacingAgentResponse>('/social-agent/chat/route-message', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      })
+      .requestProtected<UserFacingAgentResponse>(
+        fitMeetCoreEndpoints.socialAgentChat.routeMessage,
+        {
+          method: 'POST',
+          body: JSON.stringify(data),
+        },
+      )
       .then(sanitizeSocialAgentResponse),
 
   handleMessage: (data: RouteMessageInput) => {
     const taskId = data.taskId ?? null;
     const path = taskId
-      ? `/social-agent/chat/tasks/${taskId}/messages`
-      : '/social-agent/chat/messages';
+      ? fitMeetCoreEndpoints.socialAgentChat.taskMessages(taskId)
+      : fitMeetCoreEndpoints.socialAgentChat.messages;
     return api
       .requestProtected<UserFacingAgentResponse>(path, {
         method: 'POST',
@@ -629,7 +632,7 @@ export const socialAgentDebugApi = {
   publishSocialRequest: (taskId: number, draft: Record<string, unknown>) =>
     api
       .requestProtected<SocialAgentPublishResult>(
-        `/social-agent/chat/tasks/${taskId}/publish-social-request`,
+        fitMeetCoreEndpoints.socialAgentChat.publishSocialRequest(taskId),
         {
           method: 'POST',
           body: JSON.stringify(draft),
@@ -639,16 +642,19 @@ export const socialAgentDebugApi = {
 
   saveCandidate: (taskId: number, data: SaveCandidateInput) =>
     api
-      .requestProtected<SocialAgentToolCall>(`/social-agent/chat/tasks/${taskId}/save-candidate`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      })
+      .requestProtected<SocialAgentToolCall>(
+        fitMeetCoreEndpoints.socialAgentChat.saveCandidate(taskId),
+        {
+          method: 'POST',
+          body: JSON.stringify(data),
+        },
+      )
       .then(sanitizeSocialAgentResponse),
 
   sendCandidateMessage: (taskId: number, data: SendCandidateMessageInput) =>
     api
       .requestProtected<SocialAgentSendCandidateMessageResult>(
-        `/social-agent/chat/tasks/${taskId}/send-message`,
+        fitMeetCoreEndpoints.socialAgentChat.sendCandidateMessage(taskId),
         {
           method: 'POST',
           body: JSON.stringify({
@@ -665,7 +671,7 @@ export const socialAgentDebugApi = {
   connectCandidate: (taskId: number, data: ConnectCandidateInput) =>
     api
       .requestProtected<SocialAgentConnectCandidateResult>(
-        `/social-agent/chat/tasks/${taskId}/connect-candidate`,
+        fitMeetCoreEndpoints.socialAgentChat.connectCandidate(taskId),
         {
           method: 'POST',
           body: JSON.stringify({
@@ -682,20 +688,23 @@ export const socialAgentDebugApi = {
 
   replanTask: (taskId: number, data: ReplanChatInput) =>
     api
-      .requestProtected<SocialAgentReplanResult>(`/social-agent/tasks/${taskId}/replan`, {
-        method: 'POST',
-        body: JSON.stringify({
-          reason: data.reason ?? 'user_follow_up',
-          userMessage: data.userMessage,
-          failure: data.failure ?? null,
-        }),
-      })
+      .requestProtected<SocialAgentReplanResult>(
+        fitMeetCoreEndpoints.socialAgentTasks.replan(taskId),
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            reason: data.reason ?? 'user_follow_up',
+            userMessage: data.userMessage,
+            failure: data.failure ?? null,
+          }),
+        },
+      )
       .then(sanitizeSocialAgentResponse),
 
   replanAndRunTask: (taskId: number, data: ReplanChatInput) =>
     api
       .requestProtected<SocialAgentAsyncRunResult>(
-        `/social-agent/chat/tasks/${taskId}/replan-run`,
+        fitMeetCoreEndpoints.socialAgentChat.replanRun(taskId),
         {
           method: 'POST',
           body: JSON.stringify({
@@ -710,7 +719,7 @@ export const socialAgentDebugApi = {
   appendContext: (taskId: number, data: ReplanChatInput) =>
     api
       .requestProtected<SocialAgentAppendContextResult>(
-        `/social-agent/chat/tasks/${taskId}/append-context`,
+        fitMeetCoreEndpoints.socialAgentChat.appendContext(taskId),
         {
           method: 'POST',
           body: JSON.stringify({
@@ -731,7 +740,9 @@ export const socialAgentDebugApi = {
 
   getTaskEvents: (taskId: number) =>
     api
-      .requestProtected<SocialAgentTaskEventsResult>(`/social-agent/tasks/${taskId}/events`)
+      .requestProtected<SocialAgentTaskEventsResult>(
+        fitMeetCoreEndpoints.socialAgentTasks.events(taskId),
+      )
       .then(sanitizeSocialAgentResponse),
 
   getCurrentTask: () =>
@@ -750,12 +761,16 @@ export const socialAgentDebugApi = {
 
   getSession: () =>
     api
-      .requestProtected<SocialAgentSessionSnapshot>('/social-agent/chat/session')
+      .requestProtected<SocialAgentSessionSnapshot>(
+        fitMeetCoreEndpoints.socialAgentChat.session,
+      )
       .then(sanitizeSocialAgentResponse),
 
   getTaskSession: (taskId: number) =>
     api
-      .requestProtected<SocialAgentSessionSnapshot>(`/social-agent/chat/tasks/${taskId}/session`)
+      .requestProtected<SocialAgentSessionSnapshot>(
+        fitMeetCoreEndpoints.socialAgentChat.taskSession(taskId),
+      )
       .then(sanitizeSocialAgentResponse),
 };
 
@@ -834,11 +849,14 @@ async function runUserFacingAgentStream(
   onEvent: (event: UserFacingAgentStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<UserFacingAgentResponse> {
-  const response = await api.fetchWithAuth('/social-agent/chat/stream-user', {
-    method: 'POST',
-    signal,
-    body: JSON.stringify(data),
-  });
+  const response = await api.fetchWithAuth(
+    fitMeetCoreEndpoints.socialAgentChat.streamUser,
+    {
+      method: 'POST',
+      signal,
+      body: JSON.stringify(data),
+    },
+  );
 
   if (!response.ok) {
     throw new Error(await resolveStreamError(response));

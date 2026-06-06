@@ -51,6 +51,12 @@ export const fitMeetCoreEndpoints = {
       )}` as const,
     taskMessages: (taskId: number) =>
       `/social-agent/chat/tasks/${taskId}/messages` as const,
+    publishSocialRequest: (taskId: number) =>
+      `/social-agent/chat/tasks/${taskId}/publish-social-request` as const,
+    replanRun: (taskId: number) =>
+      `/social-agent/chat/tasks/${taskId}/replan-run` as const,
+    appendContext: (taskId: number) =>
+      `/social-agent/chat/tasks/${taskId}/append-context` as const,
     taskActions: (taskId: number) =>
       `/social-agent/chat/tasks/${taskId}/actions` as const,
     saveCandidate: (taskId: number) =>
@@ -64,6 +70,10 @@ export const fitMeetCoreEndpoints = {
     current: '/social-agent/tasks/current',
     timeline: (taskId: number) =>
       `/social-agent/tasks/${taskId}/timeline` as const,
+    events: (taskId: number) =>
+      `/social-agent/tasks/${taskId}/events` as const,
+    replan: (taskId: number) =>
+      `/social-agent/tasks/${taskId}/replan` as const,
   },
   uploads: {
     image: '/uploads/image',
@@ -114,6 +124,10 @@ export const fitMeetCoreEndpointTemplates = {
     taskSession: '/social-agent/chat/tasks/{taskId}/session',
     taskRunStatus: '/social-agent/chat/tasks/{taskId}/runs/{runId}',
     taskMessages: '/social-agent/chat/tasks/{taskId}/messages',
+    publishSocialRequest:
+      '/social-agent/chat/tasks/{taskId}/publish-social-request',
+    replanRun: '/social-agent/chat/tasks/{taskId}/replan-run',
+    appendContext: '/social-agent/chat/tasks/{taskId}/append-context',
     taskActions: '/social-agent/chat/tasks/{taskId}/actions',
     saveCandidate: '/social-agent/chat/tasks/{taskId}/save-candidate',
     sendCandidateMessage: '/social-agent/chat/tasks/{taskId}/send-message',
@@ -122,6 +136,8 @@ export const fitMeetCoreEndpointTemplates = {
   socialAgentTasks: {
     current: '/social-agent/tasks/current',
     timeline: '/social-agent/tasks/{taskId}/timeline',
+    events: '/social-agent/tasks/{taskId}/events',
+    replan: '/social-agent/tasks/{taskId}/replan',
   },
   uploads: {
     image: '/uploads/image',

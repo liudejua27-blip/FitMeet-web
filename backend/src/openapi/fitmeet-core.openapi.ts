@@ -933,6 +933,76 @@ export const fitMeetCoreOpenApi = {
         },
       },
     },
+    '/social-agent/tasks/{taskId}/events': {
+      get: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentGetTaskEvents',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Persisted Social Agent task events for the authenticated owner',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentTaskEventsResult',
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/tasks/{taskId}/replan': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentReplanTask',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SocialAgentReplanInput',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated Social Agent plan for a follow-up task',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentReplanResult',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
     '/social-agent/chat/tasks/{taskId}/messages': {
       post: {
         tags: ['social-agent-chat'],
@@ -958,6 +1028,127 @@ export const fitMeetCoreOpenApi = {
         },
         responses: {
           '200': { $ref: '#/components/responses/UserFacingAgentResponse' },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/tasks/{taskId}/publish-social-request': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentPublishSocialRequest',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SocialAgentPublishSocialRequestInput',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description:
+              'Published Social Agent social request synced to the real feed model',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentPublishResult',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/tasks/{taskId}/replan-run': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentReplanAndRunTask',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SocialAgentReplanInput',
+              },
+            },
+          },
+        },
+        responses: {
+          '202': {
+            description: 'Queued Social Agent replan-and-run snapshot',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentAsyncRunSnapshot',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/tasks/{taskId}/append-context': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentAppendTaskContext',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SocialAgentReplanInput',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Saved follow-up context for a Social Agent task',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentAppendContextResult',
+                },
+              },
+            },
+          },
           '400': { $ref: '#/components/responses/Error' },
           '401': { $ref: '#/components/responses/Error' },
           '404': { $ref: '#/components/responses/Error' },
@@ -1630,6 +1821,143 @@ export const fitMeetCoreOpenApi = {
           socialRequestId: { type: 'integer' },
           candidate: { type: 'object', additionalProperties: true },
           suggestedOpener: { type: 'string' },
+        },
+      },
+      SocialAgentReplanInput: {
+        type: 'object',
+        required: ['userMessage'],
+        additionalProperties: true,
+        properties: {
+          userMessage: { type: 'string', minLength: 1 },
+          reason: {
+            type: 'string',
+            enum: [
+              'user_follow_up',
+              'failure_recovery',
+              'manual_replan',
+              'initial',
+            ],
+          },
+          failure: {
+            type: ['object', 'null'],
+            additionalProperties: true,
+          },
+        },
+      },
+      SocialAgentReplanResult: {
+        type: 'object',
+        required: [
+          'taskId',
+          'permissionMode',
+          'allowedActions',
+          'plan',
+          'source',
+          'fallbackReason',
+          'reason',
+          'replanAttempt',
+        ],
+        additionalProperties: true,
+        properties: {
+          taskId: { type: 'integer' },
+          permissionMode: { type: 'string' },
+          allowedActions: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+          plan: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          source: { type: 'string', enum: ['deepseek', 'fallback'] },
+          fallbackReason: { type: ['string', 'null'] },
+          reason: {
+            type: 'string',
+            enum: [
+              'initial',
+              'user_follow_up',
+              'failure_recovery',
+              'manual_replan',
+            ],
+          },
+          replanAttempt: { type: 'integer', minimum: 0 },
+        },
+      },
+      SocialAgentAppendContextResult: {
+        type: 'object',
+        required: [
+          'taskId',
+          'saved',
+          'eventType',
+          'userMessage',
+          'previousGoal',
+          'refreshedGoal',
+          'appendedAt',
+        ],
+        additionalProperties: true,
+        properties: {
+          taskId: { type: 'integer' },
+          saved: { type: 'boolean', enum: [true] },
+          eventType: {
+            type: 'string',
+            enum: ['social_agent.context.appended'],
+          },
+          userMessage: { type: 'string' },
+          previousGoal: { type: 'string' },
+          refreshedGoal: { type: 'string' },
+          appendedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      SocialAgentTaskEventsResult: {
+        type: 'object',
+        required: ['taskId', 'events'],
+        additionalProperties: true,
+        properties: {
+          taskId: { type: 'integer' },
+          events: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+        },
+      },
+      SocialAgentPublishSocialRequestInput: {
+        type: 'object',
+        additionalProperties: true,
+        properties: {
+          title: { type: 'string' },
+          description: { type: 'string' },
+          requestType: { type: 'string' },
+          city: { type: 'string' },
+          locationText: { type: 'string' },
+          timePreference: { type: 'string' },
+          interestTags: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+        },
+      },
+      SocialAgentPublishResult: {
+        type: 'object',
+        required: [
+          'success',
+          'taskId',
+          'socialRequestId',
+          'publicIntentId',
+          'status',
+          'taskStatus',
+          'synced',
+          'socialRequest',
+        ],
+        additionalProperties: true,
+        properties: {
+          success: { type: 'boolean' },
+          taskId: { type: 'integer' },
+          socialRequestId: { type: 'integer' },
+          publicIntentId: { type: ['string', 'null'] },
+          status: { type: 'string' },
+          taskStatus: { type: 'string' },
+          synced: { type: 'boolean' },
+          toolCallId: { type: 'string' },
+          socialRequest: { type: 'object', additionalProperties: true },
         },
       },
       SocialAgentSessionSnapshot: {

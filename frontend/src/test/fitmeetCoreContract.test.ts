@@ -53,6 +53,15 @@ describe('fitMeetCoreEndpoints', () => {
     expect(fitMeetCoreEndpoints.socialAgentChat.taskMessages(101)).toBe(
       '/social-agent/chat/tasks/101/messages',
     );
+    expect(
+      fitMeetCoreEndpoints.socialAgentChat.publishSocialRequest(101),
+    ).toBe('/social-agent/chat/tasks/101/publish-social-request');
+    expect(fitMeetCoreEndpoints.socialAgentChat.replanRun(101)).toBe(
+      '/social-agent/chat/tasks/101/replan-run',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentChat.appendContext(101)).toBe(
+      '/social-agent/chat/tasks/101/append-context',
+    );
     expect(fitMeetCoreEndpoints.socialAgentChat.taskActions(101)).toBe(
       '/social-agent/chat/tasks/101/actions',
     );
@@ -76,6 +85,12 @@ describe('fitMeetCoreEndpoints', () => {
     );
     expect(fitMeetCoreEndpoints.socialAgentTasks.timeline(101)).toBe(
       '/social-agent/tasks/101/timeline',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentTasks.events(101)).toBe(
+      '/social-agent/tasks/101/events',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentTasks.replan(101)).toBe(
+      '/social-agent/tasks/101/replan',
     );
   });
 
@@ -113,12 +128,17 @@ describe('fitMeetCoreEndpoints', () => {
         '/social-agent/chat/tasks/{taskId}/session',
         '/social-agent/chat/tasks/{taskId}/runs/{runId}',
         '/social-agent/chat/tasks/{taskId}/messages',
+        '/social-agent/chat/tasks/{taskId}/publish-social-request',
+        '/social-agent/chat/tasks/{taskId}/replan-run',
+        '/social-agent/chat/tasks/{taskId}/append-context',
         '/social-agent/chat/tasks/{taskId}/actions',
         '/social-agent/chat/tasks/{taskId}/save-candidate',
         '/social-agent/chat/tasks/{taskId}/send-message',
         '/social-agent/chat/tasks/{taskId}/connect-candidate',
         '/social-agent/tasks/current',
         '/social-agent/tasks/{taskId}/timeline',
+        '/social-agent/tasks/{taskId}/events',
+        '/social-agent/tasks/{taskId}/replan',
         '/uploads/image',
         '/uploads/video',
       ]),
@@ -182,6 +202,19 @@ describe('fitMeetCoreEndpoints', () => {
         template: fitMeetCoreEndpointTemplates.socialAgentChat.taskMessages,
       },
       {
+        built: fitMeetCoreEndpoints.socialAgentChat.publishSocialRequest(101),
+        template:
+          fitMeetCoreEndpointTemplates.socialAgentChat.publishSocialRequest,
+      },
+      {
+        built: fitMeetCoreEndpoints.socialAgentChat.replanRun(101),
+        template: fitMeetCoreEndpointTemplates.socialAgentChat.replanRun,
+      },
+      {
+        built: fitMeetCoreEndpoints.socialAgentChat.appendContext(101),
+        template: fitMeetCoreEndpointTemplates.socialAgentChat.appendContext,
+      },
+      {
         built: fitMeetCoreEndpoints.socialAgentChat.taskActions(101),
         template: fitMeetCoreEndpointTemplates.socialAgentChat.taskActions,
       },
@@ -201,6 +234,14 @@ describe('fitMeetCoreEndpoints', () => {
       {
         built: fitMeetCoreEndpoints.socialAgentTasks.timeline(101),
         template: fitMeetCoreEndpointTemplates.socialAgentTasks.timeline,
+      },
+      {
+        built: fitMeetCoreEndpoints.socialAgentTasks.events(101),
+        template: fitMeetCoreEndpointTemplates.socialAgentTasks.events,
+      },
+      {
+        built: fitMeetCoreEndpoints.socialAgentTasks.replan(101),
+        template: fitMeetCoreEndpointTemplates.socialAgentTasks.replan,
       },
     ];
 
