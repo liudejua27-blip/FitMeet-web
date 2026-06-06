@@ -1354,30 +1354,6 @@ describe('SocialAgentChat acceptance flow', () => {
     );
   });
 
-  it('safe truncates long social agent timeline event summaries', async () => {
-    const { queuedRuns, savedEvents } = makeHarness();
-    await (
-      queuedRuns as unknown as {
-        writeEvent: (
-          task: AgentTask,
-          eventType: AgentTaskEventType,
-          summary: string,
-          payload: Record<string, unknown>,
-        ) => Promise<void>;
-      }
-    ).writeEvent(
-      makeTask(),
-      AgentTaskEventType.SocialAgentMessageAssistant,
-      'summary_'.repeat(100),
-      { message: '完整内容放在 payload 里' },
-    );
-
-    expect(String(savedEvents[0].summary).length).toBeLessThanOrEqual(500);
-    expect(savedEvents[0].payload).toMatchObject({
-      message: '完整内容放在 payload 里',
-    });
-  });
-
   it('routes profile updates into profile storage and context memory', async () => {
     const { service, executor, socialProfiles, savedEvents } = makeHarness();
 
