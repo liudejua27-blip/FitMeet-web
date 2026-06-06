@@ -7,7 +7,7 @@ import {
   SocialActivityStatus,
 } from '../activities/entities/activity.entity';
 import { AiDelegateProfile } from '../ai-match/ai-delegate-profile.entity';
-import { extractKnownCity, sanitizeCity } from '../common/city.util';
+import { sanitizeCity } from '../common/city.util';
 import { cleanDisplayText } from '../common/display-text.util';
 import {
   CandidateMatchLevel,
@@ -50,11 +50,7 @@ import {
   candidateProfileTags,
 } from './social-agent-candidate-profile-presenter';
 import type { CandidateProfileDataQuality } from './social-agent-candidate-profile-presenter';
-import {
-  extractCandidateActivity,
-  extractCandidateTags,
-  extractCandidateTime,
-} from './social-agent-candidate-query-parser';
+import { extractCandidateTags } from './social-agent-candidate-query-parser';
 import {
   candidateCityMatches,
   candidateClampScore,
@@ -63,13 +59,27 @@ import {
   candidateRecentScore,
   candidateTotalScore,
 } from './social-agent-candidate-scoring';
+import {
+  buildCandidatePoolResolvedQuery,
+  normalizeCandidatePoolArray,
+  uniqueCandidatePoolStrings,
+} from './social-agent-candidate-pool-query';
+import type {
+  CandidatePoolIntent,
+  CandidatePoolQuery,
+  CandidatePoolResolvedQuery,
+} from './social-agent-candidate-pool-query';
+
+export type {
+  CandidatePoolIntent,
+  CandidatePoolQuery,
+  CandidatePoolResolvedQuery,
+} from './social-agent-candidate-pool-query';
 
 export type CandidatePoolSource =
   | 'profile_candidate'
   | 'public_intent'
   | 'activity';
-
-export type CandidatePoolIntent = 'social_search' | 'activity_search';
 
 export type CandidatePoolDataQuality = CandidateProfileDataQuality;
 
@@ -102,32 +112,6 @@ export type CandidatePoolFiltered = {
   cityMismatch: number;
   boundaryMismatch: number;
   scoreBelowThreshold: number;
-};
-
-export type CandidatePoolQuery = {
-  ownerUserId: number;
-  intent?: CandidatePoolIntent;
-  taskId?: number | null;
-  socialRequestId?: number | null;
-  city?: string | null;
-  activityType?: string | null;
-  interestTags?: string[] | null;
-  timePreference?: string | null;
-  locationPreference?: string | null;
-  rawText?: string | null;
-  limit?: number | null;
-  persistCandidates?: boolean;
-};
-
-export type CandidatePoolResolvedQuery = {
-  city: string;
-  intent: CandidatePoolIntent;
-  interestTags: string[];
-  activityType: string;
-  timePreference: string;
-  locationPreference: string;
-  socialRequestId: number | null;
-  rawText: string;
 };
 
 export type CandidatePoolCandidate = {
@@ -506,47 +490,12 @@ export class SocialAgentCandidatePoolService {
       }
     }
 
-    const inputCity = sanitizeCity(input.city);
-    const inputActivityType = cleanDisplayText(input.activityType, '');
-    const inputTimePreference = cleanDisplayText(input.timePreference, '');
-    const inputLocationPreference = cleanDisplayText(
-      input.locationPreference,
-      '',
-    );
-    const rawText = cleanDisplayText(
-      input.rawText ?? request?.rawText ?? request?.title ?? task?.goal,
-      '',
-    );
-    const city = sanitizeCity(
-      inputCity || request?.city || extractKnownCity(rawText),
-    );
-    const activityType = cleanDisplayText(
-      inputActivityType ||
-        request?.activityType ||
-        extractCandidateActivity(rawText),
-      '',
-    );
-    const interestTags = this.uniqueStrings([
-      ...(Array.isArray(input.interestTags) ? input.interestTags : []),
-      ...(Array.isArray(request?.interestTags) ? request.interestTags : []),
-      ...extractCandidateTags(rawText),
-      activityType,
-    ]);
-    const timePreference = cleanDisplayText(
-      inputTimePreference || extractCandidateTime(rawText),
-      '',
-    );
-    const locationPreference = inputLocationPreference;
-    return {
-      city,
-      intent: input.intent ?? 'social_search',
-      interestTags,
-      activityType,
-      timePreference,
-      locationPreference,
+    return buildCandidatePoolResolvedQuery({
+      query: input,
       socialRequestId: socialRequestId ?? null,
-      rawText,
-    };
+      request,
+      task,
+    });
   }
 
   private buildProfileCandidates(input: {
@@ -1728,26 +1677,11 @@ export class SocialAgentCandidatePoolService {
   }
 
   private normalizeArray(value: unknown): string[] {
-    if (Array.isArray(value))
-      return this.uniqueStrings(value.map((item) => String(item)));
-    if (typeof value === 'string') {
-      return this.uniqueStrings(value.split(/[、,，;；|]/u));
-    }
-    return [];
+    return normalizeCandidatePoolArray(value);
   }
 
   private uniqueStrings(values: unknown[]): string[] {
-    const out: string[] = [];
-    const seen = new Set<string>();
-    for (const value of values) {
-      const text = cleanDisplayText(value, '').trim();
-      if (!text) continue;
-      const key = text.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(text);
-    }
-    return out;
+    return uniqueCandidatePoolStrings(values);
   }
 
   private firstText(...values: unknown[]): string {
