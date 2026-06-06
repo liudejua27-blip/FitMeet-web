@@ -71,6 +71,147 @@ describe('SocialAgentChatLlmService', () => {
     jest.restoreAllMocks();
   });
 
+  it('calls DeepSeek for product help when configured', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          choices: [
+            {
+              message: {
+                content:
+                  '你说得对，普通问题应该由大模型回答。我可以解释 FitMeet 的画像、匹配和社交偏好问题。',
+              },
+            },
+          ],
+        }),
+    });
+    global.fetch = fetchMock as never;
+    const service = new SocialAgentChatLlmService(
+      makeConfig({
+        DEEPSEEK_API_KEY: 'test-key',
+        DEEPSEEK_BASE_URL: 'https://deepseek.test',
+        DEEPSEEK_MODEL: 'deepseek-chat',
+      }) as never,
+      { recordError: jest.fn() } as never,
+    );
+
+    const answer = await service.generateConversationalAnswer({
+      message: '为什么你不会回答问题？我不是调用的 deepseek 的 api 吗？',
+      route: makeRoute(),
+      profile: null,
+      task: makeTask(),
+      longTermSnapshot: null,
+      memoryContext: null,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://deepseek.test/v1/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          authorization: 'Bearer test-key',
+        }),
+      }),
+    );
+    expect(answer).toContain('大模型回答');
+    expect(answer).not.toContain('等你明确说要找人');
+    expect(
+      JSON.parse(
+        (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
+      ).model,
+    ).toBe('deepseek-chat');
+  });
+
+  it('uses DeepSeek chat model as the final answer generator for persona questions', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          choices: [
+            {
+              message: {
+                content:
+                  '人物画像是 FitMeet 用来理解城市、兴趣、可约时间和社交边界的偏好模型。',
+              },
+            },
+          ],
+        }),
+    });
+    global.fetch = fetchMock as never;
+    const service = new SocialAgentChatLlmService(
+      makeConfig({
+        DEEPSEEK_API_KEY: 'test-key',
+        DEEPSEEK_BASE_URL: 'https://deepseek.test',
+        DEEPSEEK_MODEL: 'deepseek-v4-flash',
+      }) as never,
+      { recordError: jest.fn() } as never,
+    );
+
+    const answer = await service.generateConversationalAnswer({
+      message: '人物画像是什么？',
+      route: makeRoute(),
+      profile: null,
+      task: makeTask(),
+      longTermSnapshot: null,
+      memoryContext: null,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(
+      JSON.parse(
+        (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
+      ).model,
+    ).toBe('deepseek-chat');
+    expect(answer).toBe(
+      '人物画像是 FitMeet 用来理解城市、兴趣、可约时间和社交边界的偏好模型。',
+    );
+    expect(answer).not.toContain('等你明确说要找人');
+  });
+
+  it('uses DeepSeek chat model for casual chat', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          choices: [
+            {
+              message: {
+                content:
+                  '当然可以，我们可以先聊你的运动习惯，再慢慢整理成适合匹配的偏好。',
+              },
+            },
+          ],
+        }),
+    });
+    global.fetch = fetchMock as never;
+    const service = new SocialAgentChatLlmService(
+      makeConfig({
+        DEEPSEEK_API_KEY: 'test-key',
+        DEEPSEEK_BASE_URL: 'https://deepseek.test',
+      }) as never,
+      { recordError: jest.fn() } as never,
+    );
+
+    const answer = await service.generateConversationalAnswer({
+      message: '你好，今天可以随便聊聊吗？',
+      route: makeRoute({ intent: 'casual_chat' }),
+      profile: null,
+      task: makeTask(),
+      longTermSnapshot: null,
+      memoryContext: null,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(
+      JSON.parse(
+        (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
+      ).model,
+    ).toBe('deepseek-chat');
+    expect(answer).toContain('运动习惯');
+    expect(answer).not.toContain('等你明确说要找人');
+  });
+
   it('uses a relevant fallback when direct DeepSeek chat fails', async () => {
     const metrics = { recordError: jest.fn() };
     global.fetch = jest
