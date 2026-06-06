@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, stat } from 'node:fs/promises';
 import test from 'node:test';
 
 const root = new URL('..', import.meta.url);
@@ -24,6 +24,10 @@ async function readSource(path) {
 async function readJson(path) {
   const source = await readFile(new URL(path, root), 'utf8');
   return JSON.parse(source);
+}
+
+async function builtSize(path) {
+  return (await stat(new URL(path, root))).size;
 }
 
 async function assertBuildAssetReferencesExist(route, htmlPath) {
@@ -340,5 +344,77 @@ test('rendered pages reference only deployable Next static assets', async () => 
 
   for (const [route, htmlPath] of Object.entries(pages)) {
     await assertBuildAssetReferencesExist(route, htmlPath);
+  }
+});
+
+test('rendered landing output stays within static performance budgets', async () => {
+  const routeBudgets = {
+    '/': {
+      html: 'index.html',
+      rsc: 'index.rsc',
+      maxHtmlBytes: 60_000,
+      maxRscBytes: 14_000,
+    },
+    '/agent-hub': {
+      html: 'agent-hub.html',
+      rsc: 'agent-hub.rsc',
+      maxHtmlBytes: 35_000,
+      maxRscBytes: 12_000,
+    },
+    '/human': {
+      html: 'human.html',
+      rsc: 'human.rsc',
+      maxHtmlBytes: 30_000,
+      maxRscBytes: 14_000,
+    },
+    '/pet': {
+      html: 'pet.html',
+      rsc: 'pet.rsc',
+      maxHtmlBytes: 30_000,
+      maxRscBytes: 14_000,
+    },
+    '/ai': {
+      html: 'ai.html',
+      rsc: 'ai.rsc',
+      maxHtmlBytes: 30_000,
+      maxRscBytes: 14_000,
+    },
+  };
+
+  for (const [route, budget] of Object.entries(routeBudgets)) {
+    const htmlBytes = await builtSize(`.next/server/app/${budget.html}`);
+    const rscBytes = await builtSize(`.next/server/app/${budget.rsc}`);
+
+    assert.ok(
+      htmlBytes <= budget.maxHtmlBytes,
+      `${route} HTML should stay under ${budget.maxHtmlBytes} bytes, got ${htmlBytes}`,
+    );
+    assert.ok(
+      rscBytes <= budget.maxRscBytes,
+      `${route} RSC payload should stay under ${budget.maxRscBytes} bytes, got ${rscBytes}`,
+    );
+  }
+
+  const manifest = await readJson('.next/app-build-manifest.json');
+  const routeChunkBudgets = {
+    '/page': 525_000,
+    '/agent-hub/page': 525_000,
+    '/[gateway]/page': 360_000,
+  };
+
+  for (const [page, maxBytes] of Object.entries(routeChunkBudgets)) {
+    const files = manifest.pages[page];
+    assert.ok(
+      Array.isArray(files),
+      `${page} should be present in the app build manifest`,
+    );
+    const totalBytes = (
+      await Promise.all(files.map((file) => builtSize(`.next/${file}`)))
+    ).reduce((sum, size) => sum + size, 0);
+
+    assert.ok(
+      totalBytes <= maxBytes,
+      `${page} initial static assets should stay under ${maxBytes} bytes, got ${totalBytes}`,
+    );
   }
 });
