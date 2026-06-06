@@ -565,7 +565,6 @@ function makeHarness(options: Record<string, unknown> = {}) {
     options.lifeGraph as never,
     undefined,
     options.fitMeetRuntime as never,
-    options.alphaAgent as never,
     options.tonePolicy as never,
     sessionAssembler,
   );

@@ -73,6 +73,17 @@ function makeHarness(alphaTurn?: FitMeetAlphaTurnDecision) {
       savedEvents.push(input);
       return Promise.resolve(input);
     }),
+    find: jest.fn(() =>
+      Promise.resolve(
+        savedEvents.map((event, index) => ({
+          id: index + 1,
+          stepId: null,
+          toolCallId: null,
+          createdAt: new Date(index),
+          ...event,
+        })),
+      ),
+    ),
   };
   const messageLog = {
     recordAssistantMessage: jest.fn().mockResolvedValue(undefined),
@@ -124,7 +135,7 @@ describe('SocialAgentMainAgentTurnService', () => {
       startedAt: Date.now(),
     });
 
-    expect(result).toEqual({ task, result: null });
+    expect(result).toMatchObject({ task, result: null });
     expect(alphaAgent.prepareTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         ownerUserId: 7,
@@ -134,6 +145,26 @@ describe('SocialAgentMainAgentTurnService', () => {
       }),
     );
     expect(taskRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('passes through the Main Agent decision when run turns continue normally', async () => {
+    const { service } = makeHarness(
+      makeDecision({ structuredIntent: { requiresSearch: true } }),
+    );
+
+    const result = await service.handleRunTurn({
+      ownerUserId: 7,
+      task: makeTask(),
+      message: '帮我找跑步搭子',
+      permissionMode: AgentTaskPermissionMode.Confirm,
+      visibleSteps: [],
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(result).toMatchObject({ result: null });
+    expect(result.alphaTurn).toMatchObject({
+      structuredIntent: { requiresSearch: true },
+    });
   });
 
   it('blocks unsafe Main Agent turns and records the assistant message', async () => {
@@ -232,5 +263,102 @@ describe('SocialAgentMainAgentTurnService', () => {
       result,
     );
     expect(metrics.recordAction).toHaveBeenCalledWith('clarify');
+  });
+
+  it('returns a blocked run result and emits stream updates', async () => {
+    const blockedTurn = makeDecision({
+      assistantMessage: '这个请求不符合 FitMeet 的安全边界。',
+      safety: {
+        blocked: true,
+        level: 'blocked',
+        reasons: ['unsafe_request'],
+        boundaryNotes: [],
+        requiredConfirmations: [],
+      },
+    });
+    const { savedEvents, service, taskRepo } = makeHarness(blockedTurn);
+    const task = makeTask();
+    const visibleSteps = [];
+    const emitted: Array<Record<string, unknown>> = [];
+
+    const { result } = await service.handleRunTurn({
+      ownerUserId: 7,
+      task,
+      message: '危险请求',
+      permissionMode: AgentTaskPermissionMode.Confirm,
+      visibleSteps,
+      emit: (event) => {
+        emitted.push(event as unknown as Record<string, unknown>);
+      },
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(result).toMatchObject({
+      taskId: 101,
+      assistantMessage: '这个请求不符合 FitMeet 的安全边界。',
+      candidates: [],
+      socialRequestDraft: null,
+      traceId: 'trace-main-agent',
+    });
+    expect(task.status).toBe(AgentTaskStatus.Failed);
+    expect(task.riskLevel).toBe(AgentTaskRiskLevel.Blocked);
+    expect(taskRepo.save).toHaveBeenCalledWith(task);
+    expect(savedEvents[0]).toMatchObject({
+      eventType: AgentTaskEventType.TaskFailed,
+    });
+    expect(visibleSteps).toEqual([
+      expect.objectContaining({ id: 'main_agent_safety', status: 'failed' }),
+    ]);
+    expect(emitted).toEqual([
+      expect.objectContaining({ type: 'step' }),
+      expect.objectContaining({ type: 'result' }),
+    ]);
+  });
+
+  it('returns a clarification run result and completes runtime callback', async () => {
+    const clarifyingTurn = makeDecision({
+      structuredIntent: {
+        readiness: 'clarify',
+        requiresSearch: false,
+        clarifyingQuestion: '你更想今晚附近走走，还是周末下午？',
+      },
+    });
+    const { savedEvents, service } = makeHarness(clarifyingTurn);
+    const completeRuntimeClarification = jest.fn().mockResolvedValue(undefined);
+    const task = makeTask();
+    const visibleSteps = [];
+
+    const { result } = await service.handleRunTurn({
+      ownerUserId: 7,
+      task,
+      message: '想找轻松一点的人',
+      permissionMode: AgentTaskPermissionMode.Confirm,
+      visibleSteps,
+      emit: jest.fn(),
+      visibleStepLabel: (id, label) => `${id}:${label}`,
+      completeRuntimeClarification,
+    });
+
+    expect(result).toMatchObject({
+      taskId: 101,
+      assistantMessage: '你更想今晚附近走走，还是周末下午？',
+      candidates: [],
+      socialRequestDraft: null,
+      structuredIntent: {
+        readiness: 'clarify',
+        requiresSearch: false,
+      },
+    });
+    expect(task.status).toBe(AgentTaskStatus.AwaitingFeedback);
+    expect(visibleSteps).toEqual([
+      expect.objectContaining({
+        id: 'clarify',
+        label: 'clarify:正在等待你补充需求',
+      }),
+    ]);
+    expect(savedEvents[0]).toMatchObject({
+      eventType: AgentTaskEventType.Note,
+    });
+    expect(completeRuntimeClarification).toHaveBeenCalledWith(result);
   });
 });

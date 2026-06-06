@@ -22,7 +22,6 @@ import {
   AgentTaskEventActor,
   AgentTaskEventType,
   AgentTaskPermissionMode,
-  AgentTaskRiskLevel,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
 import { SocialAgentPlannerService } from './social-agent-planner.service';
@@ -59,13 +58,7 @@ import {
   readSocialAgentConversationHistory,
 } from './social-agent-chat-memory.presenter';
 import { rememberSocialAgentConversationBrainDecision } from './social-agent-chat-brain-memory.presenter';
-import {
-  buildSocialAgentBlockedRunResult,
-  buildSocialAgentClarificationRunResult,
-  createSocialAgentRunId,
-  socialAgentClarificationStep,
-  socialAgentSafetyBlockedStep,
-} from './social-agent-chat-run.presenter';
+import { createSocialAgentRunId } from './social-agent-chat-run.presenter';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
 import { SocialAgentFollowUpContextService } from './social-agent-follow-up-context.service';
 import { SocialAgentReplanProgressService } from './social-agent-replan-progress.service';
@@ -87,7 +80,6 @@ import {
   FitMeetAgentToolStatus,
 } from './entities/fitmeet-agent-runtime.entity';
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
-import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
 import type { FitMeetAlphaTurnDecision } from './fitmeet-alpha-agent.types';
 import { TonePolicyService } from './response-quality/tone-policy.service';
 import { AgentSessionAssemblerService } from './agent-session-assembler.service';
@@ -125,8 +117,6 @@ import {
 } from './social-agent-intent-memory.presenter';
 import {
   shouldUseSocialAgentLlmDirectReply,
-  socialAgentAlphaClarifyingMessage,
-  socialAgentAlphaNeedsClarification,
   socialAgentAssistantMessageForRoute,
   socialAgentRouteAction,
 } from './social-agent-route-response.presenter';
@@ -175,8 +165,6 @@ export class SocialAgentChatService {
     private readonly realtime?: RealtimeEventService,
     @Optional()
     private readonly fitMeetRuntime?: FitMeetAgentRuntimeService,
-    @Optional()
-    private readonly alphaAgent?: FitMeetAlphaAgentSdkService,
     @Optional()
     private readonly tonePolicy?: TonePolicyService,
     @Optional()
@@ -1079,107 +1067,27 @@ export class SocialAgentChatService {
     );
     await emit?.({ type: 'task', taskId: task.id, status: task.status });
 
-    const alphaTurn = await this.alphaAgent?.prepareTurn({
+    const mainAgentRun = await this.mainAgentTurn.handleRunTurn({
       ownerUserId,
-      taskId: task.id,
+      task,
       message: goal,
       permissionMode,
-      context: { flow: 'run_stream' },
+      visibleSteps,
+      emit,
+      visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
+      completeRuntimeClarification: async (result) => {
+        await this.fitMeetRuntime?.completeRun({
+          runId: runtimeRun?.id,
+          userId: ownerUserId,
+          status: FitMeetAgentRunStatus.WaitingConfirmation,
+          assistantMessage: result.assistantMessage,
+          resultPayload: { taskId: task.id, awaitingClarification: true },
+        });
+      },
     });
-    if (alphaTurn?.safety.blocked) {
-      const blockedStep = socialAgentSafetyBlockedStep();
-      visibleSteps.push(blockedStep);
-      task.status = AgentTaskStatus.Failed;
-      task.riskLevel = AgentTaskRiskLevel.Blocked;
-      task.statusReason = 'main_agent_guardrail_blocked';
-      task.result = {
-        ...(task.result ?? {}),
-        alphaAgent: {
-          traceId: alphaTurn.traceId,
-          safety: alphaTurn.safety,
-          cards: alphaTurn.cards,
-          agentTrace: alphaTurn.agentTrace,
-        },
-      };
-      await this.taskRepo.save(task);
-      await this.writeEvent(
-        task,
-        AgentTaskEventType.TaskFailed,
-        blockedStep.label,
-        {
-          traceId: alphaTurn.traceId,
-          safety: alphaTurn.safety,
-          agentTrace: alphaTurn.agentTrace,
-        },
-        AgentTaskEventActor.Agent,
-      );
-      await emit?.({ type: 'step', step: blockedStep });
-      const events = await this.eventRepo.find({
-        where: { taskId: task.id, ownerUserId },
-        order: { createdAt: 'ASC', id: 'ASC' },
-        take: 500,
-      });
-      const result = buildSocialAgentBlockedRunResult({
-        task,
-        visibleSteps,
-        alphaTurn,
-        events: events.map((event) => this.toEventDto(event)),
-      });
-      await emit?.({ type: 'result', result });
-      return result;
-    }
-    if (socialAgentAlphaNeedsClarification(alphaTurn)) {
-      const clarifyStep = socialAgentClarificationStep(
-        this.userVisibleStepLabel('clarify', '正在等待你补充需求'),
-      );
-      visibleSteps.push(clarifyStep);
-      task.status = AgentTaskStatus.AwaitingFeedback;
-      task.statusReason = 'main_agent_waiting_for_clarification';
-      task.result = {
-        ...(task.result ?? {}),
-        alphaAgent: {
-          traceId: alphaTurn?.traceId,
-          safety: alphaTurn?.safety,
-          cards: alphaTurn?.cards ?? [],
-          agentTrace: alphaTurn?.agentTrace,
-          structuredIntent: alphaTurn?.structuredIntent,
-        },
-      };
-      await this.taskRepo.save(task);
-      await this.writeEvent(
-        task,
-        AgentTaskEventType.Note,
-        'Main Agent 正在等待用户补充需求',
-        { structuredIntent: alphaTurn?.structuredIntent },
-        AgentTaskEventActor.Agent,
-      );
-      await emit?.({ type: 'step', step: clarifyStep });
-      const events = await this.eventRepo.find({
-        where: { taskId: task.id, ownerUserId },
-        order: { createdAt: 'ASC', id: 'ASC' },
-        take: 500,
-      });
-      const result = buildSocialAgentClarificationRunResult({
-        task,
-        visibleSteps,
-        assistantMessage: socialAgentAlphaClarifyingMessage(
-          alphaTurn,
-          (question, fallback) =>
-            this.tonePolicy?.safeAssistantMessage(question, fallback) ?? '',
-        ),
-        alphaTurn,
-        events: events.map((event) => this.toEventDto(event)),
-      });
-      await this.fitMeetRuntime?.completeRun({
-        runId: runtimeRun?.id,
-        userId: ownerUserId,
-        status: FitMeetAgentRunStatus.WaitingConfirmation,
-        assistantMessage: result.assistantMessage,
-        resultPayload: { taskId: task.id, awaitingClarification: true },
-      });
-      await emit?.({ type: 'result', result });
-      return result;
-    }
+    task = mainAgentRun.task;
+    if (mainAgentRun.result) return mainAgentRun.result;
+    const alphaTurn = mainAgentRun.alphaTurn;
 
     const progress = new SocialAgentRunProgressTracker({
       visibleSteps,
