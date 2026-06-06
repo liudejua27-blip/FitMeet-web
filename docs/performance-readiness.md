@@ -39,6 +39,7 @@ Default target and endpoints:
 - Concurrency: `1000`
 - Endpoints:
   - `/api/health`
+  - `/api/ready`
   - `/api/feed?page=1&limit=5`
   - `/api/openapi/fitmeet-core.json`
 
