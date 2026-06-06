@@ -209,6 +209,13 @@ function checkObjectStorage(
       'configure Aliyun OSS or S3; production uploads are disabled without object storage.',
     );
   }
+  if (aliyunReady) {
+    requireHttpsUrl(env, 'ALIYUN_OSS_ENDPOINT', error);
+    requireHttpsUrl(env, 'ALIYUN_OSS_PUBLIC_BASE_URL', error);
+  }
+  if (hasConfiguredValue(env.S3_ENDPOINT)) {
+    requireHttpsUrl(env, 'S3_ENDPOINT', error);
+  }
 }
 
 function checkAgentModel(

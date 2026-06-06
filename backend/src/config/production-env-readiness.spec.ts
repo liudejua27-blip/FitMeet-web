@@ -87,6 +87,25 @@ describe('production-env-readiness', () => {
     );
   });
 
+  it('rejects upload endpoints that would publish insecure production URLs', () => {
+    const report = buildProductionEnvReport({
+      ...validEnv,
+      ALIYUN_OSS_ENDPOINT: 'http://oss-cn-qingdao.aliyuncs.com',
+      ALIYUN_OSS_PUBLIC_BASE_URL:
+        'http://fitmeet-uploads.oss-cn-qingdao.aliyuncs.com',
+      S3_ENDPOINT: 'http://localhost:9000',
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'ALIYUN_OSS_ENDPOINT' }),
+        expect.objectContaining({ key: 'ALIYUN_OSS_PUBLIC_BASE_URL' }),
+        expect.objectContaining({ key: 'S3_ENDPOINT' }),
+      ]),
+    );
+  });
+
   it('rejects placeholders, unsafe origins, weak JWT, synchronize, and missing storage', () => {
     const report = buildProductionEnvReport({
       ...validEnv,
