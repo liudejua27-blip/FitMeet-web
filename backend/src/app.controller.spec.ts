@@ -49,6 +49,11 @@ const IOS_APP_REQUIRED_PATHS = {
   '/social-agent/chat/tasks/{taskId}/connect-candidate': 'post',
 } as const;
 
+const IOS_CORE_ENDPOINT_REGISTRY_PATH = resolve(
+  __dirname,
+  '../../../../Documents/FitMeet app/FitMeetAlpha/Networking/FitMeetCoreEndpoint.swift',
+);
+
 type RouteMethod = Lowercase<keyof typeof RequestMethod>;
 type ControllerType = (typeof APP_CORE_CONTROLLERS)[number];
 
@@ -221,6 +226,42 @@ describe('AppController', () => {
       );
 
       for (const endpoint of collectEndpointLiterals(frontendContract)) {
+        expect(openApiPaths).toContain(normalizeEndpointPath(endpoint));
+      }
+    });
+
+    it('keeps the iOS Swift endpoint registry aligned with OpenAPI paths', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+      const openApiPaths = new Set(
+        Object.keys(contract.paths).map(normalizePathParams),
+      );
+      const iosContract = readFileSync(IOS_CORE_ENDPOINT_REGISTRY_PATH, 'utf8');
+      const iosEndpoints = collectSwiftEndpointTemplates(iosContract);
+
+      expect(iosEndpoints).toEqual(
+        expect.arrayContaining([
+          '/auth/login',
+          '/auth/refresh',
+          '/auth/profile',
+          '/users/profile',
+          '/uploads/image',
+          '/messages/start',
+          '/messages/conversations',
+          '/messages/conversations/:param',
+          '/messages/conversations/:param/send',
+          '/messages/unread',
+          '/feed',
+          '/social-agent/chat/messages',
+          '/social-agent/chat/session',
+          '/social-agent/chat/tasks/:param/session',
+          '/social-agent/chat/tasks/:param/messages',
+          '/social-agent/chat/tasks/:param/save-candidate',
+          '/social-agent/chat/tasks/:param/send-message',
+          '/social-agent/chat/tasks/:param/connect-candidate',
+        ]),
+      );
+
+      for (const endpoint of iosEndpoints) {
         expect(openApiPaths).toContain(normalizeEndpointPath(endpoint));
       }
     });
@@ -573,4 +614,15 @@ function collectEndpointLiterals(source: string): string[] {
         .filter((value) => value.startsWith('/')),
     ),
   ];
+}
+
+function collectSwiftEndpointTemplates(source: string): string[] {
+  return [
+    ...new Set(
+      [...source.matchAll(/"([^"]*\/[^"]*)"/g)]
+        .map((match) => match[1].replace(/\\\([^)]+\)/g, ':param'))
+        .map((endpoint) => endpoint.replace(/\s+/g, ''))
+        .filter((endpoint) => endpoint.startsWith('/')),
+    ),
+  ].map(normalizeEndpointPath);
 }

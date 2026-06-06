@@ -11,6 +11,7 @@ This document is the launch control plan for FitMeet Web and FitMeetAlpha iOS. I
 - `fitmeet-landing/` is the standalone Next.js landing site.
 - `/Users/liuchongjiang/Documents/FitMeet app/` is the native SwiftUI iOS app (`FitMeetAlpha`).
 - Web and iOS are converging on the same core API contract exposed by `GET /api/openapi/fitmeet-core.json` and maintained in `backend/src/openapi/fitmeet-core.openapi.ts`.
+- Backend contract tests now read both `frontend/src/api/fitmeetCoreContract.ts` and the iOS `FitMeetCoreEndpoint.swift` registry to catch Web/App path drift before release.
 - The backend is expected to be stateless at the HTTP layer. Session continuity is token-based through access and refresh tokens; realtime paths use Socket.IO auth.
 
 ## Backend Framework And Database Types
@@ -243,6 +244,7 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- origin-allowlist.spec.ts`
 - Passed: backend `pnpm --dir backend test -- production-env-readiness.spec.ts origin-allowlist.spec.ts`
 - Passed: backend `pnpm --dir backend test -- social-agent-chat-timeline-activity.presenter.spec.ts social-agent-chat-timeline.presenter.spec.ts social-agent-chat-facade-boundary.spec.ts`
+- Passed: backend `pnpm --dir backend test -- app.controller.spec.ts`
 - Passed: backend `pnpm --dir backend lint`
 - Passed: backend `pnpm --dir backend build`
 - Passed: landing `pnpm --dir fitmeet-landing test:source`
