@@ -54,6 +54,20 @@ describe('production deploy readiness', () => {
     expect(verifier).toContain('APP_SMOKE_ALLOW_REMOTE=true');
     expect(verifier).toContain('RUN_PUBLIC_INTENT_WRITE');
   });
+
+  it('keeps the 1000-concurrency load smoke read-only and remote-guarded', () => {
+    const loadSmoke = readRepoFile('scripts/load-1000-readonly.mjs');
+
+    expect(loadSmoke).toContain('LOAD_TEST_CONCURRENCY, 1000');
+    expect(loadSmoke).toContain('/api/health');
+    expect(loadSmoke).toContain('/api/feed?page=1&limit=5');
+    expect(loadSmoke).toContain('/api/openapi/fitmeet-core.json');
+    expect(loadSmoke).toContain('LOAD_TEST_ALLOW_REMOTE');
+    expect(loadSmoke).toContain("method: 'GET'");
+    expect(loadSmoke).not.toContain("method: 'POST'");
+    expect(loadSmoke).not.toContain("method: 'PUT'");
+    expect(loadSmoke).not.toContain("method: 'DELETE'");
+  });
 });
 
 function readRepoFile(relativePath: string): string {

@@ -277,6 +277,16 @@ BASE_URL=https://www.ourfitmeet.cn ./scripts/verify-production.sh
 
 `verify-production.sh` 默认只做非破坏性检查：Web 首页、`/api/health`、运行时 OpenAPI、公开 feed、App 保护接口的 401、Agent manifest 的未授权保护。需要真实 App 账号链路时，可设置 `APP_SMOKE_EMAIL`、`APP_SMOKE_PASSWORD`、`APP_SMOKE_TARGET_USER_ID` 后追加 `--run-app-smoke`；需要写入 public intent 时，再显式追加 `--run-public-intent-write`。
 
+上线前的第一道容量 smoke 可以跑只读 1000 并发检查：
+
+```bash
+LOAD_TEST_BASE_URL=https://www.ourfitmeet.cn \
+LOAD_TEST_ALLOW_REMOTE=true \
+node scripts/load-1000-readonly.mjs
+```
+
+该脚本只打 `/api/health`、`/api/feed?page=1&limit=5` 和 `/api/openapi/fitmeet-core.json`，默认要求错误率不超过 1%、p95 不超过 1000ms、p99 不超过 2000ms。远端目标必须显式设置 `LOAD_TEST_ALLOW_REMOTE=true`，避免误压生产。它不能替代完整 Artillery/k6 长时压测，但可以作为部署后确认 1000 个并发只读请求不会立刻卡死的快速门槛。
+
 `nginx` 会等 `backend` 的 `/api/health` 通过后再进入 healthy 状态；如果这里失败，先看 `docker compose ... logs backend nginx`，再排查数据库、Redis、Mongo、Kafka 的 healthcheck。Windows 环境也可继续使用 `powershell -ExecutionPolicy Bypass -File .\scripts\verify-production.ps1`。
 
 Next 落地页可以独立部署到 Vercel、Node 服务或容器，和主 Web 的发布节奏可以分开。
