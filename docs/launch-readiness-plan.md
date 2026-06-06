@@ -61,6 +61,7 @@ Authoritative contract:
 - Runtime endpoint: `GET /api/openapi/fitmeet-core.json`
 - Web registry: `frontend/src/api/fitmeetCoreContract.ts`
 - iOS registry: `/Users/liuchongjiang/Documents/FitMeet app/FitMeetAlpha/Networking/FitMeetCoreEndpoint.swift`
+- Contract guard: every non-health core OpenAPI operation must document at least one non-2xx response using the shared `#/components/responses/Error` shape.
 
 Core launch endpoints currently covered:
 
@@ -135,6 +136,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - Social Agent chat entrypoint risk has been reduced to thin facade services; profile extraction prompt/normalization has been split out of the LLM service; timeline message restoration still needs continued focused tests because it is shared by Web and iOS session restore.
 - DB risk: production schema drift may exist if older deployments used `synchronize`; verify migration status against staging before production.
 - Contract risk: Web legacy APIs outside `fitmeet-core.openapi.ts` can drift because only the core launch subset is contract-tested.
+- Error contract risk has been reduced for the shared launch subset: OpenAPI now documents the stable error envelope for auth, feed, messages, Social Agent chat, SSE, and uploads instead of only happy paths.
 - Auth risk: production SMS/WeChat provider configuration must be present; mock WeChat login is dev-only, failed production SMS dispatch must not persist usable verification codes, WeChat OAuth redirects must be explicit HTTPS URLs, and refresh token rotation must keep stale tokens from being reused.
 - iOS release risk: staging E2E requires real credentials, a second message target user, object storage, and a deployed backend; it cannot pass in a credential-free local run.
 - Performance risk: 1000-concurrency smoke scripts exist, but no current local/staging result is recorded yet.

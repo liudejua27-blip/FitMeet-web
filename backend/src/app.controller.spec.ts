@@ -193,6 +193,25 @@ describe('AppController', () => {
       }
     });
 
+    it('documents the shared Error response shape for all non-health core operations', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+
+      for (const [path, pathItem] of Object.entries(contract.paths)) {
+        for (const operation of Object.values(pathItem)) {
+          if (path === '/health') continue;
+          const responses = operation.responses ?? {};
+          const errorResponses = Object.entries(responses).filter(
+            ([status]) => !status.startsWith('2'),
+          );
+
+          expect(errorResponses.length).toBeGreaterThan(0);
+          for (const [, response] of errorResponses) {
+            expect(response).toEqual({ $ref: '#/components/responses/Error' });
+          }
+        }
+      }
+    });
+
     it('maps the iOS app OpenAPI contract to registered controllers', () => {
       const contract = appController.getFitMeetCoreOpenApi();
       const controllerRoutes = collectControllerRoutes(APP_CORE_CONTROLLERS);
