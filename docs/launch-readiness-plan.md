@@ -175,6 +175,8 @@ Full Web/backend/landing baseline:
 ./scripts/release-preflight.sh --web-only
 ```
 
+The Web preflight runs the focused backend database contract tests (`migration-integrity.spec.ts` and `typeorm-launch-config.contract.spec.ts`) before the full backend test suite, so enum migration transaction regressions and TypeORM launch config drift fail early.
+
 Full baseline including iOS unit tests:
 
 ```bash
@@ -281,6 +283,7 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- http-exception.filter.spec.ts logging.interceptor.spec.ts`
 - Passed: backend `pnpm --dir backend test -- migration-integrity.spec.ts`
 - Passed: backend `pnpm --dir backend test -- migration-integrity.spec.ts typeorm-launch-config.contract.spec.ts` after adding the enum `ADD VALUE` transaction opt-out guard.
+- Passed: backend `pnpm --dir backend test -- production-deploy-readiness.spec.ts` after adding the focused database contract test step to release preflight.
 - Passed: backend `pnpm --dir backend seed:living-social-data:dry-run` after adding the no-database demo seed baseline check for 50 local Web/iOS test users, profiles, and public requests.
 - Passed: backend `pnpm --dir backend test -- migration-integrity.spec.ts typeorm-launch-config.contract.spec.ts`
 - Passed: `bash -n scripts/release-preflight.sh`
