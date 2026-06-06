@@ -17,10 +17,6 @@ import { RealtimeEventService } from '../realtime/realtime-event.service';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
 import { SocialProfileService } from '../users/social-profile.service';
 import {
-  AgentConnection,
-  ConnectionStatus,
-} from './entities/agent-connection.entity';
-import {
   AgentTask,
   AgentTaskEvent,
   AgentTaskEventActor,
@@ -127,6 +123,7 @@ import type {
 import { messageForSocialAgentSchemaAction } from './social-agent-card-action.presenter';
 import { SocialAgentRunProgressTracker } from './social-agent-run-progress.tracker';
 import { SocialAgentSessionRestoreService } from './social-agent-session-restore.service';
+import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
 import {
   applySocialAgentTaskMemoryForIntent,
   profileKeyForSocialAgentIntent,
@@ -151,8 +148,6 @@ export class SocialAgentChatService {
     private readonly taskRepo: Repository<AgentTask>,
     @InjectRepository(AgentTaskEvent)
     private readonly eventRepo: Repository<AgentTaskEvent>,
-    @InjectRepository(AgentConnection)
-    private readonly connectionRepo: Repository<AgentConnection>,
     private readonly planner: SocialAgentPlannerService,
     private readonly intentRouter: SocialAgentIntentRouterService,
     private readonly executor: SocialAgentToolExecutorService,
@@ -176,6 +171,7 @@ export class SocialAgentChatService {
     private readonly activitySearch: SocialAgentActivitySearchService,
     private readonly sessionRestore: SocialAgentSessionRestoreService,
     private readonly messageLog: SocialAgentMessageLogService,
+    private readonly taskLifecycle: SocialAgentTaskLifecycleService,
     @Optional() private readonly brain?: SocialAgentBrainService,
     @Optional()
     private readonly memoryContext?: SocialAgentMemoryContextService,
@@ -219,7 +215,11 @@ export class SocialAgentChatService {
     const message = cleanDisplayText(body.message, '').trim();
     if (!message) throw new BadRequestException('请输入消息');
     const taskId = this.number(body.taskId);
-    let task = await this.ensureConversationTask(ownerUserId, taskId, message);
+    let task = await this.taskLifecycle.ensureConversationTask(
+      ownerUserId,
+      taskId,
+      message,
+    );
     await this.messageLog.recordUserMessage(task, message);
 
     const alphaTurn = await this.alphaAgent?.prepareTurn({
@@ -365,7 +365,7 @@ export class SocialAgentChatService {
 
     const [profile, freshTask, longTermSnapshot] = await Promise.all([
       this.readProfileSummary(ownerUserId),
-      this.assertTaskOwner(task.id, ownerUserId),
+      this.taskLifecycle.assertTaskOwner(task.id, ownerUserId),
       this.longTermMemory.readSnapshot(ownerUserId).catch((error) => {
         this.metrics.recordError('long_term_memory_read_failed');
         this.logger.warn(
@@ -548,7 +548,7 @@ export class SocialAgentChatService {
           route.intent,
           message,
         );
-        task = await this.assertTaskOwner(task.id, ownerUserId);
+        task = await this.taskLifecycle.assertTaskOwner(task.id, ownerUserId);
       }
     }
 
@@ -613,7 +613,7 @@ export class SocialAgentChatService {
     }
 
     if (queuedRun) {
-      task = await this.assertTaskOwner(task.id, ownerUserId);
+      task = await this.taskLifecycle.assertTaskOwner(task.id, ownerUserId);
     }
 
     let pendingApproval: SocialAgentPendingApprovalSnapshot | null = null;
@@ -742,7 +742,7 @@ export class SocialAgentChatService {
     const idempotencyKey =
       cleanDisplayText(body.idempotencyKey, '') ||
       `social-agent-chat:${ownerUserId}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
-    const task = await this.createOrReuseTask({
+    const task = await this.taskLifecycle.createOrReuseTask({
       ownerUserId,
       goal,
       permissionMode,
@@ -859,7 +859,7 @@ export class SocialAgentChatService {
     taskId: number,
     body: SocialAgentChatReplanRunBody,
   ): Promise<SocialAgentAsyncRunSnapshot> {
-    let task = await this.assertTaskOwner(taskId, ownerUserId);
+    let task = await this.taskLifecycle.assertTaskOwner(taskId, ownerUserId);
     const userMessage = cleanDisplayText(body.userMessage, '').trim();
     const followUp = userMessage
       ? await this.appendFollowUpContext(task, userMessage)
@@ -918,7 +918,7 @@ export class SocialAgentChatService {
   ): Promise<SocialAgentAppendContextResult> {
     const userMessage = cleanDisplayText(body.userMessage, '').trim();
     if (!userMessage) throw new BadRequestException('请输入补充要求');
-    const task = await this.assertTaskOwner(taskId, ownerUserId);
+    const task = await this.taskLifecycle.assertTaskOwner(taskId, ownerUserId);
     const context = await this.appendFollowUpContext(task, userMessage);
     return {
       taskId,
@@ -936,7 +936,7 @@ export class SocialAgentChatService {
     taskId: number,
     runId: string,
   ): Promise<SocialAgentAsyncRunSnapshot> {
-    const task = await this.assertTaskOwner(taskId, ownerUserId);
+    const task = await this.taskLifecycle.assertTaskOwner(taskId, ownerUserId);
     const run = this.readStoredRun(task, runId);
     if (!run)
       throw new NotFoundException(`Social agent run ${runId} not found`);
@@ -963,7 +963,7 @@ export class SocialAgentChatService {
     ownerUserId: number,
     taskId: number,
   ): Promise<SocialAgentSessionSnapshot> {
-    const task = await this.assertTaskOwner(taskId, ownerUserId);
+    const task = await this.taskLifecycle.assertTaskOwner(taskId, ownerUserId);
     return this.sessionRestore.buildSessionSnapshot({
       ownerUserId,
       task,
@@ -996,7 +996,7 @@ export class SocialAgentChatService {
     ownerUserId: number,
     taskId: number,
   ): Promise<SocialAgentTaskTimelineSnapshot> {
-    const task = await this.assertTaskOwner(taskId, ownerUserId);
+    const task = await this.taskLifecycle.assertTaskOwner(taskId, ownerUserId);
     return this.sessionRestore.buildTaskTimeline({
       ownerUserId,
       task,
@@ -1066,7 +1066,7 @@ export class SocialAgentChatService {
       userMessage,
       failure: body.failure ?? null,
     });
-    task = await this.assertTaskOwner(taskId, ownerUserId);
+    task = await this.taskLifecycle.assertTaskOwner(taskId, ownerUserId);
     const usedTimeoutFallback = replan.fallbackReason === 'deepseek_timeout';
     await done(
       'follow_up_replan',
@@ -1093,7 +1093,8 @@ export class SocialAgentChatService {
     const refreshed = await this.draftSearch.refreshDraftAndCandidates({
       task,
       goal: refreshedGoal,
-      refreshTask: () => this.assertTaskOwner(taskId, ownerUserId),
+      refreshTask: () =>
+        this.taskLifecycle.assertTaskOwner(taskId, ownerUserId),
     });
     task = refreshed.task;
     const draft = refreshed.draft;
@@ -1181,7 +1182,7 @@ export class SocialAgentChatService {
       permissionMode,
     });
 
-    let task = await this.createOrReuseTask({
+    let task = await this.taskLifecycle.createOrReuseTask({
       ownerUserId,
       goal,
       permissionMode,
@@ -1400,7 +1401,7 @@ export class SocialAgentChatService {
       toolName: SocialAgentToolName.CreateSocialRequest,
       status: 'draft_ready',
     });
-    task = await this.assertTaskOwner(task.id, ownerUserId);
+    task = await this.taskLifecycle.assertTaskOwner(task.id, ownerUserId);
     const draft = buildSocialAgentRequestDraft({
       agentTaskId: task.id,
       draft: draftResult.draft,
@@ -1409,7 +1410,7 @@ export class SocialAgentChatService {
     });
 
     draft.socialRequestId = await this.createPrivateDraftRequest(task, draft);
-    task = await this.assertTaskOwner(task.id, ownerUserId);
+    task = await this.taskLifecycle.assertTaskOwner(task.id, ownerUserId);
     await progress.recordTool(
       'fitmeet_create_social_intent',
       FitMeetAgentToolStatus.WaitingConfirmation,
@@ -1463,7 +1464,7 @@ export class SocialAgentChatService {
       candidateCount: candidates.length,
       candidates,
     });
-    task = await this.assertTaskOwner(task.id, ownerUserId);
+    task = await this.taskLifecycle.assertTaskOwner(task.id, ownerUserId);
     await progress.completeStep(
       'search',
       '正在检索附近候选人',
@@ -1629,99 +1630,6 @@ export class SocialAgentChatService {
     },
   ): Promise<Record<string, unknown>> {
     return this.candidateActions.connectCandidate(ownerUserId, taskId, body);
-  }
-
-  private async createOrReuseTask(input: {
-    ownerUserId: number;
-    goal: string;
-    permissionMode: AgentTaskPermissionMode;
-    idempotencyKey: string | null;
-  }): Promise<AgentTask> {
-    if (input.idempotencyKey) {
-      const existing = await this.taskRepo.findOne({
-        where: {
-          ownerUserId: input.ownerUserId,
-          idempotencyKey: input.idempotencyKey,
-        },
-      });
-      if (existing) return existing;
-    }
-
-    const agent = await this.resolveAgentConnection(input.ownerUserId, null);
-    const task = await this.taskRepo.save(
-      this.taskRepo.create({
-        ownerUserId: input.ownerUserId,
-        agentConnectionId: agent?.id ?? null,
-        taskType: 'social_agent_chat',
-        title: 'FitMeet Social Agent 聊天任务',
-        goal: input.goal,
-        input: {
-          source: 'social_agent_chat',
-          executionBoundary: 'recommendation_plus_confirmation',
-        },
-        plan: [],
-        toolCalls: [],
-        result: {},
-        memory: {},
-        status: AgentTaskStatus.Pending,
-        permissionMode: input.permissionMode,
-        riskLevel: AgentTaskRiskLevel.Low,
-        idempotencyKey: input.idempotencyKey,
-      }),
-    );
-    await this.writeEvent(
-      task,
-      AgentTaskEventType.TaskCreated,
-      '已创建 Social Agent 聊天任务',
-      {
-        permissionMode: input.permissionMode,
-      },
-    );
-    return task;
-  }
-
-  private async ensureConversationTask(
-    ownerUserId: number,
-    taskId: number | null,
-    message: string,
-  ): Promise<AgentTask> {
-    if (taskId) return this.assertTaskOwner(taskId, ownerUserId);
-    const agent = await this.resolveAgentConnection(ownerUserId, null);
-    const idempotencyKey = `social-agent-message:${ownerUserId}:${Date.now()}:${Math.random()
-      .toString(36)
-      .slice(2, 10)}`;
-    const task = await this.taskRepo.save(
-      this.taskRepo.create({
-        ownerUserId,
-        agentConnectionId: agent?.id ?? null,
-        taskType: 'social_agent_chat',
-        title: 'FitMeet Social Agent 聊天',
-        goal: message,
-        input: {
-          source: 'social_agent_chat',
-          executionBoundary: 'conversation_then_tools',
-          firstMessage: message,
-        },
-        plan: [],
-        toolCalls: [],
-        result: {},
-        memory: {},
-        status: AgentTaskStatus.AwaitingFeedback,
-        permissionMode: AgentTaskPermissionMode.Confirm,
-        riskLevel: AgentTaskRiskLevel.Low,
-        idempotencyKey,
-      }),
-    );
-    await this.writeEvent(
-      task,
-      AgentTaskEventType.TaskCreated,
-      '已创建 Social Agent 聊天上下文',
-      {
-        permissionMode: task.permissionMode,
-        idempotencyKey,
-      },
-    );
-    return task;
   }
 
   private buildTaskContext(
@@ -2151,40 +2059,6 @@ export class SocialAgentChatService {
       toolCallId: event.toolCallId,
       createdAt: event.createdAt,
     }) as Record<string, unknown>;
-  }
-
-  private async assertTaskOwner(
-    taskId: number,
-    ownerUserId: number,
-  ): Promise<AgentTask> {
-    const task = await this.taskRepo.findOne({
-      where: { id: taskId, ownerUserId },
-    });
-    if (!task)
-      throw new NotFoundException(`Social agent task ${taskId} not found`);
-    return task;
-  }
-
-  private async resolveAgentConnection(
-    ownerUserId: number,
-    preferredId: number | null,
-  ): Promise<AgentConnection | null> {
-    if (preferredId) {
-      const explicit = await this.connectionRepo.findOne({
-        where: {
-          id: preferredId,
-          userId: ownerUserId,
-          status: ConnectionStatus.Active,
-        },
-      });
-      if (explicit) return explicit;
-    }
-    return (
-      (await this.connectionRepo.findOne({
-        where: { userId: ownerUserId, status: ConnectionStatus.Active },
-        order: { updatedAt: 'DESC' },
-      })) ?? null
-    );
   }
 
   private normalizePermissionMode(

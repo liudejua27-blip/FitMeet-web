@@ -27,6 +27,7 @@ import { SocialAgentReplanProgressService } from './social-agent-replan-progress
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
 import { SocialAgentSessionRestoreService } from './social-agent-session-restore.service';
 import { SocialAgentMessageLogService } from './social-agent-message-log.service';
+import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 
@@ -506,11 +507,17 @@ function makeHarness(options: Record<string, unknown> = {}) {
     taskRepo as never,
     eventRepo as never,
   );
+  const taskLifecycle =
+    (options.taskLifecycle as SocialAgentTaskLifecycleService | undefined) ??
+    new SocialAgentTaskLifecycleService(
+      taskRepo as never,
+      eventRepo as never,
+      connectionRepo as never,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
     eventRepo as never,
-    connectionRepo as never,
     planner as never,
     intentRouter,
     executor as never,
@@ -533,6 +540,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     activitySearch as never,
     sessionRestore as never,
     messageLog as never,
+    taskLifecycle as never,
     options.brain as never,
     undefined,
     options.lifeGraph as never,
@@ -568,6 +576,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     draftSearch,
     recommendationResults,
     activitySearch,
+    taskLifecycle,
   };
 }
 
