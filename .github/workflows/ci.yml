@@ -41,6 +41,9 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: App contract smoke
+        run: APP_SMOKE_DRY_RUN=true pnpm smoke:app-core
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
