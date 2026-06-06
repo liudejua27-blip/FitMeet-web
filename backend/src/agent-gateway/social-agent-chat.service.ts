@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 
-import { TonePolicyService } from './response-quality/tone-policy.service';
 import type {
   SocialAgentAppendContextResult,
   SocialAgentAsyncRunSnapshot,
@@ -15,28 +14,25 @@ import type {
   SocialAgentTaskTimelineSnapshot,
   StreamEmit,
 } from './social-agent-chat.types';
-import { SocialAgentQueuedRunService } from './social-agent-queued-run.service';
-import { SocialAgentRunOrchestratorService } from './social-agent-run-orchestrator.service';
 import { SocialAgentSessionQueryService } from './social-agent-session-query.service';
 import { SocialAgentReplanFacadeService } from './social-agent-replan-facade.service';
 import { SocialAgentChatTurnFacadeService } from './social-agent-chat-turn-facade.service';
+import { SocialAgentChatRunFacadeService } from './social-agent-chat-run-facade.service';
 
 @Injectable()
 export class SocialAgentChatService {
   constructor(
+    private readonly runFacade: SocialAgentChatRunFacadeService,
     private readonly turnFacade: SocialAgentChatTurnFacadeService,
-    private readonly queuedRuns: SocialAgentQueuedRunService,
-    private readonly runOrchestrator: SocialAgentRunOrchestratorService,
     private readonly sessionQueries: SocialAgentSessionQueryService,
     private readonly replanFacade: SocialAgentReplanFacadeService,
-    private readonly tonePolicy?: TonePolicyService,
   ) {}
 
   run(
     ownerUserId: number,
     body: SocialAgentChatRunBody,
   ): Promise<SocialAgentChatRunResult> {
-    return this.runOrchestrator.run(ownerUserId, body);
+    return this.runFacade.run(ownerUserId, body);
   }
 
   async routeMessage(
@@ -65,13 +61,7 @@ export class SocialAgentChatService {
     ownerUserId: number,
     body: SocialAgentChatRunBody,
   ): Promise<SocialAgentAsyncRunSnapshot> {
-    return this.queuedRuns.runQueued({
-      ownerUserId,
-      body,
-      executeRun: (runBody, emit) =>
-        this.runOrchestrator.run(ownerUserId, runBody, emit),
-      visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
-    });
+    return this.runFacade.runQueued(ownerUserId, body);
   }
 
   runStream(
@@ -79,7 +69,7 @@ export class SocialAgentChatService {
     body: SocialAgentChatRunBody,
     emit: StreamEmit,
   ): Promise<SocialAgentChatRunResult> {
-    return this.runOrchestrator.run(ownerUserId, body, emit);
+    return this.runFacade.runStream(ownerUserId, body, emit);
   }
 
   async replanAndRefresh(
@@ -130,9 +120,5 @@ export class SocialAgentChatService {
     taskId: number,
   ): Promise<SocialAgentTaskTimelineSnapshot> {
     return this.sessionQueries.getTaskTimeline(ownerUserId, taskId);
-  }
-
-  private userVisibleStepLabel(id: string, label: string): string {
-    return this.tonePolicy?.userStatus(id, label) ?? label;
   }
 }
