@@ -12,70 +12,35 @@ import {
   cleanDisplayText,
   sanitizeForDisplay,
 } from '../common/display-text.util';
-import { sanitizeCity } from '../common/city.util';
 import { RealtimeEventService } from '../realtime/realtime-event.service';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
-import { SocialProfileService } from '../users/social-profile.service';
 import {
   AgentTask,
   AgentTaskEvent,
   AgentTaskEventActor,
   AgentTaskEventType,
   AgentTaskPermissionMode,
-  AgentTaskStatus,
 } from './entities/agent-task.entity';
-import {
-  SocialAgentIntentRouterService,
-  type SocialAgentIntentEntities,
-  type SocialAgentIntentType,
-} from './social-agent-intent-router.service';
-import { SocialAgentBrainService } from './social-agent-brain.service';
-import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
-import {
-  SocialAgentToolCallRecord,
-  SocialAgentToolExecutorService,
-} from './social-agent-tool-executor.service';
+import { type SocialAgentIntentEntities } from './social-agent-intent-router.service';
+import { SocialAgentToolCallRecord } from './social-agent-tool-executor.service';
 import {
   appendShortTermMemoryItem,
-  appendSocialAgentUserMemo,
   readSocialAgentTaskMemory,
-  recordSocialAgentPendingAction,
-  rememberSocialAgentCurrentTask,
   rememberSocialAgentShortTerm,
   transitionSocialAgentState,
 } from './social-agent-memory.util';
-import { AgentApprovalService } from './agent-approval.service';
-import { PublicSocialIntent } from './entities/public-social-intent.entity';
-import {
-  hasSocialAgentSearchContext,
-  socialAgentCandidateFollowupReply,
-} from './social-agent-candidate-context.presenter';
-import {
-  appendSocialAgentConversationTurn,
-  readSocialAgentConversationHistory,
-} from './social-agent-chat-memory.presenter';
-import { rememberSocialAgentConversationBrainDecision } from './social-agent-chat-brain-memory.presenter';
 import { createSocialAgentRunId } from './social-agent-chat-run.presenter';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
 import { SocialAgentFollowUpContextService } from './social-agent-follow-up-context.service';
-import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
-import { SocialAgentActivitySearchService } from './social-agent-activity-search.service';
-import { SocialAgentMessageLogService } from './social-agent-message-log.service';
-import { SocialAgentMetricsService } from './social-agent-metrics.service';
-import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
-import { SocialAgentRouteContextService } from './social-agent-route-context.service';
-import { LifeGraphProposalDto } from '../life-graph/dto/life-graph.dto';
-import { LifeGraphService } from '../life-graph/life-graph.service';
 import { FitMeetAgentRunStatus } from './entities/fitmeet-agent-runtime.entity';
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { TonePolicyService } from './response-quality/tone-policy.service';
 import { AgentSessionAssemblerService } from './agent-session-assembler.service';
 import type {
   CandidateTargetBody,
-  SocialAgentActivityResult,
   SocialAgentAppendContextResult,
   SocialAgentAsyncRunSnapshot,
   SocialAgentCardActionBody,
@@ -85,7 +50,6 @@ import type {
   SocialAgentCurrentTaskSnapshot,
   SocialAgentFollowUpContext,
   SocialAgentIntentRouteResult,
-  SocialAgentPendingApprovalSnapshot,
   SocialAgentRouteMessageBody,
   SocialAgentSessionSnapshot,
   SocialAgentTaskTimelineSnapshot,
@@ -98,15 +62,7 @@ import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.s
 import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
 import { SocialAgentRunRecommendationService } from './social-agent-run-recommendation.service';
 import { SocialAgentReplanRunService } from './social-agent-replan-run.service';
-import {
-  applySocialAgentTaskMemoryForIntent,
-  profileKeyForSocialAgentIntent,
-} from './social-agent-intent-memory.presenter';
-import {
-  shouldUseSocialAgentLlmDirectReply,
-  socialAgentAssistantMessageForRoute,
-  socialAgentRouteAction,
-} from './social-agent-route-response.presenter';
+import { SocialAgentRouteTurnService } from './social-agent-route-turn.service';
 export type * from './social-agent-chat.types';
 
 @Injectable()
@@ -120,32 +76,17 @@ export class SocialAgentChatService {
     private readonly taskRepo: Repository<AgentTask>,
     @InjectRepository(AgentTaskEvent)
     private readonly eventRepo: Repository<AgentTaskEvent>,
-    private readonly intentRouter: SocialAgentIntentRouterService,
-    private readonly executor: SocialAgentToolExecutorService,
-    private readonly socialProfiles: SocialProfileService,
-    private readonly approvals: AgentApprovalService,
-    @InjectRepository(PublicSocialIntent)
-    private readonly publicIntentRepo: Repository<PublicSocialIntent>,
-    private readonly metrics: SocialAgentMetricsService,
-    private readonly longTermMemory: SocialAgentLongTermMemoryService,
-    private readonly chatLlm: SocialAgentChatLlmService,
     private readonly runState: SocialAgentRunStateService,
     private readonly followUpContext: SocialAgentFollowUpContextService,
-    private readonly profileEnrichment: SocialAgentProfileEnrichmentService,
     private readonly meetLoop: SocialAgentMeetLoopService,
     private readonly candidateActions: SocialAgentCandidateActionService,
     private readonly draftPublication: SocialAgentDraftPublicationService,
-    private readonly activitySearch: SocialAgentActivitySearchService,
     private readonly sessionRestore: SocialAgentSessionRestoreService,
-    private readonly messageLog: SocialAgentMessageLogService,
     private readonly taskLifecycle: SocialAgentTaskLifecycleService,
-    private readonly routeContext: SocialAgentRouteContextService,
     private readonly mainAgentTurn: SocialAgentMainAgentTurnService,
     private readonly runRecommendations: SocialAgentRunRecommendationService,
     private readonly replanRuns: SocialAgentReplanRunService,
-    @Optional() private readonly brain?: SocialAgentBrainService,
-    @Optional()
-    private readonly lifeGraph?: LifeGraphService,
+    private readonly routeTurns: SocialAgentRouteTurnService,
     @Optional()
     private readonly realtime?: RealtimeEventService,
     @Optional()
@@ -178,344 +119,14 @@ export class SocialAgentChatService {
     ownerUserId: number,
     body: SocialAgentRouteMessageBody,
   ): Promise<SocialAgentIntentRouteResult> {
-    const startedAt = Date.now();
-    const message = cleanDisplayText(body.message, '').trim();
-    if (!message) throw new BadRequestException('请输入消息');
-    const taskId = this.number(body.taskId);
-    let task = await this.taskLifecycle.ensureConversationTask(
+    return this.routeTurns.handleMessage({
       ownerUserId,
-      taskId,
-      message,
-    );
-    await this.messageLog.recordUserMessage(task, message);
-
-    const mainAgentTurn = await this.mainAgentTurn.handleRouteTurn({
-      ownerUserId,
-      task,
-      message,
-      hasCandidates: body.hasCandidates === true,
-      startedAt,
+      body,
+      replanAndRefresh: (currentOwnerUserId, taskId, replanBody) =>
+        this.replanAndRefresh(currentOwnerUserId, taskId, replanBody),
+      queueInitialSearchForTask: (currentOwnerUserId, task, goal) =>
+        this.queueInitialSearchForTask(currentOwnerUserId, task, goal),
     });
-    task = mainAgentTurn.task;
-    if (mainAgentTurn.result) return mainAgentTurn.result;
-
-    const [profile, freshTask, longTermSnapshot] = await Promise.all([
-      this.readProfileSummary(ownerUserId),
-      this.taskLifecycle.assertTaskOwner(task.id, ownerUserId),
-      this.longTermMemory.readSnapshot(ownerUserId).catch((error) => {
-        this.metrics.recordError('long_term_memory_read_failed');
-        this.logger.warn(
-          JSON.stringify({
-            event: 'social_agent.long_term_memory.read_failed',
-            ownerUserId,
-            message: error instanceof Error ? error.message : String(error),
-          }),
-        );
-        return null;
-      }),
-    ]);
-    task = freshTask;
-    let memoryContext = this.routeContext.buildMemoryContext(
-      task,
-      longTermSnapshot,
-    );
-    let route = await this.intentRouter.route({
-      message,
-      taskContext: this.routeContext.buildTaskContext({
-        task,
-        body,
-        longTermSnapshot,
-        memoryContext,
-      }),
-      profile: profile ?? {},
-      conversationHistory: readSocialAgentConversationHistory(task),
-    });
-    const brainDecision = await this.brain?.planTurn({
-      message,
-      route,
-      profile: profile ?? {},
-      taskContext: this.routeContext.buildTaskContext({
-        task,
-        body,
-        longTermSnapshot,
-        memoryContext,
-      }),
-      conversationHistory: readSocialAgentConversationHistory(task),
-      memoryContext: memoryContext ?? undefined,
-    });
-    if (brainDecision) {
-      route = brainDecision.route;
-      rememberSocialAgentConversationBrainDecision(task, brainDecision);
-      if (brainDecision.conversationMode === 'profile_correction') {
-        this.profileEnrichment.recordProfileMisunderstanding(
-          task,
-          brainDecision.reason || 'user_correction',
-        );
-      }
-    }
-    this.profileEnrichment.rememberCurrentTaskFromBrain(task, route);
-    memoryContext = this.routeContext.buildMemoryContext(
-      task,
-      longTermSnapshot,
-    );
-    await this.messageLog.recordIntentRoute(task, route).catch((error) => {
-      this.metrics.recordError('intent_route_event_failed');
-      this.logger.warn(
-        JSON.stringify({
-          event: 'social_agent.intent_route.event_failed',
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    });
-    this.metrics.recordIntent(route.intent, route.source);
-    appendSocialAgentUserMemo(task, message, route.intent);
-    applySocialAgentTaskMemoryForIntent(task, message, route);
-    await this.routeContext.applyRagContext({
-      task,
-      route,
-      message,
-      longTermSnapshot,
-    });
-    const brainToolResults =
-      await this.profileEnrichment.executeConversationBrainReadTools(
-        ownerUserId,
-        task,
-        brainDecision,
-      );
-
-    let savedContext = false;
-    let profileUpdated = false;
-    let queuedRun: SocialAgentAsyncRunSnapshot | null = null;
-    let runMode: SocialAgentIntentRouteResult['runMode'] = null;
-    let assistantMessage = socialAgentAssistantMessageForRoute({
-      route,
-      task,
-      message,
-    });
-    let activityResults: SocialAgentActivityResult[] = [];
-    let profileUpdateProposal: LifeGraphProposalDto | null = null;
-
-    const confirmedCandidateMessage =
-      await this.candidateActions.confirmPendingCandidateMessageIfRequested(
-        ownerUserId,
-        task,
-        message,
-      );
-    if (confirmedCandidateMessage) {
-      task = confirmedCandidateMessage.task;
-      assistantMessage = confirmedCandidateMessage.assistantMessage;
-      const result: SocialAgentIntentRouteResult = {
-        ...route,
-        intent: 'action_request',
-        action: 'reply',
-        taskId: task.id,
-        assistantMessage,
-        savedContext: false,
-        profileUpdated: false,
-        shouldExecuteAction: true,
-        shouldQueueRun: false,
-        runMode: null,
-        queuedRun: null,
-        pendingApproval: null,
-        activityResults: [],
-        permissionMode: task.permissionMode,
-      };
-      this.metrics.recordAction(result.action);
-      await this.messageLog.recordAssistantMessage(
-        task,
-        assistantMessage,
-        result,
-      );
-      this.metrics.observeRouteLatency(Date.now() - startedAt);
-      return result;
-    }
-
-    if (
-      route.intent === 'profile_enrichment' ||
-      route.intent === 'profile_enrichment_request' ||
-      route.intent === 'correction_or_clarification'
-    ) {
-      const handled = await this.profileEnrichment.handleTurn({
-        ownerUserId,
-        task,
-        message,
-        intent: route.intent,
-        buildMemoryContext: (currentTask) =>
-          this.routeContext.buildMemoryContext(currentTask, null),
-      });
-      assistantMessage = handled.assistantMessage;
-      savedContext = handled.savedContext;
-      profileUpdated = handled.profileUpdated;
-      profileUpdateProposal = handled.profileUpdateProposal ?? null;
-      task = handled.task;
-    } else if (shouldUseSocialAgentLlmDirectReply(route)) {
-      assistantMessage = await this.chatLlm.generateConversationalAnswer({
-        message,
-        route,
-        profile,
-        task,
-        longTermSnapshot,
-        memoryContext: this.routeContext.buildMemoryContext(
-          task,
-          longTermSnapshot,
-        ),
-        toolResults: brainToolResults,
-      });
-    }
-
-    if (
-      route.intent === 'profile_update' ||
-      route.intent === 'safety_or_boundary'
-    ) {
-      if (this.lifeGraph) {
-        const proposal = await this.lifeGraph.extractFromChat(ownerUserId, {
-          message,
-          taskId: task.id,
-          context: { intent: route.intent },
-        });
-        if (proposal.proposedFields.length > 0) {
-          profileUpdateProposal = proposal;
-          assistantMessage =
-            this.profileEnrichment.lifeGraphProposalReply(proposal);
-          savedContext = true;
-          profileUpdated = false;
-          rememberSocialAgentCurrentTask(task, {
-            objective: 'profile_enrichment',
-            nextStep: '等待用户确认是否保存 Life Graph 画像提案',
-            shouldSearchNow: false,
-            profileSaved: false,
-            waitingFor: 'life_graph_profile_confirmation',
-            lastCompletedStep: 'life_graph_profile_proposed',
-          });
-          await this.taskRepo.save(task);
-        }
-      }
-      if (!profileUpdateProposal) {
-        await this.rememberRoutedMessage(task, message, route.intent);
-        savedContext = true;
-        profileUpdated = await this.saveIntentToProfile(
-          ownerUserId,
-          route.intent,
-          message,
-        );
-        task = await this.taskLifecycle.assertTaskOwner(task.id, ownerUserId);
-      }
-    }
-
-    if (route.intent === 'activity_search') {
-      const handledActivitySearch =
-        await this.activitySearch.handleActivitySearch({
-          ownerUserId,
-          task,
-          route,
-          message,
-          buildMemoryContext: (currentTask) =>
-            this.routeContext.buildMemoryContext(currentTask, null),
-        });
-      activityResults = handledActivitySearch.activityResults;
-      assistantMessage = handledActivitySearch.assistantMessage;
-    } else if (route.intent === 'social_search') {
-      const lifeGraphClarification =
-        await this.profileEnrichment.lifeGraphSearchClarification(
-          ownerUserId,
-          message,
-        );
-      if (lifeGraphClarification) {
-        assistantMessage = lifeGraphClarification;
-        savedContext = true;
-        runMode = null;
-        queuedRun = null;
-      } else if (route.shouldReplan && hasSocialAgentSearchContext(task)) {
-        queuedRun = await this.replanAndRefresh(ownerUserId, task.id, {
-          userMessage: message,
-          reason: 'user_follow_up',
-        });
-        runMode = 'follow_up';
-      } else {
-        queuedRun = await this.queueInitialSearchForTask(
-          ownerUserId,
-          task,
-          message,
-        );
-        runMode = 'initial';
-      }
-    }
-
-    if (route.intent === 'candidate_followup') {
-      if (route.shouldSearch || route.shouldReplan) {
-        if (hasSocialAgentSearchContext(task)) {
-          queuedRun = await this.replanAndRefresh(ownerUserId, task.id, {
-            userMessage: message,
-            reason: 'user_follow_up',
-          });
-          runMode = 'follow_up';
-        } else {
-          queuedRun = await this.queueInitialSearchForTask(
-            ownerUserId,
-            task,
-            message,
-          );
-          runMode = 'initial';
-        }
-      } else {
-        assistantMessage = socialAgentCandidateFollowupReply(task, message);
-      }
-    }
-
-    if (queuedRun) {
-      task = await this.taskLifecycle.assertTaskOwner(task.id, ownerUserId);
-    }
-
-    let pendingApproval: SocialAgentPendingApprovalSnapshot | null = null;
-    if (route.intent === 'action_request') {
-      pendingApproval = await this.candidateActions.createActionApproval({
-        ownerUserId,
-        task,
-        message,
-        route,
-      });
-      if (pendingApproval) {
-        const draft = this.candidateActions.candidateMessageDraft(task);
-        assistantMessage = draft
-          ? `${assistantMessage}\n我先给你拟一条开场白：${draft}\n确认后我再发送。待确认动作 #${pendingApproval.id} 已创建。`
-          : `${assistantMessage}\n（已创建待确认动作 #${pendingApproval.id}，请在卡片上点击“批准/拒绝”。）`;
-        this.metrics.recordApproval(pendingApproval.type);
-        recordSocialAgentPendingAction(task, {
-          id: pendingApproval.id,
-          type: pendingApproval.type,
-          actionType: pendingApproval.actionType,
-          summary: pendingApproval.summary,
-          riskLevel: pendingApproval.riskLevel,
-          at: new Date().toISOString(),
-        });
-      }
-    }
-
-    const result: SocialAgentIntentRouteResult = {
-      ...route,
-      shouldReplan: queuedRun ? runMode === 'follow_up' : route.shouldReplan,
-      action: socialAgentRouteAction(route, queuedRun, runMode),
-      taskId: task.id,
-      assistantMessage,
-      savedContext,
-      profileUpdated,
-      shouldQueueRun: Boolean(queuedRun),
-      runMode,
-      queuedRun,
-      pendingApproval,
-      activityResults,
-      profileUpdateProposal,
-      permissionMode: task.permissionMode,
-    };
-    if (queuedRun && runMode) this.metrics.recordQueuedRun(runMode);
-    this.metrics.recordAction(result.action);
-    await this.messageLog.recordAssistantMessage(
-      task,
-      assistantMessage,
-      result,
-    );
-    this.metrics.observeRouteLatency(Date.now() - startedAt);
-    return result;
   }
 
   async performCardAction(
@@ -1066,98 +677,6 @@ export class SocialAgentChatService {
       permissionMode: task.permissionMode ?? AgentTaskPermissionMode.Confirm,
       idempotencyKey,
     });
-  }
-
-  private async rememberRoutedMessage(
-    task: AgentTask,
-    message: string,
-    intent: SocialAgentIntentType,
-  ): Promise<void> {
-    const now = new Date().toISOString();
-    appendSocialAgentConversationTurn(task, {
-      role: 'user',
-      text: message,
-      intent,
-      at: now,
-    });
-    task.result = {
-      ...(task.result ?? {}),
-      latestIntent: {
-        intent,
-        message,
-        at: now,
-      },
-    };
-    task.status = AgentTaskStatus.AwaitingFeedback;
-    task.statusReason = `intent_${intent}_saved`;
-    rememberSocialAgentShortTerm(task, {
-      latestUserFollowUp: message,
-      currentStep: {
-        id: `intent.${intent}`,
-        label: '已写入当前对话上下文',
-        status: 'done',
-        updatedAt: now,
-      },
-    });
-    await this.taskRepo.save(task);
-    await this.writeEvent(
-      task,
-      AgentTaskEventType.SocialAgentContextAppended,
-      '已写入 Social Agent 对话上下文',
-      { intent, message, at: now },
-      AgentTaskEventActor.User,
-    ).catch((error) => {
-      this.metrics.recordError('context_append_event_failed');
-      this.logger.warn(
-        JSON.stringify({
-          event: 'social_agent.context_append.event_failed',
-          taskId: task.id,
-          ownerUserId: task.ownerUserId,
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    });
-  }
-
-  private async saveIntentToProfile(
-    ownerUserId: number,
-    intent: SocialAgentIntentType,
-    message: string,
-  ): Promise<boolean> {
-    const key = profileKeyForSocialAgentIntent(intent, message);
-    if (!key) return false;
-    try {
-      await this.socialProfiles.saveAnswer(ownerUserId, key, message);
-      return true;
-    } catch (error) {
-      this.logger.warn(
-        JSON.stringify({
-          event: 'social_agent.profile_update_failed',
-          ownerUserId,
-          intent,
-          key,
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-      return false;
-    }
-  }
-
-  private async readProfileSummary(
-    ownerUserId: number,
-  ): Promise<Record<string, unknown> | null> {
-    try {
-      const profile = await this.socialProfiles.get(ownerUserId);
-      return {
-        city: sanitizeCity(profile.city),
-        interestTags: profile.interestTags ?? [],
-        availableTimes: profile.availableTimes ?? [],
-        profileDiscoverable: profile.profileDiscoverable,
-        agentCanRecommendMe: profile.agentCanRecommendMe,
-      };
-    } catch {
-      return null;
-    }
   }
 
   private async appendFollowUpContext(

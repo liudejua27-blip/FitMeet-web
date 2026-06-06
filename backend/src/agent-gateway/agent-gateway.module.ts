@@ -70,6 +70,7 @@ import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.s
 import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
 import { SocialAgentRunRecommendationService } from './social-agent-run-recommendation.service';
 import { SocialAgentReplanRunService } from './social-agent-replan-run.service';
+import { SocialAgentRouteTurnService } from './social-agent-route-turn.service';
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
@@ -221,6 +222,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentMainAgentTurnService,
     SocialAgentRunRecommendationService,
     SocialAgentReplanRunService,
+    SocialAgentRouteTurnService,
     SocialAgentChatService,
     FitMeetAgentRuntimeService,
     SocialAgentCandidatePoolService,
