@@ -1,6 +1,49 @@
+import { RequestMethod } from '@nestjs/common';
+import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { Test, TestingModule } from '@nestjs/testing';
+import { SocialAgentChatController } from './agent-gateway/social-agent-chat.controller';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AuthController } from './auth/auth.controller';
+import { CommentsController } from './comments/comments.controller';
+import { MessagesController } from './messages/messages.controller';
+import { PostsController } from './posts/posts.controller';
+import { UploadsController } from './uploads/uploads.controller';
+import { UsersController } from './users/users.controller';
+
+const APP_CORE_CONTROLLERS = [
+  AuthController,
+  UsersController,
+  PostsController,
+  CommentsController,
+  MessagesController,
+  SocialAgentChatController,
+  UploadsController,
+] as const;
+
+const STAGING_E2E_REQUIRED_PATHS = {
+  '/auth/login': 'post',
+  '/auth/refresh': 'post',
+  '/auth/profile': 'get',
+  '/users/profile': 'put',
+  '/uploads/image': 'post',
+  '/messages/start': 'post',
+  '/messages/conversations/{conversationId}': 'get',
+  '/messages/conversations/{conversationId}/send': 'post',
+  '/feed': ['get', 'post'],
+  '/feed/interactions': 'get',
+  '/social-agent/chat/session': 'get',
+  '/social-agent/chat/messages': 'post',
+  '/social-agent/chat/route-message': 'post',
+} as const;
+
+type RouteMethod = Lowercase<keyof typeof RequestMethod>;
+type ControllerType = (typeof APP_CORE_CONTROLLERS)[number];
+
+type ControllerRoute = {
+  method: string;
+  path: string;
+};
 
 describe('AppController', () => {
   let appController: AppController;
@@ -64,29 +107,38 @@ describe('AppController', () => {
 
     it('keeps the iOS staging E2E contract explicit', () => {
       const contract = appController.getFitMeetCoreOpenApi();
-      const requiredPaths = {
-        '/auth/login': 'post',
-        '/auth/refresh': 'post',
-        '/auth/profile': 'get',
-        '/users/profile': 'put',
-        '/uploads/image': 'post',
-        '/messages/start': 'post',
-        '/messages/conversations/{conversationId}': 'get',
-        '/messages/conversations/{conversationId}/send': 'post',
-        '/feed': ['get', 'post'],
-        '/feed/interactions': 'get',
-        '/social-agent/chat/session': 'get',
-        '/social-agent/chat/messages': 'post',
-        '/social-agent/chat/route-message': 'post',
-      } as const;
 
-      for (const [path, methodOrMethods] of Object.entries(requiredPaths)) {
+      for (const [path, methodOrMethods] of Object.entries(
+        STAGING_E2E_REQUIRED_PATHS,
+      )) {
         const methods = Array.isArray(methodOrMethods)
           ? methodOrMethods
           : [methodOrMethods];
         expect(contract.paths[path]).toBeDefined();
         for (const method of methods) {
           expect(contract.paths[path][method]).toBeDefined();
+        }
+      }
+    });
+
+    it('maps the iOS staging OpenAPI contract to registered controllers', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+      const controllerRoutes = collectControllerRoutes(APP_CORE_CONTROLLERS);
+
+      for (const [path, methodOrMethods] of Object.entries(
+        STAGING_E2E_REQUIRED_PATHS,
+      )) {
+        const methods = Array.isArray(methodOrMethods)
+          ? methodOrMethods
+          : [methodOrMethods];
+
+        for (const method of methods) {
+          const openApiOperation = contract.paths[path][method];
+          expect(openApiOperation).toBeDefined();
+          expect(controllerRoutes).toContainEqual({
+            method,
+            path: normalizePathParams(path),
+          });
         }
       }
     });
@@ -191,3 +243,66 @@ describe('AppController', () => {
     });
   });
 });
+
+function collectControllerRoutes(
+  controllers: readonly ControllerType[],
+): ControllerRoute[] {
+  return controllers.flatMap((controller) => {
+    const controllerPaths = toPathArray(
+      Reflect.getMetadata(PATH_METADATA, controller),
+    );
+    const prototype = controller.prototype as Record<string, unknown>;
+
+    return Object.getOwnPropertyNames(prototype).flatMap((propertyKey) => {
+      const handler = prototype[propertyKey];
+      if (typeof handler !== 'function') return [];
+
+      const routeMethod = Reflect.getMetadata(METHOD_METADATA, handler) as
+        | RequestMethod
+        | undefined;
+      if (routeMethod === undefined) return [];
+
+      const method = methodName(routeMethod);
+      if (!method) return [];
+
+      const methodPaths = toPathArray(
+        Reflect.getMetadata(PATH_METADATA, handler),
+      );
+
+      return controllerPaths.flatMap((controllerPath) =>
+        methodPaths.map((methodPath) => ({
+          method,
+          path: normalizePathParams(joinRoutePath(controllerPath, methodPath)),
+        })),
+      );
+    });
+  });
+}
+
+function toPathArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(toPathArray);
+  if (typeof value === 'string') return [value];
+  return [''];
+}
+
+function methodName(method: RequestMethod): RouteMethod | null {
+  const value = RequestMethod[method];
+  return typeof value === 'string'
+    ? (value.toLowerCase() as RouteMethod)
+    : null;
+}
+
+function joinRoutePath(controllerPath: string, methodPath: string) {
+  return `/${[controllerPath, methodPath]
+    .filter(Boolean)
+    .map((part) => part.replace(/^\/|\/$/g, ''))
+    .filter(Boolean)
+    .join('/')}`;
+}
+
+function normalizePathParams(path: string) {
+  return path
+    .replace(/\{[^/}]+\}/g, ':param')
+    .replace(/:[^/]+/g, ':param')
+    .replace(/\/+/g, '/');
+}
