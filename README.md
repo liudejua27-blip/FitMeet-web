@@ -293,6 +293,26 @@ LOAD_TEST_BASE_URL=http://localhost:3000 ./scripts/release-preflight.sh --web-on
 
 该脚本只打 `/api/health`、`/api/feed?page=1&limit=5` 和 `/api/openapi/fitmeet-core.json`，默认要求错误率不超过 1%、p95 不超过 1000ms、p99 不超过 2000ms。远端目标必须显式设置 `LOAD_TEST_ALLOW_REMOTE=true`，避免误压生产。它不能替代完整 Artillery/k6 长时压测，但可以作为部署后确认 1000 个并发只读请求不会立刻卡死的快速门槛。
 
+真正的“1000 人在线”还需要验证 Socket.IO 实时链路。准备一个 staging 用户 token，或提供 staging 登录账号后运行：
+
+```bash
+REALTIME_SMOKE_BASE_URL=https://www.ourfitmeet.cn \
+REALTIME_SMOKE_ALLOW_REMOTE=true \
+REALTIME_SMOKE_EMAIL=test@example.com \
+REALTIME_SMOKE_PASSWORD='***' \
+node scripts/realtime-1000-online-smoke.mjs
+```
+
+也可以纳入 Web preflight：
+
+```bash
+REALTIME_SMOKE_BASE_URL=http://localhost:3000 \
+REALTIME_SMOKE_TOKEN='eyJ...' \
+./scripts/release-preflight.sh --web-only --include-realtime-smoke
+```
+
+该脚本会打开 1000 个 `/realtime` Socket.IO 连接，等待后端 `realtime:connected`，保持在线 5 秒，并检查错误率和连接 p95。远端目标同样必须显式设置 `REALTIME_SMOKE_ALLOW_REMOTE=true`。
+
 `nginx` 会等 `backend` 的 `/api/health` 通过后再进入 healthy 状态；如果这里失败，先看 `docker compose ... logs backend nginx`，再排查数据库、Redis、Mongo、Kafka 的 healthcheck。Windows 环境也可继续使用 `powershell -ExecutionPolicy Bypass -File .\scripts\verify-production.ps1`。
 
 Next 落地页可以独立部署到 Vercel、Node 服务或容器，和主 Web 的发布节奏可以分开。

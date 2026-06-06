@@ -14,10 +14,11 @@ RUN_WEB=1
 RUN_IOS=1
 RUN_IOS_UI=0
 RUN_LOAD_SMOKE=0
+RUN_REALTIME_SMOKE=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/release-preflight.sh [--web-only] [--ios-only] [--skip-ios] [--include-ios-ui] [--include-load-smoke]
+Usage: scripts/release-preflight.sh [--web-only] [--ios-only] [--skip-ios] [--include-ios-ui] [--include-load-smoke] [--include-realtime-smoke]
 
 Runs the release baseline before deploying Web or publishing an iOS test build:
   - backend lint/build/test plus dry-run App contract smoke
@@ -25,6 +26,7 @@ Runs the release baseline before deploying Web or publishing an iOS test build:
   - fitmeet-landing lint/build/test
   - FitMeetAlpha unit tests on an available iPhone Simulator
   - optional read-only 1000-concurrency smoke for local/staging/prod targets
+  - optional realtime 1000-online Socket.IO smoke for local/staging/prod targets
 
 Environment:
   FITMEET_APP_DIR             Override the iOS app repo path.
@@ -32,6 +34,7 @@ Environment:
   FITMEET_PNPM_BIN_DIR        pnpm bin directory placed after Node on PATH.
   FITMEET_IOS_SIMULATOR_ID    Use a specific iOS Simulator UDID.
   LOAD_TEST_*                 Options for scripts/load-1000-readonly.mjs.
+  REALTIME_SMOKE_*            Options for scripts/realtime-1000-online-smoke.mjs.
 EOF
 }
 
@@ -53,6 +56,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --include-load-smoke)
       RUN_LOAD_SMOKE=1
+      ;;
+    --include-realtime-smoke)
+      RUN_REALTIME_SMOKE=1
       ;;
     -h|--help)
       usage
@@ -118,6 +124,10 @@ if [[ "${RUN_WEB}" -eq 1 ]]; then
 
   if [[ "${RUN_LOAD_SMOKE}" -eq 1 ]]; then
     run_step "read-only 1000-concurrency smoke" node "${ROOT_DIR}/scripts/load-1000-readonly.mjs"
+  fi
+
+  if [[ "${RUN_REALTIME_SMOKE}" -eq 1 ]]; then
+    run_step "realtime 1000-online smoke" node "${ROOT_DIR}/scripts/realtime-1000-online-smoke.mjs"
   fi
 fi
 
