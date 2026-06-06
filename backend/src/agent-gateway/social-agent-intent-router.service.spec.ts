@@ -161,6 +161,25 @@ describe('SocialAgentIntentRouterService', () => {
     });
   });
 
+  it.each(['只看同校', '不要晚上', '换成散步', '只看低压力', '不想要这个类型'])(
+    'routes candidate filter refinement "%s" to follow-up replan',
+    (message) => {
+      const router = makeRouter();
+
+      const result = router.routeByRules({
+        message,
+        taskContext: { hasSearchContext: true, hasCandidates: true },
+      });
+
+      expect(result).toMatchObject({
+        intent: 'candidate_followup',
+        shouldSearch: true,
+        shouldReplan: true,
+        replyStrategy: 'search_candidates',
+      });
+    },
+  );
+
   it('normalizes invalid DeepSeek casual chat search strategy to conversational answer', async () => {
     const router = new SocialAgentIntentRouterService({
       get: jest.fn((key: string) => {

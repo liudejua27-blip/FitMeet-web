@@ -753,27 +753,6 @@ async function flushAsync(times = 8): Promise<void> {
 }
 
 describe('SocialAgentChat acceptance flow', () => {
-  it.each(['只看同校', '不要晚上', '换成散步', '只看低压力', '不想要这个类型'])(
-    'routes candidate filter refinement "%s" to follow-up replan',
-    (message) => {
-      const router = new SocialAgentIntentRouterService({
-        get: jest.fn().mockReturnValue(undefined),
-      } as never);
-
-      const result = router.routeByRules({
-        message,
-        taskContext: { hasSearchContext: true, hasCandidates: true },
-      });
-
-      expect(result).toMatchObject({
-        intent: 'candidate_followup',
-        shouldSearch: true,
-        shouldReplan: true,
-        replyStrategy: 'search_candidates',
-      });
-    },
-  );
-
   it('routes casual chat without running tools', async () => {
     const { service, executor, socialProfiles, savedEvents } = makeHarness();
 
