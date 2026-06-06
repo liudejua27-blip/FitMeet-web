@@ -1,6 +1,6 @@
 # FitMeet Performance Readiness
 
-Last updated: 2026-06-06
+Last updated: 2026-06-07
 
 This document records the current performance posture for a launch target designed toward 10,000 concurrent users. It is not a claim that 10,000 concurrent users has been proven. It lists what is in place, what must be measured, and the exact blockers for a trustworthy result.
 
@@ -62,7 +62,13 @@ Remote safety gates:
 
 ## Current Results
 
-No fresh 2026-06-06 load result is recorded in this environment yet.
+No successful local or staging load result is recorded in this environment yet.
+
+2026-06-07 local Codex verification:
+
+- Passed: `./scripts/release-preflight.sh --web-only`; backend/frontend/landing install, lint, build, unit/contract tests, dry-run App core smoke, and living-social seed dry-run passed. This is a release correctness baseline, not a load-test result.
+- Blocked: `docker --version` and `docker compose version` both fail with `command not found`, so local Postgres/Mongo/Redis cannot be started through the documented compose path.
+- Blocked: `pnpm --dir backend migration:status` fails with `database.migration_status_failed` for Postgres `localhost:5432/fitness_app` and `ECONNREFUSED`.
 
 Precise blocker from the 2026-06-06 local Codex run:
 

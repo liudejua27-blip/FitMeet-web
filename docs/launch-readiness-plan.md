@@ -274,6 +274,7 @@ node scripts/realtime-1000-online-smoke.mjs
 2026-06-07 local Codex environment:
 
 - Passed: `./scripts/release-preflight.sh --web-only`; backend install/lint/build/database-contract-tests/full Jest suite passed (159 suites, 754 tests), dry-run App core smoke passed, living-social seed dry-run passed, frontend install/lint/build/test passed (14 files, 63 tests), and fitmeet-landing install/lint/build/test passed.
+- Blocked: local DB-backed migration/runtime smoke remains unavailable because `docker --version` and `docker compose version` return `command not found`, and `pnpm --dir backend migration:status` still fails against Postgres `localhost:5432/fitness_app` with `ECONNREFUSED`.
 - Passed: iOS staging backend E2E script safe skip mode: `swift Scripts/staging-backend-e2e.swift`.
 - Passed: iOS test build: `xcodebuild build-for-testing -project FitMeetAlpha.xcodeproj -scheme FitMeetAlpha -destination 'platform=iOS Simulator,id=68F37251-71BE-4F42-9849-62D61BFFE7C3'`.
 - Passed: iOS targeted auth/API contract tests: `xcodebuild test -project FitMeetAlpha.xcodeproj -scheme FitMeetAlpha -destination 'platform=iOS Simulator,id=68F37251-71BE-4F42-9849-62D61BFFE7C3' -only-testing:FitMeetAlphaTests/AuthRestoreContractTests` (24 tests).
