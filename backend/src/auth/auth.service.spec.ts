@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 
 describe('AuthService production provider safety', () => {
@@ -26,7 +26,7 @@ describe('AuthService production provider safety', () => {
       configService as never,
     );
 
-    return { service, redisClient, userRepo };
+    return { service, redisClient, userRepo, jwtService };
   }
 
   it('does not persist SMS codes when production SMS config is missing', async () => {
@@ -132,5 +132,74 @@ describe('AuthService production provider safety', () => {
       service.loginWithWechatMini({ code: 'mini-dev-code' }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(userRepo.findOne).not.toHaveBeenCalled();
+  });
+
+  it('rejects missing refresh tokens without rotating Redis state', async () => {
+    const { service, redisClient, userRepo } = makeService({
+      NODE_ENV: 'production',
+    });
+    redisClient.get.mockResolvedValueOnce(null);
+
+    await expect(service.refreshAccessToken('missing')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+
+    expect(redisClient.get).toHaveBeenCalledWith('refresh:missing');
+    expect(userRepo.findOne).not.toHaveBeenCalled();
+    expect(redisClient.del).not.toHaveBeenCalled();
+    expect(redisClient.setex).not.toHaveBeenCalled();
+  });
+
+  it('rejects refresh tokens for deleted users without deleting the old token', async () => {
+    const { service, redisClient, userRepo } = makeService({
+      NODE_ENV: 'production',
+    });
+    redisClient.get.mockResolvedValueOnce('7');
+    userRepo.findOne.mockResolvedValueOnce(null);
+
+    await expect(service.refreshAccessToken('stale')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+
+    expect(userRepo.findOne).toHaveBeenCalledWith({ where: { id: 7 } });
+    expect(redisClient.del).not.toHaveBeenCalled();
+    expect(redisClient.setex).not.toHaveBeenCalled();
+  });
+
+  it('rotates refresh tokens and returns sanitized auth results', async () => {
+    const { service, redisClient, userRepo, jwtService } = makeService({
+      NODE_ENV: 'production',
+    });
+    const user = {
+      id: 7,
+      email: 'lin@example.com',
+      password: 'hashed-password',
+      name: 'Lin',
+      avatar: '',
+    };
+    redisClient.get.mockResolvedValueOnce('7');
+    userRepo.findOne.mockResolvedValueOnce(user);
+
+    const result = await service.refreshAccessToken('old-refresh');
+
+    expect(redisClient.del).toHaveBeenCalledWith('refresh:old-refresh');
+    expect(redisClient.setex).toHaveBeenCalledWith(
+      expect.stringMatching(/^refresh:[0-9a-f-]{36}$/),
+      604800,
+      '7',
+    );
+    expect(redisClient.del.mock.invocationCallOrder[0]).toBeLessThan(
+      redisClient.setex.mock.invocationCallOrder[0],
+    );
+    expect(jwtService.sign).toHaveBeenCalledWith({
+      sub: 7,
+      email: 'lin@example.com',
+    });
+    expect(result).toMatchObject({
+      access_token: 'jwt',
+      refresh_token: expect.any(String),
+      user: { id: 7, email: 'lin@example.com', name: 'Lin' },
+    });
+    expect(result.user).not.toHaveProperty('password');
   });
 });
