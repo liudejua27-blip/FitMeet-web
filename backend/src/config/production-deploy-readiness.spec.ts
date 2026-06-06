@@ -17,6 +17,23 @@ describe('production deploy readiness', () => {
     expect(nginx).toContain('location /health');
     expect(nginx).toContain('proxy_pass http://backend/api/health');
   });
+
+  it('keeps the production deploy script behind release and env readiness gates', () => {
+    const deployScript = readRepoFile('scripts/deploy-production.sh');
+
+    expect(deployScript).toContain(
+      'RUN_RELEASE_PREFLIGHT="${RUN_RELEASE_PREFLIGHT:-true}"',
+    );
+    expect(deployScript).toContain('./scripts/release-preflight.sh --web-only');
+    expect(deployScript).toContain(
+      'pnpm -C backend run check:prod-env -- "../$ENV_FILE"',
+    );
+    expect(deployScript.indexOf('check:prod-env')).toBeLessThan(
+      deployScript.indexOf(
+        'docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build',
+      ),
+    );
+  });
 });
 
 function readRepoFile(relativePath: string): string {

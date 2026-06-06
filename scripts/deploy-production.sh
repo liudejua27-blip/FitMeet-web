@@ -4,6 +4,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/fitmeet-new}"
 COMPOSE_FILE="docker-compose.prod.yml"
 ENV_FILE=".env.production"
+RUN_RELEASE_PREFLIGHT="${RUN_RELEASE_PREFLIGHT:-true}"
 
 cd "$APP_DIR"
 
@@ -20,17 +21,32 @@ if [ ! -f "nginx/ssl/fullchain.pem" ] || [ ! -f "nginx/ssl/privkey.pem" ]; then
   exit 1
 fi
 
-echo "[1/5] Prepare code"
+echo "[1/6] Prepare code"
 if [ -d ".git" ]; then
   git pull
 else
   echo "No .git directory found; using uploaded project files in $APP_DIR"
 fi
 
-echo "[2/5] Prepare frontend dist"
-BUILD_FRONTEND="${BUILD_FRONTEND:-auto}"
+echo "[2/6] Prepare package manager"
 corepack enable
 corepack prepare pnpm@10.30.3 --activate
+
+if [ "$RUN_RELEASE_PREFLIGHT" = "true" ]; then
+  echo "[3/6] Run Web release preflight"
+  ./scripts/release-preflight.sh --web-only
+else
+  echo "[3/6] Skip Web release preflight because RUN_RELEASE_PREFLIGHT=$RUN_RELEASE_PREFLIGHT"
+  if [ ! -x "backend/node_modules/.bin/ts-node" ]; then
+    pnpm -C backend install --frozen-lockfile
+  fi
+fi
+
+echo "[4/6] Validate production environment"
+pnpm -C backend run check:prod-env -- "../$ENV_FILE"
+
+echo "[5/6] Prepare frontend dist"
+BUILD_FRONTEND="${BUILD_FRONTEND:-auto}"
 if [ "$BUILD_FRONTEND" = "false" ] || { [ "$BUILD_FRONTEND" = "auto" ] && [ -f "frontend/dist/index.html" ]; }; then
   echo "Using existing frontend/dist. Set BUILD_FRONTEND=true to rebuild on this server."
   pnpm -C frontend run check:prod-build
@@ -43,13 +59,13 @@ else
   pnpm -C frontend build
 fi
 
-echo "[3/5] Build and restart production stack"
+echo "[6/6] Build and restart production stack"
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build
 
-echo "[4/5] Show service status"
+echo "[post] Show service status"
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps
 
-echo "[5/5] Check backend logs for migrations"
+echo "[post] Check backend logs for migrations"
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" logs --tail=120 backend
 
 echo "[DONE] Run production verification from your local machine:"
