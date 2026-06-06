@@ -42,6 +42,17 @@ describe('fitMeetCoreEndpoints', () => {
     expect(fitMeetCoreEndpoints.messages.getUnreadCount).toBe(
       '/messages/unread',
     );
+    expect(fitMeetCoreEndpoints.agentInbox.conversations).toBe(
+      '/agents/inbox/conversations',
+    );
+    expect(
+      fitMeetCoreEndpoints.agentInbox.messages('conversation:city run'),
+    ).toBe(
+      '/agents/inbox/conversations/conversation%3Acity%20run/messages',
+    );
+    expect(fitMeetCoreEndpoints.agentInbox.reply('conversation:city run')).toBe(
+      '/agents/inbox/conversations/conversation%3Acity%20run/reply',
+    );
     expect(fitMeetCoreEndpoints.socialAgentChat.session).toBe(
       '/social-agent/chat/session',
     );
@@ -128,6 +139,9 @@ describe('fitMeetCoreEndpoints', () => {
         '/messages/conversations/{conversationId}/send',
         '/messages/public-intents/{id}/start',
         '/messages/unread',
+        '/agents/inbox/conversations',
+        '/agents/inbox/conversations/{conversationId}/messages',
+        '/agents/inbox/conversations/{conversationId}/reply',
         '/social-agent/chat/run',
         '/social-agent/chat/run-async',
         '/social-agent/chat/messages',
@@ -195,6 +209,16 @@ describe('fitMeetCoreEndpoints', () => {
         ),
         template:
           fitMeetCoreEndpointTemplates.messages.startPublicIntentConversation,
+      },
+      {
+        built: fitMeetCoreEndpoints.agentInbox.messages(
+          'conversation:city run',
+        ),
+        template: fitMeetCoreEndpointTemplates.agentInbox.messages,
+      },
+      {
+        built: fitMeetCoreEndpoints.agentInbox.reply('conversation:city run'),
+        template: fitMeetCoreEndpointTemplates.agentInbox.reply,
       },
       {
         built: fitMeetCoreEndpoints.socialAgentChat.taskSession(101),

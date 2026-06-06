@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const requestMock = vi.hoisted(() => vi.fn());
@@ -68,5 +70,17 @@ describe('agentInboxApi', () => {
         body: JSON.stringify({ agentProfileId: 7, content: 'hello' }),
       },
     );
+  });
+
+  it('uses the shared core endpoint registry for contracted Agent inbox paths', () => {
+    const source = readFileSync(
+      resolve(__dirname, '../api/agentInboxApi.ts'),
+      'utf8',
+    );
+
+    expect(source).toContain('fitMeetCoreEndpoints.agentInbox.conversations');
+    expect(source).toContain('fitMeetCoreEndpoints.agentInbox.messages');
+    expect(source).toContain('fitMeetCoreEndpoints.agentInbox.reply');
+    expect(source).not.toContain('`/agents/inbox/conversations/${');
   });
 });

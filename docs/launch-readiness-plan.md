@@ -145,7 +145,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - Social Agent chat entrypoint risk has been reduced to thin facade services; profile extraction prompt/normalization has been split out of the LLM service; timeline message restoration still needs continued focused tests because it is shared by Web and iOS session restore.
 - DB risk: production schema drift may exist if older deployments used `synchronize`; verify migration status against staging before production.
 - Mongo index risk has been reduced in code for message/realtime reads, but production must still verify deployed Mongo indexes for `conversations`, `messages`, and `agentinboxevents` before load testing.
-- Contract risk: Web legacy APIs outside `fitmeet-core.openapi.ts` can drift because only the core launch subset is contract-tested; Web Agent inbox conversation read/reply endpoints are now inside the shared core contract and controller mapping guard.
+- Contract risk: Web legacy APIs outside `fitmeet-core.openapi.ts` can drift because only the core launch subset is contract-tested; Web Agent inbox conversation read/reply endpoints are now inside the shared core contract, Web typed endpoint registry, and controller mapping guard.
 - Error contract risk has been reduced for the shared launch subset: OpenAPI now documents the stable error envelope for auth, feed, messages, Social Agent chat, SSE, and uploads instead of only happy paths.
 - Web error handling risk has been reduced: the shared Web base client now preserves backend `code` and `error.retryable` fields from the standard error envelope so UI flows can distinguish validation, auth, dependency, and retryable failures without parsing raw payloads.
 - Web upload risk has been reduced: multipart uploads now preserve bearer auth headers even when callers pass an empty header object for browser-managed boundaries, and upload failures map the backend standard error envelope into `ApiError.code` and `retryable`.
@@ -306,6 +306,7 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts` after adding the launch auth controller-to-OpenAPI mapping guard.
 - Passed: frontend `pnpm --dir frontend test -- fitmeetCoreContract.test.ts` after encoding Web dynamic message conversation paths.
 - Passed: frontend `pnpm --dir frontend test -- agentInboxApi.test.ts` after encoding Web Agent inbox dynamic conversation paths.
+- Passed: frontend `pnpm --dir frontend test -- fitmeetCoreContract.test.ts agentInboxApi.test.ts` after moving Web Agent inbox conversation endpoints into the shared typed endpoint registry.
 - Passed: backend `pnpm --dir backend test -- auth.service.spec.ts`
 - Passed: backend `pnpm --dir backend test -- auth.service.spec.ts production-env-readiness.spec.ts`
 - Passed: backend `pnpm --dir backend test -- uploads.service.spec.ts` after adding Aliyun OSS/S3 failure cleanup coverage.

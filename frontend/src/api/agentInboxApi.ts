@@ -1,5 +1,6 @@
 import * as api from './client';
 import { sanitizeDisplayValue } from '../lib/displayText';
+import { fitMeetCoreEndpoints } from './fitmeetCoreContract';
 
 export interface AgentInboxUser {
   id: number;
@@ -135,7 +136,7 @@ export const agentInboxApi = {
         agentProfileId: number | null;
         agentName: string | null;
         conversations: AgentInboxConversation[];
-      }>(`/agents/inbox/conversations${qs ? `?${qs}` : ''}`)
+      }>(`${fitMeetCoreEndpoints.agentInbox.conversations}${qs ? `?${qs}` : ''}`)
       .then(sanitizeAgentInboxResponse);
   },
 
@@ -153,9 +154,7 @@ export const agentInboxApi = {
         conversationId: string;
         messages: AgentInboxMessage[];
       }>(
-        `/agents/inbox/conversations/${encodeURIComponent(
-          conversationId,
-        )}/messages${qs ? `?${qs}` : ''}`,
+        `${fitMeetCoreEndpoints.agentInbox.messages(conversationId)}${qs ? `?${qs}` : ''}`,
       )
       .then(sanitizeAgentInboxResponse);
   },
@@ -170,9 +169,7 @@ export const agentInboxApi = {
         socketPushed: boolean;
         message: AgentInboxMessage;
       }>(
-        `/agents/inbox/conversations/${encodeURIComponent(
-          conversationId,
-        )}/reply`,
+        fitMeetCoreEndpoints.agentInbox.reply(conversationId),
         {
           method: 'POST',
           body: JSON.stringify(body),

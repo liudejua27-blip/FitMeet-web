@@ -32,8 +32,19 @@ export const fitMeetCoreEndpoints = {
     startPublicIntentConversation: (publicIntentId: string) =>
       `/messages/public-intents/${encodeURIComponent(
         publicIntentId,
-      )}/start` as const,
+    )}/start` as const,
     getUnreadCount: '/messages/unread',
+  },
+  agentInbox: {
+    conversations: '/agents/inbox/conversations',
+    messages: (conversationId: string) =>
+      `/agents/inbox/conversations/${encodeURIComponent(
+        conversationId,
+      )}/messages` as const,
+    reply: (conversationId: string) =>
+      `/agents/inbox/conversations/${encodeURIComponent(
+        conversationId,
+      )}/reply` as const,
   },
   socialAgentChat: {
     run: '/social-agent/chat/run',
@@ -113,6 +124,11 @@ export const fitMeetCoreEndpointTemplates = {
     startPublicIntentConversation: '/messages/public-intents/{id}/start',
     getUnreadCount: '/messages/unread',
   },
+  agentInbox: {
+    conversations: '/agents/inbox/conversations',
+    messages: '/agents/inbox/conversations/{conversationId}/messages',
+    reply: '/agents/inbox/conversations/{conversationId}/reply',
+  },
   socialAgentChat: {
     run: '/social-agent/chat/run',
     runAsync: '/social-agent/chat/run-async',
@@ -155,6 +171,7 @@ export type FitMeetCoreStaticEndpoint =
   | (typeof fitMeetCoreEndpoints.messages)['startConversation']
   | (typeof fitMeetCoreEndpoints.messages)['getConversations']
   | (typeof fitMeetCoreEndpoints.messages)['getUnreadCount']
+  | (typeof fitMeetCoreEndpoints.agentInbox)['conversations']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['messages']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['run']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['runAsync']
