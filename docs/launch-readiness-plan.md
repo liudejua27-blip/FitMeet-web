@@ -36,7 +36,7 @@ This document is the launch control plan for FitMeet Web and FitMeetAlpha iOS. I
   - `feedClient.ts`: social feed, full `FeedPage` pagination metadata, and legacy array-compatible feed reads.
   - `messagesClient.ts`: conversations and unread counts.
   - `socialAgentApi.ts`: Social Agent chat/task actions.
-  - `uploadApi.ts`: image/video upload.
+  - `uploadApi.ts`: image/video multipart upload with bearer auth and standard error envelope mapping.
 - `frontend/src/api/client.ts` remains as a compatibility facade for legacy meet/club/coach/friend surfaces.
 - Required Web production env:
   - `VITE_API_BASE_URL=/api` or a full API origin.
@@ -141,6 +141,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - Contract risk: Web legacy APIs outside `fitmeet-core.openapi.ts` can drift because only the core launch subset is contract-tested.
 - Error contract risk has been reduced for the shared launch subset: OpenAPI now documents the stable error envelope for auth, feed, messages, Social Agent chat, SSE, and uploads instead of only happy paths.
 - Web error handling risk has been reduced: the shared Web base client now preserves backend `code` and `error.retryable` fields from the standard error envelope so UI flows can distinguish validation, auth, dependency, and retryable failures without parsing raw payloads.
+- Web upload risk has been reduced: multipart uploads now preserve bearer auth headers even when callers pass an empty header object for browser-managed boundaries, and upload failures map the backend standard error envelope into `ApiError.code` and `retryable`.
 - Social Agent workspace restore risk has been reduced: Web current-task and task-timeline reads are now part of the shared core OpenAPI contract and typed Web endpoint registry instead of living as untracked debug API strings.
 - Feed write-path risk has been reduced: like/save/comment operations now confirm the target post or comment exists before writing counters or interaction rows, so Web/iOS get stable 404 errors instead of orphan rows or database constraint leakage.
 - Feed publish validation risk has been reduced: post creation now rejects blank `type`, `sport`, or `text` before moderation/database writes, and the shared OpenAPI create-post schema documents the non-empty required strings used by iOS moment publishing.
@@ -295,6 +296,9 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: frontend `pnpm --dir frontend build`
 - Passed: frontend `pnpm --dir frontend test -- baseClient.test.ts`
 - Passed: frontend `pnpm --dir frontend exec eslint src/api/baseClient.ts src/test/baseClient.test.ts`
+- Passed: frontend `pnpm --dir frontend build`
+- Passed: frontend `pnpm --dir frontend test -- uploadApi.test.ts`
+- Passed: frontend `pnpm --dir frontend exec eslint src/api/uploadApi.ts src/test/uploadApi.test.ts`
 - Passed: frontend `pnpm --dir frontend build`
 - Passed: landing `pnpm --dir fitmeet-landing test:source`
 - Passed: landing `pnpm --dir fitmeet-landing lint`

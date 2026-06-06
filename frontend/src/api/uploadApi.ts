@@ -1,6 +1,20 @@
 import { API_BASE_URL, ApiError, getToken } from './baseClient';
 import { fitMeetCoreEndpoints } from './fitmeetCoreContract';
 
+type UploadErrorResponse = {
+  message?: string | string[] | Record<string, unknown>;
+  error?:
+    | string
+    | {
+        code?: string;
+        message?: string;
+        retryable?: boolean;
+      };
+  code?: string;
+  details?: unknown;
+  statusCode?: number;
+};
+
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
   const token = getToken();
@@ -11,8 +25,8 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
 
   // Custom fetch for multipart form data - we don't set Content-Type manually
   const res = await fetch(url, {
-    headers: { ...authHeaders, ...options?.headers },
     ...options,
+    headers: { ...authHeaders, ...options?.headers },
   });
 
   if (!res.ok) {
@@ -31,7 +45,7 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
 function parseErrorBody(body: string) {
   if (!body.trim()) return undefined;
   try {
-    const data = JSON.parse(body) as { message?: string | string[]; error?: string };
+    const data = JSON.parse(body) as UploadErrorResponse;
     return typeof data === 'object' && data !== null ? data : undefined;
   } catch {
     return undefined;
@@ -39,12 +53,19 @@ function parseErrorBody(body: string) {
 }
 
 function resolveUploadErrorMessage(
-  payload: { message?: string | string[]; error?: string } | undefined,
+  payload: UploadErrorResponse | undefined,
   statusText: string,
 ) {
   if (Array.isArray(payload?.message)) return payload.message.join('，');
-  if (payload?.message) return payload.message;
-  if (payload?.error) return payload.error;
+  if (typeof payload?.message === 'string' && payload.message.trim()) return payload.message;
+  if (typeof payload?.message === 'object' && payload.message !== null) {
+    const nested = payload.message.message;
+    if (typeof nested === 'string' && nested.trim()) return nested;
+  }
+  if (typeof payload?.error === 'object' && typeof payload.error.message === 'string') {
+    return payload.error.message;
+  }
+  if (typeof payload?.error === 'string') return payload.error;
   return statusText || '上传失败';
 }
 
