@@ -5,6 +5,7 @@ import { UserFacingResponseSanitizerService } from './response-quality/user-faci
 import { SocialAgentChatController } from './social-agent-chat.controller';
 import { SocialAgentChatService } from './social-agent-chat.service';
 import { AgentTaskStatus } from './entities/agent-task.entity';
+import { SocialAgentCandidateCommandService } from './social-agent-candidate-command.service';
 
 describe('SocialAgentChatController user-facing stream', () => {
   it('streams only light status and sanitized user-facing result', async () => {
@@ -67,8 +68,10 @@ describe('SocialAgentChatController user-facing stream', () => {
         return Promise.resolve();
       }),
     };
+    const candidateCommands = {};
     const controller = new SocialAgentChatController(
       chat as unknown as SocialAgentChatService,
+      candidateCommands as unknown as SocialAgentCandidateCommandService,
       new UserFacingResponseSanitizerService(
         new LightStatusMapperService(),
         new AgentCardAssemblerService(),
@@ -109,5 +112,65 @@ describe('SocialAgentChatController user-facing stream', () => {
       { goal: '今晚想找青岛大学附近跑步搭子' },
       expect.any(Function),
     );
+  });
+});
+
+describe('SocialAgentChatController candidate commands', () => {
+  it('routes candidate command endpoints to the candidate command service', async () => {
+    const chat = {};
+    const candidateCommands = {
+      publishDraft: jest.fn().mockResolvedValue({ taskId: 101 }),
+      saveCandidate: jest.fn().mockResolvedValue({ toolCallId: 'save-1' }),
+      sendCandidateMessage: jest
+        .fn()
+        .mockResolvedValue({ messageId: 'msg-22' }),
+      connectCandidate: jest
+        .fn()
+        .mockResolvedValue({ conversationId: 'conv-22' }),
+    };
+    const controller = new SocialAgentChatController(
+      chat as unknown as SocialAgentChatService,
+      candidateCommands as unknown as SocialAgentCandidateCommandService,
+      new UserFacingResponseSanitizerService(
+        new LightStatusMapperService(),
+        new AgentCardAssemblerService(),
+      ),
+    );
+    const req = { user: { id: 7 } } as Parameters<
+      SocialAgentChatController['saveCandidate']
+    >[0];
+
+    await expect(
+      controller.publishSocialRequest(req, 101, {
+        title: '今晚跑步',
+        rawText: '今晚跑步',
+      } as never),
+    ).resolves.toEqual({ taskId: 101 });
+    await expect(
+      controller.saveCandidate(req, 101, { targetUserId: 22 }),
+    ).resolves.toEqual({ toolCallId: 'save-1' });
+    await expect(
+      controller.sendMessage(req, 101, { targetUserId: 22, message: 'hello' }),
+    ).resolves.toEqual({ messageId: 'msg-22' });
+    await expect(
+      controller.connectCandidate(req, 101, { targetUserId: 22 }),
+    ).resolves.toEqual({ conversationId: 'conv-22' });
+
+    expect(candidateCommands.publishDraft).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ title: '今晚跑步' }),
+    );
+    expect(candidateCommands.saveCandidate).toHaveBeenCalledWith(7, 101, {
+      targetUserId: 22,
+    });
+    expect(candidateCommands.sendCandidateMessage).toHaveBeenCalledWith(
+      7,
+      101,
+      { targetUserId: 22, message: 'hello' },
+    );
+    expect(candidateCommands.connectCandidate).toHaveBeenCalledWith(7, 101, {
+      targetUserId: 22,
+    });
   });
 });

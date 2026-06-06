@@ -33,12 +33,14 @@ import {
 } from './social-agent-chat-stream.presenter';
 import { SocialAgentChatService } from './social-agent-chat.service';
 import type { SocialAgentCardActionBody } from './social-agent-chat.types';
+import { SocialAgentCandidateCommandService } from './social-agent-candidate-command.service';
 
 @Controller('social-agent/chat')
 @UseGuards(AuthGuard('jwt'))
 export class SocialAgentChatController {
   constructor(
     private readonly chat: SocialAgentChatService,
+    private readonly candidateCommands: SocialAgentCandidateCommandService,
     private readonly userFacingSanitizer: UserFacingResponseSanitizerService,
   ) {}
 
@@ -226,7 +228,7 @@ export class SocialAgentChatController {
     @Param('id', ParseIntPipe) id: number,
     @Body() body: CreateSocialRequestDto & { socialRequestId?: number | null },
   ) {
-    return this.chat.publishDraft(req.user.id, id, body);
+    return this.candidateCommands.publishDraft(req.user.id, id, body);
   }
 
   @Post('tasks/:id/replan-run')
@@ -264,7 +266,7 @@ export class SocialAgentChatController {
     @Param('id', ParseIntPipe) id: number,
     @Body() body: SocialAgentSaveCandidateBody,
   ) {
-    return this.chat.saveCandidate(req.user.id, id, body ?? {});
+    return this.candidateCommands.saveCandidate(req.user.id, id, body ?? {});
   }
 
   @Post('tasks/:id/send-message')
@@ -274,7 +276,11 @@ export class SocialAgentChatController {
     @Param('id', ParseIntPipe) id: number,
     @Body() body: SocialAgentSendMessageBody,
   ) {
-    return this.chat.sendCandidateMessage(req.user.id, id, body ?? {});
+    return this.candidateCommands.sendCandidateMessage(
+      req.user.id,
+      id,
+      body ?? {},
+    );
   }
 
   @Post('tasks/:id/connect-candidate')
@@ -284,6 +290,6 @@ export class SocialAgentChatController {
     @Param('id', ParseIntPipe) id: number,
     @Body() body: SocialAgentConnectCandidateBody,
   ) {
-    return this.chat.connectCandidate(req.user.id, id, body ?? {});
+    return this.candidateCommands.connectCandidate(req.user.id, id, body ?? {});
   }
 }

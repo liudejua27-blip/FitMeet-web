@@ -23,7 +23,6 @@ import { SocialAgentFollowUpContextService } from './social-agent-follow-up-cont
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
 import { SocialAgentCardActionRouterService } from './social-agent-card-action-router.service';
-import { SocialAgentCandidateCommandService } from './social-agent-candidate-command.service';
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 import { SocialAgentReplanProgressService } from './social-agent-replan-progress.service';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
@@ -635,14 +634,6 @@ function makeHarness(options: Record<string, unknown> = {}) {
       replanRuns as never,
       options.tonePolicy as never,
     );
-  const candidateCommands =
-    (options.candidateCommands as
-      | SocialAgentCandidateCommandService
-      | undefined) ??
-    new SocialAgentCandidateCommandService(
-      candidateActions as never,
-      draftPublication as never,
-    );
   const initialSearchQueue =
     (options.initialSearchQueue as
       | SocialAgentInitialSearchQueueService
@@ -661,7 +652,6 @@ function makeHarness(options: Record<string, unknown> = {}) {
     sessionQueries as never,
     cardActionRouter as never,
     replanFacade as never,
-    candidateCommands as never,
     initialSearchQueue as never,
     options.tonePolicy as never,
   );
@@ -702,7 +692,6 @@ function makeHarness(options: Record<string, unknown> = {}) {
     sessionQueries,
     cardActionRouter,
     replanFacade,
-    candidateCommands,
     initialSearchQueue,
   };
 }
@@ -2064,45 +2053,6 @@ describe('SocialAgentChatService', () => {
     expect(result.taskId).toBe(101);
   });
 
-  it('publishes the staged draft only after explicit user confirmation', async () => {
-    const { service, taskRepo, executor } = makeHarness();
-    taskRepo.findOne.mockResolvedValue(makeTask());
-
-    const result = await service.publishDraft(7, 101, {
-      socialRequestId: 301,
-      type: SocialRequestType.RunningPartner,
-      rawText: '今晚青岛轻松跑步',
-      title: '今晚青岛轻松跑步',
-      visibility: SocialRequestVisibility.Private,
-      status: UserSocialRequestStatus.Draft,
-    });
-
-    expect(executor.executeToolAction).toHaveBeenCalledWith(
-      101,
-      SocialAgentToolName.CreateSocialRequest,
-      expect.objectContaining({
-        socialRequestId: 301,
-        mode: 'publish',
-        publish: true,
-        visibility: SocialRequestVisibility.Public,
-        status: UserSocialRequestStatus.Matching,
-        requireUserConfirmation: true,
-        metadata: expect.objectContaining({
-          agentTaskId: 101,
-          confirmationSource: 'social_agent_chat',
-        }),
-      }),
-      7,
-    );
-    expect(result.socialRequest).toMatchObject({ id: 301 });
-    expect(result).toMatchObject({
-      taskId: 101,
-      socialRequestId: 301,
-      publicIntentId: 'social_request_301',
-      toolCallId: 'action_create_social_request_publish_1',
-    });
-  });
-
   it('queues a follow-up replan and refreshes the draft plus candidates in the background', async () => {
     const { service, taskRepo, planner, executor } = makeHarness();
     taskRepo.findOne.mockResolvedValue(makeTask({ goal: '今晚青岛轻松跑步' }));
@@ -2155,154 +2105,6 @@ describe('SocialAgentChatService', () => {
       mode: 'draft',
     });
     expect(result.result?.candidates).toHaveLength(1);
-  });
-
-  it('saves a persisted candidate through the SaveCandidate tool', async () => {
-    const { service, taskRepo, executor } = makeHarness();
-    taskRepo.findOne.mockResolvedValue(makeTask());
-
-    await service.saveCandidate(7, 101, {
-      socialRequestId: 301,
-      candidateRecordId: 501,
-      targetUserId: 22,
-    });
-
-    expect(executor.executeToolAction).toHaveBeenCalledWith(
-      101,
-      SocialAgentToolName.SaveCandidate,
-      expect.objectContaining({
-        candidateRecordId: 501,
-        socialRequestId: 301,
-        targetUserId: 22,
-      }),
-      7,
-    );
-  });
-
-  it('connects a candidate through AddFriend and opens a real conversation', async () => {
-    const { service, taskRepo, executor, connectionRepo } = makeHarness();
-    taskRepo.findOne.mockResolvedValue(makeTask({ agentConnectionId: 9 }));
-    connectionRepo.findOne.mockResolvedValue({ id: 9, userId: 7 });
-
-    const result = await service.connectCandidate(7, 101, {
-      socialRequestId: 301,
-      candidateRecordId: 501,
-      targetUserId: 22,
-    });
-
-    expect(executor.executeToolAction).toHaveBeenCalledWith(
-      101,
-      SocialAgentToolName.AddFriend,
-      expect.objectContaining({
-        targetUserId: 22,
-        candidateRecordId: 501,
-        openConversation: true,
-      }),
-      7,
-    );
-    expect(result).toMatchObject({
-      success: true,
-      taskId: 101,
-      targetUserId: 22,
-      candidateUserId: 22,
-      status: 'connected',
-      following: true,
-      friendRequestId: '601',
-      conversationId: 'conv-22',
-      friendAction: {
-        success: true,
-        status: 'connected',
-        targetUserId: 22,
-        candidateUserId: 22,
-        following: true,
-        conversationId: 'conv-22',
-        friendRequestId: '601',
-      },
-      toolCall: expect.objectContaining({
-        toolName: SocialAgentToolName.AddFriend,
-        status: 'succeeded',
-      }),
-    });
-  });
-
-  it('resolves nested candidate user ids when connecting from a candidate card', async () => {
-    const { service, taskRepo, executor } = makeHarness();
-    taskRepo.findOne.mockResolvedValue(makeTask({ agentConnectionId: 9 }));
-
-    await service.connectCandidate(7, 101, {
-      socialRequestId: 301,
-      candidateRecordId: 501,
-      candidate: { candidateUserId: 23 },
-    });
-
-    expect(executor.executeToolAction).toHaveBeenCalledWith(
-      101,
-      SocialAgentToolName.AddFriend,
-      expect.objectContaining({
-        targetUserId: 23,
-        candidateRecordId: 501,
-        socialRequestId: 301,
-        openConversation: true,
-      }),
-      7,
-    );
-  });
-
-  it('surfaces send-message tool failures to callers', async () => {
-    const { service, taskRepo, executor } = makeHarness();
-    taskRepo.findOne.mockResolvedValue(makeTask({ agentConnectionId: 9 }));
-    executor.executeToolAction.mockResolvedValueOnce({
-      id: 'action_send_message_1',
-      toolName: SocialAgentToolName.SendMessage,
-      status: 'failed',
-      output: undefined,
-      error: { message: 'Mongo conversation write failed' },
-    } as never);
-
-    await expect(
-      service.sendCandidateMessage(7, 101, {
-        targetUserId: 22,
-        message: '你好，今晚一起跑步吗？',
-      }),
-    ).rejects.toThrow('Mongo conversation write failed');
-  });
-
-  it('returns normalized send candidate message success details', async () => {
-    const { service, taskRepo } = makeHarness();
-    taskRepo.findOne.mockResolvedValue(makeTask({ agentConnectionId: 9 }));
-
-    const result = await service.sendCandidateMessage(7, 101, {
-      targetUserId: 22,
-      candidateUserId: 22,
-      message: 'hello, run tonight?',
-    });
-
-    expect(result).toMatchObject({
-      success: true,
-      taskId: 101,
-      targetUserId: 22,
-      candidateUserId: 22,
-      messageId: 'msg-22',
-      conversationId: 'conv-22',
-      status: 'sent',
-      candidateStatus: 'messaged',
-      messageAction: {
-        status: 'sent',
-        conversationId: 'conv-22',
-        messageId: 'msg-22',
-      },
-      toolCall: expect.objectContaining({
-        id: 'action_send_message_1',
-        status: 'succeeded',
-      }),
-    });
-
-    const snapshot = await service.getTaskSession(7, 101);
-    expect(snapshot.candidateActions['22']).toMatchObject({
-      send: 'sent',
-      conversationId: 'conv-22',
-      messageId: 'msg-22',
-    });
   });
 
   describe('real conversation acceptance suite', () => {

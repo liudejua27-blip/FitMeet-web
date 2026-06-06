@@ -1,10 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
-import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
-import { SocialAgentToolCallRecord } from './social-agent-tool-executor.service';
 import { TonePolicyService } from './response-quality/tone-policy.service';
 import type {
-  CandidateTargetBody,
   SocialAgentAppendContextResult,
   SocialAgentAsyncRunSnapshot,
   SocialAgentCardActionBody,
@@ -24,7 +21,6 @@ import { SocialAgentRunOrchestratorService } from './social-agent-run-orchestrat
 import { SocialAgentSessionQueryService } from './social-agent-session-query.service';
 import { SocialAgentCardActionRouterService } from './social-agent-card-action-router.service';
 import { SocialAgentReplanFacadeService } from './social-agent-replan-facade.service';
-import { SocialAgentCandidateCommandService } from './social-agent-candidate-command.service';
 import { SocialAgentInitialSearchQueueService } from './social-agent-initial-search-queue.service';
 
 @Injectable()
@@ -36,7 +32,6 @@ export class SocialAgentChatService {
     private readonly sessionQueries: SocialAgentSessionQueryService,
     private readonly cardActionRouter: SocialAgentCardActionRouterService,
     private readonly replanFacade: SocialAgentReplanFacadeService,
-    private readonly candidateCommands: SocialAgentCandidateCommandService,
     private readonly initialSearchQueue: SocialAgentInitialSearchQueueService,
     private readonly tonePolicy?: TonePolicyService,
   ) {}
@@ -155,62 +150,6 @@ export class SocialAgentChatService {
     taskId: number,
   ): Promise<SocialAgentTaskTimelineSnapshot> {
     return this.sessionQueries.getTaskTimeline(ownerUserId, taskId);
-  }
-
-  async publishDraft(
-    ownerUserId: number,
-    taskId: number,
-    draft: CreateSocialRequestDto & { socialRequestId?: number | null },
-  ) {
-    return this.candidateCommands.publishDraft(ownerUserId, taskId, draft);
-  }
-
-  async saveCandidate(
-    ownerUserId: number,
-    taskId: number,
-    body: CandidateTargetBody & {
-      candidateRecordId?: number | null;
-      socialRequestId?: number | null;
-      targetUserId?: number | null;
-      candidateUserId?: number | null;
-      candidate?: Record<string, unknown>;
-    },
-  ): Promise<SocialAgentToolCallRecord> {
-    return this.candidateCommands.saveCandidate(ownerUserId, taskId, body);
-  }
-
-  async sendCandidateMessage(
-    ownerUserId: number,
-    taskId: number,
-    body: CandidateTargetBody & {
-      targetUserId?: number;
-      candidateUserId?: number;
-      message?: string;
-      suggestedOpener?: string;
-      candidateRecordId?: number | null;
-      socialRequestId?: number | null;
-      candidate?: Record<string, unknown>;
-    },
-  ): Promise<Record<string, unknown>> {
-    return this.candidateCommands.sendCandidateMessage(
-      ownerUserId,
-      taskId,
-      body,
-    );
-  }
-
-  async connectCandidate(
-    ownerUserId: number,
-    taskId: number,
-    body: CandidateTargetBody & {
-      targetUserId?: number | null;
-      candidateUserId?: number | null;
-      candidateRecordId?: number | null;
-      socialRequestId?: number | null;
-      candidate?: Record<string, unknown>;
-    },
-  ): Promise<Record<string, unknown>> {
-    return this.candidateCommands.connectCandidate(ownerUserId, taskId, body);
   }
 
   private userVisibleStepLabel(id: string, label: string): string {
