@@ -84,6 +84,7 @@ import { SocialAgentMessageLogService } from './social-agent-message-log.service
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
 import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
 import { SocialAgentMainAgentTurnEventsService } from './social-agent-main-agent-turn-events.service';
+import { SocialAgentMainAgentTurnResultService } from './social-agent-main-agent-turn-result.service';
 import { SocialAgentRunRecommendationService } from './social-agent-run-recommendation.service';
 import { SocialAgentReplanRunService } from './social-agent-replan-run.service';
 import { SocialAgentRouteTurnService } from './social-agent-route-turn.service';
@@ -260,6 +261,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentMessageLogService,
     SocialAgentTaskLifecycleService,
     SocialAgentMainAgentTurnEventsService,
+    SocialAgentMainAgentTurnResultService,
     SocialAgentMainAgentTurnService,
     SocialAgentRunRecommendationService,
     SocialAgentReplanRunService,
@@ -362,6 +364,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentMessageLogService,
     SocialAgentTaskLifecycleService,
     SocialAgentMainAgentTurnEventsService,
+    SocialAgentMainAgentTurnResultService,
     SocialAgentMainAgentTurnService,
     SocialAgentRunRecommendationService,
     SocialAgentReplanRunService,

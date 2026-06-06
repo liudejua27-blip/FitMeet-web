@@ -7,6 +7,7 @@ import {
 } from './entities/agent-task.entity';
 import type { FitMeetAlphaTurnDecision } from './fitmeet-alpha-agent.types';
 import { SocialAgentMainAgentTurnEventsService } from './social-agent-main-agent-turn-events.service';
+import { SocialAgentMainAgentTurnResultService } from './social-agent-main-agent-turn-result.service';
 import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
@@ -101,13 +102,16 @@ function makeHarness(alphaTurn?: FitMeetAlphaTurnDecision) {
       (question: string, fallback: string) => question || fallback,
     ),
   };
-  const service = new SocialAgentMainAgentTurnService(
+  const turnResults = new SocialAgentMainAgentTurnResultService(
     taskRepo as never,
     new SocialAgentMainAgentTurnEventsService(eventRepo as never),
     messageLog as never,
     metrics as never,
-    alphaAgent as never,
     tonePolicy as never,
+  );
+  const service = new SocialAgentMainAgentTurnService(
+    turnResults as never,
+    alphaAgent as never,
   );
   return {
     alphaAgent,
