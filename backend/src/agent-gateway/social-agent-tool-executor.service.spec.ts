@@ -13,6 +13,7 @@ import {
 import { ActivityProofPolicy } from '../activities/entities/activity-template.entity';
 import { SceneRiskPolicyService } from './scene-risk-policy.service';
 import { SocialAgentTargetResolverService } from './social-agent-target-resolver.service';
+import { SocialAgentActionSideEffectService } from './social-agent-action-side-effect.service';
 import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
 
 type MockRepository<T extends object = Record<string, unknown>> = {
@@ -192,6 +193,10 @@ function makeService() {
     safety as never,
   );
   const toolJsonModel = new SocialAgentToolJsonModelService(config as never);
+  const actionSideEffects = new SocialAgentActionSideEffectService(
+    actionLogs as never,
+    messages as never,
+  );
 
   const service = new SocialAgentToolExecutorService(
     taskRepo as never,
@@ -199,7 +204,6 @@ function makeService() {
     connectionRepo as never,
     candidateRepo as never,
     paymentIntentRepo as never,
-    actionLogs as never,
     new AgentPermissionService(),
     new FitMeetAgentToolRegistryService(),
     approvals as never,
@@ -217,6 +221,7 @@ function makeService() {
     new SceneRiskPolicyService(),
     targetResolver,
     toolJsonModel,
+    actionSideEffects,
   );
 
   return {
@@ -246,6 +251,7 @@ function makeService() {
     longTermMemory,
     targetResolver,
     toolJsonModel,
+    actionSideEffects,
   };
 }
 

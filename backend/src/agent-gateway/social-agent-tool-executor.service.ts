@@ -30,11 +30,6 @@ import { SocialRequestType } from '../social-requests/social-request.entity';
 import { SocialRequestsService } from '../social-requests/social-requests.service';
 import { SocialProfileService } from '../users/social-profile.service';
 import { UpdateSocialProfileDto } from '../users/dto/update-social-profile.dto';
-import { AgentActionLogService } from './agent-action-log.service';
-import {
-  AgentActionRiskLevel,
-  AgentActionStatus,
-} from './entities/agent-action-log.entity';
 import {
   PaymentIntent,
   PaymentIntentStatus,
@@ -85,13 +80,9 @@ import {
 } from './scene-risk-policy.service';
 import { ConfirmationGuardService } from './confirmation-guard.service';
 import {
-  getSocialAgentApprovalId,
   getSocialAgentRelatedActivityId,
   getSocialAgentRelatedCandidateId,
   getSocialAgentRelatedSocialRequestId,
-  getSocialAgentTargetUserId,
-  getSocialAgentToolInputSummary,
-  getSocialAgentToolOutputSummary,
 } from './social-agent-tool-audit';
 import {
   buildSocialAgentToolApprovalSummary,
@@ -99,11 +90,9 @@ import {
   getSocialAgentToolActionType,
   getSocialAgentToolApprovalRiskLevel,
   getSocialAgentToolApprovalType,
-  getSocialAgentToolRiskLevel,
   getSocialAgentToolRiskLevelForPolicy,
   getSocialAgentToolSceneActionType,
   isConfirmableSocialAgentTool,
-  shouldWriteSocialAgentActionResultInbox,
   SOCIAL_AGENT_HIGH_RISK_TOOL_DAILY_LIMITS,
 } from './social-agent-tool-policy';
 import { SocialAgentToolName } from './social-agent-tool.types';
@@ -128,6 +117,7 @@ import {
 } from './social-agent-next-action-decision';
 import { SocialAgentTargetResolverService } from './social-agent-target-resolver.service';
 import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
+import { SocialAgentActionSideEffectService } from './social-agent-action-side-effect.service';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -142,23 +132,6 @@ type StepRecord = Record<string, unknown>;
 type ExecuteTaskOptions = {
   maxSteps?: number;
   stopOnError?: boolean;
-};
-
-type ToolAuditDetails = {
-  userId: number;
-  agentTaskId: number;
-  toolName: SocialAgentToolName;
-  inputSummary: string;
-  outputSummary: string;
-  riskLevel: AgentActionRiskLevel;
-  requiresApproval: boolean;
-  userConfirmed: boolean;
-  executed: boolean;
-  sceneType: string;
-  approvalId: number | null;
-  status: SocialAgentToolCallStatus;
-  error: Record<string, unknown> | null;
-  createdAt: string;
 };
 
 @Injectable()
@@ -178,7 +151,6 @@ export class SocialAgentToolExecutorService {
     private readonly candidateRepo: Repository<SocialRequestCandidate>,
     @InjectRepository(PaymentIntent)
     private readonly paymentIntentRepo: Repository<PaymentIntent>,
-    private readonly actionLogs: AgentActionLogService,
     private readonly permissions: AgentPermissionService,
     private readonly toolRegistry: FitMeetAgentToolRegistryService,
     private readonly approvals: AgentApprovalService,
@@ -196,6 +168,7 @@ export class SocialAgentToolExecutorService {
     private readonly sceneRisk: SceneRiskPolicyService,
     private readonly targetResolver: SocialAgentTargetResolverService,
     private readonly toolJsonModel: SocialAgentToolJsonModelService,
+    private readonly actionSideEffects: SocialAgentActionSideEffectService,
     private readonly confirmationGuard?: ConfirmationGuardService,
   ) {}
 
@@ -2512,165 +2485,12 @@ export class SocialAgentToolExecutorService {
     call: SocialAgentToolCallRecord,
   ): Promise<void> {
     const policy = this.toolPolicyMetadata(task, toolName, input);
-    const audit = this.buildToolAuditDetails(
+    await this.actionSideEffects.record({
       task,
       toolName,
       input,
       call,
       policy,
-    );
-    const actionLog = await this.actionLogs.logAgentAction({
-      ownerUserId: task.ownerUserId,
-      agentId: task.agentConnectionId,
-      agentTaskId: task.id,
-      actionType: getSocialAgentToolActionType(toolName),
-      actionStatus: this.actionStatusForCall(call),
-      eventType:
-        call.status === 'succeeded'
-          ? 'social_agent.tool.succeeded'
-          : `social_agent.tool.${call.status}`,
-      conversationId: this.string(call.output?.conversationId) ?? null,
-      messageId:
-        this.string(call.output?.messageId) ??
-        this.string(call.output?.id) ??
-        null,
-      status: call.status,
-      riskLevel: audit.riskLevel,
-      targetUserId: getSocialAgentTargetUserId(input, call.output),
-      relatedSocialRequestId: getSocialAgentRelatedSocialRequestId(
-        input,
-        call.output,
-      ),
-      relatedCandidateId: getSocialAgentRelatedCandidateId(
-        toolName,
-        input,
-        call.output,
-      ),
-      relatedActivityId: getSocialAgentRelatedActivityId(
-        toolName,
-        input,
-        call.output,
-      ),
-      inputSummary: audit.inputSummary,
-      outputSummary: audit.outputSummary,
-      payload: {
-        ...audit,
-        agentTaskId: task.id,
-        stepId: call.stepId,
-        toolCallId: call.id,
-        toolName,
-        permissionMode: task.permissionMode,
-        policy,
-        userId: task.ownerUserId,
-        input,
-        output: call.output,
-        error: call.error,
-      },
-      reason: this.string(call.error?.message) ?? null,
-    });
-
-    if (!actionLog) {
-      this.logger.warn(
-        `Action completed without agent_action_logs entry for task=${task.id}, tool=${toolName}`,
-      );
-    }
-
-    if (
-      shouldWriteSocialAgentActionResultInbox(toolName) &&
-      task.agentConnectionId
-    ) {
-      try {
-        await this.writeActionResultInbox(task, toolName, call);
-      } catch (error) {
-        this.logger.warn(
-          `Failed to write action result inbox for task=${task.id}, tool=${toolName}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    }
-  }
-
-  private buildToolAuditDetails(
-    task: AgentTask,
-    toolName: SocialAgentToolName,
-    input: Record<string, unknown>,
-    call: SocialAgentToolCallRecord,
-    policy: Record<string, unknown>,
-  ): ToolAuditDetails {
-    const scenePolicy = this.isRecord(policy.sceneRisk)
-      ? (policy.sceneRisk as unknown as SceneRiskPolicyResult)
-      : null;
-    const pendingApproval =
-      call.output?.pendingApproval === true ||
-      call.output?.status === 'pending_approval';
-    const simulated = call.output?.simulated === true;
-    return {
-      userId: task.ownerUserId,
-      agentTaskId: task.id,
-      toolName,
-      inputSummary: getSocialAgentToolInputSummary(toolName, input),
-      outputSummary: getSocialAgentToolOutputSummary(toolName, call),
-      riskLevel: scenePolicy
-        ? getSocialAgentToolRiskLevelForPolicy(scenePolicy.riskLevel)
-        : getSocialAgentToolRiskLevel(toolName),
-      requiresApproval:
-        typeof policy.requiresApproval === 'boolean'
-          ? policy.requiresApproval
-          : false,
-      userConfirmed: this.hasUserApproval(input),
-      executed: call.status === 'succeeded' && !pendingApproval && !simulated,
-      sceneType: scenePolicy?.sceneType ?? 'general',
-      approvalId: getSocialAgentApprovalId(toolName, input, call.output),
-      status: call.status,
-      error: call.error,
-      createdAt: call.completedAt,
-    };
-  }
-
-  private async writeActionResultInbox(
-    task: AgentTask,
-    toolName: SocialAgentToolName,
-    call: SocialAgentToolCallRecord,
-  ): Promise<void> {
-    if (!task.agentConnectionId) {
-      throw new BadRequestException(
-        'agentConnectionId is required for action result inbox',
-      );
-    }
-
-    await this.messages.createAgentInboxEvent({
-      agentConnectionId: task.agentConnectionId,
-      ownerUserId: task.ownerUserId,
-      eventType: `agent.action.${call.status}`,
-      conversationId: this.string(call.output?.conversationId) || null,
-      messageId:
-        this.string(call.output?.messageId) ||
-        this.string(call.output?.id) ||
-        null,
-      requestId:
-        getSocialAgentRelatedSocialRequestId(call.input, call.output) ?? null,
-      candidateRecordId:
-        getSocialAgentRelatedCandidateId(toolName, call.input, call.output) ??
-        null,
-      fromUserId: getSocialAgentTargetUserId(call.input, call.output) ?? null,
-      contentPreview:
-        call.status === 'succeeded'
-          ? `${toolName} completed`
-          : `${toolName} ${call.status}: ${this.string(call.error?.message) ?? ''}`,
-      unread: true,
-      dedupeKey: `${task.agentConnectionId}:agent.action:${task.id}:${call.id}`,
-      metadata: {
-        agentTaskId: task.id,
-        stepId: call.stepId,
-        toolCallId: call.id,
-        toolName,
-        permissionMode: task.permissionMode,
-        policy: this.toolPolicyMetadata(task, toolName),
-        status: call.status,
-        output: call.output,
-        error: call.error,
-      },
     });
   }
 
@@ -2737,20 +2557,6 @@ export class SocialAgentToolExecutorService {
       SocialAgentToolName.SendMessage,
       SocialAgentToolName.SendMessageToCandidate,
     ].includes(toolName);
-  }
-
-  private actionStatusForCall(
-    call: SocialAgentToolCallRecord,
-  ): AgentActionStatus {
-    if (
-      call.output?.pendingApproval === true ||
-      call.output?.status === 'pending_approval'
-    ) {
-      return AgentActionStatus.PendingApproval;
-    }
-    return call.status === 'succeeded'
-      ? AgentActionStatus.Executed
-      : AgentActionStatus.Failed;
   }
 
   private assertToolAllowed(

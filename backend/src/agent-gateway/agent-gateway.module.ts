@@ -49,6 +49,7 @@ import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
 import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
 import { SocialAgentModelRouterService } from './social-agent-model-router.service';
 import { SocialAgentMemoryContextService } from './social-agent-memory-context.service';
+import { SocialAgentActionSideEffectService } from './social-agent-action-side-effect.service';
 import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
 import { SocialAgentToolExecutorService } from './social-agent-tool-executor.service';
 import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
@@ -219,6 +220,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentFinalResponseService,
     SocialAgentModelRouterService,
     SocialAgentMemoryContextService,
+    SocialAgentActionSideEffectService,
     SocialAgentToolJsonModelService,
     SocialAgentAutopilotService,
     SocialAgentChatLlmService,
@@ -314,6 +316,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentFinalResponseService,
     SocialAgentModelRouterService,
     SocialAgentMemoryContextService,
+    SocialAgentActionSideEffectService,
     SocialAgentToolJsonModelService,
     SocialAgentAutopilotService,
     SocialAgentChatService,
