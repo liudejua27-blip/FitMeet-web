@@ -29,7 +29,6 @@ import { SocialAgentPlannerService } from './social-agent-planner.service';
 import {
   SocialAgentIntentRouterService,
   type SocialAgentIntentEntities,
-  type SocialAgentIntentRouterResult,
   type SocialAgentIntentType,
 } from './social-agent-intent-router.service';
 import { SocialAgentBrainService } from './social-agent-brain.service';
@@ -60,7 +59,6 @@ import {
   readSocialAgentConversationHistory,
 } from './social-agent-chat-memory.presenter';
 import { rememberSocialAgentConversationBrainDecision } from './social-agent-chat-brain-memory.presenter';
-import { readSocialAgentStoredCandidateSummaries } from './social-agent-chat-session.presenter';
 import {
   buildSocialAgentBlockedRunResult,
   buildSocialAgentClarificationRunResult,
@@ -81,11 +79,7 @@ import { SocialAgentActivitySearchService } from './social-agent-activity-search
 import { SocialAgentMessageLogService } from './social-agent-message-log.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
-import { SocialAgentRagService } from './social-agent-rag.service';
-import {
-  SocialAgentMemoryContext,
-  SocialAgentMemoryContextService,
-} from './social-agent-memory-context.service';
+import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { LifeGraphProposalDto } from '../life-graph/dto/life-graph.dto';
 import { LifeGraphService } from '../life-graph/life-graph.service';
 import {
@@ -157,7 +151,6 @@ export class SocialAgentChatService {
     private readonly publicIntentRepo: Repository<PublicSocialIntent>,
     private readonly metrics: SocialAgentMetricsService,
     private readonly longTermMemory: SocialAgentLongTermMemoryService,
-    private readonly rag: SocialAgentRagService,
     private readonly chatLlm: SocialAgentChatLlmService,
     private readonly runState: SocialAgentRunStateService,
     private readonly followUpContext: SocialAgentFollowUpContextService,
@@ -172,9 +165,8 @@ export class SocialAgentChatService {
     private readonly sessionRestore: SocialAgentSessionRestoreService,
     private readonly messageLog: SocialAgentMessageLogService,
     private readonly taskLifecycle: SocialAgentTaskLifecycleService,
+    private readonly routeContext: SocialAgentRouteContextService,
     @Optional() private readonly brain?: SocialAgentBrainService,
-    @Optional()
-    private readonly memoryContext?: SocialAgentMemoryContextService,
     @Optional()
     private readonly lifeGraph?: LifeGraphService,
     @Optional()
@@ -379,15 +371,18 @@ export class SocialAgentChatService {
       }),
     ]);
     task = freshTask;
-    let memoryContext = this.buildMemoryContext(task, longTermSnapshot);
+    let memoryContext = this.routeContext.buildMemoryContext(
+      task,
+      longTermSnapshot,
+    );
     let route = await this.intentRouter.route({
       message,
-      taskContext: this.buildTaskContext(
+      taskContext: this.routeContext.buildTaskContext({
         task,
         body,
         longTermSnapshot,
         memoryContext,
-      ),
+      }),
       profile: profile ?? {},
       conversationHistory: readSocialAgentConversationHistory(task),
     });
@@ -395,12 +390,12 @@ export class SocialAgentChatService {
       message,
       route,
       profile: profile ?? {},
-      taskContext: this.buildTaskContext(
+      taskContext: this.routeContext.buildTaskContext({
         task,
         body,
         longTermSnapshot,
         memoryContext,
-      ),
+      }),
       conversationHistory: readSocialAgentConversationHistory(task),
       memoryContext: memoryContext ?? undefined,
     });
@@ -415,7 +410,10 @@ export class SocialAgentChatService {
       }
     }
     this.profileEnrichment.rememberCurrentTaskFromBrain(task, route);
-    memoryContext = this.buildMemoryContext(task, longTermSnapshot);
+    memoryContext = this.routeContext.buildMemoryContext(
+      task,
+      longTermSnapshot,
+    );
     await this.messageLog.recordIntentRoute(task, route).catch((error) => {
       this.metrics.recordError('intent_route_event_failed');
       this.logger.warn(
@@ -428,7 +426,12 @@ export class SocialAgentChatService {
     this.metrics.recordIntent(route.intent, route.source);
     appendSocialAgentUserMemo(task, message, route.intent);
     applySocialAgentTaskMemoryForIntent(task, message, route);
-    await this.applyRagContext(task, route, message, longTermSnapshot);
+    await this.routeContext.applyRagContext({
+      task,
+      route,
+      message,
+      longTermSnapshot,
+    });
     const brainToolResults =
       await this.profileEnrichment.executeConversationBrainReadTools(
         ownerUserId,
@@ -494,7 +497,7 @@ export class SocialAgentChatService {
         message,
         intent: route.intent,
         buildMemoryContext: (currentTask) =>
-          this.buildMemoryContext(currentTask, null),
+          this.routeContext.buildMemoryContext(currentTask, null),
       });
       assistantMessage = handled.assistantMessage;
       savedContext = handled.savedContext;
@@ -508,7 +511,10 @@ export class SocialAgentChatService {
         profile,
         task,
         longTermSnapshot,
-        memoryContext: this.buildMemoryContext(task, longTermSnapshot),
+        memoryContext: this.routeContext.buildMemoryContext(
+          task,
+          longTermSnapshot,
+        ),
         toolResults: brainToolResults,
       });
     }
@@ -560,7 +566,7 @@ export class SocialAgentChatService {
           route,
           message,
           buildMemoryContext: (currentTask) =>
-            this.buildMemoryContext(currentTask, null),
+            this.routeContext.buildMemoryContext(currentTask, null),
         });
       activityResults = handledActivitySearch.activityResults;
       assistantMessage = handledActivitySearch.assistantMessage;
@@ -1632,47 +1638,6 @@ export class SocialAgentChatService {
     return this.candidateActions.connectCandidate(ownerUserId, taskId, body);
   }
 
-  private buildTaskContext(
-    task: AgentTask,
-    body: SocialAgentRouteMessageBody,
-    longTermSnapshot?:
-      | import('./social-agent-long-term-memory.service').LongTermMemorySnapshot
-      | null,
-    memoryContext?: SocialAgentMemoryContext | null,
-  ): Record<string, unknown> {
-    const candidates = readSocialAgentStoredCandidateSummaries(task);
-    const result = this.isRecord(task.result) ? task.result : {};
-    const chatRun = this.isRecord(result.chatRun) ? result.chatRun : {};
-    const hasSearchContext = hasSocialAgentSearchContext(task);
-    const taskMemory = readSocialAgentTaskMemory(task);
-    return {
-      taskId: task.id,
-      taskType: task.taskType,
-      status: task.status,
-      agentState: taskMemory.currentTask.state,
-      currentTask: taskMemory.currentTask,
-      goal: task.goal,
-      hasSearchContext,
-      hasCandidates: body.hasCandidates === true || candidates.length > 0,
-      candidateCount:
-        candidates.length || this.number(chatRun.candidateCount) || 0,
-      socialRequestId: this.number(chatRun.socialRequestId) ?? null,
-      longTermSignals: longTermSnapshot
-        ? {
-            taskCount: longTermSnapshot.taskCount,
-            profileFacts: longTermSnapshot.profileFacts,
-            preferences: longTermSnapshot.preferences,
-            boundaries: longTermSnapshot.boundaries,
-            socialGoals: longTermSnapshot.socialGoals,
-            availability: longTermSnapshot.availability,
-            activityPreferences: longTermSnapshot.activityPreferences,
-            matchSignals: longTermSnapshot.matchSignals,
-          }
-        : null,
-      memoryContext: memoryContext ?? null,
-    };
-  }
-
   private emptyIntentEntities(): SocialAgentIntentEntities {
     return {
       city: '',
@@ -1681,21 +1646,6 @@ export class SocialAgentChatService {
       timePreference: '',
       locationPreference: '',
     };
-  }
-
-  private buildMemoryContext(
-    task: AgentTask,
-    longTermSnapshot:
-      | import('./social-agent-long-term-memory.service').LongTermMemorySnapshot
-      | null,
-  ): SocialAgentMemoryContext | null {
-    return (
-      this.memoryContext?.build({
-        task,
-        conversationHistory: readSocialAgentConversationHistory(task),
-        longTermSnapshot,
-      }) ?? null
-    );
   }
 
   private userVisibleStepLabel(id: string, label: string): string {
@@ -1732,57 +1682,6 @@ export class SocialAgentChatService {
       permissionMode: task.permissionMode ?? AgentTaskPermissionMode.Confirm,
       idempotencyKey,
     });
-  }
-
-  private async applyRagContext(
-    task: AgentTask,
-    route: SocialAgentIntentRouterResult,
-    message: string,
-    longTermSnapshot:
-      | import('./social-agent-long-term-memory.service').LongTermMemorySnapshot
-      | null,
-  ): Promise<void> {
-    const startedAt = Date.now();
-    try {
-      const context = await this.rag.retrieve({
-        intent: route.intent,
-        ownerUserId: task.ownerUserId,
-        message,
-        activityType: route.entities?.activityType,
-        longTermSnapshot,
-      });
-      this.metrics.recordLatency('rag_retrieve', Date.now() - startedAt);
-      if (context.retrievedKinds.length === 0) return;
-      const root =
-        task.memory &&
-        typeof task.memory === 'object' &&
-        !Array.isArray(task.memory)
-          ? (task.memory as Record<string, unknown>)
-          : {};
-      task.memory = {
-        ...root,
-        lastRagContext: {
-          intent: context.intent,
-          retrievedKinds: context.retrievedKinds,
-          safetySop: context.safetySop,
-          openingTemplates: context.openingTemplates,
-          activitySop: context.activitySop,
-          successfulMatchCases: context.successfulMatchCases,
-          userMemorySummary: context.userMemorySummary,
-          retrievedAt: new Date().toISOString(),
-        },
-      };
-    } catch (error) {
-      this.metrics.recordError('rag_retrieve_failed');
-      this.logger.warn(
-        JSON.stringify({
-          event: 'social_agent.rag.retrieve_failed',
-          intent: route.intent,
-          ownerUserId: task.ownerUserId,
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
   }
 
   private async rememberRoutedMessage(
@@ -1924,7 +1823,7 @@ export class SocialAgentChatService {
       emit,
       alphaTurn,
       buildMemoryContext: (currentTask) =>
-        this.buildMemoryContext(currentTask, null),
+        this.routeContext.buildMemoryContext(currentTask, null),
       toEventDto: (event) => this.toEventDto(event),
     });
   }

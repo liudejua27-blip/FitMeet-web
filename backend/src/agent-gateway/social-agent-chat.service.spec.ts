@@ -28,6 +28,7 @@ import { SocialAgentRunStateService } from './social-agent-run-state.service';
 import { SocialAgentSessionRestoreService } from './social-agent-session-restore.service';
 import { SocialAgentMessageLogService } from './social-agent-message-log.service';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
+import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 
@@ -514,6 +515,13 @@ function makeHarness(options: Record<string, unknown> = {}) {
       eventRepo as never,
       connectionRepo as never,
     );
+  const routeContext =
+    (options.routeContext as SocialAgentRouteContextService | undefined) ??
+    new SocialAgentRouteContextService(
+      metrics as never,
+      rag as never,
+      options.memoryContext as never,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
@@ -526,7 +534,6 @@ function makeHarness(options: Record<string, unknown> = {}) {
     publicIntentRepo as never,
     metrics as never,
     longTermMemory as never,
-    rag as never,
     chatLlm as never,
     runState as never,
     followUpContext as never,
@@ -541,8 +548,8 @@ function makeHarness(options: Record<string, unknown> = {}) {
     sessionRestore as never,
     messageLog as never,
     taskLifecycle as never,
+    routeContext as never,
     options.brain as never,
-    undefined,
     options.lifeGraph as never,
     undefined,
     options.fitMeetRuntime as never,
@@ -577,6 +584,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     recommendationResults,
     activitySearch,
     taskLifecycle,
+    routeContext,
   };
 }
 
