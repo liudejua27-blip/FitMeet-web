@@ -6,6 +6,7 @@ import {
 } from './entities/agent-task.entity';
 import { PaymentIntentStatus } from './entities/payment-intent.entity';
 import { SocialAgentPaymentIntentToolService } from './social-agent-payment-intent-tool.service';
+import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 
 type MockRepository<T extends object = Record<string, unknown>> = {
@@ -31,16 +32,22 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   } as AgentTask;
 }
 
+function makeService(paymentIntentRepo = repo()) {
+  const toolInput = new SocialAgentToolInputParserService();
+  return new SocialAgentPaymentIntentToolService(
+    paymentIntentRepo as never,
+    toolInput,
+    new SocialAgentTaskMemoryService(toolInput),
+  );
+}
+
 describe('SocialAgentPaymentIntentToolService', () => {
   it('creates payment intents without integrating a real payment gateway', async () => {
     const paymentIntentRepo = repo();
     paymentIntentRepo.save.mockImplementation((value) =>
       Promise.resolve({ id: 88, ...value }),
     );
-    const service = new SocialAgentPaymentIntentToolService(
-      paymentIntentRepo as never,
-      new SocialAgentToolInputParserService(),
-    );
+    const service = makeService(paymentIntentRepo);
 
     const result = await service.record(
       makeTask(),
@@ -91,10 +98,7 @@ describe('SocialAgentPaymentIntentToolService', () => {
 
   it('skips duplicate payment intents using social loop memory keys', async () => {
     const paymentIntentRepo = repo();
-    const service = new SocialAgentPaymentIntentToolService(
-      paymentIntentRepo as never,
-      new SocialAgentToolInputParserService(),
-    );
+    const service = makeService(paymentIntentRepo);
 
     const result = await service.record(
       makeTask({
@@ -129,10 +133,7 @@ describe('SocialAgentPaymentIntentToolService', () => {
   });
 
   it('rejects payment intents without a positive amount', async () => {
-    const service = new SocialAgentPaymentIntentToolService(
-      repo() as never,
-      new SocialAgentToolInputParserService(),
-    );
+    const service = makeService();
 
     await expect(
       service.record(makeTask(), { amount: 0 }, 'step_1'),

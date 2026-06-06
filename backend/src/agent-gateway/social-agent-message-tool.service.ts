@@ -14,18 +14,12 @@ import {
   buildSocialAgentMessageSendOptions,
 } from './social-agent-message-options';
 import { SocialAgentConfirmationPolicyService } from './social-agent-confirmation-policy.service';
-import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
+import {
+  SocialAgentTaskMemoryService,
+  type SocialAgentSentMessageMemoryInput,
+} from './social-agent-task-memory.service';
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 import { SocialAgentToolName } from './social-agent-tool.types';
-
-export type SocialAgentSentMessageMemoryInput = {
-  id?: string | null;
-  conversationId: string;
-  targetUserId?: number | null;
-  textPreview: string;
-  toolName: SocialAgentToolName;
-  stepId: string;
-};
 
 export type SocialAgentMessageToolInboxEvent = {
   eventType: string;

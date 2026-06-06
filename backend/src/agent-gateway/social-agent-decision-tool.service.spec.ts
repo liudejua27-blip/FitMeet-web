@@ -6,6 +6,7 @@ import {
 import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
 import { SocialAgentDecisionToolService } from './social-agent-decision-tool.service';
 import { SocialAgentToolCallFactoryService } from './social-agent-tool-call-factory.service';
+import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 import { SocialAgentToolName } from './social-agent-tool.types';
 
@@ -57,6 +58,7 @@ function makeService() {
     toolJsonModel as never,
     toolCallFactory,
     toolInput,
+    new SocialAgentTaskMemoryService(toolInput),
   );
 
   return { service, toolJsonModel };

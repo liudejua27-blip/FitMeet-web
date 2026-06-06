@@ -13,6 +13,7 @@ import {
   normalizeSocialAgentNextActionDecision,
 } from './social-agent-next-action-decision';
 import { SocialAgentToolCallFactoryService } from './social-agent-tool-call-factory.service';
+import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
 import { SocialAgentToolName } from './social-agent-tool.types';
@@ -42,13 +43,14 @@ export class SocialAgentDecisionToolService {
     private readonly toolJsonModel: SocialAgentToolJsonModelService,
     private readonly toolCallFactory: SocialAgentToolCallFactoryService,
     private readonly toolInput: SocialAgentToolInputParserService,
+    private readonly taskMemory: SocialAgentTaskMemoryService,
   ) {}
 
   async decideNextSocialAction(
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<SocialAgentDecisionToolResult> {
-    const loop = this.socialLoopMemory(task);
+    const loop = this.taskMemory.socialLoopMemory(task);
     const messages = toSocialAgentMessageArray(
       input.messages ?? loop.latestReceivedMessages,
     );
@@ -84,7 +86,7 @@ export class SocialAgentDecisionToolService {
       },
       shortTermUpdates: {
         nextActionDecision: safeDecision,
-        currentStep: this.shortTermStep(
+        currentStep: this.taskMemory.shortTermStep(
           'decide_next_social_action',
           '已决定下一步社交动作',
           'done',
@@ -106,22 +108,6 @@ export class SocialAgentDecisionToolService {
           },
         },
       },
-    };
-  }
-
-  private socialLoopMemory(task: AgentTask): SocialAgentLoopMemory {
-    const memory = this.toolInput.isRecord(task.memory) ? task.memory : {};
-    return this.toolInput.isRecord(memory.socialLoop)
-      ? (memory.socialLoop as SocialAgentLoopMemory)
-      : {};
-  }
-
-  private shortTermStep(id: string, label: string, status: string) {
-    return {
-      id,
-      label,
-      status,
-      updatedAt: new Date().toISOString(),
     };
   }
 }

@@ -230,6 +230,7 @@ function makeService() {
   const paymentIntentTools = new SocialAgentPaymentIntentToolService(
     paymentIntentRepo as never,
     toolInput,
+    taskMemory,
   );
   const messageTools = new SocialAgentMessageToolService(
     messages as never,
@@ -242,6 +243,7 @@ function makeService() {
     activities as never,
     messages as never,
     toolInput,
+    taskMemory,
   );
   const inboxTools = new SocialAgentInboxToolService(
     messages as never,
@@ -258,6 +260,7 @@ function makeService() {
     toolJsonModel,
     toolCallFactory,
     toolInput,
+    taskMemory,
   );
   const service = new SocialAgentToolExecutorService(
     taskRepo as never,

@@ -7,12 +7,8 @@ import {
   PaymentIntent,
   PaymentIntentStatus,
 } from './entities/payment-intent.entity';
-import {
-  appendSocialAgentLoopValue,
-  buildSocialAgentPaymentIntentDedupeKey,
-  socialAgentLoopStringArray,
-  type SocialAgentLoopMemory,
-} from './social-agent-loop-state';
+import { buildSocialAgentPaymentIntentDedupeKey } from './social-agent-loop-state';
+import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 
 export type SocialAgentPaymentIntentToolResult = {
@@ -26,6 +22,7 @@ export class SocialAgentPaymentIntentToolService {
     @InjectRepository(PaymentIntent)
     private readonly paymentIntentRepo: Repository<PaymentIntent>,
     private readonly toolInput: SocialAgentToolInputParserService,
+    private readonly taskMemory: SocialAgentTaskMemoryService,
   ) {}
 
   async record(
@@ -57,7 +54,13 @@ export class SocialAgentPaymentIntentToolService {
       description,
     });
 
-    if (this.hasSocialLoopKey(task, paymentDedupeKey)) {
+    if (
+      this.taskMemory.hasSocialLoopKey(
+        task,
+        'paymentIntentKeys',
+        paymentDedupeKey,
+      )
+    ) {
       return {
         output: {
           skipped: true,
@@ -118,28 +121,11 @@ export class SocialAgentPaymentIntentToolService {
         message:
           'Payment intent created; real payment gateway integration is pending.',
       },
-      paymentIntentKeys: this.appendSocialLoopKey(task, paymentDedupeKey),
+      paymentIntentKeys: this.taskMemory.appendSocialLoopKey(
+        task,
+        'paymentIntentKeys',
+        paymentDedupeKey,
+      ),
     };
-  }
-
-  private socialLoopMemory(task: AgentTask): SocialAgentLoopMemory {
-    const memory = this.toolInput.isRecord(task.memory) ? task.memory : {};
-    return this.toolInput.isRecord(memory.socialLoop)
-      ? (memory.socialLoop as SocialAgentLoopMemory)
-      : {};
-  }
-
-  private hasSocialLoopKey(task: AgentTask, key: string): boolean {
-    const values = socialAgentLoopStringArray(
-      this.socialLoopMemory(task).paymentIntentKeys,
-    );
-    return values.includes(key);
-  }
-
-  private appendSocialLoopKey(task: AgentTask, key: string): string[] {
-    return appendSocialAgentLoopValue(
-      socialAgentLoopStringArray(this.socialLoopMemory(task).paymentIntentKeys),
-      key,
-    );
   }
 }

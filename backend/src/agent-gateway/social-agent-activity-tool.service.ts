@@ -11,16 +11,17 @@ import { sanitizeCity } from '../common/city.util';
 import { MessagesService } from '../messages/messages.service';
 import { AgentTask } from './entities/agent-task.entity';
 import {
-  appendSocialAgentLoopValue,
   buildSocialAgentActivityInviteDedupeKey,
-  socialAgentLoopStringArray,
   type SocialAgentLoopMemory,
 } from './social-agent-loop-state';
 import {
   buildSocialAgentConversationOptions,
   buildSocialAgentDelegateMessageOptions,
 } from './social-agent-message-options';
-import type { SocialAgentSentMessageMemoryInput } from './social-agent-message-tool.service';
+import {
+  SocialAgentTaskMemoryService,
+  type SocialAgentSentMessageMemoryInput,
+} from './social-agent-task-memory.service';
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 import { SocialAgentToolName } from './social-agent-tool.types';
 
@@ -36,6 +37,7 @@ export class SocialAgentActivityToolService {
     private readonly activities: ActivitiesService,
     private readonly messages: MessagesService,
     private readonly toolInput: SocialAgentToolInputParserService,
+    private readonly taskMemory: SocialAgentTaskMemoryService,
   ) {}
 
   async createActivity(
@@ -58,7 +60,13 @@ export class SocialAgentActivityToolService {
       toolName,
       dto,
     );
-    if (this.hasActivityInviteKey(task, activityDedupeKey)) {
+    if (
+      this.taskMemory.hasSocialLoopKey(
+        task,
+        'activityInviteKeys',
+        activityDedupeKey,
+      )
+    ) {
       return {
         output: {
           skipped: true,
@@ -74,7 +82,11 @@ export class SocialAgentActivityToolService {
 
     const activity = await this.activities.create(task.ownerUserId, dto);
     const baseLoopUpdates: Partial<SocialAgentLoopMemory> = {
-      activityInviteKeys: this.appendActivityInviteKey(task, activityDedupeKey),
+      activityInviteKeys: this.taskMemory.appendSocialLoopKey(
+        task,
+        'activityInviteKeys',
+        activityDedupeKey,
+      ),
       sourceTool: toolName,
     };
 
@@ -121,7 +133,7 @@ export class SocialAgentActivityToolService {
         id: invite.messageId,
         conversationId: invite.conversationId,
         targetUserId: offlineTargetUserId,
-        textPreview: this.preview(invite.text),
+        textPreview: this.taskMemory.preview(invite.text),
         toolName: SocialAgentToolName.OfflineMeeting,
         stepId,
       },
@@ -233,28 +245,6 @@ export class SocialAgentActivityToolService {
     };
   }
 
-  private socialLoopMemory(task: AgentTask): SocialAgentLoopMemory {
-    const memory = this.toolInput.isRecord(task.memory) ? task.memory : {};
-    return this.toolInput.isRecord(memory.socialLoop)
-      ? (memory.socialLoop as SocialAgentLoopMemory)
-      : {};
-  }
-
-  private hasActivityInviteKey(task: AgentTask, key: string): boolean {
-    return socialAgentLoopStringArray(
-      this.socialLoopMemory(task).activityInviteKeys,
-    ).includes(key);
-  }
-
-  private appendActivityInviteKey(task: AgentTask, key: string): string[] {
-    return appendSocialAgentLoopValue(
-      socialAgentLoopStringArray(
-        this.socialLoopMemory(task).activityInviteKeys,
-      ),
-      key,
-    );
-  }
-
   private activityTitle(toolName: SocialAgentToolName): string {
     if (toolName === SocialAgentToolName.OfflineMeeting) return '线下见面安排';
     if (toolName === SocialAgentToolName.CreateActivity) return '约练活动';
@@ -283,11 +273,5 @@ export class SocialAgentActivityToolService {
     }
     parts.push('请在 FitMeet 中确认是否参加。');
     return parts.join('\n');
-  }
-
-  private preview(value: unknown, max = 160): string {
-    const text = this.toolInput.string(value) ?? '';
-    if (text.length <= max) return text;
-    return `${text.slice(0, max - 1)}…`;
   }
 }
