@@ -60,6 +60,7 @@ Authoritative contract:
 
 - Source: `backend/src/openapi/fitmeet-core.openapi.ts`
 - Runtime endpoint: `GET /api/openapi/fitmeet-core.json`
+- Human-readable index: `docs/api-contract.md`
 - Web registry: `frontend/src/api/fitmeetCoreContract.ts`
 - iOS registry: `/Users/liuchongjiang/Documents/FitMeet app/FitMeetAlpha/Networking/FitMeetCoreEndpoint.swift`
 - Contract guard: every non-health core OpenAPI operation must document at least one non-2xx response using the shared `#/components/responses/Error` shape.
@@ -294,6 +295,8 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts` after adding the shared Social Agent async run-status OpenAPI path.
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts` after adding the shared Social Agent run and run-async OpenAPI paths and correcting `SocialAgentRunInput.permissionMode` to optional.
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts` after adding Social Agent workspace publish, task replan, replan-run, append-context, and task-events OpenAPI coverage.
+- Passed: backend `pnpm --dir backend test -- production-deploy-readiness.spec.ts` after adding `/api/ready` to the production verifier and expanding the runtime OpenAPI path guard for Social Agent run/workspace actions.
+- Passed: `bash -n scripts/verify-production.sh`
 - Passed: backend `pnpm --dir backend lint`
 - Passed: backend `pnpm --dir backend build`
 - Passed: frontend `pnpm --dir frontend test -- feedClient.test.ts`

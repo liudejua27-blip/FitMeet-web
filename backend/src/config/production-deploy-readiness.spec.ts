@@ -40,10 +40,25 @@ describe('production deploy readiness', () => {
     const verifier = readRepoFile('scripts/verify-production.sh');
 
     expect(verifier).toContain('/openapi/fitmeet-core.json');
+    expect(verifier).toContain('/ready');
+    expect(verifier).toContain('/social-agent/chat/run');
+    expect(verifier).toContain('/social-agent/chat/run-async');
+    expect(verifier).toContain(
+      '/social-agent/chat/tasks/{taskId}/runs/{runId}',
+    );
+    expect(verifier).toContain(
+      '/social-agent/chat/tasks/{taskId}/publish-social-request',
+    );
+    expect(verifier).toContain('/social-agent/chat/tasks/{taskId}/replan-run');
+    expect(verifier).toContain(
+      '/social-agent/chat/tasks/{taskId}/append-context',
+    );
     expect(verifier).toContain('/social-agent/chat/tasks/{taskId}/session');
     expect(verifier).toContain(
       '/social-agent/chat/tasks/{taskId}/send-message',
     );
+    expect(verifier).toContain('/social-agent/tasks/{taskId}/events');
+    expect(verifier).toContain('/social-agent/tasks/{taskId}/replan');
     expect(verifier).toContain('/auth/profile');
     expect(verifier).toContain('/social-agent/chat/session');
     expect(verifier).toContain('/messages/conversations');

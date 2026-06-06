@@ -13,7 +13,7 @@ usage() {
 Usage: scripts/verify-production.sh [--base-url https://www.ourfitmeet.cn] [--agent-token token] [--run-app-smoke] [--run-public-intent-write]
 
 Verifies a deployed FitMeet Web/API stack from macOS or Linux:
-  - frontend root and backend health
+  - frontend root, backend health, and dependency readiness
   - runtime FitMeet core OpenAPI App contract
   - public feed reachability
   - auth guards on App-protected endpoints
@@ -121,6 +121,7 @@ curl_status() {
 
 frontend_body="$(curl_status "Frontend" "${BASE_URL}" "200")"
 health_body="$(curl_status "Backend health" "${API_BASE_URL}/health" "200")"
+ready_body="$(curl_status "Backend readiness" "${API_BASE_URL}/ready" "200")"
 openapi_body="$(curl_status "FitMeet core OpenAPI" "${API_BASE_URL}/openapi/fitmeet-core.json" "200")"
 feed_body="$(curl_status "Public feed" "${API_BASE_URL}/feed?page=1&limit=5" "200")"
 
@@ -141,12 +142,22 @@ const required = [
   '/messages/conversations/{conversationId}/send',
   '/messages/unread',
   '/social-agent/chat/messages',
+  '/social-agent/chat/run',
+  '/social-agent/chat/run-async',
   '/social-agent/chat/session',
   '/social-agent/chat/tasks/{taskId}/session',
+  '/social-agent/chat/tasks/{taskId}/runs/{runId}',
   '/social-agent/chat/tasks/{taskId}/messages',
+  '/social-agent/chat/tasks/{taskId}/publish-social-request',
+  '/social-agent/chat/tasks/{taskId}/replan-run',
+  '/social-agent/chat/tasks/{taskId}/append-context',
   '/social-agent/chat/tasks/{taskId}/save-candidate',
   '/social-agent/chat/tasks/{taskId}/send-message',
   '/social-agent/chat/tasks/{taskId}/connect-candidate',
+  '/social-agent/tasks/current',
+  '/social-agent/tasks/{taskId}/timeline',
+  '/social-agent/tasks/{taskId}/events',
+  '/social-agent/tasks/{taskId}/replan',
 ];
 const missing = required.filter((path) => !doc.paths?.[path]);
 if (missing.length > 0) {
@@ -156,12 +167,17 @@ if (missing.length > 0) {
 NODE
 ok "Runtime OpenAPI includes App release-critical paths"
 
-node - "${health_body}" "${feed_body}" <<'NODE'
+node - "${health_body}" "${ready_body}" "${feed_body}" <<'NODE'
 const fs = require('fs');
 const health = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-const feed = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+const ready = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+const feed = JSON.parse(fs.readFileSync(process.argv[4], 'utf8'));
 if (health.status !== 'ok') {
   console.error(`Unexpected health payload: ${JSON.stringify(health)}`);
+  process.exit(1);
+}
+if (ready.status !== 'ok' || !ready.checks?.postgres || !ready.checks?.mongo || !ready.checks?.redis) {
+  console.error(`Unexpected readiness payload: ${JSON.stringify(ready)}`);
   process.exit(1);
 }
 if (!Array.isArray(feed.data)) {
@@ -169,7 +185,7 @@ if (!Array.isArray(feed.data)) {
   process.exit(1);
 }
 NODE
-ok "Health and feed payload shapes are readable"
+ok "Health, readiness, and feed payload shapes are readable"
 
 curl_status "Profile without token is protected" "${API_BASE_URL}/auth/profile" "401" >/dev/null
 curl_status "Social Agent session without token is protected" "${API_BASE_URL}/social-agent/chat/session" "401" >/dev/null
