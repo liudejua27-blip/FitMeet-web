@@ -22,6 +22,7 @@ import { AgentSessionAssemblerService } from './agent-session-assembler.service'
 import { SocialAgentFollowUpContextService } from './social-agent-follow-up-context.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
+import { SocialAgentCardActionRouterService } from './social-agent-card-action-router.service';
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 import { SocialAgentReplanProgressService } from './social-agent-replan-progress.service';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
@@ -614,12 +615,19 @@ function makeHarness(options: Record<string, unknown> = {}) {
       taskLifecycle as never,
       options.tonePolicy as never,
     );
+  const cardActionRouter =
+    (options.cardActionRouter as
+      | SocialAgentCardActionRouterService
+      | undefined) ??
+    new SocialAgentCardActionRouterService(
+      candidateActions as never,
+      meetLoop as never,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
     runState as never,
     followUpContext as never,
-    meetLoop as never,
     candidateActions as never,
     draftPublication as never,
     taskLifecycle as never,
@@ -628,6 +636,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     queuedRuns as never,
     runOrchestrator as never,
     sessionQueries as never,
+    cardActionRouter as never,
     options.tonePolicy as never,
   );
 
@@ -665,6 +674,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     queuedRuns,
     runOrchestrator,
     sessionQueries,
+    cardActionRouter,
   };
 }
 

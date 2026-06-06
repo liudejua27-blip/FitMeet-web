@@ -14,7 +14,6 @@ import { transitionSocialAgentState } from './social-agent-memory.util';
 import { createSocialAgentRunId } from './social-agent-chat-run.presenter';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
 import { SocialAgentFollowUpContextService } from './social-agent-follow-up-context.service';
-import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { TonePolicyService } from './response-quality/tone-policy.service';
@@ -34,13 +33,13 @@ import type {
   SocialAgentTaskTimelineSnapshot,
   StreamEmit,
 } from './social-agent-chat.types';
-import { messageForSocialAgentSchemaAction } from './social-agent-card-action.presenter';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
 import { SocialAgentReplanRunService } from './social-agent-replan-run.service';
 import { SocialAgentRouteTurnService } from './social-agent-route-turn.service';
 import { SocialAgentQueuedRunService } from './social-agent-queued-run.service';
 import { SocialAgentRunOrchestratorService } from './social-agent-run-orchestrator.service';
 import { SocialAgentSessionQueryService } from './social-agent-session-query.service';
+import { SocialAgentCardActionRouterService } from './social-agent-card-action-router.service';
 export type * from './social-agent-chat.types';
 
 @Injectable()
@@ -52,7 +51,6 @@ export class SocialAgentChatService {
     private readonly taskRepo: Repository<AgentTask>,
     private readonly runState: SocialAgentRunStateService,
     private readonly followUpContext: SocialAgentFollowUpContextService,
-    private readonly meetLoop: SocialAgentMeetLoopService,
     private readonly candidateActions: SocialAgentCandidateActionService,
     private readonly draftPublication: SocialAgentDraftPublicationService,
     private readonly taskLifecycle: SocialAgentTaskLifecycleService,
@@ -61,6 +59,7 @@ export class SocialAgentChatService {
     private readonly queuedRuns: SocialAgentQueuedRunService,
     private readonly runOrchestrator: SocialAgentRunOrchestratorService,
     private readonly sessionQueries: SocialAgentSessionQueryService,
+    private readonly cardActionRouter: SocialAgentCardActionRouterService,
     private readonly tonePolicy?: TonePolicyService,
   ) {}
 
@@ -97,62 +96,11 @@ export class SocialAgentChatService {
     taskId: number,
     body: SocialAgentCardActionBody,
   ): Promise<SocialAgentIntentRouteResult> {
-    const action = body.action;
-    if (!action) throw new BadRequestException('Missing agent action');
-
-    if (action === 'opener.confirm_send') {
-      return this.handleMessage(ownerUserId, {
-        taskId,
-        message: '确认发送',
-        hasCandidates: true,
-      });
-    }
-
-    if (
-      action === 'candidate.more_like_this' ||
-      action === 'candidate.skip' ||
-      action === 'candidate.like'
-    ) {
-      return this.handleMessage(ownerUserId, {
-        taskId,
-        message:
-          action === 'candidate.skip'
-            ? '不喜欢这个推荐，换一个低压力的人'
-            : action === 'candidate.like'
-              ? '我喜欢这个推荐，继续下一步'
-              : '看看更多类似的人',
-        hasCandidates: true,
-      });
-    }
-
-    if (action === 'candidate.generate_opener') {
-      return this.candidateActions.createOpenerDraftFromCardAction(
-        ownerUserId,
-        taskId,
-        body,
-      );
-    }
-
-    if (action === 'activity.confirm_create') {
-      return this.meetLoop.performActivityAction(ownerUserId, taskId, body);
-    }
-
-    if (action === 'activity.check_in') {
-      return this.meetLoop.performActivityAction(ownerUserId, taskId, body);
-    }
-
-    if (action === 'activity.complete') {
-      return this.meetLoop.performActivityAction(ownerUserId, taskId, body);
-    }
-
-    if (action === 'review.submit') {
-      return this.meetLoop.performActivityAction(ownerUserId, taskId, body);
-    }
-
-    return this.handleMessage(ownerUserId, {
+    return this.cardActionRouter.perform({
+      ownerUserId,
       taskId,
-      message: messageForSocialAgentSchemaAction(action),
-      hasCandidates: true,
+      body,
+      handleMessage: (routeBody) => this.handleMessage(ownerUserId, routeBody),
     });
   }
 
