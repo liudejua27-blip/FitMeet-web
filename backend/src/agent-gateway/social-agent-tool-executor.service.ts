@@ -79,6 +79,7 @@ import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service
 import { summarizeSocialAgentToolCalls } from './social-agent-tool-execution-summary';
 import { buildSocialAgentProfileContextPatch } from './social-agent-profile-context-patch';
 import { buildSocialAgentSocialRequestToolInput } from './social-agent-social-request-tool-input';
+import { buildSocialAgentRunNextResult } from './social-agent-run-next-result';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -1535,18 +1536,12 @@ export class SocialAgentToolExecutorService {
     handledReply: boolean,
     decision: Record<string, unknown> | null,
   ): SocialAgentRunNextResult {
-    const summary = summarizeSocialAgentToolCalls(calls);
-    return {
-      taskId: task.id,
-      executedSteps: summary.executedSteps,
-      succeededSteps: summary.succeededSteps,
-      failedSteps: summary.failedSteps,
-      blockedSteps: summary.blockedSteps,
-      toolCalls: calls,
-      status: task.status,
+    return buildSocialAgentRunNextResult({
+      task,
+      calls,
       handledReply,
       decision,
-    };
+    });
   }
 
   private async writeSocialAgentInboxEvent(
