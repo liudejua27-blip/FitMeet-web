@@ -109,8 +109,5 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Test source smoke
+      - name: Test landing smoke
         run: pnpm test
-
-      - name: Test rendered smoke
-        run: pnpm test:rendered

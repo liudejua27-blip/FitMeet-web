@@ -260,7 +260,13 @@ test('gateway detail route covers every ecosystem CTA with real content', async 
 test('root engineering handbook documents landing tests as real baseline', async () => {
   const readme = await readSource('../README.md');
 
-  assert.match(readme, /fitmeet-landing：install、lint、build、test、test:rendered/);
+  assert.match(
+    readme,
+    /fitmeet-landing：install、lint、build、test(?:、test:rendered|（source \+ rendered smoke）)/,
+  );
   assert.doesNotMatch(readme, /fitmeet-landing.*no-op/i);
-  assert.match(readme, /fitmeet-landing` 已有源码 smoke 和 build 后 rendered smoke 覆盖/);
+  assert.match(
+    readme,
+    /fitmeet-landing` (?:的 `pnpm test` 已覆盖公开落地页组成[\s\S]*Next 产物里的首页、Agent Hub 和三个 gateway 静态 HTML|已有源码 smoke 和 build 后 rendered smoke 覆盖)/,
+  );
 });
