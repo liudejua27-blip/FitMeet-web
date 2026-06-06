@@ -33,6 +33,16 @@ import { SceneRiskPolicyService } from './scene-risk-policy.service';
 import { LifeGraphService } from '../life-graph/life-graph.service';
 import { LifeGraphUnifiedMatchSignalsDto } from '../life-graph/dto/life-graph.dto';
 import { buildSocialMatchDynamicExplanation } from './social-agent-candidate-dynamic-explanation';
+import {
+  lifeGraphBehaviorFit,
+  lifeGraphBoundaryFit,
+  lifeGraphGoalBoost,
+  lifeGraphLocationBoost,
+  lifeGraphRhythmBoost,
+  lifeGraphSafetyPenalty,
+  lifeGraphSportBoost,
+  lifeGraphTimeBoost,
+} from './social-agent-candidate-life-graph-scoring';
 
 export type CandidatePoolSource =
   | 'profile_candidate'
@@ -1183,11 +1193,17 @@ export class SocialAgentCandidatePoolService {
       permissionMode: 'limited_auto',
       safetySignals: input.lifeGraphSignals?.safetySignals,
     });
+    const cityMatches = (left: string, right: string) =>
+      this.cityMatches(left, right);
     return {
       distance: Math.min(
         18,
         (this.cityMatches(input.query.city, input.city) ? 14 : 6) +
-          this.lifeGraphLocationBoost(input.city, input.lifeGraphSignals),
+          lifeGraphLocationBoost(
+            input.city,
+            input.lifeGraphSignals,
+            cityMatches,
+          ),
       ),
       timeOverlap: Math.min(
         15,
@@ -1195,39 +1211,35 @@ export class SocialAgentCandidatePoolService {
           input.query.timePreference,
           input.profile,
           input.delegate,
-        ) + this.lifeGraphTimeBoost(input.lifeGraphSignals),
+        ) + lifeGraphTimeBoost(input.lifeGraphSignals),
       ),
       interestSimilarity: Math.min(
         20,
         input.commonTags.length * 10 +
-          this.lifeGraphSportBoost(input.tags, input.lifeGraphSignals),
+          lifeGraphSportBoost(input.tags, input.lifeGraphSignals),
       ),
       lifeRhythm: Math.min(
         10,
         this.lifeRhythmScore(input.profile, input.delegate) +
-          this.lifeGraphRhythmBoost(input.lifeGraphSignals),
+          lifeGraphRhythmBoost(input.lifeGraphSignals),
       ),
       socialEnergy: this.socialEnergyScore(input.profile, input.delegate),
       relationshipGoal: Math.min(
         10,
         this.relationshipGoalScore(input.query, input.tags) +
-          this.lifeGraphGoalBoost(
-            input.query,
-            input.tags,
-            input.lifeGraphSignals,
-          ),
+          lifeGraphGoalBoost(input.query, input.tags, input.lifeGraphSignals),
       ),
-      lifeGraphBehaviorFit: this.lifeGraphBehaviorFit({
-        query: input.query,
-        city: input.city,
-        tags: input.tags,
-        commonTags: input.commonTags,
-        signals: input.lifeGraphSignals,
-      }),
-      boundaryFit: this.lifeGraphBoundaryFit(
-        input.query,
-        input.lifeGraphSignals,
+      lifeGraphBehaviorFit: lifeGraphBehaviorFit(
+        {
+          query: input.query,
+          city: input.city,
+          tags: input.tags,
+          commonTags: input.commonTags,
+          signals: input.lifeGraphSignals,
+        },
+        cityMatches,
       ),
+      boundaryFit: lifeGraphBoundaryFit(input.query, input.lifeGraphSignals),
       trustworthiness: Math.min(
         10,
         Math.round(input.completeness * 5) + (input.user.verified ? 5 : 0),
@@ -1235,7 +1247,7 @@ export class SocialAgentCandidatePoolService {
       safetyRisk: Math.max(
         0,
         this.safetyRiskScore(policy.riskLevel) -
-          this.lifeGraphSafetyPenalty(input.user, input.lifeGraphSignals),
+          lifeGraphSafetyPenalty(input.user, input.lifeGraphSignals),
       ),
     };
   }
@@ -1265,48 +1277,50 @@ export class SocialAgentCandidatePoolService {
       permissionMode: 'limited_auto',
       safetySignals: input.lifeGraphSignals?.safetySignals,
     });
+    const cityMatches = (left: string, right: string) =>
+      this.cityMatches(left, right);
     return {
       distance: Math.min(
         18,
         (this.cityMatches(input.query.city, input.city) ? 14 : 6) +
-          this.lifeGraphLocationBoost(input.city, input.lifeGraphSignals),
+          lifeGraphLocationBoost(
+            input.city,
+            input.lifeGraphSignals,
+            cityMatches,
+          ),
       ),
       timeOverlap: Math.min(
         15,
         (input.query.timePreference ? 10 : 6) +
-          this.lifeGraphTimeBoost(input.lifeGraphSignals),
+          lifeGraphTimeBoost(input.lifeGraphSignals),
       ),
       interestSimilarity: Math.min(
         20,
         input.commonTags.length * 10 +
-          this.lifeGraphSportBoost(input.tags, input.lifeGraphSignals),
+          lifeGraphSportBoost(input.tags, input.lifeGraphSignals),
       ),
       lifeRhythm: Math.min(
         10,
         (input.query.timePreference ? 7 : 4) +
-          this.lifeGraphRhythmBoost(input.lifeGraphSignals),
+          lifeGraphRhythmBoost(input.lifeGraphSignals),
       ),
       socialEnergy: 5,
       relationshipGoal: Math.min(
         10,
         this.relationshipGoalScore(input.query, input.tags) +
-          this.lifeGraphGoalBoost(
-            input.query,
-            input.tags,
-            input.lifeGraphSignals,
-          ),
+          lifeGraphGoalBoost(input.query, input.tags, input.lifeGraphSignals),
       ),
-      lifeGraphBehaviorFit: this.lifeGraphBehaviorFit({
-        query: input.query,
-        city: input.city,
-        tags: input.tags,
-        commonTags: input.commonTags,
-        signals: input.lifeGraphSignals,
-      }),
-      boundaryFit: this.lifeGraphBoundaryFit(
-        input.query,
-        input.lifeGraphSignals,
+      lifeGraphBehaviorFit: lifeGraphBehaviorFit(
+        {
+          query: input.query,
+          city: input.city,
+          tags: input.tags,
+          commonTags: input.commonTags,
+          signals: input.lifeGraphSignals,
+        },
+        cityMatches,
       ),
+      boundaryFit: lifeGraphBoundaryFit(input.query, input.lifeGraphSignals),
       trustworthiness: Math.min(
         10,
         Math.round(input.completeness * 5) +
@@ -1332,260 +1346,6 @@ export class SocialAgentCandidatePoolService {
     if (/周末|白天|规律|早睡|morning|weekend|day/i.test(text)) return 10;
     if (/晚上|夜间|night|evening/i.test(text)) return 7;
     return 6;
-  }
-
-  private lifeGraphLocationBoost(
-    candidateCity: string,
-    signals?: LifeGraphUnifiedMatchSignalsDto | null,
-  ): number {
-    if (!signals) return 0;
-    const city = this.textSignal(signals.identitySignals.city);
-    const nearbyArea = this.textSignal(signals.identitySignals.nearbyArea);
-    if (city && candidateCity && this.cityMatches(city, candidateCity))
-      return nearbyArea ? 4 : 3;
-    return nearbyArea ? 1 : 0;
-  }
-
-  private lifeGraphTimeBoost(
-    signals?: LifeGraphUnifiedMatchSignalsDto | null,
-  ): number {
-    if (!signals) return 0;
-    const text = [
-      this.textSignal(signals.lifestyleSignals.availableTimes),
-      this.textSignal(signals.lifestyleSignals.weekendAvailability),
-      this.textSignal(signals.lifestyleSignals.activeHours),
-    ].join(' ');
-    if (/周末|下午|上午|晚上|weekend|morning|afternoon|evening/i.test(text))
-      return 3;
-    return 0;
-  }
-
-  private lifeGraphSportBoost(
-    tags: string[],
-    signals?: LifeGraphUnifiedMatchSignalsDto | null,
-  ): number {
-    const sports = this.signalList(signals?.fitnessSignals.sportsPreferences);
-    if (sports.length === 0) return 0;
-    return sports.some((sport) =>
-      tags.some(
-        (tag) =>
-          tag.toLowerCase().includes(sport.toLowerCase()) ||
-          sport.toLowerCase().includes(tag.toLowerCase()),
-      ),
-    )
-      ? 5
-      : 0;
-  }
-
-  private lifeGraphRhythmBoost(
-    signals?: LifeGraphUnifiedMatchSignalsDto | null,
-  ): number {
-    return signals?.lifestyleSignals.availableTimes ||
-      signals?.lifestyleSignals.weekendAvailability
-      ? 2
-      : 0;
-  }
-
-  private lifeGraphGoalBoost(
-    query: CandidatePoolResolvedQuery,
-    tags: string[],
-    signals?: LifeGraphUnifiedMatchSignalsDto | null,
-  ): number {
-    const goal = [
-      this.textSignal(signals?.socialIntentSignals.currentSocialGoal),
-      this.textSignal(signals?.socialIntentSignals.relationshipGoal),
-    ].join(' ');
-    if (!goal.trim()) return 0;
-    const text = [
-      query.rawText,
-      query.activityType,
-      ...query.interestTags,
-      ...tags,
-    ].join(' ');
-    return goal
-      .split(/[、,\s]+/)
-      .filter(Boolean)
-      .some((part) => text.includes(part))
-      ? 2
-      : 1;
-  }
-
-  private lifeGraphBehaviorFit(input: {
-    query: CandidatePoolResolvedQuery;
-    city: string;
-    tags: string[];
-    commonTags: string[];
-    signals?: LifeGraphUnifiedMatchSignalsDto | null;
-  }): number {
-    const behavior = input.signals?.behaviorSignals;
-    if (!behavior) return 0;
-    const weights = behavior.recommendationWeights;
-    const guidance = behavior.matchingGuidance;
-    const text = [
-      input.query.rawText,
-      input.query.activityType,
-      ...input.query.interestTags,
-      ...input.tags,
-      ...input.commonTags,
-    ].join(' ');
-    let score = 0;
-    score += Math.round(
-      this.unitScore(weights?.reliability ?? behavior.scores?.reliability) * 4,
-    );
-    score += Math.round(
-      this.unitScore(weights?.sports ?? behavior.scores?.sportsAffinity) * 3,
-    );
-    if (behavior.completionTrend === 'reliable') score += 2;
-    if (behavior.cancellationPattern === 'frequent') score -= 3;
-    if (behavior.cancellationPattern === 'rare') score += 1;
-    if (
-      (guidance?.shouldPreferLowPressure ||
-        behavior.pressurePreference === 'low') &&
-      this.looksLikeLowPressure(text)
-    ) {
-      score += Math.round(
-        this.unitScore(
-          weights?.lowPressure ?? behavior.scores?.lowPressureFit,
-        ) * 4,
-      );
-    }
-    if (
-      (guidance?.shouldPreferSameSchoolOrArea ||
-        behavior.locationPreference === 'same_school_or_area') &&
-      this.looksLikeSameSchoolOrArea(text, input.city, input.signals)
-    ) {
-      score += Math.max(
-        2,
-        Math.round(this.unitScore(weights?.sameSchoolOrArea) * 4),
-      );
-    }
-    if (
-      (guidance?.shouldPreferSameCity ||
-        behavior.locationPreference === 'same_city') &&
-      this.cityMatches(
-        this.textSignal(input.signals?.identitySignals.city),
-        input.city,
-      )
-    ) {
-      score += Math.max(1, Math.round(this.unitScore(weights?.sameCity) * 3));
-    }
-    if (
-      (guidance?.shouldPreferCommonInterest ||
-        behavior.locationPreference === 'interest_first') &&
-      input.commonTags.length > 0
-    ) {
-      score += Math.max(
-        1,
-        Math.round(this.unitScore(weights?.commonInterest) * 3),
-      );
-    }
-    if (
-      (behavior.feedbackPattern ?? []).some((item) =>
-        text.toLowerCase().includes(item.toLowerCase()),
-      )
-    ) {
-      score += 2;
-    }
-    if (
-      (guidance?.shouldAvoidNight ||
-        behavior.nightBoundary === 'avoids_late_private') &&
-      this.looksLikeLateNight(text)
-    ) {
-      score -= 6;
-    }
-    if (guidance?.shouldReduceDisturbance && !this.looksLikeLowPressure(text)) {
-      score -= 2;
-    }
-    return Math.max(0, Math.min(12, score));
-  }
-
-  private lifeGraphBoundaryFit(
-    query: CandidatePoolResolvedQuery,
-    signals?: LifeGraphUnifiedMatchSignalsDto | null,
-  ): number {
-    if (!signals) return 0;
-    const text = [
-      query.rawText,
-      query.activityType,
-      query.timePreference,
-      query.locationPreference,
-    ].join(' ');
-    let score = 0;
-    if (signals.safetySignals.publicPlaceOnly) score += 2;
-    if (signals.safetySignals.strictConfirmationRequired) score += 1;
-    if (signals.safetySignals.locationSharingAllowed === false) score += 1;
-    if (
-      (signals.behaviorSignals?.matchingGuidance?.shouldAvoidNight ||
-        signals.behaviorSignals?.nightBoundary === 'avoids_late_private') &&
-      this.looksLikeLateNight(text)
-    ) {
-      score -= 4;
-    }
-    if (
-      signals.safetySignals.acceptsNightMeet === false &&
-      this.looksLikeLateNight(text)
-    ) {
-      score -= 3;
-    }
-    return Math.max(0, Math.min(6, score));
-  }
-
-  private lifeGraphSafetyPenalty(
-    candidate: User,
-    signals?: LifeGraphUnifiedMatchSignalsDto | null,
-  ): number {
-    if (!signals) return 0;
-    let penalty = 0;
-    if (signals.safetySignals.realNameRequired && !candidate.verified)
-      penalty += 2;
-    if (signals.safetySignals.acceptsNightMeet === false) penalty += 1;
-    return penalty;
-  }
-
-  private unitScore(value: unknown): number {
-    const score = typeof value === 'number' ? value : Number(value);
-    if (!Number.isFinite(score)) return 0;
-    const normalized = score > 1 ? score / 100 : score;
-    return Math.max(0, Math.min(1, normalized));
-  }
-
-  private looksLikeLowPressure(text: string): boolean {
-    return /低压力|轻松|散步|走走|慢跑|慢热|不尴尬|low\s*pressure|walk|jog/i.test(
-      text,
-    );
-  }
-
-  private looksLikeLateNight(text: string): boolean {
-    return /深夜|凌晨|太晚|晚上|夜里|night|late/i.test(text);
-  }
-
-  private looksLikeSameSchoolOrArea(
-    text: string,
-    candidateCity: string,
-    signals?: LifeGraphUnifiedMatchSignalsDto | null,
-  ): boolean {
-    const area = this.textSignal(signals?.identitySignals.nearbyArea);
-    if (area && text.includes(area)) return true;
-    return (
-      /同校|校内|校园|大学|school|campus/i.test(text) || Boolean(candidateCity)
-    );
-  }
-
-  private textSignal(value: unknown): string {
-    if (Array.isArray(value))
-      return value
-        .map((item) => this.firstText(item))
-        .filter(Boolean)
-        .join(' ');
-    return this.firstText(value);
-  }
-
-  private signalList(value: unknown): string[] {
-    return Array.isArray(value)
-      ? value.map((item) => this.firstText(item)).filter(Boolean)
-      : this.firstText(value)
-        ? [this.firstText(value)]
-        : [];
   }
 
   private socialEnergyScore(
