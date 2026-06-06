@@ -285,6 +285,12 @@ LOAD_TEST_ALLOW_REMOTE=true \
 node scripts/load-1000-readonly.mjs
 ```
 
+也可以把它纳入 Web 发布前基线：
+
+```bash
+LOAD_TEST_BASE_URL=http://localhost:3000 ./scripts/release-preflight.sh --web-only --include-load-smoke
+```
+
 该脚本只打 `/api/health`、`/api/feed?page=1&limit=5` 和 `/api/openapi/fitmeet-core.json`，默认要求错误率不超过 1%、p95 不超过 1000ms、p99 不超过 2000ms。远端目标必须显式设置 `LOAD_TEST_ALLOW_REMOTE=true`，避免误压生产。它不能替代完整 Artillery/k6 长时压测，但可以作为部署后确认 1000 个并发只读请求不会立刻卡死的快速门槛。
 
 `nginx` 会等 `backend` 的 `/api/health` 通过后再进入 healthy 状态；如果这里失败，先看 `docker compose ... logs backend nginx`，再排查数据库、Redis、Mongo、Kafka 的 healthcheck。Windows 环境也可继续使用 `powershell -ExecutionPolicy Bypass -File .\scripts\verify-production.ps1`。

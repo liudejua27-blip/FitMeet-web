@@ -13,22 +13,25 @@ PNPM_BIN_DIRS=(
 RUN_WEB=1
 RUN_IOS=1
 RUN_IOS_UI=0
+RUN_LOAD_SMOKE=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/release-preflight.sh [--web-only] [--ios-only] [--skip-ios] [--include-ios-ui]
+Usage: scripts/release-preflight.sh [--web-only] [--ios-only] [--skip-ios] [--include-ios-ui] [--include-load-smoke]
 
 Runs the release baseline before deploying Web or publishing an iOS test build:
   - backend lint/build/test plus dry-run App contract smoke
   - frontend lint/build/test
   - fitmeet-landing lint/build/test
   - FitMeetAlpha unit tests on an available iPhone Simulator
+  - optional read-only 1000-concurrency smoke for local/staging/prod targets
 
 Environment:
   FITMEET_APP_DIR             Override the iOS app repo path.
   FITMEET_NODE_RUNTIME_DIR    Node bin directory placed first on PATH.
   FITMEET_PNPM_BIN_DIR        pnpm bin directory placed after Node on PATH.
   FITMEET_IOS_SIMULATOR_ID    Use a specific iOS Simulator UDID.
+  LOAD_TEST_*                 Options for scripts/load-1000-readonly.mjs.
 EOF
 }
 
@@ -47,6 +50,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --include-ios-ui)
       RUN_IOS_UI=1
+      ;;
+    --include-load-smoke)
+      RUN_LOAD_SMOKE=1
       ;;
     -h|--help)
       usage
@@ -109,6 +115,10 @@ if [[ "${RUN_WEB}" -eq 1 ]]; then
   run_step "fitmeet-landing lint" pnpm --dir "${ROOT_DIR}/fitmeet-landing" lint
   run_step "fitmeet-landing build" pnpm --dir "${ROOT_DIR}/fitmeet-landing" build
   run_step "fitmeet-landing test" pnpm --dir "${ROOT_DIR}/fitmeet-landing" test
+
+  if [[ "${RUN_LOAD_SMOKE}" -eq 1 ]]; then
+    run_step "read-only 1000-concurrency smoke" node "${ROOT_DIR}/scripts/load-1000-readonly.mjs"
+  fi
 fi
 
 if [[ "${RUN_IOS}" -eq 1 ]]; then

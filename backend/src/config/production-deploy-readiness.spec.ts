@@ -57,6 +57,7 @@ describe('production deploy readiness', () => {
 
   it('keeps the 1000-concurrency load smoke read-only and remote-guarded', () => {
     const loadSmoke = readRepoFile('scripts/load-1000-readonly.mjs');
+    const releasePreflight = readRepoFile('scripts/release-preflight.sh');
 
     expect(loadSmoke).toContain('LOAD_TEST_CONCURRENCY, 1000');
     expect(loadSmoke).toContain('/api/health');
@@ -67,6 +68,8 @@ describe('production deploy readiness', () => {
     expect(loadSmoke).not.toContain("method: 'POST'");
     expect(loadSmoke).not.toContain("method: 'PUT'");
     expect(loadSmoke).not.toContain("method: 'DELETE'");
+    expect(releasePreflight).toContain('--include-load-smoke');
+    expect(releasePreflight).toContain('scripts/load-1000-readonly.mjs');
   });
 });
 
