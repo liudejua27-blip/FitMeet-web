@@ -14,6 +14,7 @@ import { ActivityProofPolicy } from '../activities/entities/activity-template.en
 import { SceneRiskPolicyService } from './scene-risk-policy.service';
 import { SocialAgentTargetResolverService } from './social-agent-target-resolver.service';
 import { SocialAgentActionSideEffectService } from './social-agent-action-side-effect.service';
+import { SocialAgentToolExecutionPolicyService } from './social-agent-tool-execution-policy.service';
 import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
 
 type MockRepository<T extends object = Record<string, unknown>> = {
@@ -197,6 +198,14 @@ function makeService() {
     actionLogs as never,
     messages as never,
   );
+  const permissions = new AgentPermissionService();
+  const toolRegistry = new FitMeetAgentToolRegistryService();
+  const sceneRisk = new SceneRiskPolicyService();
+  const toolExecutionPolicy = new SocialAgentToolExecutionPolicyService(
+    permissions,
+    toolRegistry,
+    sceneRisk,
+  );
 
   const service = new SocialAgentToolExecutorService(
     taskRepo as never,
@@ -204,8 +213,8 @@ function makeService() {
     connectionRepo as never,
     candidateRepo as never,
     paymentIntentRepo as never,
-    new AgentPermissionService(),
-    new FitMeetAgentToolRegistryService(),
+    permissions,
+    toolRegistry,
     approvals as never,
     approvalDispatcher as never,
     longTermMemory as never,
@@ -218,10 +227,10 @@ function makeService() {
     messages as never,
     friends as never,
     activities as never,
-    new SceneRiskPolicyService(),
     targetResolver,
     toolJsonModel,
     actionSideEffects,
+    toolExecutionPolicy,
   );
 
   return {
@@ -252,6 +261,7 @@ function makeService() {
     targetResolver,
     toolJsonModel,
     actionSideEffects,
+    toolExecutionPolicy,
   };
 }
 

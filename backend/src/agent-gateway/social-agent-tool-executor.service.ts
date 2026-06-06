@@ -41,7 +41,6 @@ import {
   AgentTaskEvent,
   AgentTaskEventActor,
   AgentTaskEventType,
-  AgentTaskPermissionMode,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
 import {
@@ -74,10 +73,7 @@ import type {
 import { sanitizeCity } from '../common/city.util';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
-import {
-  SceneRiskPolicyResult,
-  SceneRiskPolicyService,
-} from './scene-risk-policy.service';
+import { SceneRiskPolicyResult } from './scene-risk-policy.service';
 import { ConfirmationGuardService } from './confirmation-guard.service';
 import {
   getSocialAgentRelatedActivityId,
@@ -86,14 +82,10 @@ import {
 } from './social-agent-tool-audit';
 import {
   buildSocialAgentToolApprovalSummary,
-  getSocialAgentPermissionActionForTool,
   getSocialAgentToolActionType,
   getSocialAgentToolApprovalRiskLevel,
   getSocialAgentToolApprovalType,
-  getSocialAgentToolRiskLevelForPolicy,
-  getSocialAgentToolSceneActionType,
   isConfirmableSocialAgentTool,
-  SOCIAL_AGENT_HIGH_RISK_TOOL_DAILY_LIMITS,
 } from './social-agent-tool-policy';
 import { SocialAgentToolName } from './social-agent-tool.types';
 import type {
@@ -118,6 +110,7 @@ import {
 import { SocialAgentTargetResolverService } from './social-agent-target-resolver.service';
 import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
 import { SocialAgentActionSideEffectService } from './social-agent-action-side-effect.service';
+import { SocialAgentToolExecutionPolicyService } from './social-agent-tool-execution-policy.service';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -165,10 +158,10 @@ export class SocialAgentToolExecutorService {
     private readonly messages: MessagesService,
     private readonly friends: FriendsService,
     private readonly activities: ActivitiesService,
-    private readonly sceneRisk: SceneRiskPolicyService,
     private readonly targetResolver: SocialAgentTargetResolverService,
     private readonly toolJsonModel: SocialAgentToolJsonModelService,
     private readonly actionSideEffects: SocialAgentActionSideEffectService,
+    private readonly toolExecutionPolicy: SocialAgentToolExecutionPolicyService,
     private readonly confirmationGuard?: ConfirmationGuardService,
   ) {}
 
@@ -550,7 +543,11 @@ export class SocialAgentToolExecutorService {
     const input = this.stepInput(step);
     const startedAt = new Date();
     const callId = this.safeToolCallId(task.id, toolName, startedAt);
-    const policy = this.toolPolicyMetadata(task, toolName, input);
+    const policy = this.toolExecutionPolicy.buildPolicyMetadata(
+      task,
+      toolName,
+      input,
+    );
 
     await this.createTaskEvent(task, AgentTaskEventType.StepStarted, {
       summary: `Started ${toolName}`,
@@ -570,8 +567,12 @@ export class SocialAgentToolExecutorService {
     });
 
     try {
-      this.assertToolAllowed(task.permissionMode, step, toolName);
-      this.assertHighRiskFrequencyLimit(task, toolName);
+      this.toolExecutionPolicy.assertToolAllowed({
+        mode: task.permissionMode,
+        step,
+        toolName,
+      });
+      this.toolExecutionPolicy.assertHighRiskFrequencyLimit(task, toolName);
       this.assertAgentConnectionBound(task, toolName, input);
       const gatedOutput = await this.maybeGateActionByRisk(
         task,
@@ -2484,7 +2485,11 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     call: SocialAgentToolCallRecord,
   ): Promise<void> {
-    const policy = this.toolPolicyMetadata(task, toolName, input);
+    const policy = this.toolExecutionPolicy.buildPolicyMetadata(
+      task,
+      toolName,
+      input,
+    );
     await this.actionSideEffects.record({
       task,
       toolName,
@@ -2557,130 +2562,6 @@ export class SocialAgentToolExecutorService {
       SocialAgentToolName.SendMessage,
       SocialAgentToolName.SendMessageToCandidate,
     ].includes(toolName);
-  }
-
-  private assertToolAllowed(
-    mode: AgentTaskPermissionMode | string,
-    step: StepRecord,
-    toolName: SocialAgentToolName,
-  ): void {
-    const registeredTool = this.toolRegistry.getToolByExecutorName(toolName);
-    const registryMode =
-      mode === 'open' || mode === 'lab' || mode === 'manual_confirm'
-        ? AgentTaskPermissionMode.LimitedAuto
-        : (mode as AgentTaskPermissionMode);
-    if (
-      registeredTool &&
-      !registeredTool.permissionMode.includes(registryMode)
-    ) {
-      throw new ForbiddenException(
-        `Tool ${toolName} is not registered for permission mode ${mode}`,
-      );
-    }
-
-    const action =
-      getSocialAgentPermissionActionForTool(mode, toolName) ??
-      this.permissions.normalizeAction(
-        this.string(step.action ?? step.actionType) ?? '',
-      );
-    if (!action) return;
-    if (!this.permissions.canExecute(mode as never, action)) {
-      throw new ForbiddenException(
-        `Tool ${toolName} requires action ${action}, not allowed in mode ${mode}`,
-      );
-    }
-  }
-
-  private assertHighRiskFrequencyLimit(
-    task: AgentTask,
-    toolName: SocialAgentToolName,
-  ): void {
-    const limit = SOCIAL_AGENT_HIGH_RISK_TOOL_DAILY_LIMITS[toolName];
-    if (!limit) return;
-
-    const since = Date.now() - 24 * 60 * 60 * 1000;
-    const recentSucceededCalls = (task.toolCalls ?? []).filter((call) => {
-      if (call.toolName !== toolName || call.status !== 'succeeded') {
-        return false;
-      }
-      const startedAt =
-        typeof call.startedAt === 'string' ? Date.parse(call.startedAt) : NaN;
-      return Number.isFinite(startedAt) && startedAt >= since;
-    });
-
-    if (recentSucceededCalls.length >= limit) {
-      throw new ForbiddenException(
-        `daily_high_risk_tool_limit_exceeded: ${toolName} limit=${limit}`,
-      );
-    }
-  }
-
-  private toolPolicyMetadata(
-    task: AgentTask,
-    toolName: SocialAgentToolName,
-    input: Record<string, unknown> = {},
-  ): Record<string, unknown> {
-    const limit = SOCIAL_AGENT_HIGH_RISK_TOOL_DAILY_LIMITS[toolName] ?? null;
-    const registeredTool = this.toolRegistry.getToolByExecutorName(toolName);
-    const sceneRisk = this.sceneRisk.evaluate({
-      sceneType: this.string(
-        input.sceneType ?? input.activityType ?? input.type,
-      ),
-      actionType: getSocialAgentToolSceneActionType(toolName),
-      text: `${task.goal ?? ''} ${task.title ?? ''} ${this.safeUnknownText(input)}`,
-      permissionMode: task.permissionMode,
-      involvesMoney: this.bool(
-        input.involvesMoney ?? input.hasMoney ?? input.money,
-      ),
-      preciseLocation: this.bool(
-        input.preciseLocation ??
-          input.sharePreciseLocation ??
-          input.exactLocation,
-      ),
-    });
-    const highRisk =
-      toolName === SocialAgentToolName.OfflineMeeting ||
-      toolName === SocialAgentToolName.CreateActivity ||
-      toolName === SocialAgentToolName.JoinActivity ||
-      toolName === SocialAgentToolName.ApproveAction ||
-      toolName === SocialAgentToolName.ShareLocation ||
-      toolName === SocialAgentToolName.Payment ||
-      sceneRisk.riskLevel === 'high' ||
-      sceneRisk.riskLevel === 'critical';
-    return {
-      permissionMode: task.permissionMode,
-      canonicalPermissionMode: sceneRisk.permissionMode,
-      registryToolName: registeredTool?.name ?? null,
-      category: registeredTool?.category ?? null,
-      requiresApproval:
-        sceneRisk.requiresConfirmation ||
-        registeredTool?.requiresApproval ||
-        false,
-      requiresDoubleConfirmation: sceneRisk.requiresDoubleConfirmation,
-      riskLevel: getSocialAgentToolRiskLevelForPolicy(sceneRisk.riskLevel),
-      sceneRisk,
-      highRisk,
-      dailyLimit: limit,
-      idempotency:
-        toolName === SocialAgentToolName.Payment
-          ? 'paymentIntentKeys'
-          : toolName === SocialAgentToolName.OfflineMeeting ||
-              toolName === SocialAgentToolName.InviteActivity ||
-              toolName === SocialAgentToolName.CreateActivity ||
-              toolName === SocialAgentToolName.JoinActivity
-            ? 'activityInviteKeys'
-            : toolName === SocialAgentToolName.SendMessage ||
-                toolName === SocialAgentToolName.SendMessageToCandidate ||
-                toolName === SocialAgentToolName.ReplyMessage
-              ? 'sentMessageKeys'
-              : null,
-      executionContract:
-        toolName === SocialAgentToolName.Payment
-          ? 'create_payment_intent_only'
-          : highRisk
-            ? 'audit_required'
-            : 'mode_gated',
-    };
   }
 
   private resolveToolName(step: StepRecord): SocialAgentToolName {
