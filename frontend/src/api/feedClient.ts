@@ -75,9 +75,9 @@ export function getPublicSocialIntents(params?: {
   if (params?.requestType) search.set('requestType', params.requestType);
   if (params?.status) search.set('status', params.status);
   const qs = search.toString();
-  return request<{ data: PublicSocialIntent[] }>(`/public/social-intents${qs ? `?${qs}` : ''}`).then(
-    (r) => r.data,
-  );
+  return request<{ data: PublicSocialIntent[] }>(
+    `${fitMeetCoreEndpoints.feed.publicSocialIntents}${qs ? `?${qs}` : ''}`,
+  ).then((r) => r.data);
 }
 
 export function getComments(postId: number): Promise<Comment[]> {

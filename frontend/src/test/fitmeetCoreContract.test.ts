@@ -12,6 +12,9 @@ describe('fitMeetCoreEndpoints', () => {
     expect(fitMeetCoreEndpoints.uploads.image).toBe('/uploads/image');
     expect(fitMeetCoreEndpoints.feed.getFeed).toBe('/feed');
     expect(fitMeetCoreEndpoints.feed.createPost).toBe('/feed');
+    expect(fitMeetCoreEndpoints.feed.publicSocialIntents).toBe(
+      '/public/social-intents',
+    );
     expect(fitMeetCoreEndpoints.messages.startConversation).toBe(
       '/messages/start',
     );
@@ -155,6 +158,7 @@ describe('fitMeetCoreEndpoints', () => {
         '/auth/profile',
         '/users/profile',
         '/feed',
+        '/public/social-intents',
         '/feed/interactions',
         '/feed/{id}/like',
         '/feed/{id}/save',

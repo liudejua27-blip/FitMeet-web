@@ -16,6 +16,7 @@ export const fitMeetCoreEndpoints = {
     getFeed: '/feed',
     createPost: '/feed',
     getPostInteractions: '/feed/interactions',
+    publicSocialIntents: '/public/social-intents',
     likePost: (id: number) => `/feed/${id}/like` as const,
     savePost: (id: number) => `/feed/${id}/save` as const,
     getComments: (postId: number) => `/feed/${postId}/comments` as const,
@@ -126,6 +127,7 @@ export const fitMeetCoreEndpointTemplates = {
     getFeed: '/feed',
     createPost: '/feed',
     getPostInteractions: '/feed/interactions',
+    publicSocialIntents: '/public/social-intents',
     likePost: '/feed/{id}/like',
     savePost: '/feed/{id}/save',
     getComments: '/feed/{postId}/comments',
@@ -196,6 +198,7 @@ export type FitMeetCoreStaticEndpoint =
   | (typeof fitMeetCoreEndpoints.feed)['getFeed']
   | (typeof fitMeetCoreEndpoints.feed)['createPost']
   | (typeof fitMeetCoreEndpoints.feed)['getPostInteractions']
+  | (typeof fitMeetCoreEndpoints.feed)['publicSocialIntents']
   | (typeof fitMeetCoreEndpoints.messages)['startConversation']
   | (typeof fitMeetCoreEndpoints.messages)['getConversations']
   | (typeof fitMeetCoreEndpoints.messages)['getUnreadCount']

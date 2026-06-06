@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { getFeed, getFeedPage } from '../api/feedClient';
+import {
+  getFeed,
+  getFeedPage,
+  getPublicSocialIntents,
+} from '../api/feedClient';
 
 const feedPayload = {
   data: [
@@ -63,6 +67,53 @@ describe('feedClient', () => {
 
     await expect(getFeed({ category: 'all', page: 1, pageSize: 5 })).resolves.toEqual(
       feedPayload.data,
+    );
+  });
+
+  it('reads public social intents through the shared core endpoint registry', async () => {
+    const publicIntentPayload = {
+      data: [
+        {
+          id: 'intent_1',
+          mode: 'public',
+          requestType: 'fitness_partner',
+          title: '周末约练',
+          description: '找附近跑步搭子',
+          city: '青岛',
+          loc: '',
+          lat: null,
+          lng: null,
+          radiusKm: 5,
+          timePreference: '周末',
+          riskLevel: 'low',
+          requiresUserConfirmation: true,
+          filters: {},
+          candidateUserIds: [],
+          matchedCount: 0,
+          status: 'active',
+        },
+      ],
+    };
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(publicIntentPayload));
+
+    await expect(
+      getPublicSocialIntents({
+        page: 2,
+        limit: 10,
+        q: '跑步',
+        city: '青岛',
+        requestType: 'fitness_partner',
+        status: 'active',
+      }),
+    ).resolves.toEqual(publicIntentPayload.data);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/public/social-intents?page=2&limit=10&q=%E8%B7%91%E6%AD%A5&city=%E9%9D%92%E5%B2%9B&requestType=fitness_partner&status=active',
+      expect.objectContaining({
+        headers: { 'Content-Type': 'application/json' },
+      }),
     );
   });
 });

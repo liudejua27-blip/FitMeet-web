@@ -5,7 +5,10 @@ import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { getConnectionToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
-import { AgentUserController } from './agent-gateway/agent-gateway.controller';
+import {
+  AgentUserController,
+  PublicSocialIntentController,
+} from './agent-gateway/agent-gateway.controller';
 import { SocialAgentChatController } from './agent-gateway/social-agent-chat.controller';
 import { SocialAgentTasksController } from './agent-gateway/social-agent-tasks.controller';
 import { AppController } from './app.controller';
@@ -25,6 +28,7 @@ const APP_CORE_CONTROLLERS = [
   CommentsController,
   MessagesController,
   AgentUserController,
+  PublicSocialIntentController,
   SocialAgentChatController,
   SocialAgentTasksController,
   UploadsController,
@@ -68,6 +72,7 @@ const IOS_APP_REQUIRED_PATHS = {
 } as const;
 
 const WEB_APP_REQUIRED_PATHS = {
+  '/public/social-intents': 'get',
   '/social-agent/tasks/current': 'get',
   '/social-agent/tasks/{taskId}/timeline': 'get',
   '/social-agent/tasks/{taskId}/events': 'get',
@@ -194,6 +199,7 @@ describe('AppController', () => {
           '/auth/profile',
           '/users/profile',
           '/feed',
+          '/public/social-intents',
           '/feed/{postId}/comments',
           '/feed/comments/{commentId}/like',
           '/messages/start',
@@ -725,6 +731,44 @@ describe('AppController', () => {
         images: {
           type: 'array',
           items: { $ref: '#/components/schemas/FeedImage' },
+        },
+      });
+    });
+
+    it('documents the Web public hall social intents contract', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+      const publicHallPath = contract.paths['/public/social-intents'].get;
+      const limitParam = publicHallPath.parameters.find(
+        (param) => param.name === 'limit',
+      );
+
+      expect(limitParam?.schema).toMatchObject({ maximum: 50 });
+      expect(
+        publicHallPath.responses['200'].content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/PublicSocialIntentPage',
+      });
+      expect(contract.components.schemas.PublicSocialIntentPage).toMatchObject({
+        required: ['data', 'metadata'],
+        properties: {
+          data: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/PublicSocialIntent' },
+          },
+        },
+      });
+      expect(contract.components.schemas.PublicSocialIntent).toMatchObject({
+        required: expect.arrayContaining([
+          'id',
+          'requestType',
+          'title',
+          'city',
+          'status',
+        ]),
+        properties: {
+          id: { type: 'string' },
+          candidateUserIds: { type: 'array', items: { type: 'integer' } },
+          matchSignal: { type: 'object', additionalProperties: true },
         },
       });
     });

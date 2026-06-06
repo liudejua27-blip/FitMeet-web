@@ -90,6 +90,7 @@ Feed:
 
 - `GET /feed`
 - `POST /feed`
+- `GET /public/social-intents`
 - `GET /feed/interactions`
 - `POST /feed/{id}/like`
 - `POST /feed/{id}/save`
