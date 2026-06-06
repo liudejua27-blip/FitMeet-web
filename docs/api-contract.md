@@ -106,6 +106,12 @@ Messages:
 - `POST /messages/public-intents/{id}/start`
 - `GET /messages/unread`
 
+Agent inbox:
+
+- `GET /agents/inbox/conversations`
+- `GET /agents/inbox/conversations/{conversationId}/messages`
+- `POST /agents/inbox/conversations/{conversationId}/reply`
+
 Social Agent chat and workspace:
 
 - `POST /social-agent/chat/run`

@@ -5,6 +5,7 @@ import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { getConnectionToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
+import { AgentUserController } from './agent-gateway/agent-gateway.controller';
 import { SocialAgentChatController } from './agent-gateway/social-agent-chat.controller';
 import { SocialAgentTasksController } from './agent-gateway/social-agent-tasks.controller';
 import { AppController } from './app.controller';
@@ -23,6 +24,7 @@ const APP_CORE_CONTROLLERS = [
   PostsController,
   CommentsController,
   MessagesController,
+  AgentUserController,
   SocialAgentChatController,
   SocialAgentTasksController,
   UploadsController,
@@ -73,6 +75,9 @@ const WEB_APP_REQUIRED_PATHS = {
   '/social-agent/chat/tasks/{taskId}/publish-social-request': 'post',
   '/social-agent/chat/tasks/{taskId}/replan-run': 'post',
   '/social-agent/chat/tasks/{taskId}/append-context': 'post',
+  '/agents/inbox/conversations': 'get',
+  '/agents/inbox/conversations/{conversationId}/messages': 'get',
+  '/agents/inbox/conversations/{conversationId}/reply': 'post',
 } as const;
 
 const IOS_CORE_ENDPOINT_REGISTRY_PATH = resolve(
@@ -188,6 +193,9 @@ describe('AppController', () => {
           '/messages/conversations/{conversationId}/send',
           '/messages/public-intents/{id}/start',
           '/messages/unread',
+          '/agents/inbox/conversations',
+          '/agents/inbox/conversations/{conversationId}/messages',
+          '/agents/inbox/conversations/{conversationId}/reply',
           '/social-agent/chat/run',
           '/social-agent/chat/run-async',
           '/social-agent/chat/session',
@@ -480,6 +488,68 @@ describe('AppController', () => {
       expect(controllerRoutes).toContainEqual({
         method: 'post',
         path: normalizePathParams('/messages/public-intents/{id}/start'),
+      });
+    });
+
+    it('documents the Web Agent inbox conversation contract', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+      const conversations = contract.paths['/agents/inbox/conversations'].get;
+      const messages =
+        contract.paths['/agents/inbox/conversations/{conversationId}/messages']
+          .get;
+      const reply =
+        contract.paths['/agents/inbox/conversations/{conversationId}/reply']
+          .post;
+
+      expect(conversations.security).toEqual([{ bearerAuth: [] }]);
+      expect(conversations.parameters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'agentProfileId', in: 'query' }),
+          expect.objectContaining({ name: 'limit', in: 'query' }),
+          expect.objectContaining({ name: 'unreadOnly', in: 'query' }),
+        ]),
+      );
+      expect(
+        conversations.responses['200'].content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/AgentInboxConversationsResult',
+      });
+      expect(messages.parameters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'conversationId', in: 'path' }),
+          expect.objectContaining({ name: 'agentProfileId', in: 'query' }),
+          expect.objectContaining({ name: 'limit', in: 'query' }),
+        ]),
+      );
+      expect(
+        messages.responses['200'].content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/AgentInboxMessagesResult',
+      });
+      expect(reply.requestBody.content['application/json'].schema).toEqual({
+        $ref: '#/components/schemas/AgentInboxReplyInput',
+      });
+      expect(reply.responses['200'].content['application/json'].schema).toEqual(
+        {
+          $ref: '#/components/schemas/AgentInboxReplyResult',
+        },
+      );
+      expect(contract.components.schemas.AgentInboxReplyInput).toMatchObject({
+        required: ['content'],
+        properties: {
+          agentProfileId: { type: 'integer', minimum: 1 },
+          content: { type: 'string', minLength: 1 },
+        },
+      });
+      expect(
+        contract.components.schemas.AgentInboxConversationsResult,
+      ).toMatchObject({
+        required: ['agentProfileId', 'agentName', 'conversations'],
+      });
+      expect(
+        contract.components.schemas.AgentInboxMessagesResult,
+      ).toMatchObject({
+        required: ['agentProfileId', 'agentName', 'conversationId', 'messages'],
       });
     });
 

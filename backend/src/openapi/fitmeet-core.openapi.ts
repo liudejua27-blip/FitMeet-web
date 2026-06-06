@@ -4,7 +4,7 @@ export const fitMeetCoreOpenApi = {
     title: 'FitMeet Core Web/App API',
     version: '2026-06-05',
     description:
-      'Shared contract for FitMeet Web and App auth, users, feed, messages, Social Agent chat, and uploads.',
+      'Shared contract for FitMeet Web and App auth, users, feed, messages, Agent inbox, Social Agent chat, and uploads.',
   },
   servers: [{ url: '/api' }],
   tags: [
@@ -13,6 +13,7 @@ export const fitMeetCoreOpenApi = {
     { name: 'users' },
     { name: 'feed' },
     { name: 'messages' },
+    { name: 'agent-inbox' },
     { name: 'social-agent-chat' },
     { name: 'uploads' },
   ],
@@ -639,6 +640,116 @@ export const fitMeetCoreOpenApi = {
             },
           },
           '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/agents/inbox/conversations': {
+      get: {
+        tags: ['agent-inbox'],
+        operationId: 'listAgentInboxConversations',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'agentProfileId',
+            in: 'query',
+            schema: { type: 'integer', minimum: 1 },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            schema: { type: 'integer', minimum: 1, maximum: 100 },
+          },
+          { name: 'unreadOnly', in: 'query', schema: { type: 'boolean' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Agent inbox conversation list for the owner',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/AgentInboxConversationsResult',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/agents/inbox/conversations/{conversationId}/messages': {
+      get: {
+        tags: ['agent-inbox'],
+        operationId: 'listAgentInboxMessages',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'conversationId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', minLength: 1 },
+          },
+          {
+            name: 'agentProfileId',
+            in: 'query',
+            schema: { type: 'integer', minimum: 1 },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            schema: { type: 'integer', minimum: 1, maximum: 100 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Agent inbox conversation messages',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/AgentInboxMessagesResult',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/agents/inbox/conversations/{conversationId}/reply': {
+      post: {
+        tags: ['agent-inbox'],
+        operationId: 'replyToAgentInboxConversation',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'conversationId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', minLength: 1 },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/AgentInboxReplyInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Agent inbox reply result',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentInboxReplyResult' },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
         },
       },
     },
@@ -1704,6 +1815,120 @@ export const fitMeetCoreOpenApi = {
           lastMessage: { type: 'string' },
           unread: { type: 'integer' },
           updatedAt: { type: 'string' },
+        },
+      },
+      AgentInboxUser: {
+        type: 'object',
+        required: ['id', 'name'],
+        additionalProperties: true,
+        properties: {
+          id: { type: 'integer' },
+          name: { type: 'string' },
+          avatar: { type: 'string' },
+          color: { type: 'string' },
+        },
+      },
+      AgentInboxAgent: {
+        type: 'object',
+        required: ['id', 'name'],
+        additionalProperties: true,
+        properties: {
+          id: { type: 'integer' },
+          name: { type: 'string' },
+          provider: { type: ['string', 'null'] },
+          agentType: { type: ['string', 'null'] },
+        },
+      },
+      AgentInboxConversation: {
+        type: 'object',
+        required: ['id', 'lastMessage', 'unread'],
+        additionalProperties: true,
+        properties: {
+          id: { type: 'string' },
+          participantUserIds: { type: 'array', items: { type: 'integer' } },
+          participantAgentIds: { type: 'array', items: { type: 'integer' } },
+          users: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AgentInboxUser' },
+          },
+          agents: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AgentInboxAgent' },
+          },
+          lastMessage: { type: 'string' },
+          lastMessageTime: { type: ['string', 'null'], format: 'date-time' },
+          time: { type: 'string' },
+          unread: { type: 'integer' },
+        },
+      },
+      AgentInboxMessage: {
+        allOf: [
+          { $ref: '#/components/schemas/ConversationMessage' },
+          {
+            type: 'object',
+            additionalProperties: true,
+            properties: {
+              senderAgentId: { type: ['integer', 'null'] },
+              receiverAgentId: { type: ['integer', 'null'] },
+              createdAt: { type: 'string', format: 'date-time' },
+            },
+          },
+        ],
+      },
+      AgentInboxConversationsResult: {
+        type: 'object',
+        required: ['agentProfileId', 'agentName', 'conversations'],
+        additionalProperties: false,
+        properties: {
+          agentProfileId: { type: ['integer', 'null'] },
+          agentName: { type: ['string', 'null'] },
+          conversations: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AgentInboxConversation' },
+          },
+        },
+      },
+      AgentInboxMessagesResult: {
+        type: 'object',
+        required: ['agentProfileId', 'agentName', 'conversationId', 'messages'],
+        additionalProperties: false,
+        properties: {
+          agentProfileId: { type: ['integer', 'null'] },
+          agentName: { type: ['string', 'null'] },
+          conversationId: { type: 'string' },
+          messages: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AgentInboxMessage' },
+          },
+        },
+      },
+      AgentInboxReplyInput: {
+        type: 'object',
+        required: ['content'],
+        additionalProperties: false,
+        properties: {
+          agentProfileId: { type: 'integer', minimum: 1 },
+          content: { type: 'string', minLength: 1 },
+        },
+      },
+      AgentInboxReplyResult: {
+        type: 'object',
+        required: [
+          'status',
+          'agentProfileId',
+          'agentName',
+          'conversationId',
+          'socketPushed',
+          'message',
+        ],
+        additionalProperties: false,
+        properties: {
+          status: { type: 'string', enum: ['sent'] },
+          agentProfileId: { type: ['integer', 'null'] },
+          agentName: { type: ['string', 'null'] },
+          conversationId: { type: 'string' },
+          socketPushed: { type: 'boolean' },
+          message: { $ref: '#/components/schemas/AgentInboxMessage' },
         },
       },
       UnreadCount: {
