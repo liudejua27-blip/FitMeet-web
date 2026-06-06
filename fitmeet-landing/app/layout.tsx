@@ -8,11 +8,16 @@ export const metadata: Metadata = {
   title: 'FitMeet — One Earth. Every body. Every being.',
   description:
     'FitMeet — a connected wellness ecosystem for humans, pets, animals, robotics, and virtual AI.',
-  metadataBase: new URL('https://fitmeet.example'),
+  metadataBase: new URL('https://www.ourfitmeet.cn'),
+  alternates: {
+    canonical: '/',
+  },
   openGraph: {
     title: 'FitMeet',
     description:
       'A connected wellness ecosystem for humans, pets, animals, robotics, and virtual AI.',
+    url: '/',
+    siteName: 'FitMeet',
     type: 'website',
   },
 };

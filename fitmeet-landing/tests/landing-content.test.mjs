@@ -87,6 +87,11 @@ test('layout exposes FitMeet metadata and global chrome', async () => {
 
   assert.match(layout, /title:\s*['"`][^'"`]*FitMeet/);
   assert.match(layout, /description:\s*['"`][^'"`]*AI/i);
+  assert.match(layout, /metadataBase:\s*new URL\('https:\/\/www\.ourfitmeet\.cn'\)/);
+  assert.match(layout, /alternates:\s*\{\s*canonical:\s*'\/'/);
+  assert.match(layout, /url:\s*'\/'/);
+  assert.match(layout, /siteName:\s*'FitMeet'/);
+  assert.doesNotMatch(layout, /fitmeet\.example|localhost|127\.0\.0\.1/);
   assert.match(layout, /<SmoothScroll\s*\/>/);
   assert.match(layout, /<Navbar\s*\/>/);
   assert.match(layout, /<Footer\s*\/>/);

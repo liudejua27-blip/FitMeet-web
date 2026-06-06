@@ -79,6 +79,30 @@ function assertContainsAll(source, values, label) {
   }
 }
 
+function assertProductionMetadata(html, route) {
+  const readable = decodeHtml(html);
+  assert.doesNotMatch(
+    readable,
+    /fitmeet\.example|localhost|127\.0\.0\.1/,
+    `${route} should not render placeholder metadata origins`,
+  );
+  assert.match(
+    readable,
+    /<link rel="canonical" href="https:\/\/www\.ourfitmeet\.cn\/?"/,
+    `${route} should render the production canonical URL`,
+  );
+  assert.match(
+    readable,
+    /<meta property="og:url" content="https:\/\/www\.ourfitmeet\.cn\/?"/,
+    `${route} should render the production Open Graph URL`,
+  );
+  assert.match(
+    readable,
+    /<meta property="og:site_name" content="FitMeet"/,
+    `${route} should render the Open Graph site name`,
+  );
+}
+
 test('rendered home page exposes the full public landing surface', async () => {
   const html = await readBuilt('index.html');
 
@@ -98,6 +122,7 @@ test('rendered home page exposes the full public landing surface', async () => {
     ],
     'home page',
   );
+  assertProductionMetadata(html, 'home page');
   assert.doesNotMatch(html, /No landing tests configured|placeholder|coming soon/i);
 });
 
