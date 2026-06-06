@@ -17,6 +17,10 @@ const timelineMessagesPath = path.resolve(
   __dirname,
   'social-agent-chat-timeline-messages.presenter.ts',
 );
+const timelineEventsPath = path.resolve(
+  __dirname,
+  'social-agent-chat-timeline-events.presenter.ts',
+);
 const timelineActivityPath = path.resolve(
   __dirname,
   'social-agent-chat-timeline-activity.presenter.ts',
@@ -47,6 +51,7 @@ describe('SocialAgentChatService facade boundary', () => {
   const facadeSource = fs.readFileSync(facadePath, 'utf8');
   const timelineSource = fs.readFileSync(timelinePath, 'utf8');
   const timelineMessagesSource = fs.readFileSync(timelineMessagesPath, 'utf8');
+  const timelineEventsSource = fs.readFileSync(timelineEventsPath, 'utf8');
   const timelineActivitySource = fs.readFileSync(timelineActivityPath, 'utf8');
   const timelineCandidatesSource = fs.readFileSync(
     timelineCandidatesPath,
@@ -88,13 +93,18 @@ describe('SocialAgentChatService facade boundary', () => {
     expect(timelineSource.trim().split('\n').length).toBeLessThanOrEqual(90);
     expect(
       timelineMessagesSource.trim().split('\n').length,
-    ).toBeLessThanOrEqual(230);
+    ).toBeLessThanOrEqual(90);
+    expect(timelineEventsSource.trim().split('\n').length).toBeLessThanOrEqual(
+      180,
+    );
     expect(timelineSource).toContain('buildSocialAgentTimelineMessages');
     expect(timelineSource).toContain('readSocialAgentTimelineCandidates');
-    expect(timelineMessagesSource).toContain(
+    expect(timelineMessagesSource).toContain('timelineMessageFromEvent');
+    expect(timelineMessagesSource).not.toContain(
       'function timelineMessageFromEvent',
     );
-    expect(timelineMessagesSource).toContain('readSocialAgentActivityResults');
+    expect(timelineEventsSource).toContain('function timelineMessageFromEvent');
+    expect(timelineEventsSource).toContain('readSocialAgentActivityResults');
     expect(timelineActivitySource).toContain(
       'function normalizePendingApprovalSnapshot',
     );
