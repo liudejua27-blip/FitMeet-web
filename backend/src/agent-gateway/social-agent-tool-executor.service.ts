@@ -768,6 +768,7 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.Payment:
         return this.recordPaymentIntent(task, input, stepId);
     }
+    return assertUnreachableSocialAgentToolName(toolName);
   }
 
   private async maybeGateActionByRisk(
@@ -1668,4 +1669,10 @@ export class SocialAgentToolExecutorService {
       }),
     );
   }
+}
+
+function assertUnreachableSocialAgentToolName(toolName: never): never {
+  throw new BadRequestException(
+    `Unhandled social agent tool ${String(toolName)}`,
+  );
 }

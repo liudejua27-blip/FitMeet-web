@@ -119,7 +119,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 
 ## Risk List
 
-- Highest backend risk: large Social Agent services remain complex, especially `social-agent-tool-executor.service.ts` and `social-agent-candidate-pool.service.ts`.
+- Highest backend risk: large Social Agent services remain complex, especially `social-agent-tool-executor.service.ts` and `social-agent-candidate-pool.service.ts`; the tool executor now has enum-to-dispatch coverage and TypeScript exhaustiveness guards so newly added tools cannot silently miss a real execution branch.
 - Social Agent chat entrypoint risk has been reduced to thin facade services; profile extraction prompt/normalization has been split out of the LLM service; timeline message restoration still needs continued focused tests because it is shared by Web and iOS session restore.
 - DB risk: production schema drift may exist if older deployments used `synchronize`; verify migration status against staging before production.
 - Contract risk: Web legacy APIs outside `fitmeet-core.openapi.ts` can drift because only the core launch subset is contract-tested.
@@ -251,6 +251,7 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- production-env-readiness.spec.ts`
 - Passed: backend `pnpm --dir backend test -- social-agent-chat-timeline-activity.presenter.spec.ts social-agent-chat-timeline.presenter.spec.ts social-agent-chat-facade-boundary.spec.ts`
 - Passed: backend `pnpm --dir backend test -- social-agent-profile-extraction.presenter.spec.ts social-agent-chat-llm.service.spec.ts`
+- Passed: backend `pnpm --dir backend test -- social-agent-tool-dispatch.contract.spec.ts social-agent-tool-executor.service.spec.ts`
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts`
 - Passed: backend `pnpm --dir backend test -- auth.service.spec.ts`
 - Passed: backend `pnpm --dir backend test -- auth.service.spec.ts production-env-readiness.spec.ts`
