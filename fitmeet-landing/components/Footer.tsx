@@ -1,3 +1,38 @@
+const FOOTER_LINK_GROUPS = [
+  {
+    title: 'Ecosystem',
+    links: [
+      { label: 'Human', href: '/human' },
+      { label: 'Pet & Animal', href: '/pet' },
+      { label: 'AI & Robotics', href: '/ai' },
+    ],
+  },
+  {
+    title: 'Brand',
+    links: [
+      { label: 'About', href: '#philosophy' },
+      { label: 'Contact', href: 'mailto:hello@ourfitmeet.cn' },
+      { label: 'Press', href: 'mailto:press@ourfitmeet.cn' },
+    ],
+  },
+  {
+    title: 'Legal',
+    links: [
+      { label: 'Privacy', href: 'mailto:privacy@ourfitmeet.cn' },
+      { label: 'Terms', href: 'mailto:legal@ourfitmeet.cn' },
+      { label: 'Cookies', href: 'mailto:privacy@ourfitmeet.cn?subject=Cookies' },
+    ],
+  },
+  {
+    title: 'Product',
+    links: [
+      { label: 'Agent Hub', href: '/agent-hub' },
+      { label: 'Ecosystem', href: '#gateways' },
+      { label: 'Email', href: 'mailto:hello@ourfitmeet.cn' },
+    ],
+  },
+] as const;
+
 export function Footer() {
   const year = new Date().getFullYear();
   return (
@@ -13,43 +48,25 @@ export function Footer() {
           </p>
         </div>
 
-        <div className="md:col-span-2">
-          <p className="text-[10px] tracking-[0.28em] uppercase text-ivory/35 mb-4">
-            Ecosystem
-          </p>
-          <ul className="space-y-2">
-            <li><a href="/human" className="hover:text-ivory transition-colors">Human</a></li>
-            <li><a href="/pet" className="hover:text-ivory transition-colors">Pet & Animal</a></li>
-            <li><a href="/ai" className="hover:text-ivory transition-colors">AI & Robotics</a></li>
-          </ul>
-        </div>
-
-        <div className="md:col-span-2">
-          <p className="text-[10px] tracking-[0.28em] uppercase text-ivory/35 mb-4">Brand</p>
-          <ul className="space-y-2">
-            <li><a href="#philosophy" className="hover:text-ivory transition-colors">About</a></li>
-            <li><a href="#footer" className="hover:text-ivory transition-colors">Contact</a></li>
-            <li><a href="#" className="hover:text-ivory transition-colors">Press</a></li>
-          </ul>
-        </div>
-
-        <div className="md:col-span-2">
-          <p className="text-[10px] tracking-[0.28em] uppercase text-ivory/35 mb-4">Legal</p>
-          <ul className="space-y-2">
-            <li><a href="#" className="hover:text-ivory transition-colors">Privacy</a></li>
-            <li><a href="#" className="hover:text-ivory transition-colors">Terms</a></li>
-            <li><a href="#" className="hover:text-ivory transition-colors">Cookies</a></li>
-          </ul>
-        </div>
-
-        <div className="md:col-span-2">
-          <p className="text-[10px] tracking-[0.28em] uppercase text-ivory/35 mb-4">Social</p>
-          <ul className="space-y-2">
-            <li><a href="#" className="hover:text-ivory transition-colors">Instagram</a></li>
-            <li><a href="#" className="hover:text-ivory transition-colors">X</a></li>
-            <li><a href="#" className="hover:text-ivory transition-colors">YouTube</a></li>
-          </ul>
-        </div>
+        {FOOTER_LINK_GROUPS.map((group) => (
+          <div key={group.title} className="md:col-span-2">
+            <p className="text-[10px] tracking-[0.28em] uppercase text-ivory/35 mb-4">
+              {group.title}
+            </p>
+            <ul className="space-y-2">
+              {group.links.map((link) => (
+                <li key={`${group.title}-${link.label}`}>
+                  <a
+                    href={link.href}
+                    className="hover:text-ivory transition-colors"
+                  >
+                    {link.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </div>
 
       <div className="max-w-[1440px] mx-auto mt-16 pt-6 border-t hairline flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-ivory/35 text-[11px] tracking-[0.18em] uppercase">

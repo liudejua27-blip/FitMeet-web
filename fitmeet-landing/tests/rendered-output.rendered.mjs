@@ -17,9 +17,26 @@ async function readBuilt(path) {
   }
 }
 
+async function readSource(path) {
+  return readFile(new URL(path, root), 'utf8');
+}
+
 async function readJson(path) {
   const source = await readFile(new URL(path, root), 'utf8');
   return JSON.parse(source);
+}
+
+function gatewayRecordsFromSource(source) {
+  return [
+    ...source.matchAll(
+      /\{\s*id:\s*'([^']+)'[\s\S]*?titleEn:\s*'([^']+)'[\s\S]*?cta:\s*'([^']+)'[\s\S]*?href:\s*'([^']+)'/g,
+    ),
+  ].map((match) => ({
+    id: match[1],
+    titleEn: match[2],
+    cta: match[3],
+    href: match[4],
+  }));
 }
 
 function decodeHtml(value) {
@@ -101,6 +118,38 @@ test('rendered gateway pages cover every static ecosystem route', async () => {
       `${route} gateway`,
     );
     assert.doesNotMatch(html, /placeholder|mock-only|coming soon/i);
+  }
+});
+
+test('rendered footer and gateway CTAs do not ship dead links', async () => {
+  const html = decodeHtml(await readBuilt('index.html'));
+  const gateways = gatewayRecordsFromSource(await readSource('data/gateways.ts'));
+
+  assert.doesNotMatch(html, /href="#"/);
+  assertContainsAll(
+    html,
+    [
+      'mailto:hello@ourfitmeet.cn',
+      'mailto:press@ourfitmeet.cn',
+      'mailto:privacy@ourfitmeet.cn',
+      'mailto:legal@ourfitmeet.cn',
+      '/agent-hub',
+      '#gateways',
+    ],
+    'home footer links',
+  );
+
+  for (const gateway of gateways) {
+    assertContainsAll(
+      html,
+      [
+        `id="gateway-${gateway.id}"`,
+        `href="${gateway.href}"`,
+        gateway.titleEn,
+        gateway.cta,
+      ],
+      `${gateway.id} rendered gateway CTA`,
+    );
   }
 });
 

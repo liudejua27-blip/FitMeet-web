@@ -46,6 +46,23 @@ function securityTitlesFromSource(source) {
   );
 }
 
+function hrefsFromSource(source) {
+  return [...source.matchAll(/href:\s*['"]([^'"]+)['"]/g)].map(
+    (match) => match[1],
+  );
+}
+
+function assertNoDeadHrefs(source, label) {
+  assert.doesNotMatch(source, /href=["']#["']|href:\s*['"]#['"]/);
+  for (const href of hrefsFromSource(source)) {
+    assert.match(
+      href,
+      /^(\/[a-z0-9-]*|#[a-z][a-z0-9-]*|mailto:[^@\s]+@[^?\s]+(?:\?[^"\s]+)?)$/i,
+      `${label} should expose deployable href ${href}`,
+    );
+  }
+}
+
 test('home route composes the public landing experience', async () => {
   const page = await readSource('app/page.tsx');
   const requiredSections = [
@@ -183,6 +200,7 @@ test('primary navigation and CTAs keep gateway anchors reachable', async () => {
 
   const gatewayIds = gatewayIdsFromSource(gatewaysData);
   const gatewayHrefs = gatewayHrefsFromSource(gatewaysData);
+  const footerHrefs = hrefsFromSource(footer);
   assert.deepEqual(gatewayIds, ['human', 'pet', 'ai']);
   assert.deepEqual(gatewayHrefs, ['/human', '/pet', '/ai']);
   for (const id of gatewayIds) {
@@ -191,8 +209,26 @@ test('primary navigation and CTAs keep gateway anchors reachable', async () => {
       new RegExp(`gateway:\\s*gateway\\.id`),
       'dynamic gateway route should generate params from GATEWAYS ids',
     );
-    assert.match(footer, new RegExp(`href=["']/${id}["']`));
+    assert.ok(footerHrefs.includes(`/${id}`), `footer should link to /${id}`);
   }
+});
+
+test('footer links are deployable product paths, anchors, or email contacts', async () => {
+  const footer = await readSource('components/Footer.tsx');
+
+  assertNoDeadHrefs(footer, 'footer');
+  assertContainsAll(
+    footer,
+    [
+      'mailto:hello@ourfitmeet.cn',
+      'mailto:press@ourfitmeet.cn',
+      'mailto:privacy@ourfitmeet.cn',
+      'mailto:legal@ourfitmeet.cn',
+      '/agent-hub',
+      '#gateways',
+    ],
+    'footer',
+  );
 });
 
 test('gateway detail route covers every ecosystem CTA with real content', async () => {
