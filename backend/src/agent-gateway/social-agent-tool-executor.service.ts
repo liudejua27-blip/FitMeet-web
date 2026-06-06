@@ -83,6 +83,15 @@ import {
 } from './scene-risk-policy.service';
 import { ConfirmationGuardService } from './confirmation-guard.service';
 import {
+  getSocialAgentApprovalId,
+  getSocialAgentRelatedActivityId,
+  getSocialAgentRelatedCandidateId,
+  getSocialAgentRelatedSocialRequestId,
+  getSocialAgentTargetUserId,
+  getSocialAgentToolInputSummary,
+  getSocialAgentToolOutputSummary,
+} from './social-agent-tool-audit';
+import {
   buildSocialAgentToolApprovalSummary,
   getSocialAgentPermissionActionForTool,
   getSocialAgentToolActionType,
@@ -851,9 +860,13 @@ export class SocialAgentToolExecutorService {
       riskLevel: getSocialAgentToolApprovalRiskLevel(policy.riskLevel),
       reason: policy.safetyPrompts.join('；') || '该动作需要用户确认后再执行。',
       createdBy: 'agent',
-      relatedSocialRequestId: this.relatedSocialRequestIdFor(input, null),
-      relatedCandidateId: this.relatedCandidateIdFor(toolName, input, null),
-      relatedActivityId: this.relatedActivityIdFor(toolName, input, null),
+      relatedSocialRequestId: getSocialAgentRelatedSocialRequestId(input, null),
+      relatedCandidateId: getSocialAgentRelatedCandidateId(
+        toolName,
+        input,
+        null,
+      ),
+      relatedActivityId: getSocialAgentRelatedActivityId(toolName, input, null),
       rationale:
         policy.safetyPrompts.join('；') || 'Agent 已按场景风险策略暂停执行。',
     });
@@ -3314,17 +3327,17 @@ export class SocialAgentToolExecutorService {
         null,
       status: call.status,
       riskLevel: audit.riskLevel,
-      targetUserId: this.targetUserIdFor(input, call.output),
-      relatedSocialRequestId: this.relatedSocialRequestIdFor(
+      targetUserId: getSocialAgentTargetUserId(input, call.output),
+      relatedSocialRequestId: getSocialAgentRelatedSocialRequestId(
         input,
         call.output,
       ),
-      relatedCandidateId: this.relatedCandidateIdFor(
+      relatedCandidateId: getSocialAgentRelatedCandidateId(
         toolName,
         input,
         call.output,
       ),
-      relatedActivityId: this.relatedActivityIdFor(
+      relatedActivityId: getSocialAgentRelatedActivityId(
         toolName,
         input,
         call.output,
@@ -3387,8 +3400,8 @@ export class SocialAgentToolExecutorService {
       userId: task.ownerUserId,
       agentTaskId: task.id,
       toolName,
-      inputSummary: this.toolInputSummary(toolName, input),
-      outputSummary: this.toolOutputSummary(toolName, call),
+      inputSummary: getSocialAgentToolInputSummary(toolName, input),
+      outputSummary: getSocialAgentToolOutputSummary(toolName, call),
       riskLevel: scenePolicy
         ? getSocialAgentToolRiskLevelForPolicy(scenePolicy.riskLevel)
         : getSocialAgentToolRiskLevel(toolName),
@@ -3399,97 +3412,11 @@ export class SocialAgentToolExecutorService {
       userConfirmed: this.hasUserApproval(input),
       executed: call.status === 'succeeded' && !pendingApproval && !simulated,
       sceneType: scenePolicy?.sceneType ?? 'general',
-      approvalId: this.approvalIdFor(toolName, input, call.output),
+      approvalId: getSocialAgentApprovalId(toolName, input, call.output),
       status: call.status,
       error: call.error,
       createdAt: call.completedAt,
     };
-  }
-
-  private toolInputSummary(
-    toolName: SocialAgentToolName,
-    input: Record<string, unknown>,
-  ): string {
-    return this.preview(
-      `${toolName} input=${this.auditValuePreview(input, 320)}`,
-      500,
-    );
-  }
-
-  private toolOutputSummary(
-    toolName: SocialAgentToolName,
-    call: SocialAgentToolCallRecord,
-  ): string {
-    if (call.status !== 'succeeded') {
-      const errorText =
-        this.string(call.error?.message) ??
-        this.string(call.error?.code) ??
-        'unknown_error';
-      return this.preview(`${toolName} ${call.status}: ${errorText}`, 500);
-    }
-
-    return this.preview(
-      `${toolName} succeeded output=${this.auditValuePreview(
-        call.output ?? {},
-        320,
-      )}`,
-      500,
-    );
-  }
-
-  private approvalIdFor(
-    toolName: SocialAgentToolName,
-    input: Record<string, unknown>,
-    output: Record<string, unknown> | null,
-  ): number | null {
-    const outputApproval = this.isRecord(output?.approval)
-      ? output.approval
-      : null;
-    return (
-      this.number(input.approvalId) ??
-      ([
-        SocialAgentToolName.ApproveAction,
-        SocialAgentToolName.RejectAction,
-      ].includes(toolName)
-        ? this.number(input.id)
-        : undefined) ??
-      this.number(output?.approvalId) ??
-      this.number(outputApproval?.id) ??
-      ([
-        SocialAgentToolName.ApproveAction,
-        SocialAgentToolName.RejectAction,
-      ].includes(toolName)
-        ? this.number(output?.id)
-        : undefined) ??
-      null
-    );
-  }
-
-  private auditValuePreview(value: unknown, max: number): string {
-    const compactValue = this.compactAuditValue(value);
-    const text =
-      typeof compactValue === 'string'
-        ? compactValue
-        : JSON.stringify(compactValue);
-    return this.preview(text ?? this.safeUnknownText(value), max);
-  }
-
-  private compactAuditValue(value: unknown, depth = 0): unknown {
-    if (value == null) return value;
-    if (typeof value === 'string') return this.preview(value, 160);
-    if (typeof value !== 'object') return value;
-    if (depth >= 2) return Array.isArray(value) ? '[Array]' : '[Object]';
-    if (Array.isArray(value)) {
-      return value
-        .slice(0, 6)
-        .map((item) => this.compactAuditValue(item, depth + 1));
-    }
-
-    const result: Record<string, unknown> = {};
-    for (const [key, item] of Object.entries(value).slice(0, 12)) {
-      result[key] = this.compactAuditValue(item, depth + 1);
-    }
-    return result;
   }
 
   private async writeActionResultInbox(
@@ -3513,10 +3440,11 @@ export class SocialAgentToolExecutorService {
         this.string(call.output?.id) ||
         null,
       requestId:
-        this.relatedSocialRequestIdFor(call.input, call.output) ?? null,
+        getSocialAgentRelatedSocialRequestId(call.input, call.output) ?? null,
       candidateRecordId:
-        this.relatedCandidateIdFor(toolName, call.input, call.output) ?? null,
-      fromUserId: this.targetUserIdFor(call.input, call.output) ?? null,
+        getSocialAgentRelatedCandidateId(toolName, call.input, call.output) ??
+        null,
+      fromUserId: getSocialAgentTargetUserId(call.input, call.output) ?? null,
       contentPreview:
         call.status === 'succeeded'
           ? `${toolName} completed`
@@ -3614,84 +3542,6 @@ export class SocialAgentToolExecutorService {
     return call.status === 'succeeded'
       ? AgentActionStatus.Executed
       : AgentActionStatus.Failed;
-  }
-
-  private targetUserIdFor(
-    input: Record<string, unknown>,
-    output: Record<string, unknown> | null,
-  ): number | null {
-    const candidate = this.isRecord(input.candidate) ? input.candidate : {};
-    return (
-      this.number(
-        input.candidateUserId ??
-          input.targetUserId ??
-          input.toUserId ??
-          input.recipientUserId ??
-          input.recipientId ??
-          input.receiverId ??
-          input.payeeUserId ??
-          input.userId ??
-          input.followingId ??
-          input.invitedUserId ??
-          candidate.candidateUserId ??
-          candidate.targetUserId ??
-          candidate.toUserId ??
-          candidate.recipientUserId ??
-          candidate.recipientId ??
-          candidate.receiverId ??
-          candidate.userId,
-      ) ??
-      this.number(output?.targetUserId) ??
-      this.number(output?.candidateUserId) ??
-      this.number(output?.recipientUserId) ??
-      null
-    );
-  }
-
-  private relatedSocialRequestIdFor(
-    input: Record<string, unknown>,
-    output: Record<string, unknown> | null,
-  ): number | null {
-    return (
-      this.number(input.socialRequestId ?? input.requestId) ??
-      this.number(output?.socialRequestId) ??
-      null
-    );
-  }
-
-  private relatedCandidateIdFor(
-    toolName: SocialAgentToolName,
-    input: Record<string, unknown>,
-    output: Record<string, unknown> | null,
-  ): number | null {
-    return (
-      this.number(input.candidateRecordId ?? input.candidateId) ??
-      this.number(output?.candidateRecordId) ??
-      (toolName === SocialAgentToolName.SaveCandidate
-        ? this.number(output?.id)
-        : undefined) ??
-      null
-    );
-  }
-
-  private relatedActivityIdFor(
-    toolName: SocialAgentToolName,
-    input: Record<string, unknown>,
-    output: Record<string, unknown> | null,
-  ): number | null {
-    return (
-      this.number(input.activityId) ??
-      this.number(output?.activityId) ??
-      ([
-        SocialAgentToolName.InviteActivity,
-        SocialAgentToolName.CreateActivity,
-        SocialAgentToolName.JoinActivity,
-        SocialAgentToolName.OfflineMeeting,
-      ].includes(toolName)
-        ? this.number(output?.id)
-        : undefined) ??
-      null
-    );
   }
 
   private assertToolAllowed(
