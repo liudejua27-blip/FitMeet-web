@@ -50,7 +50,6 @@ import {
 import {
   appendSocialAgentLoopValue,
   buildSocialAgentActivityInviteDedupeKey,
-  buildSocialAgentMessageDedupeKey,
   filterPendingSocialAgentCounterpartMessages,
   socialAgentLoopStringArray,
   toSocialAgentMessageArray,
@@ -85,8 +84,6 @@ import type {
 import {
   buildSocialAgentConversationOptions,
   buildSocialAgentDelegateMessageOptions,
-  buildSocialAgentMessageMetadata,
-  buildSocialAgentMessageSendOptions,
 } from './social-agent-message-options';
 import {
   buildFallbackSocialAgentNextAction,
@@ -103,6 +100,7 @@ import { SocialAgentConfirmationPolicyService } from './social-agent-confirmatio
 import { SocialAgentToolCallFactoryService } from './social-agent-tool-call-factory.service';
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 import { SocialAgentPaymentIntentToolService } from './social-agent-payment-intent-tool.service';
+import { SocialAgentMessageToolService } from './social-agent-message-tool.service';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -153,6 +151,7 @@ export class SocialAgentToolExecutorService {
     private readonly toolCallFactory: SocialAgentToolCallFactoryService,
     private readonly toolInput: SocialAgentToolInputParserService,
     private readonly paymentIntentTools: SocialAgentPaymentIntentToolService,
+    private readonly messageTools: SocialAgentMessageToolService,
   ) {}
 
   async executeTask(
@@ -1294,102 +1293,10 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     stepId: string,
   ): Promise<unknown> {
-    const text = this.toolInput.string(
-      input.text ?? input.message ?? input.content,
-    );
-    if (!text) throw new BadRequestException('text is required');
-
-    let conversationId = this.toolInput.string(input.conversationId);
-    const targetUserId = this.toolInput.number(
-      input.targetUserId ?? input.toUserId,
-    );
-    const targetForDedupe = targetUserId ?? this.memoryTargetUserId(task);
-    const duplicateKey = buildSocialAgentMessageDedupeKey(
-      targetForDedupe,
-      text,
-    );
-    if (this.hasSocialLoopKey(task, 'sentMessageKeys', duplicateKey)) {
-      return {
-        skipped: true,
-        duplicate: true,
-        reason: 'duplicate_message_content',
-        conversationId:
-          conversationId ?? this.socialLoopMemory(task).conversationId ?? null,
-        targetUserId: targetForDedupe ?? null,
-        textPreview: this.preview(text),
-      };
-    }
-    if (!conversationId) {
-      if (!targetUserId)
-        throw new BadRequestException(
-          'targetUserId or conversationId is required',
-        );
-      const conversation = await this.messages.startConversation(
-        task.ownerUserId,
-        targetUserId,
-        this.messageConversationOptions(task, stepId),
-      );
-      conversationId = conversation.conversationId;
-    }
-
-    const message = await this.messages.sendMessage(
-      conversationId,
-      task.ownerUserId,
-      text,
-      this.messageSendOptions(task, stepId, input),
-    );
-    const output = this.toolInput.asRecord(message);
-    const candidateInput = this.toolInput.isRecord(input.candidate)
-      ? input.candidate
-      : {};
-    const candidateRecordId = this.toolInput.number(
-      input.candidateRecordId ??
-        input.candidateId ??
-        candidateInput.candidateRecordId,
-    );
-    const socialRequestId = this.toolInput.number(
-      input.socialRequestId ??
-        input.requestId ??
-        candidateInput.socialRequestId,
-    );
-    let candidate: { id: number; status: SocialRequestCandidateStatus } | null =
-      null;
-    if (candidateRecordId && socialRequestId) {
-      try {
-        candidate = await this.matchService.markCandidateMessaged(
-          socialRequestId,
-          candidateRecordId,
-          task.ownerUserId,
-        );
-      } catch (error) {
-        this.logger.warn(
-          `markCandidateMessaged failed for task=${task.id}, candidate=${candidateRecordId}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    }
-    this.rememberConversation(task, {
-      conversationId,
-      targetUserId: targetUserId ?? this.memoryTargetUserId(task),
-      lastMessageId: this.toolInput.string(output.id ?? output.messageId),
-      lastAgentMessageId: this.toolInput.string(output.id ?? output.messageId),
-      sentMessageKeys: this.appendSocialLoopKey(
-        task,
-        'sentMessageKeys',
-        duplicateKey,
-      ),
-      sourceTool: SocialAgentToolName.SendMessage,
-    });
-    this.rememberSentMessage(task, {
-      id: this.toolInput.string(output.id ?? output.messageId),
-      conversationId,
-      targetUserId: targetUserId ?? this.memoryTargetUserId(task),
-      textPreview: this.preview(text),
-      toolName: SocialAgentToolName.SendMessage,
-      stepId,
-    });
-    return candidate ? { ...output, candidate } : output;
+    const result = await this.messageTools.sendMessage(task, input, stepId);
+    if (result.loopUpdates) this.rememberConversation(task, result.loopUpdates);
+    if (result.sentMessage) this.rememberSentMessage(task, result.sentMessage);
+    return result.output;
   }
 
   private async addFriend(
@@ -2126,80 +2033,17 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     stepId: string,
   ): Promise<unknown> {
-    if (!task.agentConnectionId)
-      throw new BadRequestException('agentConnectionId is required');
-    const conversationId = this.toolInput.string(input.conversationId);
-    const text = this.toolInput.string(
-      input.text ?? input.message ?? input.content,
-    );
-    if (!conversationId)
-      throw new BadRequestException('conversationId is required');
-    if (!text) throw new BadRequestException('text is required');
-    const targetForDedupe =
-      this.toolInput.number(input.targetUserId) ??
-      this.memoryTargetUserId(task);
-    const duplicateKey = buildSocialAgentMessageDedupeKey(
-      targetForDedupe,
-      text,
-    );
-    if (this.hasSocialLoopKey(task, 'sentMessageKeys', duplicateKey)) {
-      return {
-        skipped: true,
-        duplicate: true,
-        reason: 'duplicate_message_content',
-        conversationId,
-        targetUserId: targetForDedupe ?? null,
-        textPreview: this.preview(text),
-      };
-    }
-    const message = await this.messages.sendAgentReply(
-      conversationId,
-      task.agentConnectionId,
-      text,
-      {
-        ownerUserId: task.ownerUserId,
-        metadata: this.messageMetadata(task, stepId, input.metadata),
-      },
-    );
-    const output = this.toolInput.asRecord(message);
-    const targetUserId =
-      this.toolInput.number(output.recipientUserId) ??
-      this.toolInput.number(input.targetUserId) ??
-      this.memoryTargetUserId(task);
-    this.rememberConversation(task, {
-      conversationId,
-      targetUserId,
-      lastMessageId: this.toolInput.string(output.id ?? output.messageId),
-      lastAgentMessageId: this.toolInput.string(output.id ?? output.messageId),
-      sentMessageKeys: this.appendSocialLoopKey(
+    const result = await this.messageTools.replyMessage(task, input, stepId);
+    if (result.loopUpdates) this.rememberConversation(task, result.loopUpdates);
+    if (result.sentMessage) this.rememberSentMessage(task, result.sentMessage);
+    if (result.inboxEvent) {
+      await this.writeSocialAgentInboxEvent(
         task,
-        'sentMessageKeys',
-        duplicateKey,
-      ),
-      sourceTool: SocialAgentToolName.ReplyMessage,
-    });
-    this.rememberSentMessage(task, {
-      id: this.toolInput.string(output.id ?? output.messageId),
-      conversationId,
-      targetUserId,
-      textPreview: this.preview(text),
-      toolName: SocialAgentToolName.ReplyMessage,
-      stepId,
-    });
-    await this.writeSocialAgentInboxEvent(task, 'social_agent.reply.sent', {
-      conversationId,
-      messageId: this.toolInput.string(output.id ?? output.messageId) ?? null,
-      fromUserId: targetUserId ?? null,
-      contentPreview: this.preview(text),
-      metadata: {
-        agentTaskId: task.id,
-        stepId,
-        toolName: SocialAgentToolName.ReplyMessage,
-        textPreview: this.preview(text),
-        output,
-      },
-    });
-    return message;
+        result.inboxEvent.eventType,
+        result.inboxEvent.input,
+      );
+    }
+    return result.output;
   }
 
   private async recordPaymentIntent(
@@ -2521,31 +2365,6 @@ export class SocialAgentToolExecutorService {
     metadata: Record<string, unknown> = {},
   ) {
     return buildSocialAgentConversationOptions(task, stepId, metadata);
-  }
-
-  private messageSendOptions(
-    task: AgentTask,
-    stepId: string,
-    input: Record<string, unknown>,
-  ) {
-    return buildSocialAgentMessageSendOptions(
-      task,
-      stepId,
-      input,
-      (toolName, currentInput) =>
-        this.confirmationPolicy.canRunAsConfirmedUserAction(
-          toolName,
-          currentInput,
-        ),
-    );
-  }
-
-  private messageMetadata(
-    task: AgentTask,
-    stepId: string,
-    raw: unknown,
-  ): Record<string, unknown> {
-    return buildSocialAgentMessageMetadata(task, stepId, raw);
   }
 
   private activityTitle(toolName: SocialAgentToolName): string {
