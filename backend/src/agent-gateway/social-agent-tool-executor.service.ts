@@ -41,7 +41,6 @@ import { AgentActionLogService } from './agent-action-log.service';
 import {
   AgentActionRiskLevel,
   AgentActionStatus,
-  AgentActionType,
 } from './entities/agent-action-log.entity';
 import {
   PaymentIntent,
@@ -63,10 +62,6 @@ import {
 } from './agent-permission.service';
 import { AgentApprovalDispatcherService } from './agent-approval-dispatcher.service';
 import { AgentApprovalService } from './agent-approval.service';
-import {
-  ApprovalRiskLevel,
-  ApprovalType,
-} from './entities/agent-approval-request.entity';
 import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
 import {
   appendShortTermMemoryItem,
@@ -87,77 +82,34 @@ import {
   SceneRiskPolicyService,
 } from './scene-risk-policy.service';
 import { ConfirmationGuardService } from './confirmation-guard.service';
+import {
+  buildSocialAgentToolApprovalSummary,
+  getSocialAgentPermissionActionForTool,
+  getSocialAgentToolActionType,
+  getSocialAgentToolApprovalRiskLevel,
+  getSocialAgentToolApprovalType,
+  getSocialAgentToolRiskLevel,
+  getSocialAgentToolRiskLevelForPolicy,
+  getSocialAgentToolSceneActionType,
+  isConfirmableSocialAgentTool,
+  shouldWriteSocialAgentActionResultInbox,
+  SOCIAL_AGENT_HIGH_RISK_TOOL_DAILY_LIMITS,
+} from './social-agent-tool-policy';
+import { SocialAgentToolName } from './social-agent-tool.types';
+import type {
+  SocialAgentRunNextResult,
+  SocialAgentTaskExecutionResult,
+  SocialAgentToolCallRecord,
+  SocialAgentToolCallStatus,
+} from './social-agent-tool.types';
 
-export enum SocialAgentToolName {
-  GetMyProfile = 'get_my_profile',
-  GetAiProfile = 'get_ai_profile',
-  GenerateProfileQuestions = 'generate_profile_questions',
-  UpdateAiProfileFromAnswers = 'update_ai_profile_from_answers',
-  UpdateProfileFromAgentContext = 'update_profile_from_agent_context',
-  GetCurrentTaskMemory = 'get_current_task_memory',
-  PublishSocialRequest = 'publish_social_request',
-  CreateSocialRequest = 'create_social_request',
-  SearchPublicIntents = 'search_public_intents',
-  SearchActivities = 'search_activities',
-  SearchMatches = 'search_matches',
-  ExplainMatches = 'explain_matches',
-  DraftOpener = 'draft_opener',
-  SendMessageToCandidate = 'send_message_to_candidate',
-  SendMessage = 'send_message',
-  ConnectCandidate = 'connect_candidate',
-  AddFriend = 'add_friend',
-  CreateActivity = 'create_activity',
-  JoinActivity = 'join_activity',
-  InviteActivity = 'invite_activity',
-  SaveCandidate = 'save_candidate',
-  GetConversations = 'get_conversations',
-  GetAgentInbox = 'get_agent_inbox',
-  WriteInbox = 'write_inbox',
-  ReadInbox = 'read_inbox',
-  GetPendingApprovals = 'get_pending_approvals',
-  ApproveAction = 'approve_action',
-  RejectAction = 'reject_action',
-  ReadLongTermMemory = 'read_long_term_memory',
-  SummarizeCurrentTask = 'summarize_current_task',
-  GetCandidatePoolDebug = 'get_candidate_pool_debug',
-  ReadTaskConversationMessages = 'read_task_conversation_messages',
-  SummarizeReply = 'summarize_reply',
-  DecideNextSocialAction = 'decide_next_social_action',
-  ReplyMessage = 'reply_message',
-  OfflineMeeting = 'offline_meeting',
-  ShareLocation = 'share_location',
-  Payment = 'payment',
-}
-
-export type SocialAgentToolCallStatus = 'succeeded' | 'failed' | 'blocked';
-
-export interface SocialAgentToolCallRecord extends Record<string, unknown> {
-  id: string;
-  stepId: string;
-  toolName: SocialAgentToolName;
-  status: SocialAgentToolCallStatus;
-  input: Record<string, unknown>;
-  output: Record<string, unknown> | null;
-  error: Record<string, unknown> | null;
-  startedAt: string;
-  completedAt: string;
-  durationMs: number;
-}
-
-export interface SocialAgentTaskExecutionResult {
-  taskId: number;
-  executedSteps: number;
-  succeededSteps: number;
-  failedSteps: number;
-  blockedSteps: number;
-  toolCalls: SocialAgentToolCallRecord[];
-}
-
-export interface SocialAgentRunNextResult extends SocialAgentTaskExecutionResult {
-  status: AgentTaskStatus;
-  handledReply: boolean;
-  decision: Record<string, unknown> | null;
-}
+export { SocialAgentToolName } from './social-agent-tool.types';
+export type {
+  SocialAgentRunNextResult,
+  SocialAgentTaskExecutionResult,
+  SocialAgentToolCallRecord,
+  SocialAgentToolCallStatus,
+} from './social-agent-tool.types';
 
 type StepRecord = Record<string, unknown>;
 
@@ -208,13 +160,6 @@ type ToolAuditDetails = {
   status: SocialAgentToolCallStatus;
   error: Record<string, unknown> | null;
   createdAt: string;
-};
-
-const HIGH_RISK_TOOL_DAILY_LIMITS: Partial<
-  Record<SocialAgentToolName, number>
-> = {
-  [SocialAgentToolName.OfflineMeeting]: 3,
-  [SocialAgentToolName.Payment]: 3,
 };
 
 @Injectable()
@@ -883,14 +828,14 @@ export class SocialAgentToolExecutorService {
 
     if (!policy.requiresConfirmation) return null;
     if (this.hasUserApproval(input)) return null;
-    if (!this.isConfirmableTool(toolName)) return null;
+    if (!isConfirmableSocialAgentTool(toolName)) return null;
 
     const approval = await this.approvals.create({
       userId: task.ownerUserId,
       agentConnectionId: task.agentConnectionId ?? null,
       agentTaskId: task.id,
-      type: this.approvalTypeForTool(toolName, policy),
-      actionType: this.actionTypeForTool(toolName),
+      type: getSocialAgentToolApprovalType(toolName, policy),
+      actionType: getSocialAgentToolActionType(toolName),
       skillName: toolName,
       payload: {
         ...input,
@@ -902,8 +847,8 @@ export class SocialAgentToolExecutorService {
         requiresDoubleConfirmation: policy.requiresDoubleConfirmation,
         blockedActions: policy.blockedActions,
       },
-      summary: this.approvalSummaryForPolicy(toolName, policy),
-      riskLevel: this.approvalRiskLevel(policy.riskLevel),
+      summary: buildSocialAgentToolApprovalSummary(toolName, policy),
+      riskLevel: getSocialAgentToolApprovalRiskLevel(policy.riskLevel),
       reason: policy.safetyPrompts.join('；') || '该动作需要用户确认后再执行。',
       createdBy: 'agent',
       relatedSocialRequestId: this.relatedSocialRequestIdFor(input, null),
@@ -952,106 +897,6 @@ export class SocialAgentToolExecutorService {
 
   private isDangerousAdhocAction(toolName: SocialAgentToolName): boolean {
     return this.confirmationRules().requiresExplicitConfirmation(toolName);
-  }
-
-  private isConfirmableTool(toolName: SocialAgentToolName): boolean {
-    return [
-      SocialAgentToolName.SendMessageToCandidate,
-      SocialAgentToolName.SendMessage,
-      SocialAgentToolName.ReplyMessage,
-      SocialAgentToolName.ConnectCandidate,
-      SocialAgentToolName.AddFriend,
-      SocialAgentToolName.CreateActivity,
-      SocialAgentToolName.InviteActivity,
-      SocialAgentToolName.JoinActivity,
-      SocialAgentToolName.OfflineMeeting,
-      SocialAgentToolName.ShareLocation,
-      SocialAgentToolName.Payment,
-      SocialAgentToolName.PublishSocialRequest,
-      SocialAgentToolName.CreateSocialRequest,
-    ].includes(toolName);
-  }
-
-  private approvalTypeForTool(
-    toolName: SocialAgentToolName,
-    policy: SceneRiskPolicyResult,
-  ): ApprovalType {
-    if (policy.actionType === 'payment' || policy.actionType === 'wallet') {
-      return ApprovalType.Payment;
-    }
-    if (
-      policy.actionType === 'share_location' ||
-      policy.actionType === 'precise_location'
-    ) {
-      return ApprovalType.ShareLocation;
-    }
-    if (policy.actionType === 'contact_exchange') {
-      return ApprovalType.ContactExchange;
-    }
-    if (policy.sceneType === 'drinking') return ApprovalType.AlcoholActivity;
-    switch (toolName) {
-      case SocialAgentToolName.SendMessage:
-      case SocialAgentToolName.SendMessageToCandidate:
-      case SocialAgentToolName.ReplyMessage:
-        return ApprovalType.SendMessage;
-      case SocialAgentToolName.ConnectCandidate:
-      case SocialAgentToolName.AddFriend:
-        return ApprovalType.ContactRequest;
-      case SocialAgentToolName.JoinActivity:
-        return ApprovalType.JoinActivity;
-      case SocialAgentToolName.CreateActivity:
-      case SocialAgentToolName.InviteActivity:
-        return ApprovalType.CreateActivity;
-      case SocialAgentToolName.OfflineMeeting:
-        return ApprovalType.OfflineMeeting;
-      case SocialAgentToolName.Payment:
-        return ApprovalType.Payment;
-      default:
-        return ApprovalType.Custom;
-    }
-  }
-
-  private approvalRiskLevel(level: SceneRiskPolicyResult['riskLevel']) {
-    if (level === 'low') return ApprovalRiskLevel.Low;
-    if (level === 'medium') return ApprovalRiskLevel.Medium;
-    return ApprovalRiskLevel.High;
-  }
-
-  private approvalSummaryForPolicy(
-    toolName: SocialAgentToolName,
-    policy: SceneRiskPolicyResult,
-  ): string {
-    const actionLabel = this.toolLabel(toolName);
-    const riskLabel =
-      policy.riskLevel === 'critical'
-        ? 'Critical'
-        : policy.riskLevel === 'high'
-          ? '高风险'
-          : policy.riskLevel === 'medium'
-            ? '中风险'
-            : '低风险';
-    const confirmText = policy.requiresDoubleConfirmation
-      ? '需要双确认'
-      : '需要确认';
-    return `${actionLabel}属于${riskLabel}动作，${confirmText}后再执行。`;
-  }
-
-  private toolLabel(toolName: SocialAgentToolName): string {
-    const labels: Partial<Record<SocialAgentToolName, string>> = {
-      [SocialAgentToolName.SendMessage]: '发消息',
-      [SocialAgentToolName.SendMessageToCandidate]: '给候选人发消息',
-      [SocialAgentToolName.ReplyMessage]: '回复消息',
-      [SocialAgentToolName.AddFriend]: '加好友',
-      [SocialAgentToolName.ConnectCandidate]: '连接候选人',
-      [SocialAgentToolName.CreateActivity]: '创建活动',
-      [SocialAgentToolName.InviteActivity]: '邀请参加活动',
-      [SocialAgentToolName.JoinActivity]: '加入活动',
-      [SocialAgentToolName.OfflineMeeting]: '线下见面',
-      [SocialAgentToolName.Payment]: '支付/钱包',
-      [SocialAgentToolName.PublishSocialRequest]: '发布社交需求',
-      [SocialAgentToolName.CreateSocialRequest]: '创建社交需求',
-    };
-    return labels[toolName] ?? toolName;
   }
 
   private async updateAiProfileFromAnswers(
@@ -3302,7 +3147,7 @@ export class SocialAgentToolExecutorService {
       };
     }
 
-    const permissionAction = this.permissionActionForTool(
+    const permissionAction = getSocialAgentPermissionActionForTool(
       task.permissionMode,
       toolName,
     );
@@ -3353,7 +3198,10 @@ export class SocialAgentToolExecutorService {
     return {
       ...raw,
       nextAction,
-      action: this.permissionActionForTool(task.permissionMode, toolName),
+      action: getSocialAgentPermissionActionForTool(
+        task.permissionMode,
+        toolName,
+      ),
       toolName,
       input,
       reason: this.string(raw.reason) ?? `Execute ${toolName}`,
@@ -3453,7 +3301,7 @@ export class SocialAgentToolExecutorService {
       ownerUserId: task.ownerUserId,
       agentId: task.agentConnectionId,
       agentTaskId: task.id,
-      actionType: this.actionTypeForTool(toolName),
+      actionType: getSocialAgentToolActionType(toolName),
       actionStatus: this.actionStatusForCall(call),
       eventType:
         call.status === 'succeeded'
@@ -3505,7 +3353,10 @@ export class SocialAgentToolExecutorService {
       );
     }
 
-    if (this.shouldWriteActionResultInbox(toolName) && task.agentConnectionId) {
+    if (
+      shouldWriteSocialAgentActionResultInbox(toolName) &&
+      task.agentConnectionId
+    ) {
       try {
         await this.writeActionResultInbox(task, toolName, call);
       } catch (error) {
@@ -3539,8 +3390,8 @@ export class SocialAgentToolExecutorService {
       inputSummary: this.toolInputSummary(toolName, input),
       outputSummary: this.toolOutputSummary(toolName, call),
       riskLevel: scenePolicy
-        ? this.riskLevelForPolicy(scenePolicy.riskLevel)
-        : this.riskLevelForTool(toolName),
+        ? getSocialAgentToolRiskLevelForPolicy(scenePolicy.riskLevel)
+        : getSocialAgentToolRiskLevel(toolName),
       requiresApproval:
         typeof policy.requiresApproval === 'boolean'
           ? policy.requiresApproval
@@ -3751,86 +3602,6 @@ export class SocialAgentToolExecutorService {
     ].includes(toolName);
   }
 
-  private shouldWriteActionResultInbox(toolName: SocialAgentToolName): boolean {
-    return [
-      SocialAgentToolName.SendMessage,
-      SocialAgentToolName.SendMessageToCandidate,
-      SocialAgentToolName.AddFriend,
-      SocialAgentToolName.ConnectCandidate,
-      SocialAgentToolName.InviteActivity,
-      SocialAgentToolName.CreateActivity,
-      SocialAgentToolName.JoinActivity,
-      SocialAgentToolName.OfflineMeeting,
-      SocialAgentToolName.ReplyMessage,
-      SocialAgentToolName.SaveCandidate,
-      SocialAgentToolName.PublishSocialRequest,
-      SocialAgentToolName.ApproveAction,
-      SocialAgentToolName.RejectAction,
-      SocialAgentToolName.Payment,
-    ].includes(toolName);
-  }
-
-  private actionTypeForTool(toolName: SocialAgentToolName): AgentActionType {
-    switch (toolName) {
-      case SocialAgentToolName.PublishSocialRequest:
-      case SocialAgentToolName.CreateSocialRequest:
-        return AgentActionType.CreateSocialRequest;
-      case SocialAgentToolName.SearchPublicIntents:
-      case SocialAgentToolName.SearchActivities:
-      case SocialAgentToolName.SearchMatches:
-      case SocialAgentToolName.ExplainMatches:
-        return AgentActionType.RunMatch;
-      case SocialAgentToolName.DraftOpener:
-        return AgentActionType.GenerateInvite;
-      case SocialAgentToolName.SendMessageToCandidate:
-      case SocialAgentToolName.SendMessage:
-      case SocialAgentToolName.ReplyMessage:
-        return AgentActionType.SendMessage;
-      case SocialAgentToolName.ConnectCandidate:
-      case SocialAgentToolName.AddFriend:
-        return AgentActionType.AddFriend;
-      case SocialAgentToolName.CreateActivity:
-        return AgentActionType.CreateActivity;
-      case SocialAgentToolName.InviteActivity:
-        return AgentActionType.InviteActivity;
-      case SocialAgentToolName.OfflineMeeting:
-        return AgentActionType.OfflineMeeting;
-      case SocialAgentToolName.ShareLocation:
-        return AgentActionType.ApproveAction;
-      case SocialAgentToolName.JoinActivity:
-        return AgentActionType.JoinActivity;
-      case SocialAgentToolName.SaveCandidate:
-        return AgentActionType.ApproveAction;
-      case SocialAgentToolName.GenerateProfileQuestions:
-        return AgentActionType.GenerateProfileQuestion;
-      case SocialAgentToolName.UpdateAiProfileFromAnswers:
-      case SocialAgentToolName.UpdateProfileFromAgentContext:
-        return AgentActionType.UpdateProfile;
-      case SocialAgentToolName.GetMyProfile:
-      case SocialAgentToolName.GetAiProfile:
-        return AgentActionType.ReadProfile;
-      case SocialAgentToolName.ApproveAction:
-        return AgentActionType.ApproveAction;
-      case SocialAgentToolName.RejectAction:
-        return AgentActionType.RejectAction;
-      case SocialAgentToolName.Payment:
-        return AgentActionType.Payment;
-      case SocialAgentToolName.GetCurrentTaskMemory:
-      case SocialAgentToolName.GetConversations:
-      case SocialAgentToolName.GetAgentInbox:
-      case SocialAgentToolName.GetPendingApprovals:
-      case SocialAgentToolName.ReadLongTermMemory:
-      case SocialAgentToolName.SummarizeCurrentTask:
-      case SocialAgentToolName.GetCandidatePoolDebug:
-      case SocialAgentToolName.WriteInbox:
-      case SocialAgentToolName.ReadInbox:
-      case SocialAgentToolName.ReadTaskConversationMessages:
-      case SocialAgentToolName.SummarizeReply:
-      case SocialAgentToolName.DecideNextSocialAction:
-        return AgentActionType.AgentEvent;
-    }
-  }
-
   private actionStatusForCall(
     call: SocialAgentToolCallRecord,
   ): AgentActionStatus {
@@ -3843,81 +3614,6 @@ export class SocialAgentToolExecutorService {
     return call.status === 'succeeded'
       ? AgentActionStatus.Executed
       : AgentActionStatus.Failed;
-  }
-
-  private riskLevelForTool(
-    toolName: SocialAgentToolName,
-  ): AgentActionRiskLevel {
-    if (
-      toolName === SocialAgentToolName.Payment ||
-      toolName === SocialAgentToolName.OfflineMeeting ||
-      toolName === SocialAgentToolName.CreateActivity ||
-      toolName === SocialAgentToolName.JoinActivity ||
-      toolName === SocialAgentToolName.ShareLocation ||
-      toolName === SocialAgentToolName.ApproveAction
-    ) {
-      return AgentActionRiskLevel.High;
-    }
-    if (
-      [
-        SocialAgentToolName.SendMessage,
-        SocialAgentToolName.SendMessageToCandidate,
-        SocialAgentToolName.ReplyMessage,
-        SocialAgentToolName.AddFriend,
-        SocialAgentToolName.ConnectCandidate,
-        SocialAgentToolName.InviteActivity,
-        SocialAgentToolName.SaveCandidate,
-        SocialAgentToolName.PublishSocialRequest,
-        SocialAgentToolName.RejectAction,
-      ].includes(toolName)
-    ) {
-      return AgentActionRiskLevel.Medium;
-    }
-    return AgentActionRiskLevel.Low;
-  }
-
-  private riskLevelForPolicy(
-    level: SceneRiskPolicyResult['riskLevel'],
-  ): AgentActionRiskLevel {
-    if (level === 'low') return AgentActionRiskLevel.Low;
-    if (level === 'medium') return AgentActionRiskLevel.Medium;
-    return AgentActionRiskLevel.High;
-  }
-
-  private sceneActionTypeForTool(toolName: SocialAgentToolName): string {
-    switch (toolName) {
-      case SocialAgentToolName.GetMyProfile:
-      case SocialAgentToolName.GetAiProfile:
-      case SocialAgentToolName.UpdateAiProfileFromAnswers:
-      case SocialAgentToolName.UpdateProfileFromAgentContext:
-        return 'profile';
-      case SocialAgentToolName.SearchPublicIntents:
-      case SocialAgentToolName.SearchActivities:
-      case SocialAgentToolName.SearchMatches:
-      case SocialAgentToolName.ExplainMatches:
-        return 'search_candidates';
-      case SocialAgentToolName.DraftOpener:
-        return 'generate_opener';
-      case SocialAgentToolName.SendMessageToCandidate:
-      case SocialAgentToolName.SendMessage:
-      case SocialAgentToolName.ReplyMessage:
-        return 'send_message';
-      case SocialAgentToolName.ConnectCandidate:
-      case SocialAgentToolName.AddFriend:
-        return 'add_friend';
-      case SocialAgentToolName.CreateActivity:
-      case SocialAgentToolName.InviteActivity:
-      case SocialAgentToolName.JoinActivity:
-        return 'create_activity';
-      case SocialAgentToolName.OfflineMeeting:
-        return 'offline_meeting';
-      case SocialAgentToolName.ShareLocation:
-        return 'share_location';
-      case SocialAgentToolName.Payment:
-        return 'payment';
-      default:
-        return 'chat';
-    }
   }
 
   private targetUserIdFor(
@@ -4018,7 +3714,7 @@ export class SocialAgentToolExecutorService {
     }
 
     const action =
-      this.permissionActionForTool(mode, toolName) ??
+      getSocialAgentPermissionActionForTool(mode, toolName) ??
       this.permissions.normalizeAction(
         this.string(step.action ?? step.actionType) ?? '',
       );
@@ -4034,7 +3730,7 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     toolName: SocialAgentToolName,
   ): void {
-    const limit = HIGH_RISK_TOOL_DAILY_LIMITS[toolName];
+    const limit = SOCIAL_AGENT_HIGH_RISK_TOOL_DAILY_LIMITS[toolName];
     if (!limit) return;
 
     const since = Date.now() - 24 * 60 * 60 * 1000;
@@ -4059,13 +3755,13 @@ export class SocialAgentToolExecutorService {
     toolName: SocialAgentToolName,
     input: Record<string, unknown> = {},
   ): Record<string, unknown> {
-    const limit = HIGH_RISK_TOOL_DAILY_LIMITS[toolName] ?? null;
+    const limit = SOCIAL_AGENT_HIGH_RISK_TOOL_DAILY_LIMITS[toolName] ?? null;
     const registeredTool = this.toolRegistry.getToolByExecutorName(toolName);
     const sceneRisk = this.sceneRisk.evaluate({
       sceneType: this.string(
         input.sceneType ?? input.activityType ?? input.type,
       ),
-      actionType: this.sceneActionTypeForTool(toolName),
+      actionType: getSocialAgentToolSceneActionType(toolName),
       text: `${task.goal ?? ''} ${task.title ?? ''} ${this.safeUnknownText(input)}`,
       permissionMode: task.permissionMode,
       involvesMoney: this.bool(
@@ -4096,7 +3792,7 @@ export class SocialAgentToolExecutorService {
         registeredTool?.requiresApproval ||
         false,
       requiresDoubleConfirmation: sceneRisk.requiresDoubleConfirmation,
-      riskLevel: this.riskLevelForPolicy(sceneRisk.riskLevel),
+      riskLevel: getSocialAgentToolRiskLevelForPolicy(sceneRisk.riskLevel),
       sceneRisk,
       highRisk,
       dailyLimit: limit,
@@ -4120,67 +3816,6 @@ export class SocialAgentToolExecutorService {
             ? 'audit_required'
             : 'mode_gated',
     };
-  }
-
-  private permissionActionForTool(
-    mode: AgentTaskPermissionMode | string,
-    toolName: SocialAgentToolName,
-  ): SocialAgentAction | null {
-    switch (toolName) {
-      case SocialAgentToolName.GenerateProfileQuestions:
-      case SocialAgentToolName.UpdateAiProfileFromAnswers:
-      case SocialAgentToolName.UpdateProfileFromAgentContext:
-      case SocialAgentToolName.ExplainMatches:
-        return SocialAgentAction.GenerateContent;
-      case SocialAgentToolName.PublishSocialRequest:
-      case SocialAgentToolName.CreateSocialRequest:
-        return SocialAgentAction.SendInvite;
-      case SocialAgentToolName.SearchPublicIntents:
-      case SocialAgentToolName.SearchActivities:
-      case SocialAgentToolName.SearchMatches:
-        return SocialAgentAction.SearchProfiles;
-      case SocialAgentToolName.DraftOpener:
-        return SocialAgentAction.DraftMessage;
-      case SocialAgentToolName.SendMessageToCandidate:
-      case SocialAgentToolName.SendMessage:
-      case SocialAgentToolName.ReplyMessage:
-        return SocialAgentAction.SendMessage;
-      case SocialAgentToolName.ConnectCandidate:
-      case SocialAgentToolName.AddFriend:
-        return SocialAgentAction.AddFriend;
-      case SocialAgentToolName.InviteActivity:
-        return String(mode) === 'limited_auto'
-          ? SocialAgentAction.OfflineMeet
-          : SocialAgentAction.SendInvite;
-      case SocialAgentToolName.CreateActivity:
-      case SocialAgentToolName.JoinActivity:
-        return SocialAgentAction.OfflineMeet;
-      case SocialAgentToolName.SaveCandidate:
-        return SocialAgentAction.FavoriteCandidate;
-      case SocialAgentToolName.WriteInbox:
-        return SocialAgentAction.WriteInbox;
-      case SocialAgentToolName.OfflineMeeting:
-      case SocialAgentToolName.ShareLocation:
-        return SocialAgentAction.OfflineMeet;
-      case SocialAgentToolName.Payment:
-        return SocialAgentAction.Payment;
-      case SocialAgentToolName.GetMyProfile:
-      case SocialAgentToolName.GetAiProfile:
-      case SocialAgentToolName.GetCurrentTaskMemory:
-      case SocialAgentToolName.GetConversations:
-      case SocialAgentToolName.GetAgentInbox:
-      case SocialAgentToolName.GetPendingApprovals:
-      case SocialAgentToolName.ApproveAction:
-      case SocialAgentToolName.RejectAction:
-      case SocialAgentToolName.ReadLongTermMemory:
-      case SocialAgentToolName.SummarizeCurrentTask:
-      case SocialAgentToolName.GetCandidatePoolDebug:
-      case SocialAgentToolName.ReadInbox:
-      case SocialAgentToolName.ReadTaskConversationMessages:
-      case SocialAgentToolName.SummarizeReply:
-      case SocialAgentToolName.DecideNextSocialAction:
-        return null;
-    }
   }
 
   private resolveToolName(step: StepRecord): SocialAgentToolName {
