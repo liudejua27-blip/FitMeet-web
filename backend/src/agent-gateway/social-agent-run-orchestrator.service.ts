@@ -21,6 +21,7 @@ import type {
   SocialAgentVisibleStep,
   StreamEmit,
 } from './social-agent-chat.types';
+import { buildSocialAgentRunCompletionSnapshot } from './social-agent-run-completion.presenter';
 import { TonePolicyService } from './response-quality/tone-policy.service';
 
 @Injectable()
@@ -122,26 +123,19 @@ export class SocialAgentRunOrchestratorService {
     });
     task = recommendation.task;
     const result = recommendation.result;
+    const completion = buildSocialAgentRunCompletionSnapshot(result, task.id);
     this.realtime?.emitAgentEvent(ownerUserId, 'agent:completed', {
       taskId: task.id,
       status: result.status,
-      candidateCount: result.candidates.length,
-      approvalRequiredCount: result.approvalRequiredActions.length,
+      candidateCount: completion.resultPayload.candidateCount,
+      approvalRequiredCount: completion.resultPayload.approvalRequiredCount,
     });
     await this.fitMeetRuntime?.completeRun({
       runId: runtimeRun?.id,
       userId: ownerUserId,
-      status:
-        result.approvalRequiredActions.length > 0 ||
-        result.candidates.length > 0
-          ? FitMeetAgentRunStatus.WaitingConfirmation
-          : FitMeetAgentRunStatus.Completed,
+      status: completion.status,
       assistantMessage: result.assistantMessage,
-      resultPayload: {
-        taskId: task.id,
-        candidateCount: result.candidates.length,
-        approvalRequiredCount: result.approvalRequiredActions.length,
-      },
+      resultPayload: completion.resultPayload,
     });
     return result;
   }

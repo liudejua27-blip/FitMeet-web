@@ -73,6 +73,14 @@ const candidatePoolMergePath = path.resolve(
   __dirname,
   'social-agent-candidate-pool-merge.ts',
 );
+const runOrchestratorPath = path.resolve(
+  __dirname,
+  'social-agent-run-orchestrator.service.ts',
+);
+const runCompletionPresenterPath = path.resolve(
+  __dirname,
+  'social-agent-run-completion.presenter.ts',
+);
 
 describe('SocialAgentChatService facade boundary', () => {
   const compatibilitySource = fs.readFileSync(compatibilityExportPath, 'utf8');
@@ -115,6 +123,11 @@ describe('SocialAgentChatService facade boundary', () => {
   );
   const candidatePoolMergeSource = fs.readFileSync(
     candidatePoolMergePath,
+    'utf8',
+  );
+  const runOrchestratorSource = fs.readFileSync(runOrchestratorPath, 'utf8');
+  const runCompletionPresenterSource = fs.readFileSync(
+    runCompletionPresenterPath,
     'utf8',
   );
 
@@ -279,5 +292,21 @@ describe('SocialAgentChatService facade boundary', () => {
     expect(
       candidatePoolMergeSource.trim().split('\n').length,
     ).toBeLessThanOrEqual(70);
+  });
+
+  it('keeps runtime completion status assembly split from run orchestration', () => {
+    expect(runOrchestratorSource).toContain(
+      'buildSocialAgentRunCompletionSnapshot',
+    );
+    expect(runOrchestratorSource).not.toContain(
+      'result.approvalRequiredActions.length > 0',
+    );
+    expect(runOrchestratorSource).not.toContain('result.candidates.length > 0');
+    expect(runCompletionPresenterSource).toContain(
+      'function buildSocialAgentRunCompletionSnapshot',
+    );
+    expect(
+      runCompletionPresenterSource.trim().split('\n').length,
+    ).toBeLessThanOrEqual(40);
   });
 });
