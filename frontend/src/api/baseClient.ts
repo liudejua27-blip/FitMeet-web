@@ -18,12 +18,22 @@ const TOKEN_FALLBACK_KEYS = [
 
 type ApiErrorResponse = {
   message?: string | string[] | Record<string, unknown>;
-  error?: string;
+  error?:
+    | string
+    | {
+        code?: string;
+        message?: string;
+        retryable?: boolean;
+      };
+  code?: string;
+  details?: unknown;
   statusCode?: number;
 };
 
 export class ApiError extends Error {
   readonly status: number;
+  readonly code?: string;
+  readonly retryable: boolean;
   readonly payload?: ApiErrorResponse;
   readonly rawBody?: string;
 
@@ -36,6 +46,8 @@ export class ApiError extends Error {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = resolveApiErrorCode(payload);
+    this.retryable = resolveApiErrorRetryable(payload);
     this.payload = payload;
     this.rawBody = rawBody;
   }
@@ -180,8 +192,23 @@ function resolveApiErrorMessage(
     if (typeof nested === 'string' && nested.trim()) return nested;
   }
   if (status === 401) return AUTH_EXPIRED_MESSAGE;
-  if (payload?.error) return payload.error;
+  if (typeof payload?.error === 'object' && typeof payload.error.message === 'string') {
+    return payload.error.message;
+  }
+  if (typeof payload?.error === 'string') return payload.error;
   if (/^\s*</.test(rawBody)) return '服务器返回了不可读的错误页面，请稍后重试。';
   if (rawBody.trim()) return rawBody;
   return statusText || '请求失败';
+}
+
+function resolveApiErrorCode(payload: ApiErrorResponse | undefined): string | undefined {
+  if (typeof payload?.code === 'string' && payload.code.trim()) return payload.code;
+  if (typeof payload?.error === 'object' && typeof payload.error.code === 'string') {
+    return payload.error.code;
+  }
+  return undefined;
+}
+
+function resolveApiErrorRetryable(payload: ApiErrorResponse | undefined): boolean {
+  return typeof payload?.error === 'object' && payload.error.retryable === true;
 }
