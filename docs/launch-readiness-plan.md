@@ -228,3 +228,10 @@ node scripts/realtime-1000-online-smoke.mjs
 - Blocked: `docker compose ps` and `docker --version` because `docker` is not installed in this environment.
 - Blocked: `pnpm --dir backend migration:status` because Postgres refused `localhost:5432` for database `fitness_app` (`ECONNREFUSED`).
 - Blocked: local backend `/api/health` and `/api/ready` runtime curl because database dependencies could not be started or reached.
+
+2026-06-07 local Codex environment:
+
+- Passed: iOS `xcodebuild test -project FitMeetAlpha.xcodeproj -scheme FitMeetAlpha -destination 'platform=iOS Simulator,id=68F37251-71BE-4F42-9849-62D61BFFE7C3' -only-testing:FitMeetAlphaTests/AuthRestoreContractTests`
+- Passed: iOS Debug simulator build for `FitMeetAlpha`.
+- Passed: iOS Release simulator build for `FitMeetAlpha`.
+- Blocked: iOS full `-only-testing:FitMeetAlphaTests` after three attempts because the Simulator refused to launch `com.fitmeet.alpha` with `FBSOpenApplicationServiceErrorDomain` / `Application failed preflight checks` / `Busy`. This is a local Simulator launch-state blocker; the targeted networking/auth contract tests and Debug/Release builds passed.
