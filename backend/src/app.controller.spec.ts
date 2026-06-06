@@ -465,6 +465,9 @@ describe('AppController', () => {
       expect(contract.components.schemas.CreatePostInput).toMatchObject({
         required: ['type', 'sport', 'text'],
         properties: {
+          type: { type: 'string', minLength: 1 },
+          sport: { type: 'string', minLength: 1 },
+          text: { type: 'string', minLength: 1 },
           title: { type: 'string' },
           tags: { type: 'array', items: { type: 'string' } },
           images: {

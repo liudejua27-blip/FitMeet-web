@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Post } from './post.entity';
@@ -103,8 +107,21 @@ export class PostsService {
   }
 
   async create(userId: number, dto: CreatePostDto) {
+    const type = dto.type?.trim();
+    const sport = dto.sport?.trim();
+    const text = dto.text?.trim();
+    if (!type) {
+      throw new BadRequestException('动态类型不能为空');
+    }
+    if (!sport) {
+      throw new BadRequestException('运动类型不能为空');
+    }
+    if (!text) {
+      throw new BadRequestException('动态内容不能为空');
+    }
+
     // 1. Unified Moderation Check (Sync + Async AI Simulation)
-    await this.moderationService.checkText(dto.text);
+    await this.moderationService.checkText(text);
     if (dto.tags) {
       for (const tag of dto.tags) {
         await this.moderationService.checkText(tag);
@@ -112,6 +129,10 @@ export class PostsService {
     }
     const post = this.postRepo.create({
       ...dto,
+      type,
+      sport,
+      text,
+      title: dto.title?.trim() || undefined,
       userId,
       tags: dto.tags || [],
       images: dto.images || [],

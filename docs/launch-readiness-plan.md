@@ -141,6 +141,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - Error contract risk has been reduced for the shared launch subset: OpenAPI now documents the stable error envelope for auth, feed, messages, Social Agent chat, SSE, and uploads instead of only happy paths.
 - Social Agent workspace restore risk has been reduced: Web current-task and task-timeline reads are now part of the shared core OpenAPI contract and typed Web endpoint registry instead of living as untracked debug API strings.
 - Feed write-path risk has been reduced: like/save/comment operations now confirm the target post or comment exists before writing counters or interaction rows, so Web/iOS get stable 404 errors instead of orphan rows or database constraint leakage.
+- Feed publish validation risk has been reduced: post creation now rejects blank `type`, `sport`, or `text` before moderation/database writes, and the shared OpenAPI create-post schema documents the non-empty required strings used by iOS moment publishing.
 - Messages read/write risk has been reduced: shared Web/iOS conversation history reads now require a participant-scoped conversation match before querying messages, and invalid/blank user-message, Agent inbox, and Agent reply conversation inputs fail with stable 400 responses before Mongo reads or writes. Core OpenAPI now documents the message conversation 400 responses used by Web and iOS clients.
 - Auth risk: production SMS/WeChat provider configuration must be present; mock WeChat login is dev-only, failed production SMS dispatch must not persist usable verification codes, WeChat OAuth redirects must be explicit HTTPS URLs, and refresh token rotation must keep stale tokens from being reused.
 - iOS release risk: staging E2E requires real credentials, a second message target user, object storage, and a deployed backend; it cannot pass in a credential-free local run.
@@ -280,6 +281,7 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- uploads.controller.spec.ts`
 - Passed: backend `pnpm --dir backend test -- typeorm-launch-config.contract.spec.ts`
 - Passed: backend `pnpm --dir backend test -- messages.realtime.spec.ts`
+- Passed: backend `pnpm --dir backend test -- posts.service.spec.ts app.controller.spec.ts`
 - Passed: backend `pnpm --dir backend lint`
 - Passed: backend `pnpm --dir backend build`
 - Passed: landing `pnpm --dir fitmeet-landing test:source`

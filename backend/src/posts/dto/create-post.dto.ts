@@ -1,7 +1,14 @@
-import { IsString, IsOptional, IsArray, IsNumber } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsArray,
+  IsNumber,
+  MinLength,
+} from 'class-validator';
 
 export class CreatePostDto {
   @IsString()
+  @MinLength(1)
   type!: string; // 'meet' | 'log'
 
   @IsOptional()
@@ -9,9 +16,11 @@ export class CreatePostDto {
   title?: string;
 
   @IsString()
+  @MinLength(1)
   sport!: string;
 
   @IsString()
+  @MinLength(1)
   text!: string;
 
   @IsOptional()

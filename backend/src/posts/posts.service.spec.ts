@@ -1,5 +1,5 @@
 import { PostsService } from './posts.service';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 const createQueryBuilder = <T>(items: T[], total = items.length) => {
   const builder = {
@@ -134,6 +134,44 @@ describe('PostsService unified feed', () => {
       }),
     );
     expect(created).toMatchObject({ loc: '西湖', city: '杭州' });
+  });
+
+  it('rejects blank launch-critical post fields before moderation or persistence', async () => {
+    const postRepo = repo();
+    const moderation = { checkText: jest.fn() };
+    const service = new PostsService(
+      postRepo as never,
+      {} as never,
+      {} as never,
+      repo() as never,
+      moderation as never,
+    );
+
+    await expect(
+      service.create(7, {
+        type: 'log',
+        sport: 'run',
+        text: '   ',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.create(7, {
+        type: '   ',
+        sport: 'run',
+        text: '跑步打卡',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.create(7, {
+        type: 'log',
+        sport: '   ',
+        text: '跑步打卡',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(moderation.checkText).not.toHaveBeenCalled();
+    expect(postRepo.create).not.toHaveBeenCalled();
+    expect(postRepo.save).not.toHaveBeenCalled();
   });
 
   it('returns a stable not found error before liking a missing post', async () => {
