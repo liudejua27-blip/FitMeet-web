@@ -846,6 +846,82 @@ describe('SocialAgentToolExecutorService', () => {
     });
   });
 
+  it('falls back when DeepSeek reply-loop JSON calls time out', async () => {
+    const { service, taskRepo, messages, approvals, config } = makeService();
+    const logger = (
+      service as unknown as { logger: { warn: (message: string) => void } }
+    ).logger;
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    config.get.mockImplementation((key: string) => {
+      const env: Record<string, string> = {
+        DEEPSEEK_API_KEY: 'test-key',
+        SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS: '10',
+      };
+      return env[key];
+    });
+    const abortError = new Error('aborted');
+    abortError.name = 'AbortError';
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(abortError as never);
+    const task = makeTask({
+      status: AgentTaskStatus.WaitingReply,
+      memory: {
+        socialLoop: {
+          taskId: 100,
+          conversationId: 'conv_1',
+          targetUserId: 2,
+          lastMessageId: 'msg_1',
+          lastAgentMessageId: 'msg_1',
+        },
+      },
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    messages.getAgentInboxMessages.mockResolvedValue([
+      {
+        id: 'msg_1',
+        conversationId: 'conv_1',
+        text: 'Want to run tonight?',
+        senderType: 'agent',
+        senderId: 1,
+      },
+      {
+        id: 'msg_2',
+        conversationId: 'conv_1',
+        text: 'Sure, public track works for me.',
+        senderType: 'user',
+        senderId: 2,
+      },
+    ]);
+
+    const result = await service.runNext(100, 1);
+
+    expect(result).toMatchObject({
+      executedSteps: 4,
+      succeededSteps: 4,
+      handledReply: true,
+      status: AgentTaskStatus.WaitingReply,
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(approvals.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillName: SocialAgentToolName.ReplyMessage,
+        actionType: 'send_message',
+      }),
+    );
+    expect(task.memory).toMatchObject({
+      shortTerm: {
+        replySummary: expect.objectContaining({ source: 'fallback' }),
+        nextActionDecision: expect.objectContaining({
+          source: 'fallback',
+          toolName: SocialAgentToolName.ReplyMessage,
+        }),
+      },
+    });
+
+    fetchSpy.mockRestore();
+  });
+
   it('turns offline meeting into pending approval in assist/manual mode', async () => {
     const { service, taskRepo, activities, actionLogs, approvals } =
       makeService();

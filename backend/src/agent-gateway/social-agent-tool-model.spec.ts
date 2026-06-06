@@ -1,6 +1,7 @@
 import type { ConfigService } from '@nestjs/config';
 import {
   selectSocialAgentToolModel,
+  selectSocialAgentToolTimeoutMs,
   socialAgentToolModelUseCaseForPurpose,
 } from './social-agent-tool-model';
 
@@ -30,7 +31,10 @@ describe('social agent tool model helpers', () => {
   });
 
   it('uses the injected model router when available', () => {
-    const modelRouter = { getModel: jest.fn(() => 'router-model') };
+    const modelRouter = {
+      getModel: jest.fn(() => 'router-model'),
+      getTimeout: jest.fn(() => 4321),
+    };
 
     expect(
       selectSocialAgentToolModel('planner', {
@@ -39,6 +43,13 @@ describe('social agent tool model helpers', () => {
       }),
     ).toBe('router-model');
     expect(modelRouter.getModel).toHaveBeenCalledWith('planner');
+    expect(
+      selectSocialAgentToolTimeoutMs('planner', {
+        config: makeConfig({ SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS: '9000' }),
+        modelRouter,
+      }),
+    ).toBe(4321);
+    expect(modelRouter.getTimeout).toHaveBeenCalledWith('planner');
   });
 
   it('keeps card and summary work on card or fast models without a router', () => {
@@ -100,5 +111,31 @@ describe('social agent tool model helpers', () => {
     expect(
       selectSocialAgentToolModel('planner', { config: makeConfig() }),
     ).toBe('deepseek-v4-flash');
+  });
+
+  it('resolves bounded DeepSeek timeouts without a router', () => {
+    expect(
+      selectSocialAgentToolTimeoutMs('planner', {
+        config: makeConfig({ SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS: '7000' }),
+      }),
+    ).toBe(7000);
+    expect(
+      selectSocialAgentToolTimeoutMs('planner', {
+        config: makeConfig({
+          SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS: undefined,
+          DEEPSEEK_TIMEOUT_MS: '9000',
+        }),
+      }),
+    ).toBe(9000);
+    expect(
+      selectSocialAgentToolTimeoutMs('planner', {
+        config: makeConfig({ SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS: '20000' }),
+      }),
+    ).toBe(15_000);
+    expect(
+      selectSocialAgentToolTimeoutMs('planner', {
+        config: makeConfig({ SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS: '-1' }),
+      }),
+    ).toBe(5000);
   });
 });

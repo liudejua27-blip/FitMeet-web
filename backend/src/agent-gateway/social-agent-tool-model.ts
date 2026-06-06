@@ -8,7 +8,8 @@ export type SocialAgentToolModelConfig = Pick<ConfigService, 'get'>;
 export type SocialAgentToolModelRouter = Pick<
   SocialAgentModelRouterService,
   'getModel'
->;
+> &
+  Partial<Pick<SocialAgentModelRouterService, 'getTimeout'>>;
 
 export function socialAgentToolModelUseCaseForPurpose(
   purpose: string,
@@ -52,4 +53,30 @@ export function selectSocialAgentToolModel(
     legacy ||
     'deepseek-v4-flash'
   );
+}
+
+export function selectSocialAgentToolTimeoutMs(
+  useCase: SocialAgentModelUseCase,
+  input: {
+    config: SocialAgentToolModelConfig;
+    modelRouter?: SocialAgentToolModelRouter | null;
+  },
+): number {
+  if (input.modelRouter?.getTimeout) {
+    return input.modelRouter.getTimeout(useCase);
+  }
+  const configured =
+    input.config.get<string>('SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS') ??
+    input.config.get<string>('DEEPSEEK_TIMEOUT_MS');
+  return positiveTimeoutMs(configured, 5000, 15_000);
+}
+
+function positiveTimeoutMs(
+  value: string | undefined,
+  fallback: number,
+  max: number,
+): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, max);
 }

@@ -138,6 +138,7 @@ import {
 } from './social-agent-next-action-decision';
 import {
   selectSocialAgentToolModel,
+  selectSocialAgentToolTimeoutMs,
   socialAgentToolModelUseCaseForPurpose,
 } from './social-agent-tool-model';
 
@@ -2643,6 +2644,12 @@ export class SocialAgentToolExecutorService {
       config: this.config,
       modelRouter: this.modelRouter,
     });
+    const timeoutMs = selectSocialAgentToolTimeoutMs(useCase, {
+      config: this.config,
+      modelRouter: this.modelRouter,
+    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const startedAt = Date.now();
     try {
       const baseUrl =
@@ -2652,6 +2659,7 @@ export class SocialAgentToolExecutorService {
         `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
         {
           method: 'POST',
+          signal: controller.signal,
           headers: {
             'content-type': 'application/json',
             authorization: `Bearer ${apiKey}`,
@@ -2710,6 +2718,11 @@ export class SocialAgentToolExecutorService {
         purpose,
       };
     } catch (error) {
+      const reason = this.isAbortError(error)
+        ? 'deepseek_timeout'
+        : error instanceof Error
+          ? error.message
+          : String(error);
       this.logModelCall({
         useCase,
         model,
@@ -2717,18 +2730,25 @@ export class SocialAgentToolExecutorService {
         intent: purpose,
         latencyMs: Date.now() - startedAt,
         success: false,
-        reason: error instanceof Error ? error.message : String(error),
+        reason,
       });
       this.logger.warn(
         JSON.stringify({
           event: 'deepseek.call_failed',
           purpose,
-          reason: 'exception',
-          message: error instanceof Error ? error.message : String(error),
+          reason: this.isAbortError(error) ? 'timeout' : 'exception',
+          message: reason,
+          ...(this.isAbortError(error) ? { timeoutMs } : {}),
         }),
       );
       return fallback();
+    } finally {
+      clearTimeout(timeout);
     }
+  }
+
+  private isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === 'AbortError';
   }
 
   private logModelCall(input: {
