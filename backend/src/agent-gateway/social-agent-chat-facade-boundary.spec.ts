@@ -25,6 +25,14 @@ const timelineCandidatesPath = path.resolve(
   __dirname,
   'social-agent-chat-timeline-candidates.presenter.ts',
 );
+const chatLlmServicePath = path.resolve(
+  __dirname,
+  'social-agent-chat-llm.service.ts',
+);
+const chatLlmPromptsPath = path.resolve(
+  __dirname,
+  'social-agent-chat-llm-prompts.ts',
+);
 
 describe('SocialAgentChatService facade boundary', () => {
   const compatibilitySource = fs.readFileSync(compatibilityExportPath, 'utf8');
@@ -36,6 +44,8 @@ describe('SocialAgentChatService facade boundary', () => {
     timelineCandidatesPath,
     'utf8',
   );
+  const chatLlmServiceSource = fs.readFileSync(chatLlmServicePath, 'utf8');
+  const chatLlmPromptsSource = fs.readFileSync(chatLlmPromptsPath, 'utf8');
 
   it('keeps the legacy service module as a compatibility export', () => {
     expect(compatibilitySource.trim()).toBe(
@@ -77,6 +87,28 @@ describe('SocialAgentChatService facade boundary', () => {
     );
     expect(timelineCandidatesSource).toContain(
       'function candidateFromStoredSummary',
+    );
+  });
+
+  it('keeps LLM orchestration split from prompt assembly', () => {
+    expect(chatLlmServiceSource.trim().split('\n').length).toBeLessThanOrEqual(
+      240,
+    );
+    expect(chatLlmServiceSource).toContain(
+      'buildSocialAgentDirectReplyMessages',
+    );
+    expect(chatLlmServiceSource).toContain(
+      'buildSocialAgentAgentBrainMessages',
+    );
+    expect(chatLlmServiceSource).not.toContain('availableTools: [');
+    expect(chatLlmPromptsSource).toContain(
+      'function buildSocialAgentDirectReplyMessages',
+    );
+    expect(chatLlmPromptsSource).toContain(
+      'function buildSocialAgentAgentBrainMessages',
+    );
+    expect(chatLlmPromptsSource).toContain(
+      'readSocialAgentConversationBrainPlannedTools',
     );
   });
 });
