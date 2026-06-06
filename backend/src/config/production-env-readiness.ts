@@ -1,3 +1,5 @@
+import { getConfiguredAllowedOrigins } from '../common/cors/origin-allowlist';
+
 export type EnvIssueSeverity = 'error' | 'warning';
 
 export interface ProductionEnvIssue {
@@ -22,7 +24,6 @@ const CORE_REQUIRED_KEYS = [
   'PORT',
   'BASE_URL',
   'FRONTEND_BASE_URL',
-  'ALLOWED_ORIGINS',
   'DB_HOST',
   'DB_PORT',
   'DB_USERNAME',
@@ -117,24 +118,24 @@ function checkAllowedOrigins(
   env: EnvMap,
   error: (key: string, message: string) => void,
 ): void {
-  const raw = env.ALLOWED_ORIGINS ?? '';
-  const origins = raw
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+  const originKey = env.CORS_ORIGIN ? 'CORS_ORIGIN' : 'ALLOWED_ORIGINS';
+  const origins = getConfiguredAllowedOrigins(env) ?? [];
   if (origins.length === 0) {
-    error('ALLOWED_ORIGINS', 'must include the production Web/App origins.');
+    error(
+      'ALLOWED_ORIGINS',
+      'ALLOWED_ORIGINS or CORS_ORIGIN must include the production Web/App origins.',
+    );
     return;
   }
   for (const origin of origins) {
     if (origin === '*' || /^http:\/\//i.test(origin)) {
       error(
-        'ALLOWED_ORIGINS',
+        originKey,
         `origin ${origin} is not production-safe; use explicit https origins.`,
       );
     }
     if (/localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(origin)) {
-      error('ALLOWED_ORIGINS', `origin ${origin} points at a local address.`);
+      error(originKey, `origin ${origin} points at a local address.`);
     }
   }
 }

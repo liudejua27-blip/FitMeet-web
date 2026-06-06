@@ -61,6 +61,17 @@ describe('production-env-readiness', () => {
     expect(report.errors).toEqual([]);
   });
 
+  it('accepts CORS_ORIGIN as the shared HTTP and Socket.IO origin source', () => {
+    const { ALLOWED_ORIGINS, ...env } = validEnv;
+    const report = buildProductionEnvReport({
+      ...env,
+      CORS_ORIGIN: ALLOWED_ORIGINS,
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.errors).toEqual([]);
+  });
+
   it('allows JWT fallback for webhook signing while warning about the risk', () => {
     const report = buildProductionEnvReport({
       ...validEnv,

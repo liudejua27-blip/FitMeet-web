@@ -240,5 +240,6 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- http-exception.filter.spec.ts logging.interceptor.spec.ts`
 - Passed: backend `pnpm --dir backend test -- migration-integrity.spec.ts`
 - Passed: backend `pnpm --dir backend test -- origin-allowlist.spec.ts`
+- Passed: backend `pnpm --dir backend test -- production-env-readiness.spec.ts origin-allowlist.spec.ts`
 - Passed: backend `pnpm --dir backend lint`
 - Passed: backend `pnpm --dir backend build`
