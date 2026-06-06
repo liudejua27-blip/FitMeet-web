@@ -221,6 +221,19 @@ describe('AppController', () => {
       }
     });
 
+    it('documents stable 400 errors for message conversation validation failures', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+
+      expect(
+        contract.paths['/messages/conversations/{conversationId}'].get
+          .responses['400'],
+      ).toEqual({ $ref: '#/components/responses/Error' });
+      expect(
+        contract.paths['/messages/conversations/{conversationId}/send'].post
+          .responses['400'],
+      ).toEqual({ $ref: '#/components/responses/Error' });
+    });
+
     it('maps the iOS app OpenAPI contract to registered controllers', () => {
       const contract = appController.getFitMeetCoreOpenApi();
       const controllerRoutes = collectControllerRoutes(APP_CORE_CONTROLLERS);
