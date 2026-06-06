@@ -224,7 +224,7 @@ test('gateway detail route covers every ecosystem CTA with real content', async 
 test('root engineering handbook documents landing tests as real baseline', async () => {
   const readme = await readSource('../README.md');
 
-  assert.match(readme, /fitmeet-landing：install、lint、build、test/);
+  assert.match(readme, /fitmeet-landing：install、lint、build、test、test:rendered/);
   assert.doesNotMatch(readme, /fitmeet-landing.*no-op/i);
-  assert.match(readme, /fitmeet-landing` 已有真实 smoke 覆盖/);
+  assert.match(readme, /fitmeet-landing` 已有源码 smoke 和 build 后 rendered smoke 覆盖/);
 });

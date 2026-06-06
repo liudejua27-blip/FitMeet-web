@@ -18,6 +18,17 @@ pnpm install   # or npm install / yarn
 pnpm dev       # http://localhost:3000
 ```
 
+## Verification
+
+```bash
+pnpm lint
+pnpm build
+pnpm test
+pnpm test:rendered
+```
+
+`pnpm test` checks source-level landing composition, navigation, gateway data, and Agent Hub product copy. `pnpm test:rendered` must run after `pnpm build`; it verifies the prerendered `.next/server/app` HTML for `/`, `/agent-hub`, `/human`, `/pet`, and `/ai`.
+
 ## Structure
 
 ```
