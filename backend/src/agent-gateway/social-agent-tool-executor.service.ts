@@ -73,11 +73,6 @@ import type {
   SocialAgentToolCallRecord,
 } from './social-agent-tool.types';
 import { buildSocialAgentConversationOptions } from './social-agent-message-options';
-import {
-  buildFallbackSocialAgentNextAction,
-  buildSocialAgentNextActionPrompt,
-  normalizeSocialAgentNextActionDecision,
-} from './social-agent-next-action-decision';
 import { SocialAgentTargetResolverService } from './social-agent-target-resolver.service';
 import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
 import { SocialAgentActionSideEffectService } from './social-agent-action-side-effect.service';
@@ -93,6 +88,10 @@ import {
   SocialAgentConversationToolService,
   type SocialAgentConversationToolResult,
 } from './social-agent-conversation-tool.service';
+import {
+  SocialAgentDecisionToolService,
+  type SocialAgentDecisionToolResult,
+} from './social-agent-decision-tool.service';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -146,6 +145,7 @@ export class SocialAgentToolExecutorService {
     private readonly activityTools: SocialAgentActivityToolService,
     private readonly inboxTools: SocialAgentInboxToolService,
     private readonly conversationTools: SocialAgentConversationToolService,
+    private readonly decisionTools: SocialAgentDecisionToolService,
   ) {}
 
   async executeTask(
@@ -773,7 +773,10 @@ export class SocialAgentToolExecutorService {
           stepId,
         );
       case SocialAgentToolName.DecideNextSocialAction:
-        return this.decideNextSocialAction(task, input);
+        return this.runDecisionTool(
+          task,
+          await this.decisionTools.decideNextSocialAction(task, input),
+        );
       case SocialAgentToolName.ReplyMessage:
         return this.replyMessage(task, input, stepId);
       case SocialAgentToolName.Payment:
@@ -1549,71 +1552,6 @@ export class SocialAgentToolExecutorService {
     );
   }
 
-  private async decideNextSocialAction(
-    task: AgentTask,
-    input: Record<string, unknown>,
-  ): Promise<unknown> {
-    const loop = this.socialLoopMemory(task);
-    const messages = toSocialAgentMessageArray(
-      input.messages ?? loop.latestReceivedMessages,
-    );
-    const summary = this.toolInput.isRecord(input.summary)
-      ? input.summary
-      : (loop.replySummary ?? {});
-    const decision = await this.toolJsonModel.callJson({
-      purpose: 'decide_next_social_action',
-      prompt: buildSocialAgentNextActionPrompt(
-        task,
-        messages,
-        summary,
-        loop,
-        this.permissions.getAllowedActions(task.permissionMode),
-      ),
-      fallback: () =>
-        buildFallbackSocialAgentNextAction(task, messages, summary, loop),
-      taskId: task.id,
-    });
-    const safeDecision = normalizeSocialAgentNextActionDecision(
-      task,
-      decision,
-      loop,
-      this.permissions,
-      (value) => this.toolCallFactory.normalizeToolName(value),
-    );
-    this.rememberConversation(task, {
-      nextActionDecision: safeDecision,
-      sourceTool: SocialAgentToolName.DecideNextSocialAction,
-    });
-    rememberSocialAgentShortTerm(task, {
-      nextActionDecision: safeDecision,
-      currentStep: this.shortTermStep(
-        'decide_next_social_action',
-        '已决定下一步社交动作',
-        'done',
-      ),
-    });
-
-    await this.writeSocialAgentInboxEvent(
-      task,
-      'social_agent.next_action.decided',
-      {
-        conversationId: loop.conversationId ?? null,
-        messageId: loop.lastReceivedMessageId ?? null,
-        fromUserId: loop.targetUserId ?? null,
-        contentPreview:
-          this.toolInput.string(safeDecision.reason) ??
-          `Next action: ${this.toolInput.string(safeDecision.nextAction) ?? 'stop'}`,
-        metadata: {
-          agentTaskId: task.id,
-          summary,
-          decision: safeDecision,
-        },
-      },
-    );
-
-    return safeDecision;
-  }
-
   private async replyMessage(
     task: AgentTask,
     input: Record<string, unknown>,
@@ -1629,6 +1567,20 @@ export class SocialAgentToolExecutorService {
         result.inboxEvent.input,
       );
     }
+    return result.output;
+  }
+
+  private async runDecisionTool(
+    task: AgentTask,
+    result: SocialAgentDecisionToolResult,
+  ): Promise<unknown> {
+    this.rememberConversation(task, result.loopUpdates);
+    rememberSocialAgentShortTerm(task, result.shortTermUpdates);
+    await this.writeSocialAgentInboxEvent(
+      task,
+      result.inboxEvent.eventType,
+      result.inboxEvent.input,
+    );
     return result.output;
   }
 
