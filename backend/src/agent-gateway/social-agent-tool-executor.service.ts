@@ -16,9 +16,7 @@ import {
   SocialRequestCandidateStatus,
 } from '../match/social-request-candidate.entity';
 import { MessagesService } from '../messages/messages.service';
-import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
 import { UpdateSocialRequestDto } from '../social-requests/dto/update-social-request.dto';
-import { SocialRequestType } from '../social-requests/social-request.entity';
 import { SocialRequestsService } from '../social-requests/social-requests.service';
 import { SocialProfileService } from '../users/social-profile.service';
 import { sanitizeCity } from '../common/city.util';
@@ -80,6 +78,7 @@ import {
 import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
 import { summarizeSocialAgentToolCalls } from './social-agent-tool-execution-summary';
 import { buildSocialAgentProfileContextPatch } from './social-agent-profile-context-patch';
+import { buildSocialAgentSocialRequestToolInput } from './social-agent-social-request-tool-input';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -924,64 +923,41 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<unknown> {
-    const mode = this.toolInput.string(input.mode ?? input.intent);
-    const rawText =
-      this.toolInput.string(input.rawText ?? input.goal ?? task.goal) ??
-      task.goal;
+    const parsed = buildSocialAgentSocialRequestToolInput(
+      task,
+      input,
+      this.toolInput,
+    );
     const agent = await this.loadAgentConnection(task.agentConnectionId);
 
-    if (mode === 'ai_draft' || mode === 'draft_only') {
-      return this.socialRequests.aiDraft(task.ownerUserId, rawText, {
+    if (parsed.shouldCreateDraft) {
+      return this.socialRequests.aiDraft(task.ownerUserId, parsed.rawText, {
         agentTaskId: task.id,
         agentId: task.agentConnectionId,
         source: 'social_agent_tool_executor',
       });
     }
 
-    if (!this.toolInput.string(input.type) && rawText) {
+    if (parsed.shouldCreateFromNaturalLanguage) {
       return this.socialRequests.createFromNaturalLanguage(
-        rawText,
+        parsed.rawText,
         task.ownerUserId,
         agent,
       );
     }
 
-    const dto: CreateSocialRequestDto = {
-      ...(input as Partial<CreateSocialRequestDto>),
-      type:
-        this.toolInput.socialRequestType(input.type) ??
-        SocialRequestType.Custom,
-      rawText,
-      title: this.toolInput.string(input.title ?? task.title),
-      description: this.toolInput.string(input.description ?? task.goal),
-      city: sanitizeCity(input.city),
-      radiusKm: this.toolInput.number(input.radiusKm) ?? undefined,
-      activityType: this.toolInput.string(input.activityType),
-      interestTags: this.toolInput.stringArray(
-        input.interestTags ?? input.tags,
-      ),
-      metadata: {
-        ...(this.toolInput.isRecord(input.metadata) ? input.metadata : {}),
-        agentTaskId: task.id,
-      },
-    };
-    const socialRequestId = this.toolInput.number(
-      input.socialRequestId ?? input.requestId,
-    );
-    const request = socialRequestId
+    const request = parsed.socialRequestId
       ? await this.socialRequests.update(
-          socialRequestId,
+          parsed.socialRequestId,
           task.ownerUserId,
-          dto as UpdateSocialRequestDto,
+          parsed.dto as UpdateSocialRequestDto,
           agent,
         )
-      : await this.socialRequests.create(task.ownerUserId, dto, { agent });
+      : await this.socialRequests.create(task.ownerUserId, parsed.dto, {
+          agent,
+        });
 
-    const shouldSyncPublicIntent =
-      mode === 'publish' ||
-      this.toolInput.bool(input.publish) === true ||
-      this.toolInput.bool(input.syncPublicIntent) === true;
-    if (!shouldSyncPublicIntent) {
+    if (!parsed.shouldSyncPublicIntent) {
       return {
         ...this.toolInput.asRecord(request),
         socialRequest: request,
