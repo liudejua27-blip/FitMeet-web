@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const root = new URL('..', import.meta.url);
@@ -24,6 +24,26 @@ async function readSource(path) {
 async function readJson(path) {
   const source = await readFile(new URL(path, root), 'utf8');
   return JSON.parse(source);
+}
+
+async function assertBuildAssetReferencesExist(route, htmlPath) {
+  const html = await readBuilt(htmlPath);
+  const assetUrls = [
+    ...html.matchAll(/\b(?:href|src)="([^"]+)"/g),
+  ]
+    .map((match) => decodeHtml(match[1]))
+    .filter((value) => value.startsWith('/_next/static/'));
+
+  assert.ok(assetUrls.length > 0, `${route} should reference Next static assets`);
+
+  for (const assetUrl of new Set(assetUrls)) {
+    const { pathname } = new URL(assetUrl, 'https://ourfitmeet.cn');
+    const assetPath = `.next${pathname.replace('/_next', '')}`;
+    await assert.doesNotReject(
+      () => access(new URL(assetPath, root)),
+      `${route} should reference an existing build asset: ${assetUrl}`,
+    );
+  }
 }
 
 function gatewayRecordsFromSource(source) {
@@ -168,5 +188,19 @@ test('next build manifest keeps all deployment-critical landing routes static', 
       false,
       `${route} should be static without ISR timing`,
     );
+  }
+});
+
+test('rendered pages reference only deployable Next static assets', async () => {
+  const pages = {
+    '/': 'index.html',
+    '/agent-hub': 'agent-hub.html',
+    '/human': 'human.html',
+    '/pet': 'pet.html',
+    '/ai': 'ai.html',
+  };
+
+  for (const [route, htmlPath] of Object.entries(pages)) {
+    await assertBuildAssetReferencesExist(route, htmlPath);
   }
 });
