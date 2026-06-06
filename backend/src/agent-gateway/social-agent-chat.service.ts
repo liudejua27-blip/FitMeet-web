@@ -15,24 +15,20 @@ import type {
   SocialAgentTaskTimelineSnapshot,
   StreamEmit,
 } from './social-agent-chat.types';
-import { SocialAgentRouteTurnService } from './social-agent-route-turn.service';
 import { SocialAgentQueuedRunService } from './social-agent-queued-run.service';
 import { SocialAgentRunOrchestratorService } from './social-agent-run-orchestrator.service';
 import { SocialAgentSessionQueryService } from './social-agent-session-query.service';
-import { SocialAgentCardActionRouterService } from './social-agent-card-action-router.service';
 import { SocialAgentReplanFacadeService } from './social-agent-replan-facade.service';
-import { SocialAgentInitialSearchQueueService } from './social-agent-initial-search-queue.service';
+import { SocialAgentChatTurnFacadeService } from './social-agent-chat-turn-facade.service';
 
 @Injectable()
 export class SocialAgentChatService {
   constructor(
-    private readonly routeTurns: SocialAgentRouteTurnService,
+    private readonly turnFacade: SocialAgentChatTurnFacadeService,
     private readonly queuedRuns: SocialAgentQueuedRunService,
     private readonly runOrchestrator: SocialAgentRunOrchestratorService,
     private readonly sessionQueries: SocialAgentSessionQueryService,
-    private readonly cardActionRouter: SocialAgentCardActionRouterService,
     private readonly replanFacade: SocialAgentReplanFacadeService,
-    private readonly initialSearchQueue: SocialAgentInitialSearchQueueService,
     private readonly tonePolicy?: TonePolicyService,
   ) {}
 
@@ -47,25 +43,14 @@ export class SocialAgentChatService {
     ownerUserId: number,
     body: SocialAgentRouteMessageBody,
   ): Promise<SocialAgentIntentRouteResult> {
-    return this.handleMessage(ownerUserId, body);
+    return this.turnFacade.routeMessage(ownerUserId, body);
   }
 
   async handleMessage(
     ownerUserId: number,
     body: SocialAgentRouteMessageBody,
   ): Promise<SocialAgentIntentRouteResult> {
-    return this.routeTurns.handleMessage({
-      ownerUserId,
-      body,
-      replanAndRefresh: (currentOwnerUserId, taskId, replanBody) =>
-        this.replanAndRefresh(currentOwnerUserId, taskId, replanBody),
-      queueInitialSearchForTask: (currentOwnerUserId, task, goal) =>
-        this.initialSearchQueue.queueInitialSearchForTask({
-          ownerUserId: currentOwnerUserId,
-          task,
-          goal,
-        }),
-    });
+    return this.turnFacade.handleMessage(ownerUserId, body);
   }
 
   async performCardAction(
@@ -73,12 +58,7 @@ export class SocialAgentChatService {
     taskId: number,
     body: SocialAgentCardActionBody,
   ): Promise<SocialAgentIntentRouteResult> {
-    return this.cardActionRouter.perform({
-      ownerUserId,
-      taskId,
-      body,
-      handleMessage: (routeBody) => this.handleMessage(ownerUserId, routeBody),
-    });
+    return this.turnFacade.performCardAction(ownerUserId, taskId, body);
   }
 
   async runQueued(

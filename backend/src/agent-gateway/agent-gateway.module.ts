@@ -78,6 +78,7 @@ import { SocialAgentRunOrchestratorService } from './social-agent-run-orchestrat
 import { SocialAgentSessionQueryService } from './social-agent-session-query.service';
 import { SocialAgentReplanFacadeService } from './social-agent-replan-facade.service';
 import { SocialAgentInitialSearchQueueService } from './social-agent-initial-search-queue.service';
+import { SocialAgentChatTurnFacadeService } from './social-agent-chat-turn-facade.service';
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
@@ -237,6 +238,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentSessionQueryService,
     SocialAgentReplanFacadeService,
     SocialAgentInitialSearchQueueService,
+    SocialAgentChatTurnFacadeService,
     SocialAgentChatService,
     FitMeetAgentRuntimeService,
     SocialAgentCandidatePoolService,
