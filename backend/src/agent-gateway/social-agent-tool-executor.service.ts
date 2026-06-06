@@ -9,13 +9,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { AIService } from '../ai/ai.service';
-import { ActivitiesService } from '../activities/activities.service';
-import { CreateActivityDto } from '../activities/dto/activity.dto';
-import { SocialActivity } from '../activities/entities/activity.entity';
-import {
-  ActivityProofPolicy,
-  ActivityType,
-} from '../activities/entities/activity-template.entity';
 import { FriendsService } from '../friends/friends.service';
 import { MatchService } from '../match/match.service';
 import {
@@ -29,6 +22,7 @@ import { SocialRequestType } from '../social-requests/social-request.entity';
 import { SocialRequestsService } from '../social-requests/social-requests.service';
 import { SocialProfileService } from '../users/social-profile.service';
 import { UpdateSocialProfileDto } from '../users/dto/update-social-profile.dto';
+import { sanitizeCity } from '../common/city.util';
 import { MatchReasonerService } from './match-reasoner.service';
 import { AgentConnection } from './entities/agent-connection.entity';
 import {
@@ -49,7 +43,6 @@ import {
 } from './social-agent-memory.util';
 import {
   appendSocialAgentLoopValue,
-  buildSocialAgentActivityInviteDedupeKey,
   filterPendingSocialAgentCounterpartMessages,
   socialAgentLoopStringArray,
   toSocialAgentMessageArray,
@@ -59,7 +52,6 @@ import type {
   SocialAgentLoopMemory as SocialLoopMemory,
   SocialAgentMessageRecord as AgentMessageRecord,
 } from './social-agent-loop-state';
-import { sanitizeCity } from '../common/city.util';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SceneRiskPolicyResult } from './scene-risk-policy.service';
@@ -81,10 +73,7 @@ import type {
   SocialAgentTaskExecutionResult,
   SocialAgentToolCallRecord,
 } from './social-agent-tool.types';
-import {
-  buildSocialAgentConversationOptions,
-  buildSocialAgentDelegateMessageOptions,
-} from './social-agent-message-options';
+import { buildSocialAgentConversationOptions } from './social-agent-message-options';
 import {
   buildFallbackSocialAgentNextAction,
   buildFallbackSocialAgentReplySummary,
@@ -101,6 +90,7 @@ import { SocialAgentToolCallFactoryService } from './social-agent-tool-call-fact
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 import { SocialAgentPaymentIntentToolService } from './social-agent-payment-intent-tool.service';
 import { SocialAgentMessageToolService } from './social-agent-message-tool.service';
+import { SocialAgentActivityToolService } from './social-agent-activity-tool.service';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -142,7 +132,6 @@ export class SocialAgentToolExecutorService {
     private readonly ai: AIService,
     private readonly messages: MessagesService,
     private readonly friends: FriendsService,
-    private readonly activities: ActivitiesService,
     private readonly targetResolver: SocialAgentTargetResolverService,
     private readonly toolJsonModel: SocialAgentToolJsonModelService,
     private readonly actionSideEffects: SocialAgentActionSideEffectService,
@@ -152,6 +141,7 @@ export class SocialAgentToolExecutorService {
     private readonly toolInput: SocialAgentToolInputParserService,
     private readonly paymentIntentTools: SocialAgentPaymentIntentToolService,
     private readonly messageTools: SocialAgentMessageToolService,
+    private readonly activityTools: SocialAgentActivityToolService,
   ) {}
 
   async executeTask(
@@ -1409,105 +1399,15 @@ export class SocialAgentToolExecutorService {
     toolName: SocialAgentToolName,
     stepId: string,
   ): Promise<unknown> {
-    const invitedUserId = this.toolInput.number(
-      input.invitedUserId ?? input.targetUserId,
-    );
-    if (toolName === SocialAgentToolName.OfflineMeeting && !invitedUserId) {
-      throw new BadRequestException(
-        'targetUserId or invitedUserId is required',
-      );
-    }
-    const allowPreciseLocation =
-      this.toolInput.bool(input.allowPreciseLocation) === true;
-    const icebreakerTasks = this.toolInput.stringArray(input.icebreakerTasks);
-
-    const dto: CreateActivityDto = {
-      type:
-        this.toolInput.activityType(input.type ?? input.activityType) ??
-        ActivityType.Custom,
-      title:
-        this.toolInput.string(input.title ?? task.title) ||
-        this.activityTitle(toolName),
-      description: this.toolInput.string(
-        input.description ?? input.note ?? task.goal,
-      ),
-      city: sanitizeCity(input.city),
-      locationName:
-        this.toolInput.string(input.locationName ?? input.location) ??
-        '公共场所待确认',
-      lat: allowPreciseLocation ? this.toolInput.number(input.lat) : undefined,
-      lng: allowPreciseLocation ? this.toolInput.number(input.lng) : undefined,
-      startTime: this.toolInput.string(input.startTime ?? input.timeStart),
-      durationMinutes: this.toolInput.number(input.durationMinutes) ?? 45,
-      socialRequestId:
-        this.toolInput.number(input.socialRequestId) ?? undefined,
-      meetId: this.toolInput.number(input.meetId) ?? undefined,
-      matchedCandidateId:
-        this.toolInput.number(
-          input.matchedCandidateId ?? input.candidateRecordId,
-        ) ?? undefined,
-      icebreakerTasks: icebreakerTasks.length
-        ? icebreakerTasks
-        : ['到达后先确认彼此状态和活动节奏。', '活动结束后互相确认是否完成。'],
-      proofRequired: this.toolInput.bool(input.proofRequired) ?? true,
-      proofPolicy:
-        this.toolInput.activityProofPolicy(input.proofPolicy) ??
-        ActivityProofPolicy.MutualOrProof,
-      invitedUserId: invitedUserId ?? undefined,
-    };
-    const activityDedupeKey = buildSocialAgentActivityInviteDedupeKey(
-      toolName,
-      dto,
-    );
-    if (this.hasSocialLoopKey(task, 'activityInviteKeys', activityDedupeKey)) {
-      return {
-        skipped: true,
-        duplicate: true,
-        reason: 'duplicate_activity_invite',
-        toolName,
-        targetUserId: invitedUserId ?? null,
-        title: dto.title,
-        startTime: dto.startTime ?? null,
-      };
-    }
-    const activity = await this.activities.create(task.ownerUserId, dto);
-    this.rememberConversation(task, {
-      activityInviteKeys: this.appendSocialLoopKey(
-        task,
-        'activityInviteKeys',
-        activityDedupeKey,
-      ),
-      sourceTool: toolName,
-    });
-
-    if (toolName !== SocialAgentToolName.OfflineMeeting) return activity;
-    const offlineTargetUserId = invitedUserId;
-    if (!offlineTargetUserId) {
-      throw new BadRequestException(
-        'targetUserId or invitedUserId is required',
-      );
-    }
-
-    const inviteMessage = await this.sendOfflineMeetingInvite(
+    const result = await this.activityTools.createActivity(
       task,
       input,
+      toolName,
       stepId,
-      activity,
-      offlineTargetUserId,
     );
-    return {
-      id: activity.id,
-      activityId: activity.id,
-      status: activity.status,
-      invitedUserId: offlineTargetUserId,
-      conversationId:
-        this.toolInput.string(inviteMessage.conversationId) || null,
-      messageId:
-        this.toolInput.string(inviteMessage.id ?? inviteMessage.messageId) ||
-        null,
-      activity,
-      inviteMessage,
-    };
+    if (result.loopUpdates) this.rememberConversation(task, result.loopUpdates);
+    if (result.sentMessage) this.rememberSentMessage(task, result.sentMessage);
+    return result.output;
   }
 
   private shareLocation(
@@ -1524,71 +1424,11 @@ export class SocialAgentToolExecutorService {
     };
   }
 
-  private async sendOfflineMeetingInvite(
-    task: AgentTask,
-    input: Record<string, unknown>,
-    stepId: string,
-    activity: SocialActivity,
-    targetUserId: number,
-  ): Promise<Record<string, unknown>> {
-    const conversation = await this.messages.startConversation(
-      task.ownerUserId,
-      targetUserId,
-      this.messageConversationOptions(task, stepId, {
-        toolName: SocialAgentToolName.OfflineMeeting,
-        activityId: activity.id,
-        targetUserId,
-      }),
-    );
-    const conversationId = conversation.conversationId;
-    const text = this.offlineMeetingInviteText(input, activity);
-    const message = await this.messages.sendMessage(
-      conversationId,
-      task.ownerUserId,
-      text,
-      buildSocialAgentDelegateMessageOptions(task, stepId, {
-        ...(this.toolInput.isRecord(input.metadata) ? input.metadata : {}),
-        toolName: SocialAgentToolName.OfflineMeeting,
-        activityId: activity.id,
-        targetUserId,
-      }),
-    );
-    const messageRecord = this.toolInput.asRecord(message);
-    this.rememberConversation(task, {
-      conversationId,
-      targetUserId,
-      lastMessageId: this.toolInput.string(
-        messageRecord.id ?? messageRecord.messageId,
-      ),
-      lastAgentMessageId: this.toolInput.string(
-        messageRecord.id ?? messageRecord.messageId,
-      ),
-      sourceTool: SocialAgentToolName.OfflineMeeting,
-      activityId: activity.id,
-    });
-    this.rememberSentMessage(task, {
-      id: this.toolInput.string(messageRecord.id ?? messageRecord.messageId),
-      conversationId,
-      targetUserId,
-      textPreview: this.preview(text),
-      toolName: SocialAgentToolName.OfflineMeeting,
-      stepId,
-    });
-    return { ...this.toolInput.asRecord(message), conversationId };
-  }
-
   private async joinActivity(
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<unknown> {
-    const activityId = this.toolInput.number(input.activityId ?? input.id);
-    if (!activityId) throw new BadRequestException('activityId is required');
-    const activity = await this.activities.join(activityId, task.ownerUserId);
-    return {
-      ...this.toolInput.asRecord(activity),
-      activityId,
-      joined: true,
-    };
+    return this.activityTools.joinActivity(task, input);
   }
 
   private async saveCandidate(
@@ -2365,36 +2205,6 @@ export class SocialAgentToolExecutorService {
     metadata: Record<string, unknown> = {},
   ) {
     return buildSocialAgentConversationOptions(task, stepId, metadata);
-  }
-
-  private activityTitle(toolName: SocialAgentToolName): string {
-    if (toolName === SocialAgentToolName.OfflineMeeting) return '线下见面安排';
-    if (toolName === SocialAgentToolName.CreateActivity) return '约练活动';
-    return '约练邀请';
-  }
-
-  private offlineMeetingInviteText(
-    input: Record<string, unknown>,
-    activity: SocialActivity,
-  ): string {
-    const explicit = this.toolInput.string(
-      input.text ?? input.message ?? input.content ?? input.inviteMessage,
-    );
-    if (explicit) return explicit;
-
-    const parts = [`我已为你发起线下见面安排：${activity.title || '线下见面'}`];
-    if (activity.city || activity.locationName) {
-      parts.push(
-        `地点：${[activity.city, activity.locationName].filter(Boolean).join(' ')}`,
-      );
-    }
-    if (activity.startTime) {
-      parts.push(
-        `时间：${activity.startTime.toLocaleString('zh-CN', { hour12: false })}`,
-      );
-    }
-    parts.push('请在 FitMeet 中确认是否参加。');
-    return parts.join('\n');
   }
 
   private logToolFailure(
