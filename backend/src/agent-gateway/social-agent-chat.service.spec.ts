@@ -30,6 +30,7 @@ import { SocialAgentMessageLogService } from './social-agent-message-log.service
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
+import { SocialAgentRunRecommendationService } from './social-agent-run-recommendation.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 
@@ -533,6 +534,20 @@ function makeHarness(options: Record<string, unknown> = {}) {
       options.alphaAgent as never,
       options.tonePolicy as never,
     );
+  const runRecommendations =
+    (options.runRecommendations as
+      | SocialAgentRunRecommendationService
+      | undefined) ??
+    new SocialAgentRunRecommendationService(
+      eventRepo as never,
+      planner as never,
+      socialProfiles as never,
+      draftSearch as never,
+      recommendationResults as never,
+      taskLifecycle as never,
+      routeContext as never,
+      undefined,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
@@ -561,6 +576,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     taskLifecycle as never,
     routeContext as never,
     mainAgentTurn as never,
+    runRecommendations as never,
     options.brain as never,
     options.lifeGraph as never,
     undefined,
@@ -597,6 +613,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     taskLifecycle,
     routeContext,
     mainAgentTurn,
+    runRecommendations,
   };
 }
 

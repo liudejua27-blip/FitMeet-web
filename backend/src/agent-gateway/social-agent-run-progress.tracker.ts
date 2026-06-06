@@ -8,7 +8,7 @@ import type {
   StreamEmit,
 } from './social-agent-chat.types';
 
-type RuntimeStepRecord = {
+export type RuntimeStepRecord = {
   stepOrder: number;
   stepKey: string;
   title: string;
@@ -16,7 +16,7 @@ type RuntimeStepRecord = {
   safePayload: Record<string, unknown>;
 };
 
-type RuntimeToolRecord = {
+export type RuntimeToolRecord = {
   toolName: string;
   status: FitMeetAgentToolStatus;
   safeInput: Record<string, unknown>;
