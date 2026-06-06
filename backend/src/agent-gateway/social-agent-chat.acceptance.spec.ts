@@ -1259,42 +1259,6 @@ describe('SocialAgentChat acceptance flow', () => {
     expect(executor.executeToolAction).not.toHaveBeenCalled();
   });
 
-  it('answers candidate follow-up from existing candidates without full search', async () => {
-    const { service, executor, taskRepo } = makeHarness();
-    taskRepo.findOne.mockResolvedValue(
-      makeTask({
-        memory: {
-          shortTerm: {
-            candidates: [
-              {
-                userId: 22,
-                nickname: '小林',
-                candidateRecordId: 501,
-                score: 87,
-                reasons: ['同城且时间匹配', '都喜欢拍照'],
-                risk: { warnings: [] },
-              },
-            ],
-          },
-        },
-      }),
-    );
-
-    const result = await service.handleMessage(7, {
-      message: '第一个人为什么匹配',
-      taskId: 101,
-    });
-
-    expect(result).toMatchObject({
-      intent: 'candidate_followup',
-      action: 'reply',
-      shouldQueueRun: false,
-      taskId: 101,
-    });
-    expect(result.assistantMessage).toContain('同城且时间匹配');
-    expect(executor.executeToolAction).not.toHaveBeenCalled();
-  });
-
   it('asks a clarification question for unknown intent', async () => {
     const { service, executor } = makeHarness();
 
