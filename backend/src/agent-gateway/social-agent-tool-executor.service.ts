@@ -5,9 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  Optional,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -81,7 +79,6 @@ import type {
 import { sanitizeCity } from '../common/city.util';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
-import { SocialAgentModelRouterService } from './social-agent-model-router.service';
 import {
   SceneRiskPolicyResult,
   SceneRiskPolicyService,
@@ -128,14 +125,9 @@ import {
   buildSocialAgentNextActionPrompt,
   buildSocialAgentReplySummaryPrompt,
   normalizeSocialAgentNextActionDecision,
-  parseSocialAgentJsonObject,
 } from './social-agent-next-action-decision';
-import {
-  selectSocialAgentToolModel,
-  selectSocialAgentToolTimeoutMs,
-  socialAgentToolModelUseCaseForPurpose,
-} from './social-agent-tool-model';
 import { SocialAgentTargetResolverService } from './social-agent-target-resolver.service';
+import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -186,7 +178,6 @@ export class SocialAgentToolExecutorService {
     private readonly candidateRepo: Repository<SocialRequestCandidate>,
     @InjectRepository(PaymentIntent)
     private readonly paymentIntentRepo: Repository<PaymentIntent>,
-    private readonly config: ConfigService,
     private readonly actionLogs: AgentActionLogService,
     private readonly permissions: AgentPermissionService,
     private readonly toolRegistry: FitMeetAgentToolRegistryService,
@@ -204,10 +195,8 @@ export class SocialAgentToolExecutorService {
     private readonly activities: ActivitiesService,
     private readonly sceneRisk: SceneRiskPolicyService,
     private readonly targetResolver: SocialAgentTargetResolverService,
-    @Optional()
+    private readonly toolJsonModel: SocialAgentToolJsonModelService,
     private readonly confirmationGuard?: ConfirmationGuardService,
-    @Optional()
-    private readonly modelRouter?: SocialAgentModelRouterService,
   ) {}
 
   async executeTask(
@@ -2021,12 +2010,12 @@ export class SocialAgentToolExecutorService {
     if (messages.length === 0)
       throw new BadRequestException('messages are required');
 
-    const summary = await this.callDeepSeekJson(
-      'summarize_reply',
-      buildSocialAgentReplySummaryPrompt(task, messages),
-      () => buildFallbackSocialAgentReplySummary(messages),
-      task,
-    );
+    const summary = await this.toolJsonModel.callJson({
+      purpose: 'summarize_reply',
+      prompt: buildSocialAgentReplySummaryPrompt(task, messages),
+      fallback: () => buildFallbackSocialAgentReplySummary(messages),
+      taskId: task.id,
+    });
     this.rememberConversation(task, {
       replySummary: summary,
       sourceTool: SocialAgentToolName.SummarizeReply,
@@ -2070,18 +2059,19 @@ export class SocialAgentToolExecutorService {
     const summary = this.isRecord(input.summary)
       ? input.summary
       : (loop.replySummary ?? {});
-    const decision = await this.callDeepSeekJson(
-      'decide_next_social_action',
-      buildSocialAgentNextActionPrompt(
+    const decision = await this.toolJsonModel.callJson({
+      purpose: 'decide_next_social_action',
+      prompt: buildSocialAgentNextActionPrompt(
         task,
         messages,
         summary,
         loop,
         this.permissions.getAllowedActions(task.permissionMode),
       ),
-      () => buildFallbackSocialAgentNextAction(task, messages, summary, loop),
-      task,
-    );
+      fallback: () =>
+        buildFallbackSocialAgentNextAction(task, messages, summary, loop),
+      taskId: task.id,
+    });
     const safeDecision = normalizeSocialAgentNextActionDecision(
       task,
       decision,
@@ -2507,160 +2497,6 @@ export class SocialAgentToolExecutorService {
         eventType,
       },
     });
-  }
-
-  private async callDeepSeekJson(
-    purpose: string,
-    prompt: string,
-    fallback: () => Record<string, unknown>,
-    task?: AgentTask,
-  ): Promise<Record<string, unknown>> {
-    const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
-    if (!apiKey) {
-      this.logger.warn(
-        JSON.stringify({
-          event: 'deepseek.call_skipped',
-          purpose,
-          taskId: task?.id ?? null,
-          reason: 'DEEPSEEK_API_KEY missing',
-        }),
-      );
-      return fallback();
-    }
-
-    const useCase = socialAgentToolModelUseCaseForPurpose(purpose);
-    const model = selectSocialAgentToolModel(useCase, {
-      config: this.config,
-      modelRouter: this.modelRouter,
-    });
-    const timeoutMs = selectSocialAgentToolTimeoutMs(useCase, {
-      config: this.config,
-      modelRouter: this.modelRouter,
-    });
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    const startedAt = Date.now();
-    try {
-      const baseUrl =
-        this.config.get<string>('DEEPSEEK_BASE_URL') ||
-        'https://api.deepseek.com';
-      const res = await fetch(
-        `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
-        {
-          method: 'POST',
-          signal: controller.signal,
-          headers: {
-            'content-type': 'application/json',
-            authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            temperature: this.modelRouter?.getTemperature(useCase) ?? 0.2,
-            response_format: { type: 'json_object' },
-            messages: [
-              {
-                role: 'system',
-                content:
-                  'You are FitMeet Social Agent reply loop. Return only one valid JSON object.',
-              },
-              { role: 'user', content: prompt },
-            ],
-          }),
-        },
-      );
-      if (!res.ok) {
-        this.logModelCall({
-          useCase,
-          model,
-          taskId: task?.id ?? null,
-          intent: purpose,
-          latencyMs: Date.now() - startedAt,
-          success: false,
-          reason: `DeepSeek HTTP ${res.status}`,
-        });
-        this.logger.warn(
-          JSON.stringify({
-            event: 'deepseek.call_failed',
-            purpose,
-            httpStatus: res.status,
-            reason: 'http_error',
-          }),
-        );
-        return fallback();
-      }
-      const data = (await res.json()) as {
-        choices?: { message?: { content?: string } }[];
-      };
-      const content = data.choices?.[0]?.message?.content ?? '';
-      const parsed = parseSocialAgentJsonObject(content);
-      this.logModelCall({
-        useCase,
-        model,
-        taskId: task?.id ?? null,
-        intent: purpose,
-        latencyMs: Date.now() - startedAt,
-        success: true,
-      });
-      return {
-        ...parsed,
-        source: 'deepseek',
-        purpose,
-      };
-    } catch (error) {
-      const reason = this.isAbortError(error)
-        ? 'deepseek_timeout'
-        : error instanceof Error
-          ? error.message
-          : String(error);
-      this.logModelCall({
-        useCase,
-        model,
-        taskId: task?.id ?? null,
-        intent: purpose,
-        latencyMs: Date.now() - startedAt,
-        success: false,
-        reason,
-      });
-      this.logger.warn(
-        JSON.stringify({
-          event: 'deepseek.call_failed',
-          purpose,
-          reason: this.isAbortError(error) ? 'timeout' : 'exception',
-          message: reason,
-          ...(this.isAbortError(error) ? { timeoutMs } : {}),
-        }),
-      );
-      return fallback();
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  private isAbortError(error: unknown): boolean {
-    return error instanceof Error && error.name === 'AbortError';
-  }
-
-  private logModelCall(input: {
-    useCase: string;
-    model: string;
-    taskId: number | null;
-    intent?: unknown;
-    latencyMs: number;
-    success: boolean;
-    reason?: string;
-  }): void {
-    this.logger.log(
-      JSON.stringify({
-        event: 'social_agent.model_call',
-        useCase: input.useCase,
-        model: input.model,
-        taskId: input.taskId,
-        intent: typeof input.intent === 'string' ? input.intent : null,
-        latencyMs: input.latencyMs,
-        success: input.success,
-        ...(input.reason ? { reason: input.reason } : {}),
-      }),
-    );
   }
 
   private preview(value: unknown, max = 160): string {

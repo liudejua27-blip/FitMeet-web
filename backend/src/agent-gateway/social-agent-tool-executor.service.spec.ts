@@ -13,6 +13,7 @@ import {
 import { ActivityProofPolicy } from '../activities/entities/activity-template.entity';
 import { SceneRiskPolicyService } from './scene-risk-policy.service';
 import { SocialAgentTargetResolverService } from './social-agent-target-resolver.service';
+import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
 
 type MockRepository<T extends object = Record<string, unknown>> = {
   findOne: jest.Mock<Promise<T | null>, [unknown?]>;
@@ -190,6 +191,7 @@ function makeService() {
     userRepo as never,
     safety as never,
   );
+  const toolJsonModel = new SocialAgentToolJsonModelService(config as never);
 
   const service = new SocialAgentToolExecutorService(
     taskRepo as never,
@@ -197,7 +199,6 @@ function makeService() {
     connectionRepo as never,
     candidateRepo as never,
     paymentIntentRepo as never,
-    config as never,
     actionLogs as never,
     new AgentPermissionService(),
     new FitMeetAgentToolRegistryService(),
@@ -215,6 +216,7 @@ function makeService() {
     activities as never,
     new SceneRiskPolicyService(),
     targetResolver,
+    toolJsonModel,
   );
 
   return {
@@ -243,6 +245,7 @@ function makeService() {
     approvalDispatcher,
     longTermMemory,
     targetResolver,
+    toolJsonModel,
   };
 }
 
