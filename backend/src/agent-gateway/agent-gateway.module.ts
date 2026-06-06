@@ -56,6 +56,7 @@ import { SocialAgentToolExecutorService } from './social-agent-tool-executor.ser
 import { SocialAgentConfirmationPolicyService } from './social-agent-confirmation-policy.service';
 import { SocialAgentToolCallFactoryService } from './social-agent-tool-call-factory.service';
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
+import { SocialAgentPaymentIntentToolService } from './social-agent-payment-intent-tool.service';
 import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
 import { SocialAgentAutopilotService } from './social-agent-autopilot.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
@@ -271,6 +272,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentTargetResolverService,
     SocialAgentToolExecutorService,
     SocialAgentToolInputParserService,
+    SocialAgentPaymentIntentToolService,
     AgentWebhookService,
     AiSocialAutopilotService,
     AgentDiscoveryService,

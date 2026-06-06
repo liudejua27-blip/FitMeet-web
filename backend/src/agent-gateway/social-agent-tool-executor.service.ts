@@ -29,10 +29,6 @@ import { SocialRequestType } from '../social-requests/social-request.entity';
 import { SocialRequestsService } from '../social-requests/social-requests.service';
 import { SocialProfileService } from '../users/social-profile.service';
 import { UpdateSocialProfileDto } from '../users/dto/update-social-profile.dto';
-import {
-  PaymentIntent,
-  PaymentIntentStatus,
-} from './entities/payment-intent.entity';
 import { MatchReasonerService } from './match-reasoner.service';
 import { AgentConnection } from './entities/agent-connection.entity';
 import {
@@ -55,7 +51,6 @@ import {
   appendSocialAgentLoopValue,
   buildSocialAgentActivityInviteDedupeKey,
   buildSocialAgentMessageDedupeKey,
-  buildSocialAgentPaymentIntentDedupeKey,
   filterPendingSocialAgentCounterpartMessages,
   socialAgentLoopStringArray,
   toSocialAgentMessageArray,
@@ -107,6 +102,7 @@ import { SocialAgentToolExecutionPolicyService } from './social-agent-tool-execu
 import { SocialAgentConfirmationPolicyService } from './social-agent-confirmation-policy.service';
 import { SocialAgentToolCallFactoryService } from './social-agent-tool-call-factory.service';
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
+import { SocialAgentPaymentIntentToolService } from './social-agent-payment-intent-tool.service';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -136,8 +132,6 @@ export class SocialAgentToolExecutorService {
     private readonly connectionRepo: Repository<AgentConnection>,
     @InjectRepository(SocialRequestCandidate)
     private readonly candidateRepo: Repository<SocialRequestCandidate>,
-    @InjectRepository(PaymentIntent)
-    private readonly paymentIntentRepo: Repository<PaymentIntent>,
     private readonly permissions: AgentPermissionService,
     private readonly approvals: AgentApprovalService,
     private readonly approvalDispatcher: AgentApprovalDispatcherService,
@@ -158,6 +152,7 @@ export class SocialAgentToolExecutorService {
     private readonly confirmationPolicy: SocialAgentConfirmationPolicyService,
     private readonly toolCallFactory: SocialAgentToolCallFactoryService,
     private readonly toolInput: SocialAgentToolInputParserService,
+    private readonly paymentIntentTools: SocialAgentPaymentIntentToolService,
   ) {}
 
   async executeTask(
@@ -2212,94 +2207,14 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     stepId: string,
   ): Promise<unknown> {
-    const amount = this.toolInput.positiveAmount(
-      input.amount ?? input.total ?? input.value,
-    );
-    if (amount == null) throw new BadRequestException('amount is required');
-
-    const currency = (this.toolInput.string(input.currency) || 'CNY')
-      .toUpperCase()
-      .slice(0, 8);
-    const targetUserId = this.toolInput.number(
-      input.targetUserId ?? input.payeeUserId ?? input.toUserId,
-    );
-    const description =
-      this.toolInput.string(input.description ?? input.summary ?? input.note) ||
-      'Agent payment intent';
-    const status =
-      this.toolInput.paymentIntentStatus(input.status) ??
-      PaymentIntentStatus.Created;
-    const paymentDedupeKey = buildSocialAgentPaymentIntentDedupeKey({
-      targetUserId: targetUserId ?? null,
-      amount,
-      currency,
-      description,
-    });
-    if (this.hasSocialLoopKey(task, 'paymentIntentKeys', paymentDedupeKey)) {
-      return {
-        skipped: true,
-        duplicate: true,
-        reason: 'duplicate_payment_intent',
-        targetUserId: targetUserId ?? null,
-        amount: amount.toFixed(2),
-        currency,
-        description,
-      };
+    const result = await this.paymentIntentTools.record(task, input, stepId);
+    if (result.paymentIntentKeys) {
+      this.rememberConversation(task, {
+        paymentIntentKeys: result.paymentIntentKeys,
+        sourceTool: SocialAgentToolName.Payment,
+      });
     }
-    const paymentIntent = await this.paymentIntentRepo.save(
-      this.paymentIntentRepo.create({
-        ownerUserId: task.ownerUserId,
-        agentConnectionId: task.agentConnectionId,
-        agentTaskId: task.id,
-        stepId,
-        targetUserId: targetUserId ?? null,
-        amount: amount.toFixed(2),
-        currency,
-        description,
-        status,
-        provider: this.toolInput.string(input.provider) || 'manual_intent',
-        providerReference:
-          this.toolInput.string(input.providerReference) ?? null,
-        metadata: {
-          ...(this.toolInput.isRecord(input.metadata) ? input.metadata : {}),
-          agentTaskId: task.id,
-          stepId,
-          userId: task.ownerUserId,
-          targetUserId: targetUserId ?? null,
-          source: 'social_agent_tool_executor',
-          permissionMode: task.permissionMode,
-          auditPolicy: 'payment_intent_only_no_silent_charge',
-          reversible: true,
-          gatewayStatus: 'not_integrated',
-        },
-      }),
-    );
-    this.rememberConversation(task, {
-      paymentIntentKeys: this.appendSocialLoopKey(
-        task,
-        'paymentIntentKeys',
-        paymentDedupeKey,
-      ),
-      sourceTool: SocialAgentToolName.Payment,
-    });
-
-    return {
-      id: paymentIntent.id,
-      paymentIntentId: paymentIntent.id,
-      status: paymentIntent.status,
-      amount: paymentIntent.amount,
-      currency: paymentIntent.currency,
-      description: paymentIntent.description,
-      targetUserId: paymentIntent.targetUserId,
-      userId: task.ownerUserId,
-      agentTaskId: task.id,
-      provider: paymentIntent.provider,
-      gatewayStatus: 'not_integrated',
-      auditPolicy: 'payment_intent_only_no_silent_charge',
-      reversible: true,
-      message:
-        'Payment intent created; real payment gateway integration is pending.',
-    };
+    return result.output;
   }
 
   private async executeAdhocStep(
