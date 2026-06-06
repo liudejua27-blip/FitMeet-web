@@ -56,7 +56,7 @@ export class MessagesGateway
   @WebSocketServer()
   server!: Server;
 
-  private readonly userSockets = new Map<number, string>();
+  private readonly userSockets = new Map<number, Set<string>>();
 
   constructor(
     private readonly messagesService: MessagesService,
@@ -70,14 +70,14 @@ export class MessagesGateway
       return;
     }
 
-    this.userSockets.set(userId, client.id);
+    this.addUserSocket(userId, client.id);
     this.setUserId(client, userId);
   }
 
   handleDisconnect(client: AuthenticatedSocket) {
     const userId = this.getUserId(client);
     if (userId) {
-      this.userSockets.delete(userId);
+      this.removeUserSocket(userId, client.id);
     }
   }
 
@@ -103,12 +103,9 @@ export class MessagesGateway
       data.conversationId,
     );
     const recipientId = participants.find((id) => id !== userId);
-    const recipientSocketId = recipientId
-      ? this.userSockets.get(recipientId)
-      : undefined;
 
-    if (recipientSocketId) {
-      this.server.to(recipientSocketId).emit('newMessage', message);
+    if (recipientId) {
+      this.emitNewMessageToUser(recipientId, message);
     }
 
     return message;
@@ -120,9 +117,32 @@ export class MessagesGateway
    * Used by AgentGatewayService when an external Agent sends a message.
    */
   pushNewMessageToUser(userId: number, message: unknown): boolean {
-    const socketId = this.userSockets.get(userId);
-    if (!socketId) return false;
-    this.server.to(socketId).emit('newMessage', message);
+    return this.emitNewMessageToUser(userId, message);
+  }
+
+  private addUserSocket(userId: number, socketId: string): void {
+    const socketIds = this.userSockets.get(userId) ?? new Set<string>();
+    socketIds.add(socketId);
+    this.userSockets.set(userId, socketIds);
+  }
+
+  private removeUserSocket(userId: number, socketId: string): void {
+    const socketIds = this.userSockets.get(userId);
+    if (!socketIds) return;
+
+    socketIds.delete(socketId);
+    if (socketIds.size === 0) {
+      this.userSockets.delete(userId);
+    }
+  }
+
+  private emitNewMessageToUser(userId: number, message: unknown): boolean {
+    const socketIds = this.userSockets.get(userId);
+    if (!socketIds?.size) return false;
+
+    socketIds.forEach((socketId) => {
+      this.server.to(socketId).emit('newMessage', message);
+    });
     return true;
   }
 
