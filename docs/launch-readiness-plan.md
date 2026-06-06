@@ -235,3 +235,6 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: iOS Debug simulator build for `FitMeetAlpha`.
 - Passed: iOS Release simulator build for `FitMeetAlpha`.
 - Blocked: iOS full `-only-testing:FitMeetAlphaTests` after three attempts because the Simulator refused to launch `com.fitmeet.alpha` with `FBSOpenApplicationServiceErrorDomain` / `Application failed preflight checks` / `Busy`. This is a local Simulator launch-state blocker; the targeted networking/auth contract tests and Debug/Release builds passed.
+- Passed: backend `pnpm --dir backend test -- logging.interceptor.spec.ts`
+- Passed: backend `pnpm --dir backend lint`
+- Passed: backend `pnpm --dir backend build`
