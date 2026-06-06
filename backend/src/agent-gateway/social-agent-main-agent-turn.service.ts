@@ -1,12 +1,9 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { sanitizeForDisplay } from '../common/display-text.util';
 import {
   AgentTask,
-  AgentTaskEvent,
-  AgentTaskEventActor,
   AgentTaskEventType,
   AgentTaskPermissionMode,
   AgentTaskRiskLevel,
@@ -33,16 +30,14 @@ import {
   socialAgentAlphaClarifyingMessage,
   socialAgentAlphaNeedsClarification,
 } from './social-agent-route-response.presenter';
+import { SocialAgentMainAgentTurnEventsService } from './social-agent-main-agent-turn-events.service';
 
 @Injectable()
 export class SocialAgentMainAgentTurnService {
-  private readonly logger = new Logger(SocialAgentMainAgentTurnService.name);
-
   constructor(
     @InjectRepository(AgentTask)
     private readonly taskRepo: Repository<AgentTask>,
-    @InjectRepository(AgentTaskEvent)
-    private readonly eventRepo: Repository<AgentTaskEvent>,
+    private readonly turnEvents: SocialAgentMainAgentTurnEventsService,
     private readonly messageLog: SocialAgentMessageLogService,
     private readonly metrics: SocialAgentMetricsService,
     @Optional()
@@ -192,7 +187,7 @@ export class SocialAgentMainAgentTurnService {
       agentTrace: alphaTurn.agentTrace,
       structuredIntent: alphaTurn.structuredIntent,
     };
-    await this.writeEvent(
+    await this.turnEvents.writeEvent(
       task,
       AgentTaskEventType.TaskFailed,
       'Main Agent 已拦截不安全请求',
@@ -263,7 +258,7 @@ export class SocialAgentMainAgentTurnService {
       agentTrace: alphaTurn?.agentTrace,
       structuredIntent: alphaTurn?.structuredIntent,
     };
-    await this.writeEvent(
+    await this.turnEvents.writeEvent(
       task,
       AgentTaskEventType.Note,
       'Main Agent 正在等待用户补充需求',
@@ -302,7 +297,7 @@ export class SocialAgentMainAgentTurnService {
       },
     };
     await this.taskRepo.save(task);
-    await this.writeEvent(
+    await this.turnEvents.writeEvent(
       task,
       AgentTaskEventType.TaskFailed,
       blockedStep.label,
@@ -313,7 +308,10 @@ export class SocialAgentMainAgentTurnService {
       },
     );
     await input.emit?.({ type: 'step', step: blockedStep });
-    const events = await this.readTaskEvents(task, input.ownerUserId);
+    const events = await this.turnEvents.readTaskEvents(
+      task,
+      input.ownerUserId,
+    );
     const result = buildSocialAgentBlockedRunResult({
       task,
       visibleSteps,
@@ -350,14 +348,17 @@ export class SocialAgentMainAgentTurnService {
       },
     };
     await this.taskRepo.save(task);
-    await this.writeEvent(
+    await this.turnEvents.writeEvent(
       task,
       AgentTaskEventType.Note,
       'Main Agent 正在等待用户补充需求',
       { structuredIntent: alphaTurn?.structuredIntent },
     );
     await input.emit?.({ type: 'step', step: clarifyStep });
-    const events = await this.readTaskEvents(task, input.ownerUserId);
+    const events = await this.turnEvents.readTaskEvents(
+      task,
+      input.ownerUserId,
+    );
     const result = buildSocialAgentClarificationRunResult({
       task,
       visibleSteps,
@@ -371,59 +372,6 @@ export class SocialAgentMainAgentTurnService {
     });
     await input.emit?.({ type: 'result', result });
     return result;
-  }
-
-  private async writeEvent(
-    task: AgentTask,
-    eventType: AgentTaskEventType,
-    summary: string,
-    payload: Record<string, unknown>,
-  ): Promise<void> {
-    try {
-      await this.eventRepo.save(
-        this.eventRepo.create({
-          taskId: task.id,
-          ownerUserId: task.ownerUserId,
-          eventType,
-          actor: AgentTaskEventActor.Agent,
-          summary,
-          payload: sanitizeForDisplay(payload) as Record<string, unknown>,
-        }),
-      );
-    } catch (error) {
-      this.logger.warn(
-        JSON.stringify({
-          event: 'social_agent.main_agent_turn.event_write_failed',
-          taskId: task.id,
-          eventType,
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
-  }
-
-  private async readTaskEvents(
-    task: AgentTask,
-    ownerUserId: number,
-  ): Promise<Array<Record<string, unknown>>> {
-    const events = await this.eventRepo.find({
-      where: { taskId: task.id, ownerUserId },
-      order: { createdAt: 'ASC', id: 'ASC' },
-      take: 500,
-    });
-    return events.map((event) =>
-      sanitizeForDisplay({
-        id: event.id,
-        taskId: event.taskId,
-        eventType: event.eventType,
-        actor: event.actor,
-        summary: event.summary,
-        payload: event.payload,
-        stepId: event.stepId,
-        toolCallId: event.toolCallId,
-        createdAt: event.createdAt,
-      }),
-    ) as Array<Record<string, unknown>>;
   }
 
   private emptyIntentEntities(): SocialAgentIntentRouteResult['entities'] {
