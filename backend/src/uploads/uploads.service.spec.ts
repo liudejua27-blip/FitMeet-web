@@ -42,6 +42,28 @@ describe('UploadsService', () => {
     expect(fs.existsSync(tempFile)).toBe(false);
     expect(fs.existsSync(uploadedPath)).toBe(true);
   });
+
+  it('removes the temporary file when Aliyun OSS file upload fails', async () => {
+    const tempFile = writeTempUpload('aliyun-failure.mp4');
+    const service = makeService({ NODE_ENV: 'production' });
+    configureAliyunFailure(service);
+
+    await expect(service.saveFile(fileFor(tempFile))).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(fs.existsSync(tempFile)).toBe(false);
+  });
+
+  it('removes the temporary file when S3 file upload fails', async () => {
+    const tempFile = writeTempUpload('s3-failure.mp4');
+    const service = makeService({ NODE_ENV: 'production' });
+    configureS3Failure(service);
+
+    await expect(service.saveFile(fileFor(tempFile))).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(fs.existsSync(tempFile)).toBe(false);
+  });
 });
 
 function makeService(env: Record<string, string>) {
@@ -71,4 +93,24 @@ function fileFor(filePath: string): Express.Multer.File {
     originalname: path.basename(filePath),
     mimetype: 'video/mp4',
   } as Express.Multer.File;
+}
+
+function configureAliyunFailure(service: UploadsService) {
+  Object.assign(service as unknown as Record<string, unknown>, {
+    storageProvider: 'aliyun-oss',
+    bucketName: 'fitmeet-test',
+    ossClient: {
+      put: jest.fn().mockRejectedValue(new Error('oss unavailable')),
+    },
+  });
+}
+
+function configureS3Failure(service: UploadsService) {
+  Object.assign(service as unknown as Record<string, unknown>, {
+    storageProvider: 's3',
+    bucketName: 'fitmeet-test',
+    s3Client: {
+      send: jest.fn().mockRejectedValue(new Error('s3 unavailable')),
+    },
+  });
 }

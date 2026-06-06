@@ -241,13 +241,14 @@ export class UploadsService implements OnModuleInit {
       try {
         const fileBuffer = fs.readFileSync(file.path);
         await this.uploadToAliyunOss(filename, fileBuffer, file.mimetype);
-        this.safeUnlink(file.path);
         return this.getAliyunOssUrl(filename);
       } catch (error) {
         if (error instanceof Error) {
           this.logger.error(`File upload failed: ${error.message}`);
         }
         throw new BadRequestException('File upload failed');
+      } finally {
+        this.safeUnlink(file.path);
       }
     } else if (this.s3Client) {
       try {
@@ -259,13 +260,14 @@ export class UploadsService implements OnModuleInit {
 
         await this.uploadToS3(filename, fileBuffer, file.mimetype);
 
-        this.safeUnlink(file.path);
         return this.getS3Url(filename);
       } catch (error) {
         if (error instanceof Error) {
           this.logger.error(`File upload failed: ${error.message}`);
         }
         throw new BadRequestException('File upload failed');
+      } finally {
+        this.safeUnlink(file.path);
       }
     } else {
       const filepath = path.join(this.uploadDir, filename);

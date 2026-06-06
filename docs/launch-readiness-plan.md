@@ -152,7 +152,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - Performance risk: 1000-concurrency smoke scripts exist, but no current local/staging result is recorded yet.
 - Deployment risk: GitHub push/deploy automation is blocked in the current local environment by missing HTTPS credentials; deployment must run from an authenticated machine or CI.
 - AI risk: `DEEPSEEK_API_KEY` is required for release-quality Social Agent behavior. Fallback responses are useful for local tests but are not release-ready for the final AI experience.
-- Upload risk: production uploads require object storage; local filesystem upload fallback is tested as development-only, and object storage public URLs/endpoints must stay HTTPS for release traffic.
+- Upload risk: production uploads require object storage; local filesystem upload fallback is tested as development-only, object storage failure paths now remove multer temporary files for both Aliyun OSS and S3, and object storage public URLs/endpoints must stay HTTPS for release traffic.
 
 ## Exact Validation Commands
 
@@ -284,7 +284,7 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts`
 - Passed: backend `pnpm --dir backend test -- auth.service.spec.ts`
 - Passed: backend `pnpm --dir backend test -- auth.service.spec.ts production-env-readiness.spec.ts`
-- Passed: backend `pnpm --dir backend test -- uploads.service.spec.ts`
+- Passed: backend `pnpm --dir backend test -- uploads.service.spec.ts` after adding Aliyun OSS/S3 failure cleanup coverage.
 - Passed: backend `pnpm --dir backend test -- uploads.controller.spec.ts`
 - Passed: backend `pnpm --dir backend test -- typeorm-launch-config.contract.spec.ts`
 - Passed: backend `pnpm --dir backend test -- messages.realtime.spec.ts`
