@@ -1042,9 +1042,30 @@ export class SocialAgentCandidatePoolService {
       row.riskWarnings = candidate.risk.warnings;
       row.suggestedMessage = candidate.suggestedOpener;
       row.status = existing?.status ?? SocialRequestCandidateStatus.Suggested;
-      const saved = await this.candidateRepo.save(row);
+      const saved = await this.saveCandidateRowIdempotently(
+        row,
+        socialRequestId,
+        candidate.candidateUserId,
+      );
       candidate.candidateRecordId = saved.id;
       candidate.socialRequestId = socialRequestId;
+    }
+  }
+
+  private async saveCandidateRowIdempotently(
+    row: SocialRequestCandidate,
+    socialRequestId: number,
+    candidateUserId: number,
+  ): Promise<SocialRequestCandidate> {
+    try {
+      return await this.candidateRepo.save(row);
+    } catch (error) {
+      if (!this.isUniqueConstraintViolation(error)) throw error;
+      const existing = await this.candidateRepo.findOne({
+        where: { socialRequestId, candidateUserId },
+      });
+      if (!existing) throw error;
+      return existing;
     }
   }
 
@@ -1602,5 +1623,15 @@ export class SocialAgentCandidatePoolService {
       if (Number.isFinite(parsed)) return parsed;
     }
     return null;
+  }
+
+  private isUniqueConstraintViolation(error: unknown): boolean {
+    if (typeof error !== 'object' || error === null) return false;
+    const record = error as Record<string, unknown>;
+    return (
+      record.code === '23505' ||
+      (record.driverError instanceof Object &&
+        (record.driverError as Record<string, unknown>).code === '23505')
+    );
   }
 }

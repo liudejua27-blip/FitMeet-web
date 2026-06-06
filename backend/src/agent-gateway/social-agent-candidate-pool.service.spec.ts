@@ -517,6 +517,45 @@ describe('SocialAgentCandidatePoolService', () => {
     expect(result.candidates[0].candidateRecordId).toBeDefined();
   });
 
+  it('reuses an existing candidate row when concurrent persistence hits the unique index', async () => {
+    const { service, candidates } = makeService({
+      profiles: [profile(2)],
+      socialRequests: [
+        {
+          id: 301,
+          userId: 1,
+          city: '青岛',
+          rawText: '青岛周末咖啡',
+          interestTags: ['咖啡'],
+        },
+      ],
+    });
+    candidates.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      id: 777,
+      socialRequestId: 301,
+      candidateUserId: 2,
+      status: SocialRequestCandidateStatus.Suggested,
+    });
+    candidates.save.mockRejectedValueOnce(
+      Object.assign(new Error('duplicate candidate row'), { code: '23505' }),
+    );
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      socialRequestId: 301,
+    });
+
+    expect(result.candidates[0]).toMatchObject({
+      candidateUserId: 2,
+      candidateRecordId: 777,
+      socialRequestId: 301,
+    });
+    expect(candidates.findOne).toHaveBeenLastCalledWith({
+      where: { socialRequestId: 301, candidateUserId: 2 },
+    });
+  });
+
   it('productizes mahjong confirmation risk into candidate risk and persisted rows', async () => {
     const { service, candidates } = makeService({
       profiles: [profile(2, { interestTags: ['麻将'], city: '青岛' })],

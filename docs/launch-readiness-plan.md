@@ -131,7 +131,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 
 - Highest backend risk: large Social Agent services remain complex, especially `social-agent-tool-executor.service.ts` and `social-agent-candidate-pool.service.ts`; the tool executor now has enum-to-dispatch coverage and TypeScript exhaustiveness guards so newly added tools cannot silently miss a real execution branch.
 - Candidate pool authorization risk has been reduced: Social Agent candidate searches now require `socialRequestId` to belong to the authenticated owner before using its query context or persisting candidate rows.
-- Candidate persistence idempotency risk has been reduced with a database-level unique index for `(socialRequestId, candidateUserId)`; production must inspect duplicates before applying the migration if historical data exists.
+- Candidate persistence idempotency risk has been reduced with a database-level unique index for `(socialRequestId, candidateUserId)`; the service also reuses the existing candidate row on Postgres unique-conflict races, and production must inspect duplicates before applying the migration if historical data exists.
 - Social Agent chat entrypoint risk has been reduced to thin facade services; profile extraction prompt/normalization has been split out of the LLM service; timeline message restoration still needs continued focused tests because it is shared by Web and iOS session restore.
 - DB risk: production schema drift may exist if older deployments used `synchronize`; verify migration status against staging before production.
 - Contract risk: Web legacy APIs outside `fitmeet-core.openapi.ts` can drift because only the core launch subset is contract-tested.
