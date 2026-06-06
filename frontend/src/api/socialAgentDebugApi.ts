@@ -719,7 +719,7 @@ export const socialAgentDebugApi = {
   getRunStatus: (taskId: number, runId: string) =>
     api
       .requestProtected<SocialAgentAsyncRunResult>(
-        `/social-agent/chat/tasks/${taskId}/runs/${encodeURIComponent(runId)}`,
+        fitMeetCoreEndpoints.socialAgentChat.taskRunStatus(taskId, runId),
       )
       .then(sanitizeSocialAgentResponse),
 

@@ -38,6 +38,12 @@ describe('fitMeetCoreEndpoints', () => {
     expect(fitMeetCoreEndpoints.socialAgentChat.taskSession(101)).toBe(
       '/social-agent/chat/tasks/101/session',
     );
+    expect(
+      fitMeetCoreEndpoints.socialAgentChat.taskRunStatus(
+        101,
+        'sar:city run',
+      ),
+    ).toBe('/social-agent/chat/tasks/101/runs/sar%3Acity%20run');
     expect(fitMeetCoreEndpoints.socialAgentChat.taskMessages(101)).toBe(
       '/social-agent/chat/tasks/101/messages',
     );
@@ -97,6 +103,7 @@ describe('fitMeetCoreEndpoints', () => {
         '/social-agent/chat/stream-user',
         '/social-agent/chat/session',
         '/social-agent/chat/tasks/{taskId}/session',
+        '/social-agent/chat/tasks/{taskId}/runs/{runId}',
         '/social-agent/chat/tasks/{taskId}/messages',
         '/social-agent/chat/tasks/{taskId}/actions',
         '/social-agent/chat/tasks/{taskId}/save-candidate',
@@ -156,6 +163,13 @@ describe('fitMeetCoreEndpoints', () => {
         template: fitMeetCoreEndpointTemplates.socialAgentChat.taskSession,
       },
       {
+        built: fitMeetCoreEndpoints.socialAgentChat.taskRunStatus(
+          101,
+          'sar:city run',
+        ),
+        template: fitMeetCoreEndpointTemplates.socialAgentChat.taskRunStatus,
+      },
+      {
         built: fitMeetCoreEndpoints.socialAgentChat.taskMessages(101),
         template: fitMeetCoreEndpointTemplates.socialAgentChat.taskMessages,
       },
@@ -209,5 +223,6 @@ function normalizeBuiltPath(path: string): string {
   return path
     .replace(/\/\d+(?=\/|$)/g, '/:param')
     .replace(/\/conv-[^/]+(?=\/|$)/g, '/:param')
+    .replace(/\/sar%3Acity%20run(?=\/|$)/g, '/:param')
     .replace(/\/intent%3Acity%20run(?=\/|$)/g, '/:param');
 }

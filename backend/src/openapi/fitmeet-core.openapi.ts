@@ -783,6 +783,42 @@ export const fitMeetCoreOpenApi = {
         },
       },
     },
+    '/social-agent/chat/tasks/{taskId}/runs/{runId}': {
+      get: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentGetRunStatus',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+          {
+            name: 'runId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', minLength: 1 },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Async Social Agent run status for the authenticated task owner',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentAsyncRunSnapshot',
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
     '/social-agent/tasks/current': {
       get: {
         tags: ['social-agent-chat'],
@@ -1507,6 +1543,51 @@ export const fitMeetCoreOpenApi = {
             items: { type: 'object', additionalProperties: true },
           },
           restoredAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      SocialAgentAsyncRunSnapshot: {
+        type: 'object',
+        required: [
+          'taskId',
+          'runId',
+          'status',
+          'phase',
+          'message',
+          'pollAfterMs',
+        ],
+        additionalProperties: true,
+        properties: {
+          taskId: { type: 'integer' },
+          runId: { type: 'string' },
+          status: {
+            type: 'string',
+            enum: ['queued', 'running', 'completed', 'failed'],
+          },
+          phase: { type: 'string' },
+          message: { type: 'string' },
+          visibleSteps: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          pollAfterMs: { type: 'integer' },
+          taskStatus: { type: 'string' },
+          queuedAt: { type: ['string', 'null'], format: 'date-time' },
+          startedAt: { type: ['string', 'null'], format: 'date-time' },
+          updatedAt: { type: ['string', 'null'], format: 'date-time' },
+          completedAt: { type: ['string', 'null'], format: 'date-time' },
+          failedAt: { type: ['string', 'null'], format: 'date-time' },
+          error: {
+            type: ['object', 'null'],
+            additionalProperties: true,
+          },
+          result: {
+            type: ['object', 'null'],
+            additionalProperties: true,
+          },
+          replan: {
+            type: ['object', 'null'],
+            additionalProperties: true,
+          },
         },
       },
       SocialAgentCurrentTaskSnapshot: {

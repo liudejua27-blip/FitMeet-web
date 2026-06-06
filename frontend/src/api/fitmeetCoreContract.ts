@@ -43,6 +43,10 @@ export const fitMeetCoreEndpoints = {
     session: '/social-agent/chat/session',
     taskSession: (taskId: number) =>
       `/social-agent/chat/tasks/${taskId}/session` as const,
+    taskRunStatus: (taskId: number, runId: string) =>
+      `/social-agent/chat/tasks/${taskId}/runs/${encodeURIComponent(
+        runId,
+      )}` as const,
     taskMessages: (taskId: number) =>
       `/social-agent/chat/tasks/${taskId}/messages` as const,
     taskActions: (taskId: number) =>
@@ -104,6 +108,7 @@ export const fitMeetCoreEndpointTemplates = {
     streamUser: '/social-agent/chat/stream-user',
     session: '/social-agent/chat/session',
     taskSession: '/social-agent/chat/tasks/{taskId}/session',
+    taskRunStatus: '/social-agent/chat/tasks/{taskId}/runs/{runId}',
     taskMessages: '/social-agent/chat/tasks/{taskId}/messages',
     taskActions: '/social-agent/chat/tasks/{taskId}/actions',
     saveCandidate: '/social-agent/chat/tasks/{taskId}/save-candidate',

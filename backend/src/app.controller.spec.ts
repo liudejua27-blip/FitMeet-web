@@ -43,6 +43,7 @@ const IOS_APP_REQUIRED_PATHS = {
   '/feed/interactions': 'get',
   '/social-agent/chat/session': 'get',
   '/social-agent/chat/tasks/{taskId}/session': 'get',
+  '/social-agent/chat/tasks/{taskId}/runs/{runId}': 'get',
   '/social-agent/chat/messages': 'post',
   '/social-agent/chat/route-message': 'post',
   '/social-agent/chat/tasks/{taskId}/messages': 'post',
@@ -174,6 +175,7 @@ describe('AppController', () => {
           '/social-agent/chat/stream',
           '/social-agent/chat/stream-user',
           '/social-agent/chat/tasks/{taskId}/session',
+          '/social-agent/chat/tasks/{taskId}/runs/{runId}',
           '/social-agent/chat/tasks/{taskId}/messages',
           '/social-agent/chat/tasks/{taskId}/save-candidate',
           '/social-agent/chat/tasks/{taskId}/send-message',
@@ -534,6 +536,8 @@ describe('AppController', () => {
           .requestBody.content['application/json'].schema;
       const taskSession =
         contract.paths['/social-agent/chat/tasks/{taskId}/session'].get;
+      const runStatus =
+        contract.paths['/social-agent/chat/tasks/{taskId}/runs/{runId}'].get;
 
       for (const route of [
         '/social-agent/chat/messages',
@@ -589,6 +593,46 @@ describe('AppController', () => {
         taskSession.responses['200'].content['application/json'].schema,
       ).toEqual({
         $ref: '#/components/schemas/SocialAgentSessionSnapshot',
+      });
+      expect(runStatus.parameters).toEqual([
+        {
+          name: 'taskId',
+          in: 'path',
+          required: true,
+          schema: { type: 'integer' },
+        },
+        {
+          name: 'runId',
+          in: 'path',
+          required: true,
+          schema: { type: 'string', minLength: 1 },
+        },
+      ]);
+      expect(
+        runStatus.responses['200'].content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/SocialAgentAsyncRunSnapshot',
+      });
+      expect(
+        contract.components.schemas.SocialAgentAsyncRunSnapshot,
+      ).toMatchObject({
+        required: [
+          'taskId',
+          'runId',
+          'status',
+          'phase',
+          'message',
+          'pollAfterMs',
+        ],
+        properties: {
+          taskId: { type: 'integer' },
+          runId: { type: 'string' },
+          status: {
+            type: 'string',
+            enum: ['queued', 'running', 'completed', 'failed'],
+          },
+          pollAfterMs: { type: 'integer' },
+        },
       });
     });
   });
