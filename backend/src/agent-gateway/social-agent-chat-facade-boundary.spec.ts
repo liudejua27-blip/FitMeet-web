@@ -33,6 +33,14 @@ const chatLlmPromptsPath = path.resolve(
   __dirname,
   'social-agent-chat-llm-prompts.ts',
 );
+const runPresenterPath = path.resolve(
+  __dirname,
+  'social-agent-chat-run.presenter.ts',
+);
+const runStorePresenterPath = path.resolve(
+  __dirname,
+  'social-agent-chat-run-store.presenter.ts',
+);
 
 describe('SocialAgentChatService facade boundary', () => {
   const compatibilitySource = fs.readFileSync(compatibilityExportPath, 'utf8');
@@ -46,6 +54,11 @@ describe('SocialAgentChatService facade boundary', () => {
   );
   const chatLlmServiceSource = fs.readFileSync(chatLlmServicePath, 'utf8');
   const chatLlmPromptsSource = fs.readFileSync(chatLlmPromptsPath, 'utf8');
+  const runPresenterSource = fs.readFileSync(runPresenterPath, 'utf8');
+  const runStorePresenterSource = fs.readFileSync(
+    runStorePresenterPath,
+    'utf8',
+  );
 
   it('keeps the legacy service module as a compatibility export', () => {
     expect(compatibilitySource.trim()).toBe(
@@ -109,6 +122,27 @@ describe('SocialAgentChatService facade boundary', () => {
     );
     expect(chatLlmPromptsSource).toContain(
       'readSocialAgentConversationBrainPlannedTools',
+    );
+  });
+
+  it('keeps async run storage normalization split from run result presentation', () => {
+    expect(runPresenterSource.trim().split('\n').length).toBeLessThanOrEqual(
+      100,
+    );
+    expect(
+      runStorePresenterSource.trim().split('\n').length,
+    ).toBeLessThanOrEqual(160);
+    expect(runPresenterSource).toContain(
+      "from './social-agent-chat-run-store.presenter'",
+    );
+    expect(runPresenterSource).not.toContain(
+      'function socialAgentStoredRunMap',
+    );
+    expect(runStorePresenterSource).toContain(
+      'function socialAgentStoredRunMap',
+    );
+    expect(runStorePresenterSource).toContain(
+      'function readSocialAgentVisibleSteps',
     );
   });
 });
