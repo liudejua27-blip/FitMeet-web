@@ -118,6 +118,7 @@ import { messageForSocialAgentSchemaAction } from './social-agent-card-action.pr
 import { SocialAgentRunProgressTracker } from './social-agent-run-progress.tracker';
 import { SocialAgentSessionRestoreService } from './social-agent-session-restore.service';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
+import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
 import {
   applySocialAgentTaskMemoryForIntent,
   profileKeyForSocialAgentIntent,
@@ -166,6 +167,7 @@ export class SocialAgentChatService {
     private readonly messageLog: SocialAgentMessageLogService,
     private readonly taskLifecycle: SocialAgentTaskLifecycleService,
     private readonly routeContext: SocialAgentRouteContextService,
+    private readonly mainAgentTurn: SocialAgentMainAgentTurnService,
     @Optional() private readonly brain?: SocialAgentBrainService,
     @Optional()
     private readonly lifeGraph?: LifeGraphService,
@@ -214,146 +216,15 @@ export class SocialAgentChatService {
     );
     await this.messageLog.recordUserMessage(task, message);
 
-    const alphaTurn = await this.alphaAgent?.prepareTurn({
+    const mainAgentTurn = await this.mainAgentTurn.handleRouteTurn({
       ownerUserId,
-      taskId: task.id,
+      task,
       message,
-      permissionMode: task.permissionMode,
-      context: { hasCandidates: body.hasCandidates === true },
+      hasCandidates: body.hasCandidates === true,
+      startedAt,
     });
-    if (alphaTurn?.safety.blocked) {
-      task.status = AgentTaskStatus.Failed;
-      task.riskLevel = AgentTaskRiskLevel.Blocked;
-      task.statusReason = 'main_agent_guardrail_blocked';
-      task.result = {
-        ...(task.result ?? {}),
-        alphaAgent: {
-          traceId: alphaTurn.traceId,
-          safety: alphaTurn.safety,
-          cards: alphaTurn.cards,
-          agentTrace: alphaTurn.agentTrace,
-        },
-      };
-      await this.taskRepo.save(task);
-      const assistantMessage =
-        alphaTurn.assistantMessage ||
-        '这个请求不符合 FitMeet 的安全边界，我不能继续执行。';
-      const result: SocialAgentIntentRouteResult = {
-        intent: 'safety_or_boundary',
-        confidence: 1,
-        entities: this.emptyIntentEntities(),
-        shouldSearch: false,
-        shouldReplan: false,
-        shouldUpdateProfile: false,
-        shouldExecuteAction: false,
-        replyStrategy: 'direct_reply',
-        source: 'rules',
-        action: 'answer',
-        taskId: task.id,
-        assistantMessage,
-        savedContext: true,
-        profileUpdated: false,
-        shouldQueueRun: false,
-        runMode: null,
-        queuedRun: null,
-        pendingApproval: null,
-        activityResults: [],
-        profileUpdateProposal: null,
-        cards: alphaTurn.cards,
-        safety: alphaTurn.safety,
-        permissionMode: task.permissionMode,
-        traceId: alphaTurn.traceId,
-        agentTrace: alphaTurn.agentTrace,
-        structuredIntent: alphaTurn.structuredIntent,
-      };
-      await this.writeEvent(
-        task,
-        AgentTaskEventType.TaskFailed,
-        'Main Agent 已拦截不安全请求',
-        {
-          traceId: alphaTurn.traceId,
-          safety: alphaTurn.safety,
-          agentTrace: alphaTurn.agentTrace,
-        },
-        AgentTaskEventActor.Agent,
-      );
-      await this.messageLog.recordAssistantMessage(
-        task,
-        assistantMessage,
-        result,
-      );
-      this.metrics.observeRouteLatency(Date.now() - startedAt);
-      return result;
-    }
-    if (socialAgentAlphaNeedsClarification(alphaTurn)) {
-      const assistantMessage = socialAgentAlphaClarifyingMessage(
-        alphaTurn,
-        (question, fallback) =>
-          this.tonePolicy?.safeAssistantMessage(question, fallback) ?? '',
-      );
-      task.status = AgentTaskStatus.AwaitingFeedback;
-      task.statusReason = 'main_agent_waiting_for_clarification';
-      task.result = {
-        ...(task.result ?? {}),
-        alphaAgent: {
-          traceId: alphaTurn?.traceId,
-          safety: alphaTurn?.safety,
-          cards: alphaTurn?.cards ?? [],
-          agentTrace: alphaTurn?.agentTrace,
-          structuredIntent: alphaTurn?.structuredIntent,
-        },
-      };
-      await this.taskRepo.save(task);
-      const result: SocialAgentIntentRouteResult = {
-        intent: 'unknown',
-        confidence: 0.86,
-        entities: {
-          city: '',
-          activityType: '',
-          targetGender: '',
-          timePreference: '',
-          locationPreference: '',
-        },
-        shouldSearch: false,
-        shouldReplan: false,
-        shouldUpdateProfile: false,
-        shouldExecuteAction: false,
-        replyStrategy: 'ask_clarifying_question',
-        source: 'rules',
-        action: 'clarify',
-        taskId: task.id,
-        assistantMessage,
-        savedContext: true,
-        profileUpdated: false,
-        shouldQueueRun: false,
-        runMode: null,
-        queuedRun: null,
-        pendingApproval: null,
-        activityResults: [],
-        profileUpdateProposal: null,
-        cards: alphaTurn?.cards ?? [],
-        safety: alphaTurn?.safety,
-        permissionMode: task.permissionMode,
-        traceId: alphaTurn?.traceId,
-        agentTrace: alphaTurn?.agentTrace,
-        structuredIntent: alphaTurn?.structuredIntent,
-      };
-      await this.writeEvent(
-        task,
-        AgentTaskEventType.Note,
-        'Main Agent 正在等待用户补充需求',
-        { structuredIntent: alphaTurn?.structuredIntent },
-        AgentTaskEventActor.Agent,
-      );
-      await this.messageLog.recordAssistantMessage(
-        task,
-        assistantMessage,
-        result,
-      );
-      this.metrics.recordAction(result.action);
-      this.metrics.observeRouteLatency(Date.now() - startedAt);
-      return result;
-    }
+    task = mainAgentTurn.task;
+    if (mainAgentTurn.result) return mainAgentTurn.result;
 
     const [profile, freshTask, longTermSnapshot] = await Promise.all([
       this.readProfileSummary(ownerUserId),

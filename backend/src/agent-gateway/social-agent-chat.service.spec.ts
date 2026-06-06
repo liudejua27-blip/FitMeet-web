@@ -29,6 +29,7 @@ import { SocialAgentSessionRestoreService } from './social-agent-session-restore
 import { SocialAgentMessageLogService } from './social-agent-message-log.service';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
+import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 
@@ -522,6 +523,16 @@ function makeHarness(options: Record<string, unknown> = {}) {
       rag as never,
       options.memoryContext as never,
     );
+  const mainAgentTurn =
+    (options.mainAgentTurn as SocialAgentMainAgentTurnService | undefined) ??
+    new SocialAgentMainAgentTurnService(
+      taskRepo as never,
+      eventRepo as never,
+      messageLog as never,
+      metrics as never,
+      options.alphaAgent as never,
+      options.tonePolicy as never,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
@@ -549,6 +560,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     messageLog as never,
     taskLifecycle as never,
     routeContext as never,
+    mainAgentTurn as never,
     options.brain as never,
     options.lifeGraph as never,
     undefined,
@@ -585,6 +597,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     activitySearch,
     taskLifecycle,
     routeContext,
+    mainAgentTurn,
   };
 }
 
