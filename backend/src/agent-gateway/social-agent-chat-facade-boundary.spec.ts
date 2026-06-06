@@ -57,6 +57,10 @@ const publicSocialCandidatePresenterPath = path.resolve(
   __dirname,
   'public-social-candidate.presenter.ts',
 );
+const publicSocialIntentPresenterPath = path.resolve(
+  __dirname,
+  'public-social-intent.presenter.ts',
+);
 const toolExecutorPath = path.resolve(
   __dirname,
   'social-agent-tool-executor.service.ts',
@@ -110,6 +114,10 @@ describe('SocialAgentChatService facade boundary', () => {
   );
   const publicSocialCandidatePresenterSource = fs.readFileSync(
     publicSocialCandidatePresenterPath,
+    'utf8',
+  );
+  const publicSocialIntentPresenterSource = fs.readFileSync(
+    publicSocialIntentPresenterPath,
     'utf8',
   );
   const toolExecutorSource = fs.readFileSync(toolExecutorPath, 'utf8');
@@ -258,6 +266,22 @@ describe('SocialAgentChatService facade boundary', () => {
     expect(
       publicSocialCandidatePresenterSource.trim().split('\n').length,
     ).toBeLessThanOrEqual(190);
+  });
+
+  it('keeps public social intent response serialization split from the gateway service', () => {
+    expect(agentGatewayServiceSource).toContain('serializePublicSocialIntent');
+    expect(agentGatewayServiceSource).not.toContain(
+      'private serializePublicSocialIntent',
+    );
+    expect(publicSocialIntentPresenterSource).toContain(
+      'function serializePublicSocialIntent',
+    );
+    expect(publicSocialIntentPresenterSource).toContain(
+      'buildPublicIntentMatchSignal',
+    );
+    expect(
+      publicSocialIntentPresenterSource.trim().split('\n').length,
+    ).toBeLessThanOrEqual(40);
   });
 
   it('keeps tool step event payload assembly split from the executor', () => {

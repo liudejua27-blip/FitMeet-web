@@ -117,6 +117,7 @@ import {
   buildPendingApprovalSendMessageActionLog,
 } from './agent-gateway-message-log.mapper';
 import { buildPublicSocialCandidates } from './public-social-candidate.presenter';
+import { serializePublicSocialIntent } from './public-social-intent.presenter';
 
 // Permission-level capability map
 const LEVEL_CAPABILITIES: Record<AgentPermissionLevel, AgentAction[]> = {
@@ -958,7 +959,7 @@ export class AgentGatewayService {
 
     const [data, total] = await query.getManyAndCount();
     return {
-      data: data.map((intent) => this.serializePublicSocialIntent(intent)),
+      data: data.map((intent) => serializePublicSocialIntent(intent)),
       metadata: {
         total,
         page,
@@ -976,7 +977,7 @@ export class AgentGatewayService {
   async getPublicSocialIntent(id: string) {
     const intent = await this.publicIntentRepo.findOne({ where: { id } });
     if (!intent) throw new NotFoundException('Public social intent not found');
-    return this.serializePublicSocialIntent(intent);
+    return serializePublicSocialIntent(intent);
   }
 
   async getPublicSocialIntentMatches(id: string) {
@@ -1012,7 +1013,7 @@ export class AgentGatewayService {
     };
     await this.publicIntentRepo.save(intent);
     return {
-      request: this.serializePublicSocialIntent(intent),
+      request: serializePublicSocialIntent(intent),
       candidates,
       matchedBy: 'fitmeet_matching_engine',
     };
@@ -2051,37 +2052,6 @@ export class AgentGatewayService {
       : 'recently';
     const title = request.title || request.description || request.type;
     return `Hi, this is a FitMeet agent-assisted intro. My owner is looking for ${title} around ${where} ${when}. Would you like to chat inside FitMeet first?`;
-  }
-
-  private serializePublicSocialIntent(intent: PublicSocialIntent) {
-    return {
-      id: intent.id,
-      userId: intent.userId,
-      linkedSocialRequestId: intent.linkedSocialRequestId,
-      source: intent.source,
-      mode: intent.mode,
-      requestType: intent.requestType,
-      title: intent.title,
-      description: intent.description,
-      interestTags: intent.interestTags ?? [],
-      city: intent.city,
-      loc: intent.loc,
-      lat: intent.lat,
-      lng: intent.lng,
-      radiusKm: intent.radiusKm,
-      timePreference: intent.timePreference,
-      locationPreference: intent.locationPreference,
-      socialGoal: intent.socialGoal,
-      riskLevel: intent.riskLevel,
-      requiresUserConfirmation: intent.requiresUserConfirmation,
-      filters: intent.filters,
-      candidateUserIds: intent.candidateUserIds,
-      matchedCount: intent.matchedCount,
-      matchSignal: buildPublicIntentMatchSignal(intent),
-      status: intent.status,
-      createdAt: intent.createdAt,
-      updatedAt: intent.updatedAt,
-    };
   }
 
   private computeRisk(text: string): number {
