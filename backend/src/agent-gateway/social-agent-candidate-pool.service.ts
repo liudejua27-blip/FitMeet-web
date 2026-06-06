@@ -64,17 +64,34 @@ import {
   normalizeCandidatePoolArray,
   uniqueCandidatePoolStrings,
 } from './social-agent-candidate-pool-query';
+import {
+  buildCandidatePoolDebugSnapshot,
+  emptyCandidatePoolFiltered,
+  toCandidatePoolDebugReasons,
+} from './social-agent-candidate-pool-debug';
 import type {
   CandidatePoolIntent,
   CandidatePoolQuery,
   CandidatePoolResolvedQuery,
 } from './social-agent-candidate-pool-query';
+import type {
+  CandidatePoolCounts,
+  CandidatePoolDebugReasons,
+  CandidatePoolDebugSnapshot,
+  CandidatePoolFiltered,
+} from './social-agent-candidate-pool-debug';
 
 export type {
   CandidatePoolIntent,
   CandidatePoolQuery,
   CandidatePoolResolvedQuery,
 } from './social-agent-candidate-pool-query';
+export type {
+  CandidatePoolCounts,
+  CandidatePoolDebugReasons,
+  CandidatePoolDebugSnapshot,
+  CandidatePoolFiltered,
+} from './social-agent-candidate-pool-debug';
 
 export type CandidatePoolSource =
   | 'profile_candidate'
@@ -82,37 +99,6 @@ export type CandidatePoolSource =
   | 'activity';
 
 export type CandidatePoolDataQuality = CandidateProfileDataQuality;
-
-export type CandidatePoolDebugReasons = {
-  usersTotal: number;
-  socialProfilesTotal: number;
-  publicIntentsTotal: number;
-  eligibleProfiles: number;
-  eligiblePublicIntents: number;
-  eligibleActivities: number;
-  filteredBySelf: number;
-  filteredByBlocked: number;
-  filteredByCity: number;
-  filteredByBoundary: number;
-  scoreBelowThreshold: number;
-};
-
-export type CandidatePoolCounts = {
-  users: number;
-  socialProfiles: number;
-  aiDelegateProfiles: number;
-  publicSocialIntents: number;
-  socialRequests: number;
-  socialActivities: number;
-};
-
-export type CandidatePoolFiltered = {
-  self: number;
-  blocked: number;
-  cityMismatch: number;
-  boundaryMismatch: number;
-  scoreBelowThreshold: number;
-};
 
 export type CandidatePoolCandidate = {
   source: CandidatePoolSource;
@@ -220,40 +206,6 @@ export type CandidatePoolActivitySearchResult = {
   debug: CandidatePoolDebugSnapshot;
 };
 
-export type CandidatePoolDebugSnapshot = {
-  ownerUserId: number;
-  query: CandidatePoolResolvedQuery;
-  counts: CandidatePoolCounts;
-  eligible: {
-    profileCandidates: number;
-    publicIntentCandidates: number;
-    activityCandidates: number;
-  };
-  filtered: CandidatePoolFiltered;
-  finalCandidates: Array<
-    Pick<
-      CandidatePoolCandidate,
-      | 'source'
-      | 'isRealData'
-      | 'targetUserId'
-      | 'candidateUserId'
-      | 'userId'
-      | 'publicIntentId'
-      | 'socialRequestId'
-      | 'activityId'
-      | 'displayName'
-      | 'city'
-      | 'interestTags'
-      | 'profileCompleteness'
-      | 'dataQuality'
-      | 'matchScore'
-      | 'matchReasons'
-      | 'riskWarnings'
-      | 'suggestedOpener'
-    >
-  >;
-};
-
 const EMPTY_CANDIDATE_MESSAGE =
   '当前没有找到符合条件的真实用户，我可以帮你发布一个约练需求，或者你可以放宽城市、时间、兴趣条件。';
 
@@ -340,7 +292,7 @@ export class SocialAgentCandidatePoolService {
       delegates.map((delegate) => [delegate.userId, delegate]),
     );
     const userMap = new Map(users.map((user) => [user.id, user]));
-    const filtered = this.emptyFiltered();
+    const filtered = emptyCandidatePoolFiltered();
 
     const profileCandidates = this.buildProfileCandidates({
       ownerUserId: input.ownerUserId,
@@ -390,7 +342,7 @@ export class SocialAgentCandidatePoolService {
       candidates,
       emptyReason: candidates.length === 0 ? 'no_real_candidates' : null,
       message: candidates.length === 0 ? EMPTY_CANDIDATE_MESSAGE : '',
-      debugReasons: this.toDebugReasons(debug),
+      debugReasons: toCandidatePoolDebugReasons(debug),
       debug,
     };
   }
@@ -408,7 +360,7 @@ export class SocialAgentCandidatePoolService {
       this.safeFind(this.publicIntentRepo, { order: { updatedAt: 'DESC' } }),
       this.loadBlockedIds(input.ownerUserId),
     ]);
-    const filtered = this.emptyFiltered();
+    const filtered = emptyCandidatePoolFiltered();
     const realActivities = this.buildActivityResults({
       ownerUserId: input.ownerUserId,
       query,
@@ -448,7 +400,7 @@ export class SocialAgentCandidatePoolService {
       activityResults,
       emptyReason: activityResults.length === 0 ? 'no_real_candidates' : null,
       message: activityResults.length === 0 ? EMPTY_ACTIVITY_MESSAGE : '',
-      debugReasons: this.toDebugReasons(debug),
+      debugReasons: toCandidatePoolDebugReasons(debug),
       debug,
     };
   }
@@ -1595,64 +1547,7 @@ export class SocialAgentCandidatePoolService {
     activityCandidates: number;
     finalCandidates: CandidatePoolCandidate[];
   }): CandidatePoolDebugSnapshot {
-    return {
-      ownerUserId: input.ownerUserId,
-      query: input.query,
-      counts: input.counts,
-      eligible: {
-        profileCandidates: input.profileCandidates,
-        publicIntentCandidates: input.publicIntentCandidates,
-        activityCandidates: input.activityCandidates,
-      },
-      filtered: input.filtered,
-      finalCandidates: input.finalCandidates.map((candidate) => ({
-        source: candidate.source,
-        isRealData: candidate.isRealData,
-        targetUserId: candidate.targetUserId,
-        candidateUserId: candidate.candidateUserId,
-        userId: candidate.userId,
-        publicIntentId: candidate.publicIntentId,
-        socialRequestId: candidate.socialRequestId,
-        activityId: candidate.activityId,
-        displayName: candidate.displayName,
-        city: candidate.city,
-        interestTags: candidate.interestTags,
-        profileCompleteness: candidate.profileCompleteness,
-        dataQuality: candidate.dataQuality,
-        matchScore: candidate.matchScore,
-        matchReasons: candidate.matchReasons,
-        riskWarnings: candidate.riskWarnings,
-        suggestedOpener: candidate.suggestedOpener,
-      })),
-    };
-  }
-
-  private toDebugReasons(
-    debug: CandidatePoolDebugSnapshot,
-  ): CandidatePoolDebugReasons {
-    return {
-      usersTotal: debug.counts.users,
-      socialProfilesTotal: debug.counts.socialProfiles,
-      publicIntentsTotal: debug.counts.publicSocialIntents,
-      eligibleProfiles: debug.eligible.profileCandidates,
-      eligiblePublicIntents: debug.eligible.publicIntentCandidates,
-      eligibleActivities: debug.eligible.activityCandidates,
-      filteredBySelf: debug.filtered.self,
-      filteredByBlocked: debug.filtered.blocked,
-      filteredByCity: debug.filtered.cityMismatch,
-      filteredByBoundary: debug.filtered.boundaryMismatch,
-      scoreBelowThreshold: debug.filtered.scoreBelowThreshold,
-    };
-  }
-
-  private emptyFiltered(): CandidatePoolFiltered {
-    return {
-      self: 0,
-      blocked: 0,
-      cityMismatch: 0,
-      boundaryMismatch: 0,
-      scoreBelowThreshold: 0,
-    };
+    return buildCandidatePoolDebugSnapshot(input);
   }
 
   private async safeCount<T extends ObjectLiteral>(
