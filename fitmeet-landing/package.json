@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "pnpm test:source && pnpm test:rendered",
+    "test": "pnpm test:source && pnpm build && pnpm test:rendered",
     "test:source": "node --test tests/*.test.mjs",
     "test:rendered": "node --test tests/*.rendered.mjs"
   },
