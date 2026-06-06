@@ -85,6 +85,13 @@ import {
   type SocialAgentInboxEventInput,
 } from './social-agent-inbox-event-payload';
 import { buildSocialAgentFriendActionResult } from './social-agent-friend-action-result';
+import {
+  buildSocialAgentStepCompletedEvent,
+  buildSocialAgentStepStartedEvent,
+  buildSocialAgentToolCalledEvent,
+  buildSocialAgentToolFailedEvent,
+  buildSocialAgentToolReturnedEvent,
+} from './social-agent-tool-step-events.presenter';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -525,22 +532,31 @@ export class SocialAgentToolExecutorService {
       input,
     );
 
-    await this.createTaskEvent(task, AgentTaskEventType.StepStarted, {
-      summary: `Started ${toolName}`,
-      stepId,
-      toolCallId: callId,
-      payload: { toolName, input },
-    });
-    await this.createTaskEvent(task, AgentTaskEventType.ToolCalled, {
-      summary: `Called ${toolName}`,
-      stepId,
-      toolCallId: callId,
-      payload: {
+    await this.createTaskEvent(
+      task,
+      AgentTaskEventType.StepStarted,
+      buildSocialAgentStepStartedEvent({
         toolName,
+        stepId,
+        toolCallId: callId,
+        input,
+      }),
+    );
+    await this.createTaskEvent(
+      task,
+      AgentTaskEventType.ToolCalled,
+      buildSocialAgentToolCalledEvent({
+        toolName,
+        stepId,
+        toolCallId: callId,
         input,
         policy,
-      },
-    });
+      }),
+    );
+    const inputSummary = this.taskMemory.preview(
+      this.toolInput.safeUnknownText(input),
+      240,
+    );
 
     try {
       this.toolExecutionPolicy.assertToolAllowed({
@@ -569,27 +585,29 @@ export class SocialAgentToolExecutorService {
           startedAt,
         });
         await this.recordActionSideEffects(task, toolName, input, call);
-        await this.createTaskEvent(task, AgentTaskEventType.ToolReturned, {
-          summary: `${toolName} pending approval`,
-          stepId,
-          toolCallId: callId,
-          payload: {
+        await this.createTaskEvent(
+          task,
+          AgentTaskEventType.ToolReturned,
+          buildSocialAgentToolReturnedEvent({
             toolName,
-            inputSummary: this.taskMemory.preview(
-              this.toolInput.safeUnknownText(input),
-              240,
-            ),
-            status: call.status,
-            output: call.output,
-            error: null,
-          },
-        });
-        await this.createTaskEvent(task, AgentTaskEventType.StepCompleted, {
-          summary: `Completed ${toolName}`,
-          stepId,
-          toolCallId: callId,
-          payload: { status: call.status, pendingApproval: true },
-        });
+            stepId,
+            toolCallId: callId,
+            inputSummary,
+            call,
+            pendingApproval: true,
+          }),
+        );
+        await this.createTaskEvent(
+          task,
+          AgentTaskEventType.StepCompleted,
+          buildSocialAgentStepCompletedEvent({
+            toolName,
+            stepId,
+            toolCallId: callId,
+            call,
+            pendingApproval: true,
+          }),
+        );
         return call;
       }
       const output = await this.dispatchTool(task, toolName, input, stepId);
@@ -605,27 +623,27 @@ export class SocialAgentToolExecutorService {
         startedAt,
       });
       await this.recordActionSideEffects(task, toolName, input, call);
-      await this.createTaskEvent(task, AgentTaskEventType.ToolReturned, {
-        summary: `${toolName} succeeded`,
-        stepId,
-        toolCallId: callId,
-        payload: {
+      await this.createTaskEvent(
+        task,
+        AgentTaskEventType.ToolReturned,
+        buildSocialAgentToolReturnedEvent({
           toolName,
-          inputSummary: this.taskMemory.preview(
-            this.toolInput.safeUnknownText(input),
-            240,
-          ),
-          status: call.status,
-          output: call.output,
-          error: null,
-        },
-      });
-      await this.createTaskEvent(task, AgentTaskEventType.StepCompleted, {
-        summary: `Completed ${toolName}`,
-        stepId,
-        toolCallId: callId,
-        payload: { status: call.status },
-      });
+          stepId,
+          toolCallId: callId,
+          inputSummary,
+          call,
+        }),
+      );
+      await this.createTaskEvent(
+        task,
+        AgentTaskEventType.StepCompleted,
+        buildSocialAgentStepCompletedEvent({
+          toolName,
+          stepId,
+          toolCallId: callId,
+          call,
+        }),
+      );
       return call;
     } catch (error) {
       const blocked = error instanceof ForbiddenException;
@@ -648,21 +666,17 @@ export class SocialAgentToolExecutorService {
           sideEffectError: this.toolInput.errorPayload(sideEffectError),
         };
       }
-      await this.createTaskEvent(task, AgentTaskEventType.ToolFailed, {
-        summary: `${toolName} ${call.status}`,
-        stepId,
-        toolCallId: callId,
-        payload: {
+      await this.createTaskEvent(
+        task,
+        AgentTaskEventType.ToolFailed,
+        buildSocialAgentToolFailedEvent({
           toolName,
-          inputSummary: this.taskMemory.preview(
-            this.toolInput.safeUnknownText(input),
-            240,
-          ),
-          status: call.status,
-          output: null,
-          error: call.error,
-        },
-      });
+          stepId,
+          toolCallId: callId,
+          inputSummary,
+          call,
+        }),
+      );
       return call;
     }
   }

@@ -57,6 +57,14 @@ const publicSocialCandidatePresenterPath = path.resolve(
   __dirname,
   'public-social-candidate.presenter.ts',
 );
+const toolExecutorPath = path.resolve(
+  __dirname,
+  'social-agent-tool-executor.service.ts',
+);
+const toolStepEventsPresenterPath = path.resolve(
+  __dirname,
+  'social-agent-tool-step-events.presenter.ts',
+);
 
 describe('SocialAgentChatService facade boundary', () => {
   const compatibilitySource = fs.readFileSync(compatibilityExportPath, 'utf8');
@@ -86,6 +94,11 @@ describe('SocialAgentChatService facade boundary', () => {
   );
   const publicSocialCandidatePresenterSource = fs.readFileSync(
     publicSocialCandidatePresenterPath,
+    'utf8',
+  );
+  const toolExecutorSource = fs.readFileSync(toolExecutorPath, 'utf8');
+  const toolStepEventsPresenterSource = fs.readFileSync(
+    toolStepEventsPresenterPath,
     'utf8',
   );
 
@@ -216,5 +229,23 @@ describe('SocialAgentChatService facade boundary', () => {
     expect(
       publicSocialCandidatePresenterSource.trim().split('\n').length,
     ).toBeLessThanOrEqual(190);
+  });
+
+  it('keeps tool step event payload assembly split from the executor', () => {
+    expect(toolExecutorSource).toContain('buildSocialAgentToolReturnedEvent');
+    expect(toolExecutorSource).toContain('buildSocialAgentToolFailedEvent');
+    expect(toolExecutorSource).not.toContain('summary: `Called ${toolName}`');
+    expect(toolExecutorSource).not.toContain(
+      'summary: `${toolName} succeeded`',
+    );
+    expect(toolStepEventsPresenterSource).toContain(
+      'function buildSocialAgentToolReturnedEvent',
+    );
+    expect(toolStepEventsPresenterSource).toContain(
+      'function buildSocialAgentToolFailedEvent',
+    );
+    expect(
+      toolStepEventsPresenterSource.trim().split('\n').length,
+    ).toBeLessThanOrEqual(140);
   });
 });
