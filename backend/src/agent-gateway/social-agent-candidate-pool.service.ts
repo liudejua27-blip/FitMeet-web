@@ -69,6 +69,7 @@ import {
   emptyCandidatePoolFiltered,
   toCandidatePoolDebugReasons,
 } from './social-agent-candidate-pool-debug';
+import { mergeSocialAgentCandidatePool } from './social-agent-candidate-pool-merge';
 import type {
   CandidatePoolIntent,
   CandidatePoolQuery,
@@ -316,7 +317,7 @@ export class SocialAgentCandidatePoolService {
       filtered,
       lifeGraphSignals,
     });
-    const merged = this.mergeSocialCandidates([
+    const merged = mergeSocialAgentCandidatePool([
       ...profileCandidates,
       ...publicCandidates,
     ]);
@@ -1067,48 +1068,6 @@ export class SocialAgentCandidatePoolService {
       if (!existing) throw error;
       return existing;
     }
-  }
-
-  private mergeSocialCandidates(
-    candidates: CandidatePoolCandidate[],
-  ): CandidatePoolCandidate[] {
-    const byUser = new Map<number, CandidatePoolCandidate>();
-    for (const candidate of candidates) {
-      const existing = byUser.get(candidate.candidateUserId);
-      if (!existing) {
-        byUser.set(candidate.candidateUserId, candidate);
-        continue;
-      }
-      const mergedReasons = this.uniqueStrings([
-        ...existing.matchReasons,
-        ...candidate.matchReasons,
-      ]).slice(0, 6);
-      const mergedTags = this.uniqueStrings([
-        ...existing.interestTags,
-        ...candidate.interestTags,
-      ]);
-      const winner =
-        candidate.matchScore > existing.matchScore ? candidate : existing;
-      byUser.set(candidate.candidateUserId, {
-        ...winner,
-        publicIntentId:
-          winner.publicIntentId ??
-          existing.publicIntentId ??
-          candidate.publicIntentId,
-        socialRequestId:
-          winner.socialRequestId ??
-          existing.socialRequestId ??
-          candidate.socialRequestId,
-        matchReasons: mergedReasons,
-        reasons: mergedReasons,
-        interestTags: mergedTags,
-        commonTags: this.uniqueStrings([
-          ...existing.commonTags,
-          ...candidate.commonTags,
-        ]),
-      });
-    }
-    return [...byUser.values()].sort((a, b) => b.matchScore - a.matchScore);
   }
 
   private scoreProfile(input: {

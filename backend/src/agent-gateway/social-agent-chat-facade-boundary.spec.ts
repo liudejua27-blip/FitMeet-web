@@ -65,6 +65,14 @@ const toolStepEventsPresenterPath = path.resolve(
   __dirname,
   'social-agent-tool-step-events.presenter.ts',
 );
+const candidatePoolServicePath = path.resolve(
+  __dirname,
+  'social-agent-candidate-pool.service.ts',
+);
+const candidatePoolMergePath = path.resolve(
+  __dirname,
+  'social-agent-candidate-pool-merge.ts',
+);
 
 describe('SocialAgentChatService facade boundary', () => {
   const compatibilitySource = fs.readFileSync(compatibilityExportPath, 'utf8');
@@ -99,6 +107,14 @@ describe('SocialAgentChatService facade boundary', () => {
   const toolExecutorSource = fs.readFileSync(toolExecutorPath, 'utf8');
   const toolStepEventsPresenterSource = fs.readFileSync(
     toolStepEventsPresenterPath,
+    'utf8',
+  );
+  const candidatePoolServiceSource = fs.readFileSync(
+    candidatePoolServicePath,
+    'utf8',
+  );
+  const candidatePoolMergeSource = fs.readFileSync(
+    candidatePoolMergePath,
     'utf8',
   );
 
@@ -247,5 +263,21 @@ describe('SocialAgentChatService facade boundary', () => {
     expect(
       toolStepEventsPresenterSource.trim().split('\n').length,
     ).toBeLessThanOrEqual(140);
+  });
+
+  it('keeps candidate pool merge semantics split from repository orchestration', () => {
+    expect(candidatePoolServiceSource).toContain(
+      'mergeSocialAgentCandidatePool',
+    );
+    expect(candidatePoolServiceSource).not.toContain(
+      'private mergeSocialCandidates',
+    );
+    expect(candidatePoolMergeSource).toContain(
+      'function mergeSocialAgentCandidatePool',
+    );
+    expect(candidatePoolMergeSource).toContain('uniqueCandidatePoolStrings');
+    expect(
+      candidatePoolMergeSource.trim().split('\n').length,
+    ).toBeLessThanOrEqual(70);
   });
 });
