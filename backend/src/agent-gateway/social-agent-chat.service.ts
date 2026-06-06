@@ -17,7 +17,6 @@ import { CreateSocialRequestDto } from '../social-requests/dto/create-social-req
 import {
   AgentTask,
   AgentTaskEvent,
-  AgentTaskEventActor,
   AgentTaskEventType,
   AgentTaskPermissionMode,
 } from './entities/agent-task.entity';
@@ -63,6 +62,7 @@ import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.
 import { SocialAgentRunRecommendationService } from './social-agent-run-recommendation.service';
 import { SocialAgentReplanRunService } from './social-agent-replan-run.service';
 import { SocialAgentRouteTurnService } from './social-agent-route-turn.service';
+import { SocialAgentQueuedRunService } from './social-agent-queued-run.service';
 export type * from './social-agent-chat.types';
 
 @Injectable()
@@ -74,8 +74,6 @@ export class SocialAgentChatService {
   constructor(
     @InjectRepository(AgentTask)
     private readonly taskRepo: Repository<AgentTask>,
-    @InjectRepository(AgentTaskEvent)
-    private readonly eventRepo: Repository<AgentTaskEvent>,
     private readonly runState: SocialAgentRunStateService,
     private readonly followUpContext: SocialAgentFollowUpContextService,
     private readonly meetLoop: SocialAgentMeetLoopService,
@@ -87,6 +85,7 @@ export class SocialAgentChatService {
     private readonly runRecommendations: SocialAgentRunRecommendationService,
     private readonly replanRuns: SocialAgentReplanRunService,
     private readonly routeTurns: SocialAgentRouteTurnService,
+    private readonly queuedRuns: SocialAgentQueuedRunService,
     @Optional()
     private readonly realtime?: RealtimeEventService,
     @Optional()
@@ -197,63 +196,13 @@ export class SocialAgentChatService {
     ownerUserId: number,
     body: SocialAgentChatRunBody,
   ): Promise<SocialAgentAsyncRunSnapshot> {
-    const goal = cleanDisplayText(body.goal, '').trim();
-    if (!goal) throw new BadRequestException('请输入你的社交需求');
-    const permissionMode = this.normalizePermissionMode(body.permissionMode);
-    const idempotencyKey =
-      cleanDisplayText(body.idempotencyKey, '') ||
-      `social-agent-chat:${ownerUserId}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
-    const task = await this.taskLifecycle.createOrReuseTask({
+    return this.queuedRuns.runQueued({
       ownerUserId,
-      goal,
-      permissionMode,
-      idempotencyKey,
+      body,
+      executeRun: (runBody, emit) =>
+        this.runInternal(ownerUserId, runBody, emit),
+      visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
     });
-    const runId = createSocialAgentRunId();
-    const queuedRun = await this.runState.queueChatRun({
-      task,
-      runId,
-      goal,
-    });
-
-    void this.executeQueuedRun(
-      ownerUserId,
-      task.id,
-      {
-        ...body,
-        goal,
-        permissionMode,
-        idempotencyKey,
-      },
-      runId,
-    ).catch((error) => {
-      this.logger.error(
-        JSON.stringify({
-          event: 'social_agent.chat_run.background_failed',
-          taskId: task.id,
-          runId,
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-      void this.markRunFailed(ownerUserId, task.id, runId, error, {
-        message: '搜索失败，请稍后重试。',
-        statusReason: 'chat_run_failed',
-      }).catch((markError) => {
-        this.logger.error(
-          JSON.stringify({
-            event: 'social_agent.chat_run.mark_failed_failed',
-            taskId: task.id,
-            runId,
-            message:
-              markError instanceof Error
-                ? markError.message
-                : String(markError),
-          }),
-        );
-      });
-    });
-
-    return queuedRun;
   }
 
   runStream(
@@ -262,57 +211,6 @@ export class SocialAgentChatService {
     emit: StreamEmit,
   ): Promise<SocialAgentChatRunResult> {
     return this.runInternal(ownerUserId, body, emit);
-  }
-
-  private async executeQueuedRun(
-    ownerUserId: number,
-    taskId: number,
-    body: SocialAgentChatRunBody,
-    runId: string,
-  ): Promise<SocialAgentChatRunResult> {
-    const visibleSteps: SocialAgentVisibleStep[] = [];
-    await this.updateRunSnapshot(ownerUserId, taskId, runId, {
-      status: 'running',
-      phase: 'understand',
-      startedAt: new Date().toISOString(),
-      message: '正在理解需求',
-    });
-    const result = await this.runInternal(ownerUserId, body, async (event) => {
-      if (event.type !== 'step') return;
-      const existingIndex = visibleSteps.findIndex(
-        (step) => step.id === event.step.id,
-      );
-      if (existingIndex >= 0) {
-        visibleSteps[existingIndex] = event.step;
-      } else {
-        visibleSteps.push(event.step);
-      }
-      await this.updateRunSnapshot(ownerUserId, taskId, runId, {
-        status: 'running',
-        phase: event.step.id,
-        message: event.step.label,
-        visibleSteps: [...visibleSteps],
-      });
-    });
-    const task = await this.updateRunSnapshot(ownerUserId, taskId, runId, {
-      status: 'completed',
-      phase: 'completed',
-      completedAt: new Date().toISOString(),
-      message: '已完成搜索并刷新候选人',
-      visibleSteps: result.visibleSteps,
-      result,
-      error: null,
-    });
-    await this.writeEvent(
-      task,
-      AgentTaskEventType.Note,
-      'Social Agent 后台搜索已完成',
-      {
-        runId,
-        candidateCount: result.candidates.length,
-      },
-    );
-    return result;
   }
 
   async replanAndRefresh(
@@ -741,42 +639,6 @@ export class SocialAgentChatService {
     if (value instanceof Date) return value.toISOString();
     const text = cleanDisplayText(value, '');
     return text || new Date().toISOString();
-  }
-
-  private async writeEvent(
-    task: AgentTask,
-    eventType: AgentTaskEventType,
-    summary: string,
-    payload: Record<string, unknown> = {},
-    actor: AgentTaskEventActor = AgentTaskEventActor.Agent,
-  ) {
-    try {
-      await this.eventRepo.save(
-        this.eventRepo.create({
-          taskId: task.id,
-          ownerUserId: task.ownerUserId,
-          eventType,
-          actor,
-          summary: this.safeVarchar(summary, 500),
-          payload: sanitizeForDisplay(payload) as Record<string, unknown>,
-        }),
-      );
-    } catch (error) {
-      this.logger.warn(
-        JSON.stringify({
-          event: 'social_agent.task_event_write_failed',
-          taskId: task.id,
-          eventType,
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
-  }
-
-  private safeVarchar(value: unknown, max = 80): string {
-    const text = cleanDisplayText(value, '');
-    if (text.length <= max) return text;
-    return `${text.slice(0, Math.max(0, max - 1))}…`;
   }
 
   private rememberShortTermStep(

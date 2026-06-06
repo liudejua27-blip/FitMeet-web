@@ -33,6 +33,7 @@ import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.
 import { SocialAgentRunRecommendationService } from './social-agent-run-recommendation.service';
 import { SocialAgentReplanRunService } from './social-agent-replan-run.service';
 import { SocialAgentRouteTurnService } from './social-agent-route-turn.service';
+import { SocialAgentQueuedRunService } from './social-agent-queued-run.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 
@@ -584,10 +585,16 @@ function makeHarness(options: Record<string, unknown> = {}) {
       options.brain as never,
       options.lifeGraph as never,
     );
+  const queuedRuns =
+    (options.queuedRuns as SocialAgentQueuedRunService | undefined) ??
+    new SocialAgentQueuedRunService(
+      eventRepo as never,
+      runState as never,
+      taskLifecycle as never,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
-    eventRepo as never,
     runState as never,
     followUpContext as never,
     meetLoop as never,
@@ -599,6 +606,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     runRecommendations as never,
     replanRuns as never,
     routeTurns as never,
+    queuedRuns as never,
     undefined,
     options.fitMeetRuntime as never,
     options.tonePolicy as never,
@@ -636,6 +644,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     runRecommendations,
     replanRuns,
     routeTurns,
+    queuedRuns,
   };
 }
 
@@ -1344,9 +1353,9 @@ describe('SocialAgentChatService', () => {
   });
 
   it('safe truncates long social agent timeline event summaries', async () => {
-    const { service, savedEvents } = makeHarness();
+    const { queuedRuns, savedEvents } = makeHarness();
     await (
-      service as unknown as {
+      queuedRuns as unknown as {
         writeEvent: (
           task: AgentTask,
           eventType: AgentTaskEventType,
