@@ -76,10 +76,5 @@
     "*.{json,md,css}": [
       "prettier --write"
     ]
-  },
-  "pnpm": {
-    "overrides": {
-      "socket.io-parser": "4.2.6"
-    }
   }
 }

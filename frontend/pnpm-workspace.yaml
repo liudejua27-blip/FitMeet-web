@@ -1,0 +1,6 @@
+onlyBuiltDependencies:
+  - esbuild
+overrides:
+  socket.io-parser: 4.2.6
+allowBuilds:
+  esbuild: true
