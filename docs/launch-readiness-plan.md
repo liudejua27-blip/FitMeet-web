@@ -87,7 +87,7 @@ Core launch endpoints currently covered:
 - Recent launch-critical schema areas already have migrations: user social profile, profile privacy, Social Agent runtime/tasks/events/timeline, long-term memory, Life Graph, waitlist, and FitMeet Agent runtime.
 - `1774400000000-AddSocialRequestCandidateUniqueness.ts` adds the `(socialRequestId, candidateUserId)` unique index for `social_request_candidates`, with a non-destructive duplicate preflight so retrying Agent searches cannot create duplicate candidate rows.
 - Remaining schema audit item: verify every currently registered entity has an equivalent migration in a disposable empty Postgres database, then compare `typeorm schema:log` output. Static tests now guard TypeORM discovery/config drift, but this live empty-database diff is still required before production migration approval.
-- MongoDB collections are created by Mongoose models and are not migration-managed. Before launch, indexes for high-volume message/realtime reads should be confirmed against the deployed Mongo database.
+- MongoDB collections are created by Mongoose models and are not migration-managed. Message, conversation, and Agent inbox event schemas now declare compound indexes for the Web/iOS conversation list, message history, unread count, Agent inbox, and recent Agent signal queries. Before launch, confirm those indexes exist on the deployed Mongo database because production `autoIndex` behavior may be disabled.
 - Redis has no schema migration, but production must enforce password/TLS/network isolation outside app code.
 
 ## Required Or Candidate Migrations
@@ -136,6 +136,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - Candidate persistence idempotency risk has been reduced with a database-level unique index for `(socialRequestId, candidateUserId)`; the service also reuses the existing candidate row on Postgres unique-conflict races, and production must inspect duplicates before applying the migration if historical data exists.
 - Social Agent chat entrypoint risk has been reduced to thin facade services; profile extraction prompt/normalization has been split out of the LLM service; timeline message restoration still needs continued focused tests because it is shared by Web and iOS session restore.
 - DB risk: production schema drift may exist if older deployments used `synchronize`; verify migration status against staging before production.
+- Mongo index risk has been reduced in code for message/realtime reads, but production must still verify deployed Mongo indexes for `conversations`, `messages`, and `agentinboxevents` before load testing.
 - Contract risk: Web legacy APIs outside `fitmeet-core.openapi.ts` can drift because only the core launch subset is contract-tested.
 - Error contract risk has been reduced for the shared launch subset: OpenAPI now documents the stable error envelope for auth, feed, messages, Social Agent chat, SSE, and uploads instead of only happy paths.
 - Social Agent workspace restore risk has been reduced: Web current-task and task-timeline reads are now part of the shared core OpenAPI contract and typed Web endpoint registry instead of living as untracked debug API strings.

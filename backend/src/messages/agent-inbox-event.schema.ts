@@ -62,3 +62,16 @@ export class AgentInboxEvent extends Document {
 
 export const AgentInboxEventSchema =
   SchemaFactory.createForClass(AgentInboxEvent);
+
+AgentInboxEventSchema.index({
+  agentConnectionId: 1,
+  unread: 1,
+  eventType: 1,
+  createdAt: -1,
+});
+AgentInboxEventSchema.index({
+  ownerUserId: 1,
+  unread: 1,
+  eventType: 1,
+  createdAt: -1,
+});

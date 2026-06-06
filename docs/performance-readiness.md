@@ -20,6 +20,7 @@ This document records the current performance posture for a launch target design
 - Redis is available for cache/realtime coordination paths.
 - Rate limiting is enabled globally with short/medium/long throttler buckets, with tighter throttles on login/register/SMS.
 - Feed pagination is present with `page` and `limit`; the OpenAPI contract caps core feed limit at 50.
+- Mongo message schemas declare compound indexes for high-frequency conversation list, message history, unread count, Agent inbox, and recent Agent signal reads. These are code-level declarations; staging/production index existence must still be verified against the live Mongo deployment.
 - Static asset compression and Helmet are enabled in the API process.
 - Health and readiness are separated:
   - `GET /api/health` for process liveness.
@@ -169,7 +170,7 @@ Target before claiming 10,000 concurrent support:
   - feed publish/read-back
   - message send/read-back
 - Capture database query plans for high-volume feed, message, and Social Agent task/session queries.
-- Confirm Mongo and Postgres indexes on the deployed databases, not only in entity definitions.
+- Confirm Mongo and Postgres indexes on the deployed databases, not only in entity/schema definitions. For Mongo, specifically verify `conversations`, `messages`, and `agentinboxevents`.
 - Confirm horizontal scaling behavior for Socket.IO and Redis coordination.
 
 ## Remaining Performance Risks

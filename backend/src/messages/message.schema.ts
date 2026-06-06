@@ -72,3 +72,10 @@ export class Message extends Document {
 }
 
 export const MessageSchema = SchemaFactory.createForClass(Message);
+
+MessageSchema.index({ conversationId: 1, createdAt: -1 });
+MessageSchema.index({ agentConnectionId: 1, conversationId: 1 });
+MessageSchema.index({ agentConnectionId: 1, createdAt: -1 });
+MessageSchema.index({ ownerUserId: 1, createdAt: -1 });
+MessageSchema.index({ senderAgentId: 1, conversationId: 1 });
+MessageSchema.index({ receiverAgentId: 1, conversationId: 1 });
