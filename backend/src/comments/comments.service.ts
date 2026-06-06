@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Comment } from './comment.entity';
@@ -17,6 +17,8 @@ export class CommentsService {
   ) {}
 
   async findByPost(postId: number) {
+    await this.assertPostExists(postId);
+
     const comments = await this.commentRepo.find({
       where: { postId },
       relations: ['user'],
@@ -26,6 +28,8 @@ export class CommentsService {
   }
 
   async create(postId: number, userId: number, dto: CreateCommentDto) {
+    await this.assertPostExists(postId);
+
     // 1. Unified Moderation Check
     await this.moderationService.checkText(dto.text);
 
@@ -45,8 +49,19 @@ export class CommentsService {
   }
 
   async likeComment(commentId: number) {
+    const comment = await this.commentRepo.findOne({
+      where: { id: commentId },
+    });
+    if (!comment)
+      throw new NotFoundException(`Comment #${commentId} not found`);
+
     await this.commentRepo.increment({ id: commentId }, 'likesCount', 1);
     return { success: true };
+  }
+
+  private async assertPostExists(postId: number) {
+    const post = await this.postRepo.findOne({ where: { id: postId } });
+    if (!post) throw new NotFoundException(`Post #${postId} not found`);
   }
 
   private toResponse(c: Comment) {

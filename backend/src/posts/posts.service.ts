@@ -131,6 +131,8 @@ export class PostsService {
   }
 
   async toggleLike(postId: number, userId: number) {
+    await this.assertPostExists(postId);
+
     const existing = await this.likeRepo.findOne({
       where: { postId, userId },
     });
@@ -147,6 +149,8 @@ export class PostsService {
   }
 
   async toggleSave(postId: number, userId: number) {
+    await this.assertPostExists(postId);
+
     const existing = await this.saveRepo.findOne({
       where: { postId, userId },
     });
@@ -180,6 +184,11 @@ export class PostsService {
     }
 
     return qb;
+  }
+
+  private async assertPostExists(postId: number) {
+    const post = await this.postRepo.findOne({ where: { id: postId } });
+    if (!post) throw new NotFoundException(`Post #${postId} not found`);
   }
 
   private buildMeetFeedQuery() {

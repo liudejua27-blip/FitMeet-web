@@ -140,6 +140,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - Contract risk: Web legacy APIs outside `fitmeet-core.openapi.ts` can drift because only the core launch subset is contract-tested.
 - Error contract risk has been reduced for the shared launch subset: OpenAPI now documents the stable error envelope for auth, feed, messages, Social Agent chat, SSE, and uploads instead of only happy paths.
 - Social Agent workspace restore risk has been reduced: Web current-task and task-timeline reads are now part of the shared core OpenAPI contract and typed Web endpoint registry instead of living as untracked debug API strings.
+- Feed write-path risk has been reduced: like/save/comment operations now confirm the target post or comment exists before writing counters or interaction rows, so Web/iOS get stable 404 errors instead of orphan rows or database constraint leakage.
 - Auth risk: production SMS/WeChat provider configuration must be present; mock WeChat login is dev-only, failed production SMS dispatch must not persist usable verification codes, WeChat OAuth redirects must be explicit HTTPS URLs, and refresh token rotation must keep stale tokens from being reused.
 - iOS release risk: staging E2E requires real credentials, a second message target user, object storage, and a deployed backend; it cannot pass in a credential-free local run.
 - Performance risk: 1000-concurrency smoke scripts exist, but no current local/staging result is recorded yet.

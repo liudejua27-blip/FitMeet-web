@@ -1,4 +1,5 @@
 import { PostsService } from './posts.service';
+import { NotFoundException } from '@nestjs/common';
 
 const createQueryBuilder = <T>(items: T[], total = items.length) => {
   const builder = {
@@ -17,6 +18,9 @@ const repo = <T>(items: T[] = []) => ({
   create: jest.fn((value) => value),
   save: jest.fn((value) => Promise.resolve({ ...value, id: 99 })),
   findOne: jest.fn(),
+  remove: jest.fn((value) => Promise.resolve(value)),
+  increment: jest.fn().mockResolvedValue({ affected: 1 }),
+  decrement: jest.fn().mockResolvedValue({ affected: 1 }),
 });
 
 describe('PostsService unified feed', () => {
@@ -130,5 +134,44 @@ describe('PostsService unified feed', () => {
       }),
     );
     expect(created).toMatchObject({ loc: '西湖', city: '杭州' });
+  });
+
+  it('returns a stable not found error before liking a missing post', async () => {
+    const postRepo = repo();
+    const likeRepo = repo();
+    postRepo.findOne.mockResolvedValue(null);
+    const service = new PostsService(
+      postRepo as never,
+      likeRepo as never,
+      repo() as never,
+      repo() as never,
+      { checkText: jest.fn() } as never,
+    );
+
+    await expect(service.toggleLike(404, 7)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+
+    expect(likeRepo.save).not.toHaveBeenCalled();
+    expect(postRepo.increment).not.toHaveBeenCalled();
+  });
+
+  it('returns a stable not found error before saving a missing post', async () => {
+    const postRepo = repo();
+    const saveRepo = repo();
+    postRepo.findOne.mockResolvedValue(null);
+    const service = new PostsService(
+      postRepo as never,
+      repo() as never,
+      saveRepo as never,
+      repo() as never,
+      { checkText: jest.fn() } as never,
+    );
+
+    await expect(service.toggleSave(404, 7)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+
+    expect(saveRepo.save).not.toHaveBeenCalled();
   });
 });
