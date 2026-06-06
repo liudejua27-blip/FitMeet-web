@@ -41,8 +41,6 @@ export function buildSocialAgentTimelineSnapshot(input: {
     taskId: task.id,
     messages: buildSocialAgentTimelineMessages({
       task,
-      result,
-      pendingApprovals,
       events,
       sessionMessages,
     }),
