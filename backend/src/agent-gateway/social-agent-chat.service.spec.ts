@@ -31,6 +31,7 @@ import { SocialAgentMessageLogService } from './social-agent-message-log.service
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
+import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile-turn.service';
 import { SocialAgentRunRecommendationService } from './social-agent-run-recommendation.service';
 import { SocialAgentReplanRunService } from './social-agent-replan-run.service';
 import { SocialAgentRouteTurnService } from './social-agent-route-turn.service';
@@ -452,6 +453,16 @@ function makeHarness(options: Record<string, unknown> = {}) {
       metrics as never,
       options.lifeGraph as never,
     );
+  const profileTurns =
+    (options.profileTurns as SocialAgentRouteProfileTurnService | undefined) ??
+    new SocialAgentRouteProfileTurnService(
+      taskRepo as never,
+      eventRepo as never,
+      socialProfiles as never,
+      metrics as never,
+      profileEnrichment as never,
+      options.lifeGraph as never,
+    );
   const sessionAssembler =
     (options.sessionAssembler as AgentSessionAssemblerService | undefined) ??
     new AgentSessionAssemblerService();
@@ -575,8 +586,6 @@ function makeHarness(options: Record<string, unknown> = {}) {
   const routeTurns =
     (options.routeTurns as SocialAgentRouteTurnService | undefined) ??
     new SocialAgentRouteTurnService(
-      taskRepo as never,
-      eventRepo as never,
       intentRouter,
       socialProfiles as never,
       metrics as never,
@@ -588,9 +597,9 @@ function makeHarness(options: Record<string, unknown> = {}) {
       messageLog as never,
       taskLifecycle as never,
       routeContext as never,
+      profileTurns as never,
       mainAgentTurn as never,
       options.brain as never,
-      options.lifeGraph as never,
     );
   const queuedRuns =
     (options.queuedRuns as SocialAgentQueuedRunService | undefined) ??

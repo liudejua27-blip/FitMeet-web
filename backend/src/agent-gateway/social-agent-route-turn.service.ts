@@ -4,29 +4,15 @@ import {
   Logger,
   Optional,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 
-import {
-  cleanDisplayText,
-  sanitizeForDisplay,
-} from '../common/display-text.util';
+import { cleanDisplayText } from '../common/display-text.util';
 import { sanitizeCity } from '../common/city.util';
 import { LifeGraphProposalDto } from '../life-graph/dto/life-graph.dto';
 import { SocialProfileService } from '../users/social-profile.service';
-import {
-  AgentTask,
-  AgentTaskEvent,
-  AgentTaskEventActor,
-  AgentTaskEventType,
-  AgentTaskStatus,
-} from './entities/agent-task.entity';
+import { AgentTask } from './entities/agent-task.entity';
 import { SocialAgentBrainService } from './social-agent-brain.service';
 import { rememberSocialAgentConversationBrainDecision } from './social-agent-chat-brain-memory.presenter';
-import {
-  appendSocialAgentConversationTurn,
-  readSocialAgentConversationHistory,
-} from './social-agent-chat-memory.presenter';
+import { readSocialAgentConversationHistory } from './social-agent-chat-memory.presenter';
 import type {
   SocialAgentActivityResult,
   SocialAgentAsyncRunSnapshot,
@@ -42,16 +28,11 @@ import {
 import {
   appendSocialAgentUserMemo,
   recordSocialAgentPendingAction,
-  rememberSocialAgentCurrentTask,
-  rememberSocialAgentShortTerm,
 } from './social-agent-memory.util';
 import { SocialAgentActivitySearchService } from './social-agent-activity-search.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
-import {
-  SocialAgentIntentRouterService,
-  type SocialAgentIntentType,
-} from './social-agent-intent-router.service';
+import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
 import { SocialAgentMessageLogService } from './social-agent-message-log.service';
@@ -64,11 +45,8 @@ import {
   socialAgentRouteAction,
 } from './social-agent-route-response.presenter';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
-import { LifeGraphService } from '../life-graph/life-graph.service';
-import {
-  applySocialAgentTaskMemoryForIntent,
-  profileKeyForSocialAgentIntent,
-} from './social-agent-intent-memory.presenter';
+import { applySocialAgentTaskMemoryForIntent } from './social-agent-intent-memory.presenter';
+import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile-turn.service';
 
 type QueueInitialSearchForTask = (
   ownerUserId: number,
@@ -87,10 +65,6 @@ export class SocialAgentRouteTurnService {
   private readonly logger = new Logger(SocialAgentRouteTurnService.name);
 
   constructor(
-    @InjectRepository(AgentTask)
-    private readonly taskRepo: Repository<AgentTask>,
-    @InjectRepository(AgentTaskEvent)
-    private readonly eventRepo: Repository<AgentTaskEvent>,
     private readonly intentRouter: SocialAgentIntentRouterService,
     private readonly socialProfiles: SocialProfileService,
     private readonly metrics: SocialAgentMetricsService,
@@ -102,10 +76,9 @@ export class SocialAgentRouteTurnService {
     private readonly messageLog: SocialAgentMessageLogService,
     private readonly taskLifecycle: SocialAgentTaskLifecycleService,
     private readonly routeContext: SocialAgentRouteContextService,
+    private readonly profileTurns: SocialAgentRouteProfileTurnService,
     private readonly mainAgentTurn: SocialAgentMainAgentTurnService,
     @Optional() private readonly brain?: SocialAgentBrainService,
-    @Optional()
-    private readonly lifeGraph?: LifeGraphService,
   ) {}
 
   async handleMessage(input: {
@@ -300,41 +273,19 @@ export class SocialAgentRouteTurnService {
       });
     }
 
-    if (
-      route.intent === 'profile_update' ||
-      route.intent === 'safety_or_boundary'
-    ) {
-      if (this.lifeGraph) {
-        const proposal = await this.lifeGraph.extractFromChat(ownerUserId, {
-          message,
-          taskId: task.id,
-          context: { intent: route.intent },
-        });
-        if (proposal.proposedFields.length > 0) {
-          profileUpdateProposal = proposal;
-          assistantMessage =
-            this.profileEnrichment.lifeGraphProposalReply(proposal);
-          savedContext = true;
-          profileUpdated = false;
-          rememberSocialAgentCurrentTask(task, {
-            objective: 'profile_enrichment',
-            nextStep: '等待用户确认是否保存 Life Graph 画像提案',
-            shouldSearchNow: false,
-            profileSaved: false,
-            waitingFor: 'life_graph_profile_confirmation',
-            lastCompletedStep: 'life_graph_profile_proposed',
-          });
-          await this.taskRepo.save(task);
-        }
-      }
+    const profileTurn = await this.profileTurns.handle({
+      ownerUserId,
+      task,
+      message,
+      route,
+    });
+    if (profileTurn.handled) {
+      task = profileTurn.task;
+      savedContext = profileTurn.savedContext;
+      profileUpdated = profileTurn.profileUpdated;
+      profileUpdateProposal = profileTurn.profileUpdateProposal;
+      assistantMessage = profileTurn.assistantMessage ?? assistantMessage;
       if (!profileUpdateProposal) {
-        await this.rememberRoutedMessage(task, message, route.intent);
-        savedContext = true;
-        profileUpdated = await this.saveIntentToProfile(
-          ownerUserId,
-          route.intent,
-          message,
-        );
         task = await this.taskLifecycle.assertTaskOwner(task.id, ownerUserId);
       }
     }
@@ -455,81 +406,6 @@ export class SocialAgentRouteTurnService {
     return result;
   }
 
-  private async rememberRoutedMessage(
-    task: AgentTask,
-    message: string,
-    intent: SocialAgentIntentType,
-  ): Promise<void> {
-    const now = new Date().toISOString();
-    appendSocialAgentConversationTurn(task, {
-      role: 'user',
-      text: message,
-      intent,
-      at: now,
-    });
-    task.result = {
-      ...(task.result ?? {}),
-      latestIntent: {
-        intent,
-        message,
-        at: now,
-      },
-    };
-    task.status = AgentTaskStatus.AwaitingFeedback;
-    task.statusReason = `intent_${intent}_saved`;
-    rememberSocialAgentShortTerm(task, {
-      latestUserFollowUp: message,
-      currentStep: {
-        id: `intent.${intent}`,
-        label: '已写入当前对话上下文',
-        status: 'done',
-        updatedAt: now,
-      },
-    });
-    await this.taskRepo.save(task);
-    await this.writeEvent(
-      task,
-      AgentTaskEventType.SocialAgentContextAppended,
-      '已写入 Social Agent 对话上下文',
-      { intent, message, at: now },
-      AgentTaskEventActor.User,
-    ).catch((error) => {
-      this.metrics.recordError('context_append_event_failed');
-      this.logger.warn(
-        JSON.stringify({
-          event: 'social_agent.context_append.event_failed',
-          taskId: task.id,
-          ownerUserId: task.ownerUserId,
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    });
-  }
-
-  private async saveIntentToProfile(
-    ownerUserId: number,
-    intent: SocialAgentIntentType,
-    message: string,
-  ): Promise<boolean> {
-    const key = profileKeyForSocialAgentIntent(intent, message);
-    if (!key) return false;
-    try {
-      await this.socialProfiles.saveAnswer(ownerUserId, key, message);
-      return true;
-    } catch (error) {
-      this.logger.warn(
-        JSON.stringify({
-          event: 'social_agent.profile_update_failed',
-          ownerUserId,
-          intent,
-          key,
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-      return false;
-    }
-  }
-
   private async readProfileSummary(
     ownerUserId: number,
   ): Promise<Record<string, unknown> | null> {
@@ -545,42 +421,6 @@ export class SocialAgentRouteTurnService {
     } catch {
       return null;
     }
-  }
-
-  private async writeEvent(
-    task: AgentTask,
-    eventType: AgentTaskEventType,
-    summary: string,
-    payload: Record<string, unknown> = {},
-    actor: AgentTaskEventActor = AgentTaskEventActor.Agent,
-  ) {
-    try {
-      await this.eventRepo.save(
-        this.eventRepo.create({
-          taskId: task.id,
-          ownerUserId: task.ownerUserId,
-          eventType,
-          actor,
-          summary: this.safeVarchar(summary, 500),
-          payload: sanitizeForDisplay(payload) as Record<string, unknown>,
-        }),
-      );
-    } catch (error) {
-      this.logger.warn(
-        JSON.stringify({
-          event: 'social_agent.route_turn.event_write_failed',
-          taskId: task.id,
-          eventType,
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
-  }
-
-  private safeVarchar(value: unknown, max = 80): string {
-    const text = cleanDisplayText(value, '');
-    if (text.length <= max) return text;
-    return `${text.slice(0, Math.max(0, max - 1))}…`;
   }
 
   private number(value: unknown): number | null {

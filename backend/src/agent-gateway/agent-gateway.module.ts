@@ -88,6 +88,7 @@ import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memor
 import { SocialAgentLongTermMemory } from './entities/social-agent-long-term-memory.entity';
 import { SocialAgentRagService } from './social-agent-rag.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
+import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile-turn.service';
 import { AgentWebhookService } from './agent-webhook.service';
 import { AiSocialAutopilotService } from './ai-social-autopilot.service';
 import { AgentDiscoveryService } from './agent-discovery.service';
@@ -248,6 +249,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentLongTermMemoryService,
     SocialAgentRagService,
     SocialAgentRouteContextService,
+    SocialAgentRouteProfileTurnService,
     SocialAgentToolExecutorService,
     AgentWebhookService,
     AiSocialAutopilotService,
