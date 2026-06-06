@@ -53,7 +53,6 @@ import { AgentSettingsService } from './agent-settings.service';
 import { AgentWebhookService } from './agent-webhook.service';
 import { AgentSettingsMode } from './entities/agent-settings.entity';
 import { AgentActionLogService } from './agent-action-log.service';
-import { mapApprovalRiskLevel as mapApprovalRiskToActionRisk } from './approval-action-mapper';
 import {
   AgentActionRiskLevel,
   AgentActionStatus,
@@ -114,6 +113,11 @@ import {
   buildLegacyAgentActionLogInput,
   numberOrNull,
 } from './agent-gateway-legacy-log.mapper';
+import {
+  buildBlockedSendMessageActionLog,
+  buildExecutedSendMessageActionLog,
+  buildPendingApprovalSendMessageActionLog,
+} from './agent-gateway-message-log.mapper';
 
 // Permission-level capability map
 const LEVEL_CAPABILITIES: Record<AgentPermissionLevel, AgentAction[]> = {
@@ -1549,21 +1553,15 @@ export class AgentGatewayService {
           verdict.blockedReason,
         );
         await this.actionLogs.logAgentAction({
-          ownerUserId: conn.userId,
-          agentId: conn.id,
-          actionType: AgentActionType.SendMessage,
-          actionStatus: AgentActionStatus.Failed,
-          riskLevel: AgentActionRiskLevel.High,
-          targetUserId,
-          inputSummary: content,
-          outputSummary: `blocked_by_policy: ${verdict.blockedReason ?? 'policy'}`,
-          payload: {
+          ...buildBlockedSendMessageActionLog({
+            conn,
+            dto,
+            targetUserId,
+            content,
             agentTaskId,
-            messageType: dto.messageType ?? 'text',
-            reasons: verdict.reasons,
+            verdict,
             isFirstContact,
-          },
-          reason: verdict.blockedReason ?? 'blocked_by_policy',
+          }),
         });
         throw new ForbiddenException(
           verdict.blockedReason ?? 'Action blocked by policy',
@@ -1613,27 +1611,16 @@ export class AgentGatewayService {
           ActionResult.PendingApproval,
         );
         await this.actionLogs.logAgentAction({
-          ownerUserId: conn.userId,
-          agentId: conn.id,
-          actionType: AgentActionType.SendMessage,
-          actionStatus: AgentActionStatus.PendingApproval,
-          agentTaskId,
-          riskLevel: mapApprovalRiskToActionRisk(verdict.riskLevel),
-          targetUserId,
-          relatedSocialRequestId: dto.socialRequestId ?? null,
-          relatedActivityId: dto.activityId ?? null,
-          inputSummary: content,
-          outputSummary: `pending_approval: ${req.summary}`,
-          payload: {
-            approvalId: req.id,
+          ...buildPendingApprovalSendMessageActionLog({
+            conn,
+            dto,
+            targetUserId,
+            content,
             agentTaskId,
-            approvalType: isFirstContact
-              ? ApprovalType.FirstMessage
-              : ApprovalType.SendMessage,
-            reasons: verdict.reasons,
-            messageType: dto.messageType ?? 'text',
-          },
-          reason: req.reason ?? null,
+            approvalRequest: req,
+            verdict,
+            isFirstContact,
+          }),
         });
         return {
           success: false,
@@ -1735,29 +1722,18 @@ export class AgentGatewayService {
       risk,
     );
     await this.actionLogs.logAgentAction({
-      ownerUserId: conn.userId,
-      agentId: conn.id,
-      actionType: AgentActionType.SendMessage,
-      actionStatus: AgentActionStatus.Executed,
-      agentTaskId,
-      riskLevel:
-        risk >= 0.4 ? AgentActionRiskLevel.Medium : AgentActionRiskLevel.Low,
-      targetUserId,
-      relatedSocialRequestId: dto.socialRequestId ?? null,
-      relatedActivityId: dto.activityId ?? null,
-      inputSummary: content,
-      outputSummary: `message_sent: id=${message.id} conv=${conversationId}`,
-      payload: {
+      ...buildExecutedSendMessageActionLog({
+        conn,
+        dto,
+        targetUserId,
+        content,
+        agentTaskId,
+        risk,
         messageId: message.id,
         conversationId,
-        messageType: dto.messageType ?? 'text',
-        agentTaskId,
         socketPushed,
         notificationCreated,
-        approvalRequestId: dto.approvalRequestId ?? null,
-        source: dto.metadata?.source ?? conn.agentName,
-      },
-      reason: 'agent_send_message',
+      }),
     });
 
     return {
