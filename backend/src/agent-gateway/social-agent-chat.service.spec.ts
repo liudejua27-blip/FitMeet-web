@@ -46,6 +46,7 @@ import { SocialAgentToolName } from './social-agent-tool-executor.service';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
 import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
+import { SocialAgentRouteDecisionService } from './social-agent-route-decision.service';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -559,6 +560,19 @@ function makeHarness(options: Record<string, unknown> = {}) {
       rag as never,
       options.memoryContext as never,
     );
+  const routeDecisions =
+    (options.routeDecisions as SocialAgentRouteDecisionService | undefined) ??
+    new SocialAgentRouteDecisionService(
+      intentRouter,
+      socialProfiles as never,
+      metrics as never,
+      longTermMemory as never,
+      profileEnrichment as never,
+      messageLog as never,
+      taskLifecycle as never,
+      routeContext as never,
+      options.brain as never,
+    );
   const mainAgentTurn =
     (options.mainAgentTurn as SocialAgentMainAgentTurnService | undefined) ??
     new SocialAgentMainAgentTurnService(
@@ -600,10 +614,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
   const routeTurns =
     (options.routeTurns as SocialAgentRouteTurnService | undefined) ??
     new SocialAgentRouteTurnService(
-      intentRouter,
-      socialProfiles as never,
       metrics as never,
-      longTermMemory as never,
       chatLlm as never,
       profileEnrichment as never,
       candidateActions as never,
@@ -613,8 +624,8 @@ function makeHarness(options: Record<string, unknown> = {}) {
       profileTurns as never,
       searchTurns as never,
       actionTurns as never,
+      routeDecisions as never,
       mainAgentTurn as never,
-      options.brain as never,
     );
   const queuedRuns =
     (options.queuedRuns as SocialAgentQueuedRunService | undefined) ??

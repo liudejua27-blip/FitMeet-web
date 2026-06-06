@@ -1,18 +1,8 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  Optional,
-} from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { cleanDisplayText } from '../common/display-text.util';
-import { sanitizeCity } from '../common/city.util';
 import { LifeGraphProposalDto } from '../life-graph/dto/life-graph.dto';
-import { SocialProfileService } from '../users/social-profile.service';
 import { AgentTask } from './entities/agent-task.entity';
-import { SocialAgentBrainService } from './social-agent-brain.service';
-import { rememberSocialAgentConversationBrainDecision } from './social-agent-chat-brain-memory.presenter';
-import { readSocialAgentConversationHistory } from './social-agent-chat-memory.presenter';
 import type {
   SocialAgentActivityResult,
   SocialAgentAsyncRunSnapshot,
@@ -20,11 +10,8 @@ import type {
   SocialAgentIntentRouteResult,
   SocialAgentRouteMessageBody,
 } from './social-agent-chat.types';
-import { appendSocialAgentUserMemo } from './social-agent-memory.util';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
-import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
-import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
 import { SocialAgentMessageLogService } from './social-agent-message-log.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
@@ -36,10 +23,10 @@ import {
   socialAgentRouteAction,
 } from './social-agent-route-response.presenter';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
-import { applySocialAgentTaskMemoryForIntent } from './social-agent-intent-memory.presenter';
 import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile-turn.service';
 import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
 import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
+import { SocialAgentRouteDecisionService } from './social-agent-route-decision.service';
 
 type QueueInitialSearchForTask = (
   ownerUserId: number,
@@ -55,13 +42,8 @@ type ReplanAndRefresh = (
 
 @Injectable()
 export class SocialAgentRouteTurnService {
-  private readonly logger = new Logger(SocialAgentRouteTurnService.name);
-
   constructor(
-    private readonly intentRouter: SocialAgentIntentRouterService,
-    private readonly socialProfiles: SocialProfileService,
     private readonly metrics: SocialAgentMetricsService,
-    private readonly longTermMemory: SocialAgentLongTermMemoryService,
     private readonly chatLlm: SocialAgentChatLlmService,
     private readonly profileEnrichment: SocialAgentProfileEnrichmentService,
     private readonly candidateActions: SocialAgentCandidateActionService,
@@ -71,8 +53,8 @@ export class SocialAgentRouteTurnService {
     private readonly profileTurns: SocialAgentRouteProfileTurnService,
     private readonly searchTurns: SocialAgentRouteSearchTurnService,
     private readonly actionTurns: SocialAgentRouteActionTurnService,
+    private readonly routeDecisions: SocialAgentRouteDecisionService,
     private readonly mainAgentTurn: SocialAgentMainAgentTurnService,
-    @Optional() private readonly brain?: SocialAgentBrainService,
   ) {}
 
   async handleMessage(input: {
@@ -103,89 +85,14 @@ export class SocialAgentRouteTurnService {
     task = mainAgentTurn.task;
     if (mainAgentTurn.result) return mainAgentTurn.result;
 
-    const [profile, freshTask, longTermSnapshot] = await Promise.all([
-      this.readProfileSummary(ownerUserId),
-      this.taskLifecycle.assertTaskOwner(task.id, ownerUserId),
-      this.longTermMemory.readSnapshot(ownerUserId).catch((error) => {
-        this.metrics.recordError('long_term_memory_read_failed');
-        this.logger.warn(
-          JSON.stringify({
-            event: 'social_agent.long_term_memory.read_failed',
-            ownerUserId,
-            message: error instanceof Error ? error.message : String(error),
-          }),
-        );
-        return null;
-      }),
-    ]);
-    task = freshTask;
-    let memoryContext = this.routeContext.buildMemoryContext(
+    const decision = await this.routeDecisions.prepare({
+      ownerUserId,
       task,
-      longTermSnapshot,
-    );
-    let route = await this.intentRouter.route({
+      body,
       message,
-      taskContext: this.routeContext.buildTaskContext({
-        task,
-        body,
-        longTermSnapshot,
-        memoryContext,
-      }),
-      profile: profile ?? {},
-      conversationHistory: readSocialAgentConversationHistory(task),
     });
-    const brainDecision = await this.brain?.planTurn({
-      message,
-      route,
-      profile: profile ?? {},
-      taskContext: this.routeContext.buildTaskContext({
-        task,
-        body,
-        longTermSnapshot,
-        memoryContext,
-      }),
-      conversationHistory: readSocialAgentConversationHistory(task),
-      memoryContext: memoryContext ?? undefined,
-    });
-    if (brainDecision) {
-      route = brainDecision.route;
-      rememberSocialAgentConversationBrainDecision(task, brainDecision);
-      if (brainDecision.conversationMode === 'profile_correction') {
-        this.profileEnrichment.recordProfileMisunderstanding(
-          task,
-          brainDecision.reason || 'user_correction',
-        );
-      }
-    }
-    this.profileEnrichment.rememberCurrentTaskFromBrain(task, route);
-    memoryContext = this.routeContext.buildMemoryContext(
-      task,
-      longTermSnapshot,
-    );
-    await this.messageLog.recordIntentRoute(task, route).catch((error) => {
-      this.metrics.recordError('intent_route_event_failed');
-      this.logger.warn(
-        JSON.stringify({
-          event: 'social_agent.intent_route.event_failed',
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    });
-    this.metrics.recordIntent(route.intent, route.source);
-    appendSocialAgentUserMemo(task, message, route.intent);
-    applySocialAgentTaskMemoryForIntent(task, message, route);
-    await this.routeContext.applyRagContext({
-      task,
-      route,
-      message,
-      longTermSnapshot,
-    });
-    const brainToolResults =
-      await this.profileEnrichment.executeConversationBrainReadTools(
-        ownerUserId,
-        task,
-        brainDecision,
-      );
+    task = decision.task;
+    const { profile, longTermSnapshot, route, brainToolResults } = decision;
 
     let savedContext = false;
     let profileUpdated = false;
@@ -340,23 +247,6 @@ export class SocialAgentRouteTurnService {
     );
     this.metrics.observeRouteLatency(Date.now() - startedAt);
     return result;
-  }
-
-  private async readProfileSummary(
-    ownerUserId: number,
-  ): Promise<Record<string, unknown> | null> {
-    try {
-      const profile = await this.socialProfiles.get(ownerUserId);
-      return {
-        city: sanitizeCity(profile.city),
-        interestTags: profile.interestTags ?? [],
-        availableTimes: profile.availableTimes ?? [],
-        profileDiscoverable: profile.profileDiscoverable,
-        agentCanRecommendMe: profile.agentCanRecommendMe,
-      };
-    } catch {
-      return null;
-    }
   }
 
   private number(value: unknown): number | null {
