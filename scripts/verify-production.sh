@@ -151,6 +151,7 @@ const required = [
   '/social-agent/chat/tasks/{taskId}/publish-social-request',
   '/social-agent/chat/tasks/{taskId}/replan-run',
   '/social-agent/chat/tasks/{taskId}/append-context',
+  '/social-agent/chat/tasks/{taskId}/actions',
   '/social-agent/chat/tasks/{taskId}/save-candidate',
   '/social-agent/chat/tasks/{taskId}/send-message',
   '/social-agent/chat/tasks/{taskId}/connect-candidate',

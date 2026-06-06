@@ -61,6 +61,7 @@ describe('production deploy readiness', () => {
     expect(verifier).toContain(
       '/social-agent/chat/tasks/{taskId}/append-context',
     );
+    expect(verifier).toContain('/social-agent/chat/tasks/{taskId}/actions');
     expect(verifier).toContain('/social-agent/chat/tasks/{taskId}/session');
     expect(verifier).toContain(
       '/social-agent/chat/tasks/{taskId}/send-message',
