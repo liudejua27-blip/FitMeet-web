@@ -90,7 +90,7 @@ pnpm dev
 ```bash
 cd backend && pnpm lint && pnpm build && pnpm test && APP_SMOKE_DRY_RUN=true pnpm smoke:app-core
 cd ../frontend && pnpm lint && pnpm build && pnpm test
-cd ../fitmeet-landing && pnpm lint && pnpm build && pnpm test && pnpm test:rendered
+cd ../fitmeet-landing && pnpm lint && pnpm build && pnpm test
 ```
 
 iOS App：
@@ -202,11 +202,11 @@ GitHub Actions 工作流在 `.github/workflows/ci.yml`。当前基线包含：
 - backend：install、lint、build、test
 - backend app contract smoke：`APP_SMOKE_DRY_RUN=true pnpm smoke:app-core`
 - frontend：install、lint、build、test
-- fitmeet-landing：install、lint、build、test、test:rendered
+- fitmeet-landing：install、lint、build、test（source + rendered smoke）
 
 后端 smoke 会以 dry-run 方式检查 `/auth`、`/feed`、`/social-agent/chat` 和 `/uploads` 的 App 核心契约，确保 OpenAPI、typed client 和 App 调用路径不会静默漂移。
 
-`fitmeet-landing` 的 `pnpm test` 已覆盖公开落地页组成、导航锚点、gateway 数据和 Agent Hub 产品入口；`pnpm test:rendered` 在 `pnpm build` 后检查 Next 产物里的首页、Agent Hub 和三个 gateway 静态 HTML。后续仍应继续补 Playwright 交互和视觉回归测试。
+`fitmeet-landing` 的 `pnpm test` 已覆盖公开落地页组成、导航锚点、gateway 数据、Agent Hub 产品入口，并在 `pnpm build` 后检查 Next 产物里的首页、Agent Hub 和三个 gateway 静态 HTML。后续仍应继续补 Playwright 交互和视觉回归测试。
 
 ## 部署
 

@@ -24,10 +24,9 @@ pnpm dev       # http://localhost:3000
 pnpm lint
 pnpm build
 pnpm test
-pnpm test:rendered
 ```
 
-`pnpm test` checks source-level landing composition, navigation, gateway data, and Agent Hub product copy. `pnpm test:rendered` must run after `pnpm build`; it verifies the prerendered `.next/server/app` HTML for `/`, `/agent-hub`, `/human`, `/pet`, and `/ai`.
+`pnpm test` must run after `pnpm build`. It checks source-level landing composition, navigation, gateway data, and Agent Hub product copy, then verifies the prerendered `.next/server/app` HTML for `/`, `/agent-hub`, `/human`, `/pet`, and `/ai`. `pnpm test:source` and `pnpm test:rendered` are available when you need to run one side of the suite directly.
 
 ## Structure
 
