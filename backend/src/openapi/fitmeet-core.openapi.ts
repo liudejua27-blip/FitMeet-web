@@ -372,6 +372,36 @@ export const fitMeetCoreOpenApi = {
         },
       },
     },
+    '/feed/comments/{commentId}/like': {
+      post: {
+        tags: ['feed'],
+        operationId: 'likeComment',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'commentId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '201': {
+            description: 'Comment like state',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['liked'],
+                  properties: { liked: { type: 'boolean' } },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
     '/messages/start': {
       post: {
         tags: ['messages'],

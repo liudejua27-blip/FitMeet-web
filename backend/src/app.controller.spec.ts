@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { RequestMethod } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -92,6 +94,7 @@ describe('AppController', () => {
           '/users/profile',
           '/feed',
           '/feed/{postId}/comments',
+          '/feed/comments/{commentId}/like',
           '/messages/start',
           '/messages/conversations',
           '/messages/conversations/{conversationId}',
@@ -147,6 +150,21 @@ describe('AppController', () => {
             path: normalizePathParams(path),
           });
         }
+      }
+    });
+
+    it('keeps the frontend typed endpoint registry aligned with OpenAPI paths', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+      const openApiPaths = new Set(
+        Object.keys(contract.paths).map(normalizePathParams),
+      );
+      const frontendContract = readFileSync(
+        resolve(__dirname, '../../frontend/src/api/fitmeetCoreContract.ts'),
+        'utf8',
+      );
+
+      for (const endpoint of collectEndpointLiterals(frontendContract)) {
+        expect(openApiPaths).toContain(normalizeEndpointPath(endpoint));
       }
     });
 
@@ -466,4 +484,21 @@ function normalizePathParams(path: string) {
     .replace(/\{[^/}]+\}/g, ':param')
     .replace(/:[^/]+/g, ':param')
     .replace(/\/+/g, '/');
+}
+
+function normalizeEndpointPath(path: string) {
+  return normalizePathParams(path.replace(/\$\{[^}]+\}/g, ':param'));
+}
+
+function collectEndpointLiterals(source: string): string[] {
+  const literalMatches = [
+    ...source.matchAll(/(['"`])((?:\/|\$\{)[\s\S]*?)\1/g),
+  ];
+  return [
+    ...new Set(
+      literalMatches
+        .map((match) => match[2].replace(/\s+/g, ''))
+        .filter((value) => value.startsWith('/')),
+    ),
+  ];
 }
