@@ -13,6 +13,7 @@ import type {
   SocialCandidate,
   SocialRequest,
 } from '../types';
+import type { FeedPage, FeedQueryParams } from '../api/feedClient';
 
 export function register(data: { email: string; password: string; name: string }) {
   return api.register(data);
@@ -39,13 +40,11 @@ export function createSocialRequest(data: CreateSocialRequestInput): Promise<{
   return api.createSocialRequest(data);
 }
 
-export function getFeed(params?: {
-  category?: string;
-  page?: number;
-  pageSize?: number;
-  lat?: number;
-  lng?: number;
-}): Promise<Post[]> {
+export function getFeedPage(params?: FeedQueryParams): Promise<FeedPage> {
+  return api.getFeedPage(params);
+}
+
+export function getFeed(params?: FeedQueryParams): Promise<Post[]> {
   return api.getFeed(params);
 }
 

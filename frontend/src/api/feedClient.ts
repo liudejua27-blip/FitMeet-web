@@ -2,13 +2,26 @@ import type { Comment, Post, PublicSocialIntent } from '../types';
 import { request } from './baseClient';
 import { fitMeetCoreEndpoints } from './fitmeetCoreContract';
 
-export function getFeed(params?: {
+export interface FeedPageMetadata {
+  total: number;
+  page: number;
+  lastPage: number;
+}
+
+export interface FeedPage {
+  data: Post[];
+  metadata: FeedPageMetadata;
+}
+
+export type FeedQueryParams = {
   category?: string;
   page?: number;
   pageSize?: number;
   lat?: number;
   lng?: number;
-}): Promise<Post[]> {
+};
+
+function feedPath(params?: FeedQueryParams): string {
   const search = new URLSearchParams();
   if (params?.category && params.category !== 'all') search.set('category', params.category);
   if (params?.page) search.set('page', String(params.page));
@@ -16,9 +29,15 @@ export function getFeed(params?: {
   if (Number.isFinite(params?.lat)) search.set('lat', String(params?.lat));
   if (Number.isFinite(params?.lng)) search.set('lng', String(params?.lng));
   const qs = search.toString();
-  return request<{ data: Post[] }>(
-    `${fitMeetCoreEndpoints.feed.getFeed}${qs ? `?${qs}` : ''}`,
-  ).then((r) => r.data);
+  return `${fitMeetCoreEndpoints.feed.getFeed}${qs ? `?${qs}` : ''}`;
+}
+
+export function getFeedPage(params?: FeedQueryParams): Promise<FeedPage> {
+  return request<FeedPage>(feedPath(params));
+}
+
+export function getFeed(params?: FeedQueryParams): Promise<Post[]> {
+  return getFeedPage(params).then((r) => r.data);
 }
 
 export function createPost(data: Partial<Post>): Promise<Post> {

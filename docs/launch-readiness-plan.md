@@ -32,7 +32,7 @@ This document is the launch control plan for FitMeet Web and FitMeetAlpha iOS. I
 - `frontend/src/api/fitmeetCoreContract.ts` lists the Web/App shared endpoint registry and template paths.
 - Domain clients are already split for major launch flows:
   - `authClient.ts`: login/register/refresh/profile.
-  - `feedClient.ts`: social feed and interactions.
+  - `feedClient.ts`: social feed, full `FeedPage` pagination metadata, and legacy array-compatible feed reads.
   - `messagesClient.ts`: conversations and unread counts.
   - `socialAgentApi.ts`: Social Agent chat/task actions.
   - `uploadApi.ts`: image/video upload.
@@ -142,6 +142,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - Social Agent workspace restore risk has been reduced: Web current-task and task-timeline reads are now part of the shared core OpenAPI contract and typed Web endpoint registry instead of living as untracked debug API strings.
 - Feed write-path risk has been reduced: like/save/comment operations now confirm the target post or comment exists before writing counters or interaction rows, so Web/iOS get stable 404 errors instead of orphan rows or database constraint leakage.
 - Feed publish validation risk has been reduced: post creation now rejects blank `type`, `sport`, or `text` before moderation/database writes, and the shared OpenAPI create-post schema documents the non-empty required strings used by iOS moment publishing.
+- Web feed pagination contract risk has been reduced: the Web API client now exposes `getFeedPage()` for the shared `/feed` `{ data, metadata }` response while preserving legacy `getFeed()` array behavior for existing pages.
 - Messages read/write risk has been reduced: shared Web/iOS conversation history reads now require a participant-scoped conversation match before querying messages, and invalid/blank user-message, Agent inbox, and Agent reply conversation inputs fail with stable 400 responses before Mongo reads or writes. Core OpenAPI now documents the message conversation 400 responses used by Web and iOS clients.
 - Auth risk: production SMS/WeChat provider configuration must be present; mock WeChat login is dev-only, failed production SMS dispatch must not persist usable verification codes, WeChat OAuth redirects must be explicit HTTPS URLs, and refresh token rotation must keep stale tokens from being reused.
 - iOS release risk: staging E2E requires real credentials, a second message target user, object storage, and a deployed backend; it cannot pass in a credential-free local run.
@@ -287,6 +288,9 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- posts.service.spec.ts app.controller.spec.ts`
 - Passed: backend `pnpm --dir backend lint`
 - Passed: backend `pnpm --dir backend build`
+- Passed: frontend `pnpm --dir frontend test -- feedClient.test.ts`
+- Passed: frontend `pnpm --dir frontend exec eslint src/api/feedClient.ts src/services/dataService.ts src/test/feedClient.test.ts`
+- Passed: frontend `pnpm --dir frontend build`
 - Passed: landing `pnpm --dir fitmeet-landing test:source`
 - Passed: landing `pnpm --dir fitmeet-landing lint`
 - Passed: landing `pnpm --dir fitmeet-landing test`
