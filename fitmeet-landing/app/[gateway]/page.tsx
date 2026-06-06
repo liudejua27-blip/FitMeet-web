@@ -44,6 +44,16 @@ export function generateMetadata({ params }: GatewayPageProps): Metadata {
   return {
     title: `${gateway.titleEn} — FitMeet`,
     description: gateway.descriptionEn,
+    alternates: {
+      canonical: gateway.href,
+    },
+    openGraph: {
+      title: `${gateway.titleEn} — FitMeet`,
+      description: gateway.descriptionEn,
+      url: gateway.href,
+      siteName: 'FitMeet',
+      type: 'website',
+    },
   };
 }
 

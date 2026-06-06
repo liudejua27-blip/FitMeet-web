@@ -257,7 +257,7 @@ GitHub Actions 工作流在 `.github/workflows/ci.yml`。当前基线包含：
 
 后端 smoke 会以 dry-run 方式检查 `/auth`、`/feed`、`/social-agent/chat` 和 `/uploads` 的 App 核心契约，确保 OpenAPI、typed client 和 App 调用路径不会静默漂移。
 
-`fitmeet-landing` 的 `pnpm test` 已覆盖公开落地页组成、导航锚点、gateway 数据、Agent Hub 产品入口，并在 `pnpm build` 后检查 Next 产物里的首页、Agent Hub 和三个 gateway 静态 HTML。后续仍应继续补 Playwright 交互和视觉回归测试。
+`fitmeet-landing` 的 `pnpm test` 已覆盖公开落地页组成、导航锚点、gateway 数据、Agent Hub 产品入口，并在 `pnpm build` 后检查 Next 产物里的首页、Agent Hub、三个 gateway 静态 HTML，以及逐路由 canonical / Open Graph metadata。后续仍应继续补 Playwright 交互和视觉回归测试。
 
 ## 部署
 

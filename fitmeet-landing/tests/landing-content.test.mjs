@@ -111,6 +111,7 @@ test('layout exposes FitMeet metadata and global chrome', async () => {
 
 test('agent hub route is a real product surface', async () => {
   const agentHub = await readSource('app/agent-hub/page.tsx');
+  const agentHubLayout = await readSource('app/agent-hub/layout.tsx');
   const agentConnectPanel = await readSource(
     'components/agent/AgentConnectPanel.tsx',
   );
@@ -127,6 +128,16 @@ test('agent hub route is a real product surface', async () => {
 
   assert.match(agentConnectPanel, /import .*PermissionCard/);
   assert.match(agentConnectPanel, /<PermissionCard\b/);
+  assertContainsAll(
+    agentHubLayout,
+    [
+      "title: 'Agent Hub — FitMeet'",
+      "canonical: '/agent-hub'",
+      "url: '/agent-hub'",
+      'Connect your AI Agent to FitMeet',
+    ],
+    'agent hub metadata',
+  );
   assertContainsAll(
     agentHub,
     ['接入 Agent', '偏好设置', '安全承诺', '双重确认不可绕过', 'Token 永不存储明文'],
@@ -319,6 +330,9 @@ test('gateway detail route covers every ecosystem CTA with real content', async 
       'What it covers',
       'readGateway',
       'GATEWAYS.find',
+      'canonical: gateway.href',
+      'url: gateway.href',
+      'siteName: \'FitMeet\'',
     ],
     'gateway detail route',
   );

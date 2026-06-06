@@ -99,8 +99,11 @@ function idExistsInHtml(html, id) {
   return new RegExp(`\\bid="${escapedId}"`).test(html);
 }
 
-function assertProductionMetadata(html, route) {
+function assertProductionMetadata(html, route, expected = {}) {
   const readable = decodeHtml(html);
+  const canonicalUrl = `https://www.ourfitmeet.cn${expected.path ?? ''}`;
+  const title = expected.title ?? 'FitMeet';
+  const description = expected.description;
   assert.doesNotMatch(
     readable,
     /fitmeet\.example|localhost|127\.0\.0\.1/,
@@ -108,19 +111,51 @@ function assertProductionMetadata(html, route) {
   );
   assert.match(
     readable,
-    /<link rel="canonical" href="https:\/\/www\.ourfitmeet\.cn\/?"/,
-    `${route} should render the production canonical URL`,
+    new RegExp(
+      `<link rel="canonical" href="${canonicalUrl.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        '\\$&',
+      )}"`,
+    ),
+    `${route} should render the production canonical URL ${canonicalUrl}`,
   );
   assert.match(
     readable,
-    /<meta property="og:url" content="https:\/\/www\.ourfitmeet\.cn\/?"/,
-    `${route} should render the production Open Graph URL`,
+    new RegExp(
+      `<meta property="og:url" content="${canonicalUrl.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        '\\$&',
+      )}"`,
+    ),
+    `${route} should render the production Open Graph URL ${canonicalUrl}`,
+  );
+  assert.match(
+    readable,
+    new RegExp(
+      `<meta property="og:title" content="${title.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        '\\$&',
+      )}"`,
+    ),
+    `${route} should render the expected Open Graph title`,
   );
   assert.match(
     readable,
     /<meta property="og:site_name" content="FitMeet"/,
     `${route} should render the Open Graph site name`,
   );
+  if (description) {
+    assert.match(
+      readable,
+      new RegExp(
+        `<meta property="og:description" content="${description.replace(
+          /[.*+?^${}()|[\]\\]/g,
+          '\\$&',
+        )}"`,
+      ),
+      `${route} should render the expected Open Graph description`,
+    );
+  }
 }
 
 function assertNoDemoOrigins(html, route) {
@@ -175,6 +210,12 @@ test('rendered agent hub is a concrete product entry, not a shell', async () => 
     'agent hub',
   );
   assertNoDemoOrigins(html, 'agent hub');
+  assertProductionMetadata(html, 'agent hub', {
+    path: '/agent-hub',
+    title: 'Agent Hub — FitMeet',
+    description:
+      'Connect your AI Agent to FitMeet with explicit permissions, auditability, and user-controlled social matching.',
+  });
   assert.doesNotMatch(html, /No landing tests configured|placeholder|mock-only/i);
 });
 
@@ -248,6 +289,11 @@ test('rendered gateway metadata and RSC payloads stay aligned with gateway data'
       ],
       `${gateway.id} gateway metadata`,
     );
+    assertProductionMetadata(html, `${gateway.id} gateway`, {
+      path: gateway.href,
+      title: `${gateway.titleEn} — FitMeet`,
+      description: gateway.descriptionEn,
+    });
     assertContainsAll(
       rsc,
       [gateway.titleEn, gateway.cta, 'Connect Agent', 'Back to ecosystem'],
