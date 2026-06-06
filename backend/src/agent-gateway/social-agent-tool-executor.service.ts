@@ -87,10 +87,7 @@ import { sanitizeCity } from '../common/city.util';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { PublicSocialIntent } from './entities/public-social-intent.entity';
-import {
-  SocialAgentModelRouterService,
-  SocialAgentModelUseCase,
-} from './social-agent-model-router.service';
+import { SocialAgentModelRouterService } from './social-agent-model-router.service';
 import {
   SceneRiskPolicyResult,
   SceneRiskPolicyService,
@@ -139,6 +136,10 @@ import {
   normalizeSocialAgentNextActionDecision,
   parseSocialAgentJsonObject,
 } from './social-agent-next-action-decision';
+import {
+  selectSocialAgentToolModel,
+  socialAgentToolModelUseCaseForPurpose,
+} from './social-agent-tool-model';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -2637,8 +2638,11 @@ export class SocialAgentToolExecutorService {
       return fallback();
     }
 
-    const useCase = this.modelUseCaseForPurpose(purpose);
-    const model = this.modelFor(useCase);
+    const useCase = socialAgentToolModelUseCaseForPurpose(purpose);
+    const model = selectSocialAgentToolModel(useCase, {
+      config: this.config,
+      modelRouter: this.modelRouter,
+    });
     const startedAt = Date.now();
     try {
       const baseUrl =
@@ -2725,39 +2729,6 @@ export class SocialAgentToolExecutorService {
       );
       return fallback();
     }
-  }
-
-  private modelUseCaseForPurpose(purpose: string): SocialAgentModelUseCase {
-    if (/candidate|match|summary/i.test(purpose)) return 'candidate_summary';
-    if (/card|social_request|request/i.test(purpose)) return 'card_generation';
-    if (/safety|boundary|risk/i.test(purpose)) return 'safety_check';
-    return 'planner';
-  }
-
-  private modelFor(useCase: SocialAgentModelUseCase): string {
-    if (this.modelRouter) return this.modelRouter.getModel(useCase);
-    const legacy = this.config.get<string>('DEEPSEEK_MODEL');
-    if (useCase === 'candidate_summary' || useCase === 'card_generation') {
-      return (
-        this.config.get<string>('AGENT_CARD_MODEL') ||
-        this.config.get<string>('DEEPSEEK_FAST_MODEL') ||
-        legacy ||
-        'deepseek-v4-flash'
-      );
-    }
-    if (useCase === 'safety_check') {
-      return (
-        this.config.get<string>('DEEPSEEK_FAST_MODEL') ||
-        legacy ||
-        'deepseek-v4-flash'
-      );
-    }
-    return (
-      this.config.get<string>('AGENT_PLANNER_MODEL') ||
-      this.config.get<string>('DEEPSEEK_FAST_MODEL') ||
-      legacy ||
-      'deepseek-v4-flash'
-    );
   }
 
   private logModelCall(input: {
