@@ -642,6 +642,64 @@ export const fitMeetCoreOpenApi = {
         },
       },
     },
+    '/social-agent/chat/run': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentRun',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/SocialAgentRunInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Synchronous Social Agent run result',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentChatRunResult',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/run-async': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentRunAsync',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/SocialAgentRunInput' },
+            },
+          },
+        },
+        responses: {
+          '202': {
+            description: 'Queued Social Agent async run snapshot',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentAsyncRunSnapshot',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
     '/social-agent/chat/messages': {
       post: {
         tags: ['social-agent-chat'],
@@ -1465,9 +1523,9 @@ export const fitMeetCoreOpenApi = {
       },
       SocialAgentRunInput: {
         type: 'object',
-        required: ['goal', 'permissionMode'],
+        required: ['goal'],
         properties: {
-          goal: { type: 'string' },
+          goal: { type: 'string', minLength: 1 },
           permissionMode: {
             type: 'string',
             enum: [
@@ -1480,6 +1538,68 @@ export const fitMeetCoreOpenApi = {
             ],
           },
           idempotencyKey: { type: 'string' },
+        },
+      },
+      SocialAgentChatRunResult: {
+        type: 'object',
+        required: [
+          'taskId',
+          'status',
+          'visibleSteps',
+          'assistantMessage',
+          'socialRequestDraft',
+          'candidates',
+          'approvalRequiredActions',
+          'events',
+        ],
+        additionalProperties: true,
+        properties: {
+          taskId: { type: 'integer' },
+          status: { type: 'string' },
+          visibleSteps: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          assistantMessage: { type: 'string' },
+          emptyReason: { type: ['string', 'null'] },
+          message: { type: ['string', 'null'] },
+          debugReasons: {
+            type: ['object', 'null'],
+            additionalProperties: true,
+          },
+          socialRequestDraft: {
+            type: ['object', 'null'],
+            additionalProperties: true,
+          },
+          candidates: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          approvalRequiredActions: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          events: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          cards: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          safety: {
+            type: 'object',
+            additionalProperties: true,
+          },
+          traceId: { type: 'string' },
+          agentTrace: {
+            type: 'object',
+            additionalProperties: true,
+          },
+          structuredIntent: {
+            type: 'object',
+            additionalProperties: true,
+          },
         },
       },
       SocialAgentRouteMessageInput: {

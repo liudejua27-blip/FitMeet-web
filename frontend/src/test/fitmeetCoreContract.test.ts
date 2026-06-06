@@ -35,6 +35,12 @@ describe('fitMeetCoreEndpoints', () => {
     expect(fitMeetCoreEndpoints.socialAgentChat.session).toBe(
       '/social-agent/chat/session',
     );
+    expect(fitMeetCoreEndpoints.socialAgentChat.run).toBe(
+      '/social-agent/chat/run',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentChat.runAsync).toBe(
+      '/social-agent/chat/run-async',
+    );
     expect(fitMeetCoreEndpoints.socialAgentChat.taskSession(101)).toBe(
       '/social-agent/chat/tasks/101/session',
     );
@@ -97,6 +103,8 @@ describe('fitMeetCoreEndpoints', () => {
         '/messages/conversations/{conversationId}/send',
         '/messages/public-intents/{id}/start',
         '/messages/unread',
+        '/social-agent/chat/run',
+        '/social-agent/chat/run-async',
         '/social-agent/chat/messages',
         '/social-agent/chat/route-message',
         '/social-agent/chat/stream',

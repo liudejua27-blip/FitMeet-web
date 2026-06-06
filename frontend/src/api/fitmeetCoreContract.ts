@@ -36,6 +36,8 @@ export const fitMeetCoreEndpoints = {
     getUnreadCount: '/messages/unread',
   },
   socialAgentChat: {
+    run: '/social-agent/chat/run',
+    runAsync: '/social-agent/chat/run-async',
     messages: '/social-agent/chat/messages',
     routeMessage: '/social-agent/chat/route-message',
     stream: '/social-agent/chat/stream',
@@ -102,6 +104,8 @@ export const fitMeetCoreEndpointTemplates = {
     getUnreadCount: '/messages/unread',
   },
   socialAgentChat: {
+    run: '/social-agent/chat/run',
+    runAsync: '/social-agent/chat/run-async',
     messages: '/social-agent/chat/messages',
     routeMessage: '/social-agent/chat/route-message',
     stream: '/social-agent/chat/stream',
@@ -136,6 +140,8 @@ export type FitMeetCoreStaticEndpoint =
   | (typeof fitMeetCoreEndpoints.messages)['getConversations']
   | (typeof fitMeetCoreEndpoints.messages)['getUnreadCount']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['messages']
+  | (typeof fitMeetCoreEndpoints.socialAgentChat)['run']
+  | (typeof fitMeetCoreEndpoints.socialAgentChat)['runAsync']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['routeMessage']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['stream']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['streamUser']

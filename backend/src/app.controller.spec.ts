@@ -41,6 +41,8 @@ const IOS_APP_REQUIRED_PATHS = {
   '/messages/unread': 'get',
   '/feed': ['get', 'post'],
   '/feed/interactions': 'get',
+  '/social-agent/chat/run': 'post',
+  '/social-agent/chat/run-async': 'post',
   '/social-agent/chat/session': 'get',
   '/social-agent/chat/tasks/{taskId}/session': 'get',
   '/social-agent/chat/tasks/{taskId}/runs/{runId}': 'get',
@@ -170,6 +172,8 @@ describe('AppController', () => {
           '/messages/conversations/{conversationId}/send',
           '/messages/public-intents/{id}/start',
           '/messages/unread',
+          '/social-agent/chat/run',
+          '/social-agent/chat/run-async',
           '/social-agent/chat/session',
           '/social-agent/chat/messages',
           '/social-agent/chat/stream',
@@ -531,6 +535,8 @@ describe('AppController', () => {
 
     it('documents the iOS Social Agent chat and candidate action contract', () => {
       const contract = appController.getFitMeetCoreOpenApi();
+      const run = contract.paths['/social-agent/chat/run'].post;
+      const runAsync = contract.paths['/social-agent/chat/run-async'].post;
       const sendCandidate =
         contract.paths['/social-agent/chat/tasks/{taskId}/send-message'].post
           .requestBody.content['application/json'].schema;
@@ -553,6 +559,51 @@ describe('AppController', () => {
           $ref: '#/components/responses/UserFacingAgentResponse',
         });
       }
+      for (const operation of [run, runAsync]) {
+        expect(
+          operation.requestBody.content['application/json'].schema,
+        ).toEqual({
+          $ref: '#/components/schemas/SocialAgentRunInput',
+        });
+      }
+      expect(run.responses['200'].content['application/json'].schema).toEqual({
+        $ref: '#/components/schemas/SocialAgentChatRunResult',
+      });
+      expect(
+        runAsync.responses['202'].content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/SocialAgentAsyncRunSnapshot',
+      });
+      expect(contract.components.schemas.SocialAgentRunInput).toMatchObject({
+        required: ['goal'],
+        properties: {
+          goal: { type: 'string', minLength: 1 },
+          permissionMode: { type: 'string' },
+        },
+      });
+      expect(
+        contract.components.schemas.SocialAgentChatRunResult,
+      ).toMatchObject({
+        required: [
+          'taskId',
+          'status',
+          'visibleSteps',
+          'assistantMessage',
+          'socialRequestDraft',
+          'candidates',
+          'approvalRequiredActions',
+          'events',
+        ],
+        properties: {
+          taskId: { type: 'integer' },
+          status: { type: 'string' },
+          assistantMessage: { type: 'string' },
+          socialRequestDraft: {
+            type: ['object', 'null'],
+            additionalProperties: true,
+          },
+        },
+      });
       expect(
         contract.components.schemas.SocialAgentRouteMessageInput.properties,
       ).toMatchObject({

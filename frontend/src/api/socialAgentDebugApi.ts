@@ -573,18 +573,24 @@ export interface SocialAgentConnectCandidateResult {
 export const socialAgentDebugApi = {
   runChat: (data: RunChatInput) =>
     api
-      .requestProtected<SocialAgentChatRunResult>('/social-agent/chat/run', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      })
+      .requestProtected<SocialAgentChatRunResult>(
+        fitMeetCoreEndpoints.socialAgentChat.run,
+        {
+          method: 'POST',
+          body: JSON.stringify(data),
+        },
+      )
       .then(sanitizeSocialAgentResponse),
 
   runChatQueued: (data: RunChatInput) =>
     api
-      .requestProtected<SocialAgentAsyncRunResult>('/social-agent/chat/run-async', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      })
+      .requestProtected<SocialAgentAsyncRunResult>(
+        fitMeetCoreEndpoints.socialAgentChat.runAsync,
+        {
+          method: 'POST',
+          body: JSON.stringify(data),
+        },
+      )
       .then(sanitizeSocialAgentResponse),
 
   routeMessage: (data: RouteMessageInput) =>

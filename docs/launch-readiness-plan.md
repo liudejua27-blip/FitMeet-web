@@ -142,7 +142,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - Error contract risk has been reduced for the shared launch subset: OpenAPI now documents the stable error envelope for auth, feed, messages, Social Agent chat, SSE, and uploads instead of only happy paths.
 - Web error handling risk has been reduced: the shared Web base client now preserves backend `code` and `error.retryable` fields from the standard error envelope so UI flows can distinguish validation, auth, dependency, and retryable failures without parsing raw payloads.
 - Web upload risk has been reduced: multipart uploads now preserve bearer auth headers even when callers pass an empty header object for browser-managed boundaries, and upload failures map the backend standard error envelope into `ApiError.code` and `retryable`.
-- Social Agent workspace restore risk has been reduced: Web current-task, task-timeline, and async run-status polling reads are now part of the shared core OpenAPI contract and typed Web/iOS endpoint registries instead of living as untracked debug API strings.
+- Social Agent workspace restore risk has been reduced: Web/iOS Social Agent run, async run, current-task, task-timeline, and async run-status polling endpoints are now part of the shared core OpenAPI contract and typed endpoint registries instead of living as untracked debug API strings.
 - Feed write-path risk has been reduced: like/save/comment operations now confirm the target post or comment exists before writing counters or interaction rows, so Web/iOS get stable 404 errors instead of orphan rows or database constraint leakage.
 - Feed publish validation risk has been reduced: post creation now rejects blank `type`, `sport`, or `text` before moderation/database writes, and the shared OpenAPI create-post schema documents the non-empty required strings used by iOS moment publishing.
 - Web feed pagination contract risk has been reduced: the Web API client now exposes `getFeedPage()` for the shared `/feed` `{ data, metadata }` response while preserving legacy `getFeed()` array behavior for existing pages.
@@ -291,6 +291,7 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- posts.service.spec.ts app.controller.spec.ts`
 - Passed: backend `pnpm --dir backend test -- uploads.service.spec.ts app.controller.spec.ts` after documenting upload mime limits and adding unsupported image/video cleanup coverage.
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts` after adding the shared Social Agent async run-status OpenAPI path.
+- Passed: backend `pnpm --dir backend test -- app.controller.spec.ts` after adding the shared Social Agent run and run-async OpenAPI paths and correcting `SocialAgentRunInput.permissionMode` to optional.
 - Passed: backend `pnpm --dir backend lint`
 - Passed: backend `pnpm --dir backend build`
 - Passed: frontend `pnpm --dir frontend test -- feedClient.test.ts`
@@ -303,9 +304,11 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: frontend `pnpm --dir frontend exec eslint src/api/uploadApi.ts src/test/uploadApi.test.ts`
 - Passed: frontend `pnpm --dir frontend build`
 - Passed: frontend `pnpm --dir frontend test -- fitmeetCoreContract.test.ts` after adding typed async run-status endpoint coverage.
+- Passed: frontend `pnpm --dir frontend test -- fitmeetCoreContract.test.ts` after adding typed Social Agent run and run-async endpoint coverage.
 - Passed: frontend `pnpm --dir frontend exec eslint src/api/fitmeetCoreContract.ts src/api/socialAgentDebugApi.ts src/test/fitmeetCoreContract.test.ts`
 - Passed: frontend `pnpm --dir frontend build`
 - Passed: iOS `xcodebuild build-for-testing -project FitMeetAlpha.xcodeproj -scheme FitMeetAlpha -destination 'platform=iOS Simulator,id=68F37251-71BE-4F42-9849-62D61BFFE7C3'` after adding the Swift async run-status endpoint registry.
+- Passed: iOS `xcodebuild build-for-testing -project FitMeetAlpha.xcodeproj -scheme FitMeetAlpha -destination 'platform=iOS Simulator,id=68F37251-71BE-4F42-9849-62D61BFFE7C3'` after adding the Swift Social Agent run and run-async endpoint registry.
 - Blocked: iOS targeted `xcodebuild test -project FitMeetAlpha.xcodeproj -scheme FitMeetAlpha -destination 'platform=iOS Simulator,id=68F37251-71BE-4F42-9849-62D61BFFE7C3' -only-testing:FitMeetAlphaTests/AuthRestoreContractTests` failed because the Simulator refused to launch `com.fitmeet.alpha` with `FBSOpenApplicationServiceErrorDomain` / `Application failed preflight checks` / `Busy`.
 - Passed: landing `pnpm --dir fitmeet-landing test:source`
 - Passed: landing `pnpm --dir fitmeet-landing lint`
