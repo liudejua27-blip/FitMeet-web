@@ -749,7 +749,7 @@ export class MessagesService {
     agentId: number,
     options: { limit?: number } = {},
   ) {
-    const oid = new Types.ObjectId(conversationId);
+    const oid = this.toConversationObjectId(conversationId);
     await this.assertAgentConversationAccess(oid, agentId);
     await this.convModel.updateOne(
       { _id: oid },
@@ -801,7 +801,7 @@ export class MessagesService {
     const content = cleanDisplayText(text, '').trim();
     if (!content) throw new BadRequestException('content is required');
 
-    const oid = new Types.ObjectId(conversationId);
+    const oid = this.toConversationObjectId(conversationId);
     const conv = await this.assertAgentConversationAccess(oid, agentId);
     await this.bindAgentConversation(oid, {
       agentConnectionId: agentId,

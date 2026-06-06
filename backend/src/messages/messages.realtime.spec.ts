@@ -220,4 +220,61 @@ describe('MessagesService realtime events', () => {
     expect(convModel.findById).not.toHaveBeenCalled();
     expect(msgModel.create).not.toHaveBeenCalled();
   });
+
+  it('rejects invalid agent inbox conversation ids before querying messages', async () => {
+    const convModel = {
+      findById: jest.fn(),
+      updateOne: jest.fn(),
+    };
+    const msgModel = {
+      find: jest.fn(),
+      findOne: jest.fn(),
+    };
+    const service = new MessagesService(
+      convModel as never,
+      msgModel as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(
+      service.getAgentInboxMessages('not-an-object-id', 7),
+    ).rejects.toThrow(BadRequestException);
+    expect(convModel.findById).not.toHaveBeenCalled();
+    expect(convModel.updateOne).not.toHaveBeenCalled();
+    expect(msgModel.find).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid agent reply conversation ids before loading a conversation', async () => {
+    const convModel = {
+      findById: jest.fn(),
+      updateOne: jest.fn(),
+    };
+    const msgModel = {
+      create: jest.fn(),
+      findOne: jest.fn(),
+    };
+    const service = new MessagesService(
+      convModel as never,
+      msgModel as never,
+      {} as never,
+      {} as never,
+      { findOne: jest.fn() } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(
+      service.sendAgentReply('not-an-object-id', 7, 'hello'),
+    ).rejects.toThrow(BadRequestException);
+    expect(convModel.findById).not.toHaveBeenCalled();
+    expect(msgModel.create).not.toHaveBeenCalled();
+  });
 });
