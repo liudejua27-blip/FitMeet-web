@@ -12,14 +12,11 @@ import type {
 } from './social-agent-chat.types';
 import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
 import { SocialAgentMessageLogService } from './social-agent-message-log.service';
-import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
-import {
-  socialAgentAssistantMessageForRoute,
-  socialAgentRouteAction,
-} from './social-agent-route-response.presenter';
+import { socialAgentAssistantMessageForRoute } from './social-agent-route-response.presenter';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
 import { SocialAgentRouteCandidateConfirmationService } from './social-agent-route-candidate-confirmation.service';
+import { SocialAgentRouteCompletionService } from './social-agent-route-completion.service';
 import { SocialAgentRouteConversationTurnService } from './social-agent-route-conversation-turn.service';
 import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile-turn.service';
 import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
@@ -41,11 +38,11 @@ type ReplanAndRefresh = (
 @Injectable()
 export class SocialAgentRouteTurnService {
   constructor(
-    private readonly metrics: SocialAgentMetricsService,
     private readonly messageLog: SocialAgentMessageLogService,
     private readonly taskLifecycle: SocialAgentTaskLifecycleService,
     private readonly routeContext: SocialAgentRouteContextService,
     private readonly candidateConfirmations: SocialAgentRouteCandidateConfirmationService,
+    private readonly completions: SocialAgentRouteCompletionService,
     private readonly conversationTurns: SocialAgentRouteConversationTurnService,
     private readonly profileTurns: SocialAgentRouteProfileTurnService,
     private readonly searchTurns: SocialAgentRouteSearchTurnService,
@@ -178,31 +175,19 @@ export class SocialAgentRouteTurnService {
     });
     assistantMessage = actionTurn.assistantMessage;
 
-    const result: SocialAgentIntentRouteResult = {
-      ...route,
-      shouldReplan: queuedRun ? runMode === 'follow_up' : route.shouldReplan,
-      action: socialAgentRouteAction(route, queuedRun, runMode),
-      taskId: task.id,
+    return this.completions.complete({
+      task,
+      route,
       assistantMessage,
       savedContext,
       profileUpdated,
-      shouldQueueRun: Boolean(queuedRun),
-      runMode,
       queuedRun,
+      runMode,
       pendingApproval: actionTurn.pendingApproval,
       activityResults,
       profileUpdateProposal,
-      permissionMode: task.permissionMode,
-    };
-    if (queuedRun && runMode) this.metrics.recordQueuedRun(runMode);
-    this.metrics.recordAction(result.action);
-    await this.messageLog.recordAssistantMessage(
-      task,
-      assistantMessage,
-      result,
-    );
-    this.metrics.observeRouteLatency(Date.now() - startedAt);
-    return result;
+      startedAt,
+    });
   }
 
   private number(value: unknown): number | null {

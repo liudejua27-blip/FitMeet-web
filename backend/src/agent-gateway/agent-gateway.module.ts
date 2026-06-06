@@ -102,6 +102,7 @@ import { SocialAgentLongTermMemory } from './entities/social-agent-long-term-mem
 import { SocialAgentRagService } from './social-agent-rag.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { SocialAgentRouteCandidateConfirmationService } from './social-agent-route-candidate-confirmation.service';
+import { SocialAgentRouteCompletionService } from './social-agent-route-completion.service';
 import { SocialAgentRouteConversationTurnService } from './social-agent-route-conversation-turn.service';
 import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile-turn.service';
 import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
@@ -274,6 +275,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentRagService,
     SocialAgentRouteContextService,
     SocialAgentRouteCandidateConfirmationService,
+    SocialAgentRouteCompletionService,
     SocialAgentRouteConversationTurnService,
     SocialAgentRouteProfileTurnService,
     SocialAgentRouteSearchTurnService,
