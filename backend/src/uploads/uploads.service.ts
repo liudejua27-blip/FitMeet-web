@@ -14,6 +14,8 @@ import { ModerationService } from '../moderation/moderation.service';
 
 const PLACEHOLDER_PATTERN =
   /^(|change_me.*|your-.*|replace-.*|.*_here|secret_key|password)$/i;
+const IMAGE_MIME_PATTERN = /^image\/(jpg|jpeg|png|gif|webp)$/;
+const VIDEO_MIME_PATTERN = /^video\/(mp4|quicktime|webm|x-m4v)$/;
 
 @Injectable()
 export class UploadsService implements OnModuleInit {
@@ -131,7 +133,8 @@ export class UploadsService implements OnModuleInit {
       );
     }
 
-    if (!file.mimetype.match(/^image\/(jpg|jpeg|png|gif|webp)$/)) {
+    if (!IMAGE_MIME_PATTERN.test(file.mimetype)) {
+      this.safeUnlink(file.path);
       throw new BadRequestException('Only image files are allowed!');
     }
 
@@ -232,6 +235,11 @@ export class UploadsService implements OnModuleInit {
       throw new BadRequestException(
         'Uploads are disabled until object storage is configured.',
       );
+    }
+
+    if (!VIDEO_MIME_PATTERN.test(file.mimetype)) {
+      this.safeUnlink(file.path);
+      throw new BadRequestException('Only video files are allowed!');
     }
 
     const ext = path.extname(file.originalname);

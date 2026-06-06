@@ -1009,6 +1009,8 @@ export const fitMeetCoreOpenApi = {
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
+          description:
+            'Accepts jpg, jpeg, png, gif, and webp image files up to 10MB.',
           content: {
             'multipart/form-data': {
               schema: { $ref: '#/components/schemas/FileUploadInput' },
@@ -1036,6 +1038,8 @@ export const fitMeetCoreOpenApi = {
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
+          description:
+            'Accepts mp4, mov/quicktime, webm, and m4v video files up to 100MB.',
           content: {
             'multipart/form-data': {
               schema: { $ref: '#/components/schemas/FileUploadInput' },

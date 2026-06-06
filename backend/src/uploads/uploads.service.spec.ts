@@ -43,6 +43,26 @@ describe('UploadsService', () => {
     expect(fs.existsSync(uploadedPath)).toBe(true);
   });
 
+  it('rejects non-image uploads and removes the temporary file', async () => {
+    const tempFile = writeTempUpload('not-image.txt');
+    const service = makeService({ NODE_ENV: 'development' });
+
+    await expect(
+      service.saveImage(fileFor(tempFile, 'text/plain')),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(fs.existsSync(tempFile)).toBe(false);
+  });
+
+  it('rejects non-video file uploads and removes the temporary file', async () => {
+    const tempFile = writeTempUpload('not-video.txt');
+    const service = makeService({ NODE_ENV: 'development' });
+
+    await expect(
+      service.saveFile(fileFor(tempFile, 'text/plain')),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(fs.existsSync(tempFile)).toBe(false);
+  });
+
   it('removes the temporary file when Aliyun OSS file upload fails', async () => {
     const tempFile = writeTempUpload('aliyun-failure.mp4');
     const service = makeService({ NODE_ENV: 'production' });
@@ -87,11 +107,14 @@ function writeTempUpload(fileName: string) {
   return tempFile;
 }
 
-function fileFor(filePath: string): Express.Multer.File {
+function fileFor(
+  filePath: string,
+  mimetype = 'video/mp4',
+): Express.Multer.File {
   return {
     path: filePath,
     originalname: path.basename(filePath),
-    mimetype: 'video/mp4',
+    mimetype,
   } as Express.Multer.File;
 }
 
