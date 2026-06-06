@@ -6,6 +6,7 @@ import { getConnectionToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
 import { SocialAgentChatController } from './agent-gateway/social-agent-chat.controller';
+import { SocialAgentTasksController } from './agent-gateway/social-agent-tasks.controller';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthController } from './auth/auth.controller';
@@ -23,6 +24,7 @@ const APP_CORE_CONTROLLERS = [
   CommentsController,
   MessagesController,
   SocialAgentChatController,
+  SocialAgentTasksController,
   UploadsController,
 ] as const;
 
@@ -47,6 +49,11 @@ const IOS_APP_REQUIRED_PATHS = {
   '/social-agent/chat/tasks/{taskId}/save-candidate': 'post',
   '/social-agent/chat/tasks/{taskId}/send-message': 'post',
   '/social-agent/chat/tasks/{taskId}/connect-candidate': 'post',
+} as const;
+
+const WEB_APP_REQUIRED_PATHS = {
+  '/social-agent/tasks/current': 'get',
+  '/social-agent/tasks/{taskId}/timeline': 'get',
 } as const;
 
 const IOS_CORE_ENDPOINT_REGISTRY_PATH = resolve(
@@ -171,6 +178,8 @@ describe('AppController', () => {
           '/social-agent/chat/tasks/{taskId}/save-candidate',
           '/social-agent/chat/tasks/{taskId}/send-message',
           '/social-agent/chat/tasks/{taskId}/connect-candidate',
+          '/social-agent/tasks/current',
+          '/social-agent/tasks/{taskId}/timeline',
           '/uploads/image',
           '/uploads/video',
         ]),
@@ -231,6 +240,20 @@ describe('AppController', () => {
             path: normalizePathParams(path),
           });
         }
+      }
+    });
+
+    it('maps the Web Social Agent workspace contract to registered controllers', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+      const controllerRoutes = collectControllerRoutes(APP_CORE_CONTROLLERS);
+
+      for (const [path, method] of Object.entries(WEB_APP_REQUIRED_PATHS)) {
+        const openApiOperation = contract.paths[path][method];
+        expect(openApiOperation).toBeDefined();
+        expect(controllerRoutes).toContainEqual({
+          method,
+          path: normalizePathParams(path),
+        });
       }
     });
 

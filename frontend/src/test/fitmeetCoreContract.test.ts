@@ -59,6 +59,12 @@ describe('fitMeetCoreEndpoints', () => {
     expect(fitMeetCoreEndpoints.socialAgentChat.routeMessage).toBe(
       '/social-agent/chat/route-message',
     );
+    expect(fitMeetCoreEndpoints.socialAgentTasks.current).toBe(
+      '/social-agent/tasks/current',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentTasks.timeline(101)).toBe(
+      '/social-agent/tasks/101/timeline',
+    );
   });
 
   it('keeps the frontend endpoint templates aligned with the shared OpenAPI path set', () => {
@@ -96,6 +102,8 @@ describe('fitMeetCoreEndpoints', () => {
         '/social-agent/chat/tasks/{taskId}/save-candidate',
         '/social-agent/chat/tasks/{taskId}/send-message',
         '/social-agent/chat/tasks/{taskId}/connect-candidate',
+        '/social-agent/tasks/current',
+        '/social-agent/tasks/{taskId}/timeline',
         '/uploads/image',
         '/uploads/video',
       ]),
@@ -167,6 +175,10 @@ describe('fitMeetCoreEndpoints', () => {
       {
         built: fitMeetCoreEndpoints.socialAgentChat.connectCandidate(101),
         template: fitMeetCoreEndpointTemplates.socialAgentChat.connectCandidate,
+      },
+      {
+        built: fitMeetCoreEndpoints.socialAgentTasks.timeline(101),
+        template: fitMeetCoreEndpointTemplates.socialAgentTasks.timeline,
       },
     ];
 

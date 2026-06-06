@@ -730,12 +730,16 @@ export const socialAgentDebugApi = {
 
   getCurrentTask: () =>
     api
-      .requestProtected<SocialAgentCurrentTaskSnapshot | null>('/social-agent/tasks/current')
+      .requestProtected<SocialAgentCurrentTaskSnapshot | null>(
+        fitMeetCoreEndpoints.socialAgentTasks.current,
+      )
       .then(sanitizeSocialAgentResponse),
 
   getTaskTimeline: (taskId: number) =>
     api
-      .requestProtected<SocialAgentTaskTimelineSnapshot>(`/social-agent/tasks/${taskId}/timeline`)
+      .requestProtected<SocialAgentTaskTimelineSnapshot>(
+        fitMeetCoreEndpoints.socialAgentTasks.timeline(taskId),
+      )
       .then(sanitizeSocialAgentResponse),
 
   getSession: () =>

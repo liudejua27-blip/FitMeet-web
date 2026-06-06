@@ -70,6 +70,7 @@ Core launch endpoints currently covered:
 - Feed: `GET/POST /feed`, `/feed/interactions`, `/feed/{id}/like`, `/feed/{id}/save`, comments
 - Messages: `/messages/start`, `/messages/public-intents/{id}/start`, `/messages/conversations`, `/messages/conversations/{conversationId}`, `/messages/conversations/{conversationId}/send`, `/messages/unread`
 - Social Agent chat: `/social-agent/chat/messages`, `/route-message`, `/stream`, `/stream-user`, `/session`, task session/message/action/candidate endpoints
+- Social Agent workspace reads: `/social-agent/tasks/current`, `/social-agent/tasks/{taskId}/timeline`
 - Uploads: `/uploads/image`, `/uploads/video`
 
 ## Missing Or Broken Interfaces
@@ -137,6 +138,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - DB risk: production schema drift may exist if older deployments used `synchronize`; verify migration status against staging before production.
 - Contract risk: Web legacy APIs outside `fitmeet-core.openapi.ts` can drift because only the core launch subset is contract-tested.
 - Error contract risk has been reduced for the shared launch subset: OpenAPI now documents the stable error envelope for auth, feed, messages, Social Agent chat, SSE, and uploads instead of only happy paths.
+- Social Agent workspace restore risk has been reduced: Web current-task and task-timeline reads are now part of the shared core OpenAPI contract and typed Web endpoint registry instead of living as untracked debug API strings.
 - Auth risk: production SMS/WeChat provider configuration must be present; mock WeChat login is dev-only, failed production SMS dispatch must not persist usable verification codes, WeChat OAuth redirects must be explicit HTTPS URLs, and refresh token rotation must keep stale tokens from being reused.
 - iOS release risk: staging E2E requires real credentials, a second message target user, object storage, and a deployed backend; it cannot pass in a credential-free local run.
 - Performance risk: 1000-concurrency smoke scripts exist, but no current local/staging result is recorded yet.

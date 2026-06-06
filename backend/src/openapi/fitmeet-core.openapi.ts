@@ -781,6 +781,62 @@ export const fitMeetCoreOpenApi = {
         },
       },
     },
+    '/social-agent/tasks/current': {
+      get: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentGetCurrentTask',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description:
+              'Current restorable Social Agent task for the authenticated user',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    {
+                      $ref: '#/components/schemas/SocialAgentCurrentTaskSnapshot',
+                    },
+                    { type: 'null' },
+                  ],
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/tasks/{taskId}/timeline': {
+      get: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentGetTaskTimeline',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Restored Social Agent task timeline for the authenticated owner',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentTaskTimelineSnapshot',
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
     '/social-agent/chat/tasks/{taskId}/messages': {
       post: {
         tags: ['social-agent-chat'],
@@ -1444,6 +1500,67 @@ export const fitMeetCoreOpenApi = {
             type: 'array',
             items: { type: 'object', additionalProperties: true },
           },
+          restoredAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      SocialAgentCurrentTaskSnapshot: {
+        type: 'object',
+        required: [
+          'taskId',
+          'status',
+          'taskType',
+          'title',
+          'goal',
+          'memory',
+          'result',
+          'updatedAt',
+          'createdAt',
+        ],
+        additionalProperties: true,
+        properties: {
+          taskId: { type: 'integer' },
+          status: { type: 'string' },
+          agentState: { type: 'string' },
+          taskType: { type: 'string' },
+          title: { type: 'string' },
+          goal: { type: 'string' },
+          memory: { type: 'object', additionalProperties: true },
+          result: { type: 'object', additionalProperties: true },
+          updatedAt: { type: 'string', format: 'date-time' },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      SocialAgentTaskTimelineSnapshot: {
+        type: 'object',
+        required: ['taskId', 'messages', 'task', 'restoredAt'],
+        additionalProperties: true,
+        properties: {
+          taskId: { type: 'integer' },
+          messages: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          task: { type: 'object', additionalProperties: true },
+          memory: { type: 'object', additionalProperties: true },
+          result: {
+            type: 'object',
+            nullable: true,
+            additionalProperties: true,
+          },
+          events: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          latestRun: {
+            type: 'object',
+            nullable: true,
+            additionalProperties: true,
+          },
+          pendingApprovals: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          candidateActions: { type: 'object', additionalProperties: true },
           restoredAt: { type: 'string', format: 'date-time' },
         },
       },

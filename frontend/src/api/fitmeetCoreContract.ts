@@ -54,6 +54,11 @@ export const fitMeetCoreEndpoints = {
     connectCandidate: (taskId: number) =>
       `/social-agent/chat/tasks/${taskId}/connect-candidate` as const,
   },
+  socialAgentTasks: {
+    current: '/social-agent/tasks/current',
+    timeline: (taskId: number) =>
+      `/social-agent/tasks/${taskId}/timeline` as const,
+  },
   uploads: {
     image: '/uploads/image',
     video: '/uploads/video',
@@ -105,6 +110,10 @@ export const fitMeetCoreEndpointTemplates = {
     sendCandidateMessage: '/social-agent/chat/tasks/{taskId}/send-message',
     connectCandidate: '/social-agent/chat/tasks/{taskId}/connect-candidate',
   },
+  socialAgentTasks: {
+    current: '/social-agent/tasks/current',
+    timeline: '/social-agent/tasks/{taskId}/timeline',
+  },
   uploads: {
     image: '/uploads/image',
     video: '/uploads/video',
@@ -126,4 +135,5 @@ export type FitMeetCoreStaticEndpoint =
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['stream']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['streamUser']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['session']
+  | (typeof fitMeetCoreEndpoints.socialAgentTasks)['current']
   | (typeof fitMeetCoreEndpoints.uploads)[keyof typeof fitMeetCoreEndpoints.uploads];
