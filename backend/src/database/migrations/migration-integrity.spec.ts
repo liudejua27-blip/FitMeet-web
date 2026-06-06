@@ -76,6 +76,29 @@ describe('database migration integrity', () => {
       expect(migration.source).toMatch(/public async down\(/);
     }
   });
+
+  it('keeps enum value additions outside TypeORM migration transactions', () => {
+    for (const migration of migrations) {
+      const addsPostgresEnumValue = /ALTER\s+TYPE[\s\S]+ADD\s+VALUE/i.test(
+        migration.source,
+      );
+      if (!addsPostgresEnumValue) continue;
+
+      expect(migration.source).toMatch(/transaction\s*=\s*false\s+as\s+const/);
+    }
+  });
+
+  it('only opts out of migration transactions for documented Postgres enum value additions', () => {
+    for (const migration of migrations) {
+      const disablesTransaction = /transaction\s*=\s*false\s+as\s+const/.test(
+        migration.source,
+      );
+      if (!disablesTransaction) continue;
+
+      expect(migration.source).toMatch(/ALTER\s+TYPE[\s\S]+ADD\s+VALUE/i);
+      expect(migration.source).toMatch(/ALTER TYPE.*ADD VALUE|ADD VALUE/i);
+    }
+  });
 });
 
 function loadMigrationSources(): MigrationSource[] {

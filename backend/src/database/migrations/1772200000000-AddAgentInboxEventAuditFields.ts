@@ -2,6 +2,12 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class AddAgentInboxEventAuditFields1772200000000 implements MigrationInterface {
   name = 'AddAgentInboxEventAuditFields1772200000000';
+  /**
+   * `ALTER TYPE ... ADD VALUE` can fail inside a transaction on older
+   * Postgres versions. Keep this migration aligned with TypeORM's per-file
+   * transaction opt-out contract.
+   */
+  transaction = false as const;
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`

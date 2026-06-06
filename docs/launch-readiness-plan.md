@@ -88,6 +88,7 @@ Core launch endpoints currently covered:
 - TypeORM migrations exist and can bootstrap from an empty Postgres database, starting with `1700000000000-InitialSchemaBaseline.ts`.
 - Recent launch-critical schema areas already have migrations: user social profile, profile privacy, Social Agent runtime/tasks/events/timeline, long-term memory, Life Graph, waitlist, and FitMeet Agent runtime.
 - `1774400000000-AddSocialRequestCandidateUniqueness.ts` adds the `(socialRequestId, candidateUserId)` unique index for `social_request_candidates`, with a non-destructive duplicate preflight so retrying Agent searches cannot create duplicate candidate rows.
+- Static migration integrity now guards Postgres enum value additions: every migration containing `ALTER TYPE ... ADD VALUE` must opt out of TypeORM's per-file transaction wrapper with `transaction = false as const`.
 - Remaining schema audit item: verify every currently registered entity has an equivalent migration in a disposable empty Postgres database, then compare `typeorm schema:log` output. Static tests now guard TypeORM discovery/config drift, but this live empty-database diff is still required before production migration approval.
 - MongoDB collections are created by Mongoose models and are not migration-managed. Message, conversation, and Agent inbox event schemas now declare compound indexes for the Web/iOS conversation list, message history, unread count, Agent inbox, and recent Agent signal queries. Before launch, confirm those indexes exist on the deployed Mongo database because production `autoIndex` behavior may be disabled.
 - Redis has no schema migration, but production must enforce password/TLS/network isolation outside app code.
@@ -139,6 +140,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - Highest backend risk: large Social Agent services remain complex, especially `social-agent-tool-executor.service.ts` and `social-agent-candidate-pool.service.ts`; the tool executor now has enum-to-dispatch coverage and TypeScript exhaustiveness guards so newly added tools cannot silently miss a real execution branch.
 - Candidate pool authorization risk has been reduced: Social Agent candidate searches now require `socialRequestId` to belong to the authenticated owner before using its query context or persisting candidate rows.
 - Candidate persistence idempotency risk has been reduced with a database-level unique index for `(socialRequestId, candidateUserId)`; the service also reuses the existing candidate row on Postgres unique-conflict races, and production must inspect duplicates before applying the migration if historical data exists.
+- Enum migration rollout risk has been reduced: all migrations that add Postgres enum values now explicitly run outside the TypeORM transaction wrapper, and `migration-integrity.spec.ts` prevents new `ADD VALUE` migrations from missing this setting.
 - Social Agent chat entrypoint risk has been reduced to thin facade services; profile extraction prompt/normalization has been split out of the LLM service; timeline message restoration still needs continued focused tests because it is shared by Web and iOS session restore.
 - DB risk: production schema drift may exist if older deployments used `synchronize`; verify migration status against staging before production.
 - Mongo index risk has been reduced in code for message/realtime reads, but production must still verify deployed Mongo indexes for `conversations`, `messages`, and `agentinboxevents` before load testing.
@@ -278,6 +280,7 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- logging.interceptor.spec.ts`
 - Passed: backend `pnpm --dir backend test -- http-exception.filter.spec.ts logging.interceptor.spec.ts`
 - Passed: backend `pnpm --dir backend test -- migration-integrity.spec.ts`
+- Passed: backend `pnpm --dir backend test -- migration-integrity.spec.ts typeorm-launch-config.contract.spec.ts` after adding the enum `ADD VALUE` transaction opt-out guard.
 - Passed: backend `pnpm --dir backend seed:living-social-data:dry-run` after adding the no-database demo seed baseline check for 50 local Web/iOS test users, profiles, and public requests.
 - Passed: backend `pnpm --dir backend test -- migration-integrity.spec.ts typeorm-launch-config.contract.spec.ts`
 - Passed: `bash -n scripts/release-preflight.sh`
