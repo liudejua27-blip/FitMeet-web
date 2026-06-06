@@ -295,6 +295,30 @@ describe('SocialAgentCandidatePoolService', () => {
     ).toBeLessThan(result.candidates[0].matchScore);
   });
 
+  it('rejects socialRequestId that does not belong to the owner', async () => {
+    const { service, candidates } = makeService({
+      profiles: [profile(2)],
+      socialRequests: [
+        {
+          id: 301,
+          userId: 2,
+          city: '青岛',
+          rawText: '青岛周末咖啡',
+          interestTags: ['咖啡'],
+        },
+      ],
+    });
+
+    await expect(
+      service.searchSocial({
+        ownerUserId: 1,
+        socialRequestId: 301,
+        city: '青岛',
+      }),
+    ).rejects.toThrow('Social request not found');
+    expect(candidates.save).not.toHaveBeenCalled();
+  });
+
   it('activity_search returns real social_activities first', async () => {
     const { service } = makeService({
       activities: [
@@ -466,6 +490,15 @@ describe('SocialAgentCandidatePoolService', () => {
   it('persists real candidate rows when a socialRequestId is present', async () => {
     const { service, candidates } = makeService({
       profiles: [profile(2)],
+      socialRequests: [
+        {
+          id: 301,
+          userId: 1,
+          city: '青岛',
+          rawText: '青岛周末咖啡',
+          interestTags: ['咖啡'],
+        },
+      ],
     });
 
     const result = await service.searchSocial({
@@ -487,6 +520,15 @@ describe('SocialAgentCandidatePoolService', () => {
   it('productizes mahjong confirmation risk into candidate risk and persisted rows', async () => {
     const { service, candidates } = makeService({
       profiles: [profile(2, { interestTags: ['麻将'], city: '青岛' })],
+      socialRequests: [
+        {
+          id: 301,
+          userId: 1,
+          city: '青岛',
+          rawText: '找麻将搭子，先确认是否涉钱和公开地点',
+          interestTags: ['麻将'],
+        },
+      ],
     });
 
     const result = await service.searchSocial({

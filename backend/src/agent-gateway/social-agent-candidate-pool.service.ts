@@ -429,8 +429,11 @@ export class SocialAgentCandidatePoolService {
     const socialRequestId = this.number(input.socialRequestId);
     if (socialRequestId) {
       request = await this.userSocialRequestRepo.findOne({
-        where: { id: socialRequestId },
+        where: { id: socialRequestId, userId: input.ownerUserId },
       });
+      if (!request) {
+        throw new NotFoundException('Social request not found');
+      }
     }
 
     let task: AgentTask | null = null;
