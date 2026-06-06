@@ -26,9 +26,9 @@ export const fitMeetCoreEndpoints = {
     startConversation: '/messages/start',
     getConversations: '/messages/conversations',
     getConversationMessages: (conversationId: string) =>
-      `/messages/conversations/${conversationId}` as const,
+      `/messages/conversations/${encodeURIComponent(conversationId)}` as const,
     sendConversationMessage: (conversationId: string) =>
-      `/messages/conversations/${conversationId}/send` as const,
+      `/messages/conversations/${encodeURIComponent(conversationId)}/send` as const,
     startPublicIntentConversation: (publicIntentId: string) =>
       `/messages/public-intents/${encodeURIComponent(
         publicIntentId,

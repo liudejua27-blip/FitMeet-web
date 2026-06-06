@@ -22,8 +22,18 @@ describe('fitMeetCoreEndpoints', () => {
       fitMeetCoreEndpoints.messages.getConversationMessages('conv-123'),
     ).toBe('/messages/conversations/conv-123');
     expect(
+      fitMeetCoreEndpoints.messages.getConversationMessages(
+        'conversation:city run',
+      ),
+    ).toBe('/messages/conversations/conversation%3Acity%20run');
+    expect(
       fitMeetCoreEndpoints.messages.sendConversationMessage('conv-123'),
     ).toBe('/messages/conversations/conv-123/send');
+    expect(
+      fitMeetCoreEndpoints.messages.sendConversationMessage(
+        'conversation:city run',
+      ),
+    ).toBe('/messages/conversations/conversation%3Acity%20run/send');
     expect(
       fitMeetCoreEndpoints.messages.startPublicIntentConversation(
         'intent:city run',
@@ -169,13 +179,13 @@ describe('fitMeetCoreEndpoints', () => {
       },
       {
         built: fitMeetCoreEndpoints.messages.getConversationMessages(
-          'conv-123',
+          'conversation:city run',
         ),
         template: fitMeetCoreEndpointTemplates.messages.getConversationMessages,
       },
       {
         built: fitMeetCoreEndpoints.messages.sendConversationMessage(
-          'conv-123',
+          'conversation:city run',
         ),
         template: fitMeetCoreEndpointTemplates.messages.sendConversationMessage,
       },
@@ -272,6 +282,7 @@ function normalizeBuiltPath(path: string): string {
   return path
     .replace(/\/\d+(?=\/|$)/g, '/:param')
     .replace(/\/conv-[^/]+(?=\/|$)/g, '/:param')
+    .replace(/\/conversation%3Acity%20run(?=\/|$)/g, '/:param')
     .replace(/\/sar%3Acity%20run(?=\/|$)/g, '/:param')
     .replace(/\/intent%3Acity%20run(?=\/|$)/g, '/:param');
 }

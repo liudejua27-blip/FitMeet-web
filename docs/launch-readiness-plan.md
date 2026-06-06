@@ -154,7 +154,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - Feed publish validation risk has been reduced: post creation now rejects blank `type`, `sport`, or `text` before moderation/database writes, and the shared OpenAPI create-post schema documents the non-empty required strings used by iOS moment publishing.
 - Web feed pagination contract risk has been reduced: the Web API client now exposes `getFeedPage()` for the shared `/feed` `{ data, metadata }` response while preserving legacy `getFeed()` array behavior for existing pages.
 - Messages read/write risk has been reduced: shared Web/iOS conversation history reads now require a participant-scoped conversation match before querying messages, and invalid/blank user-message, Agent inbox, and Agent reply conversation inputs fail with stable 400 responses before Mongo reads or writes. Core OpenAPI now documents the message conversation 400 responses used by Web and iOS clients.
-- iOS message path risk has been reduced: `FitMeetCoreEndpoint.Messages` now percent-encodes dynamic `conversationId` path segments for conversation history and send-message calls, matching the existing run-status `runId` encoding behavior.
+- Web/iOS message path risk has been reduced: the Web typed core endpoint registry and `FitMeetCoreEndpoint.Messages` now percent-encode dynamic `conversationId` path segments for conversation history and send-message calls, matching the existing run-status `runId` encoding behavior.
 - Auth contract drift risk has been reduced: register, login, SMS send/verify, WeChat URL/login, refresh, and current-profile launch auth endpoints now have a controller-to-OpenAPI mapping guard in `app.controller.spec.ts`.
 - Auth risk: production SMS/WeChat provider configuration must be present; mock WeChat login is dev-only, failed production SMS dispatch must not persist usable verification codes, WeChat OAuth redirects must be explicit HTTPS URLs, and refresh token rotation must keep stale tokens from being reused.
 - iOS release risk: staging E2E requires real credentials, a second message target user, object storage, and a deployed backend; it cannot pass in a credential-free local run.
@@ -302,6 +302,7 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- migration-integrity.spec.ts`
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts`
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts` after adding the launch auth controller-to-OpenAPI mapping guard.
+- Passed: frontend `pnpm --dir frontend test -- fitmeetCoreContract.test.ts` after encoding Web dynamic message conversation paths.
 - Passed: backend `pnpm --dir backend test -- auth.service.spec.ts`
 - Passed: backend `pnpm --dir backend test -- auth.service.spec.ts production-env-readiness.spec.ts`
 - Passed: backend `pnpm --dir backend test -- uploads.service.spec.ts` after adding Aliyun OSS/S3 failure cleanup coverage.
