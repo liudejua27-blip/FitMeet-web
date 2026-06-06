@@ -46,6 +46,9 @@ async function main() {
   await api('/health');
   ok('Health endpoint is reachable');
 
+  await api('/ready');
+  ok('Readiness endpoint is reachable');
+
   const remoteContract = await api<JsonObject>('/openapi/fitmeet-core.json');
   assertCoreContract(remoteContract);
   ok('Runtime OpenAPI contract includes App core paths');
@@ -350,20 +353,40 @@ function assertCoreContract(contract: unknown) {
     '/auth/profile': ['get'],
     '/users/profile': ['put'],
     '/uploads/image': ['post'],
+    '/uploads/video': ['post'],
     '/feed': ['get', 'post'],
     '/feed/interactions': ['get'],
+    '/feed/{id}/like': ['post'],
+    '/feed/{id}/save': ['post'],
+    '/feed/{postId}/comments': ['get', 'post'],
+    '/feed/comments/{commentId}/like': ['post'],
     '/messages/start': ['post'],
+    '/messages/public-intents/{id}/start': ['post'],
     '/messages/conversations': ['get'],
     '/messages/conversations/{conversationId}': ['get'],
     '/messages/conversations/{conversationId}/send': ['post'],
     '/messages/unread': ['get'],
+    '/social-agent/chat/run': ['post'],
+    '/social-agent/chat/run-async': ['post'],
     '/social-agent/chat/session': ['get'],
     '/social-agent/chat/messages': ['post'],
     '/social-agent/chat/route-message': ['post'],
+    '/social-agent/chat/stream': ['post'],
+    '/social-agent/chat/stream-user': ['post'],
+    '/social-agent/chat/tasks/{taskId}/session': ['get'],
+    '/social-agent/chat/tasks/{taskId}/runs/{runId}': ['get'],
     '/social-agent/chat/tasks/{taskId}/messages': ['post'],
+    '/social-agent/chat/tasks/{taskId}/publish-social-request': ['post'],
+    '/social-agent/chat/tasks/{taskId}/replan-run': ['post'],
+    '/social-agent/chat/tasks/{taskId}/append-context': ['post'],
+    '/social-agent/chat/tasks/{taskId}/actions': ['post'],
     '/social-agent/chat/tasks/{taskId}/save-candidate': ['post'],
     '/social-agent/chat/tasks/{taskId}/send-message': ['post'],
     '/social-agent/chat/tasks/{taskId}/connect-candidate': ['post'],
+    '/social-agent/tasks/current': ['get'],
+    '/social-agent/tasks/{taskId}/timeline': ['get'],
+    '/social-agent/tasks/{taskId}/events': ['get'],
+    '/social-agent/tasks/{taskId}/replan': ['post'],
   };
 
   for (const [route, methods] of Object.entries(requiredPaths)) {

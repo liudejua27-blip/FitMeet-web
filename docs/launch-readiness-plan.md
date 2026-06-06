@@ -297,6 +297,7 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts` after adding Social Agent workspace publish, task replan, replan-run, append-context, and task-events OpenAPI coverage.
 - Passed: backend `pnpm --dir backend test -- production-deploy-readiness.spec.ts` after adding `/api/ready` to the production verifier and expanding the runtime OpenAPI path guard for Social Agent run/workspace actions.
 - Passed: `bash -n scripts/verify-production.sh`
+- Passed: `APP_SMOKE_DRY_RUN=true pnpm --dir backend smoke:app-core` after expanding the dry-run contract guard to cover readiness, feed/comment interactions, Social Agent run/run-status/workspace actions, and upload image/video paths.
 - Passed: backend `pnpm --dir backend lint`
 - Passed: backend `pnpm --dir backend build`
 - Passed: frontend `pnpm --dir frontend test -- feedClient.test.ts`
