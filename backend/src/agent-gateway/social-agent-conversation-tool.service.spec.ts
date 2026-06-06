@@ -6,6 +6,7 @@ import {
   AgentTaskPermissionMode,
 } from './entities/agent-task.entity';
 import { SocialAgentConversationToolService } from './social-agent-conversation-tool.service';
+import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 import { SocialAgentToolName } from './social-agent-tool.types';
 
@@ -34,10 +35,12 @@ function makeService() {
   const toolJsonModel = {
     callJson: jest.fn(),
   };
+  const toolInput = new SocialAgentToolInputParserService();
   const service = new SocialAgentConversationToolService(
     messages as never,
     toolJsonModel as never,
-    new SocialAgentToolInputParserService(),
+    toolInput,
+    new SocialAgentTaskMemoryService(toolInput),
   );
 
   return { service, messages, toolJsonModel };

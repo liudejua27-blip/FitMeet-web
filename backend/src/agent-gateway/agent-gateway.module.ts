@@ -62,6 +62,7 @@ import { SocialAgentActivityToolService } from './social-agent-activity-tool.ser
 import { SocialAgentInboxToolService } from './social-agent-inbox-tool.service';
 import { SocialAgentConversationToolService } from './social-agent-conversation-tool.service';
 import { SocialAgentDecisionToolService } from './social-agent-decision-tool.service';
+import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
 import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
 import { SocialAgentAutopilotService } from './social-agent-autopilot.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
@@ -283,6 +284,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentInboxToolService,
     SocialAgentConversationToolService,
     SocialAgentDecisionToolService,
+    SocialAgentTaskMemoryService,
     AgentWebhookService,
     AiSocialAutopilotService,
     AgentDiscoveryService,

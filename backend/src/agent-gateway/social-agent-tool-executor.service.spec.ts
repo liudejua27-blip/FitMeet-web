@@ -26,6 +26,7 @@ import { SocialAgentActivityToolService } from './social-agent-activity-tool.ser
 import { SocialAgentInboxToolService } from './social-agent-inbox-tool.service';
 import { SocialAgentConversationToolService } from './social-agent-conversation-tool.service';
 import { SocialAgentDecisionToolService } from './social-agent-decision-tool.service';
+import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
 
 type MockRepository<T extends object = Record<string, unknown>> = {
   findOne: jest.Mock<Promise<T | null>, [unknown?]>;
@@ -225,6 +226,7 @@ function makeService() {
     toolRegistry,
   );
   const toolInput = new SocialAgentToolInputParserService();
+  const taskMemory = new SocialAgentTaskMemoryService(toolInput);
   const paymentIntentTools = new SocialAgentPaymentIntentToolService(
     paymentIntentRepo as never,
     toolInput,
@@ -234,6 +236,7 @@ function makeService() {
     matchService as never,
     confirmationPolicy,
     toolInput,
+    taskMemory,
   );
   const activityTools = new SocialAgentActivityToolService(
     activities as never,
@@ -248,6 +251,7 @@ function makeService() {
     messages as never,
     toolJsonModel,
     toolInput,
+    taskMemory,
   );
   const decisionTools = new SocialAgentDecisionToolService(
     permissions,
@@ -255,7 +259,6 @@ function makeService() {
     toolCallFactory,
     toolInput,
   );
-
   const service = new SocialAgentToolExecutorService(
     taskRepo as never,
     eventRepo as never,
@@ -286,6 +289,7 @@ function makeService() {
     inboxTools,
     conversationTools,
     decisionTools,
+    taskMemory,
   );
 
   return {

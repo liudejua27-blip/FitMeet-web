@@ -5,9 +5,7 @@ import { SocialRequestCandidateStatus } from '../match/social-request-candidate.
 import { MessagesService } from '../messages/messages.service';
 import { AgentTask } from './entities/agent-task.entity';
 import {
-  appendSocialAgentLoopValue,
   buildSocialAgentMessageDedupeKey,
-  socialAgentLoopStringArray,
   type SocialAgentLoopMemory,
 } from './social-agent-loop-state';
 import {
@@ -16,6 +14,7 @@ import {
   buildSocialAgentMessageSendOptions,
 } from './social-agent-message-options';
 import { SocialAgentConfirmationPolicyService } from './social-agent-confirmation-policy.service';
+import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 import { SocialAgentToolName } from './social-agent-tool.types';
 
@@ -55,6 +54,7 @@ export class SocialAgentMessageToolService {
     private readonly matchService: MatchService,
     private readonly confirmationPolicy: SocialAgentConfirmationPolicyService,
     private readonly toolInput: SocialAgentToolInputParserService,
+    private readonly taskMemory: SocialAgentTaskMemoryService,
   ) {}
 
   async sendMessage(
@@ -71,12 +71,15 @@ export class SocialAgentMessageToolService {
     const targetUserId = this.toolInput.number(
       input.targetUserId ?? input.toUserId,
     );
-    const targetForDedupe = targetUserId ?? this.memoryTargetUserId(task);
+    const targetForDedupe =
+      targetUserId ?? this.taskMemory.memoryTargetUserId(task);
     const duplicateKey = buildSocialAgentMessageDedupeKey(
       targetForDedupe,
       text,
     );
-    if (this.hasSentMessageKey(task, duplicateKey)) {
+    if (
+      this.taskMemory.hasSocialLoopKey(task, 'sentMessageKeys', duplicateKey)
+    ) {
       return {
         output: {
           skipped: true,
@@ -84,10 +87,10 @@ export class SocialAgentMessageToolService {
           reason: 'duplicate_message_content',
           conversationId:
             conversationId ??
-            this.socialLoopMemory(task).conversationId ??
+            this.taskMemory.socialLoopMemory(task).conversationId ??
             null,
           targetUserId: targetForDedupe ?? null,
-          textPreview: this.preview(text),
+          textPreview: this.taskMemory.preview(text),
         },
       };
     }
@@ -124,7 +127,8 @@ export class SocialAgentMessageToolService {
     const output = this.toolInput.asRecord(message);
     const candidate = await this.markCandidateMessaged(task, input);
     const messageId = this.toolInput.string(output.id ?? output.messageId);
-    const memoryTargetUserId = targetUserId ?? this.memoryTargetUserId(task);
+    const memoryTargetUserId =
+      targetUserId ?? this.taskMemory.memoryTargetUserId(task);
 
     return {
       output: candidate ? { ...output, candidate } : output,
@@ -133,14 +137,18 @@ export class SocialAgentMessageToolService {
         targetUserId: memoryTargetUserId,
         lastMessageId: messageId,
         lastAgentMessageId: messageId,
-        sentMessageKeys: this.appendSentMessageKey(task, duplicateKey),
+        sentMessageKeys: this.taskMemory.appendSocialLoopKey(
+          task,
+          'sentMessageKeys',
+          duplicateKey,
+        ),
         sourceTool: SocialAgentToolName.SendMessage,
       },
       sentMessage: {
         id: messageId,
         conversationId,
         targetUserId: memoryTargetUserId,
-        textPreview: this.preview(text),
+        textPreview: this.taskMemory.preview(text),
         toolName: SocialAgentToolName.SendMessage,
         stepId,
       },
@@ -166,12 +174,14 @@ export class SocialAgentMessageToolService {
 
     const targetForDedupe =
       this.toolInput.number(input.targetUserId) ??
-      this.memoryTargetUserId(task);
+      this.taskMemory.memoryTargetUserId(task);
     const duplicateKey = buildSocialAgentMessageDedupeKey(
       targetForDedupe,
       text,
     );
-    if (this.hasSentMessageKey(task, duplicateKey)) {
+    if (
+      this.taskMemory.hasSocialLoopKey(task, 'sentMessageKeys', duplicateKey)
+    ) {
       return {
         output: {
           skipped: true,
@@ -179,7 +189,7 @@ export class SocialAgentMessageToolService {
           reason: 'duplicate_message_content',
           conversationId,
           targetUserId: targetForDedupe ?? null,
-          textPreview: this.preview(text),
+          textPreview: this.taskMemory.preview(text),
         },
       };
     }
@@ -197,7 +207,7 @@ export class SocialAgentMessageToolService {
     const targetUserId =
       this.toolInput.number(output.recipientUserId) ??
       this.toolInput.number(input.targetUserId) ??
-      this.memoryTargetUserId(task);
+      this.taskMemory.memoryTargetUserId(task);
     const messageId = this.toolInput.string(output.id ?? output.messageId);
 
     return {
@@ -207,14 +217,18 @@ export class SocialAgentMessageToolService {
         targetUserId,
         lastMessageId: messageId,
         lastAgentMessageId: messageId,
-        sentMessageKeys: this.appendSentMessageKey(task, duplicateKey),
+        sentMessageKeys: this.taskMemory.appendSocialLoopKey(
+          task,
+          'sentMessageKeys',
+          duplicateKey,
+        ),
         sourceTool: SocialAgentToolName.ReplyMessage,
       },
       sentMessage: {
         id: messageId,
         conversationId,
         targetUserId,
-        textPreview: this.preview(text),
+        textPreview: this.taskMemory.preview(text),
         toolName: SocialAgentToolName.ReplyMessage,
         stepId,
       },
@@ -224,12 +238,12 @@ export class SocialAgentMessageToolService {
           conversationId,
           messageId: messageId ?? null,
           fromUserId: targetUserId ?? null,
-          contentPreview: this.preview(text),
+          contentPreview: this.taskMemory.preview(text),
           metadata: {
             agentTaskId: task.id,
             stepId,
             toolName: SocialAgentToolName.ReplyMessage,
-            textPreview: this.preview(text),
+            textPreview: this.taskMemory.preview(text),
             output,
           },
         },
@@ -270,35 +284,5 @@ export class SocialAgentMessageToolService {
       );
       return null;
     }
-  }
-
-  private socialLoopMemory(task: AgentTask): SocialAgentLoopMemory {
-    const memory = this.toolInput.isRecord(task.memory) ? task.memory : {};
-    return this.toolInput.isRecord(memory.socialLoop)
-      ? (memory.socialLoop as SocialAgentLoopMemory)
-      : {};
-  }
-
-  private memoryTargetUserId(task: AgentTask): number | null {
-    return this.socialLoopMemory(task).targetUserId ?? null;
-  }
-
-  private hasSentMessageKey(task: AgentTask, key: string): boolean {
-    return socialAgentLoopStringArray(
-      this.socialLoopMemory(task).sentMessageKeys,
-    ).includes(key);
-  }
-
-  private appendSentMessageKey(task: AgentTask, key: string): string[] {
-    return appendSocialAgentLoopValue(
-      socialAgentLoopStringArray(this.socialLoopMemory(task).sentMessageKeys),
-      key,
-    );
-  }
-
-  private preview(value: unknown, max = 160): string {
-    const text = this.toolInput.string(value) ?? '';
-    if (text.length <= max) return text;
-    return `${text.slice(0, max - 1)}…`;
   }
 }

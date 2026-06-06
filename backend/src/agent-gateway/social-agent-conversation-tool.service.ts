@@ -13,6 +13,7 @@ import {
   buildFallbackSocialAgentReplySummary,
   buildSocialAgentReplySummaryPrompt,
 } from './social-agent-next-action-decision';
+import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
 import { SocialAgentToolName } from './social-agent-tool.types';
@@ -52,6 +53,7 @@ export class SocialAgentConversationToolService {
     private readonly messages: MessagesService,
     private readonly toolJsonModel: SocialAgentToolJsonModelService,
     private readonly toolInput: SocialAgentToolInputParserService,
+    private readonly taskMemory: SocialAgentTaskMemoryService,
   ) {}
 
   async readTaskConversationMessages(
@@ -64,7 +66,7 @@ export class SocialAgentConversationToolService {
       throw new BadRequestException('agentConnectionId is required');
     }
 
-    const loop = this.socialLoopMemory(task);
+    const loop = this.taskMemory.socialLoopMemory(task);
     const conversationId =
       this.toolInput.string(input.conversationId) ?? loop.conversationId;
     if (!conversationId) {
@@ -143,7 +145,7 @@ export class SocialAgentConversationToolService {
                 this.toolInput.number(latest.senderId) ??
                 loop.targetUserId ??
                 null,
-              contentPreview: this.preview(latest.text),
+              contentPreview: this.taskMemory.preview(latest.text),
               metadata: {
                 agentTaskId: task.id,
                 conversationId,
@@ -161,7 +163,7 @@ export class SocialAgentConversationToolService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<SocialAgentConversationToolResult> {
-    const loop = this.socialLoopMemory(task);
+    const loop = this.taskMemory.socialLoopMemory(task);
     const messages = toSocialAgentMessageArray(
       input.messages ?? loop.latestReceivedMessages,
     );
@@ -184,7 +186,7 @@ export class SocialAgentConversationToolService {
       },
       shortTermUpdates: {
         replySummary: summary,
-        currentStep: this.shortTermStep(
+        currentStep: this.taskMemory.shortTermStep(
           'summarize_reply',
           '已总结对方回复',
           'done',
@@ -206,27 +208,5 @@ export class SocialAgentConversationToolService {
         },
       },
     };
-  }
-
-  private socialLoopMemory(task: AgentTask): SocialAgentLoopMemory {
-    const memory = this.toolInput.isRecord(task.memory) ? task.memory : {};
-    return this.toolInput.isRecord(memory.socialLoop)
-      ? (memory.socialLoop as SocialAgentLoopMemory)
-      : {};
-  }
-
-  private shortTermStep(id: string, label: string, status: string) {
-    return {
-      id,
-      label,
-      status,
-      updatedAt: new Date().toISOString(),
-    };
-  }
-
-  private preview(value: unknown, max = 160): string {
-    const text = this.toolInput.string(value) ?? '';
-    if (text.length <= max) return text;
-    return `${text.slice(0, max - 1)}…`;
   }
 }

@@ -35,22 +35,8 @@ import {
 import { AgentPermissionService } from './agent-permission.service';
 import { AgentApprovalDispatcherService } from './agent-approval-dispatcher.service';
 import { AgentApprovalService } from './agent-approval.service';
-import {
-  appendShortTermMemoryItem,
-  readSocialAgentTaskMemory,
-  rememberSocialAgentShortTerm,
-  shortTermMemoryList,
-} from './social-agent-memory.util';
-import {
-  appendSocialAgentLoopValue,
-  socialAgentLoopStringArray,
-  toSocialAgentMessageArray,
-} from './social-agent-loop-state';
-import type {
-  SocialAgentLoopKeyField,
-  SocialAgentLoopMemory as SocialLoopMemory,
-  SocialAgentMessageRecord as AgentMessageRecord,
-} from './social-agent-loop-state';
+import { rememberSocialAgentShortTerm } from './social-agent-memory.util';
+import { toSocialAgentMessageArray } from './social-agent-loop-state';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SceneRiskPolicyResult } from './scene-risk-policy.service';
@@ -92,6 +78,7 @@ import {
   SocialAgentDecisionToolService,
   type SocialAgentDecisionToolResult,
 } from './social-agent-decision-tool.service';
+import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -146,6 +133,7 @@ export class SocialAgentToolExecutorService {
     private readonly inboxTools: SocialAgentInboxToolService,
     private readonly conversationTools: SocialAgentConversationToolService,
     private readonly decisionTools: SocialAgentDecisionToolService,
+    private readonly taskMemory: SocialAgentTaskMemoryService,
   ) {}
 
   async executeTask(
@@ -212,7 +200,7 @@ export class SocialAgentToolExecutorService {
       failedSteps + blockedSteps === 0 &&
       this.toolCallFactory.hasNoRemainingExecutableSteps(task.plan)
     ) {
-      if (this.shouldWaitForReply(task)) {
+      if (this.taskMemory.shouldWaitForReply(task)) {
         task.status = AgentTaskStatus.WaitingReply;
         task.statusReason = 'waiting_for_counterpart_reply';
         task.completedAt = null;
@@ -502,10 +490,10 @@ export class SocialAgentToolExecutorService {
     });
 
     if (call.status === 'succeeded') {
-      task.status = this.shouldWaitForReply(task)
+      task.status = this.taskMemory.shouldWaitForReply(task)
         ? AgentTaskStatus.WaitingReply
         : AgentTaskStatus.WaitingResult;
-      task.statusReason = this.shouldWaitForReply(task)
+      task.statusReason = this.taskMemory.shouldWaitForReply(task)
         ? 'action_executed_waiting_reply'
         : 'action_executed_waiting_result';
     } else {
@@ -589,7 +577,7 @@ export class SocialAgentToolExecutorService {
           toolCallId: callId,
           payload: {
             toolName,
-            inputSummary: this.preview(
+            inputSummary: this.taskMemory.preview(
               this.toolInput.safeUnknownText(input),
               240,
             ),
@@ -625,7 +613,7 @@ export class SocialAgentToolExecutorService {
         toolCallId: callId,
         payload: {
           toolName,
-          inputSummary: this.preview(
+          inputSummary: this.taskMemory.preview(
             this.toolInput.safeUnknownText(input),
             240,
           ),
@@ -668,7 +656,7 @@ export class SocialAgentToolExecutorService {
         toolCallId: callId,
         payload: {
           toolName,
-          inputSummary: this.preview(
+          inputSummary: this.taskMemory.preview(
             this.toolInput.safeUnknownText(input),
             240,
           ),
@@ -700,7 +688,7 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.UpdateProfileFromAgentContext:
         return this.updateProfileFromAgentContext(task, input);
       case SocialAgentToolName.GetCurrentTaskMemory:
-        return this.getCurrentTaskMemory(task);
+        return this.taskMemory.currentTaskMemory(task);
       case SocialAgentToolName.PublishSocialRequest:
         return this.createSocialRequest(task, {
           ...input,
@@ -1005,26 +993,6 @@ export class SocialAgentToolExecutorService {
     };
   }
 
-  private getCurrentTaskMemory(task: AgentTask): Record<string, unknown> {
-    const memory = this.toolInput.isRecord(task.memory) ? task.memory : {};
-    return {
-      taskId: task.id,
-      ownerUserId: task.ownerUserId,
-      status: task.status,
-      goal: task.goal,
-      permissionMode: task.permissionMode,
-      taskMemory: readSocialAgentTaskMemory(task),
-      shortTerm: this.toolInput.isRecord(memory.shortTerm)
-        ? memory.shortTerm
-        : {},
-      socialLoop: this.socialLoopMemory(task),
-      recentToolCalls: Array.isArray(task.toolCalls)
-        ? task.toolCalls.slice(-10)
-        : [],
-      result: this.toolInput.isRecord(task.result) ? task.result : {},
-    };
-  }
-
   private async createSocialRequest(
     task: AgentTask,
     input: Record<string, unknown>,
@@ -1302,8 +1270,10 @@ export class SocialAgentToolExecutorService {
     stepId: string,
   ): Promise<unknown> {
     const result = await this.messageTools.sendMessage(task, input, stepId);
-    if (result.loopUpdates) this.rememberConversation(task, result.loopUpdates);
-    if (result.sentMessage) this.rememberSentMessage(task, result.sentMessage);
+    if (result.loopUpdates)
+      this.taskMemory.rememberConversation(task, result.loopUpdates);
+    if (result.sentMessage)
+      this.taskMemory.rememberSentMessage(task, result.sentMessage);
     return result.output;
   }
 
@@ -1364,7 +1334,7 @@ export class SocialAgentToolExecutorService {
     );
     const conversationId = this.toolInput.string(conversation.conversationId);
     if (conversationId) {
-      this.rememberConversation(task, {
+      this.taskMemory.rememberConversation(task, {
         conversationId,
         targetUserId,
         sourceTool: SocialAgentToolName.AddFriend,
@@ -1423,8 +1393,10 @@ export class SocialAgentToolExecutorService {
       toolName,
       stepId,
     );
-    if (result.loopUpdates) this.rememberConversation(task, result.loopUpdates);
-    if (result.sentMessage) this.rememberSentMessage(task, result.sentMessage);
+    if (result.loopUpdates)
+      this.taskMemory.rememberConversation(task, result.loopUpdates);
+    if (result.sentMessage)
+      this.taskMemory.rememberSentMessage(task, result.sentMessage);
     return result.output;
   }
 
@@ -1510,7 +1482,7 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    const memory = this.getCurrentTaskMemory(task);
+    const memory = this.taskMemory.currentTaskMemory(task);
     const summary = {
       taskId: task.id,
       title: task.title,
@@ -1558,8 +1530,10 @@ export class SocialAgentToolExecutorService {
     stepId: string,
   ): Promise<unknown> {
     const result = await this.messageTools.replyMessage(task, input, stepId);
-    if (result.loopUpdates) this.rememberConversation(task, result.loopUpdates);
-    if (result.sentMessage) this.rememberSentMessage(task, result.sentMessage);
+    if (result.loopUpdates)
+      this.taskMemory.rememberConversation(task, result.loopUpdates);
+    if (result.sentMessage)
+      this.taskMemory.rememberSentMessage(task, result.sentMessage);
     if (result.inboxEvent) {
       await this.writeSocialAgentInboxEvent(
         task,
@@ -1574,7 +1548,7 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     result: SocialAgentDecisionToolResult,
   ): Promise<unknown> {
-    this.rememberConversation(task, result.loopUpdates);
+    this.taskMemory.rememberConversation(task, result.loopUpdates);
     rememberSocialAgentShortTerm(task, result.shortTermUpdates);
     await this.writeSocialAgentInboxEvent(
       task,
@@ -1589,9 +1563,14 @@ export class SocialAgentToolExecutorService {
     result: SocialAgentConversationToolResult,
     stepId: string,
   ): Promise<unknown> {
-    if (result.loopUpdates) this.rememberConversation(task, result.loopUpdates);
+    if (result.loopUpdates)
+      this.taskMemory.rememberConversation(task, result.loopUpdates);
     if (result.receivedMessages && result.receivedMessages.length > 0) {
-      this.rememberReceivedReplies(task, result.receivedMessages, stepId);
+      this.taskMemory.rememberReceivedReplies(
+        task,
+        result.receivedMessages,
+        stepId,
+      );
     }
     if (result.shortTermUpdates) {
       rememberSocialAgentShortTerm(task, result.shortTermUpdates);
@@ -1620,7 +1599,7 @@ export class SocialAgentToolExecutorService {
   ): Promise<unknown> {
     const result = await this.paymentIntentTools.record(task, input, stepId);
     if (result.paymentIntentKeys) {
-      this.rememberConversation(task, {
+      this.taskMemory.rememberConversation(task, {
         paymentIntentKeys: result.paymentIntentKeys,
         sourceTool: SocialAgentToolName.Payment,
       });
@@ -1667,152 +1646,6 @@ export class SocialAgentToolExecutorService {
     };
   }
 
-  private shouldWaitForReply(task: AgentTask): boolean {
-    const loop = this.socialLoopMemory(task);
-    return Boolean(loop.conversationId && loop.lastAgentMessageId);
-  }
-
-  private rememberConversation(
-    task: AgentTask,
-    updates: Partial<SocialLoopMemory>,
-  ): void {
-    const memory = this.toolInput.isRecord(task.memory) ? task.memory : {};
-    const previous = this.toolInput.isRecord(memory.socialLoop)
-      ? (memory.socialLoop as SocialLoopMemory)
-      : {};
-    const next: SocialLoopMemory = {
-      ...previous,
-      ...updates,
-      taskId: task.id,
-      updatedAt: new Date().toISOString(),
-    };
-    task.memory = {
-      ...memory,
-      socialLoop: next,
-    };
-    rememberSocialAgentShortTerm(task, {
-      conversationId: next.conversationId ?? null,
-      targetUserId: next.targetUserId ?? null,
-      lastMessageId: next.lastMessageId ?? null,
-      lastAgentMessageId: next.lastAgentMessageId ?? null,
-      lastReceivedMessageId: next.lastReceivedMessageId ?? null,
-      lastReadMessageId: next.lastReadMessageId ?? null,
-    });
-  }
-
-  private rememberSentMessage(
-    task: AgentTask,
-    input: {
-      id?: string | null;
-      conversationId: string;
-      targetUserId?: number | null;
-      textPreview: string;
-      toolName: SocialAgentToolName;
-      stepId: string;
-    },
-  ): void {
-    const message = {
-      id: input.id ?? `${input.stepId}:${Date.now()}`,
-      conversationId: input.conversationId,
-      targetUserId: input.targetUserId ?? null,
-      textPreview: input.textPreview,
-      toolName: input.toolName,
-      stepId: input.stepId,
-      sentAt: new Date().toISOString(),
-    };
-    rememberSocialAgentShortTerm(task, {
-      conversationId: input.conversationId,
-      targetUserId: input.targetUserId ?? null,
-      currentStep: this.shortTermStep(
-        input.stepId,
-        `已执行 ${input.toolName}`,
-        'done',
-      ),
-      sentMessages: appendShortTermMemoryItem(
-        task,
-        'sentMessages',
-        message,
-        30,
-      ),
-    });
-  }
-
-  private rememberReceivedReplies(
-    task: AgentTask,
-    messages: AgentMessageRecord[],
-    stepId: string,
-  ): void {
-    let receivedReplies = shortTermMemoryList<Record<string, unknown>>(
-      task,
-      'receivedReplies',
-    );
-    for (const message of messages) {
-      const id =
-        this.toolInput.string(message.id) ??
-        `${stepId}:${receivedReplies.length}`;
-      const reply = {
-        id,
-        conversationId:
-          this.toolInput.string(message.conversationId) ??
-          this.socialLoopMemory(task).conversationId ??
-          null,
-        fromUserId: this.toolInput.number(message.senderId) ?? null,
-        textPreview: this.preview(message.text),
-        receivedAt: new Date().toISOString(),
-      };
-      receivedReplies = [
-        ...receivedReplies.filter((item) => item.id !== id),
-        reply,
-      ].slice(-30);
-    }
-    rememberSocialAgentShortTerm(task, {
-      receivedReplies,
-      currentStep: this.shortTermStep(stepId, '已读取对方回复', 'done'),
-    });
-  }
-
-  private shortTermStep(id: string, label: string, status: string) {
-    return {
-      id,
-      label,
-      status,
-      updatedAt: new Date().toISOString(),
-    };
-  }
-
-  private socialLoopMemory(task: AgentTask): SocialLoopMemory {
-    const memory = this.toolInput.isRecord(task.memory) ? task.memory : {};
-    return this.toolInput.isRecord(memory.socialLoop)
-      ? (memory.socialLoop as SocialLoopMemory)
-      : {};
-  }
-
-  private memoryTargetUserId(task: AgentTask): number | null {
-    return this.socialLoopMemory(task).targetUserId ?? null;
-  }
-
-  private hasSocialLoopKey(
-    task: AgentTask,
-    field: SocialAgentLoopKeyField,
-    key: string,
-  ): boolean {
-    const values = socialAgentLoopStringArray(
-      this.socialLoopMemory(task)[field],
-    );
-    return values.includes(key);
-  }
-
-  private appendSocialLoopKey(
-    task: AgentTask,
-    field: SocialAgentLoopKeyField,
-    key: string,
-  ): string[] {
-    return appendSocialAgentLoopValue(
-      socialAgentLoopStringArray(this.socialLoopMemory(task)[field]),
-      key,
-    );
-  }
-
   private async writeSocialAgentInboxEvent(
     task: AgentTask,
     eventType: string,
@@ -1833,7 +1666,7 @@ export class SocialAgentToolExecutorService {
       conversationId: input.conversationId ?? null,
       messageId: input.messageId ?? null,
       fromUserId: input.fromUserId ?? null,
-      contentPreview: this.preview(input.contentPreview),
+      contentPreview: this.taskMemory.preview(input.contentPreview),
       unread: true,
       dedupeKey: `${task.agentConnectionId}:${eventType}:${task.id}:${stable}`,
       metadata: {
@@ -1842,12 +1675,6 @@ export class SocialAgentToolExecutorService {
         eventType,
       },
     });
-  }
-
-  private preview(value: unknown, max = 160): string {
-    const text = this.toolInput.string(value) ?? '';
-    if (text.length <= max) return text;
-    return `${text.slice(0, max - 1)}…`;
   }
 
   private async recordActionSideEffects(

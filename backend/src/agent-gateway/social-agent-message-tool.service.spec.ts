@@ -5,6 +5,7 @@ import {
   AgentTaskPermissionMode,
 } from './entities/agent-task.entity';
 import { SocialAgentMessageToolService } from './social-agent-message-tool.service';
+import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
 import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 import { SocialAgentToolName } from './social-agent-tool.types';
 
@@ -32,11 +33,13 @@ function makeService() {
   const confirmationPolicy = {
     canRunAsConfirmedUserAction: jest.fn(() => false),
   };
+  const toolInput = new SocialAgentToolInputParserService();
   const service = new SocialAgentMessageToolService(
     messages as never,
     matchService as never,
     confirmationPolicy as never,
-    new SocialAgentToolInputParserService(),
+    toolInput,
+    new SocialAgentTaskMemoryService(toolInput),
   );
 
   return { service, messages, matchService, confirmationPolicy };
