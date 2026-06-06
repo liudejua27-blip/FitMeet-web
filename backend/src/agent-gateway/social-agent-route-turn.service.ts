@@ -10,7 +10,6 @@ import type {
   SocialAgentIntentRouteResult,
   SocialAgentRouteMessageBody,
 } from './social-agent-chat.types';
-import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
 import { SocialAgentMessageLogService } from './social-agent-message-log.service';
@@ -23,6 +22,7 @@ import {
   socialAgentRouteAction,
 } from './social-agent-route-response.presenter';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
+import { SocialAgentRouteCandidateConfirmationService } from './social-agent-route-candidate-confirmation.service';
 import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile-turn.service';
 import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
 import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
@@ -46,10 +46,10 @@ export class SocialAgentRouteTurnService {
     private readonly metrics: SocialAgentMetricsService,
     private readonly chatLlm: SocialAgentChatLlmService,
     private readonly profileEnrichment: SocialAgentProfileEnrichmentService,
-    private readonly candidateActions: SocialAgentCandidateActionService,
     private readonly messageLog: SocialAgentMessageLogService,
     private readonly taskLifecycle: SocialAgentTaskLifecycleService,
     private readonly routeContext: SocialAgentRouteContextService,
+    private readonly candidateConfirmations: SocialAgentRouteCandidateConfirmationService,
     private readonly profileTurns: SocialAgentRouteProfileTurnService,
     private readonly searchTurns: SocialAgentRouteSearchTurnService,
     private readonly actionTurns: SocialAgentRouteActionTurnService,
@@ -106,40 +106,15 @@ export class SocialAgentRouteTurnService {
     let activityResults: SocialAgentActivityResult[] = [];
     let profileUpdateProposal: LifeGraphProposalDto | null = null;
 
-    const confirmedCandidateMessage =
-      await this.candidateActions.confirmPendingCandidateMessageIfRequested(
-        ownerUserId,
-        task,
-        message,
-      );
-    if (confirmedCandidateMessage) {
-      task = confirmedCandidateMessage.task;
-      assistantMessage = confirmedCandidateMessage.assistantMessage;
-      const result: SocialAgentIntentRouteResult = {
-        ...route,
-        intent: 'action_request',
-        action: 'reply',
-        taskId: task.id,
-        assistantMessage,
-        savedContext: false,
-        profileUpdated: false,
-        shouldExecuteAction: true,
-        shouldQueueRun: false,
-        runMode: null,
-        queuedRun: null,
-        pendingApproval: null,
-        activityResults: [],
-        permissionMode: task.permissionMode,
-      };
-      this.metrics.recordAction(result.action);
-      await this.messageLog.recordAssistantMessage(
-        task,
-        assistantMessage,
-        result,
-      );
-      this.metrics.observeRouteLatency(Date.now() - startedAt);
-      return result;
-    }
+    const candidateConfirmation = await this.candidateConfirmations.handle({
+      ownerUserId,
+      task,
+      message,
+      route,
+      startedAt,
+    });
+    if (candidateConfirmation.handled) return candidateConfirmation.result;
+    task = candidateConfirmation.task;
 
     if (
       route.intent === 'profile_enrichment' ||
