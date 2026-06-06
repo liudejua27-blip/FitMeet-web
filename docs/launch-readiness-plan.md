@@ -1,6 +1,6 @@
 # FitMeet Launch Readiness Plan
 
-Last updated: 2026-06-06
+Last updated: 2026-06-07
 
 This document is the launch control plan for FitMeet Web and FitMeetAlpha iOS. It records the current architecture, API/data contract state, known gaps, and the exact commands that must pass before Web deployment or TestFlight release testing.
 
@@ -237,5 +237,6 @@ node scripts/realtime-1000-online-smoke.mjs
 - Blocked: iOS full `-only-testing:FitMeetAlphaTests` after three attempts because the Simulator refused to launch `com.fitmeet.alpha` with `FBSOpenApplicationServiceErrorDomain` / `Application failed preflight checks` / `Busy`. This is a local Simulator launch-state blocker; the targeted networking/auth contract tests and Debug/Release builds passed.
 - Passed: backend `pnpm --dir backend test -- logging.interceptor.spec.ts`
 - Passed: backend `pnpm --dir backend test -- http-exception.filter.spec.ts logging.interceptor.spec.ts`
+- Passed: backend `pnpm --dir backend test -- migration-integrity.spec.ts`
 - Passed: backend `pnpm --dir backend lint`
 - Passed: backend `pnpm --dir backend build`
