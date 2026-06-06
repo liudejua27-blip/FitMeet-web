@@ -9,6 +9,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
+import { getSocketAllowedOrigins } from '../common/cors/origin-allowlist';
 import { MessagesService } from './messages.service';
 
 interface JwtPayload {
@@ -22,26 +23,10 @@ interface SocketUserData {
 
 type AuthenticatedSocket = Socket;
 
-function getSocketCorsOrigins(): string[] {
-  const origins = process.env.ALLOWED_ORIGINS?.split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
-  if (origins?.length) {
-    return origins;
-  }
-
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('ALLOWED_ORIGINS is required for messages gateway');
-  }
-
-  return ['http://localhost:5173'];
-}
-
 @WebSocketGateway({
   namespace: 'messages',
   cors: {
-    origin: getSocketCorsOrigins(),
+    origin: getSocketAllowedOrigins('messages'),
     credentials: true,
   },
   transports: ['websocket', 'polling'],

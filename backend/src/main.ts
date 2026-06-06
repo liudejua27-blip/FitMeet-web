@@ -10,28 +10,12 @@ import type { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
 import * as path from 'path';
 import { AppModule } from './app.module';
+import { getHttpAllowedOrigins } from './common/cors/origin-allowlist';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
-
-function getAllowedOrigins(): string[] {
-  const configured = (process.env.CORS_ORIGIN || process.env.ALLOWED_ORIGINS)
-    ?.split(',')
-    .map((origin) => origin.trim())
-    .filter((origin) => origin && origin !== '*');
-
-  if (configured?.length) {
-    return configured;
-  }
-
-  if (process.env.NODE_ENV === 'production') {
-    return ['https://www.ourfitmeet.cn', 'https://ourfitmeet.cn'];
-  }
-
-  return ['http://localhost:5173', 'http://localhost:3000'];
-}
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
-  const allowedOrigins = getAllowedOrigins();
+  const allowedOrigins = getHttpAllowedOrigins();
 
   app.use(stripCallerControlledUserId);
 

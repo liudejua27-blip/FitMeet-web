@@ -11,6 +11,7 @@ import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { RedisService } from '../redis/redis.service';
+import { getSocketAllowedOrigins } from '../common/cors/origin-allowlist';
 
 interface JwtPayload {
   sub: number;
@@ -22,25 +23,9 @@ interface SocketUserData {
 
 type AuthenticatedSocket = Socket;
 
-function getSocketCorsOrigins(): string[] {
-  const origins = process.env.ALLOWED_ORIGINS?.split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
-  if (origins?.length) {
-    return origins;
-  }
-
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('ALLOWED_ORIGINS is required for events gateway');
-  }
-
-  return ['http://localhost:5173'];
-}
-
 @WebSocketGateway({
   cors: {
-    origin: getSocketCorsOrigins(),
+    origin: getSocketAllowedOrigins('events'),
     credentials: true,
   },
   namespace: 'events',

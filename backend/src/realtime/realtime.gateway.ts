@@ -11,27 +11,17 @@ import {
 import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
+import { getSocketAllowedOrigins } from '../common/cors/origin-allowlist';
 import { RealtimeEventEnvelope } from './realtime-event.types';
 import { RealtimeEventService } from './realtime-event.service';
 
 type JwtPayload = { sub: number; email?: string };
 type AuthenticatedSocket = Socket & { data: { userId?: number } };
 
-function getSocketCorsOrigins(): string[] {
-  const origins = process.env.ALLOWED_ORIGINS?.split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-  if (origins?.length) return origins;
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('ALLOWED_ORIGINS is required for realtime gateway');
-  }
-  return ['http://localhost:5173'];
-}
-
 @WebSocketGateway({
   namespace: 'realtime',
   cors: {
-    origin: getSocketCorsOrigins(),
+    origin: getSocketAllowedOrigins('realtime'),
     credentials: true,
   },
   transports: ['websocket', 'polling'],

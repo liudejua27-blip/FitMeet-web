@@ -21,6 +21,7 @@ This document is the launch control plan for FitMeet Web and FitMeetAlpha iOS. I
 - Cache/realtime support: Redis through `ioredis`.
 - Optional/event infrastructure: Kafka is present and can run in no-op mode for local development.
 - API safety layer: global `ValidationPipe`, global `HttpExceptionFilter`, global `LoggingInterceptor`, Helmet, compression, CORS allowlist, and `@nestjs/throttler`.
+- HTTP and Socket.IO origin allowlists are resolved through the same `CORS_ORIGIN`/`ALLOWED_ORIGINS` helper; production Socket.IO gateways require explicit origins.
 - Database strategy: migration-first. `DB_SYNCHRONIZE=false` is the default; schema changes must land as TypeORM migrations.
 
 ## Web API Call Flow
@@ -238,5 +239,6 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- logging.interceptor.spec.ts`
 - Passed: backend `pnpm --dir backend test -- http-exception.filter.spec.ts logging.interceptor.spec.ts`
 - Passed: backend `pnpm --dir backend test -- migration-integrity.spec.ts`
+- Passed: backend `pnpm --dir backend test -- origin-allowlist.spec.ts`
 - Passed: backend `pnpm --dir backend lint`
 - Passed: backend `pnpm --dir backend build`
