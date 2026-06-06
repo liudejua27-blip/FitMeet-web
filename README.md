@@ -293,13 +293,22 @@ LOAD_TEST_BASE_URL=http://localhost:3000 ./scripts/release-preflight.sh --web-on
 
 该脚本只打 `/api/health`、`/api/feed?page=1&limit=5` 和 `/api/openapi/fitmeet-core.json`，默认要求错误率不超过 1%、p95 不超过 1000ms、p99 不超过 2000ms。远端目标必须显式设置 `LOAD_TEST_ALLOW_REMOTE=true`，避免误压生产。它不能替代完整 Artillery/k6 长时压测，但可以作为部署后确认 1000 个并发只读请求不会立刻卡死的快速门槛。
 
-真正的“1000 人在线”还需要验证 Socket.IO 实时链路。准备一个 staging 用户 token，或提供 staging 登录账号后运行：
+真正的“1000 人在线”还需要验证 Socket.IO 实时链路。准备 staging 用户 token 池，或提供 staging 登录账号后运行：
 
 ```bash
 REALTIME_SMOKE_BASE_URL=https://www.ourfitmeet.cn \
 REALTIME_SMOKE_ALLOW_REMOTE=true \
 REALTIME_SMOKE_EMAIL=test@example.com \
 REALTIME_SMOKE_PASSWORD='***' \
+node scripts/realtime-1000-online-smoke.mjs
+```
+
+更接近真实多人在线的方式是提供 token 文件，每行一个 staging 用户 token：
+
+```bash
+REALTIME_SMOKE_BASE_URL=https://www.ourfitmeet.cn \
+REALTIME_SMOKE_ALLOW_REMOTE=true \
+REALTIME_SMOKE_TOKENS_FILE=/secure/fitmeet-staging-tokens.txt \
 node scripts/realtime-1000-online-smoke.mjs
 ```
 

@@ -81,6 +81,9 @@ describe('production deploy readiness', () => {
     expect(realtimeSmoke).toContain('REALTIME_SMOKE_CONNECTIONS, 1000');
     expect(realtimeSmoke).toContain('REALTIME_SMOKE_NAMESPACES');
     expect(realtimeSmoke).toContain('REALTIME_SMOKE_TOKEN');
+    expect(realtimeSmoke).toContain('REALTIME_SMOKE_TOKENS');
+    expect(realtimeSmoke).toContain('REALTIME_SMOKE_TOKENS_FILE');
+    expect(realtimeSmoke).toContain('distinctTokens');
     expect(realtimeSmoke).toContain('REALTIME_SMOKE_EMAIL');
     expect(realtimeSmoke).toContain('REALTIME_SMOKE_PASSWORD');
     expect(realtimeSmoke).toContain('/api/auth/login');

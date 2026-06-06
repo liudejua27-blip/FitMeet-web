@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module';
+import { readFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 
 const requireFromFrontend = createRequire(
@@ -17,6 +18,8 @@ Environment:
   REALTIME_SMOKE_CONNECTIONS    Simultaneous logical users, default 1000
   REALTIME_SMOKE_NAMESPACES     Socket.IO namespaces per user, default realtime,messages
   REALTIME_SMOKE_TOKEN          JWT access token to reuse for smoke connections
+  REALTIME_SMOKE_TOKENS         Comma/newline-separated JWT tokens for distinct users
+  REALTIME_SMOKE_TOKENS_FILE    File containing one JWT token per line
   REALTIME_SMOKE_EMAIL          Optional login email when token is not set
   REALTIME_SMOKE_PASSWORD       Optional login password when token is not set
   REALTIME_SMOKE_CONNECT_BATCH  Connections started per batch, default 100
@@ -65,10 +68,10 @@ if (!isLocalTarget(baseURL) && !allowRemote) {
   );
 }
 
-const token = await resolveAccessToken();
-if (!token) {
+const tokens = await resolveAccessTokens();
+if (tokens.length === 0) {
   throw new Error(
-    'Set REALTIME_SMOKE_TOKEN or REALTIME_SMOKE_EMAIL/REALTIME_SMOKE_PASSWORD.',
+    'Set REALTIME_SMOKE_TOKEN, REALTIME_SMOKE_TOKENS, REALTIME_SMOKE_TOKENS_FILE, or REALTIME_SMOKE_EMAIL/REALTIME_SMOKE_PASSWORD.',
   );
 }
 
@@ -83,7 +86,7 @@ try {
   for (let index = 0; index < connectJobs.length; index += batchSize) {
     const batch = connectJobs
       .slice(index, index + batchSize)
-      .map((job) => connectSocket(job, token));
+      .map((job) => connectSocket(job, tokenForUser(job.userIndex)));
     results.push(...(await Promise.all(batch)));
     if (index + batchSize < connectJobs.length) await sleep(batchGapMs);
   }
@@ -107,6 +110,7 @@ try {
         namespaces,
         requestedUsers: connections,
         requestedSockets: connectJobs.length,
+        distinctTokens: tokens.length,
         connected,
         stillOnline,
         elapsedMs: Math.round(elapsedMs),
@@ -144,12 +148,22 @@ try {
   for (const socket of sockets) socket.disconnect();
 }
 
-async function resolveAccessToken() {
+async function resolveAccessTokens() {
+  const explicitTokens = tokenList(process.env.REALTIME_SMOKE_TOKENS);
+  if (explicitTokens.length > 0) return explicitTokens;
+
+  const tokenFile = process.env.REALTIME_SMOKE_TOKENS_FILE?.trim();
+  if (tokenFile) {
+    const source = await readFile(tokenFile, 'utf8');
+    const fileTokens = tokenList(source);
+    if (fileTokens.length > 0) return fileTokens;
+  }
+
   const token = process.env.REALTIME_SMOKE_TOKEN?.trim();
-  if (token) return token;
+  if (token) return [token];
   const email = process.env.REALTIME_SMOKE_EMAIL?.trim();
   const password = process.env.REALTIME_SMOKE_PASSWORD;
-  if (!email || !password) return null;
+  if (!email || !password) return [];
 
   const response = await fetch(new URL('/api/auth/login', baseURL), {
     method: 'POST',
@@ -163,11 +177,15 @@ async function resolveAccessToken() {
     throw new Error(`Login failed with HTTP ${response.status}`);
   }
   const payload = await response.json();
-  return (
+  const loginToken =
     string(payload.access_token) ??
     string(payload.accessToken) ??
-    string(payload.token)
-  );
+    string(payload.token);
+  return loginToken ? [loginToken] : [];
+}
+
+function tokenForUser(userIndex) {
+  return tokens[userIndex % tokens.length];
 }
 
 function connectSocket(job, token) {
@@ -274,6 +292,18 @@ function namespaceList(value) {
   const allowed = new Set(['realtime', 'messages']);
   const normalized = namespaces.filter((item) => allowed.has(item));
   return normalized.length ? [...new Set(normalized)] : ['realtime', 'messages'];
+}
+
+function tokenList(value) {
+  if (!value) return [];
+  return [
+    ...new Set(
+      value
+        .split(/[\n,]/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ];
 }
 
 function round(value) {
