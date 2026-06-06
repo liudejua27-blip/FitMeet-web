@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { MessagesService } from './messages.service';
 
 describe('MessagesService realtime events', () => {
@@ -102,5 +103,121 @@ describe('MessagesService realtime events', () => {
         rooms: [`conversation:${conversationId.toString()}`],
       }),
     );
+  });
+
+  it('rejects invalid conversation ids before reading messages', async () => {
+    const convModel = {
+      findOne: jest.fn(),
+      updateOne: jest.fn(),
+    };
+    const msgModel = {
+      find: jest.fn(),
+    };
+    const service = new MessagesService(
+      convModel as never,
+      msgModel as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(service.getMessages('not-an-object-id', 1)).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(convModel.findOne).not.toHaveBeenCalled();
+    expect(msgModel.find).not.toHaveBeenCalled();
+  });
+
+  it('does not read messages when the user is not a conversation participant', async () => {
+    const conversationId = new Types.ObjectId();
+    const exec = jest.fn().mockResolvedValue(null);
+    const lean = jest.fn().mockReturnValue({ exec });
+    const convModel = {
+      findOne: jest.fn().mockReturnValue({ lean }),
+      updateOne: jest.fn(),
+    };
+    const msgModel = {
+      find: jest.fn(),
+    };
+    const service = new MessagesService(
+      convModel as never,
+      msgModel as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(
+      service.getMessages(conversationId.toString(), 99),
+    ).rejects.toThrow(NotFoundException);
+    expect(convModel.findOne).toHaveBeenCalledWith({
+      _id: conversationId,
+      participantIds: 99,
+    });
+    expect(convModel.updateOne).not.toHaveBeenCalled();
+    expect(msgModel.find).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid conversation ids before sending messages', async () => {
+    const convModel = {
+      findById: jest.fn(),
+      updateOne: jest.fn(),
+    };
+    const msgModel = {
+      create: jest.fn(),
+    };
+    const service = new MessagesService(
+      convModel as never,
+      msgModel as never,
+      {} as never,
+      {} as never,
+      { findOne: jest.fn() } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(
+      service.sendMessage('not-an-object-id', 1, 'hello'),
+    ).rejects.toThrow(BadRequestException);
+    expect(convModel.findById).not.toHaveBeenCalled();
+    expect(msgModel.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects blank message content before loading a conversation', async () => {
+    const conversationId = new Types.ObjectId();
+    const convModel = {
+      findById: jest.fn(),
+      updateOne: jest.fn(),
+    };
+    const msgModel = {
+      create: jest.fn(),
+    };
+    const service = new MessagesService(
+      convModel as never,
+      msgModel as never,
+      {} as never,
+      {} as never,
+      { findOne: jest.fn() } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(
+      service.sendMessage(conversationId.toString(), 1, '   '),
+    ).rejects.toThrow(BadRequestException);
+    expect(convModel.findById).not.toHaveBeenCalled();
+    expect(msgModel.create).not.toHaveBeenCalled();
   });
 });

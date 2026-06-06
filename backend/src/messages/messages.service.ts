@@ -195,7 +195,13 @@ export class MessagesService {
   }
 
   async getMessages(conversationId: string, userId: number) {
-    const oid = new Types.ObjectId(conversationId);
+    const oid = this.toConversationObjectId(conversationId);
+    const conv = await this.convModel
+      .findOne({ _id: oid, participantIds: Number(userId) })
+      .lean()
+      .exec();
+
+    if (!conv) throw new NotFoundException('会话不存在');
 
     await this.convModel.updateOne(
       { _id: oid, participantIds: userId },
@@ -230,7 +236,10 @@ export class MessagesService {
     text: string,
     options: SendMessageOptions = {},
   ) {
-    const oid = new Types.ObjectId(conversationId);
+    const content = cleanDisplayText(text, '').trim();
+    if (!content) throw new BadRequestException('消息内容不能为空');
+
+    const oid = this.toConversationObjectId(conversationId);
     const conv = await this.convModel.findById(oid);
     if (!conv || !conv.participantIds.includes(Number(senderId))) {
       throw new NotFoundException('会话不存在');
@@ -294,7 +303,7 @@ export class MessagesService {
         ownerUserId,
         actorUserId,
         senderId: Number(senderId),
-        text,
+        text: content,
         source: options.source ?? 'user',
         card: options.card ?? null,
         metadata,
@@ -316,7 +325,7 @@ export class MessagesService {
       throw error;
     }
 
-    const safeText = cleanDisplayText(text, '消息内容已隐藏');
+    const safeText = cleanDisplayText(content, '消息内容已隐藏');
     const update: Record<string, unknown> = {
       lastMessage: safeText,
       lastMessageTime: new Date(),
@@ -981,7 +990,7 @@ export class MessagesService {
   }
 
   async getParticipantIds(conversationId: string): Promise<number[]> {
-    const oid = new Types.ObjectId(conversationId);
+    const oid = this.toConversationObjectId(conversationId);
     const conv = await this.convModel.findById(oid).lean().exec();
     if (!conv) throw new NotFoundException('会话不存在');
     return conv.participantIds;
@@ -1538,6 +1547,16 @@ export class MessagesService {
 
   private toObjectId(value: string | Types.ObjectId): Types.ObjectId {
     return value instanceof Types.ObjectId ? value : new Types.ObjectId(value);
+  }
+
+  private toConversationObjectId(
+    value: string | Types.ObjectId,
+  ): Types.ObjectId {
+    if (value instanceof Types.ObjectId) return value;
+    if (!Types.ObjectId.isValid(value)) {
+      throw new BadRequestException('Invalid conversation id');
+    }
+    return new Types.ObjectId(value);
   }
 
   private signWebhook(timestamp: string, body: string) {
