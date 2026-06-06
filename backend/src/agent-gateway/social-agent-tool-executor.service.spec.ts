@@ -24,6 +24,7 @@ import { SocialAgentPaymentIntentToolService } from './social-agent-payment-inte
 import { SocialAgentMessageToolService } from './social-agent-message-tool.service';
 import { SocialAgentActivityToolService } from './social-agent-activity-tool.service';
 import { SocialAgentInboxToolService } from './social-agent-inbox-tool.service';
+import { SocialAgentConversationToolService } from './social-agent-conversation-tool.service';
 
 type MockRepository<T extends object = Record<string, unknown>> = {
   findOne: jest.Mock<Promise<T | null>, [unknown?]>;
@@ -242,6 +243,11 @@ function makeService() {
     messages as never,
     toolInput,
   );
+  const conversationTools = new SocialAgentConversationToolService(
+    messages as never,
+    toolJsonModel,
+    toolInput,
+  );
 
   const service = new SocialAgentToolExecutorService(
     taskRepo as never,
@@ -271,6 +277,7 @@ function makeService() {
     messageTools,
     activityTools,
     inboxTools,
+    conversationTools,
   );
 
   return {

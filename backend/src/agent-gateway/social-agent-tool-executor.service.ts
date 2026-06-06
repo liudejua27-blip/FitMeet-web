@@ -43,7 +43,6 @@ import {
 } from './social-agent-memory.util';
 import {
   appendSocialAgentLoopValue,
-  filterPendingSocialAgentCounterpartMessages,
   socialAgentLoopStringArray,
   toSocialAgentMessageArray,
 } from './social-agent-loop-state';
@@ -76,9 +75,7 @@ import type {
 import { buildSocialAgentConversationOptions } from './social-agent-message-options';
 import {
   buildFallbackSocialAgentNextAction,
-  buildFallbackSocialAgentReplySummary,
   buildSocialAgentNextActionPrompt,
-  buildSocialAgentReplySummaryPrompt,
   normalizeSocialAgentNextActionDecision,
 } from './social-agent-next-action-decision';
 import { SocialAgentTargetResolverService } from './social-agent-target-resolver.service';
@@ -92,6 +89,10 @@ import { SocialAgentPaymentIntentToolService } from './social-agent-payment-inte
 import { SocialAgentMessageToolService } from './social-agent-message-tool.service';
 import { SocialAgentActivityToolService } from './social-agent-activity-tool.service';
 import { SocialAgentInboxToolService } from './social-agent-inbox-tool.service';
+import {
+  SocialAgentConversationToolService,
+  type SocialAgentConversationToolResult,
+} from './social-agent-conversation-tool.service';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -144,6 +145,7 @@ export class SocialAgentToolExecutorService {
     private readonly messageTools: SocialAgentMessageToolService,
     private readonly activityTools: SocialAgentActivityToolService,
     private readonly inboxTools: SocialAgentInboxToolService,
+    private readonly conversationTools: SocialAgentConversationToolService,
   ) {}
 
   async executeTask(
@@ -756,9 +758,20 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.GetCandidatePoolDebug:
         return this.getCandidatePoolDebug(task, input);
       case SocialAgentToolName.ReadTaskConversationMessages:
-        return this.readTaskConversationMessages(task, input, stepId);
+        return this.runConversationTool(
+          task,
+          await this.conversationTools.readTaskConversationMessages(
+            task,
+            input,
+          ),
+          stepId,
+        );
       case SocialAgentToolName.SummarizeReply:
-        return this.summarizeReply(task, input);
+        return this.runConversationTool(
+          task,
+          await this.conversationTools.summarizeReply(task, input),
+          stepId,
+        );
       case SocialAgentToolName.DecideNextSocialAction:
         return this.decideNextSocialAction(task, input);
       case SocialAgentToolName.ReplyMessage:
@@ -1536,154 +1549,6 @@ export class SocialAgentToolExecutorService {
     );
   }
 
-  private async readTaskConversationMessages(
-    task: AgentTask,
-    input: Record<string, unknown>,
-    stepId: string,
-  ): Promise<unknown> {
-    const agentConnectionId =
-      task.agentConnectionId ?? this.toolInput.number(input.agentConnectionId);
-    if (!agentConnectionId)
-      throw new BadRequestException('agentConnectionId is required');
-
-    const loop = this.socialLoopMemory(task);
-    const conversationId =
-      this.toolInput.string(input.conversationId) ?? loop.conversationId;
-    if (!conversationId) {
-      throw new BadRequestException('task memory has no bound conversationId');
-    }
-
-    const messages = toSocialAgentMessageArray(
-      await this.messages.getAgentInboxMessages(
-        conversationId,
-        agentConnectionId,
-        {
-          limit: this.toolInput.number(input.limit) ?? 50,
-        },
-      ),
-    );
-    const cursor =
-      this.toolInput.string(input.afterMessageId) ??
-      loop.lastReadMessageId ??
-      loop.lastMessageId;
-    const newMessages = filterPendingSocialAgentCounterpartMessages(
-      messages,
-      cursor,
-      loop,
-      task.ownerUserId,
-    );
-    const latest = newMessages[newMessages.length - 1] ?? null;
-
-    this.rememberConversation(task, {
-      conversationId,
-      targetUserId:
-        this.toolInput.number(latest?.senderId) ??
-        this.toolInput.number(input.targetUserId) ??
-        loop.targetUserId ??
-        null,
-      lastReceivedMessageId: latest?.id ?? loop.lastReceivedMessageId ?? null,
-      lastReadMessageId: latest?.id ?? loop.lastReadMessageId ?? null,
-      pendingMessageId: null,
-      latestReceivedMessage: latest,
-      latestReceivedMessages: newMessages,
-      processedMessageIds: newMessages.reduce(
-        (ids, message) => appendSocialAgentLoopValue(ids, message.id),
-        loop.processedMessageIds ?? [],
-      ),
-      sourceTool: SocialAgentToolName.ReadTaskConversationMessages,
-    });
-    if (newMessages.length > 0) {
-      this.rememberReceivedReplies(task, newMessages, stepId);
-    }
-
-    if (latest) {
-      await this.createTaskEvent(task, AgentTaskEventType.FeedbackReceived, {
-        summary: 'Received counterpart reply for social agent task',
-        payload: {
-          conversationId,
-          messageId: latest.id,
-          newMessageCount: newMessages.length,
-        },
-      });
-      await this.writeSocialAgentInboxEvent(
-        task,
-        'social_agent.message.received',
-        {
-          conversationId,
-          messageId: latest.id ?? null,
-          fromUserId:
-            this.toolInput.number(latest.senderId) ?? loop.targetUserId ?? null,
-          contentPreview: this.preview(latest.text),
-          metadata: {
-            agentTaskId: task.id,
-            conversationId,
-            latestMessage: latest,
-            newMessages,
-            newMessageCount: newMessages.length,
-          },
-        },
-      );
-    }
-
-    return {
-      conversationId,
-      cursor,
-      newMessageCount: newMessages.length,
-      newMessages,
-      latestMessage: latest,
-    };
-  }
-
-  private async summarizeReply(
-    task: AgentTask,
-    input: Record<string, unknown>,
-  ): Promise<unknown> {
-    const loop = this.socialLoopMemory(task);
-    const messages = toSocialAgentMessageArray(
-      input.messages ?? loop.latestReceivedMessages,
-    );
-    if (messages.length === 0)
-      throw new BadRequestException('messages are required');
-
-    const summary = await this.toolJsonModel.callJson({
-      purpose: 'summarize_reply',
-      prompt: buildSocialAgentReplySummaryPrompt(task, messages),
-      fallback: () => buildFallbackSocialAgentReplySummary(messages),
-      taskId: task.id,
-    });
-    this.rememberConversation(task, {
-      replySummary: summary,
-      sourceTool: SocialAgentToolName.SummarizeReply,
-    });
-    rememberSocialAgentShortTerm(task, {
-      replySummary: summary,
-      currentStep: this.shortTermStep(
-        'summarize_reply',
-        '已总结对方回复',
-        'done',
-      ),
-    });
-
-    await this.writeSocialAgentInboxEvent(
-      task,
-      'social_agent.reply.summarized',
-      {
-        conversationId: loop.conversationId ?? null,
-        messageId: loop.lastReceivedMessageId ?? null,
-        fromUserId: loop.targetUserId ?? null,
-        contentPreview:
-          this.toolInput.string(summary.summary) ?? 'Reply summarized',
-        metadata: {
-          agentTaskId: task.id,
-          messages,
-          summary,
-        },
-      },
-    );
-
-    return summary;
-  }
-
   private async decideNextSocialAction(
     task: AgentTask,
     input: Record<string, unknown>,
@@ -1757,6 +1622,35 @@ export class SocialAgentToolExecutorService {
     const result = await this.messageTools.replyMessage(task, input, stepId);
     if (result.loopUpdates) this.rememberConversation(task, result.loopUpdates);
     if (result.sentMessage) this.rememberSentMessage(task, result.sentMessage);
+    if (result.inboxEvent) {
+      await this.writeSocialAgentInboxEvent(
+        task,
+        result.inboxEvent.eventType,
+        result.inboxEvent.input,
+      );
+    }
+    return result.output;
+  }
+
+  private async runConversationTool(
+    task: AgentTask,
+    result: SocialAgentConversationToolResult,
+    stepId: string,
+  ): Promise<unknown> {
+    if (result.loopUpdates) this.rememberConversation(task, result.loopUpdates);
+    if (result.receivedMessages && result.receivedMessages.length > 0) {
+      this.rememberReceivedReplies(task, result.receivedMessages, stepId);
+    }
+    if (result.shortTermUpdates) {
+      rememberSocialAgentShortTerm(task, result.shortTermUpdates);
+    }
+    if (result.taskEvent) {
+      await this.createTaskEvent(
+        task,
+        result.taskEvent.type,
+        result.taskEvent.input,
+      );
+    }
     if (result.inboxEvent) {
       await this.writeSocialAgentInboxEvent(
         task,
