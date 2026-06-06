@@ -79,6 +79,7 @@ import {
   type SocialAgentDecisionToolResult,
 } from './social-agent-decision-tool.service';
 import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
+import { summarizeSocialAgentToolCalls } from './social-agent-tool-execution-summary';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -187,17 +188,9 @@ export class SocialAgentToolExecutorService {
       }
     }
 
-    const failedSteps = executedCalls.filter(
-      (call) => call.status === 'failed',
-    ).length;
-    const blockedSteps = executedCalls.filter(
-      (call) => call.status === 'blocked',
-    ).length;
-    const succeededSteps = executedCalls.filter(
-      (call) => call.status === 'succeeded',
-    ).length;
+    const summary = summarizeSocialAgentToolCalls(executedCalls);
     if (
-      failedSteps + blockedSteps === 0 &&
+      !summary.hasFailureOrBlock &&
       this.toolCallFactory.hasNoRemainingExecutableSteps(task.plan)
     ) {
       if (this.taskMemory.shouldWaitForReply(task)) {
@@ -225,10 +218,10 @@ export class SocialAgentToolExecutorService {
 
     return {
       taskId: task.id,
-      executedSteps: executedCalls.length,
-      succeededSteps,
-      failedSteps,
-      blockedSteps,
+      executedSteps: summary.executedSteps,
+      succeededSteps: summary.succeededSteps,
+      failedSteps: summary.failedSteps,
+      blockedSteps: summary.blockedSteps,
       toolCalls: executedCalls,
     };
   }
@@ -1632,13 +1625,13 @@ export class SocialAgentToolExecutorService {
     handledReply: boolean,
     decision: Record<string, unknown> | null,
   ): SocialAgentRunNextResult {
+    const summary = summarizeSocialAgentToolCalls(calls);
     return {
       taskId: task.id,
-      executedSteps: calls.length,
-      succeededSteps: calls.filter((call) => call.status === 'succeeded')
-        .length,
-      failedSteps: calls.filter((call) => call.status === 'failed').length,
-      blockedSteps: calls.filter((call) => call.status === 'blocked').length,
+      executedSteps: summary.executedSteps,
+      succeededSteps: summary.succeededSteps,
+      failedSteps: summary.failedSteps,
+      blockedSteps: summary.blockedSteps,
       toolCalls: calls,
       status: task.status,
       handledReply,
