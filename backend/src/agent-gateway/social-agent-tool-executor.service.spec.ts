@@ -53,6 +53,11 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
+function silenceServiceWarns(service: SocialAgentToolExecutorService) {
+  const logger = (service as unknown as { logger: { warn: jest.Mock } }).logger;
+  jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+}
+
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
     id: 100,
@@ -1068,6 +1073,7 @@ describe('SocialAgentToolExecutorService', () => {
     eventRepo.save.mockRejectedValue(
       new Error('value too long for type character varying(80)'),
     );
+    silenceServiceWarns(service);
     messages.startConversation.mockResolvedValue({
       conversationId: 'conv_user',
     });
@@ -1117,6 +1123,7 @@ describe('SocialAgentToolExecutorService', () => {
     eventRepo.save.mockRejectedValue(
       new Error('value too long for type character varying(80)'),
     );
+    silenceServiceWarns(service);
     friends.ensureFollowing.mockResolvedValue({ id: 31, followingId: 2 });
     messages.startConversation.mockResolvedValue({
       conversationId: 'conv_user',
