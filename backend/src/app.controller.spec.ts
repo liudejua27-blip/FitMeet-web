@@ -28,6 +28,17 @@ const APP_CORE_CONTROLLERS = [
   UploadsController,
 ] as const;
 
+const LAUNCH_AUTH_REQUIRED_PATHS = {
+  '/auth/register': 'post',
+  '/auth/login': 'post',
+  '/auth/sms/send': 'post',
+  '/auth/sms/verify': 'post',
+  '/auth/wechat/url': 'get',
+  '/auth/wechat/login': 'post',
+  '/auth/refresh': 'post',
+  '/auth/profile': 'get',
+} as const;
+
 const IOS_APP_REQUIRED_PATHS = {
   '/auth/login': 'post',
   '/auth/refresh': 'post',
@@ -215,6 +226,19 @@ describe('AppController', () => {
         for (const method of methods) {
           expect(contract.paths[path][method]).toBeDefined();
         }
+      }
+    });
+
+    it('maps the launch auth OpenAPI contract to registered controllers', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+      const controllerRoutes = collectControllerRoutes(APP_CORE_CONTROLLERS);
+
+      for (const [path, method] of Object.entries(LAUNCH_AUTH_REQUIRED_PATHS)) {
+        expect(contract.paths[path][method]).toBeDefined();
+        expect(controllerRoutes).toContainEqual({
+          method,
+          path: normalizePathParams(path),
+        });
       }
     });
 
