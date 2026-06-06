@@ -92,6 +92,7 @@ import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile
 import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
 import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
 import { SocialAgentRouteDecisionService } from './social-agent-route-decision.service';
+import { SocialAgentTargetResolverService } from './social-agent-target-resolver.service';
 import { AgentWebhookService } from './agent-webhook.service';
 import { AiSocialAutopilotService } from './ai-social-autopilot.service';
 import { AgentDiscoveryService } from './agent-discovery.service';
@@ -256,6 +257,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentRouteSearchTurnService,
     SocialAgentRouteActionTurnService,
     SocialAgentRouteDecisionService,
+    SocialAgentTargetResolverService,
     SocialAgentToolExecutorService,
     AgentWebhookService,
     AiSocialAutopilotService,

@@ -12,6 +12,7 @@ import {
 } from './social-agent-tool-executor.service';
 import { ActivityProofPolicy } from '../activities/entities/activity-template.entity';
 import { SceneRiskPolicyService } from './scene-risk-policy.service';
+import { SocialAgentTargetResolverService } from './social-agent-target-resolver.service';
 
 type MockRepository<T extends object = Record<string, unknown>> = {
   findOne: jest.Mock<Promise<T | null>, [unknown?]>;
@@ -182,15 +183,19 @@ function makeService() {
     readSnapshot: jest.fn(),
     summarizeTask: jest.fn(),
   };
+  const targetResolver = new SocialAgentTargetResolverService(
+    candidateRepo as never,
+    publicIntentRepo as never,
+    userSocialRequestRepo as never,
+    userRepo as never,
+    safety as never,
+  );
 
   const service = new SocialAgentToolExecutorService(
     taskRepo as never,
     eventRepo as never,
     connectionRepo as never,
     candidateRepo as never,
-    publicIntentRepo as never,
-    userSocialRequestRepo as never,
-    userRepo as never,
     paymentIntentRepo as never,
     config as never,
     actionLogs as never,
@@ -208,8 +213,8 @@ function makeService() {
     messages as never,
     friends as never,
     activities as never,
-    safety as never,
     new SceneRiskPolicyService(),
+    targetResolver,
   );
 
   return {
@@ -237,6 +242,7 @@ function makeService() {
     approvals,
     approvalDispatcher,
     longTermMemory,
+    targetResolver,
   };
 }
 
