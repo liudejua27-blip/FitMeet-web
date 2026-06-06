@@ -23,6 +23,7 @@ import { SocialAgentFollowUpContextService } from './social-agent-follow-up-cont
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
 import { SocialAgentCardActionRouterService } from './social-agent-card-action-router.service';
+import { SocialAgentCandidateCommandService } from './social-agent-candidate-command.service';
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 import { SocialAgentReplanProgressService } from './social-agent-replan-progress.service';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
@@ -633,17 +634,24 @@ function makeHarness(options: Record<string, unknown> = {}) {
       replanRuns as never,
       options.tonePolicy as never,
     );
+  const candidateCommands =
+    (options.candidateCommands as
+      | SocialAgentCandidateCommandService
+      | undefined) ??
+    new SocialAgentCandidateCommandService(
+      candidateActions as never,
+      draftPublication as never,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
-    candidateActions as never,
-    draftPublication as never,
     routeTurns as never,
     queuedRuns as never,
     runOrchestrator as never,
     sessionQueries as never,
     cardActionRouter as never,
     replanFacade as never,
+    candidateCommands as never,
     options.tonePolicy as never,
   );
 
@@ -683,6 +691,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     sessionQueries,
     cardActionRouter,
     replanFacade,
+    candidateCommands,
   };
 }
 

@@ -60,6 +60,7 @@ import { SocialAgentReplanProgressService } from './social-agent-replan-progress
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
 import { SocialAgentCardActionRouterService } from './social-agent-card-action-router.service';
+import { SocialAgentCandidateCommandService } from './social-agent-candidate-command.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { SocialAgentDraftSearchService } from './social-agent-draft-search.service';
@@ -217,6 +218,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentProfileEnrichmentService,
     SocialAgentMeetLoopService,
     SocialAgentCardActionRouterService,
+    SocialAgentCandidateCommandService,
     SocialAgentCandidateActionService,
     SocialAgentDraftPublicationService,
     SocialAgentDraftSearchService,
@@ -304,6 +306,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentRunRecommendationService,
     SocialAgentReplanRunService,
     SocialAgentReplanFacadeService,
+    SocialAgentCandidateCommandService,
     SocialAgentQueuedRunService,
     SocialAgentFollowUpContextService,
     SocialAgentReplanProgressService,

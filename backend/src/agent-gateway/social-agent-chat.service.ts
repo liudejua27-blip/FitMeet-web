@@ -10,8 +10,6 @@ import {
 } from './entities/agent-task.entity';
 import { SocialAgentToolCallRecord } from './social-agent-tool-executor.service';
 import { transitionSocialAgentState } from './social-agent-memory.util';
-import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
-import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { TonePolicyService } from './response-quality/tone-policy.service';
 import type {
   CandidateTargetBody,
@@ -34,6 +32,7 @@ import { SocialAgentRunOrchestratorService } from './social-agent-run-orchestrat
 import { SocialAgentSessionQueryService } from './social-agent-session-query.service';
 import { SocialAgentCardActionRouterService } from './social-agent-card-action-router.service';
 import { SocialAgentReplanFacadeService } from './social-agent-replan-facade.service';
+import { SocialAgentCandidateCommandService } from './social-agent-candidate-command.service';
 export type * from './social-agent-chat.types';
 
 @Injectable()
@@ -41,14 +40,13 @@ export class SocialAgentChatService {
   constructor(
     @InjectRepository(AgentTask)
     private readonly taskRepo: Repository<AgentTask>,
-    private readonly candidateActions: SocialAgentCandidateActionService,
-    private readonly draftPublication: SocialAgentDraftPublicationService,
     private readonly routeTurns: SocialAgentRouteTurnService,
     private readonly queuedRuns: SocialAgentQueuedRunService,
     private readonly runOrchestrator: SocialAgentRunOrchestratorService,
     private readonly sessionQueries: SocialAgentSessionQueryService,
     private readonly cardActionRouter: SocialAgentCardActionRouterService,
     private readonly replanFacade: SocialAgentReplanFacadeService,
+    private readonly candidateCommands: SocialAgentCandidateCommandService,
     private readonly tonePolicy?: TonePolicyService,
   ) {}
 
@@ -169,7 +167,7 @@ export class SocialAgentChatService {
     taskId: number,
     draft: CreateSocialRequestDto & { socialRequestId?: number | null },
   ) {
-    return this.draftPublication.publishDraft(ownerUserId, taskId, draft);
+    return this.candidateCommands.publishDraft(ownerUserId, taskId, draft);
   }
 
   async saveCandidate(
@@ -183,7 +181,7 @@ export class SocialAgentChatService {
       candidate?: Record<string, unknown>;
     },
   ): Promise<SocialAgentToolCallRecord> {
-    return this.candidateActions.saveCandidate(ownerUserId, taskId, body);
+    return this.candidateCommands.saveCandidate(ownerUserId, taskId, body);
   }
 
   async sendCandidateMessage(
@@ -199,7 +197,7 @@ export class SocialAgentChatService {
       candidate?: Record<string, unknown>;
     },
   ): Promise<Record<string, unknown>> {
-    return this.candidateActions.sendCandidateMessage(
+    return this.candidateCommands.sendCandidateMessage(
       ownerUserId,
       taskId,
       body,
@@ -217,7 +215,7 @@ export class SocialAgentChatService {
       candidate?: Record<string, unknown>;
     },
   ): Promise<Record<string, unknown>> {
-    return this.candidateActions.connectCandidate(ownerUserId, taskId, body);
+    return this.candidateCommands.connectCandidate(ownerUserId, taskId, body);
   }
 
   private userVisibleStepLabel(id: string, label: string): string {
