@@ -60,6 +60,57 @@ export const fitMeetCoreEndpoints = {
   },
 } as const;
 
+export const fitMeetCoreEndpointTemplates = {
+  auth: {
+    register: '/auth/register',
+    login: '/auth/login',
+    sendSmsCode: '/auth/sms/send',
+    loginWithPhone: '/auth/sms/verify',
+    getWechatLoginUrl: '/auth/wechat/url',
+    loginWithWechat: '/auth/wechat/login',
+    refreshToken: '/auth/refresh',
+    getProfile: '/auth/profile',
+  },
+  users: {
+    updateProfile: '/users/profile',
+  },
+  feed: {
+    getFeed: '/feed',
+    createPost: '/feed',
+    getPostInteractions: '/feed/interactions',
+    likePost: '/feed/{id}/like',
+    savePost: '/feed/{id}/save',
+    getComments: '/feed/{postId}/comments',
+    addComment: '/feed/{postId}/comments',
+    likeComment: '/feed/comments/{commentId}/like',
+  },
+  messages: {
+    startConversation: '/messages/start',
+    getConversations: '/messages/conversations',
+    getConversationMessages: '/messages/conversations/{conversationId}',
+    sendConversationMessage: '/messages/conversations/{conversationId}/send',
+    startPublicIntentConversation: '/messages/public-intents/{id}/start',
+    getUnreadCount: '/messages/unread',
+  },
+  socialAgentChat: {
+    messages: '/social-agent/chat/messages',
+    routeMessage: '/social-agent/chat/route-message',
+    stream: '/social-agent/chat/stream',
+    streamUser: '/social-agent/chat/stream-user',
+    session: '/social-agent/chat/session',
+    taskSession: '/social-agent/chat/tasks/{taskId}/session',
+    taskMessages: '/social-agent/chat/tasks/{taskId}/messages',
+    taskActions: '/social-agent/chat/tasks/{taskId}/actions',
+    saveCandidate: '/social-agent/chat/tasks/{taskId}/save-candidate',
+    sendCandidateMessage: '/social-agent/chat/tasks/{taskId}/send-message',
+    connectCandidate: '/social-agent/chat/tasks/{taskId}/connect-candidate',
+  },
+  uploads: {
+    image: '/uploads/image',
+    video: '/uploads/video',
+  },
+} as const;
+
 export type FitMeetCoreEndpointGroup = keyof typeof fitMeetCoreEndpoints;
 export type FitMeetCoreStaticEndpoint =
   | (typeof fitMeetCoreEndpoints.auth)[keyof typeof fitMeetCoreEndpoints.auth]
