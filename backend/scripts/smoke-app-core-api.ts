@@ -147,6 +147,8 @@ async function runMutationSmoke(actor: SmokeActor) {
 
   const upload = await uploadTinyAvatar(actor.accessToken);
   const uploadedUrl = mustString(upload.url, 'upload.url');
+  const uploadedWidth = optionalNumber(upload.width) ?? 1;
+  const uploadedHeight = optionalNumber(upload.height) ?? 1;
   ok('Avatar image upload succeeds');
 
   const updatedProfile = await api<JsonObject>('/users/profile', {
@@ -199,8 +201,8 @@ async function runMutationSmoke(actor: SmokeActor) {
       images: [
         {
           url: uploadedUrl,
-          width: typeof upload.width === 'number' ? upload.width : 1,
-          height: typeof upload.height === 'number' ? upload.height : 1,
+          width: uploadedWidth,
+          height: uploadedHeight,
         },
       ],
       tags: ['app-smoke'],
@@ -208,9 +210,15 @@ async function runMutationSmoke(actor: SmokeActor) {
     token: actor.accessToken,
   });
   const postId = optionalNumber(post.id);
+  assertPostImageMetadata(post, {
+    imageUrl: uploadedUrl,
+    width: uploadedWidth,
+    height: uploadedHeight,
+    source: 'created feed post',
+  });
   const feedPage = await api<JsonObject>('/feed?category=&page=1&limit=50');
   const feedData = mustArray(feedPage.data, 'feed.data');
-  const foundPost = feedData.some((item) => {
+  const foundPost = feedData.find((item) => {
     const post = objectOrNull(item);
     return (
       (postId !== undefined && optionalNumber(post?.id) === postId) ||
@@ -223,7 +231,13 @@ async function runMutationSmoke(actor: SmokeActor) {
       'Published smoke feed post was not found in /feed read-back',
     );
   }
-  ok('Feed moment publish/read-back succeeds');
+  assertPostImageMetadata(mustObject(foundPost, 'feed post read-back'), {
+    imageUrl: uploadedUrl,
+    width: uploadedWidth,
+    height: uploadedHeight,
+    source: '/feed read-back',
+  });
+  ok('Feed moment publish/read-back preserves image metadata');
 
   await api('/social-agent/chat/route-message', {
     body: { message: `FitMeet App smoke route ${runId}` },
@@ -476,6 +490,31 @@ function expectStringContains(
       `${label}: expected "${String(actual)}" to include "${expected}"`,
     );
   }
+}
+
+function assertPostImageMetadata(
+  post: JsonObject,
+  expected: { imageUrl: string; width: number; height: number; source: string },
+) {
+  const images = mustArray(post.images, `${expected.source}.images`);
+  const image = images
+    .map((item) => objectOrNull(item))
+    .find((item) => optionalString(item?.url) === expected.imageUrl);
+  if (!image) {
+    throw new Error(
+      `${expected.source} should include uploaded image URL ${expected.imageUrl}`,
+    );
+  }
+  expectEqual(
+    optionalNumber(image.width),
+    expected.width,
+    `${expected.source} image width should match upload width`,
+  );
+  expectEqual(
+    optionalNumber(image.height),
+    expected.height,
+    `${expected.source} image height should match upload height`,
+  );
 }
 
 function ok(message: string) {
