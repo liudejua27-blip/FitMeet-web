@@ -44,13 +44,40 @@ describe('production deploy readiness', () => {
     expect(releasePreflight).toContain('seed:living-social-data:dry-run');
   });
 
-  it('keeps production verification cross-platform and App contract aware', () => {
+  it('keeps production verification cross-platform and Web/App contract aware', () => {
     const verifier = readRepoFile('scripts/verify-production.sh');
 
     expect(verifier).toContain('/openapi/fitmeet-core.json');
     expect(verifier).toContain('/ready');
+    for (const webPath of [
+      '/public/social-intents',
+      '/feed/interactions',
+      '/feed/{id}/like',
+      '/feed/{id}/save',
+      '/feed/{postId}/comments',
+      '/feed/comments/{commentId}/like',
+      '/messages/public-intents/{id}/start',
+      '/agents/inbox/conversations',
+      '/agents/inbox/conversations/{conversationId}/messages',
+      '/agents/inbox/events',
+      '/agents/inbox/events/ack',
+      '/agents/inbox/conversations/{conversationId}/reply',
+      '/agents/profile-matches',
+      '/agents/profile-matches/{id}/ignore',
+      '/agents/profile-matches/{id}/favorite',
+      '/agents/profile-matches/{id}/draft-opener',
+      '/agents/profile-matches/{id}/confirm-contact',
+      '/agents/profile-matches/{id}/request-contact-exchange',
+      '/agents/profile-matches/{id}/send-intro',
+      '/uploads/video',
+    ]) {
+      expect(verifier).toContain(webPath);
+    }
     expect(verifier).toContain('/social-agent/chat/run');
     expect(verifier).toContain('/social-agent/chat/run-async');
+    expect(verifier).toContain('/social-agent/chat/route-message');
+    expect(verifier).toContain('/social-agent/chat/stream');
+    expect(verifier).toContain('/social-agent/chat/stream-user');
     expect(verifier).toContain(
       '/social-agent/chat/tasks/{taskId}/runs/{runId}',
     );

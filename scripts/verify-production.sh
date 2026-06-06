@@ -135,15 +135,38 @@ const required = [
   '/auth/profile',
   '/users/profile',
   '/uploads/image',
+  '/uploads/video',
   '/feed',
+  '/public/social-intents',
+  '/feed/interactions',
+  '/feed/{id}/like',
+  '/feed/{id}/save',
+  '/feed/{postId}/comments',
+  '/feed/comments/{commentId}/like',
   '/messages/start',
+  '/messages/public-intents/{id}/start',
   '/messages/conversations',
   '/messages/conversations/{conversationId}',
   '/messages/conversations/{conversationId}/send',
   '/messages/unread',
+  '/agents/inbox/conversations',
+  '/agents/inbox/conversations/{conversationId}/messages',
+  '/agents/inbox/events',
+  '/agents/inbox/events/ack',
+  '/agents/inbox/conversations/{conversationId}/reply',
+  '/agents/profile-matches',
+  '/agents/profile-matches/{id}/ignore',
+  '/agents/profile-matches/{id}/favorite',
+  '/agents/profile-matches/{id}/draft-opener',
+  '/agents/profile-matches/{id}/confirm-contact',
+  '/agents/profile-matches/{id}/request-contact-exchange',
+  '/agents/profile-matches/{id}/send-intro',
   '/social-agent/chat/messages',
+  '/social-agent/chat/route-message',
   '/social-agent/chat/run',
   '/social-agent/chat/run-async',
+  '/social-agent/chat/stream',
+  '/social-agent/chat/stream-user',
   '/social-agent/chat/session',
   '/social-agent/chat/tasks/{taskId}/session',
   '/social-agent/chat/tasks/{taskId}/runs/{runId}',
@@ -162,11 +185,11 @@ const required = [
 ];
 const missing = required.filter((path) => !doc.paths?.[path]);
 if (missing.length > 0) {
-  console.error(`Missing App contract paths: ${missing.join(', ')}`);
+  console.error(`Missing Web/App contract paths: ${missing.join(', ')}`);
   process.exit(1);
 }
 NODE
-ok "Runtime OpenAPI includes App release-critical paths"
+ok "Runtime OpenAPI includes Web/App release-critical paths"
 
 node - "${health_body}" "${ready_body}" "${feed_body}" <<'NODE'
 const fs = require('fs');
