@@ -21,7 +21,6 @@ import { UpdateSocialRequestDto } from '../social-requests/dto/update-social-req
 import { SocialRequestType } from '../social-requests/social-request.entity';
 import { SocialRequestsService } from '../social-requests/social-requests.service';
 import { SocialProfileService } from '../users/social-profile.service';
-import { UpdateSocialProfileDto } from '../users/dto/update-social-profile.dto';
 import { sanitizeCity } from '../common/city.util';
 import { MatchReasonerService } from './match-reasoner.service';
 import { AgentConnection } from './entities/agent-connection.entity';
@@ -80,6 +79,7 @@ import {
 } from './social-agent-decision-tool.service';
 import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
 import { summarizeSocialAgentToolCalls } from './social-agent-tool-execution-summary';
+import { buildSocialAgentProfileContextPatch } from './social-agent-profile-context-patch';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -891,77 +891,11 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<unknown> {
-    const extracted = this.toolInput.isRecord(input.extractedProfile)
-      ? input.extractedProfile
-      : {};
-    const sourceMessage = this.toolInput.string(input.sourceMessage) ?? '';
-    const dto: UpdateSocialProfileDto = {};
-    const updatedFields: string[] = [];
-    const memoryFields: string[] = [];
-    const missingFields: string[] = [];
-    const setString = (field: string, value: unknown) => {
-      const text = this.toolInput.string(value);
-      if (!text) return;
-      dto[field] = text;
-      updatedFields.push(field);
-    };
-    const setList = (field: string, value: unknown) => {
-      const list = this.toolInput.stringList(value);
-      if (list.length === 0) return;
-      dto[field] = list;
-      updatedFields.push(field);
-    };
-
-    setString('gender', extracted.gender);
-    setString('ageRange', extracted.ageRange);
-    setString('city', extracted.city);
-    setString('nearbyArea', extracted.nearbyArea);
-    setString('zodiac', extracted.zodiac);
-    setString('mbti', extracted.mbti);
-    setList('traits', extracted.traits ?? extracted.personality);
-    setList('interestTags', extracted.interestTags);
-    setList('availableTimes', extracted.availableTimes);
-    setList('wantToMeet', extracted.wantToMeet ?? extracted.socialGoal);
-    setList(
-      'preferredTraits',
-      extracted.preferredTraits ?? extracted.targetPreference,
-    );
-    setString('rejectRules', extracted.rejectRules);
-    setString('privacyBoundary', extracted.privacyBoundary);
-
-    const supplemental: Record<string, unknown> = {};
-    for (const field of [
-      'height',
-      'weight',
-      'school',
-      'targetPreference',
-      'socialGoal',
-    ]) {
-      const value = extracted[field];
-      if (value === undefined || value === null || value === '') continue;
-      supplemental[field] = value;
-      memoryFields.push(field);
-    }
-    if (Object.keys(supplemental).length > 0 || sourceMessage) {
-      dto.matchSignals = {
-        agentProfileMemory: supplemental,
-        sourceMessage,
-        updatedAt: new Date().toISOString(),
-      };
-      updatedFields.push('matchSignals');
-    }
-    for (const field of [
-      'availableTimes',
-      'privacyBoundary',
-      'interestTags',
-      'wantToMeet',
-    ]) {
-      if (!updatedFields.includes(field)) missingFields.push(field);
-    }
+    const patch = buildSocialAgentProfileContextPatch(input);
 
     const saved =
-      Object.keys(dto).length > 0
-        ? await this.socialProfiles.upsert(task.ownerUserId, dto)
+      Object.keys(patch.dto).length > 0
+        ? await this.socialProfiles.upsert(task.ownerUserId, patch.dto)
         : await this.socialProfiles.get(task.ownerUserId);
     await this.createTaskEvent(
       task,
@@ -969,19 +903,19 @@ export class SocialAgentToolExecutorService {
       {
         summary: 'Updated social profile from agent context',
         payload: {
-          extractedProfile: extracted,
-          updatedFields,
-          memoryFields,
-          missingFields,
-          sourceMessage,
+          extractedProfile: patch.extractedProfile,
+          updatedFields: patch.updatedFields,
+          memoryFields: patch.memoryFields,
+          missingFields: patch.missingFields,
+          sourceMessage: patch.sourceMessage,
         },
       },
     );
     return {
       success: true,
-      updatedFields,
-      memoryFields,
-      missingFields,
+      updatedFields: patch.updatedFields,
+      memoryFields: patch.memoryFields,
+      missingFields: patch.missingFields,
       profile: saved,
     };
   }
