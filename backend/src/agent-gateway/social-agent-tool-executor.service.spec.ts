@@ -11,9 +11,11 @@ import {
   SocialAgentToolName,
 } from './social-agent-tool-executor.service';
 import { ActivityProofPolicy } from '../activities/entities/activity-template.entity';
+import { ConfirmationGuardService } from './confirmation-guard.service';
 import { SceneRiskPolicyService } from './scene-risk-policy.service';
 import { SocialAgentTargetResolverService } from './social-agent-target-resolver.service';
 import { SocialAgentActionSideEffectService } from './social-agent-action-side-effect.service';
+import { SocialAgentConfirmationPolicyService } from './social-agent-confirmation-policy.service';
 import { SocialAgentToolExecutionPolicyService } from './social-agent-tool-execution-policy.service';
 import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
 
@@ -206,6 +208,10 @@ function makeService() {
     toolRegistry,
     sceneRisk,
   );
+  const confirmationPolicy = new SocialAgentConfirmationPolicyService(
+    new ConfirmationGuardService(),
+    targetResolver,
+  );
 
   const service = new SocialAgentToolExecutorService(
     taskRepo as never,
@@ -231,6 +237,7 @@ function makeService() {
     toolJsonModel,
     actionSideEffects,
     toolExecutionPolicy,
+    confirmationPolicy,
   );
 
   return {
@@ -262,6 +269,7 @@ function makeService() {
     toolJsonModel,
     actionSideEffects,
     toolExecutionPolicy,
+    confirmationPolicy,
   };
 }
 

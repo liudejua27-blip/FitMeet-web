@@ -74,7 +74,6 @@ import { sanitizeCity } from '../common/city.util';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SceneRiskPolicyResult } from './scene-risk-policy.service';
-import { ConfirmationGuardService } from './confirmation-guard.service';
 import {
   getSocialAgentRelatedActivityId,
   getSocialAgentRelatedCandidateId,
@@ -111,6 +110,7 @@ import { SocialAgentTargetResolverService } from './social-agent-target-resolver
 import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
 import { SocialAgentActionSideEffectService } from './social-agent-action-side-effect.service';
 import { SocialAgentToolExecutionPolicyService } from './social-agent-tool-execution-policy.service';
+import { SocialAgentConfirmationPolicyService } from './social-agent-confirmation-policy.service';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -130,7 +130,6 @@ type ExecuteTaskOptions = {
 @Injectable()
 export class SocialAgentToolExecutorService {
   private readonly logger = new Logger(SocialAgentToolExecutorService.name);
-  private readonly fallbackConfirmationGuard = new ConfirmationGuardService();
   private toolCallSequence = 0;
 
   constructor(
@@ -162,7 +161,7 @@ export class SocialAgentToolExecutorService {
     private readonly toolJsonModel: SocialAgentToolJsonModelService,
     private readonly actionSideEffects: SocialAgentActionSideEffectService,
     private readonly toolExecutionPolicy: SocialAgentToolExecutionPolicyService,
-    private readonly confirmationGuard?: ConfirmationGuardService,
+    private readonly confirmationPolicy: SocialAgentConfirmationPolicyService,
   ) {}
 
   async executeTask(
@@ -410,14 +409,20 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     stepId: string,
   ): Promise<SocialAgentToolCallRecord | null> {
-    if (!this.isDangerousAdhocAction(toolName)) return null;
-    if (this.hasExplicitApprovalCredential(input)) return null;
+    if (!this.confirmationPolicy.isDangerousAdhocAction(toolName)) return null;
+    if (this.confirmationPolicy.hasExplicitApprovalCredential(input)) {
+      return null;
+    }
 
     const startedAt = new Date();
     const callId = this.safeToolCallId(task.id, toolName, startedAt);
 
     try {
-      await this.validateDangerousAdhocActionTarget(task, toolName, input);
+      await this.confirmationPolicy.validateDangerousAdhocActionTarget(
+        task,
+        toolName,
+        input,
+      );
     } catch (error) {
       const blocked = error instanceof ForbiddenException;
       return this.buildToolCall({
@@ -449,21 +454,6 @@ export class SocialAgentToolExecutorService {
     });
   }
 
-  private async validateDangerousAdhocActionTarget(
-    task: AgentTask,
-    toolName: SocialAgentToolName,
-    input: Record<string, unknown>,
-  ): Promise<void> {
-    if (
-      toolName !== SocialAgentToolName.ConnectCandidate &&
-      toolName !== SocialAgentToolName.AddFriend
-    ) {
-      return;
-    }
-
-    await this.resolveCandidateTargetUser(input, task.ownerUserId);
-  }
-
   async executeToolAction(
     taskId: number,
     toolName: SocialAgentToolName | string,
@@ -485,7 +475,7 @@ export class SocialAgentToolExecutorService {
       throw new BadRequestException(`Unknown tool ${String(toolName)}`);
     }
 
-    const actionInput = this.withAdhocConfirmationMetadata(
+    const actionInput = this.confirmationPolicy.withAdhocConfirmationMetadata(
       normalizedToolName,
       input,
       ownerUserId,
@@ -573,7 +563,7 @@ export class SocialAgentToolExecutorService {
         toolName,
       });
       this.toolExecutionPolicy.assertHighRiskFrequencyLimit(task, toolName);
-      this.assertAgentConnectionBound(task, toolName, input);
+      this.confirmationPolicy.assertAgentConnectionBound(task, toolName, input);
       const gatedOutput = await this.maybeGateActionByRisk(
         task,
         toolName,
@@ -791,7 +781,7 @@ export class SocialAgentToolExecutorService {
     }
 
     if (!policy.requiresConfirmation) return null;
-    if (this.hasUserApproval(input)) return null;
+    if (this.confirmationPolicy.hasUserApproval(input)) return null;
     if (!isConfirmableSocialAgentTool(toolName)) return null;
 
     const approval = await this.approvals.create({
@@ -843,28 +833,6 @@ export class SocialAgentToolExecutorService {
       riskPolicy: policy,
       message: '已创建待确认动作，用户确认后 Agent 才会继续执行。',
     };
-  }
-
-  private hasUserApproval(input: Record<string, unknown>): boolean {
-    if (this.number(input.approvalId) || this.number(input.approvalRequestId)) {
-      return true;
-    }
-    const metadata = this.isRecord(input.metadata) ? input.metadata : {};
-    return (
-      this.bool(input.userConfirmed) ||
-      this.bool(input.confirmedByUser) ||
-      this.string(metadata.confirmationSource) === 'social_agent_chat'
-    );
-  }
-
-  private hasExplicitApprovalCredential(
-    input: Record<string, unknown>,
-  ): boolean {
-    return this.confirmationRules().hasExplicitApprovalCredential(input);
-  }
-
-  private isDangerousAdhocAction(toolName: SocialAgentToolName): boolean {
-    return this.confirmationRules().requiresExplicitConfirmation(toolName);
   }
 
   private async updateAiProfileFromAnswers(
@@ -2499,71 +2467,6 @@ export class SocialAgentToolExecutorService {
     });
   }
 
-  private assertAgentConnectionBound(
-    task: AgentTask,
-    toolName: SocialAgentToolName,
-    input: Record<string, unknown>,
-  ): void {
-    const requiresAgentConnection = [
-      SocialAgentToolName.SendMessage,
-      SocialAgentToolName.SendMessageToCandidate,
-      SocialAgentToolName.ReplyMessage,
-      SocialAgentToolName.AddFriend,
-      SocialAgentToolName.ConnectCandidate,
-      SocialAgentToolName.InviteActivity,
-      SocialAgentToolName.CreateActivity,
-      SocialAgentToolName.OfflineMeeting,
-      SocialAgentToolName.ShareLocation,
-      SocialAgentToolName.Payment,
-    ].includes(toolName);
-    if (!requiresAgentConnection || task.agentConnectionId) return;
-    if (this.canRunAsConfirmedUserAction(toolName, input)) return;
-    throw new BadRequestException(
-      `agentConnectionId is required for ${toolName}`,
-    );
-  }
-
-  private canRunAsConfirmedUserAction(
-    toolName: SocialAgentToolName,
-    input: Record<string, unknown>,
-  ): boolean {
-    return this.confirmationRules().canRunAsConfirmedUserAction(
-      toolName,
-      input,
-    );
-  }
-
-  private withAdhocConfirmationMetadata(
-    toolName: SocialAgentToolName,
-    input: Record<string, unknown>,
-    ownerUserId?: number,
-  ): Record<string, unknown> {
-    if (!ownerUserId) return input;
-    if (!this.isUserConfirmedCandidateAction(toolName)) return input;
-    const metadata = this.isRecord(input.metadata) ? input.metadata : {};
-    if (this.string(metadata.confirmationSource)) return input;
-    return {
-      ...input,
-      metadata: {
-        ...metadata,
-        confirmationSource: 'social_agent_chat',
-      },
-    };
-  }
-
-  private confirmationRules(): ConfirmationGuardService {
-    return this.confirmationGuard ?? this.fallbackConfirmationGuard;
-  }
-
-  private isUserConfirmedCandidateAction(
-    toolName: SocialAgentToolName,
-  ): boolean {
-    return [
-      SocialAgentToolName.SendMessage,
-      SocialAgentToolName.SendMessageToCandidate,
-    ].includes(toolName);
-  }
-
   private resolveToolName(step: StepRecord): SocialAgentToolName {
     const explicit = this.normalizeToolName(step.toolName ?? step.tool);
     if (explicit) return explicit;
@@ -2780,7 +2683,10 @@ export class SocialAgentToolExecutorService {
       stepId,
       input,
       (toolName, currentInput) =>
-        this.canRunAsConfirmedUserAction(toolName, currentInput),
+        this.confirmationPolicy.canRunAsConfirmedUserAction(
+          toolName,
+          currentInput,
+        ),
     );
   }
 
