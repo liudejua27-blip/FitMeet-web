@@ -16,6 +16,7 @@ import { SceneRiskPolicyService } from './scene-risk-policy.service';
 import { SocialAgentTargetResolverService } from './social-agent-target-resolver.service';
 import { SocialAgentActionSideEffectService } from './social-agent-action-side-effect.service';
 import { SocialAgentConfirmationPolicyService } from './social-agent-confirmation-policy.service';
+import { SocialAgentToolCallFactoryService } from './social-agent-tool-call-factory.service';
 import { SocialAgentToolExecutionPolicyService } from './social-agent-tool-execution-policy.service';
 import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
 
@@ -212,6 +213,10 @@ function makeService() {
     new ConfirmationGuardService(),
     targetResolver,
   );
+  const toolCallFactory = new SocialAgentToolCallFactoryService(
+    permissions,
+    toolRegistry,
+  );
 
   const service = new SocialAgentToolExecutorService(
     taskRepo as never,
@@ -220,7 +225,6 @@ function makeService() {
     candidateRepo as never,
     paymentIntentRepo as never,
     permissions,
-    toolRegistry,
     approvals as never,
     approvalDispatcher as never,
     longTermMemory as never,
@@ -238,6 +242,7 @@ function makeService() {
     actionSideEffects,
     toolExecutionPolicy,
     confirmationPolicy,
+    toolCallFactory,
   );
 
   return {
