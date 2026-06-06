@@ -79,11 +79,13 @@ describe('production deploy readiness', () => {
     const releasePreflight = readRepoFile('scripts/release-preflight.sh');
 
     expect(realtimeSmoke).toContain('REALTIME_SMOKE_CONNECTIONS, 1000');
+    expect(realtimeSmoke).toContain('REALTIME_SMOKE_NAMESPACES');
     expect(realtimeSmoke).toContain('REALTIME_SMOKE_TOKEN');
     expect(realtimeSmoke).toContain('REALTIME_SMOKE_EMAIL');
     expect(realtimeSmoke).toContain('REALTIME_SMOKE_PASSWORD');
     expect(realtimeSmoke).toContain('/api/auth/login');
     expect(realtimeSmoke).toContain('/realtime');
+    expect(realtimeSmoke).toContain('realtime,messages');
     expect(realtimeSmoke).toContain('REALTIME_SMOKE_ALLOW_REMOTE');
     expect(releasePreflight).toContain('--include-realtime-smoke');
     expect(releasePreflight).toContain(

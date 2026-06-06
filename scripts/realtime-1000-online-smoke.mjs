@@ -14,7 +14,8 @@ Socket.IO online-capacity smoke for App/Web realtime paths.
 
 Environment:
   REALTIME_SMOKE_BASE_URL       Target origin, default LOAD_TEST_BASE_URL or http://localhost:3000
-  REALTIME_SMOKE_CONNECTIONS    Simultaneous realtime sockets, default 1000
+  REALTIME_SMOKE_CONNECTIONS    Simultaneous logical users, default 1000
+  REALTIME_SMOKE_NAMESPACES     Socket.IO namespaces per user, default realtime,messages
   REALTIME_SMOKE_TOKEN          JWT access token to reuse for smoke connections
   REALTIME_SMOKE_EMAIL          Optional login email when token is not set
   REALTIME_SMOKE_PASSWORD       Optional login password when token is not set
@@ -46,6 +47,7 @@ const baseURL = new URL(
     'http://localhost:3000',
 );
 const connections = positiveInt(process.env.REALTIME_SMOKE_CONNECTIONS, 1000);
+const namespaces = namespaceList(process.env.REALTIME_SMOKE_NAMESPACES);
 const batchSize = positiveInt(process.env.REALTIME_SMOKE_CONNECT_BATCH, 100);
 const batchGapMs = positiveInt(process.env.REALTIME_SMOKE_CONNECT_GAP_MS, 25);
 const timeoutMs = positiveInt(process.env.REALTIME_SMOKE_TIMEOUT_MS, 15_000);
@@ -73,15 +75,17 @@ if (!token) {
 const startedAt = performance.now();
 const sockets = [];
 const results = [];
+const connectJobs = Array.from({ length: connections }, (_, userIndex) =>
+  namespaces.map((namespace) => ({ userIndex, namespace })),
+).flat();
 
 try {
-  for (let index = 0; index < connections; index += batchSize) {
-    const batch = Array.from(
-      { length: Math.min(batchSize, connections - index) },
-      (_, offset) => connectSocket(index + offset, token),
-    );
+  for (let index = 0; index < connectJobs.length; index += batchSize) {
+    const batch = connectJobs
+      .slice(index, index + batchSize)
+      .map((job) => connectSocket(job, token));
     results.push(...(await Promise.all(batch)));
-    if (index + batchSize < connections) await sleep(batchGapMs);
+    if (index + batchSize < connectJobs.length) await sleep(batchGapMs);
   }
 
   const failures = results.filter((result) => result.ok === false);
@@ -99,8 +103,10 @@ try {
   console.log(
     JSON.stringify(
       {
-        target: `${baseURL.origin}/realtime`,
-        requestedConnections: connections,
+        target: baseURL.origin,
+        namespaces,
+        requestedUsers: connections,
+        requestedSockets: connectJobs.length,
         connected,
         stillOnline,
         elapsedMs: Math.round(elapsedMs),
@@ -117,17 +123,19 @@ try {
   if (failures.length > 0) {
     console.error('First connection failures:');
     for (const failure of failures.slice(0, 5)) {
-      console.error(`  #${failure.index}: ${failure.error}`);
+      console.error(
+        `  user=${failure.userIndex} namespace=${failure.namespace}: ${failure.error}`,
+      );
     }
   }
 
   if (
     errorRate > maxErrorRate ||
     p95 > p95LimitMs ||
-    stillOnline < connections - failures.length
+    stillOnline < connectJobs.length - failures.length
   ) {
     throw new Error(
-      `Realtime online smoke failed thresholds: errorRate=${round(errorRate)}%/${maxErrorRate}%, p95=${Math.round(p95)}ms/${p95LimitMs}ms, stillOnline=${stillOnline}/${connections - failures.length}.`,
+      `Realtime online smoke failed thresholds: errorRate=${round(errorRate)}%/${maxErrorRate}%, p95=${Math.round(p95)}ms/${p95LimitMs}ms, stillOnline=${stillOnline}/${connectJobs.length - failures.length}.`,
     );
   }
 
@@ -162,10 +170,10 @@ async function resolveAccessToken() {
   );
 }
 
-function connectSocket(index, token) {
+function connectSocket(job, token) {
   const started = performance.now();
   return new Promise((resolve) => {
-    const socket = io(`${baseURL.origin}/realtime`, {
+    const socket = io(`${baseURL.origin}/${job.namespace}`, {
       path: '/socket.io',
       transports: ['websocket'],
       auth: { token },
@@ -181,7 +189,8 @@ function connectSocket(index, token) {
       socket.disconnect();
       resolve({
         ok: false,
-        index,
+        userIndex: job.userIndex,
+        namespace: job.namespace,
         durationMs: performance.now() - started,
         error: `connect timeout after ${timeoutMs}ms`,
       });
@@ -190,6 +199,7 @@ function connectSocket(index, token) {
     const cleanup = () => {
       clearTimeout(timer);
       socket.off('realtime:connected', onConnected);
+      socket.off('connect', onSocketConnect);
       socket.off('connect_error', onError);
       socket.off('disconnect', onDisconnectBeforeReady);
     };
@@ -198,16 +208,22 @@ function connectSocket(index, token) {
       cleanup();
       resolve({
         ok: true,
-        index,
+        userIndex: job.userIndex,
+        namespace: job.namespace,
         durationMs: performance.now() - started,
       });
+    };
+    const onSocketConnect = () => {
+      if (job.namespace === 'realtime') return;
+      onConnected();
     };
     const onError = (error) => {
       cleanup();
       socket.disconnect();
       resolve({
         ok: false,
-        index,
+        userIndex: job.userIndex,
+        namespace: job.namespace,
         durationMs: performance.now() - started,
         error: error?.message ?? String(error),
       });
@@ -216,13 +232,15 @@ function connectSocket(index, token) {
       cleanup();
       resolve({
         ok: false,
-        index,
+        userIndex: job.userIndex,
+        namespace: job.namespace,
         durationMs: performance.now() - started,
         error: `disconnected before ready: ${reason}`,
       });
     };
 
     socket.once('realtime:connected', onConnected);
+    socket.once('connect', onSocketConnect);
     socket.once('connect_error', onError);
     socket.once('disconnect', onDisconnectBeforeReady);
   });
@@ -246,6 +264,16 @@ function positiveInt(value, fallback) {
 function positiveNumber(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function namespaceList(value) {
+  const namespaces = (value ?? 'realtime,messages')
+    .split(',')
+    .map((item) => item.trim().replace(/^\/+/, ''))
+    .filter(Boolean);
+  const allowed = new Set(['realtime', 'messages']);
+  const normalized = namespaces.filter((item) => allowed.has(item));
+  return normalized.length ? [...new Set(normalized)] : ['realtime', 'messages'];
 }
 
 function round(value) {

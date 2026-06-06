@@ -311,7 +311,7 @@ REALTIME_SMOKE_TOKEN='eyJ...' \
 ./scripts/release-preflight.sh --web-only --include-realtime-smoke
 ```
 
-该脚本会打开 1000 个 `/realtime` Socket.IO 连接，等待后端 `realtime:connected`，保持在线 5 秒，并检查错误率和连接 p95。远端目标同样必须显式设置 `REALTIME_SMOKE_ALLOW_REMOTE=true`。
+该脚本默认按 1000 个逻辑用户打开 `/realtime` 和 `/messages` 两组 Socket.IO 连接，等待实时网关 `realtime:connected` 和消息网关 `connect`，保持在线 5 秒，并检查错误率和连接 p95。远端目标同样必须显式设置 `REALTIME_SMOKE_ALLOW_REMOTE=true`。如果只想压某一条链路，可设置 `REALTIME_SMOKE_NAMESPACES=realtime` 或 `REALTIME_SMOKE_NAMESPACES=messages`。
 
 `nginx` 会等 `backend` 的 `/api/health` 通过后再进入 healthy 状态；如果这里失败，先看 `docker compose ... logs backend nginx`，再排查数据库、Redis、Mongo、Kafka 的 healthcheck。Windows 环境也可继续使用 `powershell -ExecutionPolicy Bypass -File .\scripts\verify-production.ps1`。
 
