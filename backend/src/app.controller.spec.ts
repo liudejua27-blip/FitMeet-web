@@ -21,20 +21,26 @@ const APP_CORE_CONTROLLERS = [
   UploadsController,
 ] as const;
 
-const STAGING_E2E_REQUIRED_PATHS = {
+const IOS_APP_REQUIRED_PATHS = {
   '/auth/login': 'post',
   '/auth/refresh': 'post',
   '/auth/profile': 'get',
   '/users/profile': 'put',
   '/uploads/image': 'post',
   '/messages/start': 'post',
+  '/messages/conversations': 'get',
   '/messages/conversations/{conversationId}': 'get',
   '/messages/conversations/{conversationId}/send': 'post',
+  '/messages/unread': 'get',
   '/feed': ['get', 'post'],
   '/feed/interactions': 'get',
   '/social-agent/chat/session': 'get',
   '/social-agent/chat/messages': 'post',
   '/social-agent/chat/route-message': 'post',
+  '/social-agent/chat/tasks/{taskId}/messages': 'post',
+  '/social-agent/chat/tasks/{taskId}/save-candidate': 'post',
+  '/social-agent/chat/tasks/{taskId}/send-message': 'post',
+  '/social-agent/chat/tasks/{taskId}/connect-candidate': 'post',
 } as const;
 
 type RouteMethod = Lowercase<keyof typeof RequestMethod>;
@@ -105,11 +111,11 @@ describe('AppController', () => {
       );
     });
 
-    it('keeps the iOS staging E2E contract explicit', () => {
+    it('keeps the iOS app API contract explicit', () => {
       const contract = appController.getFitMeetCoreOpenApi();
 
       for (const [path, methodOrMethods] of Object.entries(
-        STAGING_E2E_REQUIRED_PATHS,
+        IOS_APP_REQUIRED_PATHS,
       )) {
         const methods = Array.isArray(methodOrMethods)
           ? methodOrMethods
@@ -121,12 +127,12 @@ describe('AppController', () => {
       }
     });
 
-    it('maps the iOS staging OpenAPI contract to registered controllers', () => {
+    it('maps the iOS app OpenAPI contract to registered controllers', () => {
       const contract = appController.getFitMeetCoreOpenApi();
       const controllerRoutes = collectControllerRoutes(APP_CORE_CONTROLLERS);
 
       for (const [path, methodOrMethods] of Object.entries(
-        STAGING_E2E_REQUIRED_PATHS,
+        IOS_APP_REQUIRED_PATHS,
       )) {
         const methods = Array.isArray(methodOrMethods)
           ? methodOrMethods
@@ -143,13 +149,61 @@ describe('AppController', () => {
       }
     });
 
+    it('documents the iOS avatar upload and profile update contract', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+
+      expect(
+        contract.paths['/uploads/image'].post.requestBody.content[
+          'multipart/form-data'
+        ].schema,
+      ).toEqual({ $ref: '#/components/schemas/FileUploadInput' });
+      expect(contract.components.schemas.FileUploadInput).toMatchObject({
+        required: ['file'],
+        properties: { file: { type: 'string', format: 'binary' } },
+      });
+      expect(contract.components.schemas.ImageUploadResult).toMatchObject({
+        required: ['url', 'width', 'height'],
+      });
+      expect(
+        contract.paths['/users/profile'].put.requestBody.content[
+          'application/json'
+        ].schema,
+      ).toEqual({ $ref: '#/components/schemas/UpdateProfileInput' });
+      expect(
+        contract.components.schemas.UpdateProfileInput.properties,
+      ).toMatchObject({
+        avatar: { type: 'string', format: 'uri' },
+      });
+      expect(
+        contract.paths['/users/profile'].put.responses['200'],
+      ).toMatchObject({
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/UserProfile' },
+          },
+        },
+      });
+    });
+
     it('documents conversation history separately from sent message payloads', () => {
       const contract = appController.getFitMeetCoreOpenApi();
       const historySchema =
         contract.paths['/messages/conversations/{conversationId}'].get
           .responses['200'].content['application/json'].schema;
       const summarySchema = contract.components.schemas.ConversationSummary;
+      const conversationsSchema =
+        contract.paths['/messages/conversations'].get.responses['200'].content[
+          'application/json'
+        ].schema;
+      const unreadSchema =
+        contract.paths['/messages/unread'].get.responses['200'].content[
+          'application/json'
+        ].schema;
 
+      expect(conversationsSchema).toMatchObject({
+        type: 'array',
+        items: { $ref: '#/components/schemas/ConversationSummary' },
+      });
       expect(historySchema).toMatchObject({
         type: 'array',
         items: { $ref: '#/components/schemas/ConversationHistoryMessage' },
@@ -161,6 +215,12 @@ describe('AppController', () => {
       expect(
         contract.components.schemas.ConversationMessage.required,
       ).toContain('conversationId');
+      expect(unreadSchema).toEqual({
+        $ref: '#/components/schemas/UnreadCount',
+      });
+      expect(contract.components.schemas.UnreadCount.required).toEqual([
+        'unreadCount',
+      ]);
     });
 
     it('documents the iOS moment feed contract used by staging E2E', () => {
@@ -241,6 +301,56 @@ describe('AppController', () => {
         name: { type: 'string' },
         avatar: { type: 'string' },
         city: { type: 'string' },
+      });
+    });
+
+    it('documents the iOS Social Agent chat and candidate action contract', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+      const sendCandidate =
+        contract.paths['/social-agent/chat/tasks/{taskId}/send-message'].post
+          .requestBody.content['application/json'].schema;
+
+      for (const route of [
+        '/social-agent/chat/messages',
+        '/social-agent/chat/tasks/{taskId}/messages',
+      ]) {
+        expect(
+          contract.paths[route].post.requestBody.content['application/json']
+            .schema,
+        ).toEqual({
+          $ref: '#/components/schemas/SocialAgentRouteMessageInput',
+        });
+        expect(contract.paths[route].post.responses['200']).toEqual({
+          $ref: '#/components/responses/UserFacingAgentResponse',
+        });
+      }
+      expect(
+        contract.components.schemas.SocialAgentRouteMessageInput.properties,
+      ).toMatchObject({
+        message: { type: 'string' },
+        taskId: { type: 'integer' },
+        hasCandidates: { type: 'boolean' },
+      });
+      expect(
+        contract.components.schemas.SocialAgentCandidateActionInput.properties,
+      ).toMatchObject({
+        targetUserId: { type: 'integer' },
+        candidateUserId: { type: 'integer' },
+        candidateRecordId: { type: 'integer' },
+        publicIntentId: { type: 'string' },
+        socialRequestId: { type: 'integer' },
+        candidate: { type: 'object', additionalProperties: true },
+        suggestedOpener: { type: 'string' },
+      });
+      expect(sendCandidate).toMatchObject({
+        allOf: [
+          { $ref: '#/components/schemas/SocialAgentCandidateActionInput' },
+          {
+            type: 'object',
+            required: ['message'],
+            properties: { message: { type: 'string', minLength: 1 } },
+          },
+        ],
       });
     });
   });

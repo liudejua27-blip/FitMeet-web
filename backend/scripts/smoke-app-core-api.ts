@@ -353,11 +353,17 @@ function assertCoreContract(contract: unknown) {
     '/feed': ['get', 'post'],
     '/feed/interactions': ['get'],
     '/messages/start': ['post'],
+    '/messages/conversations': ['get'],
     '/messages/conversations/{conversationId}': ['get'],
     '/messages/conversations/{conversationId}/send': ['post'],
+    '/messages/unread': ['get'],
     '/social-agent/chat/session': ['get'],
     '/social-agent/chat/messages': ['post'],
     '/social-agent/chat/route-message': ['post'],
+    '/social-agent/chat/tasks/{taskId}/messages': ['post'],
+    '/social-agent/chat/tasks/{taskId}/save-candidate': ['post'],
+    '/social-agent/chat/tasks/{taskId}/send-message': ['post'],
+    '/social-agent/chat/tasks/{taskId}/connect-candidate': ['post'],
   };
 
   for (const [route, methods] of Object.entries(requiredPaths)) {
