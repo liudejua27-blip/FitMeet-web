@@ -3,7 +3,6 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -12,20 +11,15 @@ import {
   cleanDisplayText,
   sanitizeForDisplay,
 } from '../common/display-text.util';
-import { RealtimeEventService } from '../realtime/realtime-event.service';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
 import {
   AgentTask,
-  AgentTaskEvent,
   AgentTaskEventType,
   AgentTaskPermissionMode,
 } from './entities/agent-task.entity';
-import { type SocialAgentIntentEntities } from './social-agent-intent-router.service';
 import { SocialAgentToolCallRecord } from './social-agent-tool-executor.service';
 import {
-  appendShortTermMemoryItem,
   readSocialAgentTaskMemory,
-  rememberSocialAgentShortTerm,
   transitionSocialAgentState,
 } from './social-agent-memory.util';
 import { createSocialAgentRunId } from './social-agent-chat-run.presenter';
@@ -34,10 +28,7 @@ import { SocialAgentFollowUpContextService } from './social-agent-follow-up-cont
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
-import { FitMeetAgentRunStatus } from './entities/fitmeet-agent-runtime.entity';
-import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { TonePolicyService } from './response-quality/tone-policy.service';
-import { AgentSessionAssemblerService } from './agent-session-assembler.service';
 import type {
   CandidateTargetBody,
   SocialAgentAppendContextResult,
@@ -52,24 +43,20 @@ import type {
   SocialAgentRouteMessageBody,
   SocialAgentSessionSnapshot,
   SocialAgentTaskTimelineSnapshot,
-  SocialAgentVisibleStep,
   StreamEmit,
 } from './social-agent-chat.types';
 import { messageForSocialAgentSchemaAction } from './social-agent-card-action.presenter';
 import { SocialAgentSessionRestoreService } from './social-agent-session-restore.service';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
-import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
-import { SocialAgentRunRecommendationService } from './social-agent-run-recommendation.service';
 import { SocialAgentReplanRunService } from './social-agent-replan-run.service';
 import { SocialAgentRouteTurnService } from './social-agent-route-turn.service';
 import { SocialAgentQueuedRunService } from './social-agent-queued-run.service';
+import { SocialAgentRunOrchestratorService } from './social-agent-run-orchestrator.service';
 export type * from './social-agent-chat.types';
 
 @Injectable()
 export class SocialAgentChatService {
   private readonly logger = new Logger(SocialAgentChatService.name);
-  private readonly fallbackSessionAssembler =
-    new AgentSessionAssemblerService();
 
   constructor(
     @InjectRepository(AgentTask)
@@ -81,30 +68,18 @@ export class SocialAgentChatService {
     private readonly draftPublication: SocialAgentDraftPublicationService,
     private readonly sessionRestore: SocialAgentSessionRestoreService,
     private readonly taskLifecycle: SocialAgentTaskLifecycleService,
-    private readonly mainAgentTurn: SocialAgentMainAgentTurnService,
-    private readonly runRecommendations: SocialAgentRunRecommendationService,
     private readonly replanRuns: SocialAgentReplanRunService,
     private readonly routeTurns: SocialAgentRouteTurnService,
     private readonly queuedRuns: SocialAgentQueuedRunService,
-    @Optional()
-    private readonly realtime?: RealtimeEventService,
-    @Optional()
-    private readonly fitMeetRuntime?: FitMeetAgentRuntimeService,
-    @Optional()
+    private readonly runOrchestrator: SocialAgentRunOrchestratorService,
     private readonly tonePolicy?: TonePolicyService,
-    @Optional()
-    private readonly sessionAssembler?: AgentSessionAssemblerService,
   ) {}
-
-  private sessions(): AgentSessionAssemblerService {
-    return this.sessionAssembler ?? this.fallbackSessionAssembler;
-  }
 
   run(
     ownerUserId: number,
     body: SocialAgentChatRunBody,
   ): Promise<SocialAgentChatRunResult> {
-    return this.runInternal(ownerUserId, body);
+    return this.runOrchestrator.run(ownerUserId, body);
   }
 
   async routeMessage(
@@ -200,7 +175,7 @@ export class SocialAgentChatService {
       ownerUserId,
       body,
       executeRun: (runBody, emit) =>
-        this.runInternal(ownerUserId, runBody, emit),
+        this.runOrchestrator.run(ownerUserId, runBody, emit),
       visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
     });
   }
@@ -210,7 +185,7 @@ export class SocialAgentChatService {
     body: SocialAgentChatRunBody,
     emit: StreamEmit,
   ): Promise<SocialAgentChatRunResult> {
-    return this.runInternal(ownerUserId, body, emit);
+    return this.runOrchestrator.run(ownerUserId, body, emit);
   }
 
   async replanAndRefresh(
@@ -366,115 +341,6 @@ export class SocialAgentChatService {
     });
   }
 
-  private async runInternal(
-    ownerUserId: number,
-    body: SocialAgentChatRunBody,
-    emit?: StreamEmit,
-  ): Promise<SocialAgentChatRunResult> {
-    const goal = cleanDisplayText(body.goal, '').trim();
-    if (!goal) throw new BadRequestException('请输入你的社交需求');
-
-    const permissionMode = this.normalizePermissionMode(body.permissionMode);
-    const idempotencyKey = cleanDisplayText(body.idempotencyKey, '');
-    const visibleSteps: SocialAgentVisibleStep[] = [];
-    const runtimeRun = await this.fitMeetRuntime?.startRun({
-      userId: ownerUserId,
-      userMessage: goal,
-      permissionMode,
-    });
-
-    let task = await this.taskLifecycle.createOrReuseTask({
-      ownerUserId,
-      goal,
-      permissionMode,
-      idempotencyKey: idempotencyKey || null,
-    });
-    await this.fitMeetRuntime?.attachTask(runtimeRun?.id, task.id);
-    this.realtime?.emitAgentEvent(ownerUserId, 'agent:thinking', {
-      taskId: task.id,
-      goal,
-      status: 'understanding',
-    });
-    this.rememberShortTermStep(
-      task,
-      'task.created',
-      '已创建 Social Agent 任务',
-      'done',
-    );
-    await emit?.({ type: 'task', taskId: task.id, status: task.status });
-
-    const mainAgentRun = await this.mainAgentTurn.handleRunTurn({
-      ownerUserId,
-      task,
-      message: goal,
-      permissionMode,
-      visibleSteps,
-      emit,
-      visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
-      completeRuntimeClarification: async (result) => {
-        await this.fitMeetRuntime?.completeRun({
-          runId: runtimeRun?.id,
-          userId: ownerUserId,
-          status: FitMeetAgentRunStatus.WaitingConfirmation,
-          assistantMessage: result.assistantMessage,
-          resultPayload: { taskId: task.id, awaitingClarification: true },
-        });
-      },
-    });
-    task = mainAgentRun.task;
-    if (mainAgentRun.result) return mainAgentRun.result;
-    const alphaTurn = mainAgentRun.alphaTurn;
-
-    const recommendation = await this.runRecommendations.run({
-      ownerUserId,
-      task,
-      goal,
-      permissionMode,
-      visibleSteps,
-      emit,
-      alphaTurn,
-      visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
-      recordRuntimeStep: async (input) => {
-        await this.fitMeetRuntime?.recordStep({
-          runId: runtimeRun?.id,
-          userId: ownerUserId,
-          ...input,
-        });
-      },
-      recordRuntimeTool: async (input) => {
-        await this.fitMeetRuntime?.recordToolCall({
-          runId: runtimeRun?.id,
-          userId: ownerUserId,
-          ...input,
-        });
-      },
-    });
-    task = recommendation.task;
-    const result = recommendation.result;
-    this.realtime?.emitAgentEvent(ownerUserId, 'agent:completed', {
-      taskId: task.id,
-      status: result.status,
-      candidateCount: result.candidates.length,
-      approvalRequiredCount: result.approvalRequiredActions.length,
-    });
-    await this.fitMeetRuntime?.completeRun({
-      runId: runtimeRun?.id,
-      userId: ownerUserId,
-      status:
-        result.approvalRequiredActions.length > 0 ||
-        result.candidates.length > 0
-          ? FitMeetAgentRunStatus.WaitingConfirmation
-          : FitMeetAgentRunStatus.Completed,
-      assistantMessage: result.assistantMessage,
-      resultPayload: {
-        taskId: task.id,
-        candidateCount: result.candidates.length,
-        approvalRequiredCount: result.approvalRequiredActions.length,
-      },
-    });
-    return result;
-  }
-
   async publishDraft(
     ownerUserId: number,
     taskId: number,
@@ -531,16 +397,6 @@ export class SocialAgentChatService {
     return this.candidateActions.connectCandidate(ownerUserId, taskId, body);
   }
 
-  private emptyIntentEntities(): SocialAgentIntentEntities {
-    return {
-      city: '',
-      activityType: '',
-      targetGender: '',
-      timePreference: '',
-      locationPreference: '',
-    };
-  }
-
   private userVisibleStepLabel(id: string, label: string): string {
     return this.tonePolicy?.userStatus(id, label) ?? label;
   }
@@ -594,21 +450,6 @@ export class SocialAgentChatService {
     );
   }
 
-  private async updateRunSnapshot(
-    ownerUserId: number,
-    taskId: number,
-    runId: string,
-    patch: Partial<SocialAgentAsyncRunSnapshot>,
-  ): Promise<AgentTask> {
-    return this.runState.updateRunSnapshot(
-      ownerUserId,
-      taskId,
-      runId,
-      patch,
-      (id, label) => this.userVisibleStepLabel(id, label),
-    );
-  }
-
   private async markRunFailed(
     ownerUserId: number,
     taskId: number,
@@ -639,54 +480,5 @@ export class SocialAgentChatService {
     if (value instanceof Date) return value.toISOString();
     const text = cleanDisplayText(value, '');
     return text || new Date().toISOString();
-  }
-
-  private rememberShortTermStep(
-    task: AgentTask,
-    id: string,
-    label: string,
-    status: string,
-  ) {
-    const step = {
-      id,
-      label,
-      status,
-      updatedAt: new Date().toISOString(),
-    };
-    rememberSocialAgentShortTerm(task, {
-      currentStep: step,
-      steps: appendShortTermMemoryItem(task, 'steps', step, 40),
-    });
-  }
-
-  private toEventDto(event: AgentTaskEvent): Record<string, unknown> {
-    return sanitizeForDisplay({
-      id: event.id,
-      taskId: event.taskId,
-      eventType: event.eventType,
-      actor: event.actor,
-      summary: event.summary,
-      payload: event.payload,
-      stepId: event.stepId,
-      toolCallId: event.toolCallId,
-      createdAt: event.createdAt,
-    }) as Record<string, unknown>;
-  }
-
-  private normalizePermissionMode(
-    mode: AgentTaskPermissionMode | undefined,
-  ): AgentTaskPermissionMode {
-    return mode && Object.values(AgentTaskPermissionMode).includes(mode)
-      ? mode
-      : AgentTaskPermissionMode.Confirm;
-  }
-
-  private isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
-  }
-
-  private number(value: unknown): number | null {
-    const num = Number(value);
-    return Number.isFinite(num) && num > 0 ? num : null;
   }
 }

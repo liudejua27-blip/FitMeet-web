@@ -34,6 +34,7 @@ import { SocialAgentRunRecommendationService } from './social-agent-run-recommen
 import { SocialAgentReplanRunService } from './social-agent-replan-run.service';
 import { SocialAgentRouteTurnService } from './social-agent-route-turn.service';
 import { SocialAgentQueuedRunService } from './social-agent-queued-run.service';
+import { SocialAgentRunOrchestratorService } from './social-agent-run-orchestrator.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 
@@ -592,6 +593,18 @@ function makeHarness(options: Record<string, unknown> = {}) {
       runState as never,
       taskLifecycle as never,
     );
+  const runOrchestrator =
+    (options.runOrchestrator as
+      | SocialAgentRunOrchestratorService
+      | undefined) ??
+    new SocialAgentRunOrchestratorService(
+      taskLifecycle as never,
+      mainAgentTurn as never,
+      runRecommendations as never,
+      undefined,
+      options.fitMeetRuntime as never,
+      options.tonePolicy as never,
+    );
 
   const service = new SocialAgentChatService(
     taskRepo as never,
@@ -602,15 +615,11 @@ function makeHarness(options: Record<string, unknown> = {}) {
     draftPublication as never,
     sessionRestore as never,
     taskLifecycle as never,
-    mainAgentTurn as never,
-    runRecommendations as never,
     replanRuns as never,
     routeTurns as never,
     queuedRuns as never,
-    undefined,
-    options.fitMeetRuntime as never,
+    runOrchestrator as never,
     options.tonePolicy as never,
-    sessionAssembler,
   );
 
   return {
@@ -645,6 +654,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     replanRuns,
     routeTurns,
     queuedRuns,
+    runOrchestrator,
   };
 }
 
