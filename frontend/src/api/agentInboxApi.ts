@@ -152,7 +152,11 @@ export const agentInboxApi = {
         agentName: string | null;
         conversationId: string;
         messages: AgentInboxMessage[];
-      }>(`/agents/inbox/conversations/${conversationId}/messages${qs ? `?${qs}` : ''}`)
+      }>(
+        `/agents/inbox/conversations/${encodeURIComponent(
+          conversationId,
+        )}/messages${qs ? `?${qs}` : ''}`,
+      )
       .then(sanitizeAgentInboxResponse);
   },
 
@@ -165,10 +169,15 @@ export const agentInboxApi = {
         conversationId: string;
         socketPushed: boolean;
         message: AgentInboxMessage;
-      }>(`/agents/inbox/conversations/${conversationId}/reply`, {
-        method: 'POST',
-        body: JSON.stringify(body),
-      })
+      }>(
+        `/agents/inbox/conversations/${encodeURIComponent(
+          conversationId,
+        )}/reply`,
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+        },
+      )
       .then(sanitizeAgentInboxResponse),
 
   runAutopilotOnce: () =>
