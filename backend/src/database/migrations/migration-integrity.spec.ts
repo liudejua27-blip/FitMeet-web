@@ -99,6 +99,27 @@ describe('database migration integrity', () => {
       expect(migration.source).toMatch(/ALTER TYPE.*ADD VALUE|ADD VALUE/i);
     }
   });
+
+  it('keeps destructive data or table operations out of production up migrations', () => {
+    for (const migration of migrations) {
+      const upBody = extractMethodBody(migration.source, 'up');
+      const hasDestructiveDataOrTableOperation =
+        /\bDROP\s+(TABLE|COLUMN)\b/i.test(upBody) ||
+        /\bALTER\s+TABLE[\s\S]*?\bDROP\s+COLUMN\b/i.test(upBody) ||
+        /\bDELETE\s+FROM\b/i.test(upBody) ||
+        /\bTRUNCATE\b/i.test(upBody);
+
+      expect(hasDestructiveDataOrTableOperation).toBe(false);
+
+      const dropsType = /\bDROP\s+TYPE\b/i.test(upBody);
+      if (!dropsType) continue;
+
+      expect(migration.fileName).toBe('1771600000000-RenameAgentModes.ts');
+      expect(upBody).toMatch(/\bCREATE\s+TYPE\b[\s\S]+_new/i);
+      expect(upBody).toMatch(/\bALTER\s+TABLE\b[\s\S]+\bUSING\b/i);
+      expect(upBody).toMatch(/\bALTER\s+TYPE\b[\s\S]+\bRENAME\s+TO\b/i);
+    }
+  });
 });
 
 function loadMigrationSources(): MigrationSource[] {
@@ -121,4 +142,23 @@ function groupByTimestamp(migrations: MigrationSource[]) {
     ]);
   }
   return groups;
+}
+
+function extractMethodBody(source: string, methodName: 'up' | 'down'): string {
+  const marker = `public async ${methodName}(`;
+  const start = source.indexOf(marker);
+  if (start === -1) return '';
+
+  const bodyStart = source.indexOf('{', start);
+  if (bodyStart === -1) return '';
+
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '{') depth += 1;
+    if (char === '}') depth -= 1;
+    if (depth === 0) return source.slice(bodyStart + 1, index);
+  }
+
+  return source.slice(bodyStart + 1);
 }
