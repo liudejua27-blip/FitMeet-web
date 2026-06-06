@@ -69,6 +69,20 @@ import {
   rememberSocialAgentShortTerm,
   shortTermMemoryList,
 } from './social-agent-memory.util';
+import {
+  appendSocialAgentLoopValue,
+  buildSocialAgentActivityInviteDedupeKey,
+  buildSocialAgentMessageDedupeKey,
+  buildSocialAgentPaymentIntentDedupeKey,
+  filterPendingSocialAgentCounterpartMessages,
+  socialAgentLoopStringArray,
+  toSocialAgentMessageArray,
+} from './social-agent-loop-state';
+import type {
+  SocialAgentLoopKeyField,
+  SocialAgentLoopMemory as SocialLoopMemory,
+  SocialAgentMessageRecord as AgentMessageRecord,
+} from './social-agent-loop-state';
 import { sanitizeCity } from '../common/city.util';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
@@ -121,33 +135,6 @@ export type {
 } from './social-agent-tool.types';
 
 type StepRecord = Record<string, unknown>;
-
-type AgentMessageRecord = Record<string, unknown> & {
-  id?: string;
-  conversationId?: string;
-  text?: string;
-  senderId?: number;
-  senderType?: string;
-};
-
-type SocialLoopMemory = Record<string, unknown> & {
-  taskId?: number;
-  conversationId?: string;
-  targetUserId?: number | null;
-  lastMessageId?: string | null;
-  lastAgentMessageId?: string | null;
-  lastReceivedMessageId?: string | null;
-  lastReadMessageId?: string | null;
-  pendingMessageId?: string | null;
-  latestReceivedMessage?: AgentMessageRecord | null;
-  latestReceivedMessages?: AgentMessageRecord[];
-  replySummary?: Record<string, unknown> | null;
-  nextActionDecision?: Record<string, unknown> | null;
-  processedMessageIds?: string[];
-  sentMessageKeys?: string[];
-  activityInviteKeys?: string[];
-  paymentIntentKeys?: string[];
-};
 
 type ExecuteTaskOptions = {
   maxSteps?: number;
@@ -354,7 +341,7 @@ export class SocialAgentToolExecutorService {
     });
     calls.push(readCall);
 
-    const newMessages = this.messageArray(readCall.output?.newMessages);
+    const newMessages = toSocialAgentMessageArray(readCall.output?.newMessages);
     if (readCall.status !== 'succeeded' || newMessages.length === 0) {
       task.status = AgentTaskStatus.WaitingReply;
       task.statusReason =
@@ -1431,7 +1418,10 @@ export class SocialAgentToolExecutorService {
     let conversationId = this.string(input.conversationId);
     const targetUserId = this.number(input.targetUserId ?? input.toUserId);
     const targetForDedupe = targetUserId ?? this.memoryTargetUserId(task);
-    const duplicateKey = this.messageDedupeKey(targetForDedupe, text);
+    const duplicateKey = buildSocialAgentMessageDedupeKey(
+      targetForDedupe,
+      text,
+    );
     if (this.hasSocialLoopKey(task, 'sentMessageKeys', duplicateKey)) {
       return {
         skipped: true,
@@ -1663,7 +1653,10 @@ export class SocialAgentToolExecutorService {
         ActivityProofPolicy.MutualOrProof,
       invitedUserId: invitedUserId ?? undefined,
     };
-    const activityDedupeKey = this.activityInviteDedupeKey(toolName, dto);
+    const activityDedupeKey = buildSocialAgentActivityInviteDedupeKey(
+      toolName,
+      dto,
+    );
     if (this.hasSocialLoopKey(task, 'activityInviteKeys', activityDedupeKey)) {
       return {
         skipped: true,
@@ -2040,7 +2033,7 @@ export class SocialAgentToolExecutorService {
       throw new BadRequestException('task memory has no bound conversationId');
     }
 
-    const messages = this.messageArray(
+    const messages = toSocialAgentMessageArray(
       await this.messages.getAgentInboxMessages(
         conversationId,
         agentConnectionId,
@@ -2053,7 +2046,7 @@ export class SocialAgentToolExecutorService {
       this.string(input.afterMessageId) ??
       loop.lastReadMessageId ??
       loop.lastMessageId;
-    const newMessages = this.filterPendingCounterpartMessages(
+    const newMessages = filterPendingSocialAgentCounterpartMessages(
       messages,
       cursor,
       loop,
@@ -2074,7 +2067,7 @@ export class SocialAgentToolExecutorService {
       latestReceivedMessage: latest,
       latestReceivedMessages: newMessages,
       processedMessageIds: newMessages.reduce(
-        (ids, message) => this.appendValue(ids, message.id),
+        (ids, message) => appendSocialAgentLoopValue(ids, message.id),
         loop.processedMessageIds ?? [],
       ),
       sourceTool: SocialAgentToolName.ReadTaskConversationMessages,
@@ -2125,7 +2118,7 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
   ): Promise<unknown> {
     const loop = this.socialLoopMemory(task);
-    const messages = this.messageArray(
+    const messages = toSocialAgentMessageArray(
       input.messages ?? loop.latestReceivedMessages,
     );
     if (messages.length === 0)
@@ -2174,7 +2167,7 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
   ): Promise<unknown> {
     const loop = this.socialLoopMemory(task);
-    const messages = this.messageArray(
+    const messages = toSocialAgentMessageArray(
       input.messages ?? loop.latestReceivedMessages,
     );
     const summary = this.isRecord(input.summary)
@@ -2235,7 +2228,10 @@ export class SocialAgentToolExecutorService {
     if (!text) throw new BadRequestException('text is required');
     const targetForDedupe =
       this.number(input.targetUserId) ?? this.memoryTargetUserId(task);
-    const duplicateKey = this.messageDedupeKey(targetForDedupe, text);
+    const duplicateKey = buildSocialAgentMessageDedupeKey(
+      targetForDedupe,
+      text,
+    );
     if (this.hasSocialLoopKey(task, 'sentMessageKeys', duplicateKey)) {
       return {
         skipped: true,
@@ -2317,7 +2313,7 @@ export class SocialAgentToolExecutorService {
       'Agent payment intent';
     const status =
       this.paymentIntentStatus(input.status) ?? PaymentIntentStatus.Created;
-    const paymentDedupeKey = this.paymentIntentDedupeKey({
+    const paymentDedupeKey = buildSocialAgentPaymentIntentDedupeKey({
       targetUserId: targetUserId ?? null,
       amount,
       currency,
@@ -2553,10 +2549,10 @@ export class SocialAgentToolExecutorService {
 
   private hasSocialLoopKey(
     task: AgentTask,
-    field: 'sentMessageKeys' | 'activityInviteKeys' | 'paymentIntentKeys',
+    field: SocialAgentLoopKeyField,
     key: string,
   ): boolean {
-    const values = this.socialLoopStringArray(
+    const values = socialAgentLoopStringArray(
       this.socialLoopMemory(task)[field],
     );
     return values.includes(key);
@@ -2564,127 +2560,13 @@ export class SocialAgentToolExecutorService {
 
   private appendSocialLoopKey(
     task: AgentTask,
-    field: 'sentMessageKeys' | 'activityInviteKeys' | 'paymentIntentKeys',
+    field: SocialAgentLoopKeyField,
     key: string,
   ): string[] {
-    return this.appendValue(
-      this.socialLoopStringArray(this.socialLoopMemory(task)[field]),
+    return appendSocialAgentLoopValue(
+      socialAgentLoopStringArray(this.socialLoopMemory(task)[field]),
       key,
     );
-  }
-
-  private messageDedupeKey(
-    targetUserId: number | null | undefined,
-    text: string,
-  ): string {
-    return `message:${targetUserId ?? 'unknown'}:${this.normalizeDedupeText(text)}`;
-  }
-
-  private activityInviteDedupeKey(
-    toolName: SocialAgentToolName,
-    dto: CreateActivityDto,
-  ): string {
-    return [
-      'activity',
-      toolName,
-      dto.invitedUserId ?? 'unknown',
-      this.normalizeDedupeText(dto.title ?? ''),
-      this.normalizeDedupeText(dto.startTime ?? ''),
-      this.normalizeDedupeText(dto.city ?? ''),
-      this.normalizeDedupeText(dto.locationName ?? ''),
-    ].join(':');
-  }
-
-  private paymentIntentDedupeKey(input: {
-    targetUserId: number | null;
-    amount: number;
-    currency: string;
-    description: string;
-  }): string {
-    return [
-      'payment',
-      input.targetUserId ?? 'unknown',
-      input.amount.toFixed(2),
-      input.currency,
-      this.normalizeDedupeText(input.description),
-    ].join(':');
-  }
-
-  private normalizeDedupeText(value: string): string {
-    return value.trim().replace(/\s+/g, ' ').toLowerCase().slice(0, 180);
-  }
-
-  private socialLoopStringArray(value: unknown): string[] {
-    return Array.isArray(value)
-      ? value.filter((item): item is string => typeof item === 'string')
-      : [];
-  }
-
-  private appendValue(
-    values: string[],
-    value: string | null | undefined,
-  ): string[] {
-    if (!value) return values.slice(-100);
-    if (values.includes(value)) return values.slice(-100);
-    return [...values, value].slice(-100);
-  }
-
-  private messageArray(value: unknown): AgentMessageRecord[] {
-    if (!Array.isArray(value)) return [];
-    return value
-      .filter((item): item is Record<string, unknown> => this.isRecord(item))
-      .map((item) => ({
-        ...item,
-        id: this.string(item.id ?? item.messageId),
-        conversationId: this.string(item.conversationId),
-        text: this.string(item.text ?? item.content),
-        senderId: this.number(item.senderId),
-        senderType: this.string(item.senderType),
-      }));
-  }
-
-  private filterNewCounterpartMessages(
-    messages: AgentMessageRecord[],
-    cursor: string | null | undefined,
-    ownerUserId: number,
-  ): AgentMessageRecord[] {
-    const cursorIndex = cursor
-      ? messages.findIndex((message) => message.id === cursor)
-      : -1;
-    const afterCursor =
-      cursorIndex >= 0 ? messages.slice(cursorIndex + 1) : messages;
-    return afterCursor.filter((message) => {
-      if (message.senderType === 'agent') return false;
-      if (this.number(message.senderId) === ownerUserId) return false;
-      return Boolean(message.id || message.text);
-    });
-  }
-
-  private filterPendingCounterpartMessages(
-    messages: AgentMessageRecord[],
-    cursor: string | null | undefined,
-    loop: SocialLoopMemory,
-    ownerUserId: number,
-  ): AgentMessageRecord[] {
-    const processed = new Set(loop.processedMessageIds ?? []);
-    let candidates = this.filterNewCounterpartMessages(
-      messages,
-      cursor,
-      ownerUserId,
-    ).filter((message) => !message.id || !processed.has(message.id));
-
-    if (candidates.length === 0 && loop.pendingMessageId) {
-      const pending = messages.find(
-        (message) =>
-          message.id === loop.pendingMessageId &&
-          message.senderType !== 'agent' &&
-          this.number(message.senderId) !== ownerUserId &&
-          !processed.has(loop.pendingMessageId ?? ''),
-      );
-      if (pending) candidates = [pending];
-    }
-
-    return candidates;
   }
 
   private async writeSocialAgentInboxEvent(
