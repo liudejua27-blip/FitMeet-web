@@ -1,15 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 
-import { cleanDisplayText } from '../common/display-text.util';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
-import {
-  AgentTask,
-  AgentTaskPermissionMode,
-} from './entities/agent-task.entity';
 import { SocialAgentToolCallRecord } from './social-agent-tool-executor.service';
-import { transitionSocialAgentState } from './social-agent-memory.util';
 import { TonePolicyService } from './response-quality/tone-policy.service';
 import type {
   CandidateTargetBody,
@@ -33,13 +25,12 @@ import { SocialAgentSessionQueryService } from './social-agent-session-query.ser
 import { SocialAgentCardActionRouterService } from './social-agent-card-action-router.service';
 import { SocialAgentReplanFacadeService } from './social-agent-replan-facade.service';
 import { SocialAgentCandidateCommandService } from './social-agent-candidate-command.service';
+import { SocialAgentInitialSearchQueueService } from './social-agent-initial-search-queue.service';
 export type * from './social-agent-chat.types';
 
 @Injectable()
 export class SocialAgentChatService {
   constructor(
-    @InjectRepository(AgentTask)
-    private readonly taskRepo: Repository<AgentTask>,
     private readonly routeTurns: SocialAgentRouteTurnService,
     private readonly queuedRuns: SocialAgentQueuedRunService,
     private readonly runOrchestrator: SocialAgentRunOrchestratorService,
@@ -47,6 +38,7 @@ export class SocialAgentChatService {
     private readonly cardActionRouter: SocialAgentCardActionRouterService,
     private readonly replanFacade: SocialAgentReplanFacadeService,
     private readonly candidateCommands: SocialAgentCandidateCommandService,
+    private readonly initialSearchQueue: SocialAgentInitialSearchQueueService,
     private readonly tonePolicy?: TonePolicyService,
   ) {}
 
@@ -74,7 +66,11 @@ export class SocialAgentChatService {
       replanAndRefresh: (currentOwnerUserId, taskId, replanBody) =>
         this.replanAndRefresh(currentOwnerUserId, taskId, replanBody),
       queueInitialSearchForTask: (currentOwnerUserId, task, goal) =>
-        this.queueInitialSearchForTask(currentOwnerUserId, task, goal),
+        this.initialSearchQueue.queueInitialSearchForTask({
+          ownerUserId: currentOwnerUserId,
+          task,
+          goal,
+        }),
     });
   }
 
@@ -220,37 +216,5 @@ export class SocialAgentChatService {
 
   private userVisibleStepLabel(id: string, label: string): string {
     return this.tonePolicy?.userStatus(id, label) ?? label;
-  }
-
-  private async queueInitialSearchForTask(
-    ownerUserId: number,
-    task: AgentTask,
-    goal: string,
-  ): Promise<SocialAgentAsyncRunSnapshot> {
-    const idempotencyKey =
-      cleanDisplayText(task.idempotencyKey, '') ||
-      `social-agent-chat:${task.id}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
-    task.goal = goal;
-    task.taskType = 'social_agent_chat';
-    task.idempotencyKey = idempotencyKey;
-    task.input = {
-      ...(task.input ?? {}),
-      source: 'social_agent_chat',
-      executionBoundary: 'conversation_then_tools',
-      latestSearchMessage: goal,
-    };
-    transitionSocialAgentState(task, 'search_started', {
-      objective: 'search',
-      nextStep: '搜索真实候选人并展示结果',
-      shouldSearchNow: true,
-      awaitingSearchConfirmation: false,
-      waitingFor: 'search_results',
-    });
-    await this.taskRepo.save(task);
-    return this.runQueued(ownerUserId, {
-      goal,
-      permissionMode: task.permissionMode ?? AgentTaskPermissionMode.Confirm,
-      idempotencyKey,
-    });
   }
 }
