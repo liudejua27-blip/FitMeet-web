@@ -122,6 +122,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - Social Agent chat entrypoint risk has been reduced to thin facade services; timeline message restoration still needs continued focused tests because it is shared by Web and iOS session restore.
 - DB risk: production schema drift may exist if older deployments used `synchronize`; verify migration status against staging before production.
 - Contract risk: Web legacy APIs outside `fitmeet-core.openapi.ts` can drift because only the core launch subset is contract-tested.
+- Auth risk: production SMS/WeChat provider configuration must be present; mock WeChat login is dev-only, and failed production SMS dispatch must not persist usable verification codes.
 - iOS release risk: staging E2E requires real credentials, a second message target user, object storage, and a deployed backend; it cannot pass in a credential-free local run.
 - Performance risk: 1000-concurrency smoke scripts exist, but no current local/staging result is recorded yet.
 - Deployment risk: GitHub push/deploy automation is blocked in the current local environment by missing HTTPS credentials; deployment must run from an authenticated machine or CI.
@@ -247,6 +248,7 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- production-env-readiness.spec.ts`
 - Passed: backend `pnpm --dir backend test -- social-agent-chat-timeline-activity.presenter.spec.ts social-agent-chat-timeline.presenter.spec.ts social-agent-chat-facade-boundary.spec.ts`
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts`
+- Passed: backend `pnpm --dir backend test -- auth.service.spec.ts`
 - Passed: backend `pnpm --dir backend test -- uploads.service.spec.ts`
 - Passed: backend `pnpm --dir backend test -- uploads.controller.spec.ts`
 - Passed: backend `pnpm --dir backend lint`

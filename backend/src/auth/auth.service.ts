@@ -139,10 +139,10 @@ export class AuthService {
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const codeKey = `sms:code:${dto.phone}`;
 
+    this.dispatchSms(dto.phone, code);
+
     await redis.setex(codeKey, SMS_CODE_TTL, code);
     await redis.setex(throttleKey, 60, '1');
-
-    this.dispatchSms(dto.phone, code);
 
     return { message: '验证码已发送', expiresIn: SMS_CODE_TTL };
   }
