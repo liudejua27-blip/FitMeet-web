@@ -95,6 +95,7 @@ export function buildProductionEnvReport(env: EnvMap): ProductionEnvReport {
   checkAllowedOrigins(env, error);
   checkJwtSecret(env, error);
   checkAgentWebhookSecret(env, warning);
+  checkWechatRedirectUri(env, error);
   checkMongoUri(env, error);
   checkObjectStorage(env, error);
   checkAgentModel(env, error);
@@ -166,6 +167,25 @@ function checkAgentWebhookSecret(
       'AGENT_WEBHOOK_SIGNING_SECRET',
       'matches JWT_SECRET; use a separate value to isolate webhook and auth blast radius.',
     );
+  }
+}
+
+function checkWechatRedirectUri(
+  env: EnvMap,
+  error: (key: string, message: string) => void,
+): void {
+  const hasWechatOAuthConfig =
+    hasConfiguredValue(env.WECHAT_APP_ID) ||
+    hasConfiguredValue(env.WECHAT_APP_SECRET);
+  if (hasWechatOAuthConfig && !hasConfiguredValue(env.WECHAT_REDIRECT_URI)) {
+    error(
+      'WECHAT_REDIRECT_URI',
+      'must be configured when WeChat OAuth credentials are present.',
+    );
+    return;
+  }
+  if (hasConfiguredValue(env.WECHAT_REDIRECT_URI)) {
+    requireHttpsUrl(env, 'WECHAT_REDIRECT_URI', error);
   }
 }
 

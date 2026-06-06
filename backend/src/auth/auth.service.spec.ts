@@ -83,6 +83,42 @@ describe('AuthService production provider safety', () => {
     expect(userRepo.findOne).not.toHaveBeenCalled();
   });
 
+  it('requires an explicit HTTPS WeChat redirect URL in production', () => {
+    const missingRedirect = makeService({
+      NODE_ENV: 'production',
+      WECHAT_APP_ID: 'wechat-app',
+      WECHAT_REDIRECT_URI: '',
+    }).service;
+    const insecureRedirect = makeService({
+      NODE_ENV: 'production',
+      WECHAT_APP_ID: 'wechat-app',
+      WECHAT_REDIRECT_URI: 'http://localhost:3000/api/auth/wechat/callback',
+    }).service;
+
+    expect(() => missingRedirect.getWechatLoginUrl()).toThrow(
+      BadRequestException,
+    );
+    expect(() => insecureRedirect.getWechatLoginUrl()).toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('builds production WeChat login URLs with the configured redirect URI', () => {
+    const { service } = makeService({
+      NODE_ENV: 'production',
+      WECHAT_APP_ID: 'wechat-app',
+      WECHAT_REDIRECT_URI: 'https://www.ourfitmeet.cn/api/auth/wechat/callback',
+    });
+
+    const { url } = service.getWechatLoginUrl();
+
+    expect(url).toContain('https://open.weixin.qq.com/connect/qrconnect');
+    expect(url).toContain('appid=wechat-app');
+    expect(url).toContain(
+      'redirect_uri=https%3A%2F%2Fwww.ourfitmeet.cn%2Fapi%2Fauth%2Fwechat%2Fcallback',
+    );
+  });
+
   it('blocks production WeChat mini mock fallback when provider config is missing', async () => {
     const { service, userRepo } = makeService({
       NODE_ENV: 'production',

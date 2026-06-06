@@ -106,6 +106,34 @@ describe('production-env-readiness', () => {
     );
   });
 
+  it('rejects missing or insecure WeChat OAuth redirect URIs', () => {
+    const missingRedirect = buildProductionEnvReport({
+      ...validEnv,
+      WECHAT_APP_ID: 'wechat-app',
+      WECHAT_APP_SECRET: 'wechat-secret',
+      WECHAT_REDIRECT_URI: '',
+    });
+    const insecureRedirect = buildProductionEnvReport({
+      ...validEnv,
+      WECHAT_APP_ID: 'wechat-app',
+      WECHAT_APP_SECRET: 'wechat-secret',
+      WECHAT_REDIRECT_URI: 'http://localhost:3000/api/auth/wechat/callback',
+    });
+
+    expect(missingRedirect.ok).toBe(false);
+    expect(insecureRedirect.ok).toBe(false);
+    expect(missingRedirect.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'WECHAT_REDIRECT_URI' }),
+      ]),
+    );
+    expect(insecureRedirect.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'WECHAT_REDIRECT_URI' }),
+      ]),
+    );
+  });
+
   it('rejects placeholders, unsafe origins, weak JWT, synchronize, and missing storage', () => {
     const report = buildProductionEnvReport({
       ...validEnv,

@@ -218,26 +218,45 @@ export class AuthService {
 
   getWechatLoginUrl() {
     const appId = this.configService.get<string>('WECHAT_APP_ID');
-    const redirectUri =
-      this.configService.get<string>('WECHAT_REDIRECT_URI') ||
-      'http://localhost:3000/api/auth/wechat/callback';
 
     if (!this.hasConfiguredValue(appId)) {
       this.logger.warn('WECHAT_APP_ID not configured');
-      // In strict production, might want to throw error.
-      // But for now, returning a generic error URL or fallback.
       if (this.isProduction) {
         throw new BadRequestException('微信登录服务未配置');
       }
       return { url: '' }; // Client handle empty
     }
 
+    const redirectUri = this.getWechatRedirectUri();
     const encodedRedirect = encodeURIComponent(redirectUri);
     // CSRF protection: state should be random string stored in session/redis
     const state = randomUUID();
     // Ideally store state in redis to verify on callback
     const url = `https://open.weixin.qq.com/connect/qrconnect?appid=${appId}&redirect_uri=${encodedRedirect}&response_type=code&scope=snsapi_login&state=${state}#wechat_redirect`;
     return { url };
+  }
+
+  private getWechatRedirectUri(): string {
+    const configured = this.configService.get<string>('WECHAT_REDIRECT_URI');
+    if (!this.hasConfiguredValue(configured)) {
+      if (this.isProduction) {
+        throw new BadRequestException('微信登录回调地址未配置');
+      }
+      return 'http://localhost:3000/api/auth/wechat/callback';
+    }
+
+    if (this.isProduction) {
+      try {
+        const url = new URL(configured);
+        if (url.protocol !== 'https:') {
+          throw new Error('WECHAT_REDIRECT_URI must use HTTPS');
+        }
+      } catch {
+        throw new BadRequestException('微信登录回调地址必须是 HTTPS URL');
+      }
+    }
+
+    return configured;
   }
 
   async loginWithWechat(dto: WechatLoginDto) {
