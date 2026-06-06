@@ -182,6 +182,54 @@ test('agent hub tabs and security controls are wired as a stateful product flow'
   );
 });
 
+test('agent connection panel keeps the real registration state machine wired', async () => {
+  const agentConnectPanel = await readSource(
+    'components/agent/AgentConnectPanel.tsx',
+  );
+
+  assertContainsAll(
+    agentConnectPanel,
+    [
+      'useState<1 | 2 | 3>(1)',
+      'useState<string | null>(null)',
+      'useState<PermissionLevel | null>(null)',
+      'useState(false)',
+      'setChosenAgent(ag.id)',
+      'setPermLevel(l)',
+      'setSubmitted(true)',
+    ],
+    'agent connection state machine',
+  );
+  assert.match(
+    agentConnectPanel,
+    /if \(!chosenAgent \|\| !permLevel\) return;/,
+    'agent connection should not submit without an agent and permission level',
+  );
+  assertContainsAll(
+    agentConnectPanel,
+    [
+      'Landing preview mirrors the authenticated POST /api/agents/register payload.',
+      'agentName',
+      'agentDisplayName',
+      'agentWebhookUrl',
+      'permissionLevel',
+      'dailyActionLimit',
+      'fitmeet_agent_',
+      'X-Agent-Token',
+    ],
+    'agent registration contract',
+  );
+  assert.match(
+    agentConnectPanel,
+    /if \(submitted && agentToken\)/,
+    'success state should render only after a token has been generated',
+  );
+  assert.doesNotMatch(
+    agentConnectPanel,
+    /assert\(true\)|No landing tests configured|mock-only|would post/i,
+  );
+});
+
 test('primary navigation and CTAs keep gateway anchors reachable', async () => {
   const nav = await readSource('data/nav.ts');
   const hero = await readSource('components/HeroSection.tsx');
