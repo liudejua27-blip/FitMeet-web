@@ -44,6 +44,7 @@ import { SocialAgentChatTurnFacadeService } from './social-agent-chat-turn-facad
 import { SocialAgentChatRunFacadeService } from './social-agent-chat-run-facade.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
+import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -520,6 +521,12 @@ function makeHarness(options: Record<string, unknown> = {}) {
     metrics as never,
     options.finalResponses as never,
   );
+  const searchTurns =
+    (options.searchTurns as SocialAgentRouteSearchTurnService | undefined) ??
+    new SocialAgentRouteSearchTurnService(
+      profileEnrichment as never,
+      activitySearch as never,
+    );
   const sessionRestore = new SocialAgentSessionRestoreService(
     taskRepo as never,
     eventRepo as never,
@@ -593,11 +600,11 @@ function makeHarness(options: Record<string, unknown> = {}) {
       chatLlm as never,
       profileEnrichment as never,
       candidateActions as never,
-      activitySearch as never,
       messageLog as never,
       taskLifecycle as never,
       routeContext as never,
       profileTurns as never,
+      searchTurns as never,
       mainAgentTurn as never,
       options.brain as never,
     );

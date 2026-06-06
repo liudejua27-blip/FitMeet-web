@@ -22,14 +22,9 @@ import type {
   SocialAgentRouteMessageBody,
 } from './social-agent-chat.types';
 import {
-  hasSocialAgentSearchContext,
-  socialAgentCandidateFollowupReply,
-} from './social-agent-candidate-context.presenter';
-import {
   appendSocialAgentUserMemo,
   recordSocialAgentPendingAction,
 } from './social-agent-memory.util';
-import { SocialAgentActivitySearchService } from './social-agent-activity-search.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
@@ -47,6 +42,7 @@ import {
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
 import { applySocialAgentTaskMemoryForIntent } from './social-agent-intent-memory.presenter';
 import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile-turn.service';
+import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
 
 type QueueInitialSearchForTask = (
   ownerUserId: number,
@@ -72,11 +68,11 @@ export class SocialAgentRouteTurnService {
     private readonly chatLlm: SocialAgentChatLlmService,
     private readonly profileEnrichment: SocialAgentProfileEnrichmentService,
     private readonly candidateActions: SocialAgentCandidateActionService,
-    private readonly activitySearch: SocialAgentActivitySearchService,
     private readonly messageLog: SocialAgentMessageLogService,
     private readonly taskLifecycle: SocialAgentTaskLifecycleService,
     private readonly routeContext: SocialAgentRouteContextService,
     private readonly profileTurns: SocialAgentRouteProfileTurnService,
+    private readonly searchTurns: SocialAgentRouteSearchTurnService,
     private readonly mainAgentTurn: SocialAgentMainAgentTurnService,
     @Optional() private readonly brain?: SocialAgentBrainService,
   ) {}
@@ -290,64 +286,22 @@ export class SocialAgentRouteTurnService {
       }
     }
 
-    if (route.intent === 'activity_search') {
-      const handledActivitySearch =
-        await this.activitySearch.handleActivitySearch({
-          ownerUserId,
-          task,
-          route,
-          message,
-          buildMemoryContext: (currentTask) =>
-            this.routeContext.buildMemoryContext(currentTask, null),
-        });
-      activityResults = handledActivitySearch.activityResults;
-      assistantMessage = handledActivitySearch.assistantMessage;
-    } else if (route.intent === 'social_search') {
-      const lifeGraphClarification =
-        await this.profileEnrichment.lifeGraphSearchClarification(
-          ownerUserId,
-          message,
-        );
-      if (lifeGraphClarification) {
-        assistantMessage = lifeGraphClarification;
-        savedContext = true;
-        runMode = null;
-        queuedRun = null;
-      } else if (route.shouldReplan && hasSocialAgentSearchContext(task)) {
-        queuedRun = await input.replanAndRefresh(ownerUserId, task.id, {
-          userMessage: message,
-          reason: 'user_follow_up',
-        });
-        runMode = 'follow_up';
-      } else {
-        queuedRun = await input.queueInitialSearchForTask(
-          ownerUserId,
-          task,
-          message,
-        );
-        runMode = 'initial';
-      }
-    }
-
-    if (route.intent === 'candidate_followup') {
-      if (route.shouldSearch || route.shouldReplan) {
-        if (hasSocialAgentSearchContext(task)) {
-          queuedRun = await input.replanAndRefresh(ownerUserId, task.id, {
-            userMessage: message,
-            reason: 'user_follow_up',
-          });
-          runMode = 'follow_up';
-        } else {
-          queuedRun = await input.queueInitialSearchForTask(
-            ownerUserId,
-            task,
-            message,
-          );
-          runMode = 'initial';
-        }
-      } else {
-        assistantMessage = socialAgentCandidateFollowupReply(task, message);
-      }
+    const searchTurn = await this.searchTurns.handle({
+      ownerUserId,
+      task,
+      route,
+      message,
+      replanAndRefresh: input.replanAndRefresh,
+      queueInitialSearchForTask: input.queueInitialSearchForTask,
+      buildMemoryContext: (currentTask) =>
+        this.routeContext.buildMemoryContext(currentTask, null),
+    });
+    if (searchTurn.handled) {
+      assistantMessage = searchTurn.assistantMessage ?? assistantMessage;
+      savedContext = searchTurn.savedContext || savedContext;
+      activityResults = searchTurn.activityResults;
+      queuedRun = searchTurn.queuedRun;
+      runMode = searchTurn.runMode;
     }
 
     if (queuedRun) {
