@@ -79,6 +79,21 @@ function assertContainsAll(source, values, label) {
   }
 }
 
+function hrefsFromHtml(html) {
+  return [
+    ...new Set(
+      [...html.matchAll(/\bhref="([^"]+)"/g)].map((match) =>
+        decodeHtml(match[1]),
+      ),
+    ),
+  ];
+}
+
+function idExistsInHtml(html, id) {
+  const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\bid="${escapedId}"`).test(html);
+}
+
 function assertProductionMetadata(html, route) {
   const readable = decodeHtml(html);
   assert.doesNotMatch(
@@ -158,6 +173,33 @@ test('rendered agent hub is a concrete product entry, not a shell', async () => 
   assert.doesNotMatch(html, /No landing tests configured|placeholder|mock-only/i);
 });
 
+test('rendered agent hub exposes the real initial connection workflow', async () => {
+  const html = await readBuilt('agent-hub.html');
+
+  assertContainsAll(
+    html,
+    [
+      '选择 Agent',
+      'OpenClaw',
+      'Autonomous fitness-companion agent',
+      'Codex',
+      'Context-aware social intelligence',
+      'Hermes',
+      'Swift messaging & scheduling agent',
+      'QClaw',
+      'Quantum-indexed preference matching',
+      'Custom',
+      'Connect your own agent via API key',
+    ],
+    'agent hub initial connection workflow',
+  );
+  assert.doesNotMatch(
+    decodeHtml(html),
+    /fitmeet_agent_|Agent Token|连接成功/,
+    'agent hub must not prerender a successful connection token before user action',
+  );
+});
+
 test('rendered gateway pages cover every static ecosystem route', async () => {
   const expected = {
     human: ['Human', 'Training companion', 'Recovery rhythm', 'Social matching'],
@@ -173,6 +215,33 @@ test('rendered gateway pages cover every static ecosystem route', async () => {
       `${route} gateway`,
     );
     assert.doesNotMatch(html, /placeholder|mock-only|coming soon/i);
+  }
+});
+
+test('rendered home links resolve to deployed routes or in-page anchors', async () => {
+  const html = await readBuilt('index.html');
+  const prerender = await readJson('.next/prerender-manifest.json');
+  const allowedExternal = new Set([
+    'https://rsms.me/',
+    'https://rsms.me/inter/inter.css',
+    'https://www.ourfitmeet.cn',
+  ]);
+
+  for (const href of hrefsFromHtml(html)) {
+    if (href.startsWith('/_next/static/')) continue;
+    if (href.startsWith('mailto:')) continue;
+    if (allowedExternal.has(href)) continue;
+    if (href.startsWith('#')) {
+      assert.ok(
+        idExistsInHtml(html, href.slice(1)),
+        `home page should render target anchor ${href}`,
+      );
+      continue;
+    }
+    assert.ok(
+      prerender.routes[href],
+      `home page link ${href} should resolve to a prerendered route`,
+    );
   }
 });
 
