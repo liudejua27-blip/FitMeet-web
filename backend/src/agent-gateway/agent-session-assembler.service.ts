@@ -20,7 +20,7 @@ import type {
   SocialAgentSessionSnapshot,
   SocialAgentSessionTaskSummary,
   SocialAgentPendingApprovalSnapshot,
-} from './social-agent-chat.service';
+} from './social-agent-chat.types';
 
 @Injectable()
 export class AgentSessionAssemblerService {

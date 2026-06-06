@@ -26,7 +26,6 @@ import { SocialAgentCardActionRouterService } from './social-agent-card-action-r
 import { SocialAgentReplanFacadeService } from './social-agent-replan-facade.service';
 import { SocialAgentCandidateCommandService } from './social-agent-candidate-command.service';
 import { SocialAgentInitialSearchQueueService } from './social-agent-initial-search-queue.service';
-export type * from './social-agent-chat.types';
 
 @Injectable()
 export class SocialAgentChatService {

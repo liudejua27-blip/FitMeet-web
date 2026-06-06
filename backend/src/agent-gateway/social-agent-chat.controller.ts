@@ -32,7 +32,7 @@ import {
   type UserFacingStreamEvent,
 } from './social-agent-chat-stream.presenter';
 import { SocialAgentChatService } from './social-agent-chat.service';
-import type { SocialAgentCardActionBody } from './social-agent-chat.service';
+import type { SocialAgentCardActionBody } from './social-agent-chat.types';
 
 @Controller('social-agent/chat')
 @UseGuards(AuthGuard('jwt'))

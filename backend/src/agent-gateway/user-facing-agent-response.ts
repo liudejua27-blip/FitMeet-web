@@ -9,7 +9,7 @@ import { UserFacingResponseSanitizerService } from './response-quality/user-faci
 import type {
   SocialAgentChatRunResult,
   SocialAgentIntentRouteResult,
-} from './social-agent-chat.service';
+} from './social-agent-chat.types';
 
 export type UserFacingAgentLightStatus =
   | '正在理解你的需求'
