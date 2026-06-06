@@ -49,13 +49,14 @@ async function assertBuildAssetReferencesExist(route, htmlPath) {
 function gatewayRecordsFromSource(source) {
   return [
     ...source.matchAll(
-      /\{\s*id:\s*'([^']+)'[\s\S]*?titleEn:\s*'([^']+)'[\s\S]*?cta:\s*'([^']+)'[\s\S]*?href:\s*'([^']+)'/g,
+      /\{\s*id:\s*'([^']+)'[\s\S]*?titleEn:\s*'([^']+)'[\s\S]*?descriptionEn:\s*'([^']+)'[\s\S]*?cta:\s*'([^']+)'[\s\S]*?href:\s*'([^']+)'/g,
     ),
   ].map((match) => ({
     id: match[1],
     titleEn: match[2],
-    cta: match[3],
-    href: match[4],
+    descriptionEn: match[3],
+    cta: match[4],
+    href: match[5],
   }));
 }
 
@@ -215,6 +216,39 @@ test('rendered gateway pages cover every static ecosystem route', async () => {
       `${route} gateway`,
     );
     assert.doesNotMatch(html, /placeholder|mock-only|coming soon/i);
+  }
+});
+
+test('rendered gateway metadata and RSC payloads stay aligned with gateway data', async () => {
+  const gateways = gatewayRecordsFromSource(await readSource('data/gateways.ts'));
+  const prerender = await readJson('.next/prerender-manifest.json');
+
+  for (const gateway of gateways) {
+    const slug = gateway.href.slice(1);
+    const html = await readBuilt(`${slug}.html`);
+    const rsc = await readBuilt(`${slug}.rsc`);
+
+    await assert.doesNotReject(
+      () => access(new URL(`.next/server/app/${slug}.meta`, root)),
+      `${gateway.href} should emit a route metadata artifact`,
+    );
+    assert.ok(
+      prerender.routes[gateway.href],
+      `${gateway.href} should be present in the prerender manifest`,
+    );
+    assertContainsAll(
+      html,
+      [
+        `<title>${gateway.titleEn} — FitMeet</title>`,
+        `<meta name="description" content="${gateway.descriptionEn}"`,
+      ],
+      `${gateway.id} gateway metadata`,
+    );
+    assertContainsAll(
+      rsc,
+      [gateway.titleEn, gateway.cta, 'Connect Agent', 'Back to ecosystem'],
+      `${gateway.id} gateway RSC payload`,
+    );
   }
 });
 
