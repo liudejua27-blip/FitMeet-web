@@ -1,3 +1,5 @@
+import { Logger } from '@nestjs/common';
+
 import {
   AgentTask,
   AgentTaskEventActor,
@@ -163,6 +165,45 @@ describe('SocialAgentRouteProfileTurnService', () => {
         actor: AgentTaskEventActor.User,
       }),
     );
+  });
+
+  it('records event-write failures without failing the profile turn', async () => {
+    const warnSpy = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const { eventRepo, metrics, service, socialProfiles } = makeHarness();
+    const task = makeTask();
+    eventRepo.save.mockRejectedValue(new Error('enum missing'));
+
+    try {
+      const result = await service.handle({
+        ownerUserId: 7,
+        task,
+        message: '不要夜间见面',
+        route: makeRoute({ intent: 'safety_or_boundary' }),
+      });
+
+      expect(result).toMatchObject({
+        handled: true,
+        savedContext: true,
+        profileUpdated: true,
+      });
+      expect(socialProfiles.saveAnswer).toHaveBeenCalledWith(
+        7,
+        'avoidTraits',
+        '不要夜间见面',
+      );
+      expect(metrics.recordError).toHaveBeenCalledWith(
+        'context_append_event_failed',
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'social_agent.route_profile_turn.event_write_failed',
+        ),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('ignores intents that do not write profile or boundary context', async () => {

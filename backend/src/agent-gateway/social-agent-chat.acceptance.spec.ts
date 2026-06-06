@@ -1,3 +1,5 @@
+import { Logger } from '@nestjs/common';
+
 import {
   SocialRequestSafety,
   SocialRequestType,
@@ -1137,7 +1139,10 @@ describe('SocialAgentChat acceptance flow', () => {
   });
 
   it('keeps safety-boundary replies successful when context event enum is missing', async () => {
-    const { service, eventRepo } = makeHarness();
+    const warnSpy = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const { service, eventRepo, metrics } = makeHarness();
     eventRepo.save.mockImplementation((input) => {
       if (input.eventType === AgentTaskEventType.SocialAgentContextAppended) {
         throw new Error(
@@ -1147,13 +1152,25 @@ describe('SocialAgentChat acceptance flow', () => {
       return Promise.resolve(input);
     });
 
-    const result = await service.routeMessage(7, {
-      message: '不要夜间见面，也别自动发送消息',
-    });
+    try {
+      const result = await service.routeMessage(7, {
+        message: '不要夜间见面，也别自动发送消息',
+      });
 
-    expect(result.intent).toBe('safety_or_boundary');
-    expect(result.savedContext).toBe(true);
-    expect(result.assistantMessage).toContain('已记住这条安全边界');
+      expect(result.intent).toBe('safety_or_boundary');
+      expect(result.savedContext).toBe(true);
+      expect(result.assistantMessage).toContain('已记住这条安全边界');
+      expect(metrics.recordError).toHaveBeenCalledWith(
+        'context_append_event_failed',
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'social_agent.route_profile_turn.event_write_failed',
+        ),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('routes no-send candidate searches without creating send-message approvals', async () => {

@@ -165,17 +165,7 @@ export class SocialAgentRouteProfileTurnService {
       '已写入 Social Agent 对话上下文',
       { intent, message, at: now },
       AgentTaskEventActor.User,
-    ).catch((error) => {
-      this.metrics.recordError('context_append_event_failed');
-      this.logger.warn(
-        JSON.stringify({
-          event: 'social_agent.context_append.event_failed',
-          taskId: task.id,
-          ownerUserId: task.ownerUserId,
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    });
+    );
   }
 
   private async saveIntentToProfile(
@@ -221,6 +211,7 @@ export class SocialAgentRouteProfileTurnService {
         }),
       );
     } catch (error) {
+      this.metrics.recordError('context_append_event_failed');
       this.logger.warn(
         JSON.stringify({
           event: 'social_agent.route_profile_turn.event_write_failed',
