@@ -126,6 +126,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - Performance risk: 1000-concurrency smoke scripts exist, but no current local/staging result is recorded yet.
 - Deployment risk: GitHub push/deploy automation is blocked in the current local environment by missing HTTPS credentials; deployment must run from an authenticated machine or CI.
 - AI risk: `DEEPSEEK_API_KEY` is required for release-quality Social Agent behavior. Fallback responses are useful for local tests but are not release-ready for the final AI experience.
+- Upload risk: production uploads require object storage; local filesystem upload fallback is tested as development-only and must not be used for release traffic.
 
 ## Exact Validation Commands
 
@@ -245,6 +246,7 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- production-env-readiness.spec.ts origin-allowlist.spec.ts`
 - Passed: backend `pnpm --dir backend test -- social-agent-chat-timeline-activity.presenter.spec.ts social-agent-chat-timeline.presenter.spec.ts social-agent-chat-facade-boundary.spec.ts`
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts`
+- Passed: backend `pnpm --dir backend test -- uploads.service.spec.ts`
 - Passed: backend `pnpm --dir backend lint`
 - Passed: backend `pnpm --dir backend build`
 - Passed: landing `pnpm --dir fitmeet-landing test:source`
