@@ -24,13 +24,20 @@ export const fitMeetCoreEndpoints = {
   },
   messages: {
     startConversation: '/messages/start',
+    getConversations: '/messages/conversations',
+    getConversationMessages: (conversationId: string) =>
+      `/messages/conversations/${conversationId}` as const,
     sendConversationMessage: (conversationId: string) =>
       `/messages/conversations/${conversationId}/send` as const,
+    getUnreadCount: '/messages/unread',
   },
   socialAgentChat: {
     messages: '/social-agent/chat/messages',
     routeMessage: '/social-agent/chat/route-message',
     streamUser: '/social-agent/chat/stream-user',
+    session: '/social-agent/chat/session',
+    taskSession: (taskId: number) =>
+      `/social-agent/chat/tasks/${taskId}/session` as const,
     taskMessages: (taskId: number) => `/social-agent/chat/tasks/${taskId}/messages` as const,
     taskActions: (taskId: number) => `/social-agent/chat/tasks/${taskId}/actions` as const,
   },
@@ -48,7 +55,10 @@ export type FitMeetCoreStaticEndpoint =
   | (typeof fitMeetCoreEndpoints.feed)['createPost']
   | (typeof fitMeetCoreEndpoints.feed)['getPostInteractions']
   | (typeof fitMeetCoreEndpoints.messages)['startConversation']
+  | (typeof fitMeetCoreEndpoints.messages)['getConversations']
+  | (typeof fitMeetCoreEndpoints.messages)['getUnreadCount']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['messages']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['routeMessage']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['streamUser']
+  | (typeof fitMeetCoreEndpoints.socialAgentChat)['session']
   | (typeof fitMeetCoreEndpoints.uploads)[keyof typeof fitMeetCoreEndpoints.uploads];
