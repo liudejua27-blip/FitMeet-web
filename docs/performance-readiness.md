@@ -62,9 +62,12 @@ Remote safety gates:
 
 No fresh 2026-06-06 load result is recorded in this environment yet.
 
-Precise blocker:
+Precise blocker from the 2026-06-06 local Codex run:
 
-- A trustworthy run requires a started backend and healthy Postgres, MongoDB, and Redis.
+- `docker` is not installed, so `docker compose up -d postgres mongo redis` cannot start local dependencies.
+- MongoDB is not listening on `localhost:27017`.
+- `pnpm --dir backend migration:status` fails with Postgres `ECONNREFUSED` for `localhost:5432/fitness_app`.
+- Without reachable Postgres, MongoDB, and Redis, the backend cannot be honestly started and load-tested through `/api/ready` in this environment.
 - Staging/production runs require intentional remote opt-in plus credentials or tokens for realtime auth.
 - The current Codex session does not have production/staging credentials and should not invent or commit them.
 
@@ -175,4 +178,3 @@ Target before claiming 10,000 concurrent support:
 - Feed and message queries need production `EXPLAIN ANALYZE` against realistic data volumes.
 - Upload performance depends on object storage and image processing; the current read-only load smoke does not cover multipart upload.
 - Realtime 1000-online smoke needs real tokens or a prepared test account; a single reused token proves socket capacity but not per-user fanout correctness.
-

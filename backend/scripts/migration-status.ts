@@ -68,7 +68,13 @@ main()
     console.error(
       JSON.stringify({
         event: 'database.migration_status_failed',
-        message: error instanceof Error ? error.message : String(error),
+        target: {
+          type: dataSource.options.type,
+          host: 'host' in dataSource.options ? dataSource.options.host : null,
+          port: 'port' in dataSource.options ? dataSource.options.port : null,
+          database: dataSource.options.database ?? null,
+        },
+        error: describeError(error),
       }),
     );
     process.exitCode = 1;
@@ -78,3 +84,16 @@ main()
       await dataSource.destroy();
     }
   });
+
+function describeError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return { name: 'UnknownError', message: String(error) };
+  }
+
+  const withCode = error as Error & { code?: string };
+  return {
+    name: error.name,
+    code: withCode.code ?? null,
+    message: error.message || String(error),
+  };
+}

@@ -216,3 +216,15 @@ REALTIME_SMOKE_PASSWORD='***' \
 node scripts/realtime-1000-online-smoke.mjs
 ```
 
+## Verification Log
+
+2026-06-06 local Codex environment:
+
+- Passed: `pnpm --dir backend test -- app.controller.spec.ts`
+- Passed: `pnpm --dir backend lint`
+- Passed: `pnpm --dir backend build`
+- Passed: `APP_SMOKE_DRY_RUN=true pnpm --dir backend smoke:app-core`
+- Passed: `pnpm --dir frontend test -- fitmeetCoreContract.test.ts`
+- Blocked: `docker compose ps` and `docker --version` because `docker` is not installed in this environment.
+- Blocked: `pnpm --dir backend migration:status` because Postgres refused `localhost:5432` for database `fitness_app` (`ECONNREFUSED`).
+- Blocked: local backend `/api/health` and `/api/ready` runtime curl because database dependencies could not be started or reached.
