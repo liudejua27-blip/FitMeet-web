@@ -263,6 +263,9 @@ node scripts/realtime-1000-online-smoke.mjs
 - Blocked: iOS full `-only-testing:FitMeetAlphaTests` after three attempts because the Simulator refused to launch `com.fitmeet.alpha` with `FBSOpenApplicationServiceErrorDomain` / `Application failed preflight checks` / `Busy`. This is a local Simulator launch-state blocker; the targeted networking/auth contract tests and Debug/Release builds passed.
 - Passed: iOS staging backend E2E script safe skip mode: `swift Scripts/staging-backend-e2e.swift`
 - Blocked by credentials/env: iOS required staging backend E2E `FITMEET_ALPHA_STAGING_E2E_REQUIRED=1 swift Scripts/staging-backend-e2e.swift` failed fast because `FITMEET_ALPHA_STAGING_E2E=1` and staging credentials were not provided.
+- Passed: iOS test build after adding feed validation error mapping coverage: `xcodebuild build-for-testing -project FitMeetAlpha.xcodeproj -scheme FitMeetAlpha -destination 'platform=iOS Simulator,id=68F37251-71BE-4F42-9849-62D61BFFE7C3'`
+- Blocked: iOS targeted `xcodebuild test -project FitMeetAlpha.xcodeproj -scheme FitMeetAlpha -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' -only-testing:FitMeetAlphaTests/AuthRestoreContractTests` failed because the Simulator refused to launch `com.fitmeet.alpha` with `FBSOpenApplicationServiceErrorDomain` / `Application failed preflight checks` / `Busy`.
+- Blocked: iOS targeted retry on `iPhone 17 Pro` simulator id `68F37251-71BE-4F42-9849-62D61BFFE7C3` failed with the same Simulator `Busy` preflight launch blocker.
 - Passed: backend `pnpm --dir backend test -- logging.interceptor.spec.ts`
 - Passed: backend `pnpm --dir backend test -- http-exception.filter.spec.ts logging.interceptor.spec.ts`
 - Passed: backend `pnpm --dir backend test -- migration-integrity.spec.ts`
