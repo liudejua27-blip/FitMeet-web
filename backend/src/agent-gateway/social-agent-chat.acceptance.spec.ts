@@ -15,6 +15,7 @@ import {
 import { SocialAgentAction } from './agent-permission.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
+import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { SocialAgentDraftSearchService } from './social-agent-draft-search.service';
@@ -431,10 +432,12 @@ function makeHarness(options: Record<string, unknown> = {}) {
   const chatLlm =
     (options.chatLlm as SocialAgentChatLlmService | undefined) ??
     new SocialAgentChatLlmService(
-      config as never,
       metrics as never,
+      new SocialAgentChatDeepSeekClientService(
+        config as never,
+        options.modelRouter as never,
+      ),
       options.finalResponses as never,
-      options.modelRouter as never,
     );
   const runState =
     (options.runState as SocialAgentRunStateService | undefined) ??

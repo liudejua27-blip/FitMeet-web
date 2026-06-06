@@ -66,6 +66,7 @@ import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service
 import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
 import { SocialAgentAutopilotService } from './social-agent-autopilot.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
+import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
 import { SocialAgentFollowUpContextService } from './social-agent-follow-up-context.service';
@@ -244,6 +245,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentConfirmationPolicyService,
     SocialAgentToolCallFactoryService,
     SocialAgentAutopilotService,
+    SocialAgentChatDeepSeekClientService,
     SocialAgentChatLlmService,
     SocialAgentRunStateService,
     SocialAgentFollowUpContextService,

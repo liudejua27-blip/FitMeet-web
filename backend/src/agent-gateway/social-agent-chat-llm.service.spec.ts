@@ -3,6 +3,7 @@ import {
   AgentTaskPermissionMode,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
+import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import type { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
 
@@ -63,6 +64,16 @@ function makeRoute(
   };
 }
 
+function makeService(
+  configValues: Record<string, string | undefined>,
+  metrics: { recordError: jest.Mock } = { recordError: jest.fn() },
+): SocialAgentChatLlmService {
+  return new SocialAgentChatLlmService(
+    metrics as never,
+    new SocialAgentChatDeepSeekClientService(makeConfig(configValues) as never),
+  );
+}
+
 describe('SocialAgentChatLlmService', () => {
   const originalFetch = global.fetch;
 
@@ -87,14 +98,11 @@ describe('SocialAgentChatLlmService', () => {
         }),
     });
     global.fetch = fetchMock as never;
-    const service = new SocialAgentChatLlmService(
-      makeConfig({
-        DEEPSEEK_API_KEY: 'test-key',
-        DEEPSEEK_BASE_URL: 'https://deepseek.test',
-        DEEPSEEK_MODEL: 'deepseek-chat',
-      }) as never,
-      { recordError: jest.fn() } as never,
-    );
+    const service = makeService({
+      DEEPSEEK_API_KEY: 'test-key',
+      DEEPSEEK_BASE_URL: 'https://deepseek.test',
+      DEEPSEEK_MODEL: 'deepseek-chat',
+    });
 
     const answer = await service.generateConversationalAnswer({
       message: '为什么你不会回答问题？我不是调用的 deepseek 的 api 吗？',
@@ -139,14 +147,11 @@ describe('SocialAgentChatLlmService', () => {
         }),
     });
     global.fetch = fetchMock as never;
-    const service = new SocialAgentChatLlmService(
-      makeConfig({
-        DEEPSEEK_API_KEY: 'test-key',
-        DEEPSEEK_BASE_URL: 'https://deepseek.test',
-        DEEPSEEK_MODEL: 'deepseek-v4-flash',
-      }) as never,
-      { recordError: jest.fn() } as never,
-    );
+    const service = makeService({
+      DEEPSEEK_API_KEY: 'test-key',
+      DEEPSEEK_BASE_URL: 'https://deepseek.test',
+      DEEPSEEK_MODEL: 'deepseek-v4-flash',
+    });
 
     const answer = await service.generateConversationalAnswer({
       message: '人物画像是什么？',
@@ -185,13 +190,10 @@ describe('SocialAgentChatLlmService', () => {
         }),
     });
     global.fetch = fetchMock as never;
-    const service = new SocialAgentChatLlmService(
-      makeConfig({
-        DEEPSEEK_API_KEY: 'test-key',
-        DEEPSEEK_BASE_URL: 'https://deepseek.test',
-      }) as never,
-      { recordError: jest.fn() } as never,
-    );
+    const service = makeService({
+      DEEPSEEK_API_KEY: 'test-key',
+      DEEPSEEK_BASE_URL: 'https://deepseek.test',
+    });
 
     const answer = await service.generateConversationalAnswer({
       message: '你好，今天可以随便聊聊吗？',
@@ -217,12 +219,12 @@ describe('SocialAgentChatLlmService', () => {
     global.fetch = jest
       .fn()
       .mockRejectedValue(new Error('network down')) as never;
-    const service = new SocialAgentChatLlmService(
-      makeConfig({
+    const service = makeService(
+      {
         DEEPSEEK_API_KEY: 'test-key',
         DEEPSEEK_BASE_URL: 'https://deepseek.test',
-      }) as never,
-      metrics as never,
+      },
+      metrics,
     );
 
     const answer = await service.generateConversationalAnswer({
@@ -247,12 +249,12 @@ describe('SocialAgentChatLlmService', () => {
     const abortError = new Error('aborted');
     abortError.name = 'AbortError';
     global.fetch = jest.fn().mockRejectedValue(abortError) as never;
-    const service = new SocialAgentChatLlmService(
-      makeConfig({
+    const service = makeService(
+      {
         DEEPSEEK_API_KEY: 'test-key',
         DEEPSEEK_BASE_URL: 'https://deepseek.test',
-      }) as never,
-      metrics as never,
+      },
+      metrics,
     );
 
     const answer = await service.generateConversationalAnswer({
@@ -290,14 +292,11 @@ describe('SocialAgentChatLlmService', () => {
         }),
     });
     global.fetch = fetchMock as never;
-    const service = new SocialAgentChatLlmService(
-      makeConfig({
-        DEEPSEEK_API_KEY: 'test-key',
-        DEEPSEEK_BASE_URL: 'https://deepseek.test',
-        DEEPSEEK_FAST_MODEL: 'deepseek-v4-flash',
-      }) as never,
-      { recordError: jest.fn() } as never,
-    );
+    const service = makeService({
+      DEEPSEEK_API_KEY: 'test-key',
+      DEEPSEEK_BASE_URL: 'https://deepseek.test',
+      DEEPSEEK_FAST_MODEL: 'deepseek-v4-flash',
+    });
 
     const extracted = await service.extractProfileFieldsWithLlm(
       makeTask(),
