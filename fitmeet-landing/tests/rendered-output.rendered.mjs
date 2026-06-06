@@ -379,6 +379,43 @@ test('next build manifest keeps all deployment-critical landing routes static', 
   }
 });
 
+test('rendered landing build does not depend on server-only deployment features', async () => {
+  const exportMarker = await readJson('.next/export-marker.json');
+  const images = await readJson('.next/images-manifest.json');
+  const routes = await readJson('.next/routes-manifest.json');
+
+  assert.equal(
+    exportMarker.isNextImageImported,
+    false,
+    'landing should not require the Next image optimizer at runtime',
+  );
+  assert.equal(
+    routes.headers.length,
+    0,
+    'landing should not require platform-specific runtime headers',
+  );
+  assert.equal(
+    routes.rewrites.length,
+    0,
+    'landing should not require platform-specific runtime rewrites',
+  );
+  assert.equal(
+    routes.dataRoutes.length,
+    0,
+    'landing should not emit server data routes for the static public site',
+  );
+  assert.deepEqual(
+    images.images.remotePatterns,
+    [],
+    'landing should not allow remote image optimization hosts',
+  );
+  assert.deepEqual(
+    images.images.domains,
+    [],
+    'landing should not depend on legacy remote image domains',
+  );
+});
+
 test('rendered pages reference only deployable Next static assets', async () => {
   const pages = {
     '/': 'index.html',
