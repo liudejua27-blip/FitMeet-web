@@ -753,6 +753,65 @@ export const fitMeetCoreOpenApi = {
         },
       },
     },
+    '/agents/inbox/events': {
+      get: {
+        tags: ['agent-inbox'],
+        operationId: 'listAgentInboxEvents',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'agentProfileId',
+            in: 'query',
+            schema: { type: 'integer', minimum: 1 },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            schema: { type: 'integer', minimum: 1, maximum: 100 },
+          },
+          { name: 'unreadOnly', in: 'query', schema: { type: 'boolean' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Agent inbox event heartbeat list for the owner',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentInboxEventsResult' },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/agents/inbox/events/ack': {
+      post: {
+        tags: ['agent-inbox'],
+        operationId: 'ackAgentInboxEvents',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/AgentInboxAckInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Agent inbox event acknowledgement result',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentInboxAckResult' },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
     '/social-agent/chat/run': {
       post: {
         tags: ['social-agent-chat'],
@@ -1929,6 +1988,93 @@ export const fitMeetCoreOpenApi = {
           conversationId: { type: 'string' },
           socketPushed: { type: 'boolean' },
           message: { $ref: '#/components/schemas/AgentInboxMessage' },
+        },
+      },
+      AgentInboxEvent: {
+        type: 'object',
+        required: [
+          'id',
+          'event',
+          'eventType',
+          'agentConnectionId',
+          'ownerUserId',
+          'conversationId',
+          'messageId',
+          'requestId',
+          'candidateRecordId',
+          'fromUserId',
+          'fromUser',
+          'contentPreview',
+          'unread',
+          'reportText',
+          'nextAction',
+          'metadata',
+          'createdAt',
+          'updatedAt',
+        ],
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string' },
+          event: { type: 'string' },
+          eventType: { type: 'string' },
+          agentConnectionId: { type: 'integer' },
+          ownerUserId: { type: 'integer' },
+          conversationId: { type: ['string', 'null'] },
+          messageId: { type: ['string', 'null'] },
+          requestId: { type: ['integer', 'null'] },
+          candidateRecordId: { type: ['integer', 'null'] },
+          fromUserId: { type: ['integer', 'null'] },
+          fromUser: {
+            anyOf: [
+              { type: 'object', additionalProperties: true },
+              { type: 'null' },
+            ],
+          },
+          contentPreview: { type: 'string' },
+          unread: { type: 'boolean' },
+          reportText: { type: 'string' },
+          nextAction: { type: ['string', 'null'] },
+          metadata: { type: 'object', additionalProperties: true },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      AgentInboxEventsResult: {
+        type: 'object',
+        required: ['events'],
+        additionalProperties: false,
+        properties: {
+          events: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AgentInboxEvent' },
+          },
+        },
+      },
+      AgentInboxAckInput: {
+        type: 'object',
+        required: ['eventIds'],
+        additionalProperties: false,
+        properties: {
+          agentProfileId: { type: 'integer', minimum: 1 },
+          eventIds: {
+            type: 'array',
+            maxItems: 100,
+            items: { type: 'string', minLength: 1 },
+          },
+        },
+      },
+      AgentInboxAckResult: {
+        type: 'object',
+        required: ['ok', 'requested', 'acknowledged', 'eventIds'],
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean', enum: [true] },
+          requested: { type: 'integer', minimum: 0 },
+          acknowledged: { type: 'integer', minimum: 0 },
+          eventIds: {
+            type: 'array',
+            items: { type: 'string' },
+          },
         },
       },
       UnreadCount: {

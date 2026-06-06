@@ -72,6 +72,38 @@ describe('agentInboxApi', () => {
     );
   });
 
+  it('uses the shared endpoint registry for Agent inbox event polling', async () => {
+    requestMock.mockResolvedValue({ events: [] });
+
+    await agentInboxApi.events({ limit: 25, unreadOnly: true });
+
+    expect(requestMock).toHaveBeenCalledWith(
+      '/agents/inbox/events?limit=25&unreadOnly=true',
+    );
+  });
+
+  it('uses the shared endpoint registry for Agent inbox event acknowledgements', async () => {
+    requestProtectedMock.mockResolvedValue({
+      ok: true,
+      requested: 2,
+      acknowledged: 2,
+      eventIds: ['evt-1', 'evt-2'],
+    });
+
+    await agentInboxApi.ackEvents(['evt-1', 'evt-2'], 7);
+
+    expect(requestProtectedMock).toHaveBeenCalledWith(
+      '/agents/inbox/events/ack',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          eventIds: ['evt-1', 'evt-2'],
+          agentProfileId: 7,
+        }),
+      },
+    );
+  });
+
   it('uses the shared core endpoint registry for contracted Agent inbox paths', () => {
     const source = readFileSync(
       resolve(__dirname, '../api/agentInboxApi.ts'),
@@ -81,6 +113,10 @@ describe('agentInboxApi', () => {
     expect(source).toContain('fitMeetCoreEndpoints.agentInbox.conversations');
     expect(source).toContain('fitMeetCoreEndpoints.agentInbox.messages');
     expect(source).toContain('fitMeetCoreEndpoints.agentInbox.reply');
+    expect(source).toContain('fitMeetCoreEndpoints.agentInbox.events');
+    expect(source).toContain('fitMeetCoreEndpoints.agentInbox.ackEvents');
     expect(source).not.toContain('`/agents/inbox/conversations/${');
+    expect(source).not.toContain('`/agents/inbox/events${');
+    expect(source).not.toContain("'/agents/inbox/events/ack'");
   });
 });

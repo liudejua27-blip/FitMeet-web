@@ -110,6 +110,8 @@ Agent inbox:
 
 - `GET /agents/inbox/conversations`
 - `GET /agents/inbox/conversations/{conversationId}/messages`
+- `GET /agents/inbox/events`
+- `POST /agents/inbox/events/ack`
 - `POST /agents/inbox/conversations/{conversationId}/reply`
 
 Social Agent chat and workspace:

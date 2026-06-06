@@ -37,6 +37,8 @@ export const fitMeetCoreEndpoints = {
   },
   agentInbox: {
     conversations: '/agents/inbox/conversations',
+    events: '/agents/inbox/events',
+    ackEvents: '/agents/inbox/events/ack',
     messages: (conversationId: string) =>
       `/agents/inbox/conversations/${encodeURIComponent(
         conversationId,
@@ -126,6 +128,8 @@ export const fitMeetCoreEndpointTemplates = {
   },
   agentInbox: {
     conversations: '/agents/inbox/conversations',
+    events: '/agents/inbox/events',
+    ackEvents: '/agents/inbox/events/ack',
     messages: '/agents/inbox/conversations/{conversationId}/messages',
     reply: '/agents/inbox/conversations/{conversationId}/reply',
   },
@@ -172,6 +176,8 @@ export type FitMeetCoreStaticEndpoint =
   | (typeof fitMeetCoreEndpoints.messages)['getConversations']
   | (typeof fitMeetCoreEndpoints.messages)['getUnreadCount']
   | (typeof fitMeetCoreEndpoints.agentInbox)['conversations']
+  | (typeof fitMeetCoreEndpoints.agentInbox)['events']
+  | (typeof fitMeetCoreEndpoints.agentInbox)['ackEvents']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['messages']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['run']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['runAsync']

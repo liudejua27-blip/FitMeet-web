@@ -45,6 +45,12 @@ describe('fitMeetCoreEndpoints', () => {
     expect(fitMeetCoreEndpoints.agentInbox.conversations).toBe(
       '/agents/inbox/conversations',
     );
+    expect(fitMeetCoreEndpoints.agentInbox.events).toBe(
+      '/agents/inbox/events',
+    );
+    expect(fitMeetCoreEndpoints.agentInbox.ackEvents).toBe(
+      '/agents/inbox/events/ack',
+    );
     expect(
       fitMeetCoreEndpoints.agentInbox.messages('conversation:city run'),
     ).toBe(
@@ -140,6 +146,8 @@ describe('fitMeetCoreEndpoints', () => {
         '/messages/public-intents/{id}/start',
         '/messages/unread',
         '/agents/inbox/conversations',
+        '/agents/inbox/events',
+        '/agents/inbox/events/ack',
         '/agents/inbox/conversations/{conversationId}/messages',
         '/agents/inbox/conversations/{conversationId}/reply',
         '/social-agent/chat/run',

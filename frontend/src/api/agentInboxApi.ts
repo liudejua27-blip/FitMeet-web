@@ -306,13 +306,15 @@ export const agentInboxApi = {
     if (params?.unreadOnly) search.set('unreadOnly', 'true');
     const qs = search.toString();
     return api
-      .request<{ events: AgentInboxEvent[] }>(`/agents/inbox/events${qs ? `?${qs}` : ''}`)
+      .request<{ events: AgentInboxEvent[] }>(
+        `${fitMeetCoreEndpoints.agentInbox.events}${qs ? `?${qs}` : ''}`,
+      )
       .then(sanitizeAgentInboxResponse);
   },
 
   ackEvents: (eventIds: string[], agentProfileId?: number) =>
     api.requestProtected<{ ok: true; requested: number; acknowledged: number; eventIds: string[] }>(
-      '/agents/inbox/events/ack',
+      fitMeetCoreEndpoints.agentInbox.ackEvents,
       {
         method: 'POST',
         body: JSON.stringify({ eventIds, agentProfileId }),

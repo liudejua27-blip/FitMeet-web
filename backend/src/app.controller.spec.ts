@@ -77,6 +77,8 @@ const WEB_APP_REQUIRED_PATHS = {
   '/social-agent/chat/tasks/{taskId}/append-context': 'post',
   '/agents/inbox/conversations': 'get',
   '/agents/inbox/conversations/{conversationId}/messages': 'get',
+  '/agents/inbox/events': 'get',
+  '/agents/inbox/events/ack': 'post',
   '/agents/inbox/conversations/{conversationId}/reply': 'post',
 } as const;
 
@@ -195,6 +197,8 @@ describe('AppController', () => {
           '/messages/unread',
           '/agents/inbox/conversations',
           '/agents/inbox/conversations/{conversationId}/messages',
+          '/agents/inbox/events',
+          '/agents/inbox/events/ack',
           '/agents/inbox/conversations/{conversationId}/reply',
           '/social-agent/chat/run',
           '/social-agent/chat/run-async',
@@ -500,6 +504,8 @@ describe('AppController', () => {
       const reply =
         contract.paths['/agents/inbox/conversations/{conversationId}/reply']
           .post;
+      const events = contract.paths['/agents/inbox/events'].get;
+      const ack = contract.paths['/agents/inbox/events/ack'].post;
 
       expect(conversations.security).toEqual([{ bearerAuth: [] }]);
       expect(conversations.parameters).toEqual(
@@ -534,6 +540,25 @@ describe('AppController', () => {
           $ref: '#/components/schemas/AgentInboxReplyResult',
         },
       );
+      expect(events.security).toEqual([{ bearerAuth: [] }]);
+      expect(events.parameters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'agentProfileId', in: 'query' }),
+          expect.objectContaining({ name: 'limit', in: 'query' }),
+          expect.objectContaining({ name: 'unreadOnly', in: 'query' }),
+        ]),
+      );
+      expect(
+        events.responses['200'].content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/AgentInboxEventsResult',
+      });
+      expect(ack.requestBody.content['application/json'].schema).toEqual({
+        $ref: '#/components/schemas/AgentInboxAckInput',
+      });
+      expect(ack.responses['200'].content['application/json'].schema).toEqual({
+        $ref: '#/components/schemas/AgentInboxAckResult',
+      });
       expect(contract.components.schemas.AgentInboxReplyInput).toMatchObject({
         required: ['content'],
         properties: {
@@ -550,6 +575,25 @@ describe('AppController', () => {
         contract.components.schemas.AgentInboxMessagesResult,
       ).toMatchObject({
         required: ['agentProfileId', 'agentName', 'conversationId', 'messages'],
+      });
+      expect(contract.components.schemas.AgentInboxEventsResult).toMatchObject({
+        required: ['events'],
+        properties: {
+          events: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AgentInboxEvent' },
+          },
+        },
+      });
+      expect(contract.components.schemas.AgentInboxAckInput).toMatchObject({
+        required: ['eventIds'],
+        properties: {
+          eventIds: {
+            type: 'array',
+            maxItems: 100,
+            items: { type: 'string', minLength: 1 },
+          },
+        },
       });
     });
 
