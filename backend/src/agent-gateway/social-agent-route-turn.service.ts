@@ -10,19 +10,17 @@ import type {
   SocialAgentIntentRouteResult,
   SocialAgentRouteMessageBody,
 } from './social-agent-chat.types';
-import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
 import { SocialAgentMessageLogService } from './social-agent-message-log.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
-import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import {
-  shouldUseSocialAgentLlmDirectReply,
   socialAgentAssistantMessageForRoute,
   socialAgentRouteAction,
 } from './social-agent-route-response.presenter';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
 import { SocialAgentRouteCandidateConfirmationService } from './social-agent-route-candidate-confirmation.service';
+import { SocialAgentRouteConversationTurnService } from './social-agent-route-conversation-turn.service';
 import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile-turn.service';
 import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
 import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
@@ -44,12 +42,11 @@ type ReplanAndRefresh = (
 export class SocialAgentRouteTurnService {
   constructor(
     private readonly metrics: SocialAgentMetricsService,
-    private readonly chatLlm: SocialAgentChatLlmService,
-    private readonly profileEnrichment: SocialAgentProfileEnrichmentService,
     private readonly messageLog: SocialAgentMessageLogService,
     private readonly taskLifecycle: SocialAgentTaskLifecycleService,
     private readonly routeContext: SocialAgentRouteContextService,
     private readonly candidateConfirmations: SocialAgentRouteCandidateConfirmationService,
+    private readonly conversationTurns: SocialAgentRouteConversationTurnService,
     private readonly profileTurns: SocialAgentRouteProfileTurnService,
     private readonly searchTurns: SocialAgentRouteSearchTurnService,
     private readonly actionTurns: SocialAgentRouteActionTurnService,
@@ -116,37 +113,21 @@ export class SocialAgentRouteTurnService {
     if (candidateConfirmation.handled) return candidateConfirmation.result;
     task = candidateConfirmation.task;
 
-    if (
-      route.intent === 'profile_enrichment' ||
-      route.intent === 'profile_enrichment_request' ||
-      route.intent === 'correction_or_clarification'
-    ) {
-      const handled = await this.profileEnrichment.handleTurn({
-        ownerUserId,
-        task,
-        message,
-        intent: route.intent,
-        buildMemoryContext: (currentTask) =>
-          this.routeContext.buildMemoryContext(currentTask, null),
-      });
-      assistantMessage = handled.assistantMessage;
-      savedContext = handled.savedContext;
-      profileUpdated = handled.profileUpdated;
-      profileUpdateProposal = handled.profileUpdateProposal ?? null;
-      task = handled.task;
-    } else if (shouldUseSocialAgentLlmDirectReply(route)) {
-      assistantMessage = await this.chatLlm.generateConversationalAnswer({
-        message,
-        route,
-        profile,
-        task,
-        longTermSnapshot,
-        memoryContext: this.routeContext.buildMemoryContext(
-          task,
-          longTermSnapshot,
-        ),
-        toolResults: brainToolResults,
-      });
+    const conversationTurn = await this.conversationTurns.handle({
+      ownerUserId,
+      task,
+      message,
+      route,
+      profile,
+      longTermSnapshot,
+      brainToolResults,
+    });
+    if (conversationTurn.handled) {
+      task = conversationTurn.task;
+      assistantMessage = conversationTurn.assistantMessage ?? assistantMessage;
+      savedContext = conversationTurn.savedContext;
+      profileUpdated = conversationTurn.profileUpdated;
+      profileUpdateProposal = conversationTurn.profileUpdateProposal;
     }
 
     const profileTurn = await this.profileTurns.handle({
