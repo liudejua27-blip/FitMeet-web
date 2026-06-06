@@ -91,6 +91,7 @@ import { SocialAgentToolInputParserService } from './social-agent-tool-input-par
 import { SocialAgentPaymentIntentToolService } from './social-agent-payment-intent-tool.service';
 import { SocialAgentMessageToolService } from './social-agent-message-tool.service';
 import { SocialAgentActivityToolService } from './social-agent-activity-tool.service';
+import { SocialAgentInboxToolService } from './social-agent-inbox-tool.service';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -142,6 +143,7 @@ export class SocialAgentToolExecutorService {
     private readonly paymentIntentTools: SocialAgentPaymentIntentToolService,
     private readonly messageTools: SocialAgentMessageToolService,
     private readonly activityTools: SocialAgentActivityToolService,
+    private readonly inboxTools: SocialAgentInboxToolService,
   ) {}
 
   async executeTask(
@@ -734,13 +736,13 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.SaveCandidate:
         return this.saveCandidate(task, input);
       case SocialAgentToolName.GetConversations:
-        return this.getConversations(task, input);
+        return this.inboxTools.getConversations(task, input);
       case SocialAgentToolName.GetAgentInbox:
-        return this.getAgentInbox(task, input);
+        return this.inboxTools.getAgentInbox(task, input);
       case SocialAgentToolName.WriteInbox:
-        return this.writeInbox(task, input, stepId);
+        return this.inboxTools.writeInbox(task, input, stepId);
       case SocialAgentToolName.ReadInbox:
-        return this.readInbox(task, input);
+        return this.inboxTools.readInbox(task, input);
       case SocialAgentToolName.GetPendingApprovals:
         return this.getPendingApprovals(task, input);
       case SocialAgentToolName.ApproveAction:
@@ -1457,127 +1459,6 @@ export class SocialAgentToolExecutorService {
     row.status = SocialRequestCandidateStatus.Approved;
     const saved = await this.candidateRepo.save(row);
     return { id: saved.id, status: saved.status };
-  }
-
-  private async writeInbox(
-    task: AgentTask,
-    input: Record<string, unknown>,
-    stepId: string,
-  ): Promise<unknown> {
-    const agentConnectionId =
-      task.agentConnectionId ?? this.toolInput.number(input.agentConnectionId);
-    if (!agentConnectionId)
-      throw new BadRequestException('agentConnectionId is required');
-    return this.messages.createAgentInboxEvent({
-      agentConnectionId,
-      ownerUserId: task.ownerUserId,
-      eventType: this.toolInput.string(input.eventType) || 'agent.task.updated',
-      conversationId: this.toolInput.string(input.conversationId) || null,
-      messageId: this.toolInput.string(input.messageId) || null,
-      requestId:
-        this.toolInput.number(input.requestId ?? input.socialRequestId) ?? null,
-      candidateRecordId: this.toolInput.number(input.candidateRecordId) ?? null,
-      fromUserId: this.toolInput.number(input.fromUserId) ?? null,
-      contentPreview: this.toolInput.string(
-        input.contentPreview ?? input.summary ?? input.text,
-      ),
-      unread: this.toolInput.bool(input.unread) ?? true,
-      dedupeKey:
-        this.toolInput.string(input.dedupeKey) ||
-        `${agentConnectionId}:agent.task:${task.id}:${stepId}`,
-      metadata: {
-        ...(this.toolInput.isRecord(input.metadata) ? input.metadata : {}),
-        agentTaskId: task.id,
-        stepId,
-      },
-    });
-  }
-
-  private async readInbox(
-    task: AgentTask,
-    input: Record<string, unknown>,
-  ): Promise<unknown> {
-    const agentConnectionId =
-      task.agentConnectionId ?? this.toolInput.number(input.agentConnectionId);
-    if (!agentConnectionId)
-      throw new BadRequestException('agentConnectionId is required');
-    const conversationId = this.toolInput.string(input.conversationId);
-    if (conversationId) {
-      return {
-        messages: await this.messages.getAgentInboxMessages(
-          conversationId,
-          agentConnectionId,
-          {
-            limit: this.toolInput.number(input.limit) ?? undefined,
-          },
-        ),
-      };
-    }
-    return {
-      events: await this.messages.getAgentInboxEvents(agentConnectionId, {
-        limit: this.toolInput.number(input.limit) ?? undefined,
-        unreadOnly: this.toolInput.bool(input.unreadOnly) ?? undefined,
-        eventType: this.toolInput.string(input.eventType) || undefined,
-      }),
-    };
-  }
-
-  private async getConversations(
-    task: AgentTask,
-    input: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
-    const limit = this.toolInput.number(input.limit);
-    const conversations = await this.messages.getConversations(
-      task.ownerUserId,
-    );
-    return {
-      conversations: limit ? conversations.slice(0, limit) : conversations,
-    };
-  }
-
-  private async getAgentInbox(
-    task: AgentTask,
-    input: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
-    const agentConnectionId =
-      task.agentConnectionId ?? this.toolInput.number(input.agentConnectionId);
-    const limit = this.toolInput.number(input.limit) ?? undefined;
-    const conversationId = this.toolInput.string(input.conversationId);
-
-    if (conversationId) {
-      if (!agentConnectionId) {
-        throw new BadRequestException('agentConnectionId is required');
-      }
-      return {
-        messages: await this.messages.getAgentInboxMessages(
-          conversationId,
-          agentConnectionId,
-          { limit },
-        ),
-      };
-    }
-
-    const [conversations, events] = await Promise.all([
-      agentConnectionId
-        ? this.messages.getAgentInboxConversations(agentConnectionId, {
-            limit,
-            unreadOnly: this.toolInput.bool(input.unreadOnly) ?? undefined,
-          })
-        : Promise.resolve([]),
-      agentConnectionId
-        ? this.messages.getAgentInboxEvents(agentConnectionId, {
-            limit,
-            unreadOnly: this.toolInput.bool(input.unreadOnly) ?? undefined,
-            eventType: this.toolInput.string(input.eventType) || undefined,
-          })
-        : this.messages.getAgentInboxEventsForOwner(task.ownerUserId, {
-            limit,
-            unreadOnly: this.toolInput.bool(input.unreadOnly) ?? undefined,
-            eventType: this.toolInput.string(input.eventType) || undefined,
-          }),
-    ]);
-
-    return { conversations, events };
   }
 
   private async getPendingApprovals(
