@@ -38,11 +38,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
       exception instanceof HttpException
         ? exception.getResponse()
         : 'Internal server error';
+    const path = this.safePath(request);
 
     const message = this.resolveMessage(exceptionResponse, status);
     const descriptor = this.resolveErrorDescriptor(
       status,
-      request.url,
+      path,
       message,
       exceptionResponse,
     );
@@ -52,7 +53,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         JSON.stringify({
           event: 'backend.error',
           method: request.method,
-          path: request.url,
+          path,
           status,
           code: descriptor.code,
           userId: this.requestUserId(request),
@@ -64,7 +65,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         JSON.stringify({
           event: 'backend.request_failed',
           method: request.method,
-          path: request.url,
+          path,
           status,
           code: descriptor.code,
           userId: this.requestUserId(request),
@@ -76,7 +77,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     response.status(status).json({
       statusCode: status,
       timestamp: new Date().toISOString(),
-      path: request.url,
+      path,
       code: descriptor.code,
       message,
       ...(this.resolveDetails(exceptionResponse) !== undefined
@@ -174,6 +175,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
       return undefined;
     }
     return (response as ErrorResponseBody).details;
+  }
+
+  private safePath(request: Request): string {
+    if (typeof request.path === 'string' && request.path.length > 0) {
+      return request.path;
+    }
+    return request.url.split('?')[0] || '/';
   }
 
   private requestUserId(request: Request): number | null {
