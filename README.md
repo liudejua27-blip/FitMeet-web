@@ -272,11 +272,12 @@ APP_DIR=/opt/fitmeet-new ./scripts/deploy-production.sh
 
 ```bash
 docker compose --env-file .env.production -f docker-compose.prod.yml ps
-curl -fsS https://www.ourfitmeet.cn/health
-curl -fsS https://www.ourfitmeet.cn/api/health
+BASE_URL=https://www.ourfitmeet.cn ./scripts/verify-production.sh
 ```
 
-`nginx` 会等 `backend` 的 `/api/health` 通过后再进入 healthy 状态；如果这里失败，先看 `docker compose ... logs backend nginx`，再排查数据库、Redis、Mongo、Kafka 的 healthcheck。
+`verify-production.sh` 默认只做非破坏性检查：Web 首页、`/api/health`、运行时 OpenAPI、公开 feed、App 保护接口的 401、Agent manifest 的未授权保护。需要真实 App 账号链路时，可设置 `APP_SMOKE_EMAIL`、`APP_SMOKE_PASSWORD`、`APP_SMOKE_TARGET_USER_ID` 后追加 `--run-app-smoke`；需要写入 public intent 时，再显式追加 `--run-public-intent-write`。
+
+`nginx` 会等 `backend` 的 `/api/health` 通过后再进入 healthy 状态；如果这里失败，先看 `docker compose ... logs backend nginx`，再排查数据库、Redis、Mongo、Kafka 的 healthcheck。Windows 环境也可继续使用 `powershell -ExecutionPolicy Bypass -File .\scripts\verify-production.ps1`。
 
 Next 落地页可以独立部署到 Vercel、Node 服务或容器，和主 Web 的发布节奏可以分开。
 

@@ -33,6 +33,26 @@ describe('production deploy readiness', () => {
         'docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build',
       ),
     );
+    expect(deployScript).toContain('./scripts/verify-production.sh');
+  });
+
+  it('keeps production verification cross-platform and App contract aware', () => {
+    const verifier = readRepoFile('scripts/verify-production.sh');
+
+    expect(verifier).toContain('/openapi/fitmeet-core.json');
+    expect(verifier).toContain('/social-agent/chat/tasks/{taskId}/session');
+    expect(verifier).toContain(
+      '/social-agent/chat/tasks/{taskId}/send-message',
+    );
+    expect(verifier).toContain('/auth/profile');
+    expect(verifier).toContain('/social-agent/chat/session');
+    expect(verifier).toContain('/messages/conversations');
+    expect(verifier).toContain(
+      'ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"',
+    );
+    expect(verifier).toContain('APP_SMOKE_API_BASE_URL="${API_BASE_URL}"');
+    expect(verifier).toContain('APP_SMOKE_ALLOW_REMOTE=true');
+    expect(verifier).toContain('RUN_PUBLIC_INTENT_WRITE');
   });
 });
 
