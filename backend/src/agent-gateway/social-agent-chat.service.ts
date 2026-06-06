@@ -14,8 +14,8 @@ import type {
   SocialAgentTaskTimelineSnapshot,
   StreamEmit,
 } from './social-agent-chat.types';
-import { SocialAgentSessionQueryService } from './social-agent-session-query.service';
 import { SocialAgentReplanFacadeService } from './social-agent-replan-facade.service';
+import { SocialAgentChatSessionFacadeService } from './social-agent-chat-session-facade.service';
 import { SocialAgentChatTurnFacadeService } from './social-agent-chat-turn-facade.service';
 import { SocialAgentChatRunFacadeService } from './social-agent-chat-run-facade.service';
 
@@ -24,7 +24,7 @@ export class SocialAgentChatService {
   constructor(
     private readonly runFacade: SocialAgentChatRunFacadeService,
     private readonly turnFacade: SocialAgentChatTurnFacadeService,
-    private readonly sessionQueries: SocialAgentSessionQueryService,
+    private readonly sessionFacade: SocialAgentChatSessionFacadeService,
     private readonly replanFacade: SocialAgentReplanFacadeService,
   ) {}
 
@@ -93,32 +93,32 @@ export class SocialAgentChatService {
     taskId: number,
     runId: string,
   ): Promise<SocialAgentAsyncRunSnapshot> {
-    return this.sessionQueries.getRunStatus(ownerUserId, taskId, runId);
+    return this.sessionFacade.getRunStatus(ownerUserId, taskId, runId);
   }
 
   async getLatestSession(
     ownerUserId: number,
   ): Promise<SocialAgentSessionSnapshot> {
-    return this.sessionQueries.getLatestSession(ownerUserId);
+    return this.sessionFacade.getLatestSession(ownerUserId);
   }
 
   async getTaskSession(
     ownerUserId: number,
     taskId: number,
   ): Promise<SocialAgentSessionSnapshot> {
-    return this.sessionQueries.getTaskSession(ownerUserId, taskId);
+    return this.sessionFacade.getTaskSession(ownerUserId, taskId);
   }
 
   async getCurrentTask(
     ownerUserId: number,
   ): Promise<SocialAgentCurrentTaskSnapshot | null> {
-    return this.sessionQueries.getCurrentTask(ownerUserId);
+    return this.sessionFacade.getCurrentTask(ownerUserId);
   }
 
   async getTaskTimeline(
     ownerUserId: number,
     taskId: number,
   ): Promise<SocialAgentTaskTimelineSnapshot> {
-    return this.sessionQueries.getTaskTimeline(ownerUserId, taskId);
+    return this.sessionFacade.getTaskTimeline(ownerUserId, taskId);
   }
 }

@@ -93,6 +93,7 @@ import { SocialAgentReplanFacadeService } from './social-agent-replan-facade.ser
 import { SocialAgentInitialSearchQueueService } from './social-agent-initial-search-queue.service';
 import { SocialAgentChatTurnFacadeService } from './social-agent-chat-turn-facade.service';
 import { SocialAgentChatRunFacadeService } from './social-agent-chat-run-facade.service';
+import { SocialAgentChatSessionFacadeService } from './social-agent-chat-session-facade.service';
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
@@ -268,6 +269,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentInitialSearchQueueService,
     SocialAgentChatTurnFacadeService,
     SocialAgentChatRunFacadeService,
+    SocialAgentChatSessionFacadeService,
     SocialAgentChatService,
     FitMeetAgentRuntimeService,
     SocialAgentCandidatePoolService,

@@ -12,13 +12,14 @@ describe('SocialAgentChatService facade boundary', () => {
     expect(lineCount).toBeLessThanOrEqual(160);
     expect(source).toContain('SocialAgentChatRunFacadeService');
     expect(source).toContain('SocialAgentChatTurnFacadeService');
-    expect(source).toContain('SocialAgentSessionQueryService');
+    expect(source).toContain('SocialAgentChatSessionFacadeService');
     expect(source).toContain('SocialAgentReplanFacadeService');
   });
 
   it('does not import low-level repositories or tool execution dependencies', () => {
     expect(source).not.toMatch(/from ['"]typeorm['"]/);
     expect(source).not.toMatch(/InjectRepository/);
+    expect(source).not.toMatch(/SocialAgentSessionQueryService/);
     expect(source).not.toMatch(/SocialAgentToolExecutorService/);
     expect(source).not.toMatch(/Repository</);
   });

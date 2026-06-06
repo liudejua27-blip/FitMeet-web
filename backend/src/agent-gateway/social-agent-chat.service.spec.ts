@@ -12,7 +12,7 @@ describe('SocialAgentChatService', () => {
       handleMessage: jest.fn().mockResolvedValue({ intent: 'social_search' }),
       performCardAction: jest.fn().mockResolvedValue({ action: 'reply' }),
     };
-    const sessionQueries = {
+    const sessionFacade = {
       getRunStatus: jest
         .fn()
         .mockResolvedValue({ taskId: 101, runId: 'run_1' }),
@@ -30,11 +30,11 @@ describe('SocialAgentChatService', () => {
     const service = new SocialAgentChatService(
       runFacade as never,
       turnFacade as never,
-      sessionQueries as never,
+      sessionFacade as never,
       replanFacade as never,
     );
 
-    return { service, runFacade, turnFacade, sessionQueries, replanFacade };
+    return { service, runFacade, turnFacade, sessionFacade, replanFacade };
   }
 
   it('delegates run entrypoints to the run facade', async () => {
@@ -98,8 +98,8 @@ describe('SocialAgentChatService', () => {
     });
   });
 
-  it('delegates session reads to the session query service', async () => {
-    const { service, sessionQueries } = makeService();
+  it('delegates session reads to the session facade', async () => {
+    const { service, sessionFacade } = makeService();
 
     await service.getRunStatus(7, 101, 'run_1');
     await service.getLatestSession(7);
@@ -107,10 +107,10 @@ describe('SocialAgentChatService', () => {
     await service.getCurrentTask(7);
     await service.getTaskTimeline(7, 101);
 
-    expect(sessionQueries.getRunStatus).toHaveBeenCalledWith(7, 101, 'run_1');
-    expect(sessionQueries.getLatestSession).toHaveBeenCalledWith(7);
-    expect(sessionQueries.getTaskSession).toHaveBeenCalledWith(7, 101);
-    expect(sessionQueries.getCurrentTask).toHaveBeenCalledWith(7);
-    expect(sessionQueries.getTaskTimeline).toHaveBeenCalledWith(7, 101);
+    expect(sessionFacade.getRunStatus).toHaveBeenCalledWith(7, 101, 'run_1');
+    expect(sessionFacade.getLatestSession).toHaveBeenCalledWith(7);
+    expect(sessionFacade.getTaskSession).toHaveBeenCalledWith(7, 101);
+    expect(sessionFacade.getCurrentTask).toHaveBeenCalledWith(7);
+    expect(sessionFacade.getTaskTimeline).toHaveBeenCalledWith(7, 101);
   });
 });

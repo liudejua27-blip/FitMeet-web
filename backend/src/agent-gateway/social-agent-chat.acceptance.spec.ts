@@ -48,6 +48,7 @@ import { SocialAgentReplanFacadeService } from './social-agent-replan-facade.ser
 import { SocialAgentInitialSearchQueueService } from './social-agent-initial-search-queue.service';
 import { SocialAgentChatTurnFacadeService } from './social-agent-chat-turn-facade.service';
 import { SocialAgentChatRunFacadeService } from './social-agent-chat-run-facade.service';
+import { SocialAgentChatSessionFacadeService } from './social-agent-chat-session-facade.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
@@ -673,6 +674,11 @@ function makeHarness(options: Record<string, unknown> = {}) {
       taskLifecycle as never,
       options.tonePolicy as never,
     );
+  const sessionFacade =
+    (options.sessionFacade as
+      | SocialAgentChatSessionFacadeService
+      | undefined) ??
+    new SocialAgentChatSessionFacadeService(sessionQueries as never);
   const cardActionRouter =
     (options.cardActionRouter as
       | SocialAgentCardActionRouterService
@@ -719,7 +725,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
   const service = new SocialAgentChatService(
     runFacade as never,
     turnFacade as never,
-    sessionQueries as never,
+    sessionFacade as never,
     replanFacade as never,
   );
 
@@ -757,6 +763,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     queuedRuns,
     runOrchestrator,
     sessionQueries,
+    sessionFacade,
     cardActionRouter,
     replanFacade,
     initialSearchQueue,
