@@ -29,6 +29,10 @@ export const fitMeetCoreEndpoints = {
       `/messages/conversations/${conversationId}` as const,
     sendConversationMessage: (conversationId: string) =>
       `/messages/conversations/${conversationId}/send` as const,
+    startPublicIntentConversation: (publicIntentId: string) =>
+      `/messages/public-intents/${encodeURIComponent(
+        publicIntentId,
+      )}/start` as const,
     getUnreadCount: '/messages/unread',
   },
   socialAgentChat: {
@@ -38,8 +42,16 @@ export const fitMeetCoreEndpoints = {
     session: '/social-agent/chat/session',
     taskSession: (taskId: number) =>
       `/social-agent/chat/tasks/${taskId}/session` as const,
-    taskMessages: (taskId: number) => `/social-agent/chat/tasks/${taskId}/messages` as const,
-    taskActions: (taskId: number) => `/social-agent/chat/tasks/${taskId}/actions` as const,
+    taskMessages: (taskId: number) =>
+      `/social-agent/chat/tasks/${taskId}/messages` as const,
+    taskActions: (taskId: number) =>
+      `/social-agent/chat/tasks/${taskId}/actions` as const,
+    saveCandidate: (taskId: number) =>
+      `/social-agent/chat/tasks/${taskId}/save-candidate` as const,
+    sendCandidateMessage: (taskId: number) =>
+      `/social-agent/chat/tasks/${taskId}/send-message` as const,
+    connectCandidate: (taskId: number) =>
+      `/social-agent/chat/tasks/${taskId}/connect-candidate` as const,
   },
   uploads: {
     image: '/uploads/image',

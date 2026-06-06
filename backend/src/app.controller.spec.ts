@@ -96,6 +96,7 @@ describe('AppController', () => {
           '/messages/conversations',
           '/messages/conversations/{conversationId}',
           '/messages/conversations/{conversationId}/send',
+          '/messages/public-intents/{id}/start',
           '/messages/unread',
           '/social-agent/chat/session',
           '/social-agent/chat/messages',
@@ -221,6 +222,54 @@ describe('AppController', () => {
       expect(contract.components.schemas.UnreadCount.required).toEqual([
         'unreadCount',
       ]);
+    });
+
+    it('documents the Web public intent conversation start contract', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+      const controllerRoutes = collectControllerRoutes(APP_CORE_CONTROLLERS);
+      const publicIntentStart =
+        contract.paths['/messages/public-intents/{id}/start'].post;
+
+      expect(publicIntentStart.parameters).toEqual([
+        {
+          name: 'id',
+          in: 'path',
+          required: true,
+          schema: { type: 'string' },
+        },
+      ]);
+      expect(
+        publicIntentStart.requestBody.content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/StartPublicIntentConversationInput',
+      });
+      expect(
+        contract.components.schemas.StartPublicIntentConversationInput,
+      ).toEqual({
+        type: 'object',
+        additionalProperties: false,
+        properties: { text: { type: 'string', minLength: 1 } },
+      });
+      expect(
+        publicIntentStart.responses['201'].content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/PublicIntentConversationStartResult',
+      });
+      expect(
+        contract.components.schemas.PublicIntentConversationStartResult,
+      ).toMatchObject({
+        allOf: [
+          { $ref: '#/components/schemas/ConversationStartResult' },
+          {
+            type: 'object',
+            required: ['publicIntentId', 'agentConnectionId', 'message'],
+          },
+        ],
+      });
+      expect(controllerRoutes).toContainEqual({
+        method: 'post',
+        path: normalizePathParams('/messages/public-intents/{id}/start'),
+      });
     });
 
     it('documents the iOS moment feed contract used by staging E2E', () => {

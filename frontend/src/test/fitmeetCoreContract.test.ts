@@ -21,6 +21,11 @@ describe('fitMeetCoreEndpoints', () => {
     expect(
       fitMeetCoreEndpoints.messages.sendConversationMessage('conv-123'),
     ).toBe('/messages/conversations/conv-123/send');
+    expect(
+      fitMeetCoreEndpoints.messages.startPublicIntentConversation(
+        'intent:city run',
+      ),
+    ).toBe('/messages/public-intents/intent%3Acity%20run/start');
     expect(fitMeetCoreEndpoints.messages.getUnreadCount).toBe(
       '/messages/unread',
     );
@@ -29,6 +34,21 @@ describe('fitMeetCoreEndpoints', () => {
     );
     expect(fitMeetCoreEndpoints.socialAgentChat.taskSession(101)).toBe(
       '/social-agent/chat/tasks/101/session',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentChat.taskMessages(101)).toBe(
+      '/social-agent/chat/tasks/101/messages',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentChat.taskActions(101)).toBe(
+      '/social-agent/chat/tasks/101/actions',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentChat.saveCandidate(101)).toBe(
+      '/social-agent/chat/tasks/101/save-candidate',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentChat.sendCandidateMessage(101)).toBe(
+      '/social-agent/chat/tasks/101/send-message',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentChat.connectCandidate(101)).toBe(
+      '/social-agent/chat/tasks/101/connect-candidate',
     );
     expect(fitMeetCoreEndpoints.socialAgentChat.messages).toBe(
       '/social-agent/chat/messages',

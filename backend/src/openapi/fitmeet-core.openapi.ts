@@ -489,6 +489,46 @@ export const fitMeetCoreOpenApi = {
         },
       },
     },
+    '/messages/public-intents/{id}/start': {
+      post: {
+        tags: ['messages'],
+        operationId: 'startPublicIntentConversation',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/StartPublicIntentConversationInput',
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Public intent conversation start result',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/PublicIntentConversationStartResult',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
     '/messages/unread': {
       get: {
         tags: ['messages'],
@@ -1078,6 +1118,30 @@ export const fitMeetCoreOpenApi = {
         type: 'object',
         required: ['text'],
         properties: { text: { type: 'string', minLength: 1 } },
+      },
+      StartPublicIntentConversationInput: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { text: { type: 'string', minLength: 1 } },
+      },
+      PublicIntentConversationStartResult: {
+        allOf: [
+          { $ref: '#/components/schemas/ConversationStartResult' },
+          {
+            type: 'object',
+            required: ['publicIntentId', 'agentConnectionId', 'message'],
+            properties: {
+              publicIntentId: { type: 'string' },
+              agentConnectionId: { type: ['integer', 'null'] },
+              message: {
+                oneOf: [
+                  { $ref: '#/components/schemas/ConversationMessage' },
+                  { type: 'null' },
+                ],
+              },
+            },
+          },
+        ],
       },
       ConversationMessage: {
         type: 'object',
