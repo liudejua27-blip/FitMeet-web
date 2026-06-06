@@ -12,6 +12,7 @@ interface ErrorResponseBody {
   message?: string | string[];
   error?: string;
   code?: string;
+  details?: unknown;
 }
 
 interface ErrorDescriptor {
@@ -78,6 +79,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
       path: request.url,
       code: descriptor.code,
       message,
+      ...(this.resolveDetails(exceptionResponse) !== undefined
+        ? { details: this.resolveDetails(exceptionResponse) }
+        : {}),
       error: {
         code: descriptor.code,
         message,
@@ -163,6 +167,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
       status >= 500 ||
       code === 'OWNER_CONFIRMATION_REQUIRED'
     );
+  }
+
+  private resolveDetails(response: string | object) {
+    if (typeof response !== 'object') {
+      return undefined;
+    }
+    return (response as ErrorResponseBody).details;
   }
 
   private requestUserId(request: Request): number | null {

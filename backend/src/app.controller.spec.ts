@@ -2,7 +2,9 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { RequestMethod } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { getConnectionToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
+import { DataSource } from 'typeorm';
 import { SocialAgentChatController } from './agent-gateway/social-agent-chat.controller';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -10,6 +12,7 @@ import { AuthController } from './auth/auth.controller';
 import { CommentsController } from './comments/comments.controller';
 import { MessagesController } from './messages/messages.controller';
 import { PostsController } from './posts/posts.controller';
+import { RedisService } from './redis/redis.service';
 import { UploadsController } from './uploads/uploads.controller';
 import { UsersController } from './users/users.controller';
 
@@ -56,11 +59,28 @@ type ControllerRoute = {
 
 describe('AppController', () => {
   let appController: AppController;
+  const dataSource = { query: jest.fn() };
+  const mongoConnection = { db: { admin: jest.fn() }, readyState: 1 };
+  const mongoAdmin = { ping: jest.fn() };
+  const redisClient = { ping: jest.fn() };
+  const redisService = { getClient: jest.fn(() => redisClient) };
 
   beforeEach(async () => {
+    dataSource.query.mockResolvedValue([{ '?column?': 1 }]);
+    mongoConnection.readyState = 1;
+    mongoConnection.db.admin.mockReturnValue(mongoAdmin);
+    mongoAdmin.ping.mockResolvedValue({ ok: 1 });
+    redisClient.ping.mockResolvedValue('PONG');
+    redisService.getClient.mockReturnValue(redisClient);
+
     const app: TestingModule = await Test.createTestingModule({
       controllers: [AppController],
-      providers: [AppService],
+      providers: [
+        AppService,
+        { provide: DataSource, useValue: dataSource },
+        { provide: getConnectionToken(), useValue: mongoConnection },
+        { provide: RedisService, useValue: redisService },
+      ],
     }).compile();
 
     appController = app.get<AppController>(AppController);
@@ -80,6 +100,39 @@ describe('AppController', () => {
         timestamp: expect.any(String),
       });
     });
+
+    it('should return readiness when storage dependencies respond', async () => {
+      await expect(appController.getReadiness()).resolves.toEqual({
+        status: 'ok',
+        uptime: expect.any(Number),
+        timestamp: expect.any(String),
+        checks: {
+          postgres: { status: 'ok', latencyMs: expect.any(Number) },
+          mongo: { status: 'ok', latencyMs: expect.any(Number) },
+          redis: { status: 'ok', latencyMs: expect.any(Number) },
+        },
+      });
+      expect(dataSource.query).toHaveBeenCalledWith('SELECT 1');
+      expect(mongoAdmin.ping).toHaveBeenCalled();
+      expect(redisClient.ping).toHaveBeenCalled();
+    });
+
+    it('should fail readiness without exposing dependency error details', async () => {
+      dataSource.query.mockRejectedValueOnce(new Error('password leaked'));
+
+      await expect(appController.getReadiness()).rejects.toMatchObject({
+        response: {
+          code: 'SERVICE_NOT_READY',
+          message: 'Service dependencies are not ready',
+          details: {
+            postgres: { status: 'error', latencyMs: expect.any(Number) },
+            mongo: { status: 'ok', latencyMs: expect.any(Number) },
+            redis: { status: 'ok', latencyMs: expect.any(Number) },
+          },
+        },
+        status: 503,
+      });
+    });
   });
 
   describe('FitMeet core OpenAPI', () => {
@@ -89,6 +142,8 @@ describe('AppController', () => {
       expect(contract.openapi).toBe('3.1.0');
       expect(Object.keys(contract.paths)).toEqual(
         expect.arrayContaining([
+          '/health',
+          '/ready',
           '/auth/login',
           '/auth/refresh',
           '/auth/profile',

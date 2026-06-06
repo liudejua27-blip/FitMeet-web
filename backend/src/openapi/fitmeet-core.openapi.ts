@@ -8,6 +8,7 @@ export const fitMeetCoreOpenApi = {
   },
   servers: [{ url: '/api' }],
   tags: [
+    { name: 'system' },
     { name: 'auth' },
     { name: 'users' },
     { name: 'feed' },
@@ -16,6 +17,39 @@ export const fitMeetCoreOpenApi = {
     { name: 'uploads' },
   ],
   paths: {
+    '/health': {
+      get: {
+        tags: ['system'],
+        operationId: 'getHealth',
+        responses: {
+          '200': {
+            description: 'Process liveness check',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/HealthPayload' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/ready': {
+      get: {
+        tags: ['system'],
+        operationId: 'getReadiness',
+        responses: {
+          '200': {
+            description: 'Dependency readiness check',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ReadinessPayload' },
+              },
+            },
+          },
+          '503': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
     '/auth/register': {
       post: {
         tags: ['auth'],
@@ -957,6 +991,45 @@ export const fitMeetCoreOpenApi = {
       },
     },
     schemas: {
+      HealthPayload: {
+        type: 'object',
+        required: ['status', 'uptime', 'timestamp'],
+        additionalProperties: false,
+        properties: {
+          status: { type: 'string', enum: ['ok'] },
+          uptime: { type: 'number' },
+          timestamp: { type: 'string', format: 'date-time' },
+        },
+      },
+      ReadinessCheck: {
+        type: 'object',
+        required: ['status', 'latencyMs'],
+        additionalProperties: false,
+        properties: {
+          status: { type: 'string', enum: ['ok', 'error'] },
+          latencyMs: { type: 'integer', minimum: 0 },
+        },
+      },
+      ReadinessPayload: {
+        type: 'object',
+        required: ['status', 'uptime', 'timestamp', 'checks'],
+        additionalProperties: false,
+        properties: {
+          status: { type: 'string', enum: ['ok'] },
+          uptime: { type: 'number' },
+          timestamp: { type: 'string', format: 'date-time' },
+          checks: {
+            type: 'object',
+            required: ['postgres', 'mongo', 'redis'],
+            additionalProperties: false,
+            properties: {
+              postgres: { $ref: '#/components/schemas/ReadinessCheck' },
+              mongo: { $ref: '#/components/schemas/ReadinessCheck' },
+              redis: { $ref: '#/components/schemas/ReadinessCheck' },
+            },
+          },
+        },
+      },
       RegisterInput: {
         type: 'object',
         required: ['email', 'password', 'name'],
@@ -1376,13 +1449,31 @@ export const fitMeetCoreOpenApi = {
         type: 'object',
         properties: {
           statusCode: { type: 'integer' },
+          timestamp: { type: 'string', format: 'date-time' },
+          path: { type: 'string' },
+          code: { type: 'string' },
           message: {
             oneOf: [
               { type: 'string' },
               { type: 'array', items: { type: 'string' } },
             ],
           },
-          error: { type: 'string' },
+          details: { type: 'object', additionalProperties: true },
+          error: {
+            type: 'object',
+            required: ['code', 'message', 'retryable'],
+            additionalProperties: true,
+            properties: {
+              code: { type: 'string' },
+              message: {
+                oneOf: [
+                  { type: 'string' },
+                  { type: 'array', items: { type: 'string' } },
+                ],
+              },
+              retryable: { type: 'boolean' },
+            },
+          },
         },
       },
     },
