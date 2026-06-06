@@ -104,6 +104,7 @@ import { SocialAgentRouteContextService } from './social-agent-route-context.ser
 import { SocialAgentRouteCandidateConfirmationService } from './social-agent-route-candidate-confirmation.service';
 import { SocialAgentRouteCompletionService } from './social-agent-route-completion.service';
 import { SocialAgentRouteConversationTurnService } from './social-agent-route-conversation-turn.service';
+import { SocialAgentRouteEntranceService } from './social-agent-route-entrance.service';
 import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile-turn.service';
 import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
 import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
@@ -277,6 +278,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentRouteCandidateConfirmationService,
     SocialAgentRouteCompletionService,
     SocialAgentRouteConversationTurnService,
+    SocialAgentRouteEntranceService,
     SocialAgentRouteProfileTurnService,
     SocialAgentRouteSearchTurnService,
     SocialAgentRouteActionTurnService,

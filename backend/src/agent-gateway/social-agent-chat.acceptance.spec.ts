@@ -34,6 +34,7 @@ import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.
 import { SocialAgentRouteCandidateConfirmationService } from './social-agent-route-candidate-confirmation.service';
 import { SocialAgentRouteCompletionService } from './social-agent-route-completion.service';
 import { SocialAgentRouteConversationTurnService } from './social-agent-route-conversation-turn.service';
+import { SocialAgentRouteEntranceService } from './social-agent-route-entrance.service';
 import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile-turn.service';
 import { SocialAgentRunRecommendationService } from './social-agent-run-recommendation.service';
 import { SocialAgentReplanRunService } from './social-agent-replan-run.service';
@@ -617,7 +618,6 @@ function makeHarness(options: Record<string, unknown> = {}) {
   const routeTurns =
     (options.routeTurns as SocialAgentRouteTurnService | undefined) ??
     new SocialAgentRouteTurnService(
-      messageLog as never,
       taskLifecycle as never,
       routeContext as never,
       new SocialAgentRouteCandidateConfirmationService(
@@ -634,11 +634,15 @@ function makeHarness(options: Record<string, unknown> = {}) {
         profileEnrichment as never,
         routeContext as never,
       ),
+      new SocialAgentRouteEntranceService(
+        messageLog as never,
+        taskLifecycle as never,
+        mainAgentTurn as never,
+      ),
       profileTurns as never,
       searchTurns as never,
       actionTurns as never,
       routeDecisions as never,
-      mainAgentTurn as never,
     );
   const queuedRuns =
     (options.queuedRuns as SocialAgentQueuedRunService | undefined) ??

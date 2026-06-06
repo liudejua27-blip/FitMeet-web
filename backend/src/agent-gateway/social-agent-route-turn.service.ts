@@ -1,6 +1,5 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 
-import { cleanDisplayText } from '../common/display-text.util';
 import { LifeGraphProposalDto } from '../life-graph/dto/life-graph.dto';
 import { AgentTask } from './entities/agent-task.entity';
 import type {
@@ -10,14 +9,13 @@ import type {
   SocialAgentIntentRouteResult,
   SocialAgentRouteMessageBody,
 } from './social-agent-chat.types';
-import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
-import { SocialAgentMessageLogService } from './social-agent-message-log.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { socialAgentAssistantMessageForRoute } from './social-agent-route-response.presenter';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
 import { SocialAgentRouteCandidateConfirmationService } from './social-agent-route-candidate-confirmation.service';
 import { SocialAgentRouteCompletionService } from './social-agent-route-completion.service';
 import { SocialAgentRouteConversationTurnService } from './social-agent-route-conversation-turn.service';
+import { SocialAgentRouteEntranceService } from './social-agent-route-entrance.service';
 import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile-turn.service';
 import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
 import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
@@ -38,17 +36,16 @@ type ReplanAndRefresh = (
 @Injectable()
 export class SocialAgentRouteTurnService {
   constructor(
-    private readonly messageLog: SocialAgentMessageLogService,
     private readonly taskLifecycle: SocialAgentTaskLifecycleService,
     private readonly routeContext: SocialAgentRouteContextService,
     private readonly candidateConfirmations: SocialAgentRouteCandidateConfirmationService,
     private readonly completions: SocialAgentRouteCompletionService,
     private readonly conversationTurns: SocialAgentRouteConversationTurnService,
+    private readonly entrance: SocialAgentRouteEntranceService,
     private readonly profileTurns: SocialAgentRouteProfileTurnService,
     private readonly searchTurns: SocialAgentRouteSearchTurnService,
     private readonly actionTurns: SocialAgentRouteActionTurnService,
     private readonly routeDecisions: SocialAgentRouteDecisionService,
-    private readonly mainAgentTurn: SocialAgentMainAgentTurnService,
   ) {}
 
   async handleMessage(input: {
@@ -58,26 +55,14 @@ export class SocialAgentRouteTurnService {
     queueInitialSearchForTask: QueueInitialSearchForTask;
   }): Promise<SocialAgentIntentRouteResult> {
     const { ownerUserId, body } = input;
-    const startedAt = Date.now();
-    const message = cleanDisplayText(body.message, '').trim();
-    if (!message) throw new BadRequestException('请输入消息');
-    const taskId = this.number(body.taskId);
-    let task = await this.taskLifecycle.ensureConversationTask(
+    const entered = await this.entrance.enter({
       ownerUserId,
-      taskId,
-      message,
-    );
-    await this.messageLog.recordUserMessage(task, message);
-
-    const mainAgentTurn = await this.mainAgentTurn.handleRouteTurn({
-      ownerUserId,
-      task,
-      message,
-      hasCandidates: body.hasCandidates === true,
-      startedAt,
+      body,
     });
-    task = mainAgentTurn.task;
-    if (mainAgentTurn.result) return mainAgentTurn.result;
+    if (entered.earlyResult) return entered.earlyResult;
+
+    const { message, startedAt } = entered;
+    let task = entered.task;
 
     const decision = await this.routeDecisions.prepare({
       ownerUserId,
@@ -188,10 +173,5 @@ export class SocialAgentRouteTurnService {
       profileUpdateProposal,
       startedAt,
     });
-  }
-
-  private number(value: unknown): number | null {
-    const num = Number(value);
-    return Number.isFinite(num) && num > 0 ? num : null;
   }
 }
