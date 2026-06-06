@@ -51,6 +51,8 @@ describe('production deploy readiness', () => {
     expect(verifier).toContain('/ready');
     for (const webPath of [
       '/public/social-intents',
+      '/public/social-intents/{id}',
+      '/public/social-intents/{id}/matches',
       '/feed/interactions',
       '/feed/{id}/like',
       '/feed/{id}/save',

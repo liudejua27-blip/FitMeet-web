@@ -73,6 +73,8 @@ const IOS_APP_REQUIRED_PATHS = {
 
 const WEB_APP_REQUIRED_PATHS = {
   '/public/social-intents': 'get',
+  '/public/social-intents/{id}': 'get',
+  '/public/social-intents/{id}/matches': 'get',
   '/social-agent/tasks/current': 'get',
   '/social-agent/tasks/{taskId}/timeline': 'get',
   '/social-agent/tasks/{taskId}/events': 'get',
@@ -201,6 +203,8 @@ describe('AppController', () => {
           '/users/profile',
           '/feed',
           '/public/social-intents',
+          '/public/social-intents/{id}',
+          '/public/social-intents/{id}/matches',
           '/feed/{postId}/comments',
           '/feed/comments/{commentId}/like',
           '/messages/start',
@@ -740,6 +744,9 @@ describe('AppController', () => {
     it('documents the Web public hall social intents contract', () => {
       const contract = appController.getFitMeetCoreOpenApi();
       const publicHallPath = contract.paths['/public/social-intents'].get;
+      const detailPath = contract.paths['/public/social-intents/{id}'].get;
+      const matchesPath =
+        contract.paths['/public/social-intents/{id}/matches'].get;
       const limitParam = publicHallPath.parameters.find(
         (param) => param.name === 'limit',
       );
@@ -771,6 +778,46 @@ describe('AppController', () => {
           id: { type: 'string' },
           candidateUserIds: { type: 'array', items: { type: 'integer' } },
           matchSignal: { type: 'object', additionalProperties: true },
+        },
+      });
+      expect(
+        detailPath.responses['200'].content['application/json'].schema,
+      ).toEqual({ $ref: '#/components/schemas/PublicSocialIntent' });
+      expect(
+        matchesPath.responses['200'].content['application/json'].schema,
+      ).toEqual({ $ref: '#/components/schemas/PublicSocialIntentMatches' });
+      expect(
+        contract.components.schemas.PublicSocialIntentMatches,
+      ).toMatchObject({
+        required: ['request', 'candidates', 'matchedBy'],
+        properties: {
+          request: { $ref: '#/components/schemas/PublicSocialIntent' },
+          candidates: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/PublicSocialCandidate' },
+          },
+          matchedBy: { type: 'string' },
+        },
+      });
+      expect(contract.components.schemas.PublicSocialCandidate).toMatchObject({
+        required: [
+          'profile',
+          'score',
+          'reasonTags',
+          'reasonText',
+          'nextAction',
+        ],
+        properties: {
+          profile: expect.objectContaining({
+            required: expect.arrayContaining([
+              'id',
+              'name',
+              'verified',
+              'interestTags',
+              'distanceKm',
+            ]),
+          }),
+          nextAction: { type: 'string', enum: ['draft_invitation'] },
         },
       });
     });

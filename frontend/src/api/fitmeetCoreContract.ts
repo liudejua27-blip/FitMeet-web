@@ -17,6 +17,10 @@ export const fitMeetCoreEndpoints = {
     createPost: '/feed',
     getPostInteractions: '/feed/interactions',
     publicSocialIntents: '/public/social-intents',
+    publicSocialIntent: (id: string) =>
+      `/public/social-intents/${encodeURIComponent(id)}` as const,
+    publicSocialIntentMatches: (id: string) =>
+      `/public/social-intents/${encodeURIComponent(id)}/matches` as const,
     likePost: (id: number) => `/feed/${id}/like` as const,
     savePost: (id: number) => `/feed/${id}/save` as const,
     getComments: (postId: number) => `/feed/${postId}/comments` as const,
@@ -128,6 +132,8 @@ export const fitMeetCoreEndpointTemplates = {
     createPost: '/feed',
     getPostInteractions: '/feed/interactions',
     publicSocialIntents: '/public/social-intents',
+    publicSocialIntent: '/public/social-intents/{id}',
+    publicSocialIntentMatches: '/public/social-intents/{id}/matches',
     likePost: '/feed/{id}/like',
     savePost: '/feed/{id}/save',
     getComments: '/feed/{postId}/comments',

@@ -91,6 +91,8 @@ Feed:
 - `GET /feed`
 - `POST /feed`
 - `GET /public/social-intents`
+- `GET /public/social-intents/{id}`
+- `GET /public/social-intents/{id}/matches`
 - `GET /feed/interactions`
 - `POST /feed/{id}/like`
 - `POST /feed/{id}/save`

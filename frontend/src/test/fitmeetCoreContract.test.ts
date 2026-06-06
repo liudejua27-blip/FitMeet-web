@@ -15,6 +15,12 @@ describe('fitMeetCoreEndpoints', () => {
     expect(fitMeetCoreEndpoints.feed.publicSocialIntents).toBe(
       '/public/social-intents',
     );
+    expect(
+      fitMeetCoreEndpoints.feed.publicSocialIntent('intent:city run'),
+    ).toBe('/public/social-intents/intent%3Acity%20run');
+    expect(
+      fitMeetCoreEndpoints.feed.publicSocialIntentMatches('intent:city run'),
+    ).toBe('/public/social-intents/intent%3Acity%20run/matches');
     expect(fitMeetCoreEndpoints.messages.startConversation).toBe(
       '/messages/start',
     );
@@ -159,6 +165,8 @@ describe('fitMeetCoreEndpoints', () => {
         '/users/profile',
         '/feed',
         '/public/social-intents',
+        '/public/social-intents/{id}',
+        '/public/social-intents/{id}/matches',
         '/feed/interactions',
         '/feed/{id}/like',
         '/feed/{id}/save',
@@ -211,6 +219,18 @@ describe('fitMeetCoreEndpoints', () => {
 
   it('normalizes dynamic endpoint builders back to their OpenAPI templates', () => {
     const examples = [
+      {
+        built: fitMeetCoreEndpoints.feed.publicSocialIntent(
+          'intent:city run',
+        ),
+        template: fitMeetCoreEndpointTemplates.feed.publicSocialIntent,
+      },
+      {
+        built: fitMeetCoreEndpoints.feed.publicSocialIntentMatches(
+          'intent:city run',
+        ),
+        template: fitMeetCoreEndpointTemplates.feed.publicSocialIntentMatches,
+      },
       {
         built: fitMeetCoreEndpoints.feed.likePost(123),
         template: fitMeetCoreEndpointTemplates.feed.likePost,

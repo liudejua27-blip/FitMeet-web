@@ -345,6 +345,58 @@ export const fitMeetCoreOpenApi = {
         },
       },
     },
+    '/public/social-intents/{id}': {
+      get: {
+        tags: ['public-social-intents'],
+        operationId: 'getPublicSocialIntent',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Public hall social intent detail',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PublicSocialIntent' },
+              },
+            },
+          },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/public/social-intents/{id}/matches': {
+      get: {
+        tags: ['public-social-intents'],
+        operationId: 'getPublicSocialIntentMatches',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Public hall social intent match candidates',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/PublicSocialIntentMatches',
+                },
+              },
+            },
+          },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
     '/feed/{id}/like': {
       post: {
         tags: ['feed'],
@@ -2098,6 +2150,64 @@ export const fitMeetCoreOpenApi = {
           status: { type: 'string' },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      PublicSocialCandidate: {
+        type: 'object',
+        required: [
+          'profile',
+          'score',
+          'reasonTags',
+          'reasonText',
+          'nextAction',
+        ],
+        additionalProperties: true,
+        properties: {
+          profile: {
+            type: 'object',
+            required: [
+              'id',
+              'name',
+              'avatar',
+              'color',
+              'age',
+              'city',
+              'bio',
+              'verified',
+              'interestTags',
+              'distanceKm',
+            ],
+            additionalProperties: true,
+            properties: {
+              id: { type: 'integer' },
+              name: { type: 'string' },
+              avatar: { type: 'string' },
+              color: { type: 'string' },
+              age: { type: 'integer' },
+              city: { type: 'string' },
+              bio: { type: 'string' },
+              verified: { type: 'boolean' },
+              interestTags: { type: 'array', items: { type: 'string' } },
+              distanceKm: { type: ['number', 'null'] },
+            },
+          },
+          score: { type: 'number' },
+          reasonTags: { type: 'array', items: { type: 'string' } },
+          reasonText: { type: 'string' },
+          nextAction: { type: 'string', enum: ['draft_invitation'] },
+        },
+      },
+      PublicSocialIntentMatches: {
+        type: 'object',
+        required: ['request', 'candidates', 'matchedBy'],
+        additionalProperties: false,
+        properties: {
+          request: { $ref: '#/components/schemas/PublicSocialIntent' },
+          candidates: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/PublicSocialCandidate' },
+          },
+          matchedBy: { type: 'string' },
         },
       },
       Comment: {
