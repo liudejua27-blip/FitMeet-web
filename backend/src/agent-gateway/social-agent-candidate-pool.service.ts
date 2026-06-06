@@ -50,6 +50,11 @@ import {
   candidateProfileTags,
 } from './social-agent-candidate-profile-presenter';
 import type { CandidateProfileDataQuality } from './social-agent-candidate-profile-presenter';
+import {
+  extractCandidateActivity,
+  extractCandidateTags,
+  extractCandidateTime,
+} from './social-agent-candidate-query-parser';
 
 export type CandidatePoolSource =
   | 'profile_candidate'
@@ -510,17 +515,17 @@ export class SocialAgentCandidatePoolService {
     const activityType = cleanDisplayText(
       inputActivityType ||
         request?.activityType ||
-        this.extractActivity(rawText),
+        extractCandidateActivity(rawText),
       '',
     );
     const interestTags = this.uniqueStrings([
       ...(Array.isArray(input.interestTags) ? input.interestTags : []),
       ...(Array.isArray(request?.interestTags) ? request.interestTags : []),
-      ...this.extractTags(rawText),
+      ...extractCandidateTags(rawText),
       activityType,
     ]);
     const timePreference = cleanDisplayText(
-      inputTimePreference || this.extractTime(rawText),
+      inputTimePreference || extractCandidateTime(rawText),
       '',
     );
     const locationPreference = inputLocationPreference;
@@ -825,7 +830,7 @@ export class SocialAgentCandidatePoolService {
     );
     const tags = this.uniqueStrings([
       request.requestType,
-      ...this.extractTags(`${request.title} ${request.description}`),
+      ...extractCandidateTags(`${request.title} ${request.description}`),
       ...candidateProfileTags(user, profile, delegate),
     ]);
     const completeness = candidateProfileCompleteness(user, profile, delegate);
@@ -1003,7 +1008,7 @@ export class SocialAgentCandidatePoolService {
   ): CandidatePoolActivityResult {
     const tags = this.uniqueStrings([
       String(activity.type),
-      ...this.extractTags(`${activity.title} ${activity.description}`),
+      ...extractCandidateTags(`${activity.title} ${activity.description}`),
     ]);
     const commonTags = this.commonTags(query.interestTags, tags);
     const cityScore = this.cityMatches(query.city, activity.city) ? 35 : 0;
@@ -1056,7 +1061,7 @@ export class SocialAgentCandidatePoolService {
     const tags = this.uniqueStrings([
       ...this.normalizeArray(intent.interestTags),
       intent.requestType,
-      ...this.extractTags(`${intent.title} ${intent.description}`),
+      ...extractCandidateTags(`${intent.title} ${intent.description}`),
     ]);
     const commonTags = this.commonTags(query.interestTags, tags);
     const cityScore = this.cityMatches(query.city, intent.city) ? 35 : 0;
@@ -1624,37 +1629,6 @@ export class SocialAgentCandidatePoolService {
     if (score >= 75) return CandidateMatchLevel.High;
     if (score >= 45) return CandidateMatchLevel.Medium;
     return CandidateMatchLevel.Low;
-  }
-
-  private extractActivity(text: string): string {
-    return this.extractTags(text)[0] ?? '';
-  }
-
-  private extractTags(text: string): string[] {
-    const source = cleanDisplayText(text, '');
-    if (!source) return [];
-    const tags: Array<[string, RegExp]> = [
-      ['咖啡', /咖啡|coffee/i],
-      ['拍照', /拍照|摄影|photo/i],
-      ['跑步', /跑步|running|跑团/i],
-      ['羽毛球', /羽毛球|badminton/i],
-      ['健身', /健身|撸铁|fitness|gym/i],
-      ['瑜伽', /瑜伽|yoga/i],
-      ['徒步', /徒步|hiking/i],
-      ['骑行', /骑行|cycling/i],
-      ['citywalk', /city\s*walk|citywalk|城市漫步|散步/i],
-      ['学习', /学习|自习|study/i],
-      ['电影', /电影|movie/i],
-    ];
-    return tags.filter(([, regex]) => regex.test(source)).map(([tag]) => tag);
-  }
-
-  private extractTime(text: string): string {
-    if (/周末|星期六|星期日|周六|周日/i.test(text)) return '周末';
-    if (/晚上|夜间/i.test(text)) return '晚上';
-    if (/下午/i.test(text)) return '下午';
-    if (/上午|早上/i.test(text)) return '上午';
-    return '';
   }
 
   private async loadCounts(): Promise<CandidatePoolCounts> {
