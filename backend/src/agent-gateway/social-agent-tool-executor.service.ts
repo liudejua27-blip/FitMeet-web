@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ForbiddenException,
-  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -107,6 +106,7 @@ import { SocialAgentActionSideEffectService } from './social-agent-action-side-e
 import { SocialAgentToolExecutionPolicyService } from './social-agent-tool-execution-policy.service';
 import { SocialAgentConfirmationPolicyService } from './social-agent-confirmation-policy.service';
 import { SocialAgentToolCallFactoryService } from './social-agent-tool-call-factory.service';
+import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -157,6 +157,7 @@ export class SocialAgentToolExecutorService {
     private readonly toolExecutionPolicy: SocialAgentToolExecutionPolicyService,
     private readonly confirmationPolicy: SocialAgentConfirmationPolicyService,
     private readonly toolCallFactory: SocialAgentToolCallFactoryService,
+    private readonly toolInput: SocialAgentToolInputParserService,
   ) {}
 
   async executeTask(
@@ -198,8 +199,8 @@ export class SocialAgentToolExecutorService {
       if (call.status === 'failed' || call.status === 'blocked') {
         task.status = AgentTaskStatus.Failed;
         task.statusReason =
-          this.string(call.error?.message) ??
-          this.string(call.error?.code) ??
+          this.toolInput.string(call.error?.message) ??
+          this.toolInput.string(call.error?.code) ??
           call.status;
         task.error = call.error;
         await this.taskRepo.save(task);
@@ -333,7 +334,7 @@ export class SocialAgentToolExecutorService {
     calls.push(decisionCall);
 
     const decision = decisionCall.output;
-    const nextAction = this.string(decision?.nextAction);
+    const nextAction = this.toolInput.string(decision?.nextAction);
     if (nextAction === 'stop') {
       task.status = AgentTaskStatus.WaitingReply;
       task.statusReason = 'next_action_stop';
@@ -358,7 +359,7 @@ export class SocialAgentToolExecutorService {
       toolName: nextToolName,
       action: decision?.action,
       status: 'planned',
-      input: this.isRecord(decision?.input) ? decision.input : {},
+      input: this.toolInput.isRecord(decision?.input) ? decision.input : {},
     });
     calls.push(actionCall);
 
@@ -438,7 +439,7 @@ export class SocialAgentToolExecutorService {
         status: blocked ? 'blocked' : 'failed',
         input,
         output: null,
-        error: this.errorPayload(error),
+        error: this.toolInput.errorPayload(error),
         startedAt,
       });
     }
@@ -497,7 +498,7 @@ export class SocialAgentToolExecutorService {
     if (unconfirmedDangerousAction) {
       task.status = AgentTaskStatus.WaitingResult;
       task.statusReason =
-        this.string(unconfirmedDangerousAction.error?.message) ??
+        this.toolInput.string(unconfirmedDangerousAction.error?.message) ??
         'approval_required';
       task.error = unconfirmedDangerousAction.error;
       rememberSocialAgentShortTerm(task, {});
@@ -521,7 +522,8 @@ export class SocialAgentToolExecutorService {
         : 'action_executed_waiting_result';
     } else {
       task.status = AgentTaskStatus.WaitingResult;
-      task.statusReason = this.string(call.error?.message) ?? call.status;
+      task.statusReason =
+        this.toolInput.string(call.error?.message) ?? call.status;
       task.error = call.error;
     }
     rememberSocialAgentShortTerm(task, {});
@@ -599,7 +601,10 @@ export class SocialAgentToolExecutorService {
           toolCallId: callId,
           payload: {
             toolName,
-            inputSummary: this.preview(this.safeUnknownText(input), 240),
+            inputSummary: this.preview(
+              this.toolInput.safeUnknownText(input),
+              240,
+            ),
             status: call.status,
             output: call.output,
             error: null,
@@ -614,7 +619,7 @@ export class SocialAgentToolExecutorService {
         return call;
       }
       const output = await this.dispatchTool(task, toolName, input, stepId);
-      const outputRecord = this.asRecord(output);
+      const outputRecord = this.toolInput.asRecord(output);
       const call = this.toolCallFactory.buildToolCall({
         id: callId,
         stepId,
@@ -632,7 +637,10 @@ export class SocialAgentToolExecutorService {
         toolCallId: callId,
         payload: {
           toolName,
-          inputSummary: this.preview(this.safeUnknownText(input), 240),
+          inputSummary: this.preview(
+            this.toolInput.safeUnknownText(input),
+            240,
+          ),
           status: call.status,
           output: call.output,
           error: null,
@@ -654,7 +662,7 @@ export class SocialAgentToolExecutorService {
         status: blocked ? 'blocked' : 'failed',
         input,
         output: null,
-        error: this.errorPayload(error),
+        error: this.toolInput.errorPayload(error),
         startedAt,
       });
       this.logToolFailure(task, toolName, stepId, call, error);
@@ -663,7 +671,7 @@ export class SocialAgentToolExecutorService {
       } catch (sideEffectError) {
         call.error = {
           ...(call.error ?? {}),
-          sideEffectError: this.errorPayload(sideEffectError),
+          sideEffectError: this.toolInput.errorPayload(sideEffectError),
         };
       }
       await this.createTaskEvent(task, AgentTaskEventType.ToolFailed, {
@@ -672,7 +680,10 @@ export class SocialAgentToolExecutorService {
         toolCallId: callId,
         payload: {
           toolName,
-          inputSummary: this.preview(this.safeUnknownText(input), 240),
+          inputSummary: this.preview(
+            this.toolInput.safeUnknownText(input),
+            240,
+          ),
           status: call.status,
           output: null,
           error: call.error,
@@ -692,7 +703,7 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.GetMyProfile:
       case SocialAgentToolName.GetAiProfile:
         return this.socialProfiles.get(
-          this.number(input.userId) ?? task.ownerUserId,
+          this.toolInput.number(input.userId) ?? task.ownerUserId,
         );
       case SocialAgentToolName.GenerateProfileQuestions:
         return this.socialProfiles.generateQuestions(task.ownerUserId);
@@ -852,20 +863,24 @@ export class SocialAgentToolExecutorService {
     const answers = Array.isArray(input.answers) ? input.answers : [];
     let latest: unknown = null;
     for (const raw of answers) {
-      if (!this.isRecord(raw)) continue;
-      const key = this.string(raw.key);
-      const answer = this.string(raw.answer ?? raw.value);
+      if (!this.toolInput.isRecord(raw)) continue;
+      const key = this.toolInput.string(raw.key);
+      const answer = this.toolInput.string(raw.answer ?? raw.value);
       if (!key || !answer) continue;
       latest = await this.socialProfiles.saveAnswer(ownerUserId, key, answer);
     }
     if (latest) return latest;
 
-    if (this.isRecord(input.profile)) {
+    if (this.toolInput.isRecord(input.profile)) {
       return this.socialProfiles.saveAiDraft(ownerUserId, {
         profile: input.profile as never,
-        enableMatching: this.bool(input.enableMatching),
-        sensitiveTagsConfirmed: this.bool(input.sensitiveTagsConfirmed),
-        sensitiveTagDecisions: this.isRecord(input.sensitiveTagDecisions)
+        enableMatching: this.toolInput.bool(input.enableMatching),
+        sensitiveTagsConfirmed: this.toolInput.bool(
+          input.sensitiveTagsConfirmed,
+        ),
+        sensitiveTagDecisions: this.toolInput.isRecord(
+          input.sensitiveTagDecisions,
+        )
           ? (input.sensitiveTagDecisions as never)
           : undefined,
       });
@@ -873,14 +888,16 @@ export class SocialAgentToolExecutorService {
 
     if (typeof input.rawText === 'string' || answers.length > 0) {
       const draft = await this.socialProfiles.generateAiDraft(ownerUserId, {
-        rawText: this.string(input.rawText),
+        rawText: this.toolInput.string(input.rawText),
         answers: answers as never,
         source: 'social_agent_tool_executor',
       });
       return this.socialProfiles.saveAiDraft(ownerUserId, {
         profile: draft.draft,
-        enableMatching: this.bool(input.enableMatching),
-        sensitiveTagsConfirmed: this.bool(input.sensitiveTagsConfirmed),
+        enableMatching: this.toolInput.bool(input.enableMatching),
+        sensitiveTagsConfirmed: this.toolInput.bool(
+          input.sensitiveTagsConfirmed,
+        ),
       });
     }
 
@@ -891,22 +908,22 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<unknown> {
-    const extracted = this.isRecord(input.extractedProfile)
+    const extracted = this.toolInput.isRecord(input.extractedProfile)
       ? input.extractedProfile
       : {};
-    const sourceMessage = this.string(input.sourceMessage) ?? '';
+    const sourceMessage = this.toolInput.string(input.sourceMessage) ?? '';
     const dto: UpdateSocialProfileDto = {};
     const updatedFields: string[] = [];
     const memoryFields: string[] = [];
     const missingFields: string[] = [];
     const setString = (field: string, value: unknown) => {
-      const text = this.string(value);
+      const text = this.toolInput.string(value);
       if (!text) return;
       dto[field] = text;
       updatedFields.push(field);
     };
     const setList = (field: string, value: unknown) => {
-      const list = this.stringList(value);
+      const list = this.toolInput.stringList(value);
       if (list.length === 0) return;
       dto[field] = list;
       updatedFields.push(field);
@@ -987,7 +1004,7 @@ export class SocialAgentToolExecutorService {
   }
 
   private getCurrentTaskMemory(task: AgentTask): Record<string, unknown> {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const memory = this.toolInput.isRecord(task.memory) ? task.memory : {};
     return {
       taskId: task.id,
       ownerUserId: task.ownerUserId,
@@ -995,12 +1012,14 @@ export class SocialAgentToolExecutorService {
       goal: task.goal,
       permissionMode: task.permissionMode,
       taskMemory: readSocialAgentTaskMemory(task),
-      shortTerm: this.isRecord(memory.shortTerm) ? memory.shortTerm : {},
+      shortTerm: this.toolInput.isRecord(memory.shortTerm)
+        ? memory.shortTerm
+        : {},
       socialLoop: this.socialLoopMemory(task),
       recentToolCalls: Array.isArray(task.toolCalls)
         ? task.toolCalls.slice(-10)
         : [],
-      result: this.isRecord(task.result) ? task.result : {},
+      result: this.toolInput.isRecord(task.result) ? task.result : {},
     };
   }
 
@@ -1008,9 +1027,10 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<unknown> {
-    const mode = this.string(input.mode ?? input.intent);
+    const mode = this.toolInput.string(input.mode ?? input.intent);
     const rawText =
-      this.string(input.rawText ?? input.goal ?? task.goal) ?? task.goal;
+      this.toolInput.string(input.rawText ?? input.goal ?? task.goal) ??
+      task.goal;
     const agent = await this.loadAgentConnection(task.agentConnectionId);
 
     if (mode === 'ai_draft' || mode === 'draft_only') {
@@ -1021,7 +1041,7 @@ export class SocialAgentToolExecutorService {
       });
     }
 
-    if (!this.string(input.type) && rawText) {
+    if (!this.toolInput.string(input.type) && rawText) {
       return this.socialRequests.createFromNaturalLanguage(
         rawText,
         task.ownerUserId,
@@ -1031,20 +1051,24 @@ export class SocialAgentToolExecutorService {
 
     const dto: CreateSocialRequestDto = {
       ...(input as Partial<CreateSocialRequestDto>),
-      type: this.socialRequestType(input.type) ?? SocialRequestType.Custom,
+      type:
+        this.toolInput.socialRequestType(input.type) ??
+        SocialRequestType.Custom,
       rawText,
-      title: this.string(input.title ?? task.title),
-      description: this.string(input.description ?? task.goal),
+      title: this.toolInput.string(input.title ?? task.title),
+      description: this.toolInput.string(input.description ?? task.goal),
       city: sanitizeCity(input.city),
-      radiusKm: this.number(input.radiusKm) ?? undefined,
-      activityType: this.string(input.activityType),
-      interestTags: this.stringArray(input.interestTags ?? input.tags),
+      radiusKm: this.toolInput.number(input.radiusKm) ?? undefined,
+      activityType: this.toolInput.string(input.activityType),
+      interestTags: this.toolInput.stringArray(
+        input.interestTags ?? input.tags,
+      ),
       metadata: {
-        ...(this.isRecord(input.metadata) ? input.metadata : {}),
+        ...(this.toolInput.isRecord(input.metadata) ? input.metadata : {}),
         agentTaskId: task.id,
       },
     };
-    const socialRequestId = this.number(
+    const socialRequestId = this.toolInput.number(
       input.socialRequestId ?? input.requestId,
     );
     const request = socialRequestId
@@ -1058,11 +1082,11 @@ export class SocialAgentToolExecutorService {
 
     const shouldSyncPublicIntent =
       mode === 'publish' ||
-      this.bool(input.publish) === true ||
-      this.bool(input.syncPublicIntent) === true;
+      this.toolInput.bool(input.publish) === true ||
+      this.toolInput.bool(input.syncPublicIntent) === true;
     if (!shouldSyncPublicIntent) {
       return {
-        ...this.asRecord(request),
+        ...this.toolInput.asRecord(request),
         socialRequest: request,
         socialRequestId: request.id,
       };
@@ -1073,7 +1097,7 @@ export class SocialAgentToolExecutorService {
       task.ownerUserId,
     );
     return {
-      ...this.asRecord(request),
+      ...this.toolInput.asRecord(request),
       socialRequest: request,
       socialRequestId: request.id,
       publicIntent,
@@ -1087,19 +1111,23 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<unknown> {
-    const socialRequestId = this.number(
+    const socialRequestId = this.toolInput.number(
       input.socialRequestId ?? input.requestId,
     );
     return this.candidatePool.searchSocial({
       ownerUserId: task.ownerUserId,
       socialRequestId,
       city: sanitizeCity(input.city),
-      activityType: this.string(input.activityType),
-      interestTags: this.stringArray(input.interestTags ?? input.tags),
-      timePreference: this.string(input.timePreference),
-      locationPreference: this.string(input.locationPreference),
-      rawText: this.string(input.rawText ?? input.goal ?? input.message),
-      limit: this.number(input.limit) ?? undefined,
+      activityType: this.toolInput.string(input.activityType),
+      interestTags: this.toolInput.stringArray(
+        input.interestTags ?? input.tags,
+      ),
+      timePreference: this.toolInput.string(input.timePreference),
+      locationPreference: this.toolInput.string(input.locationPreference),
+      rawText: this.toolInput.string(
+        input.rawText ?? input.goal ?? input.message,
+      ),
+      limit: this.toolInput.number(input.limit) ?? undefined,
     });
   }
 
@@ -1107,11 +1135,14 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    const result = this.asRecord(await this.searchMatches(task, input));
+    const result = this.toolInput.asRecord(
+      await this.searchMatches(task, input),
+    );
     const candidates = Array.isArray(result.candidates)
       ? result.candidates.filter(
           (candidate) =>
-            this.isRecord(candidate) && candidate.source === 'public_intent',
+            this.toolInput.isRecord(candidate) &&
+            candidate.source === 'public_intent',
         )
       : [];
     return {
@@ -1132,12 +1163,16 @@ export class SocialAgentToolExecutorService {
       ownerUserId: task.ownerUserId,
       taskId: task.id,
       city: sanitizeCity(input.city),
-      activityType: this.string(input.activityType),
-      interestTags: this.stringArray(input.interestTags ?? input.tags),
-      timePreference: this.string(input.timePreference),
-      locationPreference: this.string(input.locationPreference),
-      rawText: this.string(input.rawText ?? input.goal ?? input.message),
-      limit: this.number(input.limit) ?? undefined,
+      activityType: this.toolInput.string(input.activityType),
+      interestTags: this.toolInput.stringArray(
+        input.interestTags ?? input.tags,
+      ),
+      timePreference: this.toolInput.string(input.timePreference),
+      locationPreference: this.toolInput.string(input.locationPreference),
+      rawText: this.toolInput.string(
+        input.rawText ?? input.goal ?? input.message,
+      ),
+      limit: this.toolInput.number(input.limit) ?? undefined,
     });
     return {
       ...result,
@@ -1149,7 +1184,7 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<unknown> {
-    const candidateUserId = this.number(
+    const candidateUserId = this.toolInput.number(
       input.candidateUserId ?? input.targetUserId,
     );
     if (candidateUserId) {
@@ -1160,16 +1195,18 @@ export class SocialAgentToolExecutorService {
       return this.matchReasoner.explain({
         ownerProfile,
         candidateProfile,
-        publicTags: this.isRecord(input.publicTags)
+        publicTags: this.toolInput.isRecord(input.publicTags)
           ? (input.publicTags as never)
           : undefined,
-        privatePreferenceSignals: this.stringArray(
+        privatePreferenceSignals: this.toolInput.stringArray(
           input.privatePreferenceSignals,
         ),
-        confirmedSensitiveTags: this.stringArray(input.confirmedSensitiveTags),
-        avoidSignals: this.stringArray(input.avoidSignals),
-        safetySignals: this.stringArray(input.safetySignals),
-        scoreBreakdown: this.isRecord(input.scoreBreakdown)
+        confirmedSensitiveTags: this.toolInput.stringArray(
+          input.confirmedSensitiveTags,
+        ),
+        avoidSignals: this.toolInput.stringArray(input.avoidSignals),
+        safetySignals: this.toolInput.stringArray(input.safetySignals),
+        scoreBreakdown: this.toolInput.isRecord(input.scoreBreakdown)
           ? (input.scoreBreakdown as never)
           : undefined,
       });
@@ -1177,21 +1214,24 @@ export class SocialAgentToolExecutorService {
 
     return {
       explanation: await this.ai.explainMatchFor(
-        this.isRecord(input.request) ? input.request : {},
-        this.isRecord(input.candidate) ? input.candidate : {},
-        this.number(input.score) ?? undefined,
+        this.toolInput.isRecord(input.request) ? input.request : {},
+        this.toolInput.isRecord(input.candidate) ? input.candidate : {},
+        this.toolInput.number(input.score) ?? undefined,
       ),
     };
   }
 
   private async draftOpener(input: Record<string, unknown>): Promise<unknown> {
-    const candidate = this.isRecord(input.candidate) ? input.candidate : input;
+    const candidate = this.toolInput.isRecord(input.candidate)
+      ? input.candidate
+      : input;
     const message = await this.ai.generateInviteMessage(
-      this.isRecord(input.request) ? input.request : input,
+      this.toolInput.isRecord(input.request) ? input.request : input,
       candidate,
     );
     const displayName =
-      this.string(candidate.displayName ?? candidate.nickname) ?? '对方';
+      this.toolInput.string(candidate.displayName ?? candidate.nickname) ??
+      '对方';
     return {
       message,
       confirmation: {
@@ -1224,7 +1264,7 @@ export class SocialAgentToolExecutorService {
       input,
       task.ownerUserId,
     );
-    const output = this.asRecord(
+    const output = this.toolInput.asRecord(
       await this.sendMessage(
         task,
         {
@@ -1234,8 +1274,9 @@ export class SocialAgentToolExecutorService {
         stepId,
       ),
     );
-    const messageId = this.string(output.id ?? output.messageId) ?? null;
-    const conversationId = this.string(output.conversationId) ?? null;
+    const messageId =
+      this.toolInput.string(output.id ?? output.messageId) ?? null;
+    const conversationId = this.toolInput.string(output.conversationId) ?? null;
     return {
       ...output,
       success: true,
@@ -1258,11 +1299,15 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     stepId: string,
   ): Promise<unknown> {
-    const text = this.string(input.text ?? input.message ?? input.content);
+    const text = this.toolInput.string(
+      input.text ?? input.message ?? input.content,
+    );
     if (!text) throw new BadRequestException('text is required');
 
-    let conversationId = this.string(input.conversationId);
-    const targetUserId = this.number(input.targetUserId ?? input.toUserId);
+    let conversationId = this.toolInput.string(input.conversationId);
+    const targetUserId = this.toolInput.number(
+      input.targetUserId ?? input.toUserId,
+    );
     const targetForDedupe = targetUserId ?? this.memoryTargetUserId(task);
     const duplicateKey = buildSocialAgentMessageDedupeKey(
       targetForDedupe,
@@ -1298,16 +1343,16 @@ export class SocialAgentToolExecutorService {
       text,
       this.messageSendOptions(task, stepId, input),
     );
-    const output = this.asRecord(message);
-    const candidateInput = this.isRecord(input.candidate)
+    const output = this.toolInput.asRecord(message);
+    const candidateInput = this.toolInput.isRecord(input.candidate)
       ? input.candidate
       : {};
-    const candidateRecordId = this.number(
+    const candidateRecordId = this.toolInput.number(
       input.candidateRecordId ??
         input.candidateId ??
         candidateInput.candidateRecordId,
     );
-    const socialRequestId = this.number(
+    const socialRequestId = this.toolInput.number(
       input.socialRequestId ??
         input.requestId ??
         candidateInput.socialRequestId,
@@ -1332,8 +1377,8 @@ export class SocialAgentToolExecutorService {
     this.rememberConversation(task, {
       conversationId,
       targetUserId: targetUserId ?? this.memoryTargetUserId(task),
-      lastMessageId: this.string(output.id ?? output.messageId),
-      lastAgentMessageId: this.string(output.id ?? output.messageId),
+      lastMessageId: this.toolInput.string(output.id ?? output.messageId),
+      lastAgentMessageId: this.toolInput.string(output.id ?? output.messageId),
       sentMessageKeys: this.appendSocialLoopKey(
         task,
         'sentMessageKeys',
@@ -1342,7 +1387,7 @@ export class SocialAgentToolExecutorService {
       sourceTool: SocialAgentToolName.SendMessage,
     });
     this.rememberSentMessage(task, {
-      id: this.string(output.id ?? output.messageId),
+      id: this.toolInput.string(output.id ?? output.messageId),
       conversationId,
       targetUserId: targetUserId ?? this.memoryTargetUserId(task),
       textPreview: this.preview(text),
@@ -1365,14 +1410,14 @@ export class SocialAgentToolExecutorService {
       task.ownerUserId,
       targetUserId,
     );
-    const friendRecord = this.asRecord(friend);
+    const friendRecord = this.toolInput.asRecord(friend);
     const rawFriendRequestId =
       friendRecord.friendRequestId ?? friendRecord.followId ?? friendRecord.id;
-    const numericFriendRequestId = this.number(rawFriendRequestId);
+    const numericFriendRequestId = this.toolInput.number(rawFriendRequestId);
     const friendRequestId =
-      this.string(rawFriendRequestId) ??
+      this.toolInput.string(rawFriendRequestId) ??
       (numericFriendRequestId != null ? String(numericFriendRequestId) : null);
-    if (this.bool(input.openConversation) !== true) {
+    if (this.toolInput.bool(input.openConversation) !== true) {
       return {
         ...friendRecord,
         success: true,
@@ -1398,14 +1443,16 @@ export class SocialAgentToolExecutorService {
       task.ownerUserId,
       targetUserId,
       this.messageConversationOptions(task, stepId, {
-        ...(this.isRecord(input.metadata) ? input.metadata : {}),
+        ...(this.toolInput.isRecord(input.metadata) ? input.metadata : {}),
         toolName: SocialAgentToolName.AddFriend,
         targetUserId,
-        candidateRecordId: this.number(input.candidateRecordId),
-        socialRequestId: this.number(input.socialRequestId ?? input.requestId),
+        candidateRecordId: this.toolInput.number(input.candidateRecordId),
+        socialRequestId: this.toolInput.number(
+          input.socialRequestId ?? input.requestId,
+        ),
       }),
     );
-    const conversationId = this.string(conversation.conversationId);
+    const conversationId = this.toolInput.string(conversation.conversationId);
     if (conversationId) {
       this.rememberConversation(task, {
         conversationId,
@@ -1460,7 +1507,7 @@ export class SocialAgentToolExecutorService {
     toolName: SocialAgentToolName,
     stepId: string,
   ): Promise<unknown> {
-    const invitedUserId = this.number(
+    const invitedUserId = this.toolInput.number(
       input.invitedUserId ?? input.targetUserId,
     );
     if (toolName === SocialAgentToolName.OfflineMeeting && !invitedUserId) {
@@ -1468,34 +1515,41 @@ export class SocialAgentToolExecutorService {
         'targetUserId or invitedUserId is required',
       );
     }
-    const allowPreciseLocation = this.bool(input.allowPreciseLocation) === true;
-    const icebreakerTasks = this.stringArray(input.icebreakerTasks);
+    const allowPreciseLocation =
+      this.toolInput.bool(input.allowPreciseLocation) === true;
+    const icebreakerTasks = this.toolInput.stringArray(input.icebreakerTasks);
 
     const dto: CreateActivityDto = {
       type:
-        this.activityType(input.type ?? input.activityType) ??
+        this.toolInput.activityType(input.type ?? input.activityType) ??
         ActivityType.Custom,
       title:
-        this.string(input.title ?? task.title) || this.activityTitle(toolName),
-      description: this.string(input.description ?? input.note ?? task.goal),
+        this.toolInput.string(input.title ?? task.title) ||
+        this.activityTitle(toolName),
+      description: this.toolInput.string(
+        input.description ?? input.note ?? task.goal,
+      ),
       city: sanitizeCity(input.city),
       locationName:
-        this.string(input.locationName ?? input.location) ?? '公共场所待确认',
-      lat: allowPreciseLocation ? this.number(input.lat) : undefined,
-      lng: allowPreciseLocation ? this.number(input.lng) : undefined,
-      startTime: this.string(input.startTime ?? input.timeStart),
-      durationMinutes: this.number(input.durationMinutes) ?? 45,
-      socialRequestId: this.number(input.socialRequestId) ?? undefined,
-      meetId: this.number(input.meetId) ?? undefined,
+        this.toolInput.string(input.locationName ?? input.location) ??
+        '公共场所待确认',
+      lat: allowPreciseLocation ? this.toolInput.number(input.lat) : undefined,
+      lng: allowPreciseLocation ? this.toolInput.number(input.lng) : undefined,
+      startTime: this.toolInput.string(input.startTime ?? input.timeStart),
+      durationMinutes: this.toolInput.number(input.durationMinutes) ?? 45,
+      socialRequestId:
+        this.toolInput.number(input.socialRequestId) ?? undefined,
+      meetId: this.toolInput.number(input.meetId) ?? undefined,
       matchedCandidateId:
-        this.number(input.matchedCandidateId ?? input.candidateRecordId) ??
-        undefined,
+        this.toolInput.number(
+          input.matchedCandidateId ?? input.candidateRecordId,
+        ) ?? undefined,
       icebreakerTasks: icebreakerTasks.length
         ? icebreakerTasks
         : ['到达后先确认彼此状态和活动节奏。', '活动结束后互相确认是否完成。'],
-      proofRequired: this.bool(input.proofRequired) ?? true,
+      proofRequired: this.toolInput.bool(input.proofRequired) ?? true,
       proofPolicy:
-        this.activityProofPolicy(input.proofPolicy) ??
+        this.toolInput.activityProofPolicy(input.proofPolicy) ??
         ActivityProofPolicy.MutualOrProof,
       invitedUserId: invitedUserId ?? undefined,
     };
@@ -1544,9 +1598,11 @@ export class SocialAgentToolExecutorService {
       activityId: activity.id,
       status: activity.status,
       invitedUserId: offlineTargetUserId,
-      conversationId: this.string(inviteMessage.conversationId) || null,
+      conversationId:
+        this.toolInput.string(inviteMessage.conversationId) || null,
       messageId:
-        this.string(inviteMessage.id ?? inviteMessage.messageId) || null,
+        this.toolInput.string(inviteMessage.id ?? inviteMessage.messageId) ||
+        null,
       activity,
       inviteMessage,
     };
@@ -1560,7 +1616,7 @@ export class SocialAgentToolExecutorService {
       success: false,
       taskId: task.id,
       status: 'not_implemented',
-      targetUserId: this.number(input.targetUserId) ?? null,
+      targetUserId: this.toolInput.number(input.targetUserId) ?? null,
       message:
         'Precise location sharing is not implemented for automatic Agent execution.',
     };
@@ -1589,43 +1645,45 @@ export class SocialAgentToolExecutorService {
       task.ownerUserId,
       text,
       buildSocialAgentDelegateMessageOptions(task, stepId, {
-        ...(this.isRecord(input.metadata) ? input.metadata : {}),
+        ...(this.toolInput.isRecord(input.metadata) ? input.metadata : {}),
         toolName: SocialAgentToolName.OfflineMeeting,
         activityId: activity.id,
         targetUserId,
       }),
     );
-    const messageRecord = this.asRecord(message);
+    const messageRecord = this.toolInput.asRecord(message);
     this.rememberConversation(task, {
       conversationId,
       targetUserId,
-      lastMessageId: this.string(messageRecord.id ?? messageRecord.messageId),
-      lastAgentMessageId: this.string(
+      lastMessageId: this.toolInput.string(
+        messageRecord.id ?? messageRecord.messageId,
+      ),
+      lastAgentMessageId: this.toolInput.string(
         messageRecord.id ?? messageRecord.messageId,
       ),
       sourceTool: SocialAgentToolName.OfflineMeeting,
       activityId: activity.id,
     });
     this.rememberSentMessage(task, {
-      id: this.string(messageRecord.id ?? messageRecord.messageId),
+      id: this.toolInput.string(messageRecord.id ?? messageRecord.messageId),
       conversationId,
       targetUserId,
       textPreview: this.preview(text),
       toolName: SocialAgentToolName.OfflineMeeting,
       stepId,
     });
-    return { ...this.asRecord(message), conversationId };
+    return { ...this.toolInput.asRecord(message), conversationId };
   }
 
   private async joinActivity(
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<unknown> {
-    const activityId = this.number(input.activityId ?? input.id);
+    const activityId = this.toolInput.number(input.activityId ?? input.id);
     if (!activityId) throw new BadRequestException('activityId is required');
     const activity = await this.activities.join(activityId, task.ownerUserId);
     return {
-      ...this.asRecord(activity),
+      ...this.toolInput.asRecord(activity),
       activityId,
       joined: true,
     };
@@ -1635,13 +1693,13 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<unknown> {
-    const candidateId = this.number(
+    const candidateId = this.toolInput.number(
       input.candidateRecordId ?? input.candidateId,
     );
-    const socialRequestId = this.number(
+    const socialRequestId = this.toolInput.number(
       input.socialRequestId ?? input.requestId,
     );
-    const candidateUserId = this.number(
+    const candidateUserId = this.toolInput.number(
       input.candidateUserId ?? input.targetUserId,
     );
 
@@ -1665,27 +1723,28 @@ export class SocialAgentToolExecutorService {
     stepId: string,
   ): Promise<unknown> {
     const agentConnectionId =
-      task.agentConnectionId ?? this.number(input.agentConnectionId);
+      task.agentConnectionId ?? this.toolInput.number(input.agentConnectionId);
     if (!agentConnectionId)
       throw new BadRequestException('agentConnectionId is required');
     return this.messages.createAgentInboxEvent({
       agentConnectionId,
       ownerUserId: task.ownerUserId,
-      eventType: this.string(input.eventType) || 'agent.task.updated',
-      conversationId: this.string(input.conversationId) || null,
-      messageId: this.string(input.messageId) || null,
-      requestId: this.number(input.requestId ?? input.socialRequestId) ?? null,
-      candidateRecordId: this.number(input.candidateRecordId) ?? null,
-      fromUserId: this.number(input.fromUserId) ?? null,
-      contentPreview: this.string(
+      eventType: this.toolInput.string(input.eventType) || 'agent.task.updated',
+      conversationId: this.toolInput.string(input.conversationId) || null,
+      messageId: this.toolInput.string(input.messageId) || null,
+      requestId:
+        this.toolInput.number(input.requestId ?? input.socialRequestId) ?? null,
+      candidateRecordId: this.toolInput.number(input.candidateRecordId) ?? null,
+      fromUserId: this.toolInput.number(input.fromUserId) ?? null,
+      contentPreview: this.toolInput.string(
         input.contentPreview ?? input.summary ?? input.text,
       ),
-      unread: this.bool(input.unread) ?? true,
+      unread: this.toolInput.bool(input.unread) ?? true,
       dedupeKey:
-        this.string(input.dedupeKey) ||
+        this.toolInput.string(input.dedupeKey) ||
         `${agentConnectionId}:agent.task:${task.id}:${stepId}`,
       metadata: {
-        ...(this.isRecord(input.metadata) ? input.metadata : {}),
+        ...(this.toolInput.isRecord(input.metadata) ? input.metadata : {}),
         agentTaskId: task.id,
         stepId,
       },
@@ -1697,26 +1756,26 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
   ): Promise<unknown> {
     const agentConnectionId =
-      task.agentConnectionId ?? this.number(input.agentConnectionId);
+      task.agentConnectionId ?? this.toolInput.number(input.agentConnectionId);
     if (!agentConnectionId)
       throw new BadRequestException('agentConnectionId is required');
-    const conversationId = this.string(input.conversationId);
+    const conversationId = this.toolInput.string(input.conversationId);
     if (conversationId) {
       return {
         messages: await this.messages.getAgentInboxMessages(
           conversationId,
           agentConnectionId,
           {
-            limit: this.number(input.limit) ?? undefined,
+            limit: this.toolInput.number(input.limit) ?? undefined,
           },
         ),
       };
     }
     return {
       events: await this.messages.getAgentInboxEvents(agentConnectionId, {
-        limit: this.number(input.limit) ?? undefined,
-        unreadOnly: this.bool(input.unreadOnly) ?? undefined,
-        eventType: this.string(input.eventType) || undefined,
+        limit: this.toolInput.number(input.limit) ?? undefined,
+        unreadOnly: this.toolInput.bool(input.unreadOnly) ?? undefined,
+        eventType: this.toolInput.string(input.eventType) || undefined,
       }),
     };
   }
@@ -1725,7 +1784,7 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    const limit = this.number(input.limit);
+    const limit = this.toolInput.number(input.limit);
     const conversations = await this.messages.getConversations(
       task.ownerUserId,
     );
@@ -1739,9 +1798,9 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     const agentConnectionId =
-      task.agentConnectionId ?? this.number(input.agentConnectionId);
-    const limit = this.number(input.limit) ?? undefined;
-    const conversationId = this.string(input.conversationId);
+      task.agentConnectionId ?? this.toolInput.number(input.agentConnectionId);
+    const limit = this.toolInput.number(input.limit) ?? undefined;
+    const conversationId = this.toolInput.string(input.conversationId);
 
     if (conversationId) {
       if (!agentConnectionId) {
@@ -1760,19 +1819,19 @@ export class SocialAgentToolExecutorService {
       agentConnectionId
         ? this.messages.getAgentInboxConversations(agentConnectionId, {
             limit,
-            unreadOnly: this.bool(input.unreadOnly) ?? undefined,
+            unreadOnly: this.toolInput.bool(input.unreadOnly) ?? undefined,
           })
         : Promise.resolve([]),
       agentConnectionId
         ? this.messages.getAgentInboxEvents(agentConnectionId, {
             limit,
-            unreadOnly: this.bool(input.unreadOnly) ?? undefined,
-            eventType: this.string(input.eventType) || undefined,
+            unreadOnly: this.toolInput.bool(input.unreadOnly) ?? undefined,
+            eventType: this.toolInput.string(input.eventType) || undefined,
           })
         : this.messages.getAgentInboxEventsForOwner(task.ownerUserId, {
             limit,
-            unreadOnly: this.bool(input.unreadOnly) ?? undefined,
-            eventType: this.string(input.eventType) || undefined,
+            unreadOnly: this.toolInput.bool(input.unreadOnly) ?? undefined,
+            eventType: this.toolInput.string(input.eventType) || undefined,
           }),
     ]);
 
@@ -1783,7 +1842,7 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    const limit = this.number(input.limit);
+    const limit = this.toolInput.number(input.limit);
     const approvals = await this.approvals.getPending(task.ownerUserId);
     return { approvals: limit ? approvals.slice(0, limit) : approvals };
   }
@@ -1792,7 +1851,7 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<unknown> {
-    const approvalId = this.number(input.approvalId ?? input.id);
+    const approvalId = this.toolInput.number(input.approvalId ?? input.id);
     if (!approvalId) throw new BadRequestException('approvalId is required');
     return this.approvals.approve(approvalId, task.ownerUserId, (approval) =>
       this.approvalDispatcher.dispatch(approval),
@@ -1803,7 +1862,7 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<unknown> {
-    const approvalId = this.number(input.approvalId ?? input.id);
+    const approvalId = this.toolInput.number(input.approvalId ?? input.id);
     if (!approvalId) throw new BadRequestException('approvalId is required');
     return this.approvals.reject(approvalId, task.ownerUserId);
   }
@@ -1825,10 +1884,10 @@ export class SocialAgentToolExecutorService {
       recentToolCalls: Array.isArray(task.toolCalls)
         ? task.toolCalls.slice(-10)
         : [],
-      result: this.isRecord(task.result) ? task.result : {},
+      result: this.toolInput.isRecord(task.result) ? task.result : {},
       memory,
     };
-    const shouldPersist = this.bool(
+    const shouldPersist = this.toolInput.bool(
       input.persistLongTerm ?? input.writeLongTerm,
     );
     return {
@@ -1844,12 +1903,12 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
   ): Promise<unknown> {
     const intent =
-      this.string(input.intent) === 'activity_search'
+      this.toolInput.string(input.intent) === 'activity_search'
         ? 'activity_search'
         : 'social_search';
     return this.candidatePool.debugCandidatePool(
       task.ownerUserId,
-      this.number(input.taskId) ?? task.id,
+      this.toolInput.number(input.taskId) ?? task.id,
       intent,
     );
   }
@@ -1860,13 +1919,13 @@ export class SocialAgentToolExecutorService {
     stepId: string,
   ): Promise<unknown> {
     const agentConnectionId =
-      task.agentConnectionId ?? this.number(input.agentConnectionId);
+      task.agentConnectionId ?? this.toolInput.number(input.agentConnectionId);
     if (!agentConnectionId)
       throw new BadRequestException('agentConnectionId is required');
 
     const loop = this.socialLoopMemory(task);
     const conversationId =
-      this.string(input.conversationId) ?? loop.conversationId;
+      this.toolInput.string(input.conversationId) ?? loop.conversationId;
     if (!conversationId) {
       throw new BadRequestException('task memory has no bound conversationId');
     }
@@ -1876,12 +1935,12 @@ export class SocialAgentToolExecutorService {
         conversationId,
         agentConnectionId,
         {
-          limit: this.number(input.limit) ?? 50,
+          limit: this.toolInput.number(input.limit) ?? 50,
         },
       ),
     );
     const cursor =
-      this.string(input.afterMessageId) ??
+      this.toolInput.string(input.afterMessageId) ??
       loop.lastReadMessageId ??
       loop.lastMessageId;
     const newMessages = filterPendingSocialAgentCounterpartMessages(
@@ -1895,8 +1954,8 @@ export class SocialAgentToolExecutorService {
     this.rememberConversation(task, {
       conversationId,
       targetUserId:
-        this.number(latest?.senderId) ??
-        this.number(input.targetUserId) ??
+        this.toolInput.number(latest?.senderId) ??
+        this.toolInput.number(input.targetUserId) ??
         loop.targetUserId ??
         null,
       lastReceivedMessageId: latest?.id ?? loop.lastReceivedMessageId ?? null,
@@ -1929,7 +1988,8 @@ export class SocialAgentToolExecutorService {
         {
           conversationId,
           messageId: latest.id ?? null,
-          fromUserId: this.number(latest.senderId) ?? loop.targetUserId ?? null,
+          fromUserId:
+            this.toolInput.number(latest.senderId) ?? loop.targetUserId ?? null,
           contentPreview: this.preview(latest.text),
           metadata: {
             agentTaskId: task.id,
@@ -1988,7 +2048,8 @@ export class SocialAgentToolExecutorService {
         conversationId: loop.conversationId ?? null,
         messageId: loop.lastReceivedMessageId ?? null,
         fromUserId: loop.targetUserId ?? null,
-        contentPreview: this.string(summary.summary) ?? 'Reply summarized',
+        contentPreview:
+          this.toolInput.string(summary.summary) ?? 'Reply summarized',
         metadata: {
           agentTaskId: task.id,
           messages,
@@ -2008,7 +2069,7 @@ export class SocialAgentToolExecutorService {
     const messages = toSocialAgentMessageArray(
       input.messages ?? loop.latestReceivedMessages,
     );
-    const summary = this.isRecord(input.summary)
+    const summary = this.toolInput.isRecord(input.summary)
       ? input.summary
       : (loop.replySummary ?? {});
     const decision = await this.toolJsonModel.callJson({
@@ -2052,8 +2113,8 @@ export class SocialAgentToolExecutorService {
         messageId: loop.lastReceivedMessageId ?? null,
         fromUserId: loop.targetUserId ?? null,
         contentPreview:
-          this.string(safeDecision.reason) ??
-          `Next action: ${this.string(safeDecision.nextAction) ?? 'stop'}`,
+          this.toolInput.string(safeDecision.reason) ??
+          `Next action: ${this.toolInput.string(safeDecision.nextAction) ?? 'stop'}`,
         metadata: {
           agentTaskId: task.id,
           summary,
@@ -2072,13 +2133,16 @@ export class SocialAgentToolExecutorService {
   ): Promise<unknown> {
     if (!task.agentConnectionId)
       throw new BadRequestException('agentConnectionId is required');
-    const conversationId = this.string(input.conversationId);
-    const text = this.string(input.text ?? input.message ?? input.content);
+    const conversationId = this.toolInput.string(input.conversationId);
+    const text = this.toolInput.string(
+      input.text ?? input.message ?? input.content,
+    );
     if (!conversationId)
       throw new BadRequestException('conversationId is required');
     if (!text) throw new BadRequestException('text is required');
     const targetForDedupe =
-      this.number(input.targetUserId) ?? this.memoryTargetUserId(task);
+      this.toolInput.number(input.targetUserId) ??
+      this.memoryTargetUserId(task);
     const duplicateKey = buildSocialAgentMessageDedupeKey(
       targetForDedupe,
       text,
@@ -2102,16 +2166,16 @@ export class SocialAgentToolExecutorService {
         metadata: this.messageMetadata(task, stepId, input.metadata),
       },
     );
-    const output = this.asRecord(message);
+    const output = this.toolInput.asRecord(message);
     const targetUserId =
-      this.number(output.recipientUserId) ??
-      this.number(input.targetUserId) ??
+      this.toolInput.number(output.recipientUserId) ??
+      this.toolInput.number(input.targetUserId) ??
       this.memoryTargetUserId(task);
     this.rememberConversation(task, {
       conversationId,
       targetUserId,
-      lastMessageId: this.string(output.id ?? output.messageId),
-      lastAgentMessageId: this.string(output.id ?? output.messageId),
+      lastMessageId: this.toolInput.string(output.id ?? output.messageId),
+      lastAgentMessageId: this.toolInput.string(output.id ?? output.messageId),
       sentMessageKeys: this.appendSocialLoopKey(
         task,
         'sentMessageKeys',
@@ -2120,7 +2184,7 @@ export class SocialAgentToolExecutorService {
       sourceTool: SocialAgentToolName.ReplyMessage,
     });
     this.rememberSentMessage(task, {
-      id: this.string(output.id ?? output.messageId),
+      id: this.toolInput.string(output.id ?? output.messageId),
       conversationId,
       targetUserId,
       textPreview: this.preview(text),
@@ -2129,7 +2193,7 @@ export class SocialAgentToolExecutorService {
     });
     await this.writeSocialAgentInboxEvent(task, 'social_agent.reply.sent', {
       conversationId,
-      messageId: this.string(output.id ?? output.messageId) ?? null,
+      messageId: this.toolInput.string(output.id ?? output.messageId) ?? null,
       fromUserId: targetUserId ?? null,
       contentPreview: this.preview(text),
       metadata: {
@@ -2148,22 +2212,23 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     stepId: string,
   ): Promise<unknown> {
-    const amount = this.positiveAmount(
+    const amount = this.toolInput.positiveAmount(
       input.amount ?? input.total ?? input.value,
     );
     if (amount == null) throw new BadRequestException('amount is required');
 
-    const currency = (this.string(input.currency) || 'CNY')
+    const currency = (this.toolInput.string(input.currency) || 'CNY')
       .toUpperCase()
       .slice(0, 8);
-    const targetUserId = this.number(
+    const targetUserId = this.toolInput.number(
       input.targetUserId ?? input.payeeUserId ?? input.toUserId,
     );
     const description =
-      this.string(input.description ?? input.summary ?? input.note) ||
+      this.toolInput.string(input.description ?? input.summary ?? input.note) ||
       'Agent payment intent';
     const status =
-      this.paymentIntentStatus(input.status) ?? PaymentIntentStatus.Created;
+      this.toolInput.paymentIntentStatus(input.status) ??
+      PaymentIntentStatus.Created;
     const paymentDedupeKey = buildSocialAgentPaymentIntentDedupeKey({
       targetUserId: targetUserId ?? null,
       amount,
@@ -2192,10 +2257,11 @@ export class SocialAgentToolExecutorService {
         currency,
         description,
         status,
-        provider: this.string(input.provider) || 'manual_intent',
-        providerReference: this.string(input.providerReference) ?? null,
+        provider: this.toolInput.string(input.provider) || 'manual_intent',
+        providerReference:
+          this.toolInput.string(input.providerReference) ?? null,
         metadata: {
-          ...(this.isRecord(input.metadata) ? input.metadata : {}),
+          ...(this.toolInput.isRecord(input.metadata) ? input.metadata : {}),
           agentTaskId: task.id,
           stepId,
           userId: task.ownerUserId,
@@ -2284,8 +2350,8 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     updates: Partial<SocialLoopMemory>,
   ): void {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    const previous = this.isRecord(memory.socialLoop)
+    const memory = this.toolInput.isRecord(task.memory) ? task.memory : {};
+    const previous = this.toolInput.isRecord(memory.socialLoop)
       ? (memory.socialLoop as SocialLoopMemory)
       : {};
     const next: SocialLoopMemory = {
@@ -2356,14 +2422,15 @@ export class SocialAgentToolExecutorService {
     );
     for (const message of messages) {
       const id =
-        this.string(message.id) ?? `${stepId}:${receivedReplies.length}`;
+        this.toolInput.string(message.id) ??
+        `${stepId}:${receivedReplies.length}`;
       const reply = {
         id,
         conversationId:
-          this.string(message.conversationId) ??
+          this.toolInput.string(message.conversationId) ??
           this.socialLoopMemory(task).conversationId ??
           null,
-        fromUserId: this.number(message.senderId) ?? null,
+        fromUserId: this.toolInput.number(message.senderId) ?? null,
         textPreview: this.preview(message.text),
         receivedAt: new Date().toISOString(),
       };
@@ -2388,8 +2455,8 @@ export class SocialAgentToolExecutorService {
   }
 
   private socialLoopMemory(task: AgentTask): SocialLoopMemory {
-    const memory = this.isRecord(task.memory) ? task.memory : {};
-    return this.isRecord(memory.socialLoop)
+    const memory = this.toolInput.isRecord(task.memory) ? task.memory : {};
+    return this.toolInput.isRecord(memory.socialLoop)
       ? (memory.socialLoop as SocialLoopMemory)
       : {};
   }
@@ -2452,7 +2519,7 @@ export class SocialAgentToolExecutorService {
   }
 
   private preview(value: unknown, max = 160): string {
-    const text = this.string(value) ?? '';
+    const text = this.toolInput.string(value) ?? '';
     if (text.length <= max) return text;
     return `${text.slice(0, max - 1)}…`;
   }
@@ -2576,7 +2643,7 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     activity: SocialActivity,
   ): string {
-    const explicit = this.string(
+    const explicit = this.toolInput.string(
       input.text ?? input.message ?? input.content ?? input.inviteMessage,
     );
     if (explicit) return explicit;
@@ -2594,36 +2661,6 @@ export class SocialAgentToolExecutorService {
     }
     parts.push('请在 FitMeet 中确认是否参加。');
     return parts.join('\n');
-  }
-
-  private asRecord(output: unknown): Record<string, unknown> {
-    if (this.isRecord(output)) return output;
-    return { value: output };
-  }
-
-  private errorPayload(error: unknown): Record<string, unknown> {
-    if (error instanceof HttpException) {
-      const response = error.getResponse();
-      const responseRecord = this.isRecord(response) ? response : {};
-      return {
-        code:
-          this.string(responseRecord.code) ??
-          (error instanceof ForbiddenException
-            ? 'tool_permission_blocked'
-            : 'TOOL_EXECUTION_FAILED'),
-        message:
-          this.string(responseRecord.message) ??
-          (error instanceof Error ? error.message : String(error)),
-        statusCode: error.getStatus(),
-      };
-    }
-    return {
-      code:
-        error instanceof ForbiddenException
-          ? 'tool_permission_blocked'
-          : 'tool_execution_failed',
-      message: error instanceof Error ? error.message : String(error),
-    };
   }
 
   private logToolFailure(
@@ -2669,99 +2706,5 @@ export class SocialAgentToolExecutorService {
         error: call.error,
       }),
     );
-  }
-
-  private string(value: unknown): string | undefined {
-    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-  }
-
-  private stringList(value: unknown): string[] {
-    const raw = Array.isArray(value) ? value : value ? [value] : [];
-    return raw
-      .map((item) => this.string(item))
-      .filter((item): item is string => Boolean(item));
-  }
-
-  private safeUnknownText(value: unknown): string {
-    if (value == null) return 'null';
-    if (
-      typeof value === 'string' ||
-      typeof value === 'number' ||
-      typeof value === 'boolean' ||
-      typeof value === 'bigint' ||
-      typeof value === 'symbol'
-    ) {
-      return String(value);
-    }
-    try {
-      return JSON.stringify(value) ?? '[unserializable]';
-    } catch {
-      return '[unserializable]';
-    }
-  }
-
-  private number(value: unknown): number | undefined {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string' && value.trim()) {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) return parsed;
-    }
-    return undefined;
-  }
-
-  private positiveAmount(value: unknown): number | undefined {
-    const amount = this.number(value);
-    if (amount == null || amount <= 0) return undefined;
-    return Math.round(amount * 100) / 100;
-  }
-
-  private paymentIntentStatus(value: unknown): PaymentIntentStatus | undefined {
-    return typeof value === 'string' &&
-      Object.values(PaymentIntentStatus).includes(value as PaymentIntentStatus)
-      ? (value as PaymentIntentStatus)
-      : undefined;
-  }
-
-  private bool(value: unknown): boolean | undefined {
-    if (typeof value === 'boolean') return value;
-    if (typeof value === 'string') {
-      const normalized = value.trim().toLowerCase();
-      if (['true', '1', 'yes', 'y', '是'].includes(normalized)) return true;
-      if (['false', '0', 'no', 'n', '否'].includes(normalized)) return false;
-    }
-    return undefined;
-  }
-
-  private stringArray(value: unknown): string[] {
-    if (!Array.isArray(value)) return [];
-    return value.filter(
-      (item): item is string =>
-        typeof item === 'string' && item.trim().length > 0,
-    );
-  }
-
-  private isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
-  }
-
-  private socialRequestType(value: unknown): SocialRequestType | undefined {
-    return typeof value === 'string' &&
-      Object.values(SocialRequestType).includes(value as SocialRequestType)
-      ? (value as SocialRequestType)
-      : undefined;
-  }
-
-  private activityType(value: unknown): ActivityType | undefined {
-    return typeof value === 'string' &&
-      Object.values(ActivityType).includes(value as ActivityType)
-      ? (value as ActivityType)
-      : undefined;
-  }
-
-  private activityProofPolicy(value: unknown): ActivityProofPolicy | undefined {
-    return typeof value === 'string' &&
-      Object.values(ActivityProofPolicy).includes(value as ActivityProofPolicy)
-      ? (value as ActivityProofPolicy)
-      : undefined;
   }
 }

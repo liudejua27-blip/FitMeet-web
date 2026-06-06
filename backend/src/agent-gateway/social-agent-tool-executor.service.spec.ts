@@ -18,6 +18,7 @@ import { SocialAgentActionSideEffectService } from './social-agent-action-side-e
 import { SocialAgentConfirmationPolicyService } from './social-agent-confirmation-policy.service';
 import { SocialAgentToolCallFactoryService } from './social-agent-tool-call-factory.service';
 import { SocialAgentToolExecutionPolicyService } from './social-agent-tool-execution-policy.service';
+import { SocialAgentToolInputParserService } from './social-agent-tool-input-parser.service';
 import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
 
 type MockRepository<T extends object = Record<string, unknown>> = {
@@ -217,6 +218,7 @@ function makeService() {
     permissions,
     toolRegistry,
   );
+  const toolInput = new SocialAgentToolInputParserService();
 
   const service = new SocialAgentToolExecutorService(
     taskRepo as never,
@@ -243,6 +245,7 @@ function makeService() {
     toolExecutionPolicy,
     confirmationPolicy,
     toolCallFactory,
+    toolInput,
   );
 
   return {
