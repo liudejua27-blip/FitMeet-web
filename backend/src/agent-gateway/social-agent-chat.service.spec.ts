@@ -45,6 +45,7 @@ import { SocialAgentChatRunFacadeService } from './social-agent-chat-run-facade.
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
+import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -490,6 +491,12 @@ function makeHarness(options: Record<string, unknown> = {}) {
       sessionAssembler,
       longTermMemory as never,
     );
+  const actionTurns =
+    (options.actionTurns as SocialAgentRouteActionTurnService | undefined) ??
+    new SocialAgentRouteActionTurnService(
+      candidateActions as never,
+      metrics as never,
+    );
   const draftPublication =
     (options.draftPublication as
       | SocialAgentDraftPublicationService
@@ -605,6 +612,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
       routeContext as never,
       profileTurns as never,
       searchTurns as never,
+      actionTurns as never,
       mainAgentTurn as never,
       options.brain as never,
     );

@@ -18,13 +18,9 @@ import type {
   SocialAgentAsyncRunSnapshot,
   SocialAgentChatReplanRunBody,
   SocialAgentIntentRouteResult,
-  SocialAgentPendingApprovalSnapshot,
   SocialAgentRouteMessageBody,
 } from './social-agent-chat.types';
-import {
-  appendSocialAgentUserMemo,
-  recordSocialAgentPendingAction,
-} from './social-agent-memory.util';
+import { appendSocialAgentUserMemo } from './social-agent-memory.util';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
@@ -43,6 +39,7 @@ import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.s
 import { applySocialAgentTaskMemoryForIntent } from './social-agent-intent-memory.presenter';
 import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile-turn.service';
 import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
+import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
 
 type QueueInitialSearchForTask = (
   ownerUserId: number,
@@ -73,6 +70,7 @@ export class SocialAgentRouteTurnService {
     private readonly routeContext: SocialAgentRouteContextService,
     private readonly profileTurns: SocialAgentRouteProfileTurnService,
     private readonly searchTurns: SocialAgentRouteSearchTurnService,
+    private readonly actionTurns: SocialAgentRouteActionTurnService,
     private readonly mainAgentTurn: SocialAgentMainAgentTurnService,
     @Optional() private readonly brain?: SocialAgentBrainService,
   ) {}
@@ -308,30 +306,14 @@ export class SocialAgentRouteTurnService {
       task = await this.taskLifecycle.assertTaskOwner(task.id, ownerUserId);
     }
 
-    let pendingApproval: SocialAgentPendingApprovalSnapshot | null = null;
-    if (route.intent === 'action_request') {
-      pendingApproval = await this.candidateActions.createActionApproval({
-        ownerUserId,
-        task,
-        message,
-        route,
-      });
-      if (pendingApproval) {
-        const draft = this.candidateActions.candidateMessageDraft(task);
-        assistantMessage = draft
-          ? `${assistantMessage}\n我先给你拟一条开场白：${draft}\n确认后我再发送。待确认动作 #${pendingApproval.id} 已创建。`
-          : `${assistantMessage}\n（已创建待确认动作 #${pendingApproval.id}，请在卡片上点击“批准/拒绝”。）`;
-        this.metrics.recordApproval(pendingApproval.type);
-        recordSocialAgentPendingAction(task, {
-          id: pendingApproval.id,
-          type: pendingApproval.type,
-          actionType: pendingApproval.actionType,
-          summary: pendingApproval.summary,
-          riskLevel: pendingApproval.riskLevel,
-          at: new Date().toISOString(),
-        });
-      }
-    }
+    const actionTurn = await this.actionTurns.handle({
+      ownerUserId,
+      task,
+      route,
+      message,
+      assistantMessage,
+    });
+    assistantMessage = actionTurn.assistantMessage;
 
     const result: SocialAgentIntentRouteResult = {
       ...route,
@@ -344,7 +326,7 @@ export class SocialAgentRouteTurnService {
       shouldQueueRun: Boolean(queuedRun),
       runMode,
       queuedRun,
-      pendingApproval,
+      pendingApproval: actionTurn.pendingApproval,
       activityResults,
       profileUpdateProposal,
       permissionMode: task.permissionMode,
