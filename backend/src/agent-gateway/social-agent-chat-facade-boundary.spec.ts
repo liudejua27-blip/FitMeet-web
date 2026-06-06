@@ -61,6 +61,10 @@ const publicSocialIntentPresenterPath = path.resolve(
   __dirname,
   'public-social-intent.presenter.ts',
 );
+const publicSocialIntentListQueryPath = path.resolve(
+  __dirname,
+  'public-social-intent-list-query.ts',
+);
 const toolExecutorPath = path.resolve(
   __dirname,
   'social-agent-tool-executor.service.ts',
@@ -118,6 +122,10 @@ describe('SocialAgentChatService facade boundary', () => {
   );
   const publicSocialIntentPresenterSource = fs.readFileSync(
     publicSocialIntentPresenterPath,
+    'utf8',
+  );
+  const publicSocialIntentListQuerySource = fs.readFileSync(
+    publicSocialIntentListQueryPath,
     'utf8',
   );
   const toolExecutorSource = fs.readFileSync(toolExecutorPath, 'utf8');
@@ -282,6 +290,22 @@ describe('SocialAgentChatService facade boundary', () => {
     expect(
       publicSocialIntentPresenterSource.trim().split('\n').length,
     ).toBeLessThanOrEqual(40);
+  });
+
+  it('keeps public social intent list filter normalization split from the gateway service', () => {
+    expect(agentGatewayServiceSource).toContain(
+      'normalizePublicSocialIntentListFilters',
+    );
+    expect(agentGatewayServiceSource).not.toContain(
+      'Math.min(Math.max(Number(filters.limit)',
+    );
+    expect(publicSocialIntentListQuerySource).toContain(
+      'function normalizePublicSocialIntentListFilters',
+    );
+    expect(publicSocialIntentListQuerySource).toContain('sanitizeCity');
+    expect(
+      publicSocialIntentListQuerySource.trim().split('\n').length,
+    ).toBeLessThanOrEqual(45);
   });
 
   it('keeps tool step event payload assembly split from the executor', () => {

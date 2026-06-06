@@ -117,6 +117,10 @@ import {
   buildPendingApprovalSendMessageActionLog,
 } from './agent-gateway-message-log.mapper';
 import { buildPublicSocialCandidates } from './public-social-candidate.presenter';
+import {
+  normalizePublicSocialIntentListFilters,
+  type PublicSocialIntentListFilters,
+} from './public-social-intent-list-query';
 import { serializePublicSocialIntent } from './public-social-intent.presenter';
 
 // Permission-level capability map
@@ -167,15 +171,6 @@ type PublicSocialIntentMeta = {
   userAgent?: string;
   deviceId?: string | string[];
   origin?: string;
-};
-
-type PublicSocialIntentListFilters = {
-  page?: number;
-  limit?: number;
-  q?: string;
-  city?: string;
-  requestType?: string;
-  status?: SocialRequestStatus;
 };
 
 type LocalRateBucket = {
@@ -913,38 +908,30 @@ export class AgentGatewayService {
   }
 
   async listPublicSocialIntents(filters: PublicSocialIntentListFilters = {}) {
-    const page = Math.max(Number(filters.page) || 1, 1);
-    const take = Math.min(Math.max(Number(filters.limit) || 30, 1), 50);
-    const skip = (page - 1) * take;
+    const normalized = normalizePublicSocialIntentListFilters(filters);
     const query = this.publicIntentRepo
       .createQueryBuilder('intent')
       .orderBy('intent.createdAt', 'DESC')
-      .take(take)
-      .skip(skip);
+      .take(normalized.take)
+      .skip(normalized.skip);
 
     query.andWhere('intent.mode = :mode', { mode: 'public' });
 
-    const city = sanitizeCity(filters.city);
-    if (city) {
+    if (normalized.city) {
       query.andWhere('LOWER(intent.city) LIKE LOWER(:city)', {
-        city: `%${city}%`,
+        city: `%${normalized.city}%`,
       });
     }
 
-    const requestType = filters.requestType?.trim();
-    if (requestType) {
-      query.andWhere('intent.requestType = :requestType', { requestType });
+    if (normalized.requestType) {
+      query.andWhere('intent.requestType = :requestType', {
+        requestType: normalized.requestType,
+      });
     }
 
-    const status = Object.values(SocialRequestStatus).includes(
-      filters.status as SocialRequestStatus,
-    )
-      ? filters.status
-      : SocialRequestStatus.Active;
-    query.andWhere('intent.status = :status', { status });
+    query.andWhere('intent.status = :status', { status: normalized.status });
 
-    const q = filters.q?.trim();
-    if (q) {
+    if (normalized.q) {
       query.andWhere(
         `(
           LOWER(intent.title) LIKE LOWER(:q)
@@ -953,7 +940,7 @@ export class AgentGatewayService {
           OR LOWER(intent.loc) LIKE LOWER(:q)
           OR LOWER(intent.requestType) LIKE LOWER(:q)
         )`,
-        { q: `%${q}%` },
+        { q: `%${normalized.q}%` },
       );
     }
 
@@ -962,13 +949,13 @@ export class AgentGatewayService {
       data: data.map((intent) => serializePublicSocialIntent(intent)),
       metadata: {
         total,
-        page,
-        lastPage: Math.ceil(total / take),
+        page: normalized.page,
+        lastPage: Math.ceil(total / normalized.take),
         filters: {
-          q: q || undefined,
-          city: city || undefined,
-          requestType: requestType || undefined,
-          status,
+          q: normalized.q,
+          city: normalized.city,
+          requestType: normalized.requestType,
+          status: normalized.status,
         },
       },
     };
