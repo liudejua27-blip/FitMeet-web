@@ -80,6 +80,7 @@ const WEB_APP_REQUIRED_PATHS = {
   '/social-agent/chat/tasks/{taskId}/publish-social-request': 'post',
   '/social-agent/chat/tasks/{taskId}/replan-run': 'post',
   '/social-agent/chat/tasks/{taskId}/append-context': 'post',
+  '/social-agent/chat/tasks/{taskId}/actions': 'post',
   '/agents/inbox/conversations': 'get',
   '/agents/inbox/conversations/{conversationId}/messages': 'get',
   '/agents/inbox/events': 'get',
@@ -232,6 +233,7 @@ describe('AppController', () => {
           '/social-agent/chat/tasks/{taskId}/publish-social-request',
           '/social-agent/chat/tasks/{taskId}/replan-run',
           '/social-agent/chat/tasks/{taskId}/append-context',
+          '/social-agent/chat/tasks/{taskId}/actions',
           '/social-agent/chat/tasks/{taskId}/save-candidate',
           '/social-agent/chat/tasks/{taskId}/send-message',
           '/social-agent/chat/tasks/{taskId}/connect-candidate',
@@ -1010,6 +1012,18 @@ describe('AppController', () => {
           .responses['200'].content['application/json'].schema,
       ).toEqual({
         $ref: '#/components/schemas/SocialAgentAppendContextResult',
+      });
+      expect(
+        contract.paths['/social-agent/chat/tasks/{taskId}/actions'].post
+          .requestBody.content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/SocialAgentCardActionInput',
+      });
+      expect(
+        contract.paths['/social-agent/chat/tasks/{taskId}/actions'].post
+          .responses['200'],
+      ).toEqual({
+        $ref: '#/components/responses/UserFacingAgentResponse',
       });
       expect(contract.components.schemas.SocialAgentReplanInput).toMatchObject({
         required: ['userMessage'],
