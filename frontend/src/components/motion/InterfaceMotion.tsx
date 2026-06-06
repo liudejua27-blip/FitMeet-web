@@ -143,14 +143,20 @@ export function InterfaceMotion() {
               });
             }
 
-            gsap.to('.agent-workspace--landing .agent-start-footer svg', {
-              y: -2,
-              duration: 1.8,
-              ease: 'sine.inOut',
-              repeat: -1,
-              yoyo: true,
-              stagger: 0.18,
-            });
+            const footerIcons = uniqueElements(
+              gsap,
+              '.agent-workspace--landing .agent-start-footer svg',
+            );
+            if (footerIcons.length > 0) {
+              gsap.to(footerIcons, {
+                y: -2,
+                duration: 1.8,
+                ease: 'sine.inOut',
+                repeat: -1,
+                yoyo: true,
+                stagger: 0.18,
+              });
+            }
 
             const removePointerListeners = wirePointerSpotlight(gsap, pointerSurfaces);
             const removeMagneticListeners = wireMagneticHover(gsap, magneticTargets);
