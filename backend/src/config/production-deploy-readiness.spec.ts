@@ -34,6 +34,9 @@ describe('production deploy readiness', () => {
       ),
     );
     expect(deployScript).toContain('./scripts/verify-production.sh');
+
+    const releasePreflight = readRepoFile('scripts/release-preflight.sh');
+    expect(releasePreflight).toContain('seed:living-social-data:dry-run');
   });
 
   it('keeps production verification cross-platform and App contract aware', () => {

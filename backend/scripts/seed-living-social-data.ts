@@ -15,6 +15,9 @@ import {
 
 const SEED_KEY = 'living-social-20260521';
 const PASSWORD = 'FitMeet@2026';
+const DRY_RUN =
+  process.argv.includes('--dry-run') ||
+  process.env.LIVING_SOCIAL_SEED_DRY_RUN === 'true';
 
 type SeedPerson = {
   key: string;
@@ -525,8 +528,13 @@ function matchSignals(person: SeedPerson) {
 }
 
 async function main() {
-  if (seedPeople.length !== 50) {
-    throw new Error(`Expected 50 seed people, got ${seedPeople.length}`);
+  validateSeedPeople();
+
+  if (DRY_RUN) {
+    console.log(
+      `[${SEED_KEY}] dry-run ok: people=${seedPeople.length}, users=${seedPeople.length}, profiles=${seedPeople.length}, requests=${seedPeople.length}`,
+    );
+    return;
   }
 
   await dataSource.initialize();
@@ -667,6 +675,66 @@ async function main() {
   console.log(
     `[${SEED_KEY}] users=${usersUpserted}, profiles=${profilesUpserted}, requests=${requestsUpserted}, password=${PASSWORD}`,
   );
+}
+
+function validateSeedPeople() {
+  if (seedPeople.length !== 50) {
+    throw new Error(`Expected 50 seed people, got ${seedPeople.length}`);
+  }
+
+  const keys = new Set<string>();
+  const emails = new Set<string>();
+
+  for (const person of seedPeople) {
+    const label = person.key || person.name || '<unknown>';
+    const requiredStrings: Array<[string, unknown]> = [
+      ['key', person.key],
+      ['name', person.name],
+      ['gender', person.gender],
+      ['city', person.city],
+      ['area', person.area],
+      ['gym', person.gym],
+      ['title', person.title],
+      ['description', person.description],
+      ['activityType', person.activityType],
+    ];
+
+    for (const [field, value] of requiredStrings) {
+      if (typeof value !== 'string' || value.trim().length === 0) {
+        throw new Error(`Seed person ${label} is missing ${field}`);
+      }
+    }
+
+    if (!Number.isInteger(person.age) || person.age < 18 || person.age > 65) {
+      throw new Error(`Seed person ${label} has invalid age ${person.age}`);
+    }
+    if (!Number.isFinite(person.lat) || !Number.isFinite(person.lng)) {
+      throw new Error(`Seed person ${label} has invalid coordinates`);
+    }
+    for (const [field, values] of [
+      ['sports', person.sports],
+      ['lifestyle', person.lifestyle],
+      ['traits', person.traits],
+      ['goals', person.goals],
+      ['wantToMeet', person.wantToMeet],
+      ['preferredTraits', person.preferredTraits],
+      ['avoidTraits', person.avoidTraits],
+    ] as const) {
+      if (!Array.isArray(values) || values.length === 0) {
+        throw new Error(`Seed person ${label} is missing ${field}`);
+      }
+    }
+
+    const email = `${person.key}@fitmeet.local`;
+    if (keys.has(person.key)) {
+      throw new Error(`Duplicate seed person key: ${person.key}`);
+    }
+    if (emails.has(email)) {
+      throw new Error(`Duplicate seed person email: ${email}`);
+    }
+    keys.add(person.key);
+    emails.add(email);
+  }
 }
 
 main().catch(async (error) => {

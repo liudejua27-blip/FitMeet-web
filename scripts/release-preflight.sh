@@ -111,6 +111,7 @@ if [[ "${RUN_WEB}" -eq 1 ]]; then
   run_step "backend build" pnpm --dir "${ROOT_DIR}/backend" build
   run_step "backend test" pnpm --dir "${ROOT_DIR}/backend" test
   run_step "backend App contract smoke" env APP_SMOKE_DRY_RUN=true pnpm --dir "${ROOT_DIR}/backend" smoke:app-core
+  run_step "backend living social seed dry-run" pnpm --dir "${ROOT_DIR}/backend" seed:living-social-data:dry-run
 
   run_step "frontend install" pnpm --dir "${ROOT_DIR}/frontend" install --frozen-lockfile
   run_step "frontend lint" pnpm --dir "${ROOT_DIR}/frontend" lint

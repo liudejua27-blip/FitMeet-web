@@ -85,6 +85,18 @@ pnpm dev
 
 后端现在采用 migration-first 策略：`DB_SYNCHRONIZE=false` 是所有环境的默认值，包括本地开发。需要变更 schema 时，先生成或创建 migration，再运行 `pnpm migration:run`。只有临时 scratch 数据库可以显式设置 `DB_SYNCHRONIZE=true`，不要把这个设置提交或带到共享环境。
 
+## 本地演示数据
+
+`backend/scripts/seed-living-social-data.ts` 可以创建 50 个本地演示用户、社交画像和公开邀约，用于 Web/iOS 的 feed、消息目标用户和 Agent 推荐链路调试。先跑 dry-run 校验数据基线，再对本地数据库写入：
+
+```bash
+cd backend
+pnpm seed:living-social-data:dry-run
+pnpm seed:living-social-data
+```
+
+生产环境不要直接 seed 真实用户，除非明确要导入演示数据，并且已确认不会污染真实用户发现流。
+
 ## 验证命令
 
 每次提交前至少跑通这组基线：
@@ -110,7 +122,7 @@ pnpm dev
 分项目命令如下，便于定位失败点：
 
 ```bash
-cd backend && pnpm lint && pnpm build && pnpm test && APP_SMOKE_DRY_RUN=true pnpm smoke:app-core
+cd backend && pnpm lint && pnpm build && pnpm test && APP_SMOKE_DRY_RUN=true pnpm smoke:app-core && pnpm seed:living-social-data:dry-run
 cd ../frontend && pnpm lint && pnpm build && pnpm test
 cd ../fitmeet-landing && pnpm lint && pnpm build && pnpm test
 ```

@@ -91,6 +91,7 @@ Core launch endpoints currently covered:
 - Remaining schema audit item: verify every currently registered entity has an equivalent migration in a disposable empty Postgres database, then compare `typeorm schema:log` output. Static tests now guard TypeORM discovery/config drift, but this live empty-database diff is still required before production migration approval.
 - MongoDB collections are created by Mongoose models and are not migration-managed. Message, conversation, and Agent inbox event schemas now declare compound indexes for the Web/iOS conversation list, message history, unread count, Agent inbox, and recent Agent signal queries. Before launch, confirm those indexes exist on the deployed Mongo database because production `autoIndex` behavior may be disabled.
 - Redis has no schema migration, but production must enforce password/TLS/network isolation outside app code.
+- Local demo data is provided by `backend/scripts/seed-living-social-data.ts`. The dry-run command validates the 50-user seed baseline without connecting to Postgres; the normal seed command should only be used against local/dev databases.
 
 ## Required Or Candidate Migrations
 
@@ -103,6 +104,8 @@ Before production cutover, run these checks:
 ```bash
 cd backend
 pnpm migration:run
+pnpm seed:living-social-data:dry-run
+pnpm seed:living-social-data
 ```
 
 2. Migration status:
@@ -275,6 +278,10 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- logging.interceptor.spec.ts`
 - Passed: backend `pnpm --dir backend test -- http-exception.filter.spec.ts logging.interceptor.spec.ts`
 - Passed: backend `pnpm --dir backend test -- migration-integrity.spec.ts`
+- Passed: backend `pnpm --dir backend seed:living-social-data:dry-run` after adding the no-database demo seed baseline check for 50 local Web/iOS test users, profiles, and public requests.
+- Passed: backend `pnpm --dir backend test -- migration-integrity.spec.ts typeorm-launch-config.contract.spec.ts`
+- Passed: `bash -n scripts/release-preflight.sh`
+- Passed: backend `pnpm --dir backend test -- production-deploy-readiness.spec.ts migration-integrity.spec.ts typeorm-launch-config.contract.spec.ts` after adding the demo seed dry-run to release preflight.
 - Passed: backend `pnpm --dir backend test -- origin-allowlist.spec.ts`
 - Passed: backend `pnpm --dir backend test -- production-env-readiness.spec.ts origin-allowlist.spec.ts`
 - Passed: backend `pnpm --dir backend test -- production-env-readiness.spec.ts`
