@@ -80,6 +80,10 @@ import { summarizeSocialAgentToolCalls } from './social-agent-tool-execution-sum
 import { buildSocialAgentProfileContextPatch } from './social-agent-profile-context-patch';
 import { buildSocialAgentSocialRequestToolInput } from './social-agent-social-request-tool-input';
 import { buildSocialAgentRunNextResult } from './social-agent-run-next-result';
+import {
+  buildSocialAgentInboxEventPayload,
+  type SocialAgentInboxEventInput,
+} from './social-agent-inbox-event-payload';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -1547,32 +1551,16 @@ export class SocialAgentToolExecutorService {
   private async writeSocialAgentInboxEvent(
     task: AgentTask,
     eventType: string,
-    input: {
-      conversationId?: string | null;
-      messageId?: string | null;
-      fromUserId?: number | null;
-      contentPreview?: string;
-      metadata?: Record<string, unknown>;
-    },
+    input: SocialAgentInboxEventInput,
   ): Promise<void> {
-    if (!task.agentConnectionId) return;
-    const stable = input.messageId ?? input.conversationId ?? `task_${task.id}`;
-    await this.messages.createAgentInboxEvent({
-      agentConnectionId: task.agentConnectionId,
-      ownerUserId: task.ownerUserId,
+    const payload = buildSocialAgentInboxEventPayload({
+      task,
       eventType,
-      conversationId: input.conversationId ?? null,
-      messageId: input.messageId ?? null,
-      fromUserId: input.fromUserId ?? null,
-      contentPreview: this.taskMemory.preview(input.contentPreview),
-      unread: true,
-      dedupeKey: `${task.agentConnectionId}:${eventType}:${task.id}:${stable}`,
-      metadata: {
-        ...(input.metadata ?? {}),
-        agentTaskId: task.id,
-        eventType,
-      },
+      inboxEvent: input,
+      preview: (value) => this.taskMemory.preview(value),
     });
+    if (!payload) return;
+    await this.messages.createAgentInboxEvent(payload);
   }
 
   private async recordActionSideEffects(
