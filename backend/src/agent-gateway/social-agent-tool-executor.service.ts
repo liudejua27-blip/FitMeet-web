@@ -131,6 +131,14 @@ import {
   buildSocialAgentMessageMetadata,
   buildSocialAgentMessageSendOptions,
 } from './social-agent-message-options';
+import {
+  buildFallbackSocialAgentNextAction,
+  buildFallbackSocialAgentReplySummary,
+  buildSocialAgentNextActionPrompt,
+  buildSocialAgentReplySummaryPrompt,
+  normalizeSocialAgentNextActionDecision,
+  parseSocialAgentJsonObject,
+} from './social-agent-next-action-decision';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -2124,8 +2132,8 @@ export class SocialAgentToolExecutorService {
 
     const summary = await this.callDeepSeekJson(
       'summarize_reply',
-      this.replySummaryPrompt(task, messages),
-      () => this.fallbackReplySummary(messages),
+      buildSocialAgentReplySummaryPrompt(task, messages),
+      () => buildFallbackSocialAgentReplySummary(messages),
       task,
     );
     this.rememberConversation(task, {
@@ -2173,11 +2181,23 @@ export class SocialAgentToolExecutorService {
       : (loop.replySummary ?? {});
     const decision = await this.callDeepSeekJson(
       'decide_next_social_action',
-      this.nextActionPrompt(task, messages, summary),
-      () => this.fallbackNextAction(task, messages, summary),
+      buildSocialAgentNextActionPrompt(
+        task,
+        messages,
+        summary,
+        loop,
+        this.permissions.getAllowedActions(task.permissionMode),
+      ),
+      () => buildFallbackSocialAgentNextAction(task, messages, summary, loop),
       task,
     );
-    const safeDecision = this.normalizeNextActionDecision(task, decision);
+    const safeDecision = normalizeSocialAgentNextActionDecision(
+      task,
+      decision,
+      loop,
+      this.permissions,
+      (value) => this.normalizeToolName(value),
+    );
     this.rememberConversation(task, {
       nextActionDecision: safeDecision,
       sourceTool: SocialAgentToolName.DecideNextSocialAction,
@@ -2671,7 +2691,7 @@ export class SocialAgentToolExecutorService {
         choices?: { message?: { content?: string } }[];
       };
       const content = data.choices?.[0]?.message?.content ?? '';
-      const parsed = this.parseJsonObject(content);
+      const parsed = parseSocialAgentJsonObject(content);
       this.logModelCall({
         useCase,
         model,
@@ -2761,413 +2781,6 @@ export class SocialAgentToolExecutorService {
         ...(input.reason ? { reason: input.reason } : {}),
       }),
     );
-  }
-
-  private replySummaryPrompt(
-    task: AgentTask,
-    messages: AgentMessageRecord[],
-  ): string {
-    return JSON.stringify({
-      taskId: task.id,
-      goal: task.goal,
-      permissionMode: task.permissionMode,
-      messages: messages.map((message) => ({
-        id: message.id,
-        text: message.text,
-        senderId: message.senderId,
-        createdAt: message.createdAt,
-      })),
-      outputSchema: {
-        summary: 'one sentence Chinese summary',
-        intent:
-          'accept | ask_question | decline | payment | schedule | smalltalk | unknown',
-        sentiment: 'positive | neutral | negative',
-        needsReply: true,
-        keyFacts: ['time/place/request constraints'],
-      },
-    });
-  }
-
-  private nextActionPrompt(
-    task: AgentTask,
-    messages: AgentMessageRecord[],
-    summary: Record<string, unknown>,
-  ): string {
-    const loop = this.socialLoopMemory(task);
-    return JSON.stringify({
-      taskId: task.id,
-      goal: task.goal,
-      permissionMode: task.permissionMode,
-      allowedActions: this.permissions.getAllowedActions(task.permissionMode),
-      socialLoop: {
-        conversationId: loop.conversationId,
-        targetUserId: loop.targetUserId,
-        lastReceivedMessageId: loop.lastReceivedMessageId,
-      },
-      messages,
-      summary,
-      outputSchema: {
-        nextAction:
-          'reply_message | add_friend | invite_activity | offline_meeting | payment | stop',
-        action: 'permission action name',
-        toolName: 'reply_message or another executable tool name',
-        input: {},
-        reason: 'short Chinese reason',
-        confidence: 0.8,
-      },
-    });
-  }
-
-  private fallbackReplySummary(
-    messages: AgentMessageRecord[],
-  ): Record<string, unknown> {
-    const latestText = messages
-      .map((message) => message.text)
-      .filter(Boolean)
-      .join(' / ');
-    const intent = /(可以|好|行|约|见|ok|yes|sure)/i.test(latestText)
-      ? 'accept'
-      : /(多少钱|支付|付款|订金|费用|pay|price)/i.test(latestText)
-        ? 'payment'
-        : /(不|不了|改天|算了|decline|no)/i.test(latestText)
-          ? 'decline'
-          : /(哪里|几点|路线|怎么|吗|\?)/i.test(latestText)
-            ? 'ask_question'
-            : 'unknown';
-    return {
-      source: 'fallback',
-      purpose: 'summarize_reply',
-      summary: latestText
-        ? `对方回复：${this.preview(latestText)}`
-        : '对方有新回复。',
-      intent,
-      sentiment:
-        intent === 'decline'
-          ? 'negative'
-          : intent === 'accept'
-            ? 'positive'
-            : 'neutral',
-      needsReply: intent !== 'decline',
-      keyFacts: [this.preview(latestText)].filter(Boolean),
-    };
-  }
-
-  private fallbackNextAction(
-    task: AgentTask,
-    messages: AgentMessageRecord[],
-    summary: Record<string, unknown>,
-  ): Record<string, unknown> {
-    const loop = this.socialLoopMemory(task);
-    const latestText = messages
-      .map((message) => message.text)
-      .filter(Boolean)
-      .join(' / ');
-    const targetUserId =
-      loop.targetUserId ??
-      this.number(messages[messages.length - 1]?.senderId) ??
-      null;
-    const intent = this.string(summary.intent);
-    const acceptedActivityInput = targetUserId
-      ? this.meetLoopActivityInput(task, summary, latestText, targetUserId)
-      : null;
-
-    if (intent === 'decline') {
-      return {
-        source: 'fallback',
-        nextAction: 'stop',
-        action: null,
-        toolName: null,
-        input: {},
-        reason: '对方暂时拒绝，停止推进并等待新的上下文。',
-        confidence: 0.72,
-      };
-    }
-
-    if (
-      intent === 'accept' &&
-      targetUserId &&
-      task.permissionMode === AgentTaskPermissionMode.LimitedAuto
-    ) {
-      return {
-        source: 'fallback',
-        nextAction: 'offline_meeting',
-        action: SocialAgentAction.OfflineMeet,
-        toolName: SocialAgentToolName.OfflineMeeting,
-        input: acceptedActivityInput ?? { targetUserId },
-        reason: '对方接受邀约，Limited Auto Mode 可继续安排线下见面。',
-        confidence: 0.76,
-      };
-    }
-
-    if (
-      intent === 'accept' &&
-      targetUserId &&
-      task.permissionMode === AgentTaskPermissionMode.Confirm
-    ) {
-      return {
-        source: 'fallback',
-        nextAction: 'invite_activity',
-        action: SocialAgentAction.SendInvite,
-        toolName: SocialAgentToolName.InviteActivity,
-        input: acceptedActivityInput ?? { targetUserId },
-        reason: '对方接受邀约，Confirm Mode 可生成活动邀请。',
-        confidence: 0.72,
-      };
-    }
-
-    return {
-      source: 'fallback',
-      nextAction: 'reply_message',
-      action: SocialAgentAction.SendMessage,
-      toolName: SocialAgentToolName.ReplyMessage,
-      input: {
-        conversationId: loop.conversationId,
-        targetUserId,
-        text: this.fallbackReplyText(latestText, summary),
-      },
-      reason: '继续用低压力回复确认细节。',
-      confidence: 0.7,
-    };
-  }
-
-  private meetLoopActivityInput(
-    task: AgentTask,
-    summary: Record<string, unknown>,
-    latestText: string,
-    targetUserId: number,
-  ): Record<string, unknown> {
-    const activityType =
-      this.activityType(summary.activityType ?? task.input?.['activityType']) ??
-      ActivityType.Running;
-    return {
-      targetUserId,
-      title: task.title || '约练邀请',
-      description: this.string(summary.summary) ?? this.preview(latestText),
-      type: activityType,
-      locationName:
-        this.string(summary.locationName ?? summary.location) ??
-        '公共场所待确认',
-      city: sanitizeCity(summary.city ?? task.input?.['city']),
-      startTime: this.string(summary.startTime ?? summary.time),
-      durationMinutes: this.number(summary.durationMinutes) ?? 45,
-      proofRequired: true,
-      proofPolicy: ActivityProofPolicy.MutualOrProof,
-      icebreakerTasks: [
-        '到达后先确认彼此状态和活动节奏。',
-        '活动结束后互相确认是否完成。',
-      ],
-      allowPreciseLocation: false,
-      publicPlaceOnly: true,
-      noPreciseLocation: true,
-      meetLoopStage: 'activity_confirmation',
-      lifeGraphUpdatePreview:
-        '完成后我会更新你的近期活动节奏、偏好边界和低压力社交信号。',
-      trustScoreUpdatePreview:
-        '完成与评价会写入 trust score，用来提升后续推荐可信度。',
-    };
-  }
-
-  private normalizeNextActionDecision(
-    task: AgentTask,
-    raw: Record<string, unknown>,
-  ): Record<string, unknown> {
-    const loop = this.socialLoopMemory(task);
-    const rawNextAction =
-      this.string(raw.nextAction ?? raw.actionType) ?? 'reply_message';
-    let toolName =
-      this.normalizeToolName(raw.toolName) ??
-      this.toolForNextAction(rawNextAction);
-    if (!toolName) toolName = SocialAgentToolName.ReplyMessage;
-
-    let input = this.isRecord(raw.input) ? { ...raw.input } : {};
-    if (toolName === SocialAgentToolName.ReplyMessage) {
-      input = {
-        conversationId:
-          this.string(input.conversationId) ?? loop.conversationId,
-        targetUserId:
-          this.number(input.targetUserId) ?? loop.targetUserId ?? null,
-        text:
-          this.string(input.text ?? raw.replyText ?? raw.message) ??
-          this.fallbackReplyText('', raw),
-        ...input,
-      };
-    }
-    if (
-      [
-        SocialAgentToolName.AddFriend,
-        SocialAgentToolName.InviteActivity,
-        SocialAgentToolName.OfflineMeeting,
-        SocialAgentToolName.Payment,
-      ].includes(toolName)
-    ) {
-      const targetUserId =
-        this.number(input.targetUserId) ?? loop.targetUserId ?? null;
-      input = {
-        targetUserId,
-        ...input,
-      };
-      if (
-        targetUserId &&
-        [
-          SocialAgentToolName.InviteActivity,
-          SocialAgentToolName.OfflineMeeting,
-        ].includes(toolName)
-      ) {
-        input = {
-          ...this.meetLoopActivityInput(
-            task,
-            raw,
-            this.string(raw.reason) ?? '',
-            targetUserId,
-          ),
-          ...input,
-          targetUserId,
-          allowPreciseLocation: false,
-          publicPlaceOnly: true,
-          noPreciseLocation: true,
-        };
-      }
-    }
-    if (
-      toolName === SocialAgentToolName.Payment &&
-      !this.positiveAmount(input.amount)
-    ) {
-      toolName = SocialAgentToolName.ReplyMessage;
-      input = {
-        conversationId: loop.conversationId,
-        targetUserId: loop.targetUserId ?? null,
-        text: '我可以继续帮你处理支付意图。你想确认一下具体金额吗？',
-      };
-    }
-
-    const permissionAction = getSocialAgentPermissionActionForTool(
-      task.permissionMode,
-      toolName,
-    );
-    if (
-      permissionAction &&
-      !this.permissions.canExecute(task.permissionMode, permissionAction)
-    ) {
-      const fallbackTool = this.permissions.canExecute(
-        task.permissionMode,
-        SocialAgentAction.SendMessage,
-      )
-        ? SocialAgentToolName.ReplyMessage
-        : null;
-      if (!fallbackTool) {
-        return {
-          source: this.string(raw.source) ?? 'normalized',
-          nextAction: 'stop',
-          action: null,
-          toolName: null,
-          input: {},
-          reason: `Permission mode ${task.permissionMode} blocks ${toolName}`,
-          confidence: this.number(raw.confidence) ?? 0.5,
-        };
-      }
-      toolName = fallbackTool;
-      input = {
-        conversationId: loop.conversationId,
-        targetUserId: loop.targetUserId ?? null,
-        text: this.fallbackReplyText('', raw),
-      };
-    }
-
-    const nextAction =
-      rawNextAction === 'stop' ? 'stop' : this.nextActionForTool(toolName);
-    if (nextAction === 'stop') {
-      return {
-        source: this.string(raw.source) ?? 'normalized',
-        nextAction: 'stop',
-        action: null,
-        toolName: null,
-        input: {},
-        reason:
-          this.string(raw.reason) ?? 'No further social action is needed.',
-        confidence: this.number(raw.confidence) ?? 0.6,
-      };
-    }
-
-    return {
-      ...raw,
-      nextAction,
-      action: getSocialAgentPermissionActionForTool(
-        task.permissionMode,
-        toolName,
-      ),
-      toolName,
-      input,
-      reason: this.string(raw.reason) ?? `Execute ${toolName}`,
-      confidence: this.number(raw.confidence) ?? 0.65,
-    };
-  }
-
-  private toolForNextAction(value: string): SocialAgentToolName | null {
-    switch (value) {
-      case 'reply_message':
-      case 'send_message':
-      case 'send_message_to_candidate':
-        return SocialAgentToolName.ReplyMessage;
-      case 'add_friend':
-      case 'connect_candidate':
-        return SocialAgentToolName.AddFriend;
-      case 'invite_activity':
-      case 'send_invite':
-        return SocialAgentToolName.InviteActivity;
-      case 'offline_meeting':
-      case 'offline_meet':
-        return SocialAgentToolName.OfflineMeeting;
-      case 'payment':
-        return SocialAgentToolName.Payment;
-      case 'stop':
-        return null;
-      default:
-        return this.normalizeToolName(value);
-    }
-  }
-
-  private nextActionForTool(toolName: SocialAgentToolName | null): string {
-    switch (toolName) {
-      case SocialAgentToolName.ReplyMessage:
-      case SocialAgentToolName.SendMessage:
-      case SocialAgentToolName.SendMessageToCandidate:
-        return 'reply_message';
-      case SocialAgentToolName.AddFriend:
-      case SocialAgentToolName.ConnectCandidate:
-        return 'add_friend';
-      case SocialAgentToolName.InviteActivity:
-        return 'invite_activity';
-      case SocialAgentToolName.OfflineMeeting:
-        return 'offline_meeting';
-      case SocialAgentToolName.Payment:
-        return 'payment';
-      default:
-        return 'stop';
-    }
-  }
-
-  private fallbackReplyText(
-    latestText: string,
-    summary: Record<string, unknown>,
-  ): string {
-    const summaryText =
-      this.string(summary.summary) ?? this.preview(latestText);
-    if (/(几点|时间|路线|哪里|地点)/i.test(latestText)) {
-      return '可以，我们先把时间、地点和路线确认清楚。我倾向公开场地，节奏按你舒服的来。';
-    }
-    if (summaryText) {
-      return `收到，我理解是：${summaryText}。我们可以继续按这个方向推进。`;
-    }
-    return '收到，我会继续帮你低压力推进这次约练。';
-  }
-
-  private parseJsonObject(text: string): Record<string, unknown> {
-    const trimmed = text
-      .trim()
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```$/i, '');
-    const parsed = JSON.parse(trimmed) as unknown;
-    return this.isRecord(parsed) ? parsed : {};
   }
 
   private preview(value: unknown, max = 160): string {
