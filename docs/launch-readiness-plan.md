@@ -24,6 +24,7 @@ This document is the launch control plan for FitMeet Web and FitMeetAlpha iOS. I
 - API safety layer: global `ValidationPipe`, global `HttpExceptionFilter`, global `LoggingInterceptor`, Helmet, compression, CORS allowlist, and `@nestjs/throttler`.
 - HTTP and Socket.IO origin allowlists are resolved through the same `CORS_ORIGIN`/`ALLOWED_ORIGINS` helper; production Socket.IO gateways require explicit origins.
 - Database strategy: migration-first. `DB_SYNCHRONIZE=false` is the default; schema changes must land as TypeORM migrations.
+- Launch guard: backend tests now verify the Nest runtime TypeORM config and CLI `data-source.ts` use the same glob-based entity/migration discovery, keep `synchronize` off by default, and run migrations transactionally per file.
 
 ## Web API Call Flow
 
@@ -82,7 +83,7 @@ Core launch endpoints currently covered:
 
 - TypeORM migrations exist and can bootstrap from an empty Postgres database, starting with `1700000000000-InitialSchemaBaseline.ts`.
 - Recent launch-critical schema areas already have migrations: user social profile, profile privacy, Social Agent runtime/tasks/events/timeline, long-term memory, Life Graph, waitlist, and FitMeet Agent runtime.
-- Remaining schema audit item: verify every currently registered entity has an equivalent migration in a disposable empty Postgres database, then compare `typeorm schema:log` output. This should be done before production migration approval.
+- Remaining schema audit item: verify every currently registered entity has an equivalent migration in a disposable empty Postgres database, then compare `typeorm schema:log` output. Static tests now guard TypeORM discovery/config drift, but this live empty-database diff is still required before production migration approval.
 - MongoDB collections are created by Mongoose models and are not migration-managed. Before launch, indexes for high-volume message/realtime reads should be confirmed against the deployed Mongo database.
 - Redis has no schema migration, but production must enforce password/TLS/network isolation outside app code.
 
@@ -252,6 +253,7 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- auth.service.spec.ts production-env-readiness.spec.ts`
 - Passed: backend `pnpm --dir backend test -- uploads.service.spec.ts`
 - Passed: backend `pnpm --dir backend test -- uploads.controller.spec.ts`
+- Passed: backend `pnpm --dir backend test -- typeorm-launch-config.contract.spec.ts`
 - Passed: backend `pnpm --dir backend lint`
 - Passed: backend `pnpm --dir backend build`
 - Passed: landing `pnpm --dir fitmeet-landing test:source`
