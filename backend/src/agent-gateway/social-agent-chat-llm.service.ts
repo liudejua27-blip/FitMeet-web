@@ -27,6 +27,11 @@ import type {
   SocialAgentIntentType,
 } from './social-agent-intent-router.service';
 import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
+import {
+  buildSocialAgentProfileExtractionMessages,
+  parseSocialAgentProfileExtractionContent,
+  profileFieldsFromRecord,
+} from './social-agent-profile-extraction.presenter';
 
 type LongTermMemorySnapshot = Awaited<
   ReturnType<SocialAgentLongTermMemoryService['readSnapshot']>
@@ -150,34 +155,13 @@ export class SocialAgentChatLlmService {
         intent: 'profile_enrichment',
         fallbackTemperature: 0.15,
         responseFormat: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: [
-              'You extract FitMeet user profile facts.',
-              'Return only one valid JSON object.',
-              'Allowed keys: gender, age, heightCm, weightKg, city, school, area, mbti, zodiac, personality, targetPreference, activityType, availableTimes, boundaries.',
-              'Use strings or string arrays only. Do not invent missing facts.',
-            ].join('\n'),
-          },
-          {
-            role: 'user',
-            content: JSON.stringify({
-              taskId: task.id,
-              message: sourceMessage,
-              outputSchema: {
-                city: 'Qingdao',
-                school: 'Qingdao University',
-                mbti: 'INFP',
-                targetPreference: 'same-school women',
-              },
-            }),
-          },
-        ],
+        messages: buildSocialAgentProfileExtractionMessages(
+          task,
+          sourceMessage,
+        ),
       });
       if (!content) return {};
-      const parsed = this.parseJsonObject(content);
-      return this.profileFieldsFromRecord(parsed);
+      return parseSocialAgentProfileExtractionContent(content);
     } catch {
       return {};
     }
@@ -186,21 +170,7 @@ export class SocialAgentChatLlmService {
   profileFieldsFromRecord(
     value: Record<string, unknown>,
   ): ExtractedProfileFields {
-    const fields: ExtractedProfileFields = {};
-    for (const [key, raw] of Object.entries(value)) {
-      if (typeof raw === 'string') {
-        const text = cleanDisplayText(raw, '');
-        if (text) fields[key] = text;
-        continue;
-      }
-      if (Array.isArray(raw) && raw.every((item) => typeof item === 'string')) {
-        const list = raw
-          .map((item) => cleanDisplayText(item, ''))
-          .filter(Boolean);
-        if (list.length > 0) fields[key] = list;
-      }
-    }
-    return fields;
+    return profileFieldsFromRecord(value);
   }
 
   private async callDeepSeekForDirectReply(input: {
@@ -322,18 +292,9 @@ export class SocialAgentChatLlmService {
     });
   }
 
-  private parseJsonObject(content: string): Record<string, unknown> {
-    const parsed = JSON.parse(content) as unknown;
-    return this.isRecord(parsed) ? parsed : {};
-  }
-
   private memoryContextRecord(
     memoryContext: SocialAgentMemoryContext | null,
   ): Record<string, unknown> {
     return (memoryContext ?? {}) as unknown as Record<string, unknown>;
-  }
-
-  private isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 }
