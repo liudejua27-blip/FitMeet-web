@@ -42,6 +42,13 @@ export enum CandidateMatchLevel {
  * every refresh or "try another" action.
  */
 @Entity('social_request_candidates')
+@Index(
+  'uniq_src_request_candidate_user',
+  ['socialRequestId', 'candidateUserId'],
+  {
+    unique: true,
+  },
+)
 @Index(['socialRequestId', 'status'])
 @Index(['socialRequestId', 'score'])
 export class SocialRequestCandidate {

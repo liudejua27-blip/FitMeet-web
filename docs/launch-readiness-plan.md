@@ -83,13 +83,14 @@ Core launch endpoints currently covered:
 
 - TypeORM migrations exist and can bootstrap from an empty Postgres database, starting with `1700000000000-InitialSchemaBaseline.ts`.
 - Recent launch-critical schema areas already have migrations: user social profile, profile privacy, Social Agent runtime/tasks/events/timeline, long-term memory, Life Graph, waitlist, and FitMeet Agent runtime.
+- `1774400000000-AddSocialRequestCandidateUniqueness.ts` adds the `(socialRequestId, candidateUserId)` unique index for `social_request_candidates`, with a non-destructive duplicate preflight so retrying Agent searches cannot create duplicate candidate rows.
 - Remaining schema audit item: verify every currently registered entity has an equivalent migration in a disposable empty Postgres database, then compare `typeorm schema:log` output. Static tests now guard TypeORM discovery/config drift, but this live empty-database diff is still required before production migration approval.
 - MongoDB collections are created by Mongoose models and are not migration-managed. Before launch, indexes for high-volume message/realtime reads should be confirmed against the deployed Mongo database.
 - Redis has no schema migration, but production must enforce password/TLS/network isolation outside app code.
 
 ## Required Or Candidate Migrations
 
-No new destructive migration is required by this document batch.
+No new destructive migration is required by this document batch. The latest migration adds a unique index for Social Agent candidate rows and intentionally fails before index creation if duplicate rows already exist.
 
 Before production cutover, run these checks:
 
@@ -115,12 +116,22 @@ NODE_ENV=production pnpm check:prod-env -- ../.env.production
 NODE_ENV=production pnpm migration:run:prod
 ```
 
+Duplicate candidate preflight, useful before applying the latest migration to staging/production:
+
+```sql
+SELECT "socialRequestId", "candidateUserId", COUNT(*) AS duplicate_count
+FROM "social_request_candidates"
+GROUP BY "socialRequestId", "candidateUserId"
+HAVING COUNT(*) > 1;
+```
+
 Rollback note: TypeORM `down()` methods exist for most migrations, but production rollback should prefer restoring from backup or applying a forward repair migration after impact review. Do not run destructive rollback commands against production without a database snapshot and a written rollback owner.
 
 ## Risk List
 
 - Highest backend risk: large Social Agent services remain complex, especially `social-agent-tool-executor.service.ts` and `social-agent-candidate-pool.service.ts`; the tool executor now has enum-to-dispatch coverage and TypeScript exhaustiveness guards so newly added tools cannot silently miss a real execution branch.
 - Candidate pool authorization risk has been reduced: Social Agent candidate searches now require `socialRequestId` to belong to the authenticated owner before using its query context or persisting candidate rows.
+- Candidate persistence idempotency risk has been reduced with a database-level unique index for `(socialRequestId, candidateUserId)`; production must inspect duplicates before applying the migration if historical data exists.
 - Social Agent chat entrypoint risk has been reduced to thin facade services; profile extraction prompt/normalization has been split out of the LLM service; timeline message restoration still needs continued focused tests because it is shared by Web and iOS session restore.
 - DB risk: production schema drift may exist if older deployments used `synchronize`; verify migration status against staging before production.
 - Contract risk: Web legacy APIs outside `fitmeet-core.openapi.ts` can drift because only the core launch subset is contract-tested.
@@ -254,6 +265,7 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- social-agent-profile-extraction.presenter.spec.ts social-agent-chat-llm.service.spec.ts`
 - Passed: backend `pnpm --dir backend test -- social-agent-tool-dispatch.contract.spec.ts social-agent-tool-executor.service.spec.ts`
 - Passed: backend `pnpm --dir backend test -- social-agent-candidate-pool.service.spec.ts social-agent-candidate-pool-query.spec.ts social-agent-candidate-pool-debug.spec.ts`
+- Passed: backend `pnpm --dir backend test -- migration-integrity.spec.ts`
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts`
 - Passed: backend `pnpm --dir backend test -- auth.service.spec.ts`
 - Passed: backend `pnpm --dir backend test -- auth.service.spec.ts production-env-readiness.spec.ts`
