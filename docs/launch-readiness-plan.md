@@ -368,3 +368,4 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: landing `pnpm --dir fitmeet-landing lint`
 - Passed: landing `pnpm --dir fitmeet-landing test`
 - Passed: landing `pnpm --dir fitmeet-landing test` after adding rendered manifest checks that the public landing build does not depend on Next image optimization, runtime headers, rewrites, or data routes.
+- Passed: landing `pnpm --dir fitmeet-landing test`; current landing baseline runs source smoke tests, `next build`, and rendered-output smoke tests rather than a no-op placeholder.
