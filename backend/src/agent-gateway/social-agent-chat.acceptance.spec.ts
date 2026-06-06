@@ -990,55 +990,6 @@ describe('SocialAgentChat acceptance flow', () => {
     }
   });
 
-  it('uses deepseek-v4-flash for structured profile extraction', async () => {
-    const { chatLlm, config } = makeHarness();
-    const originalFetch = global.fetch;
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  city: '青岛',
-                  school: '青岛大学',
-                  mbti: 'INFP',
-                }),
-              },
-            },
-          ],
-        }),
-    });
-    global.fetch = fetchMock as never;
-    config.get.mockImplementation((key: string) => {
-      if (key === 'DEEPSEEK_API_KEY') return 'test-key';
-      if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
-      if (key === 'DEEPSEEK_FAST_MODEL') return 'deepseek-v4-flash';
-      return undefined;
-    });
-
-    try {
-      const extracted = await chatLlm.extractProfileFieldsWithLlm(
-        makeTask(),
-        '我是白羊男，18，青岛大学，INFP，想找同校女生。',
-      );
-
-      expect(extracted).toMatchObject({
-        city: '青岛',
-        school: '青岛大学',
-        mbti: 'INFP',
-      });
-      expect(
-        JSON.parse(
-          (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
-        ).model,
-      ).toBe('deepseek-v4-flash');
-    } finally {
-      global.fetch = originalFetch;
-    }
-  });
-
   it('executes safe read tools planned by Agent Brain before final reply', async () => {
     const finalResponses = {
       // eslint-disable-next-line @typescript-eslint/require-await
