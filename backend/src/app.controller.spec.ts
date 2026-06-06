@@ -37,6 +37,7 @@ const IOS_APP_REQUIRED_PATHS = {
   '/feed': ['get', 'post'],
   '/feed/interactions': 'get',
   '/social-agent/chat/session': 'get',
+  '/social-agent/chat/tasks/{taskId}/session': 'get',
   '/social-agent/chat/messages': 'post',
   '/social-agent/chat/route-message': 'post',
   '/social-agent/chat/tasks/{taskId}/messages': 'post',
@@ -377,6 +378,8 @@ describe('AppController', () => {
       const sendCandidate =
         contract.paths['/social-agent/chat/tasks/{taskId}/send-message'].post
           .requestBody.content['application/json'].schema;
+      const taskSession =
+        contract.paths['/social-agent/chat/tasks/{taskId}/session'].get;
 
       for (const route of [
         '/social-agent/chat/messages',
@@ -419,6 +422,19 @@ describe('AppController', () => {
             properties: { message: { type: 'string', minLength: 1 } },
           },
         ],
+      });
+      expect(taskSession.parameters).toEqual([
+        {
+          name: 'taskId',
+          in: 'path',
+          required: true,
+          schema: { type: 'integer' },
+        },
+      ]);
+      expect(
+        taskSession.responses['200'].content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/SocialAgentSessionSnapshot',
       });
     });
   });
