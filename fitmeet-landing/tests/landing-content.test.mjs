@@ -82,6 +82,18 @@ test('home route composes the public landing experience', async () => {
   assert.doesNotMatch(page, /No landing tests configured|TODO|Coming soon/i);
 });
 
+test('package test script runs source, build, and rendered smoke checks', async () => {
+  const pkg = JSON.parse(await readSource('package.json'));
+
+  assert.equal(pkg.scripts['test:source'], 'node --test tests/*.test.mjs');
+  assert.equal(pkg.scripts['test:rendered'], 'node --test tests/*.rendered.mjs');
+  assert.match(
+    pkg.scripts.test,
+    /pnpm test:source && pnpm build && pnpm test:rendered/,
+  );
+  assert.doesNotMatch(pkg.scripts.test, /echo|true|exit 0|no-op/i);
+});
+
 test('layout exposes FitMeet metadata and global chrome', async () => {
   const layout = await readSource('app/layout.tsx');
 

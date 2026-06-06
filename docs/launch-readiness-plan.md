@@ -245,3 +245,6 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- social-agent-chat-timeline-activity.presenter.spec.ts social-agent-chat-timeline.presenter.spec.ts social-agent-chat-facade-boundary.spec.ts`
 - Passed: backend `pnpm --dir backend lint`
 - Passed: backend `pnpm --dir backend build`
+- Passed: landing `pnpm --dir fitmeet-landing test:source`
+- Passed: landing `pnpm --dir fitmeet-landing lint`
+- Passed: landing `pnpm --dir fitmeet-landing test`
