@@ -37,6 +37,10 @@ const chatLlmPromptsPath = path.resolve(
   __dirname,
   'social-agent-chat-llm-prompts.ts',
 );
+const chatFinalResponsePresenterPath = path.resolve(
+  __dirname,
+  'social-agent-chat-final-response.presenter.ts',
+);
 const runPresenterPath = path.resolve(
   __dirname,
   'social-agent-chat-run.presenter.ts',
@@ -59,6 +63,10 @@ describe('SocialAgentChatService facade boundary', () => {
   );
   const chatLlmServiceSource = fs.readFileSync(chatLlmServicePath, 'utf8');
   const chatLlmPromptsSource = fs.readFileSync(chatLlmPromptsPath, 'utf8');
+  const chatFinalResponsePresenterSource = fs.readFileSync(
+    chatFinalResponsePresenterPath,
+    'utf8',
+  );
   const runPresenterSource = fs.readFileSync(runPresenterPath, 'utf8');
   const runStorePresenterSource = fs.readFileSync(
     runStorePresenterPath,
@@ -115,7 +123,7 @@ describe('SocialAgentChatService facade boundary', () => {
 
   it('keeps LLM orchestration split from prompt assembly', () => {
     expect(chatLlmServiceSource.trim().split('\n').length).toBeLessThanOrEqual(
-      240,
+      190,
     );
     expect(chatLlmServiceSource).toContain(
       'buildSocialAgentDirectReplyMessages',
@@ -132,6 +140,30 @@ describe('SocialAgentChatService facade boundary', () => {
     );
     expect(chatLlmPromptsSource).toContain(
       'readSocialAgentConversationBrainPlannedTools',
+    );
+  });
+
+  it('keeps Final Response input assembly split from LLM transport', () => {
+    expect(chatLlmServiceSource).toContain(
+      'buildSocialAgentDirectReplyFinalResponseInput',
+    );
+    expect(chatLlmServiceSource).toContain(
+      'buildSocialAgentAgentBrainFinalResponseInput',
+    );
+    expect(chatLlmServiceSource).not.toContain(
+      'socialAgentFinalResponseSafetyRules',
+    );
+    expect(chatLlmServiceSource).not.toContain(
+      'readSocialAgentCurrentAgentState',
+    );
+    expect(
+      chatFinalResponsePresenterSource.trim().split('\n').length,
+    ).toBeLessThanOrEqual(120);
+    expect(chatFinalResponsePresenterSource).toContain(
+      'buildSocialAgentDirectReplyFinalResponseInput',
+    );
+    expect(chatFinalResponsePresenterSource).toContain(
+      'buildSocialAgentAgentBrainFinalResponseInput',
     );
   });
 
