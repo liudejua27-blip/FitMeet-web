@@ -126,6 +126,24 @@ describe('SocialAgentIntentRouterService', () => {
     expect(result.confidence).toBeGreaterThanOrEqual(0.9);
   });
 
+  it('routes public-place safety constrained matching as search, not action execution', async () => {
+    const router = makeRouter();
+
+    const result = await router.route({
+      message:
+        '我想找青岛周末一起喝咖啡健身交流的人，只要公开地点，先不要发送消息',
+    });
+
+    expect(result).toMatchObject({
+      intent: 'social_search',
+      shouldSearch: true,
+      shouldExecuteAction: false,
+      replyStrategy: 'search_candidates',
+      source: 'rules',
+    });
+    expect(result.confidence).toBeGreaterThanOrEqual(0.9);
+  });
+
   it('keeps explicit no-approval candidate list requests on social search', async () => {
     const router = makeRouter();
 

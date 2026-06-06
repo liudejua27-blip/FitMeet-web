@@ -117,6 +117,37 @@ describe('SocialAgentRouteSearchTurnService', () => {
     expect(queueInitialSearchForTask).not.toHaveBeenCalled();
   });
 
+  it('queues initial social searches with the user message as the search goal', async () => {
+    const { service } = makeHarness();
+    const task = makeTask();
+    const queueInitialSearchForTask = jest
+      .fn()
+      .mockResolvedValue({ status: 'queued', taskId: 101 });
+    const replanAndRefresh = jest.fn();
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute(),
+      message: '帮我找青岛附近的跑步搭子',
+      replanAndRefresh,
+      queueInitialSearchForTask,
+      buildMemoryContext: jest.fn(),
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      queuedRun: { status: 'queued', taskId: 101 },
+      runMode: 'initial',
+    });
+    expect(queueInitialSearchForTask).toHaveBeenCalledWith(
+      7,
+      task,
+      '帮我找青岛附近的跑步搭子',
+    );
+    expect(replanAndRefresh).not.toHaveBeenCalled();
+  });
+
   it('queues a follow-up replan when candidate follow-up has search context', async () => {
     const { service } = makeHarness();
     const task = makeTask({

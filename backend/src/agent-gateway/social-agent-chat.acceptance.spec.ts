@@ -1139,23 +1139,6 @@ describe('SocialAgentChat acceptance flow', () => {
     expect(result.assistantMessage).toContain('已记住这条安全边界');
   });
 
-  it('routes search requests with safety constraints to candidate search', async () => {
-    const { service } = makeHarness();
-
-    const result = await service.routeMessage(7, {
-      message:
-        '我想找青岛周末一起喝咖啡健身交流的人，只要公开地点，先不要发送消息',
-    });
-
-    expect(result).toMatchObject({
-      intent: 'social_search',
-      action: 'queue_search',
-      shouldQueueRun: true,
-      runMode: 'initial',
-    });
-    expect(result.queuedRun?.taskId).toBe(result.taskId);
-  });
-
   it('routes no-send candidate searches without creating send-message approvals', async () => {
     const { service, approvals, executor } = makeHarness();
 
@@ -1177,23 +1160,6 @@ describe('SocialAgentChat acceptance flow', () => {
       SocialAgentToolName.SendMessage,
       expect.any(Object),
     );
-  });
-
-  it('routes social searches to the async search path', async () => {
-    const { service } = makeHarness();
-
-    const result = await service.routeMessage(7, {
-      message: '帮我找青岛附近的跑步搭子',
-    });
-
-    expect(result).toMatchObject({
-      intent: 'social_search',
-      action: 'queue_search',
-      shouldQueueRun: true,
-      runMode: 'initial',
-      taskId: 101,
-      queuedRun: expect.objectContaining({ status: 'queued', taskId: 101 }),
-    });
   });
 
   it('routes gendered search requests as searches rather than boundaries', async () => {
