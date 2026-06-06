@@ -59,7 +59,17 @@ async function main() {
     return;
   }
 
-  await api('/auth/profile', { token: actor.accessToken });
+  const profile = await api<JsonObject>('/auth/profile', {
+    token: actor.accessToken,
+  });
+  const profileId = optionalNumber(profile.id);
+  if (actor.userId && profileId !== undefined) {
+    expectEqual(
+      profileId,
+      actor.userId,
+      'profile id should match login user id',
+    );
+  }
   ok('Profile restore succeeds');
 
   if (actor.refreshToken) {
@@ -101,14 +111,32 @@ async function runMessageSmoke(actor: SmokeActor) {
     'conversation.conversationId',
   );
 
-  await api(
+  const messageText = `FitMeet App smoke message ${runId}`;
+  const sentMessage = await api<JsonObject>(
     `/messages/conversations/${encodeURIComponent(conversationId)}/send`,
     {
-      body: { text: `FitMeet App smoke message ${runId}` },
+      body: { text: messageText },
       token: actor.accessToken,
     },
   );
-  ok('Real message start/send succeeds');
+  expectStringContains(
+    sentMessage.text,
+    runId,
+    'sent message text should include smoke run id',
+  );
+
+  const messages = await api<unknown>(
+    `/messages/conversations/${encodeURIComponent(conversationId)}`,
+    { token: actor.accessToken },
+  );
+  const history = mustArray(messages, 'conversation history');
+  const foundMessage = history.some((item) =>
+    optionalString(objectOrNull(item)?.text)?.includes(runId),
+  );
+  if (!foundMessage) {
+    throw new Error('Sent smoke message was not found in conversation history');
+  }
+  ok('Real message start/send/read-back succeeds');
 }
 
 async function runMutationSmoke(actor: SmokeActor) {
@@ -121,14 +149,49 @@ async function runMutationSmoke(actor: SmokeActor) {
   const uploadedUrl = mustString(upload.url, 'upload.url');
   ok('Avatar image upload succeeds');
 
-  await api('/users/profile', {
+  const updatedProfile = await api<JsonObject>('/users/profile', {
     body: { avatar: uploadedUrl },
     method: 'PUT',
     token: actor.accessToken,
   });
+  expectEqual(
+    optionalString(updatedProfile.avatar),
+    uploadedUrl,
+    'updated profile avatar should match upload URL',
+  );
   ok('Uploaded avatar can be saved to profile');
 
-  await api('/feed', {
+  if (actor.refreshToken) {
+    const refreshResult = await api<JsonObject>('/auth/refresh', {
+      body: { refreshToken: actor.refreshToken },
+    });
+    const refreshedAccessToken = mustString(
+      refreshResult.access_token,
+      'refresh.access_token',
+    );
+    const restoredProfile = await api<JsonObject>('/auth/profile', {
+      token: refreshedAccessToken,
+    });
+    if (actor.userId) {
+      expectEqual(
+        optionalNumber(restoredProfile.id),
+        actor.userId,
+        'restored profile id should match login user id',
+      );
+    }
+    expectEqual(
+      optionalString(restoredProfile.avatar),
+      uploadedUrl,
+      'restored profile avatar should match upload URL',
+    );
+    ok('Refresh token restores profile with uploaded avatar');
+  } else {
+    skip(
+      'Refresh/profile restore skipped because login did not return refresh_token',
+    );
+  }
+
+  const post = await api<JsonObject>('/feed', {
     body: {
       type: 'log',
       sport: 'fitness',
@@ -144,7 +207,23 @@ async function runMutationSmoke(actor: SmokeActor) {
     },
     token: actor.accessToken,
   });
-  ok('Feed moment publish succeeds');
+  const postId = optionalNumber(post.id);
+  const feedPage = await api<JsonObject>('/feed?category=&page=1&limit=50');
+  const feedData = mustArray(feedPage.data, 'feed.data');
+  const foundPost = feedData.some((item) => {
+    const post = objectOrNull(item);
+    return (
+      (postId !== undefined && optionalNumber(post?.id) === postId) ||
+      optionalString(post?.text)?.includes(runId) ||
+      optionalString(post?.title)?.includes(runId)
+    );
+  });
+  if (!foundPost) {
+    throw new Error(
+      'Published smoke feed post was not found in /feed read-back',
+    );
+  }
+  ok('Feed moment publish/read-back succeeds');
 
   await api('/social-agent/chat/route-message', {
     body: { message: `FitMeet App smoke route ${runId}` },
@@ -260,6 +339,7 @@ function assertCoreContract(contract: unknown) {
     '/feed': ['get', 'post'],
     '/feed/interactions': ['get'],
     '/messages/start': ['post'],
+    '/messages/conversations/{conversationId}': ['get'],
     '/messages/conversations/{conversationId}/send': ['post'],
     '/social-agent/chat/session': ['get'],
     '/social-agent/chat/messages': ['post'],
@@ -353,11 +433,49 @@ function mustObject(value: unknown, label: string): JsonObject {
   return object;
 }
 
+function mustArray(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
+  return value;
+}
+
 function mustString(value: unknown, label: string): string {
   if (typeof value !== 'string' || value.length === 0) {
     throw new Error(`${label} must be a non-empty string`);
   }
   return value;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function expectEqual<T>(actual: T, expected: T, label: string) {
+  if (actual !== expected) {
+    throw new Error(
+      `${label}: expected ${String(expected)}, actual ${String(actual)}`,
+    );
+  }
+}
+
+function expectStringContains(
+  actual: unknown,
+  expected: string,
+  label: string,
+) {
+  if (typeof actual !== 'string' || !actual.includes(expected)) {
+    throw new Error(
+      `${label}: expected "${String(actual)}" to include "${expected}"`,
+    );
+  }
 }
 
 function ok(message: string) {
