@@ -1098,20 +1098,6 @@ function UserFacingGenericCard({
       {cardDataText(card, 'lifeGraphUpdatePreview') ? (
         <p>{cardDataText(card, 'lifeGraphUpdatePreview')}</p>
       ) : null}
-      {false ? (
-        <AgentNaturalConfirmationCard
-          confirmation={{
-            id: `card-${card.id}`,
-            title: '我会先等你确认',
-            body:
-              cardDataText(card, 'suggestedOpener') ||
-              cardDataText(card, 'safetyBoundary') ||
-              '这个动作现在只是草稿。你确认之前，我不会发送消息、加好友、创建活动或共享位置。',
-            primaryLabel: '确认继续',
-            secondaryLabels: ['再自然一点', '重新生成', '取消'],
-          }}
-        />
-      ) : null}
       {card.actions.length ? (
         <div className="agent-card-actions">
           {card.actions.slice(0, 5).map((action) => (
@@ -1219,18 +1205,6 @@ function UserFacingCandidateCard({
           <span>建议开场方式</span>
           {suggestedOpener}
         </blockquote>
-      ) : null}
-      {false ? (
-        <AgentNaturalConfirmationCard
-          confirmation={{
-            id: `opener-${card.id}`,
-            title: '这条消息会发送给对方。我先帮你写好了，你确认后我再发。',
-            body:
-              suggestedOpener || '我会保持轻松、礼貌、低压力的语气，并提醒第一次见面选择公共场所。',
-            primaryLabel: '确认发送',
-            secondaryLabels: ['语气更自然', '更简短', '重新生成', '取消'],
-          }}
-        />
       ) : null}
       {card.actions.length ? (
         <div className="agent-card-actions">

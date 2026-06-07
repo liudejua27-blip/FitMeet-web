@@ -176,7 +176,7 @@ export class SocialAgentFinalResponseService {
       this.config?.get<string>('AGENT_FINAL_RESPONSE_MODEL') ||
       this.config?.get<string>('DEEPSEEK_CHAT_MODEL') ||
       this.chatCompatibleLegacyModel() ||
-      'deepseek-chat'
+      'deepseek-v4-pro'
     );
   }
 

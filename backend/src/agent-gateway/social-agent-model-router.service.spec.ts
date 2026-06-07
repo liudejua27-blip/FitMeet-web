@@ -10,22 +10,22 @@ function makeConfig(
 }
 
 describe('SocialAgentModelRouterService', () => {
-  it('routes natural conversation use cases to deepseek-chat', () => {
+  it('routes natural conversation use cases to deepseek-v4-pro', () => {
     const service = new SocialAgentModelRouterService(
       makeConfig({
-        DEEPSEEK_CHAT_MODEL: 'deepseek-chat',
+        DEEPSEEK_CHAT_MODEL: 'deepseek-v4-pro',
         DEEPSEEK_FAST_MODEL: 'deepseek-v4-flash',
       }),
     );
 
-    expect(service.getModel('casual_chat')).toBe('deepseek-chat');
-    expect(service.getModel('final_response')).toBe('deepseek-chat');
+    expect(service.getModel('casual_chat')).toBe('deepseek-v4-pro');
+    expect(service.getModel('final_response')).toBe('deepseek-v4-pro');
   });
 
   it('routes structured agent work to deepseek-v4-flash', () => {
     const service = new SocialAgentModelRouterService(
       makeConfig({
-        DEEPSEEK_CHAT_MODEL: 'deepseek-chat',
+        DEEPSEEK_CHAT_MODEL: 'deepseek-v4-pro',
         DEEPSEEK_FAST_MODEL: 'deepseek-v4-flash',
       }),
     );
@@ -39,8 +39,8 @@ describe('SocialAgentModelRouterService', () => {
   it('falls back when env vars are missing', () => {
     const service = new SocialAgentModelRouterService(makeConfig());
 
-    expect(service.getModel('casual_chat')).toBe('deepseek-chat');
-    expect(service.getModel('final_response')).toBe('deepseek-chat');
+    expect(service.getModel('casual_chat')).toBe('deepseek-v4-pro');
+    expect(service.getModel('final_response')).toBe('deepseek-v4-pro');
     expect(service.getModel('planner')).toBe('deepseek-v4-flash');
     expect(service.getModel('profile_extraction')).toBe('deepseek-v4-flash');
     expect(service.getModel('card_generation')).toBe('deepseek-v4-flash');
@@ -75,16 +75,16 @@ describe('SocialAgentModelRouterService', () => {
       makeConfig({ DEEPSEEK_MODEL: 'deepseek-v4-flash' }),
     );
 
-    expect(service.getModel('casual_chat')).toBe('deepseek-chat');
-    expect(service.getModel('final_response')).toBe('deepseek-chat');
+    expect(service.getModel('casual_chat')).toBe('deepseek-v4-pro');
+    expect(service.getModel('final_response')).toBe('deepseek-v4-pro');
   });
 
-  it('keeps DEEPSEEK_MODEL as a compatible fallback for legacy chat envs', () => {
+  it('keeps DEEPSEEK_MODEL as a compatible fallback for explicit V4 pro envs', () => {
     const service = new SocialAgentModelRouterService(
-      makeConfig({ DEEPSEEK_MODEL: 'deepseek-chat' }),
+      makeConfig({ DEEPSEEK_MODEL: 'deepseek-v4-pro' }),
     );
 
-    expect(service.getModel('casual_chat')).toBe('deepseek-chat');
-    expect(service.getModel('final_response')).toBe('deepseek-chat');
+    expect(service.getModel('casual_chat')).toBe('deepseek-v4-pro');
+    expect(service.getModel('final_response')).toBe('deepseek-v4-pro');
   });
 });

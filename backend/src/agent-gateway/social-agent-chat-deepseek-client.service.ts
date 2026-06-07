@@ -131,7 +131,7 @@ export class SocialAgentChatDeepSeekClientService {
         this.config.get<string>('AGENT_CASUAL_CHAT_MODEL') ||
         this.config.get<string>('DEEPSEEK_CHAT_MODEL') ||
         this.chatCompatibleLegacyModel(legacy) ||
-        'deepseek-chat'
+        'deepseek-v4-pro'
       );
     }
     if (useCase === 'final_response') {
@@ -139,7 +139,7 @@ export class SocialAgentChatDeepSeekClientService {
         this.config.get<string>('AGENT_FINAL_RESPONSE_MODEL') ||
         this.config.get<string>('DEEPSEEK_CHAT_MODEL') ||
         this.chatCompatibleLegacyModel(legacy) ||
-        'deepseek-chat'
+        'deepseek-v4-pro'
       );
     }
     return (

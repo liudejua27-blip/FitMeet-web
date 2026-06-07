@@ -84,6 +84,29 @@ describe('UploadsService', () => {
     );
     expect(fs.existsSync(tempFile)).toBe(false);
   });
+
+  it('uses S3_PUBLIC_BASE_URL for S3-compatible upload responses', async () => {
+    const tempFile = writeTempUpload('s3-public.mp4');
+    const service = makeService({
+      NODE_ENV: 'production',
+      S3_PUBLIC_BASE_URL: 'https://media.socialworld.world/uploads/',
+    });
+    const send = jest.fn().mockResolvedValue({});
+    Object.assign(service as unknown as Record<string, unknown>, {
+      storageProvider: 's3',
+      bucketName: 'fitmeet-test',
+      s3Client: { send },
+    });
+
+    const url = await service.saveFile(fileFor(tempFile));
+
+    expect(url).toMatch(
+      /^https:\/\/media\.socialworld\.world\/uploads\/.+\.mp4$/,
+    );
+    expect(url).not.toContain('fitmeet-test');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(fs.existsSync(tempFile)).toBe(false);
+  });
 });
 
 function makeService(env: Record<string, string>) {

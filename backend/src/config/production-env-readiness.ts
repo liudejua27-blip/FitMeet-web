@@ -313,6 +313,15 @@ function checkObjectStorage(
   }
   if (hasConfiguredValue(env.S3_ENDPOINT)) {
     requireHttpsUrl(env, 'S3_ENDPOINT', error);
+    if (!hasConfiguredValue(env.S3_PUBLIC_BASE_URL)) {
+      error(
+        'S3_PUBLIC_BASE_URL',
+        'must be configured when S3_ENDPOINT is set so upload responses use a browser-readable HTTPS public URL.',
+      );
+    }
+  }
+  if (hasConfiguredValue(env.S3_PUBLIC_BASE_URL)) {
+    requireHttpsUrl(env, 'S3_PUBLIC_BASE_URL', error);
   }
 }
 
@@ -342,10 +351,15 @@ function checkDeepSeekModelValue(
   error: (key: string, message: string) => void,
 ): void {
   if (!hasConfiguredValue(env[key])) return;
-  if (env[key].trim() === 'deepseek-v4') {
+  const value = env[key].trim();
+  if (
+    value === 'deepseek-v4' ||
+    value === 'deepseek-chat' ||
+    value === 'deepseek-reasoner'
+  ) {
     error(
       key,
-      'must use an explicit DeepSeek model id such as deepseek-v4-flash or deepseek-chat; bare deepseek-v4 is a legacy alias and not production-safe.',
+      'must use a current explicit DeepSeek V4 model id such as deepseek-v4-pro or deepseek-v4-flash; legacy aliases deepseek-v4, deepseek-chat, and deepseek-reasoner are not production-safe.',
     );
   }
 }

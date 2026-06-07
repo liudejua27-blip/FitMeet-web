@@ -34,7 +34,7 @@ const validEnv = {
     'https://fitmeet-uploads.oss-cn-qingdao.aliyuncs.com',
   DEEPSEEK_API_KEY: 'deepseek-key',
   DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
-  DEEPSEEK_CHAT_MODEL: 'deepseek-chat',
+  DEEPSEEK_CHAT_MODEL: 'deepseek-v4-pro',
   DEEPSEEK_FAST_MODEL: 'deepseek-v4-flash',
   KAFKA_BROKERS: 'kafka:29092',
   ENABLE_KAFKA: 'true',
@@ -126,6 +126,7 @@ describe('production-env-readiness', () => {
       ALIYUN_OSS_PUBLIC_BASE_URL:
         'http://fitmeet-uploads.oss-cn-qingdao.aliyuncs.com',
       S3_ENDPOINT: 'http://localhost:9000',
+      S3_PUBLIC_BASE_URL: 'http://cdn.fitmeet.test/uploads',
     });
 
     expect(report.ok).toBe(false);
@@ -134,8 +135,55 @@ describe('production-env-readiness', () => {
         expect.objectContaining({ key: 'ALIYUN_OSS_ENDPOINT' }),
         expect.objectContaining({ key: 'ALIYUN_OSS_PUBLIC_BASE_URL' }),
         expect.objectContaining({ key: 'S3_ENDPOINT' }),
+        expect.objectContaining({ key: 'S3_PUBLIC_BASE_URL' }),
       ]),
     );
+  });
+
+  it('requires a public HTTPS URL when S3-compatible storage uses a custom endpoint', () => {
+    const report = buildProductionEnvReport({
+      ...validEnv,
+      ALIYUN_ACCESS_KEY_ID: '',
+      ALIYUN_ACCESS_KEY_SECRET: '',
+      ALIYUN_OSS_REGION: '',
+      ALIYUN_OSS_BUCKET: '',
+      ALIYUN_OSS_ENDPOINT: '',
+      ALIYUN_OSS_PUBLIC_BASE_URL: '',
+      AWS_REGION: 'auto',
+      AWS_ACCESS_KEY_ID: 'r2-access-key',
+      AWS_SECRET_ACCESS_KEY: 'r2-secret-key',
+      AWS_BUCKET_NAME: 'fitmeet-uploads',
+      S3_ENDPOINT: 'https://example.r2.cloudflarestorage.com',
+      S3_PUBLIC_BASE_URL: '',
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'S3_PUBLIC_BASE_URL' }),
+      ]),
+    );
+  });
+
+  it('accepts S3-compatible storage with a custom endpoint and HTTPS public URL', () => {
+    const report = buildProductionEnvReport({
+      ...validEnv,
+      ALIYUN_ACCESS_KEY_ID: '',
+      ALIYUN_ACCESS_KEY_SECRET: '',
+      ALIYUN_OSS_REGION: '',
+      ALIYUN_OSS_BUCKET: '',
+      ALIYUN_OSS_ENDPOINT: '',
+      ALIYUN_OSS_PUBLIC_BASE_URL: '',
+      AWS_REGION: 'auto',
+      AWS_ACCESS_KEY_ID: 'r2-access-key',
+      AWS_SECRET_ACCESS_KEY: 'r2-secret-key',
+      AWS_BUCKET_NAME: 'fitmeet-uploads',
+      S3_ENDPOINT: 'https://example.r2.cloudflarestorage.com',
+      S3_PUBLIC_BASE_URL: 'https://media.socialworld.world',
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.errors).toEqual([]);
   });
 
   it('rejects invalid managed database and Redis URLs', () => {
@@ -206,9 +254,11 @@ describe('production-env-readiness', () => {
     });
     const legacyAlias = buildProductionEnvReport({
       ...validEnv,
+      DEEPSEEK_CHAT_MODEL: 'deepseek-chat',
       DEEPSEEK_MODEL: 'deepseek-v4',
       DEEPSEEK_FAST_MODEL: 'deepseek-v4',
       AGENT_FINAL_RESPONSE_MODEL: 'deepseek-v4',
+      AGENT_CASUAL_CHAT_MODEL: 'deepseek-reasoner',
     });
 
     expect(missingModels.ok).toBe(false);
@@ -222,8 +272,10 @@ describe('production-env-readiness', () => {
     expect(legacyAlias.errors).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ key: 'DEEPSEEK_MODEL' }),
+        expect.objectContaining({ key: 'DEEPSEEK_CHAT_MODEL' }),
         expect.objectContaining({ key: 'DEEPSEEK_FAST_MODEL' }),
         expect.objectContaining({ key: 'AGENT_FINAL_RESPONSE_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_CASUAL_CHAT_MODEL' }),
       ]),
     );
   });

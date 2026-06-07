@@ -9,7 +9,10 @@ import {
 import { useAuthStore } from '../stores';
 import * as dataService from '../services/dataService';
 import type { Meet, Post } from '../types';
-import { withMockMeets, withMockPosts } from '../data/mockContent';
+import {
+  filterDisplayableMeets,
+  filterDisplayablePosts,
+} from '../data/mockContent';
 import { UniversePortal } from '../components/portal/UniversePortal';
 
 const featuredOutdoor = SPORT_TAXONOMY.find((item) => item.id === 'outdoor')!;
@@ -61,8 +64,8 @@ const trustSignals = [
 
 export const HomePage = memo(function HomePage() {
   const { isLoggedIn, openLogin } = useAuthStore();
-  const [latestPosts, setLatestPosts] = useState<Post[]>(() => withMockPosts([]));
-  const [latestMeets, setLatestMeets] = useState<Meet[]>(() => withMockMeets([]));
+  const [latestPosts, setLatestPosts] = useState<Post[]>(() => filterDisplayablePosts([]));
+  const [latestMeets, setLatestMeets] = useState<Meet[]>(() => filterDisplayableMeets([]));
 
   useEffect(() => {
     let active = true;
@@ -71,8 +74,8 @@ export const HomePage = memo(function HomePage() {
       dataService.getMeets().catch(() => [] as Meet[]),
     ]).then(([posts, meets]) => {
       if (!active) return;
-      setLatestPosts(withMockPosts(posts, 4));
-      setLatestMeets(withMockMeets(meets, 4));
+      setLatestPosts(filterDisplayablePosts(posts, 4));
+      setLatestMeets(filterDisplayableMeets(meets, 4));
     });
     return () => {
       active = false;

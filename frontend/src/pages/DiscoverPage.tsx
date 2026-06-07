@@ -10,7 +10,11 @@ import { getSportLabel, isContentType, normalizeSportGroup } from '../data/taxon
 import { CATEGORIES, DISTANCE_FILTERS, GENDER_FILTERS, LEVEL_FILTERS } from '../data/options';
 import type { Coordinates } from '../lib/amap';
 import { getBrowserLocation } from '../lib/location';
-import { meetToFeedPost, uniquePostsByUser, withMockPosts } from '../data/mockContent';
+import {
+  filterDisplayablePosts,
+  meetToFeedPost,
+  uniquePostsByUser,
+} from '../data/mockContent';
 
 const PAGE_SIZE = 6;
 
@@ -53,12 +57,12 @@ export const DiscoverPage = () => {
           const merged = replace ? data : [...prev, ...data];
           const dedup = new Map<number, Post>();
           merged.forEach((item) => dedup.set(item.id, item));
-          return withMockPosts(Array.from(dedup.values()));
+          return filterDisplayablePosts(Array.from(dedup.values()));
         });
         setHasMore(data.length === PAGE_SIZE);
         setPage(nextPage);
       } catch {
-        setFeedData(withMockPosts([]));
+        setFeedData([]);
         setHasMore(false);
         setError(null);
       } finally {
@@ -191,7 +195,7 @@ export const DiscoverPage = () => {
   const handleCreated = useCallback((item: Post | Meet, createdType: 'meet' | 'log' | 'help') => {
     const createdPost = createdType === 'meet' ? meetToFeedPost(item as Meet) : (item as Post);
     setFeedData((prev) =>
-      withMockPosts([createdPost, ...prev.filter((post) => post.id !== createdPost.id)]),
+      filterDisplayablePosts([createdPost, ...prev.filter((post) => post.id !== createdPost.id)]),
     );
     setShowCreatePost(false);
   }, []);

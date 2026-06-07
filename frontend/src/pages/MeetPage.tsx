@@ -10,7 +10,7 @@ import * as dataService from '../services/dataService';
 import { useAuthStore, useNotificationStore } from '../stores';
 import type { Meet } from '../types';
 import { normalizeSportGroup } from '../data/taxonomy';
-import { withMockMeets } from '../data/mockContent';
+import { filterDisplayableMeets } from '../data/mockContent';
 
 export const MeetPage = () => {
   const location = useLocation();
@@ -38,13 +38,12 @@ export const MeetPage = () => {
     setIsLoading(true);
     try {
       const data = await dataService.getMeets({ lat: userLocation?.lat, lng: userLocation?.lng });
-      const hydrated = withMockMeets(data);
+      const hydrated = filterDisplayableMeets(data);
       setMeetData(hydrated);
       setSelectedMeetId((current) => current ?? hydrated[0]?.id ?? null);
     } catch {
-      const fallback = withMockMeets([]);
-      setMeetData(fallback);
-      setSelectedMeetId((current) => current ?? fallback[0]?.id ?? null);
+      setMeetData([]);
+      setSelectedMeetId(null);
       setError('约练列表加载失败，请稍后重试。');
     } finally {
       setIsLoading(false);
@@ -205,7 +204,7 @@ export const MeetPage = () => {
           desc: data.desc,
         } as Partial<Meet>);
         setMeetData((prev) =>
-          withMockMeets([created, ...prev.filter((meet) => meet.id !== created.id)]),
+          filterDisplayableMeets([created, ...prev.filter((meet) => meet.id !== created.id)]),
         );
         setSelectedMeetId(created.id);
         addNotification({

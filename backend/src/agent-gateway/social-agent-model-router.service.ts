@@ -20,7 +20,7 @@ export class SocialAgentModelRouterService {
         return (
           this.firstModel(['AGENT_CASUAL_CHAT_MODEL', 'DEEPSEEK_CHAT_MODEL']) ??
           this.chatCompatibleLegacyModel() ??
-          'deepseek-chat'
+          'deepseek-v4-pro'
         );
       case 'final_response':
         return (
@@ -29,7 +29,7 @@ export class SocialAgentModelRouterService {
             'DEEPSEEK_CHAT_MODEL',
           ]) ??
           this.chatCompatibleLegacyModel() ??
-          'deepseek-chat'
+          'deepseek-v4-pro'
         );
       case 'planner':
         return (

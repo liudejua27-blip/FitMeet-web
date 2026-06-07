@@ -350,14 +350,21 @@ export class UploadsService implements OnModuleInit {
   }
 
   private getS3Url(key: string): string {
+    const publicBaseUrl = this.configService.get<string>('S3_PUBLIC_BASE_URL');
+    if (publicBaseUrl) {
+      return `${publicBaseUrl.replace(/\/$/, '')}/${encodeURI(key)}`;
+    }
+
     const endpoint = this.configService.get<string>('S3_ENDPOINT');
     if (endpoint) {
-      // MinIO style: http://localhost:9000/bucket-name/key
-      return `${endpoint}/${this.bucketName}/${key}`;
+      // Development fallback for MinIO/LocalStack. Production readiness requires S3_PUBLIC_BASE_URL.
+      return `${endpoint.replace(/\/$/, '')}/${this.bucketName}/${encodeURI(key)}`;
     }
     // AWS S3 style: https://bucket-name.s3.region.amazonaws.com/key
     const region = this.configService.get<string>('AWS_REGION');
-    return `https://${this.bucketName}.s3.${region}.amazonaws.com/${key}`;
+    return `https://${this.bucketName}.s3.${region}.amazonaws.com/${encodeURI(
+      key,
+    )}`;
   }
 
   private safeUnlink(filePath: string) {

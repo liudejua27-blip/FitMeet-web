@@ -80,6 +80,9 @@ pnpm dev
 - 落地页：`http://localhost:3000` 或 Next 自动分配的可用端口
 
 如果后端和落地页同时占用 `3000`，先启动后端，再让 Next 使用其他端口。
+本地 CORS 要同时允许 `localhost` 和 `127.0.0.1`。Browser、Vite 或
+iOS 工具链有时会使用 `127.0.0.1:5173`，后端 `ALLOWED_ORIGINS`
+少了这个 origin 时，登录会表现为 `Failed to fetch`。
 
 ## 数据库策略
 
@@ -111,7 +114,7 @@ pnpm seed:living-social-data
 ./scripts/release-preflight.sh --web-only
 ```
 
-如果 pnpm 不在默认 PATH，可设置 `FITMEET_PNPM_BIN_DIR=/path/to/pnpm/bin`；如果 iOS App 不在默认路径，可设置 `FITMEET_APP_DIR`。
+上线脚本会通过 `scripts/lib/toolchain.sh` 自动补充常见 Node/pnpm 路径。如果 pnpm 仍不在默认 PATH，可设置 `FITMEET_PNPM_BIN_DIR=/path/to/pnpm/bin`；如果 iOS App 不在默认路径，可设置 `FITMEET_APP_DIR`。
 
 如果要把 iOS UI tests 也纳入发布前检查：
 
@@ -268,13 +271,69 @@ GitHub Actions 工作流在 `.github/workflows/ci.yml`。当前基线包含：
 - 数据层：Railway PostgreSQL、Railway Redis、MongoDB Atlas 或 Railway MongoDB。
 - 上传：Aliyun OSS 或 S3/R2 兼容对象存储。
 
-详细步骤见 [deployment-railway-vercel.md](/Users/liuchongjiang/Desktop/FitMeet-web/docs/deployment-railway-vercel.md)。生产验证需要同时指定前端和后端地址：
+平台配置已加入仓库：
+
+- `vercel.json`：从仓库根目录构建 `frontend/`，输出 `frontend/dist`，并把 Web `/api/*` 代理到 `https://api.socialworld.world/api/*`。
+- `backend/railway.json`：让 Railway 在 `backend/` 服务根目录下使用 `backend/Dockerfile.prod` 构建，并用 `/api/health` 做 health check。
+- `deploy/env.production.railway.example`：Railway 后端环境变量模板。
+- `deploy/env.production.vercel.example`：Vercel 前端环境变量模板。
+
+详细步骤见 [deployment-vercel-railway.md](/Users/liuchongjiang/Desktop/FitMeet-web/docs/deployment-vercel-railway.md)；上线当天按 [production-cutover-checklist.md](/Users/liuchongjiang/Desktop/FitMeet-web/docs/production-cutover-checklist.md) 执行，并用 [production-secrets-checklist.md](/Users/liuchongjiang/Desktop/FitMeet-web/docs/production-secrets-checklist.md) 核对 Railway/Vercel/iOS secrets。生产验证先跑聚合上线状态和域名/DNS/TLS/API health 预检。`launch-status.sh` 默认也会严格检查 iOS TestFlight Release API、签名和 staging 凭证状态：
+
+```bash
+./scripts/launch-status.sh
+```
+
+```bash
+./scripts/cloud-platform-preflight.sh
+```
+
+不用 GitHub 自动部署时，Vercel 前端使用本地 prebuilt 部署脚本；它会先构建 `frontend/`，再在凭证齐全时执行 `vercel deploy --prebuilt --prod`：
+
+```bash
+./scripts/vercel-prebuilt-deploy.sh
+```
+
+```bash
+WEB_ORIGIN=https://socialworld.world \
+API_BASE_URL=https://api.socialworld.world/api \
+./scripts/domain-readiness-check.sh
+```
+
+预检通过后，再同时指定前端和后端地址跑完整 smoke：
 
 ```bash
 BASE_URL=https://socialworld.world \
 API_BASE_URL=https://api.socialworld.world/api \
 ./scripts/verify-production.sh
 ```
+
+如果 Railway/Vercel 因账号授权、GitHub 导入、付款或平台状态卡住，使用阿里云 ECS 备选路径：[deployment-aliyun-ecs.md](/Users/liuchongjiang/Desktop/FitMeet-web/docs/deployment-aliyun-ecs.md)。本机生成可上传压缩包：
+
+```bash
+./scripts/build-deploy-zip.sh
+```
+
+脚本会同时生成 `fitmeet-ecs-deploy.zip.sha256` 和
+`fitmeet-ecs-install-release.sh`。上传这三个文件到 ECS 后，先运行
+`sha256sum -c fitmeet-ecs-deploy.zip.sha256` 校验压缩包。更稳的服务器安装方式是先运行
+`./fitmeet-ecs-install-release.sh --archive ./fitmeet-ecs-deploy.zip --checksum ./fitmeet-ecs-deploy.zip.sha256 --target /opt/FitMeet-web`
+预览计划，再追加 `--install` 应用 release。安装后用压缩包内的
+`deploy/env.production.ecs.example` 复制生成 `.env.production`，并替换所有
+`CHANGE_ME` 值。
+
+本机可先用上传辅助脚本 dry-run，再执行上传：
+
+```bash
+./scripts/ecs-upload-release.sh --ssh root@YOUR_ECS_PUBLIC_IP
+./scripts/ecs-upload-release.sh --ssh root@YOUR_ECS_PUBLIC_IP --check-ssh
+./scripts/ecs-upload-release.sh --ssh root@YOUR_ECS_PUBLIC_IP --upload
+```
+
+如果 `--check-ssh` 返回 `Permission denied (publickey...)`，说明本机还没有
+能登录 ECS 的 SSH key。此时不要反复 scp；改为配置 SSH key，或在阿里云
+Workbench 中把 `fitmeet-ecs-deploy.zip`、`fitmeet-ecs-deploy.zip.sha256`、
+`fitmeet-ecs-install-release.sh` 上传到 `~/fitmeet-release` 后继续执行安装命令。
 
 单机 Docker Compose 仍可作为备选部署路径，以根目录 `docker-compose.yml` 和 `.env.example` 为参考：
 
@@ -288,7 +347,7 @@ pnpm check:prod-env -- ../.env.production
 
 3. 确认 `JWT_SECRET`、数据库密码、Redis 密码、对象存储密钥、微信/短信/AI key 不使用默认值。
 4. 后端构建后运行 `pnpm migration:run:prod` 或等价迁移流程。
-5. 前端生产环境设置 `VITE_API_BASE_URL=https://api.socialworld.world/api`。
+5. 前端生产环境在 Vercel 推荐设置 `VITE_API_BASE_URL=/api`，并设置 `VITE_WS_BASE_URL=https://api.socialworld.world`。
 6. 配置反向代理，把 `/api` 转发到 Nest 服务，把 Web 静态资源指向对应构建产物。
 
 部署前建议按这个顺序收口：
@@ -300,29 +359,63 @@ cd backend && pnpm migration:run:prod
 docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
 ```
 
+在 Railway shell 或任何只通过平台注入环境变量、没有 `.env.production` 文件的环境中，使用：
+
+```bash
+cd backend
+pnpm check:prod-env -- --from-process
+```
+
 生产服务器可以直接使用：
 
 ```bash
-APP_DIR=/opt/fitmeet-new ./scripts/deploy-production.sh
+APP_DIR=/opt/FitMeet-web \
+RUN_RELEASE_PREFLIGHT=false \
+BUILD_FRONTEND=false \
+PUBLIC_BASE_URL=https://socialworld.world \
+PUBLIC_API_BASE_URL=https://socialworld.world/api \
+./scripts/deploy-production.sh
 ```
 
 该脚本默认会先跑 `./scripts/release-preflight.sh --web-only`，再跑 `pnpm -C backend run check:prod-env -- ../.env.production`。如果已经在构建机或 CI 跑过完整 Web preflight，并且服务器内存紧张，可以显式设置 `RUN_RELEASE_PREFLIGHT=false`，但生产环境变量检查仍会执行。
 
-如果检查器报 `OBJECT_STORAGE`，头像上传和朋友圈图片会在生产环境被禁用；如果报 `DEEPSEEK_API_KEY`、`DEEPSEEK_CHAT_MODEL` 或 `DEEPSEEK_FAST_MODEL`，Social Agent 会退回确定性 fallback 或使用不明确模型，不满足企业级 Agent 发布标准。生产环境应显式设置 `DEEPSEEK_CHAT_MODEL=deepseek-chat` 和 `DEEPSEEK_FAST_MODEL=deepseek-v4-flash`，不要使用裸 `deepseek-v4` 旧别名。
+如果检查器报 `OBJECT_STORAGE`，头像上传和朋友圈图片会在生产环境被禁用；如果报 `DEEPSEEK_API_KEY`、`DEEPSEEK_CHAT_MODEL` 或 `DEEPSEEK_FAST_MODEL`，Social Agent 会退回确定性 fallback 或使用不明确模型，不满足企业级 Agent 发布标准。生产环境应显式设置 `DEEPSEEK_CHAT_MODEL=deepseek-v4-pro` 和 `DEEPSEEK_FAST_MODEL=deepseek-v4-flash`，不要使用裸 `deepseek-v4` 旧别名。
 
 容器启动后检查：
 
 ```bash
 docker compose --env-file .env.production -f docker-compose.prod.yml ps
-BASE_URL=https://socialworld.world API_BASE_URL=https://api.socialworld.world/api ./scripts/verify-production.sh
+BASE_URL=https://socialworld.world API_BASE_URL=https://socialworld.world/api ./scripts/verify-production.sh
 ```
 
 `verify-production.sh` 默认只做非破坏性检查：Web 首页、`/api/health`、`/api/ready`、运行时 OpenAPI、公开 feed、App 保护接口的 401、Agent manifest 的未授权保护。需要真实 App 账号链路时，可设置 `APP_SMOKE_EMAIL`、`APP_SMOKE_PASSWORD`、`APP_SMOKE_TARGET_USER_ID` 后追加 `--run-app-smoke`；需要写入 public intent 时，再显式追加 `--run-public-intent-write`。
 
+如果还没有 staging/production smoke 账号，部署后先创建专用测试账号：
+
+```bash
+APP_SMOKE_SEED_PASSWORD='use-a-long-random-password' \
+APP_SMOKE_SEED_ALLOW_PRODUCTION=true \
+pnpm -C backend run seed:app-smoke-users
+```
+
+脚本会输出 Web smoke 和 iOS staging E2E 所需的环境变量。
+
+也可以让 ECS post-deploy smoke 脚本在同一次执行里创建 smoke 账号并立刻跑真实 App/Web 账号链路：
+
+```bash
+APP_SMOKE_SEED_PASSWORD='use-a-long-random-password' \
+APP_SMOKE_SEED_ALLOW_PRODUCTION=true \
+BASE_URL=https://socialworld.world \
+API_BASE_URL=https://socialworld.world/api \
+./scripts/ecs-post-deploy-smoke.sh --prepare-app-smoke-users --run-app-smoke
+```
+
+该脚本不会把 smoke 密码写入仓库；它只在当前进程中复用 seed 脚本输出的 `APP_SMOKE_*`。
+
 上线前的第一道容量 smoke 可以跑只读 1000 并发检查：
 
 ```bash
-LOAD_TEST_BASE_URL=https://api.socialworld.world \
+LOAD_TEST_BASE_URL=https://socialworld.world \
 LOAD_TEST_ALLOW_REMOTE=true \
 node scripts/load-1000-readonly.mjs
 ```

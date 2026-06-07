@@ -1,5 +1,13 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { meetToFeedPost, withMockMeets, withMockPosts } from '../data/mockContent';
+import {
+  filterDisplayableMeets,
+  filterDisplayablePosts,
+  meetToFeedPost,
+  withMockMeets,
+  withMockPosts,
+} from '../data/mockContent';
 import type { Meet, Post } from '../types';
 
 const postFixture = {
@@ -67,13 +75,13 @@ const meetFixture = {
 
 describe('mockContent fallbacks', () => {
   it('keeps only real posts without padding mock fillers', () => {
-    const result = withMockPosts([postFixture]);
+    const result = filterDisplayablePosts([postFixture]);
 
     expect(result).toEqual([expect.objectContaining({ id: 42, title: '真实发布', mock: false })]);
   });
 
   it('keeps only real meets without padding mock fillers', () => {
-    const result = withMockMeets([meetFixture]);
+    const result = filterDisplayableMeets([meetFixture]);
 
     expect(result).toEqual([expect.objectContaining({ id: 88, title: '真实约练', mock: false })]);
   });
@@ -84,6 +92,25 @@ describe('mockContent fallbacks', () => {
 
     expect(withMockPosts([e2ePost]).some((post) => post.id === 77)).toBe(false);
     expect(withMockMeets([placeholderMeet]).some((meet) => meet.id === 99)).toBe(false);
+  });
+
+  it('keeps production feed and meet pages on real API results without mock fallback naming', () => {
+    const pageSources = [
+      '../pages/MeetPage.tsx',
+      '../pages/DiscoverPage.tsx',
+      '../pages/FitMeetHallPage.tsx',
+      '../pages/HomePage.legacy.tsx',
+    ].map((relativePath) =>
+      fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8'),
+    );
+
+    expect(pageSources.join('\n')).toContain('filterDisplayableMeets');
+    expect(pageSources.join('\n')).toContain('filterDisplayablePosts');
+    for (const source of pageSources) {
+      expect(source).not.toContain('withMockMeets');
+      expect(source).not.toContain('withMockPosts');
+      expect(source).not.toContain('const fallback = withMockMeets([])');
+    }
   });
 
   it('maps a meet to the unified feed shape', () => {

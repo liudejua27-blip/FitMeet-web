@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as dataService from '../services/dataService';
-import { meetToFeedPost, withMockPosts } from '../data/mockContent';
+import { filterDisplayablePosts, meetToFeedPost } from '../data/mockContent';
 import { cleanDisplayArray, cleanDisplayText, isDisplayableRecordText } from '../lib/displayText';
 import { isPublicHallIntent } from '../lib/hallPublicIntent';
 import { useAuthStore } from '../stores';
@@ -155,7 +155,7 @@ export const FitMeetHallPage = memo(function FitMeetHallPage() {
         ]);
         if (cancelled) return;
         const meetPosts = meets.slice(0, 8).map(meetToFeedPost);
-        const merged = withMockPosts([...meetPosts, ...posts], 12)
+        const merged = filterDisplayablePosts([...meetPosts, ...posts], 12)
           .map(postToHallItem)
           .filter(
             (item, index, array) =>

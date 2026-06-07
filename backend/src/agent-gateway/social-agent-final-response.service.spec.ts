@@ -33,7 +33,7 @@ describe('SocialAgentFinalResponseService', () => {
       makeConfig({
         DEEPSEEK_API_KEY: 'key',
         DEEPSEEK_BASE_URL: 'https://deepseek.test',
-        DEEPSEEK_MODEL: 'deepseek-chat',
+        DEEPSEEK_CHAT_MODEL: 'deepseek-v4-pro',
       }) as never,
     );
 
@@ -73,7 +73,7 @@ describe('SocialAgentFinalResponseService', () => {
       model?: string;
       messages: Array<{ role: string; content: string }>;
     };
-    expect(body.model).toBe('deepseek-chat');
+    expect(body.model).toBe('deepseek-v4-pro');
     const userPayload = JSON.parse(body.messages[1].content) as Record<
       string,
       unknown

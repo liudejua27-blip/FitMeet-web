@@ -14,11 +14,18 @@ Do not paste real secrets into this file. Store production values only in Railwa
 
 ## Railway Backend
 
+This file is kept as a compatibility note. The canonical Railway + Vercel
+runbook is now:
+
+```text
+docs/deployment-vercel-railway.md
+```
+
 Create one Railway service for the backend:
 
 - Repository root: this repository.
 - Service root directory: `backend`.
-- Config file path: `backend/railway.toml`.
+- Config source in monorepo imports: `/backend/railway.json`.
 - Build: Dockerfile, using `backend/Dockerfile.prod`.
 - Health check path: `/api/health`.
 - Public domain: `api.socialworld.world`.
@@ -47,7 +54,7 @@ AGENT_WEBHOOK_SIGNING_SECRET=<separate random secret>
 
 DEEPSEEK_API_KEY=<secret>
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_CHAT_MODEL=deepseek-chat
+DEEPSEEK_CHAT_MODEL=deepseek-v4-pro
 DEEPSEEK_FAST_MODEL=deepseek-v4-flash
 DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_TIMEOUT_MS=12000
@@ -67,14 +74,22 @@ AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
 AWS_BUCKET_NAME=
 S3_ENDPOINT=
+S3_PUBLIC_BASE_URL=
 ```
 
-Use one object storage provider. For production, `/uploads/image` and `/uploads/video` must not rely on local filesystem fallback.
+Use one object storage provider. For production, `/uploads/image` and `/uploads/video` must not rely on local filesystem fallback. If S3/R2 uses a custom `S3_ENDPOINT`, set `S3_PUBLIC_BASE_URL` to the HTTPS media domain that browsers and iOS can read.
 
 Before the first deploy, validate production env locally from a redacted `.env.production` copy:
 
 ```bash
 pnpm --dir backend check:prod-env -- ../.env.production
+```
+
+On Railway or any platform shell where variables are injected into
+`process.env`, validate without writing secrets to a file:
+
+```bash
+pnpm --dir backend check:prod-env -- --from-process
 ```
 
 Run migrations explicitly after Railway has database connectivity and before exposing user traffic:
@@ -90,7 +105,15 @@ On Railway, run the same commands from an authenticated deploy shell or one-off 
 
 ## Vercel Frontend
 
-Create one Vercel project for `frontend/`:
+Create one Vercel project. The preferred path is importing the repository root
+and letting root `vercel.json` build `frontend/`:
+
+- Output Directory: `frontend/dist`
+- API rewrite: `/api/*` -> `https://api.socialworld.world/api/*`
+- Production domain: `socialworld.world`
+- Optional alias: `www.socialworld.world`
+
+If you instead set Vercel root directory to `frontend/`, use:
 
 - Root Directory: `frontend`
 - Install Command: `pnpm install --frozen-lockfile`
@@ -102,7 +125,7 @@ Create one Vercel project for `frontend/`:
 Required Vercel variables:
 
 ```bash
-VITE_API_BASE_URL=https://api.socialworld.world/api
+VITE_API_BASE_URL=/api
 VITE_WS_BASE_URL=https://api.socialworld.world
 VITE_MAP_API_KEY=
 VITE_AMAP_SECURITY_JS_CODE=

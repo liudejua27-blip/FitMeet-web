@@ -53,7 +53,6 @@ import type { CandidateProfileDataQuality } from './social-agent-candidate-profi
 import { extractCandidateTags } from './social-agent-candidate-query-parser';
 import {
   candidateCityMatches,
-  candidateClampScore,
   candidateCommonTags,
   candidateMatchLevel,
   candidateRecentScore,
@@ -81,6 +80,19 @@ import type {
   CandidatePoolDebugSnapshot,
   CandidatePoolFiltered,
 } from './social-agent-candidate-pool-debug';
+import {
+  buildCandidatePoolActivityResult,
+  buildCandidatePoolPublicIntentActivityResult,
+} from './social-agent-candidate-pool-activity-result';
+import type {
+  CandidatePoolActivityExplanationInput,
+  CandidatePoolActivityResult,
+  CandidatePoolSource,
+} from './social-agent-candidate-pool-activity-result';
+import {
+  applySavedSocialAgentCandidateRow,
+  applySocialAgentCandidateRowState,
+} from './social-agent-candidate-row-state';
 
 export type {
   CandidatePoolIntent,
@@ -94,10 +106,10 @@ export type {
   CandidatePoolFiltered,
 } from './social-agent-candidate-pool-debug';
 
-export type CandidatePoolSource =
-  | 'profile_candidate'
-  | 'public_intent'
-  | 'activity';
+export type {
+  CandidatePoolActivityResult,
+  CandidatePoolSource,
+} from './social-agent-candidate-pool-activity-result';
 
 export type CandidatePoolDataQuality = CandidateProfileDataQuality;
 
@@ -161,30 +173,6 @@ export type CandidateEmotionalInsight = {
   possibleAwkwardness: string;
   safeFirstStep: string;
   tone: 'gentle' | 'active' | 'careful';
-};
-
-export type CandidatePoolActivityResult = {
-  id: string;
-  source: CandidatePoolSource;
-  isRealData: true;
-  targetUserId: number | null;
-  candidateUserId: number | null;
-  userId: number | null;
-  activityId: number | null;
-  publicIntentId: string | null;
-  title: string;
-  description: string;
-  city: string;
-  loc: string;
-  requestType: string;
-  interestTags: string[];
-  timePreference: string;
-  ownerUserId: number | null;
-  status: string;
-  createdAt: string | null;
-  matchScore: number;
-  matchReasons: string[];
-  candidateExplanation?: CandidateExplanation;
 };
 
 export type CandidatePoolSearchResult = {
@@ -919,103 +907,24 @@ export class SocialAgentCandidatePoolService {
     activity: SocialActivity,
     query: CandidatePoolResolvedQuery,
   ): CandidatePoolActivityResult {
-    const tags = this.uniqueStrings([
-      String(activity.type),
-      ...extractCandidateTags(`${activity.title} ${activity.description}`),
-    ]);
-    const commonTags = candidateCommonTags(query.interestTags, tags);
-    const cityScore = candidateCityMatches(query.city, activity.city) ? 35 : 0;
-    const tagScore = Math.min(35, commonTags.length * 15);
-    const typeScore =
-      query.activityType && tags.includes(query.activityType) ? 15 : 0;
-    const recentScore = candidateRecentScore(activity.updatedAt, 15);
-    const matchScore = candidateClampScore(
-      cityScore + tagScore + typeScore + recentScore,
-    );
-    const matchReasons = this.activityReasons(query, activity.city, commonTags);
-    return {
-      id: String(activity.id),
-      source: 'activity',
-      isRealData: true,
-      targetUserId: activity.creatorId ?? null,
-      candidateUserId: activity.creatorId ?? null,
-      userId: activity.creatorId ?? null,
-      activityId: activity.id,
-      publicIntentId: null,
-      title: cleanDisplayText(activity.title, '真实活动'),
-      description: cleanDisplayText(activity.description, ''),
-      city: sanitizeCity(activity.city),
-      loc: cleanDisplayText(activity.locationName, ''),
-      requestType: String(activity.type),
-      interestTags: tags,
-      timePreference: activity.startTime
-        ? activity.startTime.toISOString()
-        : '',
-      ownerUserId: activity.creatorId,
-      status: activity.status,
-      createdAt: activity.createdAt ? activity.createdAt.toISOString() : null,
-      matchScore,
-      matchReasons,
-      candidateExplanation: this.explainActivityCandidate({
-        title: cleanDisplayText(activity.title, '活动'),
-        city: sanitizeCity(activity.city),
-        tags,
-        query,
-        matchScore,
-        matchReasons,
-      }),
-    };
+    return buildCandidatePoolActivityResult({
+      activity,
+      query,
+      explain: (explanationInput) =>
+        this.explainActivityCandidate(explanationInput),
+    });
   }
 
   private toPublicIntentActivityResult(
     intent: PublicSocialIntent,
     query: CandidatePoolResolvedQuery,
   ): CandidatePoolActivityResult {
-    const tags = this.uniqueStrings([
-      ...this.normalizeArray(intent.interestTags),
-      intent.requestType,
-      ...extractCandidateTags(`${intent.title} ${intent.description}`),
-    ]);
-    const commonTags = candidateCommonTags(query.interestTags, tags);
-    const cityScore = candidateCityMatches(query.city, intent.city) ? 35 : 0;
-    const tagScore = Math.min(35, commonTags.length * 15);
-    const typeScore =
-      query.activityType && tags.includes(query.activityType) ? 15 : 0;
-    const recentScore = candidateRecentScore(intent.updatedAt, 15);
-    const matchScore = candidateClampScore(
-      cityScore + tagScore + typeScore + recentScore,
-    );
-    const matchReasons = this.activityReasons(query, intent.city, commonTags);
-    return {
-      id: intent.id,
-      source: 'public_intent',
-      isRealData: true,
-      targetUserId: intent.userId ?? null,
-      candidateUserId: intent.userId ?? null,
-      userId: intent.userId ?? null,
-      activityId: null,
-      publicIntentId: intent.id,
-      title: cleanDisplayText(intent.title, '公开约练卡片'),
-      description: cleanDisplayText(intent.description, ''),
-      city: sanitizeCity(intent.city),
-      loc: cleanDisplayText(intent.loc, ''),
-      requestType: cleanDisplayText(intent.requestType, ''),
-      interestTags: tags,
-      timePreference: cleanDisplayText(intent.timePreference, ''),
-      ownerUserId: intent.userId ?? null,
-      status: intent.status,
-      createdAt: intent.createdAt ? intent.createdAt.toISOString() : null,
-      matchScore,
-      matchReasons,
-      candidateExplanation: this.explainActivityCandidate({
-        title: cleanDisplayText(intent.title, '公开约练卡片'),
-        city: sanitizeCity(intent.city),
-        tags,
-        query,
-        matchScore,
-        matchReasons,
-      }),
-    };
+    return buildCandidatePoolPublicIntentActivityResult({
+      intent,
+      query,
+      explain: (explanationInput) =>
+        this.explainActivityCandidate(explanationInput),
+    });
   }
 
   private async persistCandidateRows(
@@ -1033,23 +942,17 @@ export class SocialAgentCandidatePoolService {
           socialRequestId,
           candidateUserId: candidate.candidateUserId,
         });
-      row.score = candidate.matchScore;
-      row.level = candidate.level;
-      row.scoreBreakdown = candidate.scoreBreakdown;
-      row.reasons = candidate.matchReasons;
-      row.commonTags = candidate.commonTags;
-      row.distanceKm = null;
-      row.riskLevel = candidate.risk.level;
-      row.riskWarnings = candidate.risk.warnings;
-      row.suggestedMessage = candidate.suggestedOpener;
-      row.status = existing?.status ?? SocialRequestCandidateStatus.Suggested;
+      applySocialAgentCandidateRowState({
+        row,
+        candidate,
+        existingStatus: existing?.status,
+      });
       const saved = await this.saveCandidateRowIdempotently(
         row,
         socialRequestId,
         candidate.candidateUserId,
       );
-      candidate.candidateRecordId = saved.id;
-      candidate.socialRequestId = socialRequestId;
+      applySavedSocialAgentCandidateRow({ candidate, saved, socialRequestId });
     }
   }
 
@@ -1345,19 +1248,6 @@ export class SocialAgentCandidatePoolService {
     return reasons.slice(0, 6);
   }
 
-  private activityReasons(
-    query: CandidatePoolResolvedQuery,
-    city: string,
-    commonTags: string[],
-  ): string[] {
-    const reasons = ['来自真实活动或公开约练卡片。'];
-    if (candidateCityMatches(query.city, city))
-      reasons.push(`城市匹配：${city}。`);
-    if (commonTags.length)
-      reasons.push(`标签匹配：${commonTags.slice(0, 3).join('、')}。`);
-    return reasons;
-  }
-
   private emotionalInsightFromExplanation(
     explanation: CandidateExplanation,
     highRisk: boolean,
@@ -1374,14 +1264,9 @@ export class SocialAgentCandidatePoolService {
     };
   }
 
-  private explainActivityCandidate(input: {
-    title: string;
-    city: string;
-    tags: string[];
-    query: CandidatePoolResolvedQuery;
-    matchScore: number;
-    matchReasons: string[];
-  }): CandidateExplanation {
+  private explainActivityCandidate(
+    input: CandidatePoolActivityExplanationInput,
+  ): CandidateExplanation {
     const requestText = [
       input.query.rawText,
       input.query.activityType,

@@ -75,6 +75,34 @@ const toolStepEventsPresenterPath = path.resolve(
   __dirname,
   'social-agent-tool-step-events.presenter.ts',
 );
+const toolExecutorLogPresenterPath = path.resolve(
+  __dirname,
+  'social-agent-tool-executor-log.presenter.ts',
+);
+const taskEventRecordPresenterPath = path.resolve(
+  __dirname,
+  'social-agent-task-event-record.presenter.ts',
+);
+const toolExecutionStatePath = path.resolve(
+  __dirname,
+  'social-agent-tool-execution-state.ts',
+);
+const runNextStatePath = path.resolve(
+  __dirname,
+  'social-agent-run-next-state.ts',
+);
+const taskExecutionStatePath = path.resolve(
+  __dirname,
+  'social-agent-task-execution-state.ts',
+);
+const adhocActionStatePath = path.resolve(
+  __dirname,
+  'social-agent-adhoc-action-state.ts',
+);
+const riskGatePresenterPath = path.resolve(
+  __dirname,
+  'social-agent-risk-gate.presenter.ts',
+);
 const candidatePoolServicePath = path.resolve(
   __dirname,
   'social-agent-candidate-pool.service.ts',
@@ -83,6 +111,14 @@ const candidatePoolMergePath = path.resolve(
   __dirname,
   'social-agent-candidate-pool-merge.ts',
 );
+const candidatePoolActivityResultPath = path.resolve(
+  __dirname,
+  'social-agent-candidate-pool-activity-result.ts',
+);
+const candidateRowStatePath = path.resolve(
+  __dirname,
+  'social-agent-candidate-row-state.ts',
+);
 const runOrchestratorPath = path.resolve(
   __dirname,
   'social-agent-run-orchestrator.service.ts',
@@ -90,6 +126,10 @@ const runOrchestratorPath = path.resolve(
 const runCompletionPresenterPath = path.resolve(
   __dirname,
   'social-agent-run-completion.presenter.ts',
+);
+const routeTurnPath = path.resolve(
+  __dirname,
+  'social-agent-route-turn.service.ts',
 );
 
 describe('SocialAgentChatService facade boundary', () => {
@@ -137,6 +177,28 @@ describe('SocialAgentChatService facade boundary', () => {
     toolStepEventsPresenterPath,
     'utf8',
   );
+  const toolExecutorLogPresenterSource = fs.readFileSync(
+    toolExecutorLogPresenterPath,
+    'utf8',
+  );
+  const taskEventRecordPresenterSource = fs.readFileSync(
+    taskEventRecordPresenterPath,
+    'utf8',
+  );
+  const toolExecutionStateSource = fs.readFileSync(
+    toolExecutionStatePath,
+    'utf8',
+  );
+  const runNextStateSource = fs.readFileSync(runNextStatePath, 'utf8');
+  const taskExecutionStateSource = fs.readFileSync(
+    taskExecutionStatePath,
+    'utf8',
+  );
+  const adhocActionStateSource = fs.readFileSync(adhocActionStatePath, 'utf8');
+  const riskGatePresenterSource = fs.readFileSync(
+    riskGatePresenterPath,
+    'utf8',
+  );
   const candidatePoolServiceSource = fs.readFileSync(
     candidatePoolServicePath,
     'utf8',
@@ -145,11 +207,20 @@ describe('SocialAgentChatService facade boundary', () => {
     candidatePoolMergePath,
     'utf8',
   );
+  const candidatePoolActivityResultSource = fs.readFileSync(
+    candidatePoolActivityResultPath,
+    'utf8',
+  );
+  const candidateRowStateSource = fs.readFileSync(
+    candidateRowStatePath,
+    'utf8',
+  );
   const runOrchestratorSource = fs.readFileSync(runOrchestratorPath, 'utf8');
   const runCompletionPresenterSource = fs.readFileSync(
     runCompletionPresenterPath,
     'utf8',
   );
+  const routeTurnSource = fs.readFileSync(routeTurnPath, 'utf8');
 
   it('keeps the legacy service module as a compatibility export', () => {
     expect(compatibilitySource.trim()).toBe(
@@ -341,6 +412,154 @@ describe('SocialAgentChatService facade boundary', () => {
     ).toBeLessThanOrEqual(140);
   });
 
+  it('keeps tool executor failure log payloads split from execution flow', () => {
+    expect(toolExecutorSource).toContain(
+      'buildSocialAgentToolFailureLogPayload',
+    );
+    expect(toolExecutorSource).toContain(
+      'buildSocialAgentTaskFailureLogPayload',
+    );
+    expect(toolExecutorSource).not.toContain(
+      "event: 'agent.task.tool_failed'",
+    );
+    expect(toolExecutorSource).not.toContain("event: 'agent.task.failed'");
+    expect(toolExecutorLogPresenterSource).toContain(
+      'function buildSocialAgentToolFailureLogPayload',
+    );
+    expect(toolExecutorLogPresenterSource).toContain(
+      'function buildSocialAgentTaskFailureLogPayload',
+    );
+    expect(
+      toolExecutorLogPresenterSource.trim().split('\n').length,
+    ).toBeLessThanOrEqual(50);
+  });
+
+  it('keeps task event record assembly split from tool execution flow', () => {
+    expect(toolExecutorSource).toContain('buildSocialAgentTaskEventRecord');
+    expect(toolExecutorSource).not.toContain(
+      'type === AgentTaskEventType.ToolReturned',
+    );
+    expect(toolExecutorSource).not.toContain('actor: this.toolCallFactory');
+    expect(taskEventRecordPresenterSource).toContain(
+      'function buildSocialAgentTaskEventRecord',
+    );
+    expect(taskEventRecordPresenterSource).toContain(
+      'function socialAgentTaskEventActor',
+    );
+    expect(
+      taskEventRecordPresenterSource.trim().split('\n').length,
+    ).toBeLessThanOrEqual(55);
+  });
+
+  it('keeps task tool-call state writes split from tool execution flow', () => {
+    expect(toolExecutorSource).toContain(
+      'applySocialAgentPlanStepCallToTask',
+    );
+    expect(toolExecutorSource).toContain('appendSocialAgentToolCallToTask');
+    expect(toolExecutorSource).not.toContain(
+      'lastToolCall: call,\\n        updatedAt: new Date().toISOString()',
+    );
+    expect(toolExecutionStateSource).toContain(
+      'function appendSocialAgentToolCallToTask',
+    );
+    expect(toolExecutionStateSource).toContain(
+      'function applySocialAgentPlanStepCallToTask',
+    );
+    expect(
+      toolExecutionStateSource.trim().split('\n').length,
+    ).toBeLessThanOrEqual(40);
+  });
+
+  it('keeps run-next pollable state reasons split from tool execution flow', () => {
+    expect(toolExecutorSource).toContain('socialAgentRunNextReadReplyState');
+    expect(toolExecutorSource).toContain('socialAgentRunNextActionState');
+    expect(toolExecutorSource).not.toContain("'no_new_reply'");
+    expect(toolExecutorSource).not.toContain("'reply_summary_failed'");
+    expect(toolExecutorSource).not.toContain(
+      "'next_action_executed_waiting_reply'",
+    );
+    expect(runNextStateSource).toContain(
+      'function socialAgentRunNextReadReplyState',
+    );
+    expect(runNextStateSource).toContain(
+      'function socialAgentRunNextActionState',
+    );
+    expect(runNextStateSource).toContain('next_action_needs_attention');
+    expect(runNextStateSource.trim().split('\n').length).toBeLessThanOrEqual(
+      60,
+    );
+  });
+
+  it('keeps task execution failure and completion state split from tool flow', () => {
+    expect(toolExecutorSource).toContain('socialAgentTaskFailureState');
+    expect(toolExecutorSource).toContain('socialAgentTaskCompletionState');
+    expect(toolExecutorSource).not.toContain(
+      "'waiting_for_counterpart_reply'",
+    );
+    expect(taskExecutionStateSource).toContain(
+      'function socialAgentTaskFailureState',
+    );
+    expect(taskExecutionStateSource).toContain(
+      'function socialAgentTaskCompletionState',
+    );
+    expect(taskExecutionStateSource).toContain('waiting_for_counterpart_reply');
+    expect(
+      taskExecutionStateSource.trim().split('\n').length,
+    ).toBeLessThanOrEqual(55);
+  });
+
+  it('keeps adhoc action pollable state reasons split from tool flow', () => {
+    expect(toolExecutorSource).toContain(
+      'socialAgentAdhocActionCompletionState',
+    );
+    expect(toolExecutorSource).toContain(
+      'socialAgentUnconfirmedAdhocActionState',
+    );
+    expect(toolExecutorSource).not.toContain(
+      "'action_executed_waiting_reply'",
+    );
+    expect(toolExecutorSource).not.toContain(
+      "'action_executed_waiting_result'",
+    );
+    expect(toolExecutorSource).not.toContain("'approval_required'");
+    expect(adhocActionStateSource).toContain(
+      'function socialAgentAdhocActionCompletionState',
+    );
+    expect(adhocActionStateSource).toContain(
+      'function socialAgentUnconfirmedAdhocActionState',
+    );
+    expect(adhocActionStateSource).toContain('approval_required');
+    expect(adhocActionStateSource.trim().split('\n').length).toBeLessThanOrEqual(
+      70,
+    );
+  });
+
+  it('keeps risk gate approval payload assembly split from tool flow', () => {
+    expect(toolExecutorSource).toContain('buildSocialAgentRiskGateDecision');
+    expect(toolExecutorSource).toContain(
+      'buildSocialAgentPendingApprovalOutput',
+    );
+    expect(toolExecutorSource).not.toContain(
+      'policy.blockedActions.includes',
+    );
+    expect(toolExecutorSource).not.toContain(
+      "status: 'pending_approval'",
+    );
+    expect(toolExecutorSource).not.toContain(
+      "message: '实验室模式只模拟，不会真实执行这个社交动作。'",
+    );
+    expect(riskGatePresenterSource).toContain(
+      'function buildSocialAgentRiskGateDecision',
+    );
+    expect(riskGatePresenterSource).toContain(
+      'function buildSocialAgentPendingApprovalOutput',
+    );
+    expect(riskGatePresenterSource).toContain('pending_approval');
+    expect(riskGatePresenterSource.trim().split('\n').length).toBeLessThanOrEqual(
+      170,
+    );
+  });
+
   it('keeps candidate pool merge semantics split from repository orchestration', () => {
     expect(candidatePoolServiceSource).toContain(
       'mergeSocialAgentCandidatePool',
@@ -357,6 +576,69 @@ describe('SocialAgentChatService facade boundary', () => {
     ).toBeLessThanOrEqual(70);
   });
 
+  it('keeps candidate pool activity card scoring split from repository orchestration', () => {
+    expect(candidatePoolServiceSource).toContain(
+      'buildCandidatePoolActivityResult',
+    );
+    expect(candidatePoolServiceSource).toContain(
+      'buildCandidatePoolPublicIntentActivityResult',
+    );
+    expect(candidatePoolServiceSource).not.toContain(
+      'const cityScore = candidateCityMatches(query.city',
+    );
+    expect(candidatePoolServiceSource).not.toContain(
+      "source: 'activity',",
+    );
+    expect(candidatePoolServiceSource).not.toContain(
+      'activityId: activity.id',
+    );
+    expect(candidatePoolServiceSource).not.toContain(
+      'activity.startTime',
+    );
+    expect(candidatePoolServiceSource).not.toContain(
+      'activity.locationName',
+    );
+    expect(candidatePoolActivityResultSource).toContain(
+      'function buildCandidatePoolActivityResult',
+    );
+    expect(candidatePoolActivityResultSource).toContain(
+      'function buildCandidatePoolPublicIntentActivityResult',
+    );
+    expect(candidatePoolActivityResultSource).toContain(
+      'function buildCandidatePoolActivityReasons',
+    );
+    expect(
+      candidatePoolActivityResultSource.trim().split('\n').length,
+    ).toBeLessThanOrEqual(230);
+  });
+
+  it('keeps candidate row persistence field mapping split from repository orchestration', () => {
+    expect(candidatePoolServiceSource).toContain(
+      'applySocialAgentCandidateRowState',
+    );
+    expect(candidatePoolServiceSource).toContain(
+      'applySavedSocialAgentCandidateRow',
+    );
+    expect(candidatePoolServiceSource).not.toContain(
+      'row.score = candidate.matchScore',
+    );
+    expect(candidatePoolServiceSource).not.toContain(
+      'candidate.candidateRecordId = saved.id',
+    );
+    expect(candidateRowStateSource).toContain(
+      'function applySocialAgentCandidateRowState',
+    );
+    expect(candidateRowStateSource).toContain(
+      'function applySavedSocialAgentCandidateRow',
+    );
+    expect(candidateRowStateSource).toContain(
+      'SocialRequestCandidateStatus.Suggested',
+    );
+    expect(candidateRowStateSource.trim().split('\n').length).toBeLessThanOrEqual(
+      55,
+    );
+  });
+
   it('keeps runtime completion status assembly split from run orchestration', () => {
     expect(runOrchestratorSource).toContain(
       'buildSocialAgentRunCompletionSnapshot',
@@ -371,5 +653,16 @@ describe('SocialAgentChatService facade boundary', () => {
     expect(
       runCompletionPresenterSource.trim().split('\n').length,
     ).toBeLessThanOrEqual(40);
+  });
+
+  it('keeps route-turn orchestration thin and repository-free', () => {
+    expect(routeTurnSource.trim().split('\n').length).toBeLessThanOrEqual(180);
+    expect(routeTurnSource).toContain('SocialAgentRouteConversationTurnService');
+    expect(routeTurnSource).toContain('SocialAgentRouteProfileTurnService');
+    expect(routeTurnSource).toContain('SocialAgentRouteSearchTurnService');
+    expect(routeTurnSource).toContain('SocialAgentRouteActionTurnService');
+    expect(routeTurnSource).not.toMatch(/from ['"]typeorm['"]/);
+    expect(routeTurnSource).not.toMatch(/InjectRepository/);
+    expect(routeTurnSource).not.toMatch(/Repository</);
   });
 });

@@ -101,7 +101,7 @@ describe('SocialAgentChatLlmService', () => {
     const service = makeService({
       DEEPSEEK_API_KEY: 'test-key',
       DEEPSEEK_BASE_URL: 'https://deepseek.test',
-      DEEPSEEK_MODEL: 'deepseek-chat',
+      DEEPSEEK_CHAT_MODEL: 'deepseek-v4-pro',
     });
 
     const answer = await service.generateConversationalAnswer({
@@ -128,7 +128,7 @@ describe('SocialAgentChatLlmService', () => {
       JSON.parse(
         (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
       ).model,
-    ).toBe('deepseek-chat');
+    ).toBe('deepseek-v4-pro');
   });
 
   it('uses DeepSeek chat model as the final answer generator for persona questions', async () => {
@@ -167,7 +167,7 @@ describe('SocialAgentChatLlmService', () => {
       JSON.parse(
         (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
       ).model,
-    ).toBe('deepseek-chat');
+    ).toBe('deepseek-v4-pro');
     expect(answer).toBe(
       '人物画像是 FitMeet 用来理解城市、兴趣、可约时间和社交边界的偏好模型。',
     );
@@ -209,7 +209,7 @@ describe('SocialAgentChatLlmService', () => {
       JSON.parse(
         (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
       ).model,
-    ).toBe('deepseek-chat');
+    ).toBe('deepseek-v4-pro');
     expect(answer).toContain('运动习惯');
     expect(answer).not.toContain('等你明确说要找人');
   });

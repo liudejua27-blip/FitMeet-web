@@ -25,7 +25,6 @@ import { AgentConnection } from './entities/agent-connection.entity';
 import {
   AgentTask,
   AgentTaskEvent,
-  AgentTaskEventActor,
   AgentTaskEventType,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
@@ -37,18 +36,6 @@ import { toSocialAgentMessageArray } from './social-agent-loop-state';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SceneRiskPolicyResult } from './scene-risk-policy.service';
-import {
-  getSocialAgentRelatedActivityId,
-  getSocialAgentRelatedCandidateId,
-  getSocialAgentRelatedSocialRequestId,
-} from './social-agent-tool-audit';
-import {
-  buildSocialAgentToolApprovalSummary,
-  getSocialAgentToolActionType,
-  getSocialAgentToolApprovalRiskLevel,
-  getSocialAgentToolApprovalType,
-  isConfirmableSocialAgentTool,
-} from './social-agent-tool-policy';
 import { SocialAgentToolName } from './social-agent-tool.types';
 import type {
   SocialAgentRunNextResult,
@@ -92,6 +79,37 @@ import {
   buildSocialAgentToolFailedEvent,
   buildSocialAgentToolReturnedEvent,
 } from './social-agent-tool-step-events.presenter';
+import {
+  buildSocialAgentTaskFailureLogPayload,
+  buildSocialAgentToolFailureLogPayload,
+} from './social-agent-tool-executor-log.presenter';
+import {
+  buildSocialAgentTaskEventRecord,
+  type SocialAgentTaskEventRecordInput,
+} from './social-agent-task-event-record.presenter';
+import {
+  appendSocialAgentToolCallToTask,
+  applySocialAgentPlanStepCallToTask,
+} from './social-agent-tool-execution-state';
+import {
+  socialAgentTaskCompletionState,
+  socialAgentTaskFailureState,
+} from './social-agent-task-execution-state';
+import {
+  socialAgentRunNextActionState,
+  socialAgentRunNextDecisionState,
+  socialAgentRunNextReadReplyState,
+  socialAgentRunNextSummaryFailedState,
+} from './social-agent-run-next-state';
+import {
+  socialAgentAdhocActionCompletionState,
+  type SocialAgentAdhocActionTaskState,
+  socialAgentUnconfirmedAdhocActionState,
+} from './social-agent-adhoc-action-state';
+import {
+  buildSocialAgentPendingApprovalOutput,
+  buildSocialAgentRiskGateDecision,
+} from './social-agent-risk-gate.presenter';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -176,22 +194,18 @@ export class SocialAgentToolExecutorService {
 
       const call = await this.executePlanStep(task, step, index);
       executedCalls.push(call);
-      plan[index] = this.toolCallFactory.withStepResult(step, call);
-      task.plan = plan;
-      task.toolCalls = [...(task.toolCalls ?? []), call];
-      task.result = {
-        ...(task.result ?? {}),
-        lastToolCall: call,
-        updatedAt: new Date().toISOString(),
-      };
+      applySocialAgentPlanStepCallToTask({
+        task,
+        plan,
+        stepIndex: index,
+        step,
+        call,
+        withStepResult: (currentStep, toolCall) =>
+          this.toolCallFactory.withStepResult(currentStep, toolCall),
+      });
 
       if (call.status === 'failed' || call.status === 'blocked') {
-        task.status = AgentTaskStatus.Failed;
-        task.statusReason =
-          this.toolInput.string(call.error?.message) ??
-          this.toolInput.string(call.error?.code) ??
-          call.status;
-        task.error = call.error;
+        this.applyTaskFailureState(task, call);
         await this.taskRepo.save(task);
         this.logTaskFailure(task, call);
         if (stopOnError) break;
@@ -205,17 +219,13 @@ export class SocialAgentToolExecutorService {
       !summary.hasFailureOrBlock &&
       this.toolCallFactory.hasNoRemainingExecutableSteps(task.plan)
     ) {
-      if (this.taskMemory.shouldWaitForReply(task)) {
-        task.status = AgentTaskStatus.WaitingReply;
-        task.statusReason = 'waiting_for_counterpart_reply';
-        task.completedAt = null;
-      } else {
-        task.status = AgentTaskStatus.Succeeded;
-        task.completedAt = new Date();
-      }
+      const completionState = this.applyTaskCompletionState(
+        task,
+        this.taskMemory.shouldWaitForReply(task),
+      );
       rememberSocialAgentShortTerm(task, {});
       await this.taskRepo.save(task);
-      if (task.status === AgentTaskStatus.Succeeded) {
+      if (completionState.status === AgentTaskStatus.Succeeded) {
         await this.createTaskEvent(task, AgentTaskEventType.TaskSucceeded, {
           summary: 'Social agent task execution succeeded',
           payload: { executedSteps: executedCalls.length },
@@ -279,9 +289,13 @@ export class SocialAgentToolExecutorService {
 
     const newMessages = toSocialAgentMessageArray(readCall.output?.newMessages);
     if (readCall.status !== 'succeeded' || newMessages.length === 0) {
-      task.status = AgentTaskStatus.WaitingReply;
-      task.statusReason =
-        newMessages.length === 0 ? 'no_new_reply' : 'reply_read_failed';
+      this.applyRunNextTaskState(
+        task,
+        socialAgentRunNextReadReplyState({
+          readCallStatus: readCall.status,
+          newMessageCount: newMessages.length,
+        }),
+      );
       rememberSocialAgentShortTerm(task, {});
       await this.taskRepo.save(task);
       return this.runNextResult(task, calls, false, null);
@@ -296,8 +310,7 @@ export class SocialAgentToolExecutorService {
     calls.push(summaryCall);
 
     if (summaryCall.status !== 'succeeded') {
-      task.status = AgentTaskStatus.WaitingReply;
-      task.statusReason = 'reply_summary_failed';
+      this.applyRunNextTaskState(task, socialAgentRunNextSummaryFailedState());
       rememberSocialAgentShortTerm(task, {});
       await this.taskRepo.save(task);
       return this.runNextResult(task, calls, true, null);
@@ -316,20 +329,15 @@ export class SocialAgentToolExecutorService {
 
     const decision = decisionCall.output;
     const nextAction = this.toolInput.string(decision?.nextAction);
-    if (nextAction === 'stop') {
-      task.status = AgentTaskStatus.WaitingReply;
-      task.statusReason = 'next_action_stop';
-      rememberSocialAgentShortTerm(task, {});
-      await this.taskRepo.save(task);
-      return this.runNextResult(task, calls, true, decision ?? null);
-    }
-
     const nextToolName = this.toolCallFactory.normalizeToolName(
       decision?.toolName,
     );
-    if (decisionCall.status !== 'succeeded' || !nextToolName) {
-      task.status = AgentTaskStatus.WaitingReply;
-      task.statusReason = 'next_action_not_executable';
+    const decisionState = socialAgentRunNextDecisionState({
+      nextAction,
+      hasExecutableTool: decisionCall.status === 'succeeded' && !!nextToolName,
+    });
+    if (decisionState) {
+      this.applyRunNextTaskState(task, decisionState);
       rememberSocialAgentShortTerm(task, {});
       await this.taskRepo.save(task);
       return this.runNextResult(task, calls, true, decision ?? null);
@@ -344,14 +352,10 @@ export class SocialAgentToolExecutorService {
     });
     calls.push(actionCall);
 
-    task.status =
-      actionCall.status === 'succeeded'
-        ? AgentTaskStatus.WaitingReply
-        : AgentTaskStatus.WaitingResult;
-    task.statusReason =
-      actionCall.status === 'succeeded'
-        ? 'next_action_executed_waiting_reply'
-        : 'next_action_needs_attention';
+    this.applyRunNextTaskState(
+      task,
+      socialAgentRunNextActionState({ actionStatus: actionCall.status }),
+    );
     rememberSocialAgentShortTerm(task, {});
     await this.taskRepo.save(task);
     return this.runNextResult(task, calls, true, decision);
@@ -371,17 +375,15 @@ export class SocialAgentToolExecutorService {
       throw new NotFoundException(`Agent plan step ${stepId} not found`);
 
     const call = await this.executePlanStep(task, plan[stepIndex], stepIndex);
-    plan[stepIndex] = this.toolCallFactory.withStepResult(
-      plan[stepIndex],
+    applySocialAgentPlanStepCallToTask({
+      task,
+      plan,
+      stepIndex,
+      step: plan[stepIndex],
       call,
-    );
-    task.plan = plan;
-    task.toolCalls = [...(task.toolCalls ?? []), call];
-    task.result = {
-      ...(task.result ?? {}),
-      lastToolCall: call,
-      updatedAt: new Date().toISOString(),
-    };
+      withStepResult: (currentStep, toolCall) =>
+        this.toolCallFactory.withStepResult(currentStep, toolCall),
+    });
     rememberSocialAgentShortTerm(task, {});
     await this.taskRepo.save(task);
     return call;
@@ -475,13 +477,15 @@ export class SocialAgentToolExecutorService {
         normalizedToolName,
         actionInput,
         stepId,
-      );
+    );
     if (unconfirmedDangerousAction) {
-      task.status = AgentTaskStatus.WaitingResult;
-      task.statusReason =
-        this.toolInput.string(unconfirmedDangerousAction.error?.message) ??
-        'approval_required';
-      task.error = unconfirmedDangerousAction.error;
+      this.applyAdhocActionState(
+        task,
+        socialAgentUnconfirmedAdhocActionState({
+          call: unconfirmedDangerousAction,
+          readErrorText: (value) => this.toolInput.string(value),
+        }),
+      );
       rememberSocialAgentShortTerm(task, {});
       await this.taskRepo.save(task);
       return unconfirmedDangerousAction;
@@ -494,19 +498,14 @@ export class SocialAgentToolExecutorService {
       input: actionInput,
     });
 
-    if (call.status === 'succeeded') {
-      task.status = this.taskMemory.shouldWaitForReply(task)
-        ? AgentTaskStatus.WaitingReply
-        : AgentTaskStatus.WaitingResult;
-      task.statusReason = this.taskMemory.shouldWaitForReply(task)
-        ? 'action_executed_waiting_reply'
-        : 'action_executed_waiting_result';
-    } else {
-      task.status = AgentTaskStatus.WaitingResult;
-      task.statusReason =
-        this.toolInput.string(call.error?.message) ?? call.status;
-      task.error = call.error;
-    }
+    this.applyAdhocActionState(
+      task,
+      socialAgentAdhocActionCompletionState({
+        call,
+        shouldWaitForReply: this.taskMemory.shouldWaitForReply(task),
+        readErrorText: (value) => this.toolInput.string(value),
+      }),
+    );
     rememberSocialAgentShortTerm(task, {});
     await this.taskRepo.save(task);
     return call;
@@ -792,71 +791,20 @@ export class SocialAgentToolExecutorService {
     stepId: string,
     policy: SceneRiskPolicyResult,
   ): Promise<Record<string, unknown> | null> {
-    if (policy.blockedActions.includes('execute_real_action')) {
-      return {
-        success: true,
-        status: 'simulated',
-        simulated: true,
-        message: '实验室模式只模拟，不会真实执行这个社交动作。',
-        toolName,
-        stepId,
-        riskPolicy: policy,
-      };
-    }
-
-    if (!policy.requiresConfirmation) return null;
-    if (this.confirmationPolicy.hasUserApproval(input)) return null;
-    if (!isConfirmableSocialAgentTool(toolName)) return null;
-
-    const approval = await this.approvals.create({
-      userId: task.ownerUserId,
-      agentConnectionId: task.agentConnectionId ?? null,
-      agentTaskId: task.id,
-      type: getSocialAgentToolApprovalType(toolName, policy),
-      actionType: getSocialAgentToolActionType(toolName),
-      skillName: toolName,
-      payload: {
-        ...input,
-        agentTaskId: task.id,
-        stepId,
-        toolName,
-        sceneType: policy.sceneType,
-        riskLevel: policy.riskLevel,
-        requiresDoubleConfirmation: policy.requiresDoubleConfirmation,
-        blockedActions: policy.blockedActions,
-      },
-      summary: buildSocialAgentToolApprovalSummary(toolName, policy),
-      riskLevel: getSocialAgentToolApprovalRiskLevel(policy.riskLevel),
-      reason: policy.safetyPrompts.join('；') || '该动作需要用户确认后再执行。',
-      createdBy: 'agent',
-      relatedSocialRequestId: getSocialAgentRelatedSocialRequestId(input, null),
-      relatedCandidateId: getSocialAgentRelatedCandidateId(
-        toolName,
-        input,
-        null,
-      ),
-      relatedActivityId: getSocialAgentRelatedActivityId(toolName, input, null),
-      rationale:
-        policy.safetyPrompts.join('；') || 'Agent 已按场景风险策略暂停执行。',
+    const decision = buildSocialAgentRiskGateDecision({
+      task,
+      toolName,
+      toolInput: input,
+      stepId,
+      policy,
+      hasUserApproval: this.confirmationPolicy.hasUserApproval(input),
     });
 
-    return {
-      success: false,
-      status: 'pending_approval',
-      pendingApproval: true,
-      approvalId: approval.id,
-      approval: {
-        id: approval.id,
-        type: approval.type,
-        actionType: approval.actionType,
-        summary: approval.summary,
-        riskLevel: approval.riskLevel,
-        payload: approval.payload,
-        expiresAt: approval.expiresAt?.toISOString?.() ?? null,
-      },
-      riskPolicy: policy,
-      message: '已创建待确认动作，用户确认后 Agent 才会继续执行。',
-    };
+    if (decision.kind === 'none') return null;
+    if (decision.kind === 'simulated') return decision.output;
+
+    const approval = await this.approvals.create(decision.approvalInput);
+    return buildSocialAgentPendingApprovalOutput({ approval, policy });
   }
 
   private async updateAiProfileFromAnswers(
@@ -1516,12 +1464,7 @@ export class SocialAgentToolExecutorService {
       step,
       task.toolCalls?.length ?? 0,
     );
-    task.toolCalls = [...(task.toolCalls ?? []), call];
-    task.result = {
-      ...(task.result ?? {}),
-      lastToolCall: call,
-      updatedAt: new Date().toISOString(),
-    };
+    appendSocialAgentToolCallToTask({ task, call });
     await this.taskRepo.save(task);
     return call;
   }
@@ -1538,6 +1481,51 @@ export class SocialAgentToolExecutorService {
       handledReply,
       decision,
     });
+  }
+
+  private applyRunNextTaskState(
+    task: AgentTask,
+    state: { status: AgentTaskStatus; statusReason: string },
+  ): void {
+    task.status = state.status;
+    task.statusReason = state.statusReason;
+  }
+
+  private applyTaskFailureState(
+    task: AgentTask,
+    call: SocialAgentToolCallRecord,
+  ): void {
+    const state = socialAgentTaskFailureState({
+      call,
+      readErrorText: (value) => this.toolInput.string(value),
+    });
+    task.status = state.status;
+    task.statusReason = state.statusReason;
+    task.error = state.error;
+  }
+
+  private applyTaskCompletionState(
+    task: AgentTask,
+    shouldWaitForReply: boolean,
+  ): ReturnType<typeof socialAgentTaskCompletionState> {
+    const state = socialAgentTaskCompletionState({ shouldWaitForReply });
+    task.status = state.status;
+    task.completedAt = state.completedAt;
+    if ('statusReason' in state) {
+      task.statusReason = state.statusReason;
+    }
+    return state;
+  }
+
+  private applyAdhocActionState(
+    task: AgentTask,
+    state: SocialAgentAdhocActionTaskState,
+  ): void {
+    task.status = state.status;
+    task.statusReason = state.statusReason;
+    if ('error' in state) {
+      task.error = state.error ?? null;
+    }
   }
 
   private async writeSocialAgentInboxEvent(
@@ -1578,42 +1566,19 @@ export class SocialAgentToolExecutorService {
   private async createTaskEvent(
     task: AgentTask,
     type: AgentTaskEventType,
-    input: {
-      summary: string;
-      payload?: Record<string, unknown>;
-      stepId?: string | null;
-      toolCallId?: string | null;
-    },
+    input: SocialAgentTaskEventRecordInput,
   ): Promise<void> {
     try {
-      const actor =
-        type === AgentTaskEventType.ToolReturned ||
-        type === AgentTaskEventType.ToolFailed
-          ? AgentTaskEventActor.Tool
-          : AgentTaskEventActor.Agent;
       await this.eventRepo.save(
-        this.eventRepo.create({
-          taskId: task.id,
-          ownerUserId: task.ownerUserId,
-          eventType: this.toolCallFactory.safeVarchar(
+        this.eventRepo.create(
+          buildSocialAgentTaskEventRecord({
+            task,
             type,
-            80,
-          ) as AgentTaskEventType,
-          actor: this.toolCallFactory.safeVarchar(
-            actor,
-            80,
-          ) as AgentTaskEventActor,
-          summary: this.toolCallFactory.safeVarchar(input.summary, 500),
-          payload: input.payload ?? {},
-          stepId:
-            input.stepId == null
-              ? null
-              : this.toolCallFactory.safeVarchar(input.stepId, 80),
-          toolCallId:
-            input.toolCallId == null
-              ? null
-              : this.toolCallFactory.safeVarchar(input.toolCallId, 80),
-        }),
+            event: input,
+            safeVarchar: (value, max) =>
+              this.toolCallFactory.safeVarchar(value, max),
+          }),
+        ),
       );
     } catch (error) {
       this.logger.warn(
@@ -1647,18 +1612,14 @@ export class SocialAgentToolExecutorService {
     error: unknown,
   ): void {
     this.logger.error(
-      JSON.stringify({
-        event: 'agent.task.tool_failed',
-        taskId: task.id,
-        ownerUserId: task.ownerUserId,
-        agentConnectionId: task.agentConnectionId,
-        permissionMode: task.permissionMode,
-        stepId,
-        toolCallId: call.id,
-        toolName,
-        status: call.status,
-        error: call.error,
-      }),
+      JSON.stringify(
+        buildSocialAgentToolFailureLogPayload({
+          task,
+          toolName,
+          stepId,
+          call,
+        }),
+      ),
       error instanceof Error ? error.stack : undefined,
     );
   }
@@ -1668,19 +1629,7 @@ export class SocialAgentToolExecutorService {
     call: SocialAgentToolCallRecord,
   ): void {
     this.logger.error(
-      JSON.stringify({
-        event: 'agent.task.failed',
-        taskId: task.id,
-        ownerUserId: task.ownerUserId,
-        agentConnectionId: task.agentConnectionId,
-        permissionMode: task.permissionMode,
-        statusReason: task.statusReason,
-        failedToolCallId: call.id,
-        failedStepId: call.stepId,
-        failedToolName: call.toolName,
-        failedStatus: call.status,
-        error: call.error,
-      }),
+      JSON.stringify(buildSocialAgentTaskFailureLogPayload({ task, call })),
     );
   }
 }

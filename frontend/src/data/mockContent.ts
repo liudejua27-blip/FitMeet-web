@@ -1,14 +1,17 @@
 import type { Meet, Post } from '../types';
 
-export function withMockPosts(posts: Post[], minimum = 4) {
+export function filterDisplayablePosts(posts: Post[], minimum = 4) {
   void minimum;
   return posts.filter(isDisplayablePost);
 }
 
-export function withMockMeets(meets: Meet[], minimum = 4) {
+export function filterDisplayableMeets(meets: Meet[], minimum = 4) {
   void minimum;
   return meets.filter(isDisplayableMeet);
 }
+
+export const withMockPosts = filterDisplayablePosts;
+export const withMockMeets = filterDisplayableMeets;
 
 export function uniquePostsByUser(posts: Post[], limit = 5) {
   const seen = new Set<string>();
