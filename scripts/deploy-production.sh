@@ -69,6 +69,6 @@ echo "[post] Check backend logs for migrations"
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" logs --tail=120 backend
 
 echo "[DONE] Run production verification from your local machine:"
-echo "BASE_URL=https://www.ourfitmeet.cn ./scripts/verify-production.sh"
-echo "powershell -ExecutionPolicy Bypass -File .\\scripts\\verify-production.ps1"
-echo "curl https://www.ourfitmeet.cn/api/health"
+echo "BASE_URL=https://socialworld.world API_BASE_URL=https://api.socialworld.world/api ./scripts/verify-production.sh"
+echo "powershell -ExecutionPolicy Bypass -File .\\scripts\\verify-production.ps1 -BaseUrl https://socialworld.world -ApiBaseUrl https://api.socialworld.world/api"
+echo "curl https://api.socialworld.world/api/health"

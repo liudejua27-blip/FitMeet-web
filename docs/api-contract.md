@@ -17,7 +17,7 @@ the relevant client registry, and contract tests.
 ## Base URL
 
 - Local backend: `http://localhost:3000/api`
-- Production default: `https://www.ourfitmeet.cn/api`
+- Production default: `https://api.socialworld.world/api`
 - Web reads `VITE_API_BASE_URL`.
 - iOS reads `FITMEET_API_BASE_URL` from build settings/Info.plist and allows
   debug-only overrides.
@@ -165,11 +165,11 @@ pnpm --dir frontend test -- fitmeetCoreContract.test.ts
 Deployment smoke should include:
 
 ```bash
-scripts/verify-production.sh --base-url https://www.ourfitmeet.cn
+API_BASE_URL=https://api.socialworld.world/api scripts/verify-production.sh --base-url https://socialworld.world
 ```
 
 Real account write/read-back smoke requires explicit credentials:
 
 ```bash
-scripts/verify-production.sh --base-url https://www.ourfitmeet.cn --run-app-smoke
+API_BASE_URL=https://api.socialworld.world/api scripts/verify-production.sh --base-url https://socialworld.world --run-app-smoke
 ```

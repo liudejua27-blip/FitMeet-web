@@ -6,9 +6,9 @@ import {
 const validEnv = {
   NODE_ENV: 'production',
   PORT: '3000',
-  BASE_URL: 'https://www.ourfitmeet.cn',
-  FRONTEND_BASE_URL: 'https://www.ourfitmeet.cn',
-  ALLOWED_ORIGINS: 'https://www.ourfitmeet.cn,https://ourfitmeet.cn',
+  BASE_URL: 'https://api.socialworld.world',
+  FRONTEND_BASE_URL: 'https://socialworld.world',
+  ALLOWED_ORIGINS: 'https://socialworld.world,https://www.socialworld.world',
   DB_HOST: 'postgres',
   DB_PORT: '5432',
   DB_USERNAME: 'fitmeet',

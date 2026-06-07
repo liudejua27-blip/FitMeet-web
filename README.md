@@ -48,7 +48,7 @@ iOS App 的 API 地址按优先级读取：
 1. 运行环境变量 `FITMEET_ALPHA_API_BASE_URL`
 2. `Info.plist` 里的 `FITMEET_API_BASE_URL`
 3. Debug 默认 `http://localhost:3000/api`
-4. Release 默认 `https://www.ourfitmeet.cn/api`
+4. Release 默认 `https://api.socialworld.world/api`
 
 模拟器访问宿主机后端时，必要时把 Debug 地址改成 `http://127.0.0.1:3000/api` 或可被模拟器访问的局域网地址。
 
@@ -261,7 +261,22 @@ GitHub Actions 工作流在 `.github/workflows/ci.yml`。当前基线包含：
 
 ## 部署
 
-容器化部署以根目录 `docker-compose.yml` 和 `.env.example` 为参考：
+当前推荐上线拓扑是：
+
+- Web 主站：Vercel，域名 `https://socialworld.world` 和可选 `https://www.socialworld.world`。
+- Backend API：Railway，域名 `https://api.socialworld.world`。
+- 数据层：Railway PostgreSQL、Railway Redis、MongoDB Atlas 或 Railway MongoDB。
+- 上传：Aliyun OSS 或 S3/R2 兼容对象存储。
+
+详细步骤见 [deployment-railway-vercel.md](/Users/liuchongjiang/Desktop/FitMeet-web/docs/deployment-railway-vercel.md)。生产验证需要同时指定前端和后端地址：
+
+```bash
+BASE_URL=https://socialworld.world \
+API_BASE_URL=https://api.socialworld.world/api \
+./scripts/verify-production.sh
+```
+
+单机 Docker Compose 仍可作为备选部署路径，以根目录 `docker-compose.yml` 和 `.env.example` 为参考：
 
 1. 准备生产 `.env`，替换所有 `CHANGE_ME`。
 2. 运行生产环境变量检查，不会打印密钥值，只报告缺失项和风险项：
@@ -273,7 +288,7 @@ pnpm check:prod-env -- ../.env.production
 
 3. 确认 `JWT_SECRET`、数据库密码、Redis 密码、对象存储密钥、微信/短信/AI key 不使用默认值。
 4. 后端构建后运行 `pnpm migration:run:prod` 或等价迁移流程。
-5. 前端生产环境设置 `VITE_API_BASE_URL=/api` 或目标 API 域名。
+5. 前端生产环境设置 `VITE_API_BASE_URL=https://api.socialworld.world/api`。
 6. 配置反向代理，把 `/api` 转发到 Nest 服务，把 Web 静态资源指向对应构建产物。
 
 部署前建议按这个顺序收口：
@@ -299,7 +314,7 @@ APP_DIR=/opt/fitmeet-new ./scripts/deploy-production.sh
 
 ```bash
 docker compose --env-file .env.production -f docker-compose.prod.yml ps
-BASE_URL=https://www.ourfitmeet.cn ./scripts/verify-production.sh
+BASE_URL=https://socialworld.world API_BASE_URL=https://api.socialworld.world/api ./scripts/verify-production.sh
 ```
 
 `verify-production.sh` 默认只做非破坏性检查：Web 首页、`/api/health`、`/api/ready`、运行时 OpenAPI、公开 feed、App 保护接口的 401、Agent manifest 的未授权保护。需要真实 App 账号链路时，可设置 `APP_SMOKE_EMAIL`、`APP_SMOKE_PASSWORD`、`APP_SMOKE_TARGET_USER_ID` 后追加 `--run-app-smoke`；需要写入 public intent 时，再显式追加 `--run-public-intent-write`。
@@ -307,7 +322,7 @@ BASE_URL=https://www.ourfitmeet.cn ./scripts/verify-production.sh
 上线前的第一道容量 smoke 可以跑只读 1000 并发检查：
 
 ```bash
-LOAD_TEST_BASE_URL=https://www.ourfitmeet.cn \
+LOAD_TEST_BASE_URL=https://api.socialworld.world \
 LOAD_TEST_ALLOW_REMOTE=true \
 node scripts/load-1000-readonly.mjs
 ```
@@ -323,7 +338,7 @@ LOAD_TEST_BASE_URL=http://localhost:3000 ./scripts/release-preflight.sh --web-on
 真正的“1000 人在线”还需要验证 Socket.IO 实时链路。准备 staging 用户 token 池，或提供 staging 登录账号后运行：
 
 ```bash
-REALTIME_SMOKE_BASE_URL=https://www.ourfitmeet.cn \
+REALTIME_SMOKE_BASE_URL=https://api.socialworld.world \
 REALTIME_SMOKE_ALLOW_REMOTE=true \
 REALTIME_SMOKE_EMAIL=test@example.com \
 REALTIME_SMOKE_PASSWORD='***' \
@@ -333,7 +348,7 @@ node scripts/realtime-1000-online-smoke.mjs
 更接近真实多人在线的方式是提供 token 文件，每行一个 staging 用户 token：
 
 ```bash
-REALTIME_SMOKE_BASE_URL=https://www.ourfitmeet.cn \
+REALTIME_SMOKE_BASE_URL=https://api.socialworld.world \
 REALTIME_SMOKE_ALLOW_REMOTE=true \
 REALTIME_SMOKE_TOKENS_FILE=/secure/fitmeet-staging-tokens.txt \
 node scripts/realtime-1000-online-smoke.mjs

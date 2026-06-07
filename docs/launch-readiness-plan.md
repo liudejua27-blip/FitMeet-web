@@ -49,7 +49,7 @@ This document is the launch control plan for FitMeet Web and FitMeetAlpha iOS. I
 - `FitMeetAlpha/Networking/FitMeetCoreEndpoint.swift` mirrors the backend core endpoint set used by the app.
 - `FitMeetAlpha/App/FitMeetDefaults.swift` resolves base URL by configuration:
   - Debug default: `http://localhost:3000/api`.
-  - Release default: `https://www.ourfitmeet.cn/api`.
+  - Release default: `https://api.socialworld.world/api`.
   - Debug can use `FITMEET_ALPHA_API_BASE_URL` or in-app persisted override.
   - Release ignores local override unless explicitly enabled by build settings.
 - `AppState.restoreSession()` restores auth by trying `/auth/profile`, then `/auth/refresh`, then `/auth/profile` again so the cached user reflects the latest backend profile.
@@ -227,9 +227,9 @@ Railway backend env shape:
 ```bash
 NODE_ENV=production
 PORT=3000
-BASE_URL=https://api.your-domain.example
-FRONTEND_BASE_URL=https://your-domain.example
-ALLOWED_ORIGINS=https://your-domain.example,https://www.your-domain.example
+BASE_URL=https://api.socialworld.world
+FRONTEND_BASE_URL=https://socialworld.world
+ALLOWED_ORIGINS=https://socialworld.world,https://www.socialworld.world
 DATABASE_URL=postgresql://...
 REDIS_URL=redis://...
 MONGO_URI=mongodb+srv://...
@@ -240,6 +240,22 @@ DEEPSEEK_API_KEY=<secret>
 DEEPSEEK_CHAT_MODEL=deepseek-chat
 DEEPSEEK_FAST_MODEL=deepseek-v4-flash
 ```
+
+Vercel frontend env shape:
+
+```bash
+VITE_API_BASE_URL=https://api.socialworld.world/api
+VITE_WS_BASE_URL=https://api.socialworld.world
+```
+
+Railway/Vercel deployment runbook:
+
+- Backend Railway service root directory: `backend`.
+- Railway config file path: `backend/railway.toml`.
+- Backend health check: `/api/health`; rollout readiness check after deploy: `/api/ready`.
+- Web Vercel project root directory: `frontend`; build command `pnpm build`; output directory `dist`.
+- Deployment smoke must use both origins: `BASE_URL=https://socialworld.world API_BASE_URL=https://api.socialworld.world/api ./scripts/verify-production.sh`.
+- iOS Release default API is now `https://api.socialworld.world/api`; staging E2E uses the same API base unless a separate staging backend is provisioned.
 
 Security note: the local `backend/.env` file contains real provider secrets. It appears local-only, but those keys should be rotated before production and stored only in Railway/Vercel/provider secret managers. Do not commit or paste real secret values into docs, issues, or chat.
 
@@ -272,7 +288,7 @@ iOS staging backend E2E, requires real staging credentials:
 cd "/Users/liuchongjiang/Documents/FitMeet app"
 FITMEET_ALPHA_STAGING_E2E_REQUIRED=1 \
 FITMEET_ALPHA_STAGING_E2E=1 \
-FITMEET_ALPHA_STAGING_BASE_URL=https://www.ourfitmeet.cn/api \
+FITMEET_ALPHA_STAGING_BASE_URL=https://api.socialworld.world/api \
 FITMEET_ALPHA_STAGING_EMAIL=test@example.com \
 FITMEET_ALPHA_STAGING_PASSWORD='***' \
 FITMEET_ALPHA_STAGING_MESSAGE_TARGET_USER_ID=123 \

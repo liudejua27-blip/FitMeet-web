@@ -157,7 +157,7 @@ node scripts/realtime-1000-online-smoke.mjs
 Read-only staging:
 
 ```bash
-LOAD_TEST_BASE_URL=https://www.ourfitmeet.cn \
+LOAD_TEST_BASE_URL=https://api.socialworld.world \
 LOAD_TEST_ALLOW_REMOTE=true \
 LOAD_TEST_CONCURRENCY=1000 \
 node scripts/load-1000-readonly.mjs
@@ -166,7 +166,7 @@ node scripts/load-1000-readonly.mjs
 Realtime staging:
 
 ```bash
-REALTIME_SMOKE_BASE_URL=https://www.ourfitmeet.cn \
+REALTIME_SMOKE_BASE_URL=https://api.socialworld.world \
 REALTIME_SMOKE_ALLOW_REMOTE=true \
 REALTIME_SMOKE_EMAIL=test@example.com \
 REALTIME_SMOKE_PASSWORD='***' \

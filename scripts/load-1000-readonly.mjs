@@ -23,7 +23,7 @@ Environment:
   LOAD_TEST_ALLOW_REMOTE   Required as true for non-local targets
 
 Example:
-  LOAD_TEST_BASE_URL=https://www.ourfitmeet.cn \\
+  LOAD_TEST_BASE_URL=https://api.socialworld.world \\
   LOAD_TEST_ALLOW_REMOTE=true \\
   node scripts/load-1000-readonly.mjs
 `);

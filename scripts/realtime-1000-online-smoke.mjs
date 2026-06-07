@@ -31,7 +31,7 @@ Environment:
   REALTIME_SMOKE_ALLOW_REMOTE   Required as true for non-local targets
 
 Example:
-  REALTIME_SMOKE_BASE_URL=https://www.ourfitmeet.cn \\
+  REALTIME_SMOKE_BASE_URL=https://api.socialworld.world \\
   REALTIME_SMOKE_ALLOW_REMOTE=true \\
   REALTIME_SMOKE_EMAIL=test@example.com \\
   REALTIME_SMOKE_PASSWORD='***' \\

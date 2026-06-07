@@ -1,5 +1,6 @@
 param(
-  [string]$BaseUrl = "https://www.ourfitmeet.cn",
+  [string]$BaseUrl = "https://socialworld.world",
+  [string]$ApiBaseUrl = "https://api.socialworld.world/api",
   [string]$AgentToken = ""
 )
 
@@ -40,7 +41,7 @@ function Invoke-Check {
 }
 
 $base = $BaseUrl.TrimEnd("/")
-$api = "$base/api"
+$api = $ApiBaseUrl.TrimEnd("/")
 
 Invoke-Check "Frontend" {
   Invoke-WebRequest -UseBasicParsing $base -TimeoutSec 20

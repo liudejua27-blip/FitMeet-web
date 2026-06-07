@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-https://www.ourfitmeet.cn}"
+BASE_URL="${BASE_URL:-https://socialworld.world}"
+API_BASE_URL="${API_BASE_URL:-https://api.socialworld.world/api}"
 AGENT_TOKEN="${AGENT_TOKEN:-}"
 RUN_APP_SMOKE="${RUN_APP_SMOKE:-false}"
 RUN_PUBLIC_INTENT_WRITE="${RUN_PUBLIC_INTENT_WRITE:-false}"
@@ -10,7 +11,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/verify-production.sh [--base-url https://www.ourfitmeet.cn] [--agent-token token] [--run-app-smoke] [--run-public-intent-write]
+Usage: scripts/verify-production.sh [--base-url https://socialworld.world] [--api-base-url https://api.socialworld.world/api] [--agent-token token] [--run-app-smoke] [--run-public-intent-write]
 
 Verifies a deployed FitMeet Web/API stack from macOS or Linux:
   - frontend root, backend health, and dependency readiness
@@ -22,7 +23,8 @@ Verifies a deployed FitMeet Web/API stack from macOS or Linux:
   - optional public social intent write/read-back
 
 Environment:
-  BASE_URL                         Public Web origin. Defaults to https://www.ourfitmeet.cn.
+  BASE_URL                         Public Web origin. Defaults to https://socialworld.world.
+  API_BASE_URL                     Backend API base URL. Defaults to https://api.socialworld.world/api.
   AGENT_TOKEN                      Optional X-Agent-Token for authorized agent manifest check.
   RUN_APP_SMOKE=true               Run backend smoke:app-core against this remote API.
   RUN_PUBLIC_INTENT_WRITE=true     Exercise public social intent write/read-back.
@@ -34,6 +36,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --base-url)
       BASE_URL="${2:-}"
+      shift
+      ;;
+    --api-base-url)
+      API_BASE_URL="${2:-}"
       shift
       ;;
     --agent-token)
@@ -60,7 +66,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 BASE_URL="${BASE_URL%/}"
-API_BASE_URL="${BASE_URL}/api"
+API_BASE_URL="${API_BASE_URL%/}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
