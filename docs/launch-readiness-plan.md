@@ -20,6 +20,7 @@ This document is the launch control plan for FitMeet Web and FitMeetAlpha iOS. I
 - SQL database: PostgreSQL through TypeORM.
 - Document database: MongoDB through Mongoose for message/realtime-style models.
 - Cache/realtime support: Redis through `ioredis`.
+- Deployment compatibility: Postgres can be configured with either split `DB_HOST`/`DB_PORT`/`DB_USERNAME`/`DB_PASSWORD`/`DB_DATABASE` variables or a managed-platform `DATABASE_URL`; Redis can be configured with either split `REDIS_*` variables or `REDIS_URL`. Use `DB_SSL=true` or `PGSSLMODE=require` when the managed Postgres provider requires TLS.
 - Optional/event infrastructure: Kafka is present and can run in no-op mode for local development.
 - API safety layer: global `ValidationPipe`, global `HttpExceptionFilter`, global `LoggingInterceptor`, Helmet, compression, CORS allowlist, and `@nestjs/throttler`.
 - HTTP and Socket.IO origin allowlists are resolved through the same `CORS_ORIGIN`/`ALLOWED_ORIGINS` helper; production Socket.IO gateways require explicit origins.
@@ -146,6 +147,7 @@ Rollback note: TypeORM `down()` methods exist for most migrations, but productio
 - Destructive migration rollout risk has been reduced: `migration-integrity.spec.ts` now fails production `up()` migrations that attempt table/column drops, deletes, or truncates without a deliberate forward-migration path.
 - Social Agent chat entrypoint risk has been reduced to thin facade services; profile extraction prompt/normalization, Final Response input assembly, and runtime completion status/payload assembly have been split out of the LLM/orchestrator services; public social candidate card scoring has been split out of the large Agent Gateway service; timeline message restoration still needs continued focused tests because it is shared by Web and iOS session restore.
 - DB risk: production schema drift may exist if older deployments used `synchronize`; verify migration status against staging before production.
+- Deployment config risk has been reduced for Railway-style managed services: backend runtime, TypeORM migration CLI, Redis runtime, and production env readiness now accept `DATABASE_URL` and `REDIS_URL` in addition to Docker-style split variables. A real Railway deployment still must validate env values through `pnpm --dir backend check:prod-env -- <env-file>` or the equivalent CI secret export before rollout.
 - Mongo index risk has been reduced in code for message/realtime reads, but production must still verify deployed Mongo indexes for `conversations`, `messages`, and `agentinboxevents` before load testing.
 - Contract risk: Web legacy APIs outside `fitmeet-core.openapi.ts` can drift because only the core launch subset is contract-tested; Web public hall social-intent list/detail/matches reads, Web Agent inbox conversation read/reply, event poll/ack, and profile-match review endpoints are now inside the shared core contract, typed endpoint registries, and controller mapping guard.
 - Error contract risk has been reduced for the shared launch subset: OpenAPI now documents the stable error envelope for auth, feed, messages, Social Agent chat, SSE, and uploads instead of only happy paths.
@@ -207,6 +209,33 @@ curl -fsS http://localhost:3000/api/health
 curl -fsS http://localhost:3000/api/ready
 curl -fsS http://localhost:3000/api/openapi/fitmeet-core.json
 ```
+
+Current local dependency status:
+
+- Docker Desktop is now installed and `docker --version` / `docker compose version` work in this environment.
+- `docker compose up -d postgres mongo redis` has not yet completed here because the first Postgres/Mongo image pull was still in progress after several minutes and was interrupted before the services reached ready state.
+- Local migration, backend startup, `/api/ready`, and load smoke remain unproven until the image pull completes and Postgres/Mongo/Redis are running.
+
+Railway backend env shape:
+
+```bash
+NODE_ENV=production
+PORT=3000
+BASE_URL=https://api.your-domain.example
+FRONTEND_BASE_URL=https://your-domain.example
+ALLOWED_ORIGINS=https://your-domain.example,https://www.your-domain.example
+DATABASE_URL=postgresql://...
+REDIS_URL=redis://...
+MONGO_URI=mongodb+srv://...
+DB_SYNCHRONIZE=false
+DB_MIGRATIONS_RUN=false
+JWT_SECRET=<32+ char random secret>
+DEEPSEEK_API_KEY=<secret>
+DEEPSEEK_CHAT_MODEL=deepseek-chat
+DEEPSEEK_FAST_MODEL=deepseek-v4-flash
+```
+
+Security note: the local `backend/.env` file contains real provider secrets. It appears local-only, but those keys should be rotated before production and stored only in Railway/Vercel/provider secret managers. Do not commit or paste real secret values into docs, issues, or chat.
 
 Frontend:
 

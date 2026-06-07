@@ -24,19 +24,9 @@ const CORE_REQUIRED_KEYS = [
   'PORT',
   'BASE_URL',
   'FRONTEND_BASE_URL',
-  'DB_HOST',
-  'DB_PORT',
-  'DB_USERNAME',
-  'DB_PASSWORD',
-  'DB_DATABASE',
   'MONGO_URI',
-  'REDIS_HOST',
-  'REDIS_PORT',
-  'REDIS_PASSWORD',
   'JWT_SECRET',
 ];
-
-const DOCKER_REQUIRED_KEYS = ['MONGO_USERNAME', 'MONGO_PASSWORD'];
 
 const OPTIONAL_BUT_LAUNCH_CRITICAL_KEYS = [
   'SMS_ACCESS_KEY',
@@ -87,9 +77,6 @@ export function buildProductionEnvReport(env: EnvMap): ProductionEnvReport {
   for (const key of CORE_REQUIRED_KEYS) {
     requireConfigured(env, key, error);
   }
-  for (const key of DOCKER_REQUIRED_KEYS) {
-    requireConfigured(env, key, error);
-  }
 
   if (env.NODE_ENV !== 'production') {
     error('NODE_ENV', 'must be exactly "production" for release readiness.');
@@ -110,7 +97,9 @@ export function buildProductionEnvReport(env: EnvMap): ProductionEnvReport {
   checkJwtSecret(env, error);
   checkAgentWebhookSecret(env, warning);
   checkWechatRedirectUri(env, error);
+  checkPostgres(env, error);
   checkMongoUri(env, error);
+  checkRedis(env, error);
   checkObjectStorage(env, error);
   checkAgentModel(env, error);
   checkKafka(env, error);
@@ -216,6 +205,81 @@ function checkMongoUri(
       'MONGO_URI',
       'must include authSource when docker-compose.prod.yml uses root Mongo credentials.',
     );
+  }
+}
+
+function checkPostgres(
+  env: EnvMap,
+  error: (key: string, message: string) => void,
+): void {
+  if (hasConfiguredValue(env.DATABASE_URL)) {
+    validateServiceUrl(
+      env.DATABASE_URL,
+      'DATABASE_URL',
+      ['postgres:', 'postgresql:'],
+      error,
+    );
+    return;
+  }
+
+  for (const key of [
+    'DB_HOST',
+    'DB_PORT',
+    'DB_USERNAME',
+    'DB_PASSWORD',
+    'DB_DATABASE',
+  ]) {
+    requireConfigured(env, key, error);
+  }
+  checkNonLocalServiceHost(env.DB_HOST, 'DB_HOST', error);
+}
+
+function checkRedis(
+  env: EnvMap,
+  error: (key: string, message: string) => void,
+): void {
+  if (hasConfiguredValue(env.REDIS_URL)) {
+    validateServiceUrl(
+      env.REDIS_URL,
+      'REDIS_URL',
+      ['redis:', 'rediss:'],
+      error,
+    );
+    return;
+  }
+
+  for (const key of ['REDIS_HOST', 'REDIS_PORT', 'REDIS_PASSWORD']) {
+    requireConfigured(env, key, error);
+  }
+  checkNonLocalServiceHost(env.REDIS_HOST, 'REDIS_HOST', error);
+}
+
+function validateServiceUrl(
+  value: string | undefined,
+  key: string,
+  allowedProtocols: string[],
+  error: (key: string, message: string) => void,
+): void {
+  try {
+    const url = new URL(value ?? '');
+    if (!allowedProtocols.includes(url.protocol)) {
+      error(key, `must use one of: ${allowedProtocols.join(', ')}.`);
+    }
+    checkNonLocalServiceHost(url.hostname, key, error);
+  } catch {
+    error(key, 'must be a valid connection URL.');
+  }
+}
+
+function checkNonLocalServiceHost(
+  host: string | undefined,
+  key: string,
+  error: (key: string, message: string) => void,
+): void {
+  const normalizedHost = `${host ?? ''}`.trim();
+  if (!hasConfiguredValue(normalizedHost)) return;
+  if (/^(localhost|127\.0\.0\.1|0\.0\.0\.0)$/i.test(normalizedHost)) {
+    error(key, 'must not point at a local address in production.');
   }
 }
 

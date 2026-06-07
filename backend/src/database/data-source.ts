@@ -35,15 +35,24 @@ if (process.env.NODE_ENV === 'production') {
   loadEnvFile(join(cwd, '.env'));
 }
 
+const databaseUrl = process.env.DATABASE_URL;
+const dbSsl =
+  process.env.DB_SSL === 'true' || process.env.PGSSLMODE === 'require';
+
 export default new DataSource({
   type: 'postgres',
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT ?? 5432),
-  username: process.env.DB_USERNAME,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_DATABASE,
+  ...(databaseUrl
+    ? { url: databaseUrl }
+    : {
+        host: process.env.DB_HOST,
+        port: Number(process.env.DB_PORT ?? 5432),
+        username: process.env.DB_USERNAME,
+        password: process.env.DB_PASSWORD,
+        database: process.env.DB_DATABASE,
+      }),
   entities: [join(__dirname, '..', '**', '*.entity{.ts,.js}')],
   migrations: [join(__dirname, 'migrations', '*{.ts,.js}')],
   migrationsTransactionMode: 'each',
   synchronize: false,
+  ssl: dbSsl ? { rejectUnauthorized: false } : undefined,
 });

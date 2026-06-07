@@ -67,14 +67,14 @@ No successful local or staging load result is recorded in this environment yet.
 2026-06-07 local Codex verification:
 
 - Passed: `./scripts/release-preflight.sh --web-only`; backend/frontend/landing install, lint, build, unit/contract tests, dry-run App core smoke, and living-social seed dry-run passed. This is a release correctness baseline, not a load-test result.
-- Blocked: `docker --version` and `docker compose version` both fail with `command not found`, so local Postgres/Mongo/Redis cannot be started through the documented compose path.
-- Blocked: `pnpm --dir backend migration:status` fails with `database.migration_status_failed` for Postgres `localhost:5432/fitness_app` and `ECONNREFUSED`.
+- Passed: Docker Desktop is now installed; `docker --version` reports Docker 29.5.2 and `docker compose version` reports Compose v5.1.4.
+- Blocked: `docker compose up -d postgres mongo redis` has not completed in this environment yet. Redis image pull completed, but the first Postgres/Mongo image pull was still running after several minutes and was interrupted before the dependency stack reached ready state.
+- Still blocked: local `pnpm --dir backend migration:status`, backend startup, `/api/ready`, and load smoke remain unproven until Postgres, MongoDB, and Redis are actually running.
 
 Precise blocker from the 2026-06-06 local Codex run:
 
-- `docker` is not installed, so `docker compose up -d postgres mongo redis` cannot start local dependencies.
-- MongoDB is not listening on `localhost:27017`.
-- `pnpm --dir backend migration:status` fails with Postgres `ECONNREFUSED` for `localhost:5432/fitness_app`.
+- Docker is now available, replacing the previous `command not found` blocker.
+- MongoDB and Postgres have still not been proven reachable locally because the compose dependency pull/start did not complete.
 - Without reachable Postgres, MongoDB, and Redis, the backend cannot be honestly started and load-tested through `/api/ready` in this environment.
 - Staging/production runs require intentional remote opt-in plus credentials or tokens for realtime auth.
 - The current Codex session does not have production/staging credentials and should not invent or commit them.

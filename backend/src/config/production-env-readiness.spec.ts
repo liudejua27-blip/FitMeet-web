@@ -63,6 +63,36 @@ describe('production-env-readiness', () => {
     expect(report.errors).toEqual([]);
   });
 
+  it('passes Railway-style managed database and Redis URLs', () => {
+    const env: Record<string, string> = { ...validEnv };
+    for (const key of [
+      'DB_HOST',
+      'DB_PORT',
+      'DB_USERNAME',
+      'DB_PASSWORD',
+      'DB_DATABASE',
+      'REDIS_HOST',
+      'REDIS_PORT',
+      'REDIS_PASSWORD',
+      'MONGO_USERNAME',
+      'MONGO_PASSWORD',
+    ]) {
+      delete env[key];
+    }
+    const report = buildProductionEnvReport({
+      ...env,
+      DATABASE_URL:
+        'postgresql://fitmeet:strong-postgres-password@postgres.railway.internal:5432/railway',
+      REDIS_URL:
+        'redis://default:strong-redis-password@redis.railway.internal:6379',
+      MONGO_URI:
+        'mongodb+srv://fitmeet:strong-mongo-password@cluster.example.mongodb.net/fitness_app?retryWrites=true&w=majority',
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.errors).toEqual([]);
+  });
+
   it('accepts CORS_ORIGIN as the shared HTTP and Socket.IO origin source', () => {
     const { ALLOWED_ORIGINS, ...env } = validEnv;
     const report = buildProductionEnvReport({
@@ -104,6 +134,38 @@ describe('production-env-readiness', () => {
         expect.objectContaining({ key: 'ALIYUN_OSS_ENDPOINT' }),
         expect.objectContaining({ key: 'ALIYUN_OSS_PUBLIC_BASE_URL' }),
         expect.objectContaining({ key: 'S3_ENDPOINT' }),
+      ]),
+    );
+  });
+
+  it('rejects invalid managed database and Redis URLs', () => {
+    const report = buildProductionEnvReport({
+      ...validEnv,
+      DATABASE_URL: 'mysql://fitmeet:password@db.example.com:3306/fitmeet',
+      REDIS_URL: 'http://redis.example.com:6379',
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'DATABASE_URL' }),
+        expect.objectContaining({ key: 'REDIS_URL' }),
+      ]),
+    );
+  });
+
+  it('rejects local production database and Redis hosts', () => {
+    const report = buildProductionEnvReport({
+      ...validEnv,
+      DB_HOST: 'localhost',
+      REDIS_HOST: '127.0.0.1',
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'DB_HOST' }),
+        expect.objectContaining({ key: 'REDIS_HOST' }),
       ]),
     );
   });

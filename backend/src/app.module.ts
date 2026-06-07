@@ -56,14 +56,22 @@ import { FutureSkillsGatewayModule } from './future-skills-gateway/future-skills
       useFactory: (configService: ConfigService) => {
         const nodeEnv = configService.get<string>('NODE_ENV');
         const defaultSynchronize = 'false';
+        const databaseUrl = configService.get<string>('DATABASE_URL');
+        const dbSsl =
+          configService.get<string>('DB_SSL') === 'true' ||
+          configService.get<string>('PGSSLMODE') === 'require';
 
         return {
           type: 'postgres',
-          host: configService.get<string>('DB_HOST'),
-          port: Number(configService.get<string>('DB_PORT') ?? 5432),
-          username: configService.get<string>('DB_USERNAME'),
-          password: configService.get<string>('DB_PASSWORD'),
-          database: configService.get<string>('DB_DATABASE'),
+          ...(databaseUrl
+            ? { url: databaseUrl }
+            : {
+                host: configService.get<string>('DB_HOST'),
+                port: Number(configService.get<string>('DB_PORT') ?? 5432),
+                username: configService.get<string>('DB_USERNAME'),
+                password: configService.get<string>('DB_PASSWORD'),
+                database: configService.get<string>('DB_DATABASE'),
+              }),
           entities: [__dirname + '/**/*.entity{.ts,.js}'],
           migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
           migrationsTransactionMode: 'each',
@@ -73,6 +81,7 @@ import { FutureSkillsGatewayModule } from './future-skills-gateway/future-skills
           synchronize:
             configService.get<string>('DB_SYNCHRONIZE', defaultSynchronize) ===
             'true',
+          ssl: dbSsl ? { rejectUnauthorized: false } : undefined,
           extra: {
             max: 100,
             min: 10,
