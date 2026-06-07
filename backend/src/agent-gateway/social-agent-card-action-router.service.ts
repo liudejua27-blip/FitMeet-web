@@ -2,8 +2,8 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { messageForSocialAgentSchemaAction } from './social-agent-card-action.presenter';
+import type { SocialAgentCardActionBody } from './social-agent-action.types';
 import type {
-  SocialAgentCardActionBody,
   SocialAgentIntentRouteResult,
   SocialAgentRouteMessageBody,
 } from './social-agent-chat.types';

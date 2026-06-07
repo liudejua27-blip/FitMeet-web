@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
+import type { SocialAgentCardActionBody } from './social-agent-action.types';
 import type {
-  SocialAgentCardActionBody,
   SocialAgentIntentRouteResult,
   SocialAgentRouteMessageBody,
 } from './social-agent-chat.types';

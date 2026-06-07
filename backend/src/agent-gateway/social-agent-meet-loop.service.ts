@@ -41,9 +41,9 @@ import {
   mergeSocialAgentActivityPayload,
   readSocialAgentMeetLoopState,
 } from './social-agent-card-action.presenter';
+import type { SocialAgentCardActionBody } from './social-agent-action.types';
 import { appendSocialAgentConversationTurn } from './social-agent-chat-memory.presenter';
 import type {
-  SocialAgentCardActionBody,
   SocialAgentIntentRouteResult,
   SocialAgentPendingApprovalSnapshot,
 } from './social-agent-chat.types';

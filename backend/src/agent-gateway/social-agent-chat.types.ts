@@ -24,7 +24,6 @@ import type {
 import type { LifeGraphProposalDto } from '../life-graph/dto/life-graph.dto';
 import type {
   FitMeetAgentSafety,
-  FitMeetAgentSchemaAction,
   FitMeetAgentTrace,
   FitMeetAlphaCard,
 } from './fitmeet-alpha-agent.types';
@@ -103,21 +102,6 @@ export interface SocialAgentChatRunResult {
   structuredIntent?: Record<string, unknown>;
 }
 
-export type CandidateTargetBody = {
-  targetUserId?: unknown;
-  candidateUserId?: unknown;
-  toUserId?: unknown;
-  recipientUserId?: unknown;
-  recipientId?: unknown;
-  receiverId?: unknown;
-  userId?: unknown;
-  followingId?: unknown;
-  publicIntentId?: unknown;
-  socialRequestId?: unknown;
-  candidateRecordId?: unknown;
-  candidate?: Record<string, unknown> | null;
-};
-
 export type SocialAgentChatStreamEvent =
   | { type: 'task'; taskId: number; status: AgentTaskStatus }
   | { type: 'step'; step: SocialAgentVisibleStep }
@@ -144,11 +128,6 @@ export type SocialAgentRouteMessageBody = {
   message?: string | null;
   taskId?: number | null;
   hasCandidates?: boolean;
-};
-
-export type SocialAgentCardActionBody = {
-  action?: FitMeetAgentSchemaAction | null;
-  payload?: Record<string, unknown> | null;
 };
 
 export type StreamEmit = (

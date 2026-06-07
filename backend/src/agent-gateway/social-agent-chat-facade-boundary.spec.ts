@@ -9,6 +9,8 @@ const facadePath = path.resolve(
   __dirname,
   'social-agent-chat-facade.service.ts',
 );
+const chatTypesPath = path.resolve(__dirname, 'social-agent-chat.types.ts');
+const actionTypesPath = path.resolve(__dirname, 'social-agent-action.types.ts');
 const timelinePath = path.resolve(
   __dirname,
   'social-agent-chat-timeline.presenter.ts',
@@ -93,6 +95,8 @@ const runCompletionPresenterPath = path.resolve(
 describe('SocialAgentChatService facade boundary', () => {
   const compatibilitySource = fs.readFileSync(compatibilityExportPath, 'utf8');
   const facadeSource = fs.readFileSync(facadePath, 'utf8');
+  const chatTypesSource = fs.readFileSync(chatTypesPath, 'utf8');
+  const actionTypesSource = fs.readFileSync(actionTypesPath, 'utf8');
   const timelineSource = fs.readFileSync(timelinePath, 'utf8');
   const timelineMessagesSource = fs.readFileSync(timelineMessagesPath, 'utf8');
   const timelineEventsSource = fs.readFileSync(timelineEventsPath, 'utf8');
@@ -169,6 +173,17 @@ describe('SocialAgentChatService facade boundary', () => {
     expect(facadeSource).not.toMatch(/SocialAgentSessionQueryService/);
     expect(facadeSource).not.toMatch(/SocialAgentToolExecutorService/);
     expect(facadeSource).not.toMatch(/Repository</);
+  });
+
+  it('keeps card and candidate action request bodies split from chat session types', () => {
+    expect(chatTypesSource).not.toContain('CandidateTargetBody');
+    expect(chatTypesSource).not.toContain('SocialAgentCardActionBody');
+    expect(chatTypesSource).not.toContain('FitMeetAgentSchemaAction');
+    expect(actionTypesSource).toContain('export type CandidateTargetBody');
+    expect(actionTypesSource).toContain(
+      'export type SocialAgentCardActionBody',
+    );
+    expect(actionTypesSource.trim().split('\n').length).toBeLessThanOrEqual(25);
   });
 
   it('keeps timeline snapshot assembly split from event and candidate normalization', () => {

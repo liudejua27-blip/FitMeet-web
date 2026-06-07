@@ -32,7 +32,7 @@ import {
   type UserFacingStreamEvent,
 } from './social-agent-chat-stream.presenter';
 import { SocialAgentChatService } from './social-agent-chat.service';
-import type { SocialAgentCardActionBody } from './social-agent-chat.types';
+import type { SocialAgentCardActionBody } from './social-agent-action.types';
 import { SocialAgentCandidateCommandService } from './social-agent-candidate-command.service';
 
 @Controller('social-agent/chat')

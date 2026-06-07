@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 
+import type { SocialAgentCardActionBody } from './social-agent-action.types';
 import type {
   SocialAgentAppendContextResult,
   SocialAgentAsyncRunSnapshot,
-  SocialAgentCardActionBody,
   SocialAgentChatReplanRunBody,
   SocialAgentChatRunBody,
   SocialAgentChatRunResult,

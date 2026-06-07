@@ -4,7 +4,7 @@ import { CreateSocialRequestDto } from '../social-requests/dto/create-social-req
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { SocialAgentToolCallRecord } from './social-agent-tool-executor.service';
-import type { CandidateTargetBody } from './social-agent-chat.types';
+import type { CandidateTargetBody } from './social-agent-action.types';
 
 @Injectable()
 export class SocialAgentCandidateCommandService {

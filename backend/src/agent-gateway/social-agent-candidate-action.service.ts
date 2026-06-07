@@ -32,11 +32,13 @@ import {
   buildSocialAgentOpenerApprovalCard,
   readSocialAgentCardActionCandidate,
 } from './social-agent-card-action.presenter';
-import { appendSocialAgentConversationTurn } from './social-agent-chat-memory.presenter';
-import { readSocialAgentStoredCandidateSummaries } from './social-agent-chat-session.presenter';
 import type {
   CandidateTargetBody,
   SocialAgentCardActionBody,
+} from './social-agent-action.types';
+import { appendSocialAgentConversationTurn } from './social-agent-chat-memory.presenter';
+import { readSocialAgentStoredCandidateSummaries } from './social-agent-chat-session.presenter';
+import type {
   SocialAgentIntentRouteResult,
   SocialAgentPendingApprovalSnapshot,
 } from './social-agent-chat.types';
