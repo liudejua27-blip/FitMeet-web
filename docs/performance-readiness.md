@@ -62,20 +62,42 @@ Remote safety gates:
 
 ## Current Results
 
-No successful local or staging load result is recorded in this environment yet.
+No successful 1000-concurrency local or staging load result is recorded in this environment yet. A local run has now produced an actionable failure result: the backend dependency stack stays healthy, but the single-IP smoke is blocked by global rate limiting.
 
 2026-06-07 local Codex verification:
 
 - Passed: `./scripts/release-preflight.sh --web-only`; backend/frontend/landing install, lint, build, unit/contract tests, dry-run App core smoke, and living-social seed dry-run passed. This is a release correctness baseline, not a load-test result.
 - Passed: Docker Desktop is now installed; `docker --version` reports Docker 29.5.2 and `docker compose version` reports Compose v5.1.4.
-- Blocked: `docker compose up -d postgres mongo redis` has not completed in this environment yet. Redis image pull completed, but the first Postgres/Mongo image pull was still running after several minutes and was interrupted before the dependency stack reached ready state.
-- Still blocked: local `pnpm --dir backend migration:status`, backend startup, `/api/ready`, and load smoke remain unproven until Postgres, MongoDB, and Redis are actually running.
+- Passed: `docker compose up -d postgres mongo redis` completed after Docker finished pulling Postgres and Mongo images.
+- Passed: `pnpm --dir backend migration:run` applied 42 migrations to an empty local Postgres database.
+- Passed: `pnpm --dir backend migration:status` reports `availableCount=42`, `appliedCount=42`, `pendingCount=0`.
+- Passed: `pnpm --dir backend seed:living-social-data` wrote 50 local users, 50 social profiles, and 50 social requests.
+- Passed: local backend startup against Docker Postgres/Mongo/Redis; `/api/ready` returned `postgres=ok`, `mongo=ok`, and `redis=ok`.
+- Passed: `pnpm --dir backend smoke:app-core` with `APP_SMOKE_RUN_MUTATIONS=true` covered auth/profile restore, refresh rotation, avatar upload/profile save, feed moment publish/read-back, real message start/send/read-back, and Social Agent route-message.
+- Failed: `LOAD_TEST_CONCURRENCY=1000 node scripts/load-1000-readonly.mjs` returned 92% errors because global throttling returned HTTP 429 for `/api/health`, `/api/ready`, `/api/feed?page=1&limit=5`, and `/api/openapi/fitmeet-core.json`.
 
-Precise blocker from the 2026-06-06 local Codex run:
+Local 1000 read-only load result from 2026-06-07:
 
-- Docker is now available, replacing the previous `command not found` blocker.
-- MongoDB and Postgres have still not been proven reachable locally because the compose dependency pull/start did not complete.
-- Without reachable Postgres, MongoDB, and Redis, the backend cannot be honestly started and load-tested through `/api/ready` in this environment.
+```json
+{
+  "target": "http://localhost:3000",
+  "concurrency": 1000,
+  "elapsedMs": 373,
+  "requestsPerSecond": 2678.5,
+  "errors": 920,
+  "errorRate": 92,
+  "p50Ms": 188,
+  "p95Ms": 331,
+  "p99Ms": 334,
+  "firstFailureStatus": 429
+}
+```
+
+Current blocker for accepted 1000-concurrency evidence:
+
+- The current load script sends 1000 concurrent requests from one local IP, while the app has global throttler buckets of 10/sec, 100/min, and 1000/hour.
+- The failure is therefore a rate-limit test result, not a capacity pass or a database saturation result.
+- Before claiming 1000+ concurrent readiness, run the smoke from a staging-safe distributed source, add an explicit load-test bypass for non-production environments, or define production rate-limit policy separately from backend capacity testing.
 - Staging/production runs require intentional remote opt-in plus credentials or tokens for realtime auth.
 - The current Codex session does not have production/staging credentials and should not invent or commit them.
 

@@ -16,10 +16,10 @@ describe('TypeORM launch configuration contract', () => {
 
   it('keeps runtime and migration CLI pointed at the same migration directory', () => {
     expect(APP_MODULE_SOURCE).toMatch(
-      /migrations:\s*\[\s*__dirname\s*\+\s*['"]\/database\/migrations\/\*\{\.ts,\.js\}['"]\s*\]/,
+      /migrations:\s*\[\s*__dirname\s*\+\s*['"]\/database\/migrations\/\[0-9\]\*\{\.ts,\.js\}['"]\s*\]/,
     );
     expect(DATA_SOURCE_SOURCE).toMatch(
-      /migrations:\s*\[\s*join\(\s*__dirname,\s*['"]migrations['"],\s*['"]\*\{\.ts,\.js\}['"]\s*\)\s*\]/,
+      /migrations:\s*\[\s*join\(\s*__dirname,\s*['"]migrations['"],\s*['"]\[0-9\]\*\{\.ts,\.js\}['"]\s*\)\s*\]/,
     );
   });
 

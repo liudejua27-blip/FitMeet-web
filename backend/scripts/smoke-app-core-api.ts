@@ -80,7 +80,14 @@ async function main() {
       body: { refreshToken: actor.refreshToken },
       token: actor.accessToken,
     });
-    mustString(refreshResult.access_token, 'refresh.access_token');
+    actor.accessToken = mustString(
+      refreshResult.access_token,
+      'refresh.access_token',
+    );
+    actor.refreshToken = mustString(
+      refreshResult.refresh_token,
+      'refresh.refresh_token',
+    );
     ok('Refresh token restores an access token');
   } else {
     skip('Refresh check skipped because login did not return refresh_token');

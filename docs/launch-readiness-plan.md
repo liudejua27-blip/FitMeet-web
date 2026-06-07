@@ -213,8 +213,14 @@ curl -fsS http://localhost:3000/api/openapi/fitmeet-core.json
 Current local dependency status:
 
 - Docker Desktop is now installed and `docker --version` / `docker compose version` work in this environment.
-- `docker compose up -d postgres mongo redis` has not yet completed here because the first Postgres/Mongo image pull was still in progress after several minutes and was interrupted before the services reached ready state.
-- Local migration, backend startup, `/api/ready`, and load smoke remain unproven until the image pull completes and Postgres/Mongo/Redis are running.
+- `docker compose up -d postgres mongo redis` completed successfully in this environment after the Postgres/Mongo images finished pulling.
+- Empty local Postgres bootstrap now succeeds: `pnpm --dir backend migration:run` applied 42 migrations.
+- `pnpm --dir backend migration:status` reports `availableCount=42`, `appliedCount=42`, and `pendingCount=0`.
+- `pnpm --dir backend seed:living-social-data` writes 50 local users, 50 social profiles, and 50 social requests with the documented local password.
+- Local backend startup succeeds against Docker Postgres/Mongo/Redis, and `/api/health`, `/api/ready`, `/api/openapi/fitmeet-core.json`, and `/api/feed?page=1&limit=5` return 2xx.
+- `pnpm --dir backend smoke:app-core` passes against `http://localhost:3000/api` with a seed user and `APP_SMOKE_RUN_MUTATIONS=true`, covering auth/profile restore, refresh rotation, avatar upload/profile save, feed moment publish/read-back, real message start/send/read-back, and Social Agent route-message.
+- Local upload mutation smoke used explicit empty object-storage env values so the backend fell back to local development storage. Production still requires Aliyun OSS or S3/R2-compatible object storage.
+- Read-only 1000-concurrency load smoke does not pass yet because the single-local-IP run hits global throttling and returns 429s for most requests. This is now documented in `docs/performance-readiness.md`.
 
 Railway backend env shape:
 

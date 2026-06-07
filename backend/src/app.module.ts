@@ -73,7 +73,7 @@ import { FutureSkillsGatewayModule } from './future-skills-gateway/future-skills
                 database: configService.get<string>('DB_DATABASE'),
               }),
           entities: [__dirname + '/**/*.entity{.ts,.js}'],
-          migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
+          migrations: [__dirname + '/database/migrations/[0-9]*{.ts,.js}'],
           migrationsTransactionMode: 'each',
           migrationsRun:
             nodeEnv === 'production' &&

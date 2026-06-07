@@ -21,6 +21,10 @@ export class UpdateProfileDto {
   city?: string;
 
   @IsOptional()
-  @IsUrl()
+  @IsUrl({
+    protocols: ['http', 'https'],
+    require_protocol: true,
+    require_tld: false,
+  })
   avatar?: string;
 }

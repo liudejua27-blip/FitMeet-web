@@ -10,10 +10,13 @@ async function main() {
   await dataSource.initialize();
 
   const available = dataSource.migrations
-    .map((migration) => ({
-      name: migration.name,
-      timestamp: timestampFromMigrationName(migration.name),
-    }))
+    .map((migration) => {
+      const name = migration.name || migration.constructor.name;
+      return {
+        name,
+        timestamp: timestampFromMigrationName(name),
+      };
+    })
     .filter(
       (migration): migration is { name: string; timestamp: number | null } =>
         typeof migration.name === 'string' && migration.name.length > 0,

@@ -51,7 +51,7 @@ export default new DataSource({
         database: process.env.DB_DATABASE,
       }),
   entities: [join(__dirname, '..', '**', '*.entity{.ts,.js}')],
-  migrations: [join(__dirname, 'migrations', '*{.ts,.js}')],
+  migrations: [join(__dirname, 'migrations', '[0-9]*{.ts,.js}')],
   migrationsTransactionMode: 'each',
   synchronize: false,
   ssl: dbSsl ? { rejectUnauthorized: false } : undefined,
