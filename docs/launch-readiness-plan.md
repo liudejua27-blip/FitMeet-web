@@ -342,8 +342,10 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: backend `pnpm --dir backend test -- social-agent-chat-facade-boundary.spec.ts social-agent-chat.controller.spec.ts social-agent-chat-turn-facade.service.spec.ts` after splitting card/candidate action request body types out of `social-agent-chat.types.ts`.
 - Passed: backend `pnpm --dir backend lint` after the social-agent action type split.
 - Passed: backend `pnpm --dir backend build` after the social-agent action type split.
+- Passed: landing `pnpm --dir fitmeet-landing test`; current baseline runs source smoke tests, `next build`, and rendered-output smoke tests, so the landing test script is no longer a no-op.
 - Passed: iOS `xcodebuild test -project FitMeetAlpha.xcodeproj -scheme FitMeetAlpha -destination 'platform=iOS Simulator,id=7E94DB1D-7623-4873-9555-9F2073EE9968' -only-testing:FitMeetAlphaTests/AuthRestoreContractTests` after adding public social-intent list/detail/matches to `FitMeetCoreEndpoint` and `FitMeetAPIClient`.
 - Passed: iOS `FITMEET_ALPHA_SIMULATOR_ID=7E94DB1D-7623-4873-9555-9F2073EE9968 Scripts/release-preflight-ios.sh` after adding public social-intent client support; Release simulator build passed, 53 tests passed, 1 staging E2E skipped because staging credentials are not configured.
+- Blocked: iOS `FITMEET_ALPHA_STAGING_E2E_REQUIRED=1 FITMEET_ALPHA_STAGING_E2E=1 swift Scripts/staging-backend-e2e.swift` fails fast with `Set FITMEET_ALPHA_STAGING_BASE_URL.`; run the staging avatar upload, message, moment publish, refresh/profile restore E2E after providing `FITMEET_ALPHA_STAGING_BASE_URL`, `FITMEET_ALPHA_STAGING_EMAIL`, `FITMEET_ALPHA_STAGING_PASSWORD`, and `FITMEET_ALPHA_STAGING_MESSAGE_TARGET_USER_ID`.
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts` after adding the launch auth controller-to-OpenAPI mapping guard.
 - Passed: frontend `pnpm --dir frontend test -- fitmeetCoreContract.test.ts` after encoding Web dynamic message conversation paths.
 - Passed: frontend `pnpm --dir frontend test -- agentInboxApi.test.ts` after encoding Web Agent inbox dynamic conversation paths.
