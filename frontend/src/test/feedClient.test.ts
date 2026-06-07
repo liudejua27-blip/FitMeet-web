@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getFeed,
   getFeedPage,
+  getPublicSocialIntent,
+  getPublicSocialIntentMatches,
   getPublicSocialIntents,
 } from '../api/feedClient';
 
@@ -111,6 +113,75 @@ describe('feedClient', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/public/social-intents?page=2&limit=10&q=%E8%B7%91%E6%AD%A5&city=%E9%9D%92%E5%B2%9B&requestType=fitness_partner&status=active',
+      expect.objectContaining({
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+  });
+
+  it('reads public social intent detail and matches through encoded core paths', async () => {
+    const intent = {
+      id: 'intent:city run',
+      mode: 'public',
+      requestType: 'fitness_partner',
+      title: '周末约练',
+      description: '找附近跑步搭子',
+      city: '青岛',
+      loc: '',
+      lat: null,
+      lng: null,
+      radiusKm: 5,
+      timePreference: '周末',
+      riskLevel: 'low',
+      requiresUserConfirmation: true,
+      filters: { verifiedOnly: true },
+      candidateUserIds: [42],
+      matchedCount: 1,
+      status: 'matched',
+      createdAt: '2026-06-07T00:00:00.000Z',
+      updatedAt: '2026-06-07T00:00:00.000Z',
+    };
+    const matches = {
+      request: intent,
+      candidates: [
+        {
+          profile: {
+            id: 42,
+            name: 'Mia',
+            verified: true,
+            interestTags: ['running'],
+            distanceKm: 1.2,
+          },
+          score: 88,
+          reasonTags: ['verified', 'interest_running'],
+          reasonText: '兴趣重合：running，建议先发送礼貌邀约并等待对方确认。',
+          nextAction: 'draft_invitation',
+        },
+      ],
+      matchedBy: 'fitmeet_matching_engine',
+    };
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(jsonResponse(intent))
+      .mockResolvedValueOnce(jsonResponse(matches));
+
+    await expect(getPublicSocialIntent('intent:city run')).resolves.toEqual(
+      intent,
+    );
+    await expect(
+      getPublicSocialIntentMatches('intent:city run'),
+    ).resolves.toEqual(matches);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/public/social-intents/intent%3Acity%20run',
+      expect.objectContaining({
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/public/social-intents/intent%3Acity%20run/matches',
       expect.objectContaining({
         headers: { 'Content-Type': 'application/json' },
       }),

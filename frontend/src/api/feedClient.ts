@@ -1,4 +1,9 @@
-import type { Comment, Post, PublicSocialIntent } from '../types';
+import type {
+  Comment,
+  Post,
+  PublicSocialIntent,
+  PublicSocialIntentMatches,
+} from '../types';
 import { request } from './baseClient';
 import { fitMeetCoreEndpoints } from './fitmeetCoreContract';
 
@@ -78,6 +83,20 @@ export function getPublicSocialIntents(params?: {
   return request<{ data: PublicSocialIntent[] }>(
     `${fitMeetCoreEndpoints.feed.publicSocialIntents}${qs ? `?${qs}` : ''}`,
   ).then((r) => r.data);
+}
+
+export function getPublicSocialIntent(id: string): Promise<PublicSocialIntent> {
+  return request<PublicSocialIntent>(
+    fitMeetCoreEndpoints.feed.publicSocialIntent(id),
+  );
+}
+
+export function getPublicSocialIntentMatches(
+  id: string,
+): Promise<PublicSocialIntentMatches> {
+  return request<PublicSocialIntentMatches>(
+    fitMeetCoreEndpoints.feed.publicSocialIntentMatches(id),
+  );
 }
 
 export function getComments(postId: number): Promise<Comment[]> {

@@ -335,6 +335,10 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: `bash -n scripts/verify-production.sh` after adding public social-intent detail and matches reads to the production OpenAPI verifier guard.
 - Passed: frontend `pnpm --dir frontend test -- fitmeetCoreContract.test.ts` after adding public social-intent detail and matches builders to the typed endpoint registry.
 - Passed: frontend `pnpm --dir frontend exec eslint src/api/fitmeetCoreContract.ts src/test/fitmeetCoreContract.test.ts` after adding public social-intent detail and matches registry entries.
+- Passed: frontend `pnpm --dir frontend test -- feedClient.test.ts fitmeetCoreContract.test.ts` after adding public social-intent detail and matches helpers to the Web feed client and `dataService`.
+- Passed: frontend `pnpm --dir frontend exec eslint src/api/feedClient.ts src/services/dataService.ts src/test/feedClient.test.ts src/types/index.ts` after adding the Web public social-intent detail/matches client methods.
+- Passed: frontend `pnpm --dir frontend exec tsc --noEmit` after adding typed public social-intent matches models.
+- Passed: frontend `pnpm --dir frontend build` after wiring the Web public social-intent detail/matches client methods.
 - Passed: iOS `xcodebuild test -project FitMeetAlpha.xcodeproj -scheme FitMeetAlpha -destination 'platform=iOS Simulator,id=7E94DB1D-7623-4873-9555-9F2073EE9968' -only-testing:FitMeetAlphaTests/AuthRestoreContractTests` after adding public social-intent list/detail/matches to `FitMeetCoreEndpoint` and `FitMeetAPIClient`.
 - Passed: iOS `FITMEET_ALPHA_SIMULATOR_ID=7E94DB1D-7623-4873-9555-9F2073EE9968 Scripts/release-preflight-ios.sh` after adding public social-intent client support; Release simulator build passed, 53 tests passed, 1 staging E2E skipped because staging credentials are not configured.
 - Passed: backend `pnpm --dir backend test -- app.controller.spec.ts` after adding the launch auth controller-to-OpenAPI mapping guard.

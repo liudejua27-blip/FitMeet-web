@@ -399,3 +399,28 @@ export interface SocialRequest {
     createdAt: string;
     updatedAt: string;
   }
+
+  export interface PublicSocialCandidate {
+    profile: {
+      id: number;
+      name: string;
+      avatar?: string;
+      color?: string;
+      age?: number;
+      city?: string;
+      bio?: string;
+      verified?: boolean;
+      interestTags?: string[];
+      distanceKm?: number | null;
+    };
+    score: number;
+    reasonTags: string[];
+    reasonText: string;
+    nextAction: 'draft_invitation' | string;
+  }
+
+  export interface PublicSocialIntentMatches {
+    request: PublicSocialIntent;
+    candidates: PublicSocialCandidate[];
+    matchedBy: string;
+  }

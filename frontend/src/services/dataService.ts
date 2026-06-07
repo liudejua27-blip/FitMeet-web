@@ -12,6 +12,8 @@ import type {
   UserProfile,
   SocialCandidate,
   SocialRequest,
+  PublicSocialIntent,
+  PublicSocialIntentMatches,
 } from '../types';
 import type { FeedPage, FeedQueryParams } from '../api/feedClient';
 
@@ -57,6 +59,16 @@ export function getPublicSocialIntents(params?: {
   status?: string;
 }) {
   return api.getPublicSocialIntents(params);
+}
+
+export function getPublicSocialIntent(id: string): Promise<PublicSocialIntent> {
+  return api.getPublicSocialIntent(id);
+}
+
+export function getPublicSocialIntentMatches(
+  id: string,
+): Promise<PublicSocialIntentMatches> {
+  return api.getPublicSocialIntentMatches(id);
 }
 
 export function createPost(data: Partial<Post>): Promise<Post> {
