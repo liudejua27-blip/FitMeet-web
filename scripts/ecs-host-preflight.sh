@@ -137,24 +137,73 @@ env_value() {
 }
 
 check_domain_env() {
-  local base_url allowed_origins wechat_redirect alerts model upload_temp
+  local base_url frontend_base_url public_base_url public_api_base_url allowed_origins wechat_redirect alerts upload_temp
   base_url="$(env_value BASE_URL)"
+  frontend_base_url="$(env_value FRONTEND_BASE_URL)"
+  public_base_url="$(env_value PUBLIC_BASE_URL)"
+  public_api_base_url="$(env_value PUBLIC_API_BASE_URL)"
   allowed_origins="$(env_value ALLOWED_ORIGINS)"
   wechat_redirect="$(env_value WECHAT_REDIRECT_URI)"
   alerts="$(env_value AGENT_OBSERVABILITY_ALERTS_ENABLED)"
-  model="$(env_value DEEPSEEK_MODEL)"
   upload_temp="$(env_value UPLOAD_TEMP_DIR)"
 
   [ "$base_url" = "https://www.ourfitmeet.cn" ] && pass "BASE_URL targets www.ourfitmeet.cn" || fail "BASE_URL must be https://www.ourfitmeet.cn"
+  [ "$frontend_base_url" = "https://www.ourfitmeet.cn" ] && pass "FRONTEND_BASE_URL targets www.ourfitmeet.cn" || fail "FRONTEND_BASE_URL must be https://www.ourfitmeet.cn"
+  [ "$public_base_url" = "https://www.ourfitmeet.cn" ] && pass "PUBLIC_BASE_URL targets www.ourfitmeet.cn" || fail "PUBLIC_BASE_URL must be https://www.ourfitmeet.cn"
+  [ "$public_api_base_url" = "https://www.ourfitmeet.cn/api" ] && pass "PUBLIC_API_BASE_URL targets production API" || fail "PUBLIC_API_BASE_URL must be https://www.ourfitmeet.cn/api"
   [[ "$allowed_origins" == *"https://www.ourfitmeet.cn"* && "$allowed_origins" == *"https://ourfitmeet.cn"* ]] && pass "ALLOWED_ORIGINS includes www and apex domains" || fail "ALLOWED_ORIGINS must include https://www.ourfitmeet.cn and https://ourfitmeet.cn"
   [ "$wechat_redirect" = "https://www.ourfitmeet.cn/api/auth/wechat/callback" ] && pass "WECHAT_REDIRECT_URI targets production callback" || warn "WECHAT_REDIRECT_URI is not the production callback"
   [ "${alerts:-false}" = "false" ] && pass "Agent alert delivery disabled for first launch" || warn "Agent alert delivery is enabled; verify webhook/token before launch."
-  if [ "$model" = "deepseek-chat" ] || [ "$model" = "deepseek-reasoner" ] || [ "$model" = "deepseek-v4" ]; then
-    fail "DEEPSEEK_MODEL must be an explicit V4 model id, not $model"
-  else
-    pass "DeepSeek model is not a legacy alias"
-  fi
+  check_deepseek_models
+  check_worker_env
   [[ "$upload_temp" = /* ]] && pass "UPLOAD_TEMP_DIR is absolute: $upload_temp" || fail "UPLOAD_TEMP_DIR must be an absolute writable path."
+}
+
+check_deepseek_models() {
+  local key model checked=0 invalid=0
+  for key in DEEPSEEK_CHAT_MODEL DEEPSEEK_FAST_MODEL DEEPSEEK_MODEL AGENT_CASUAL_CHAT_MODEL AGENT_FINAL_RESPONSE_MODEL AGENT_PLANNER_MODEL AGENT_EXTRACTOR_MODEL AGENT_CARD_MODEL; do
+    model="$(env_value "$key")"
+    [ -z "$model" ] && continue
+    checked=$((checked + 1))
+    case "$model" in
+      deepseek-chat|deepseek-reasoner|deepseek-v4)
+        invalid=$((invalid + 1))
+        fail "$key must be an explicit V4 model id, not $model"
+        ;;
+    esac
+  done
+  if [ "$checked" -gt 0 ] && [ "$invalid" -eq 0 ]; then
+    pass "DeepSeek configured models are explicit model IDs"
+  elif [ "$checked" -eq 0 ]; then
+    fail "At least one DeepSeek model must be configured."
+  fi
+}
+
+check_positive_integer_env() {
+  local key="$1"
+  local value
+  value="$(env_value "$key")"
+  if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+    pass "$key is configured"
+  else
+    fail "$key must be a positive integer."
+  fi
+}
+
+check_worker_env() {
+  local worker_mode
+  worker_mode="$(env_value FITMEET_SUBAGENT_WORKER_MODE)"
+  case "$worker_mode" in
+    db_queue|queue_worker_ready)
+      pass "FITMEET_SUBAGENT_WORKER_MODE enables queue worker runtime"
+      ;;
+    *)
+      fail "FITMEET_SUBAGENT_WORKER_MODE must be db_queue or queue_worker_ready for ECS production."
+      ;;
+  esac
+  check_positive_integer_env FITMEET_SUBAGENT_WORKER_CONCURRENCY
+  check_positive_integer_env FITMEET_SUBAGENT_WORKER_POLL_MS
+  check_positive_integer_env FITMEET_SUBAGENT_WORKER_TIMEOUT_MS
 }
 
 check_ssl() {

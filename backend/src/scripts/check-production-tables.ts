@@ -9,6 +9,7 @@ const REQUIRED_TABLES = [
   'activity_templates',
   'subagent_worker_jobs',
   'subagent_worker_heartbeats',
+  'subagent_worker_failures',
   'agent_activity_logs',
   'social_request_candidates',
   'life_graph_profiles',

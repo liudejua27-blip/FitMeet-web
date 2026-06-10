@@ -84,6 +84,13 @@ describe('production deploy readiness', () => {
     const gitignore = readRepoFile('.gitignore');
 
     expect(ecsTemplate).toContain('BASE_URL=https://www.ourfitmeet.cn');
+    expect(ecsTemplate).toContain(
+      'FRONTEND_BASE_URL=https://www.ourfitmeet.cn',
+    );
+    expect(ecsTemplate).toContain('PUBLIC_BASE_URL=https://www.ourfitmeet.cn');
+    expect(ecsTemplate).toContain(
+      'PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api',
+    );
     expect(ecsTemplate).toContain('VITE_API_BASE_URL=/api');
     expect(ecsTemplate).toContain(
       'JWT_SECRET=CHANGE_ME_RANDOM_32_BYTE_HEX_SECRET',
@@ -177,6 +184,10 @@ describe('production deploy readiness', () => {
     expect(ecsPreflight).toContain('Docker Compose config validates');
     expect(ecsPreflight).toContain('pnpm -C backend run check:prod-env');
     expect(ecsPreflight).toContain('RUN_PROD_ENV_CHECK');
+    expect(ecsPreflight).toContain('FRONTEND_BASE_URL targets');
+    expect(ecsPreflight).toContain('PUBLIC_API_BASE_URL targets');
+    expect(ecsPreflight).toContain('check_deepseek_models');
+    expect(ecsPreflight).toContain('check_worker_env');
     expect(ecsPreflight).toContain('nginx/ssl/fullchain.pem');
     expect(ecsPreflight).toContain('check_port 443');
     expect(ecsInstallRelease).toContain('Checksum verified');
@@ -217,6 +228,27 @@ describe('production deploy readiness', () => {
     expect(ecsRunbook).toContain(
       './scripts/ecs-post-deploy-smoke.sh --run-app-smoke',
     );
+  });
+
+  it('keeps the ECS critical table check aligned with worker migrations', () => {
+    const criticalTableCheck = readRepoFile(
+      'backend/src/scripts/check-production-tables.ts',
+    );
+
+    for (const table of [
+      'users',
+      'agent_profiles',
+      'user_social_profiles',
+      'activity_templates',
+      'subagent_worker_jobs',
+      'subagent_worker_heartbeats',
+      'subagent_worker_failures',
+      'agent_activity_logs',
+      'social_request_candidates',
+      'life_graph_profiles',
+    ]) {
+      expect(criticalTableCheck).toContain(`'${table}'`);
+    }
   });
 
   it('keeps Vercel and Railway platform deploy config explicit', () => {
