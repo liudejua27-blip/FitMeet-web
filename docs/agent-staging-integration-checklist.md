@@ -50,6 +50,10 @@ DEEPSEEK_FAST_MODEL=deepseek-v4-flash
 DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_TIMEOUT_MS=12000
 SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS=12000
+SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS=3500
+SOCIAL_AGENT_CHAT_FIRST_CHUNK_TIMEOUT_MS=3500
+SOCIAL_AGENT_FINAL_RESPONSE_FIRST_CHUNK_TIMEOUT_MS=3500
+SOCIAL_AGENT_DEEPSEEK_THINKING=disabled
 AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL=<staging-alert-webhook>
 AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN=<staging-alert-token>
 AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS=300000
@@ -345,20 +349,54 @@ RUN_SELF_IMPROVE_SANDBOX=false
 
 Do not use these overrides for production go/no-go.
 
+## DeepSeek Latency Gate
+
+普通聊天和最终回答默认走 `deepseek-v4-flash` + `thinking=disabled`。只有确实需要复杂推理时，才通过这些 env 对单个 use case 打开：
+
+```bash
+SOCIAL_AGENT_FINAL_RESPONSE_THINKING=enabled
+SOCIAL_AGENT_PLANNER_THINKING=enabled
+```
+
+上线前至少跑下面几个延迟桶，并把结果贴到发布记录：
+
+| Bucket                                | Required evidence                                     |
+| ------------------------------------- | ----------------------------------------------------- |
+| short prompt / non-thinking / no tool | P50, P95, `first_sse_chunk`, `first_content_delta`    |
+| long prompt / cache miss              | `prompt_cache_hit_tokens`, `prompt_cache_miss_tokens` |
+| long prompt / cache hit               | cache hit ratio and P95 delta from miss bucket        |
+| thinking enabled sample               | `first_reasoning_delta` vs `first_content_delta`      |
+| agent one-tool                        | tool latency + final response `first_content_delta`   |
+
+后端 now records:
+
+- `httpHeadersLatencyMs`
+- `firstSseChunkLatencyMs`
+- `firstReasoningDeltaLatencyMs`
+- `firstContentDeltaLatencyMs`
+- `promptTokens`
+- `promptCacheHitTokens`
+- `promptCacheMissTokens`
+- `completionTokens`
+- `reasoningTokens`
+- `systemFingerprint`
+
+如果 P95 慢样本的 cache hit ratio 很低，先调整固定 prompt / tool schema / RAG 前缀顺序，再考虑升级模型或增加超时。
+
 ## High-Risk Action Acceptance
 
 Before enabling complex Agent functions, manually verify each action with a real
 staging user:
 
-| Action | Required result |
-| --- | --- |
-| Send message | Creates approval request; no message sent before approval |
-| Connect candidate / add friend | Creates approval request; no relationship write before approval |
-| Create activity / invite / join | Creates approval request; repeated idempotency key is safe |
-| Publish social request | Creates approval request; draft can be saved without public publish |
-| Share precise location | Creates approval request and logs sensitive-field access |
-| Privacy profile update | Creates approval request and writes audit log |
-| Payment | Creates approval request; no payment intent is executed before approval |
+| Action                          | Required result                                                         |
+| ------------------------------- | ----------------------------------------------------------------------- |
+| Send message                    | Creates approval request; no message sent before approval               |
+| Connect candidate / add friend  | Creates approval request; no relationship write before approval         |
+| Create activity / invite / join | Creates approval request; repeated idempotency key is safe              |
+| Publish social request          | Creates approval request; draft can be saved without public publish     |
+| Share precise location          | Creates approval request and logs sensitive-field access                |
+| Privacy profile update          | Creates approval request and writes audit log                           |
+| Payment                         | Creates approval request; no payment intent is executed before approval |
 
 For each row, capture evidence for approval log, user rejection, natural
 assistant reply after rejection, retry behavior, and rollback/compensation path.
@@ -427,26 +465,26 @@ Check:
 
 Fill this after running against the real staging domain.
 
-| Check | Result | Evidence |
-| --- | --- | --- |
-| Backend deployed | Not run in this environment | Need Aliyun host access |
-| `DATABASE_URL` configured | Not verified | Check `.env.production` on ECS |
-| `DEEPSEEK_API_KEY` configured | Not verified | Check backend env, no logging secret |
-| JWT/Auth configured | Not verified | Login smoke required |
-| CORS allows only staging Web | Not verified | Browser + rejected-origin curl |
-| `/api/health` | Not verified | `curl -fsS .../api/health` |
-| `/api/ready` | Not verified | `curl -fsS .../api/ready` |
-| Frontend real adapter | Not verified | Built with `VITE_AGENT_ADAPTER=real` |
-| `/agent` full path | Not verified | Browser smoke |
-| SSE through proxy | Config prepared | Needs staging `curl -N` evidence |
-| Session restore | Not verified | Refresh `/agent`; inspect `GET /session` |
-| Action idempotency | Not verified | Repeat same action key |
-| Independent subagent worker | Not verified | Worker heartbeat in L5 dashboard |
-| High-risk approval smoke | Not verified | `smoke:agent-launch-gates` with `USER_JWT` |
-| Self-improve sandbox cycle | Not verified | Runner + eval + canary evidence |
-| Alert delivery | Not verified | Real alert webhook receives test alert |
-| Life Graph privacy gate | Not verified | Export/delete + log masking evidence |
-| Logs and traceId | Not verified | Tail backend logs |
+| Check                         | Result                      | Evidence                                   |
+| ----------------------------- | --------------------------- | ------------------------------------------ |
+| Backend deployed              | Not run in this environment | Need Aliyun host access                    |
+| `DATABASE_URL` configured     | Not verified                | Check `.env.production` on ECS             |
+| `DEEPSEEK_API_KEY` configured | Not verified                | Check backend env, no logging secret       |
+| JWT/Auth configured           | Not verified                | Login smoke required                       |
+| CORS allows only staging Web  | Not verified                | Browser + rejected-origin curl             |
+| `/api/health`                 | Not verified                | `curl -fsS .../api/health`                 |
+| `/api/ready`                  | Not verified                | `curl -fsS .../api/ready`                  |
+| Frontend real adapter         | Not verified                | Built with `VITE_AGENT_ADAPTER=real`       |
+| `/agent` full path            | Not verified                | Browser smoke                              |
+| SSE through proxy             | Config prepared             | Needs staging `curl -N` evidence           |
+| Session restore               | Not verified                | Refresh `/agent`; inspect `GET /session`   |
+| Action idempotency            | Not verified                | Repeat same action key                     |
+| Independent subagent worker   | Not verified                | Worker heartbeat in L5 dashboard           |
+| High-risk approval smoke      | Not verified                | `smoke:agent-launch-gates` with `USER_JWT` |
+| Self-improve sandbox cycle    | Not verified                | Runner + eval + canary evidence            |
+| Alert delivery                | Not verified                | Real alert webhook receives test alert     |
+| Life Graph privacy gate       | Not verified                | Export/delete + log masking evidence       |
+| Logs and traceId              | Not verified                | Tail backend logs                          |
 
 ## Current Local Repository Status
 

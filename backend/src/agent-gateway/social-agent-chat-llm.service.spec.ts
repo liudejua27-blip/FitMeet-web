@@ -170,7 +170,7 @@ describe('SocialAgentChatLlmService', () => {
       JSON.parse(
         (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
       ).model,
-    ).toBe('deepseek-v4-pro');
+    ).toBe('deepseek-v4-flash');
     expect(answer).toBe(
       '人物画像是 FitMeet 用来理解城市、兴趣、可约时间和社交边界的偏好模型。',
     );
@@ -212,7 +212,7 @@ describe('SocialAgentChatLlmService', () => {
       JSON.parse(
         (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
       ).model,
-    ).toBe('deepseek-v4-pro');
+    ).toBe('deepseek-v4-flash');
     expect(answer).toContain('运动习惯');
     expect(answer).not.toContain('等你明确说要找人');
   });
@@ -325,6 +325,11 @@ describe('SocialAgentChatLlmService', () => {
         (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
       ).model,
     ).toBe('deepseek-v4-flash');
+    expect(
+      JSON.parse(
+        (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
+      ).thinking,
+    ).toEqual({ type: 'disabled' });
   });
 
   it('injects published life graph extraction rules into structured extraction', async () => {

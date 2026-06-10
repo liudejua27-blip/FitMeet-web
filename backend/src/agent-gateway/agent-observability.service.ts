@@ -69,6 +69,16 @@ export class AgentObservabilityService {
     success: boolean;
     latencyMs: number;
     firstTokenLatencyMs?: number | null;
+    httpHeadersLatencyMs?: number | null;
+    firstSseChunkLatencyMs?: number | null;
+    firstReasoningDeltaLatencyMs?: number | null;
+    firstContentDeltaLatencyMs?: number | null;
+    promptTokens?: number | null;
+    promptCacheHitTokens?: number | null;
+    promptCacheMissTokens?: number | null;
+    completionTokens?: number | null;
+    reasoningTokens?: number | null;
+    systemFingerprint?: string | null;
     tokenCount?: number | null;
     failureReason?: string | null;
   }): void {
@@ -80,6 +90,54 @@ export class AgentObservabilityService {
         `llm_first_token.${input.useCase}`,
         input.firstTokenLatencyMs,
       );
+    }
+    if (input.httpHeadersLatencyMs != null) {
+      this.observeLatency(
+        `llm_http_headers.${input.useCase}`,
+        input.httpHeadersLatencyMs,
+      );
+    }
+    if (input.firstSseChunkLatencyMs != null) {
+      this.observeLatency(
+        `llm_first_sse_chunk.${input.useCase}`,
+        input.firstSseChunkLatencyMs,
+      );
+    }
+    if (input.firstReasoningDeltaLatencyMs != null) {
+      this.observeLatency(
+        `llm_first_reasoning_delta.${input.useCase}`,
+        input.firstReasoningDeltaLatencyMs,
+      );
+    }
+    if (input.firstContentDeltaLatencyMs != null) {
+      this.observeLatency(
+        `llm_first_content_delta.${input.useCase}`,
+        input.firstContentDeltaLatencyMs,
+      );
+    }
+    if (input.promptTokens != null) {
+      this.bump(`llm_prompt_tokens.${input.useCase}`, input.promptTokens);
+    }
+    if (input.promptCacheHitTokens != null) {
+      this.bump(
+        `llm_prompt_cache_hit_tokens.${input.useCase}`,
+        input.promptCacheHitTokens,
+      );
+    }
+    if (input.promptCacheMissTokens != null) {
+      this.bump(
+        `llm_prompt_cache_miss_tokens.${input.useCase}`,
+        input.promptCacheMissTokens,
+      );
+    }
+    if (input.completionTokens != null) {
+      this.bump(
+        `llm_completion_tokens.${input.useCase}`,
+        input.completionTokens,
+      );
+    }
+    if (input.reasoningTokens != null) {
+      this.bump(`llm_reasoning_tokens.${input.useCase}`, input.reasoningTokens);
     }
     if (input.tokenCount != null) {
       this.bump(`llm_tokens.${input.useCase}`, input.tokenCount);

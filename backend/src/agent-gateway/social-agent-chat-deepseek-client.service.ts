@@ -7,6 +7,15 @@ import {
   SocialAgentModelUseCase,
 } from './social-agent-model-router.service';
 import { AgentObservabilityService } from './agent-observability.service';
+import {
+  readDeepSeekStreamedContent,
+  readDeepSeekSystemFingerprint,
+  readDeepSeekUsageMetrics,
+} from './deepseek-streaming.util';
+import {
+  DeepSeekStreamResult,
+  emptyDeepSeekStreamMetrics,
+} from './deepseek-latency.types';
 
 type ChatDeepSeekMessage = {
   role: 'system' | 'user' | 'assistant';
@@ -54,6 +63,9 @@ export class SocialAgentChatDeepSeekClientService {
       () => controller.abort(),
       this.chatDeepSeekTimeoutMs(input.useCase),
     );
+    let httpHeadersLatencyMs: number | null = null;
+    let streamResult: DeepSeekStreamResult | null = null;
+    let usageMetrics = emptyDeepSeekStreamMetrics(null);
 
     try {
       const response = await fetch(
@@ -75,10 +87,16 @@ export class SocialAgentChatDeepSeekClientService {
               ? { response_format: input.responseFormat }
               : {}),
             ...(input.onDelta && !input.responseFormat ? { stream: true } : {}),
+            ...(input.onDelta && !input.responseFormat
+              ? { stream_options: { include_usage: true } }
+              : {}),
+            thinking: { type: this.thinkingMode(input.useCase) },
             messages: input.messages,
           }),
         },
       );
+      httpHeadersLatencyMs = Date.now() - startedAt;
+      usageMetrics.httpHeadersLatencyMs = httpHeadersLatencyMs;
       if (!response.ok) {
         this.logModelCall({
           useCase: input.useCase,
@@ -91,15 +109,30 @@ export class SocialAgentChatDeepSeekClientService {
         });
         throw new Error(`DeepSeek HTTP ${response.status}`);
       }
-      const streamResult =
+      streamResult =
         input.onDelta && !input.responseFormat
-          ? await this.readStreamedContent(response, input.onDelta, startedAt)
+          ? await readDeepSeekStreamedContent({
+              response,
+              onDelta: input.onDelta,
+              startedAt,
+              httpHeadersLatencyMs,
+              firstChunkTimeoutMs: this.firstChunkTimeoutMs(input.useCase),
+              abortController: controller,
+            })
           : null;
+      const jsonPayload = streamResult
+        ? null
+        : ((await response.json()) as Record<string, unknown>);
       const content =
         streamResult?.content ??
-        this.readChatDeepSeekContent(
-          (await response.json()) as Record<string, unknown>,
-        );
+        this.readChatDeepSeekContent(jsonPayload ?? {});
+      usageMetrics =
+        streamResult ??
+        ({
+          ...usageMetrics,
+          ...readDeepSeekUsageMetrics(jsonPayload ?? {}),
+          systemFingerprint: readDeepSeekSystemFingerprint(jsonPayload ?? {}),
+        } satisfies typeof usageMetrics);
       const latencyMs = Date.now() - startedAt;
       this.logModelCall({
         useCase: input.useCase,
@@ -117,6 +150,16 @@ export class SocialAgentChatDeepSeekClientService {
         latencyMs,
         firstTokenLatencyMs: streamResult?.firstTokenLatencyMs ?? null,
         tokenCount: streamResult?.tokenCount ?? null,
+        httpHeadersLatencyMs,
+        firstSseChunkLatencyMs: usageMetrics.firstSseChunkLatencyMs,
+        firstReasoningDeltaLatencyMs: usageMetrics.firstReasoningDeltaLatencyMs,
+        firstContentDeltaLatencyMs: usageMetrics.firstContentDeltaLatencyMs,
+        promptTokens: usageMetrics.promptTokens,
+        promptCacheHitTokens: usageMetrics.promptCacheHitTokens,
+        promptCacheMissTokens: usageMetrics.promptCacheMissTokens,
+        completionTokens: usageMetrics.completionTokens,
+        reasoningTokens: usageMetrics.reasoningTokens,
+        systemFingerprint: usageMetrics.systemFingerprint,
         success: true,
       });
       return content || null;
@@ -146,6 +189,10 @@ export class SocialAgentChatDeepSeekClientService {
         taskId: input.taskId,
         latencyMs,
         success: false,
+        httpHeadersLatencyMs,
+        firstSseChunkLatencyMs: usageMetrics.firstSseChunkLatencyMs,
+        firstReasoningDeltaLatencyMs: usageMetrics.firstReasoningDeltaLatencyMs,
+        firstContentDeltaLatencyMs: usageMetrics.firstContentDeltaLatencyMs,
         failureReason: reason,
       });
       if (error instanceof Error && error.name === 'AbortError') {
@@ -167,89 +214,6 @@ export class SocialAgentChatDeepSeekClientService {
     return cleanDisplayText(message.content, '').trim();
   }
 
-  private async readStreamedContent(
-    response: Response,
-    onDelta: (delta: string) => void | Promise<void>,
-    startedAt: number,
-  ): Promise<{
-    content: string;
-    firstTokenLatencyMs: number | null;
-    tokenCount: number;
-  }> {
-    if (!response.body)
-      return { content: '', firstTokenLatencyMs: null, tokenCount: 0 };
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let content = '';
-    let firstTokenLatencyMs: number | null = null;
-    let tokenCount = 0;
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const chunks = buffer.split(/\r?\n\r?\n/);
-        buffer = chunks.pop() ?? '';
-        for (const chunk of chunks) {
-          const delta = this.readStreamDelta(chunk);
-          if (!delta) continue;
-          content += delta;
-          firstTokenLatencyMs ??= Date.now() - startedAt;
-          tokenCount += this.countTokens(delta);
-          await onDelta(cleanDisplayText(delta, ''));
-        }
-      }
-      if (buffer.trim()) {
-        const delta = this.readStreamDelta(buffer);
-        if (delta) {
-          content += delta;
-          firstTokenLatencyMs ??= Date.now() - startedAt;
-          tokenCount += this.countTokens(delta);
-          await onDelta(cleanDisplayText(delta, ''));
-        }
-      }
-    } finally {
-      try {
-        await reader.cancel();
-      } catch {
-        // Stream may already be closed.
-      }
-    }
-    return {
-      content: cleanDisplayText(content, '').trim(),
-      firstTokenLatencyMs,
-      tokenCount,
-    };
-  }
-
-  private countTokens(delta: string): number {
-    return delta.match(/[\u4e00-\u9fff]|[a-zA-Z0-9_]+|[^\s]/g)?.length ?? 0;
-  }
-
-  private readStreamDelta(chunk: string): string {
-    const lines = chunk
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.startsWith('data:'))
-      .map((line) => line.slice(5).trim());
-    let delta = '';
-    for (const line of lines) {
-      if (!line || line === '[DONE]') continue;
-      try {
-        const payload = JSON.parse(line) as Record<string, unknown>;
-        const choices = Array.isArray(payload.choices) ? payload.choices : [];
-        const first = this.isRecord(choices[0]) ? choices[0] : {};
-        const deltaPayload = this.isRecord(first.delta) ? first.delta : {};
-        const content = deltaPayload.content;
-        if (typeof content === 'string') delta += content;
-      } catch {
-        continue;
-      }
-    }
-    return delta;
-  }
-
   private modelFor(useCase: SocialAgentModelUseCase): string {
     if (this.modelRouter) return this.modelRouter.getModel(useCase);
     const legacy = this.config.get<string>('DEEPSEEK_MODEL');
@@ -258,7 +222,7 @@ export class SocialAgentChatDeepSeekClientService {
         this.config.get<string>('AGENT_CASUAL_CHAT_MODEL') ||
         this.config.get<string>('DEEPSEEK_CHAT_MODEL') ||
         this.chatCompatibleLegacyModel(legacy) ||
-        'deepseek-v4-pro'
+        'deepseek-v4-flash'
       );
     }
     if (useCase === 'final_response') {
@@ -266,7 +230,7 @@ export class SocialAgentChatDeepSeekClientService {
         this.config.get<string>('AGENT_FINAL_RESPONSE_MODEL') ||
         this.config.get<string>('DEEPSEEK_CHAT_MODEL') ||
         this.chatCompatibleLegacyModel(legacy) ||
-        'deepseek-v4-pro'
+        'deepseek-v4-flash'
       );
     }
     return (
@@ -289,6 +253,30 @@ export class SocialAgentChatDeepSeekClientService {
     );
     if (!Number.isFinite(configured) || configured <= 0) return 5000;
     return Math.min(configured, 8000);
+  }
+
+  private firstChunkTimeoutMs(useCase: SocialAgentModelUseCase): number {
+    if (this.modelRouter) return this.modelRouter.getFirstChunkTimeout(useCase);
+    const configured = Number(
+      this.config.get<string>('SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS') ??
+        '3500',
+    );
+    if (!Number.isFinite(configured) || configured <= 0) return 3500;
+    return configured;
+  }
+
+  private thinkingMode(
+    useCase: SocialAgentModelUseCase,
+  ): 'disabled' | 'enabled' {
+    if (this.modelRouter) return this.modelRouter.getThinkingMode(useCase);
+    const value = `${
+      this.config.get<string>('SOCIAL_AGENT_DEEPSEEK_THINKING') ?? ''
+    }`
+      .trim()
+      .toLowerCase();
+    return ['enabled', 'true', '1', 'yes'].includes(value)
+      ? 'enabled'
+      : 'disabled';
   }
 
   private logModelCall(input: {

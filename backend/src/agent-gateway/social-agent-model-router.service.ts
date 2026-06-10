@@ -20,7 +20,7 @@ export class SocialAgentModelRouterService {
         return (
           this.firstModel(['AGENT_CASUAL_CHAT_MODEL', 'DEEPSEEK_CHAT_MODEL']) ??
           this.chatCompatibleLegacyModel() ??
-          'deepseek-v4-pro'
+          'deepseek-v4-flash'
         );
       case 'final_response':
         return (
@@ -29,7 +29,7 @@ export class SocialAgentModelRouterService {
             'DEEPSEEK_CHAT_MODEL',
           ]) ??
           this.chatCompatibleLegacyModel() ??
-          'deepseek-v4-pro'
+          'deepseek-v4-flash'
         );
       case 'planner':
         return (
@@ -73,6 +73,27 @@ export class SocialAgentModelRouterService {
     const fallback =
       useCase === 'final_response' || useCase === 'casual_chat' ? 7000 : 5000;
     return this.positiveNumber(specific ?? shared, fallback);
+  }
+
+  getFirstChunkTimeout(useCase: SocialAgentModelUseCase): number {
+    const specific = this.config.get<string>(
+      this.firstChunkTimeoutEnvKey(useCase),
+    );
+    const shared =
+      this.config.get<string>('SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS') ??
+      this.config.get<string>('DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS');
+    const fallback =
+      useCase === 'final_response' || useCase === 'casual_chat' ? 3500 : 5000;
+    return this.positiveNumber(specific ?? shared, fallback);
+  }
+
+  getThinkingMode(useCase: SocialAgentModelUseCase): 'disabled' | 'enabled' {
+    const specific = this.config.get<string>(this.thinkingEnvKey(useCase));
+    const shared = this.config.get<string>('SOCIAL_AGENT_DEEPSEEK_THINKING');
+    const value = `${specific ?? shared ?? ''}`.trim().toLowerCase();
+    if (['enabled', 'true', '1', 'yes'].includes(value)) return 'enabled';
+    if (['disabled', 'false', '0', 'no'].includes(value)) return 'disabled';
+    return 'disabled';
   }
 
   getTemperature(useCase: SocialAgentModelUseCase): number {
@@ -133,6 +154,48 @@ export class SocialAgentModelRouterService {
         return 'SOCIAL_AGENT_SAFETY_TIMEOUT_MS';
       default:
         return 'SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS';
+    }
+  }
+
+  private firstChunkTimeoutEnvKey(useCase: SocialAgentModelUseCase): string {
+    switch (useCase) {
+      case 'final_response':
+        return 'SOCIAL_AGENT_FINAL_RESPONSE_FIRST_CHUNK_TIMEOUT_MS';
+      case 'casual_chat':
+        return 'SOCIAL_AGENT_CHAT_FIRST_CHUNK_TIMEOUT_MS';
+      case 'planner':
+        return 'SOCIAL_AGENT_PLANNER_FIRST_CHUNK_TIMEOUT_MS';
+      case 'profile_extraction':
+        return 'SOCIAL_AGENT_EXTRACTOR_FIRST_CHUNK_TIMEOUT_MS';
+      case 'card_generation':
+        return 'SOCIAL_AGENT_CARD_FIRST_CHUNK_TIMEOUT_MS';
+      case 'candidate_summary':
+        return 'SOCIAL_AGENT_CANDIDATE_SUMMARY_FIRST_CHUNK_TIMEOUT_MS';
+      case 'safety_check':
+        return 'SOCIAL_AGENT_SAFETY_FIRST_CHUNK_TIMEOUT_MS';
+      default:
+        return 'SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS';
+    }
+  }
+
+  private thinkingEnvKey(useCase: SocialAgentModelUseCase): string {
+    switch (useCase) {
+      case 'final_response':
+        return 'SOCIAL_AGENT_FINAL_RESPONSE_THINKING';
+      case 'casual_chat':
+        return 'SOCIAL_AGENT_CHAT_THINKING';
+      case 'planner':
+        return 'SOCIAL_AGENT_PLANNER_THINKING';
+      case 'profile_extraction':
+        return 'SOCIAL_AGENT_EXTRACTOR_THINKING';
+      case 'card_generation':
+        return 'SOCIAL_AGENT_CARD_THINKING';
+      case 'candidate_summary':
+        return 'SOCIAL_AGENT_CANDIDATE_SUMMARY_THINKING';
+      case 'safety_check':
+        return 'SOCIAL_AGENT_SAFETY_THINKING';
+      default:
+        return 'SOCIAL_AGENT_DEEPSEEK_THINKING';
     }
   }
 

@@ -71,9 +71,11 @@ describe('SocialAgentFinalResponseService', () => {
     const request = fetchMock.mock.calls[0]?.[1] as { body?: string };
     const body = JSON.parse(request.body ?? '{}') as {
       model?: string;
+      thinking?: unknown;
       messages: Array<{ role: string; content: string }>;
     };
     expect(body.model).toBe('deepseek-v4-pro');
+    expect(body.thinking).toEqual({ type: 'disabled' });
     const userPayload = JSON.parse(body.messages[1].content) as Record<
       string,
       unknown
@@ -181,5 +183,7 @@ describe('SocialAgentFinalResponseService', () => {
       (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
     ) as Record<string, unknown>;
     expect(body.stream).toBe(true);
+    expect(body.stream_options).toEqual({ include_usage: true });
+    expect(body.thinking).toEqual({ type: 'disabled' });
   });
 });
