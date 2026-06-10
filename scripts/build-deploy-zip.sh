@@ -81,6 +81,7 @@ require_path "scripts/vercel-prebuilt-deploy.sh"
 require_path "scripts/lib/toolchain.sh"
 require_path "scripts/ecs-install-release.sh"
 require_path "scripts/ecs-upload-release.sh"
+require_path "scripts/ecs-workbench-install-plan.sh"
 require_path "scripts/ecs-host-preflight.sh"
 require_path "scripts/ecs-post-deploy-smoke.sh"
 require_path "docs/deployment-vercel-railway.md"
@@ -196,6 +197,10 @@ contains_entry '^FitMeet-web/scripts/ecs-install-release\.sh$' || {
 }
 contains_entry '^FitMeet-web/scripts/ecs-upload-release\.sh$' || {
   echo "[FAIL] Missing scripts/ecs-upload-release.sh" >&2
+  exit 1
+}
+contains_entry '^FitMeet-web/scripts/ecs-workbench-install-plan\.sh$' || {
+  echo "[FAIL] Missing scripts/ecs-workbench-install-plan.sh" >&2
   exit 1
 }
 contains_entry '^FitMeet-web/scripts/ecs-post-deploy-smoke\.sh$' || {

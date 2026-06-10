@@ -32,6 +32,9 @@ Required release values:
 - `DEEPSEEK_CHAT_MODEL=deepseek-v4-pro`
 - `DEEPSEEK_FAST_MODEL=deepseek-v4-flash`
 - `DEEPSEEK_MODEL=deepseek-v4-flash`
+- `AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL`
+- `AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN`
+- `AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS=300000`
 - One production object storage provider:
   - Aliyun OSS: `ALIYUN_ACCESS_KEY_ID`,
     `ALIYUN_ACCESS_KEY_SECRET`, `ALIYUN_OSS_REGION`,
@@ -82,6 +85,7 @@ Never put these in Vercel frontend env:
 - `JWT_SECRET`, `AGENT_WEBHOOK_SIGNING_SECRET`
 - Object storage access keys
 - `DEEPSEEK_API_KEY`
+- `AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN`
 - SMS or WeChat secrets
 
 ## iOS And TestFlight

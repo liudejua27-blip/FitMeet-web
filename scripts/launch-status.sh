@@ -132,6 +132,7 @@ run_gate "Shell syntax for production scripts" \
   scripts/railway-docker-build-check.sh \
   scripts/ecs-install-release.sh \
   scripts/ecs-upload-release.sh \
+  scripts/ecs-workbench-install-plan.sh \
   scripts/ecs-post-deploy-smoke.sh \
   scripts/launch-status.sh
 

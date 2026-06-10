@@ -70,6 +70,12 @@ Workbench's file-upload channel to place the same three files in
 `~/fitmeet-release`. `--upload` creates the remote release directory, uploads
 the zip, checksum, and installer, then prints the remote dry-run/install command.
 
+For the Workbench path, generate the paste-ready terminal command block locally:
+
+```bash
+./scripts/ecs-workbench-install-plan.sh
+```
+
 The exported `fitmeet-ecs-install-release.sh` verifies the checksum and zip
 shape, backs up an existing `/opt/FitMeet-web`, preserves `.env.production` and
 `nginx/ssl/`, then syncs the new release. Run it first without `--install` to
@@ -110,6 +116,7 @@ Required values include:
 - `JWT_SECRET`
 - object storage credentials for uploads; avatar upload and feed image E2E require a real OSS/S3 bucket. If S3/R2 uses a custom endpoint, set `S3_PUBLIC_BASE_URL` to the HTTPS public media domain.
 - `DEEPSEEK_API_KEY`, `DEEPSEEK_CHAT_MODEL=deepseek-v4-pro`, `DEEPSEEK_FAST_MODEL=deepseek-v4-flash`
+- `AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL`, `AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN`, `AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS=300000`
 
 Copy SSL files:
 

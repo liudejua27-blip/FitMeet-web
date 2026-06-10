@@ -35,6 +35,9 @@ ui-verify-out/
 **/ui-verify-out/
 playwright-report/
 test-results/
+qa-gsap-round2/
+docs/qa/
+*-qa.png
 frontend/output/
 fitmeet-backup*/
 fitmeet-old*/

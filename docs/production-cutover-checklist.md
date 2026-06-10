@@ -84,6 +84,9 @@ Required production values:
 - `DEEPSEEK_API_KEY`
 - `DEEPSEEK_CHAT_MODEL=deepseek-v4-pro`
 - `DEEPSEEK_FAST_MODEL=deepseek-v4-flash`
+- `AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL`
+- `AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN`
+- `AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS=300000`
 - `DB_SYNCHRONIZE=false`
 - `DB_MIGRATIONS_RUN=false`
 
@@ -268,6 +271,8 @@ Build package:
 ./scripts/build-deploy-zip.sh
 ls -lh fitmeet-ecs-deploy.zip fitmeet-ecs-deploy.zip.sha256 fitmeet-ecs-install-release.sh
 ./scripts/ecs-upload-release.sh --ssh root@YOUR_ECS_PUBLIC_IP
+./scripts/ecs-upload-release.sh --ssh root@YOUR_ECS_PUBLIC_IP --check-ssh
+./scripts/ecs-workbench-install-plan.sh
 ./scripts/domain-readiness-check.sh --topology ecs --print-required-records
 TIMEOUT_SECONDS=8 ./scripts/launch-status.sh --topology ecs --skip-ios-testflight-check
 ```

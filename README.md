@@ -333,7 +333,12 @@ API_BASE_URL=https://api.socialworld.world/api \
 如果 `--check-ssh` 返回 `Permission denied (publickey...)`，说明本机还没有
 能登录 ECS 的 SSH key。此时不要反复 scp；改为配置 SSH key，或在阿里云
 Workbench 中把 `fitmeet-ecs-deploy.zip`、`fitmeet-ecs-deploy.zip.sha256`、
-`fitmeet-ecs-install-release.sh` 上传到 `~/fitmeet-release` 后继续执行安装命令。
+`fitmeet-ecs-install-release.sh` 上传到 `~/fitmeet-release`。上传前可生成
+Workbench 终端命令块：
+
+```bash
+./scripts/ecs-workbench-install-plan.sh
+```
 
 单机 Docker Compose 仍可作为备选部署路径，以根目录 `docker-compose.yml` 和 `.env.example` 为参考：
 
