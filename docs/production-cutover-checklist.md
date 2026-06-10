@@ -84,8 +84,10 @@ Required production values:
 - `DEEPSEEK_API_KEY`
 - `DEEPSEEK_CHAT_MODEL=deepseek-v4-pro`
 - `DEEPSEEK_FAST_MODEL=deepseek-v4-flash`
-- `AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL`
-- `AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN`
+- `AGENT_OBSERVABILITY_ALERTS_ENABLED=false` for first launch; set to `true`
+  later when an external alert receiver is ready.
+- `AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL` when alert delivery is enabled.
+- `AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN` when alert delivery is enabled.
 - `AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS=300000`
 - `DB_SYNCHRONIZE=false`
 - `DB_MIGRATIONS_RUN=false`

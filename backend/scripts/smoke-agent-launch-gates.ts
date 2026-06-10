@@ -98,6 +98,10 @@ function checkAlertSink(
 ) {
   const observability = asRecord(dashboard.observability);
   const alertSink = asRecord(observability.alertSink);
+  if (alertSink.enabled === false) {
+    pass('production alert sink disabled', 'first-launch mode');
+    return;
+  }
   if (alertSink.configured === true) {
     pass('production alert sink configured');
     return;

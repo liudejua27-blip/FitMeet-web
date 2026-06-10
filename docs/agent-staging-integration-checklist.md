@@ -334,7 +334,7 @@ This script verifies:
 
 - L5 dashboard and worker job APIs are reachable through RBAC.
 - Independent subagent worker heartbeat is fresh.
-- production alert sink is configured.
+- production alert sink is either explicitly disabled for first launch or configured with a real webhook.
 - high-risk tool endpoints return approval signals instead of executing.
 - self-improve runner and canary effect APIs are reachable when
   `RUN_SELF_IMPROVE_SANDBOX=true`.
@@ -347,7 +347,10 @@ ALLOW_LOG_ONLY_ALERTS=true
 RUN_SELF_IMPROVE_SANDBOX=false
 ```
 
-Do not use these overrides for production go/no-go.
+Do not use these overrides for production go/no-go, except
+`ALLOW_LOG_ONLY_ALERTS=true` is unnecessary when
+`AGENT_OBSERVABILITY_ALERTS_ENABLED=false` is the intentional first-launch
+configuration.
 
 ## DeepSeek Latency Gate
 
@@ -439,9 +442,11 @@ delivery for:
 - worker queue backlog and stale heartbeat.
 - high-risk approval anomaly.
 
-The production env readiness checker now fails release when
-`AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL` or
-`AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN` is missing.
+The production env readiness checker only requires
+`AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL` and
+`AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN` when
+`AGENT_OBSERVABILITY_ALERTS_ENABLED=true`. First launch may keep external alert
+delivery disabled and rely on the L5 admin dashboard plus logs.
 
 ## Logs And TraceId Checks
 

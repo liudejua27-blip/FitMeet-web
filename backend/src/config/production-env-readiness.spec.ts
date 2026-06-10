@@ -40,9 +40,9 @@ const validEnv = {
   FITMEET_SUBAGENT_WORKER_CONCURRENCY: '2',
   FITMEET_SUBAGENT_WORKER_POLL_MS: '1000',
   FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: '15000',
-  AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL:
-    'https://alerts.socialworld.world/fitmeet-agent',
-  AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN: 'alert-token-1234567890abcdef',
+  AGENT_OBSERVABILITY_ALERTS_ENABLED: 'false',
+  AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL: '',
+  AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN: '',
   AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS: '300000',
   KAFKA_BROKERS: 'kafka:29092',
   ENABLE_KAFKA: 'true',
@@ -324,9 +324,28 @@ describe('production-env-readiness', () => {
     );
   });
 
-  it('requires real observability alert delivery for production', () => {
+  it('allows external observability alert delivery to be disabled for first launch', () => {
     const report = buildProductionEnvReport({
       ...validEnv,
+      AGENT_OBSERVABILITY_ALERTS_ENABLED: 'false',
+      AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL: '',
+      AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN: '',
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'AGENT_OBSERVABILITY_ALERTS_ENABLED',
+        }),
+      ]),
+    );
+  });
+
+  it('requires real observability alert delivery when alerts are enabled', () => {
+    const report = buildProductionEnvReport({
+      ...validEnv,
+      AGENT_OBSERVABILITY_ALERTS_ENABLED: 'true',
       AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL: 'http://localhost:9000/alerts',
       AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN: '',
       AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS: '-1',

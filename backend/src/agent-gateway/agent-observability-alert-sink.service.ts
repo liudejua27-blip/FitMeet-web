@@ -4,8 +4,9 @@ import { redactSensitiveValue } from '../common/privacy-redaction.util';
 import type { AgentObservabilityAlert } from './agent-observability.service';
 
 type AlertSinkStatus = {
+  enabled: boolean;
   configured: boolean;
-  target: 'webhook' | 'log_only';
+  target: 'webhook' | 'disabled';
   lastDeliveryAt: string | null;
   lastDeliveryStatus: 'sent' | 'skipped' | 'failed' | null;
   lastError: string | null;
@@ -24,6 +25,9 @@ export class AgentObservabilityAlertSinkService {
     alerts: AgentObservabilityAlert[],
     context: Record<string, unknown> = {},
   ): Promise<void> {
+    if (!this.enabled()) {
+      return;
+    }
     const deliverable = alerts.filter((alert) => this.shouldDeliver(alert));
     if (deliverable.length === 0) {
       return;
@@ -40,7 +44,6 @@ export class AgentObservabilityAlertSinkService {
     const webhookUrl = this.webhookUrl();
     try {
       if (!webhookUrl) {
-        this.logger.warn(JSON.stringify(payload));
         this.markDelivered(deliverable, 'skipped');
         return;
       }
@@ -72,9 +75,11 @@ export class AgentObservabilityAlertSinkService {
   }
 
   status(): AlertSinkStatus {
+    const enabled = this.enabled();
     return {
-      configured: Boolean(this.webhookUrl()),
-      target: this.webhookUrl() ? 'webhook' : 'log_only',
+      enabled,
+      configured: enabled && Boolean(this.webhookUrl()),
+      target: enabled && this.webhookUrl() ? 'webhook' : 'disabled',
       lastDeliveryAt: this.lastDeliveryAt,
       lastDeliveryStatus: this.lastDeliveryStatus,
       lastError: this.lastError,
@@ -104,6 +109,14 @@ export class AgentObservabilityAlertSinkService {
 
   private webhookUrl(): string {
     return (process.env.AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL ?? '').trim();
+  }
+
+  private enabled(): boolean {
+    return (
+      (process.env.AGENT_OBSERVABILITY_ALERTS_ENABLED ?? 'false')
+        .trim()
+        .toLowerCase() === 'true'
+    );
   }
 
   private webhookToken(): string {

@@ -116,7 +116,7 @@ Required values include:
 - `JWT_SECRET`
 - object storage credentials for uploads; avatar upload and feed image E2E require a real OSS/S3 bucket. If S3/R2 uses a custom endpoint, set `S3_PUBLIC_BASE_URL` to the HTTPS public media domain.
 - `DEEPSEEK_API_KEY`, `DEEPSEEK_CHAT_MODEL=deepseek-v4-pro`, `DEEPSEEK_FAST_MODEL=deepseek-v4-flash`
-- `AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL`, `AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN`, `AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS=300000`
+- First launch can keep `AGENT_OBSERVABILITY_ALERTS_ENABLED=false`. When traffic grows, set it to `true` and configure `AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL`, `AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN`, and `AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS=300000`.
 
 Copy SSL files:
 

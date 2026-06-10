@@ -109,7 +109,7 @@ export function buildProductionEnvReport(env: EnvMap): ProductionEnvReport {
   checkAgentModel(env, error);
   checkKafka(env, error);
   checkSubagentWorker(env, error, warning);
-  checkObservabilityAlerts(env, error);
+  checkObservabilityAlerts(env, error, warning);
 
   for (const key of OPTIONAL_BUT_LAUNCH_CRITICAL_KEYS) {
     if (!hasConfiguredValue(env[key])) {
@@ -416,7 +416,25 @@ function checkSubagentWorker(
 function checkObservabilityAlerts(
   env: EnvMap,
   error: (key: string, message: string) => void,
+  warning: (key: string, message: string) => void,
 ): void {
+  const enabled = `${env.AGENT_OBSERVABILITY_ALERTS_ENABLED ?? 'false'}`
+    .trim()
+    .toLowerCase();
+  if (enabled !== 'true') {
+    warning(
+      'AGENT_OBSERVABILITY_ALERTS_ENABLED',
+      'external alert delivery is disabled; enable it once production traffic grows.',
+    );
+    if (hasConfiguredValue(env.AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS)) {
+      requireNonNegativeInt(
+        env,
+        'AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS',
+        error,
+      );
+    }
+    return;
+  }
   requireConfigured(env, 'AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL', error);
   requireHttpsUrl(env, 'AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL', error);
   requireConfigured(env, 'AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN', error);
