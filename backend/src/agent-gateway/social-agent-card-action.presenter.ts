@@ -325,6 +325,145 @@ export function buildSocialAgentLifeGraphUpdateCard(input: {
   };
 }
 
+export function buildSocialAgentProofUploadPromptCard(input: {
+  taskId: number;
+  activityId: number | null;
+  proofStatus?: string;
+}): FitMeetAlphaCard {
+  return {
+    id: `activity_proof_prompt:${input.taskId}:${input.activityId ?? 'draft'}`,
+    type: 'activity_status',
+    title: '需要补充活动完成证明',
+    body: '请在活动详情里上传场景照、签到或其他完成证明。证明只用于活动履约确认，不要求露脸。',
+    status: 'ready',
+    data: {
+      taskId: input.taskId,
+      activityId: input.activityId,
+      status: 'proof_required',
+      proofStatus: input.proofStatus ?? '待上传证明',
+      proofPolicy: 'mutual_or_proof',
+      safetyBoundary: '证明仅用于活动履约确认，不公开精确位置，不强制露脸。',
+    },
+    actions: [
+      {
+        id: 'activity_view_detail',
+        label: '打开活动详情',
+        action: 'view_activity',
+        schemaAction: 'activity.view_detail',
+        loopStage: 'activity_completed',
+        requiresConfirmation: false,
+        payload: {
+          taskId: input.taskId,
+          activityId: input.activityId,
+        },
+      },
+    ],
+  };
+}
+
+export function buildSocialAgentProofSubmittedCard(input: {
+  taskId: number;
+  activityId: number | null;
+  proofId: number | null;
+  proofType: string;
+}): FitMeetAlphaCard {
+  return {
+    id: `activity_proof_submitted:${input.taskId}:${input.proofId ?? 'draft'}`,
+    type: 'activity_status',
+    title: '活动证明已提交',
+    body: '证明已进入待确认状态。对方确认后，我会继续更新活动履约状态和 Life Graph 信号。',
+    status: 'ready',
+    data: {
+      taskId: input.taskId,
+      activityId: input.activityId,
+      proofId: input.proofId,
+      status: 'proof_submitted',
+      proofStatus: '证明待对方确认',
+      proofType: input.proofType,
+    },
+    actions: [
+      {
+        id: 'activity_view_detail',
+        label: '查看证明状态',
+        action: 'view_activity',
+        schemaAction: 'activity.view_detail',
+        loopStage: 'activity_completed',
+        requiresConfirmation: false,
+        payload: {
+          taskId: input.taskId,
+          activityId: input.activityId,
+        },
+      },
+    ],
+  };
+}
+
+export function buildSocialAgentActivityDetailCard(input: {
+  taskId: number;
+  activityId: number | null;
+  activity?: Record<string, unknown> | null;
+  proofs?: Record<string, unknown>[];
+  unavailableReason?: string;
+}): FitMeetAlphaCard {
+  const activity = input.activity ?? {};
+  const proofs = input.proofs ?? [];
+  const status = cleanDisplayText(activity.status, '') || 'detail_unavailable';
+  const proofStatus = socialAgentProofStatusText(proofs);
+  return {
+    id: `activity_detail:${input.taskId}:${input.activityId ?? 'draft'}`,
+    type: 'activity_status',
+    title:
+      cleanDisplayText(activity.title, '') ||
+      (input.unavailableReason ? '活动详情暂不可用' : '活动详情'),
+    body:
+      cleanDisplayText(activity.description, '') ||
+      input.unavailableReason ||
+      '这里会显示活动时间、地点、证明和履约进度。',
+    status: status === 'detail_unavailable' ? 'blocked' : 'ready',
+    data: {
+      taskId: input.taskId,
+      activityId: input.activityId,
+      status,
+      city: cleanDisplayText(activity.city, ''),
+      locationName: cleanDisplayText(activity.locationName, ''),
+      startTime: cleanDisplayText(activity.startTime, ''),
+      endTime: cleanDisplayText(activity.endTime, ''),
+      proofRequired: Boolean(activity.proofRequired),
+      proofPolicy: cleanDisplayText(activity.proofPolicy, ''),
+      proofStatus,
+      proofCount: proofs.length,
+      proofs: proofs.slice(0, 5),
+      safetyBoundary:
+        '活动详情只展示当前任务关联活动；精确位置由客户端隐私开关控制。',
+    },
+    actions: input.activityId
+      ? [
+          {
+            id: 'activity_upload_proof',
+            label: proofStatus === '还没有上传证明' ? '上传证明' : '补充证明',
+            action: 'upload_proof',
+            schemaAction: 'activity.upload_proof',
+            loopStage: 'activity_completed',
+            requiresConfirmation: false,
+            payload: {
+              taskId: input.taskId,
+              activityId: input.activityId,
+            },
+          },
+        ]
+      : [],
+  };
+}
+
+function socialAgentProofStatusText(proofs: Record<string, unknown>[]): string {
+  if (proofs.length === 0) return '还没有上传证明';
+  const accepted = proofs.filter((proof) => proof.status === 'accepted').length;
+  if (accepted > 0) return `${accepted} 条证明已确认`;
+  const pending = proofs.filter((proof) => proof.status === 'pending').length;
+  if (pending > 0) return `${pending} 条证明待确认`;
+  return `${proofs.length} 条证明需重新确认`;
+}
+
 export function createSocialAgentActivityDtoFromPayload(input: {
   payload: Record<string, unknown>;
   candidateUserId?: number | null;
@@ -449,6 +588,10 @@ export function messageForSocialAgentSchemaAction(
       return '我已到达，签到';
     case 'activity.complete':
       return '活动已完成';
+    case 'activity.upload_proof':
+      return '上传活动证明';
+    case 'activity.view_detail':
+      return '查看活动详情';
     case 'review.submit':
       return '提交活动评价';
     case 'life_graph.accept_update':

@@ -152,7 +152,7 @@ describe('SocialAgentCandidateActionService', () => {
         },
       },
     });
-    const { approvals, service } = makeHarness(task);
+    const { approvals, service, taskRepo } = makeHarness(task);
 
     const approval = await service.createActionApproval({
       ownerUserId: 7,
@@ -183,6 +183,26 @@ describe('SocialAgentCandidateActionService', () => {
       id: 9001,
       actionType: 'send_candidate_message',
       riskLevel: 'medium',
+    });
+    expect(taskRepo.save).toHaveBeenCalledWith(task);
+    expect(task.memory).toMatchObject({
+      taskMemory: {
+        currentTask: {
+          objective: 'candidate_action',
+          state: 'waiting_confirmation',
+          stateReason: 'confirmation_required',
+          waitingFor: 'action_confirmation',
+          lastCompletedStep: 'approval_created',
+        },
+        pendingActions: [
+          expect.objectContaining({
+            id: 9001,
+            actionType: 'send_candidate_message',
+            summary: expect.stringContaining('候选人 #22'),
+            riskLevel: 'medium',
+          }),
+        ],
+      },
     });
   });
 
@@ -334,6 +354,16 @@ describe('SocialAgentCandidateActionService', () => {
           }),
         },
       },
+      taskMemory: {
+        pendingActions: [],
+        currentTask: expect.objectContaining({
+          objective: 'candidate_messaging',
+          state: 'messaging_candidate',
+          stateReason: 'message_action',
+          waitingFor: 'candidate_reply',
+          lastCompletedStep: 'message_sent',
+        }),
+      },
     });
   });
 
@@ -421,6 +451,79 @@ describe('SocialAgentCandidateActionService', () => {
     expect(longTermMemory.summarizeTask).toHaveBeenCalledWith(task);
   });
 
+  it('persists pending approval state when connecting a candidate requires confirmation', async () => {
+    const { executor, longTermMemory, savedEvents, service, task } =
+      makeHarness();
+    executor.executeToolAction.mockResolvedValueOnce({
+      id: 'action_add_friend_pending_1',
+      toolName: SocialAgentToolName.AddFriend,
+      status: 'succeeded',
+      output: {
+        status: 'pending_approval',
+        requiresApproval: true,
+        approvalId: 701,
+      },
+      error: null,
+    } as never);
+
+    const result = await service.connectCandidate(7, 101, {
+      socialRequestId: 301,
+      candidateRecordId: 501,
+      targetUserId: 22,
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      status: 'pending_approval',
+      following: false,
+      approvalId: 701,
+      requiresApproval: true,
+      message: '加好友/连接候选人需要你确认',
+      friendAction: {
+        status: 'pending_approval',
+        targetUserId: 22,
+        following: false,
+      },
+    });
+    expect(task.memory).toMatchObject({
+      shortTerm: {
+        candidateActions: {
+          '22': expect.objectContaining({
+            connect: 'pendingApproval',
+            candidateRecordId: 501,
+            socialRequestId: 301,
+          }),
+        },
+      },
+      taskMemory: {
+        currentTask: expect.objectContaining({
+          objective: 'candidate_messaging',
+          state: 'waiting_confirmation',
+          stateReason: 'confirmation_required',
+          waitingFor: 'connect_confirmation',
+          lastCompletedStep: 'connect_approval_created',
+        }),
+        pendingActions: [
+          expect.objectContaining({
+            id: 701,
+            type: 'contact_request',
+            actionType: 'connect_candidate',
+            summary: '加好友/连接候选人 #22',
+            riskLevel: 'medium',
+          }),
+        ],
+      },
+    });
+    expect(savedEvents).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: 'confirmation.received',
+        }),
+      ]),
+    );
+    expect(longTermMemory.summarizeTask).not.toHaveBeenCalled();
+  });
+
   it('resolves nested candidate user ids when connecting from a card payload', async () => {
     const { executor, service } = makeHarness();
 
@@ -498,6 +601,70 @@ describe('SocialAgentCandidateActionService', () => {
             messageId: 'msg-22',
           }),
         },
+      },
+    });
+  });
+
+  it('persists pending approval state when direct candidate message requires confirmation', async () => {
+    const { executor, service, task } = makeHarness();
+    executor.executeToolAction.mockResolvedValueOnce({
+      id: 'action_send_message_pending_1',
+      toolName: SocialAgentToolName.SendMessage,
+      status: 'succeeded',
+      output: {
+        status: 'pending_approval',
+        requiresApproval: true,
+        approvalId: 501,
+        candidate: { status: 'pending_approval' },
+      },
+      error: null,
+    } as never);
+
+    const result = await service.sendCandidateMessage(7, 101, {
+      targetUserId: 22,
+      candidateUserId: 22,
+      candidateRecordId: 601,
+      socialRequestId: 301,
+      message: '今晚先在青岛大学操场轻松跑一段吗？',
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      status: 'pending_approval',
+      approvalId: 501,
+      requiresApproval: true,
+      message: '发送消息需要你确认',
+      messageAction: {
+        status: 'pending_approval',
+      },
+    });
+    expect(task.memory).toMatchObject({
+      shortTerm: {
+        candidateActions: {
+          '22': expect.objectContaining({
+            send: 'pendingApproval',
+            candidateRecordId: 601,
+            socialRequestId: 301,
+          }),
+        },
+      },
+      taskMemory: {
+        currentTask: expect.objectContaining({
+          objective: 'candidate_messaging',
+          state: 'waiting_confirmation',
+          stateReason: 'confirmation_required',
+          waitingFor: 'message_confirmation',
+          lastCompletedStep: 'message_approval_created',
+        }),
+        pendingActions: [
+          expect.objectContaining({
+            id: 501,
+            type: 'send_message',
+            actionType: 'send_candidate_message',
+            summary: '发送消息给候选人 #22',
+            riskLevel: 'medium',
+          }),
+        ],
       },
     });
   });

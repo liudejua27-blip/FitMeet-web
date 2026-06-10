@@ -129,4 +129,57 @@ describe('SocialAgentFinalResponseService', () => {
       }),
     ).resolves.toBe('当前没有找到真实候选人。');
   });
+
+  it('streams DeepSeek response deltas while returning the final content', async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            [
+              'data: {"choices":[{"delta":{"content":"我已经"}}]}',
+              '',
+              'data: {"choices":[{"delta":{"content":"找到候选人。"}}]}',
+              '',
+              'data: [DONE]',
+              '',
+              '',
+            ].join('\n'),
+          ),
+        );
+        controller.close();
+      },
+    });
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      body: stream,
+    });
+    global.fetch = fetchMock as never;
+    const deltas: string[] = [];
+    const service = new SocialAgentFinalResponseService(
+      makeConfig({
+        DEEPSEEK_API_KEY: 'key',
+        DEEPSEEK_BASE_URL: 'https://deepseek.test',
+      }) as never,
+    );
+
+    const result = await service.generate(
+      {
+        userMessage: '今晚想跑步',
+        fallbackReply: '找到候选人。',
+      },
+      {
+        onDelta: (delta) => {
+          deltas.push(delta);
+        },
+      },
+    );
+
+    expect(result).toBe('我已经找到候选人。');
+    expect(deltas).toEqual(['我已经', '找到候选人。']);
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
+    ) as Record<string, unknown>;
+    expect(body.stream).toBe(true);
+  });
 });

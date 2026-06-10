@@ -18,4 +18,5 @@ export type CandidateTargetBody = {
 export type SocialAgentCardActionBody = {
   action?: FitMeetAgentSchemaAction | null;
   payload?: Record<string, unknown> | null;
+  idempotencyKey?: string | null;
 };

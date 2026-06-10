@@ -86,12 +86,19 @@ export class SocialAgentTaskLifecycleService {
     ownerUserId: number,
     taskId: number | null,
     message: string,
+    idempotencyKeyInput?: string | null,
   ): Promise<AgentTask> {
     if (taskId) return this.assertTaskOwner(taskId, ownerUserId);
     const agent = await this.resolveAgentConnection(ownerUserId, null);
-    const idempotencyKey = `social-agent-message:${ownerUserId}:${Date.now()}:${Math.random()
-      .toString(36)
-      .slice(2, 10)}`;
+    const idempotencyKey =
+      cleanDisplayText(idempotencyKeyInput, '').trim() ||
+      `social-agent-message:${ownerUserId}:${Date.now()}:${Math.random()
+        .toString(36)
+        .slice(2, 10)}`;
+    const existing = await this.taskRepo.findOne({
+      where: { ownerUserId, idempotencyKey },
+    });
+    if (existing) return existing;
     const task = await this.taskRepo.save(
       this.taskRepo.create({
         ownerUserId,

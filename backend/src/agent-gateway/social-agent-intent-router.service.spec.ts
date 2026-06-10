@@ -41,6 +41,44 @@ describe('SocialAgentIntentRouterService', () => {
     });
   });
 
+  it('routes fitness math questions without searching or writing profile data', async () => {
+    const router = makeRouter();
+
+    const samples = [
+      '5公里30分钟配速是多少？',
+      '身高175cm体重70kg体重指数怎么算？',
+      '每周跑3次每次5公里，周跑量是多少？',
+    ];
+
+    for (const message of samples) {
+      const result = await router.route({ message });
+
+      expect(result).toMatchObject({
+        intent: 'fitness_math',
+        shouldSearch: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'conversational_answer',
+        source: 'rules',
+      });
+    }
+  });
+
+  it('does not route generic product calculations as fitness math', async () => {
+    const router = makeRouter();
+
+    const result = await router.route({
+      message: '你们是怎么计算匹配度的？',
+    });
+
+    expect(result.intent).not.toBe('fitness_math');
+    expect(result).toMatchObject({
+      intent: 'product_help',
+      shouldSearch: false,
+      replyStrategy: 'conversational_answer',
+    });
+  });
+
   it('routes concrete preference statements as profile updates', async () => {
     const router = makeRouter();
 
@@ -84,6 +122,22 @@ describe('SocialAgentIntentRouterService', () => {
       shouldSearch: false,
       shouldUpdateProfile: true,
       replyStrategy: 'conversational_answer',
+    });
+  });
+
+  it('routes rich profile facts with an explicit immediate search command to social search', async () => {
+    const router = makeRouter();
+
+    const result = await router.route({
+      message: '我是青岛大学男生，周末下午喜欢跑步，现在帮我找同校跑步搭子',
+    });
+
+    expect(result).toMatchObject({
+      intent: 'social_search',
+      shouldSearch: true,
+      shouldUpdateProfile: false,
+      replyStrategy: 'search_candidates',
+      source: 'rules',
     });
   });
 

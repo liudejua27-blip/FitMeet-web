@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -29,6 +30,7 @@ import {
   AgentTaskStatus,
 } from './entities/agent-task.entity';
 import { AgentPermissionService } from './agent-permission.service';
+import { AgentLoopService } from './agent-loop.service';
 import { AgentApprovalDispatcherService } from './agent-approval-dispatcher.service';
 import { AgentApprovalService } from './agent-approval.service';
 import { rememberSocialAgentShortTerm } from './social-agent-memory.util';
@@ -101,6 +103,7 @@ import {
   socialAgentRunNextReadReplyState,
   socialAgentRunNextSummaryFailedState,
 } from './social-agent-run-next-state';
+import { requiresMandatorySocialAgentApproval } from './social-agent-tool-policy';
 import {
   socialAgentAdhocActionCompletionState,
   type SocialAgentAdhocActionTaskState,
@@ -110,6 +113,18 @@ import {
   buildSocialAgentPendingApprovalOutput,
   buildSocialAgentRiskGateDecision,
 } from './social-agent-risk-gate.presenter';
+import {
+  buildSocialAgentPendingApprovalsToolOutput,
+  readSocialAgentApprovalToolId,
+} from './social-agent-approval-tool.presenter';
+import {
+  buildSocialAgentCurrentTaskSummary,
+  shouldPersistSocialAgentCurrentTaskSummary,
+} from './social-agent-current-task-summary.presenter';
+import { buildSocialAgentDraftOpenerResult } from './social-agent-draft-opener.presenter';
+import { buildSocialAgentCandidateMessageActionResult } from './social-agent-candidate-message-action-result';
+import { buildSocialAgentSocialRequestResult } from './social-agent-social-request-result.presenter';
+import type { FitMeetAlphaAgentName } from './fitmeet-alpha-agent.types';
 
 export { SocialAgentToolName } from './social-agent-tool.types';
 export type {
@@ -124,6 +139,17 @@ type StepRecord = Record<string, unknown>;
 type ExecuteTaskOptions = {
   maxSteps?: number;
   stopOnError?: boolean;
+};
+
+type ToolReliabilityContract = {
+  idempotencyKey: string;
+  generatedIdempotencyKey: boolean;
+  timeoutMs: number;
+  maxRetries: number;
+  retryable: boolean;
+  highRisk: boolean;
+  mandatoryApproval: boolean;
+  compensationAction: string | null;
 };
 
 @Injectable()
@@ -165,6 +191,8 @@ export class SocialAgentToolExecutorService {
     private readonly conversationTools: SocialAgentConversationToolService,
     private readonly decisionTools: SocialAgentDecisionToolService,
     private readonly taskMemory: SocialAgentTaskMemoryService,
+    @Optional()
+    private readonly agentLoop?: AgentLoopService,
   ) {}
 
   async executeTask(
@@ -257,6 +285,49 @@ export class SocialAgentToolExecutorService {
     });
     if (!task) throw new NotFoundException(`Agent task ${taskId} not found`);
 
+    let runNextResult: SocialAgentRunNextResult | null = null;
+    const loopService = this.agentLoop ?? new AgentLoopService();
+    const execution = await loopService.execute({
+      taskId,
+      goal: `Continue Social Agent task ${taskId}`,
+      agent: 'FitMeet Main Agent',
+      maxToolCalls: 1,
+      timeoutMs: 30_000,
+      plan: {
+        reason: 'run-next must pass through the unified AgentLoop.',
+        tools: [
+          {
+            agent: 'Meet Loop Agent',
+            toolName: 'run_next_execute',
+            input: { ownerUserId: ownerUserId ?? null },
+          },
+        ],
+      },
+      runner: async () => {
+        runNextResult = await this.runNextInternal(task);
+        return {
+          taskId: runNextResult.taskId,
+          status: runNextResult.status,
+          executedSteps: runNextResult.executedSteps,
+          handledReply: runNextResult.handledReply,
+          decision: runNextResult.decision,
+        };
+      },
+    });
+    if (!runNextResult) {
+      throw new Error('AgentLoop did not produce a run-next result');
+    }
+    const result = runNextResult as SocialAgentRunNextResult;
+    return {
+      ...result,
+      agentLoop: execution.loop,
+    };
+  }
+
+  private async runNextInternal(
+    task: AgentTask,
+  ): Promise<SocialAgentRunNextResult> {
+    const taskId = task.id;
     if (
       task.status !== AgentTaskStatus.WaitingReply &&
       task.status !== AgentTaskStatus.WaitingResult &&
@@ -450,6 +521,65 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     ownerUserId?: number,
   ): Promise<SocialAgentToolCallRecord> {
+    const normalizedToolName = this.toolCallFactory.normalizeToolName(toolName);
+    if (!normalizedToolName) {
+      throw new BadRequestException(`Unknown tool ${String(toolName)}`);
+    }
+
+    let didRun = false;
+    let actionResult: SocialAgentToolCallRecord | null = null;
+    const loopService = this.agentLoop ?? new AgentLoopService();
+    await loopService.execute({
+      taskId,
+      goal: `Execute Social Agent tool action`,
+      agent: 'FitMeet Main Agent',
+      maxToolCalls: 1,
+      maxRetries: 0,
+      timeoutMs: 30_000,
+      plan: {
+        reason:
+          'Adhoc task tool actions must enter the unified AgentLoop; the executor enforces approval gates.',
+        tools: [
+          {
+            agent: this.agentForToolAction(normalizedToolName),
+            toolName: 'tool_action_execute',
+            input: this.toolActionLoopInput(taskId, input, ownerUserId),
+          },
+        ],
+      },
+      runner: async () => {
+        actionResult = await this.executeToolActionInternal(
+          taskId,
+          normalizedToolName,
+          input,
+          ownerUserId,
+        );
+        didRun = true;
+        return {
+          handled: true,
+          taskId,
+          status: actionResult.status,
+          toolName: normalizedToolName,
+          outputKeys: this.recordKeys(actionResult.output),
+          errorCode: actionResult.error?.code ?? null,
+        };
+      },
+    });
+
+    if (!didRun || !actionResult) {
+      throw new Error(
+        `AgentLoop completed without executing tool action: ${normalizedToolName}`,
+      );
+    }
+    return actionResult;
+  }
+
+  private async executeToolActionInternal(
+    taskId: number,
+    normalizedToolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+    ownerUserId?: number,
+  ): Promise<SocialAgentToolCallRecord> {
     const task = await this.taskRepo.findOne({
       where: ownerUserId ? { id: taskId, ownerUserId } : { id: taskId },
     });
@@ -460,24 +590,23 @@ export class SocialAgentToolExecutorService {
     task.statusReason = null;
     await this.taskRepo.save(task);
 
-    const normalizedToolName = this.toolCallFactory.normalizeToolName(toolName);
-    if (!normalizedToolName) {
-      throw new BadRequestException(`Unknown tool ${String(toolName)}`);
-    }
-
     const actionInput = this.confirmationPolicy.withAdhocConfirmationMetadata(
       normalizedToolName,
       input,
       ownerUserId,
     );
     const stepId = `action_${normalizedToolName}_${Date.now()}`;
-    const unconfirmedDangerousAction =
-      await this.rejectUnconfirmedAdhocDangerousAction(
-        task,
-        normalizedToolName,
-        actionInput,
-        stepId,
-    );
+    const unconfirmedDangerousAction = requiresMandatorySocialAgentApproval(
+      normalizedToolName,
+      actionInput,
+    )
+      ? null
+      : await this.rejectUnconfirmedAdhocDangerousAction(
+          task,
+          normalizedToolName,
+          actionInput,
+          stepId,
+        );
     if (unconfirmedDangerousAction) {
       this.applyAdhocActionState(
         task,
@@ -511,6 +640,383 @@ export class SocialAgentToolExecutorService {
     return call;
   }
 
+  private agentForToolAction(
+    toolName: SocialAgentToolName,
+  ): FitMeetAlphaAgentName {
+    if (
+      [
+        SocialAgentToolName.GetMyProfile,
+        SocialAgentToolName.GetAiProfile,
+        SocialAgentToolName.GenerateProfileQuestions,
+        SocialAgentToolName.UpdateAiProfileFromAnswers,
+        SocialAgentToolName.UpdateProfileFromAgentContext,
+        SocialAgentToolName.ReadLongTermMemory,
+      ].includes(toolName)
+    ) {
+      return 'Life Graph Agent';
+    }
+    if (
+      [
+        SocialAgentToolName.SearchMatches,
+        SocialAgentToolName.SearchActivities,
+        SocialAgentToolName.SearchPublicIntents,
+        SocialAgentToolName.ExplainMatches,
+        SocialAgentToolName.SaveCandidate,
+        SocialAgentToolName.GetCandidatePoolDebug,
+      ].includes(toolName)
+    ) {
+      return 'Social Match Agent';
+    }
+    if (
+      [
+        SocialAgentToolName.PublishSocialRequest,
+        SocialAgentToolName.CreateSocialRequest,
+        SocialAgentToolName.DraftOpener,
+        SocialAgentToolName.SendMessageToCandidate,
+        SocialAgentToolName.SendMessage,
+        SocialAgentToolName.ConnectCandidate,
+        SocialAgentToolName.AddFriend,
+        SocialAgentToolName.CreateActivity,
+        SocialAgentToolName.JoinActivity,
+        SocialAgentToolName.InviteActivity,
+        SocialAgentToolName.OfflineMeeting,
+        SocialAgentToolName.ShareLocation,
+        SocialAgentToolName.Payment,
+        SocialAgentToolName.ReplyMessage,
+        SocialAgentToolName.GetPendingApprovals,
+        SocialAgentToolName.ApproveAction,
+        SocialAgentToolName.RejectAction,
+      ].includes(toolName)
+    ) {
+      return 'Meet Loop Agent';
+    }
+    return 'FitMeet Main Agent';
+  }
+
+  private toolActionLoopInput(
+    taskId: number,
+    input: Record<string, unknown>,
+    ownerUserId?: number,
+  ): Record<string, unknown> {
+    return {
+      taskId,
+      ownerUserId: ownerUserId ?? null,
+      fieldCount: Object.keys(input).length,
+      hasMessage:
+        typeof input.message === 'string' ||
+        typeof input.text === 'string' ||
+        typeof input.suggestedOpener === 'string',
+      executorEnforcesApproval: true,
+    };
+  }
+
+  private recordKeys(value: unknown): string[] {
+    return value && typeof value === 'object' ? Object.keys(value) : [];
+  }
+
+  private buildToolReliabilityContract(
+    task: AgentTask,
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+    stepId: string,
+  ): ToolReliabilityContract {
+    const explicitKey = this.readIdempotencyKey(input);
+    const mandatoryApproval = requiresMandatorySocialAgentApproval(
+      toolName,
+      input,
+    );
+    const highRisk = mandatoryApproval || this.isHighRiskTool(toolName);
+    const timeoutMs = this.toolTimeoutMs(toolName);
+    const maxRetries = this.toolRetryCount(toolName, highRisk, explicitKey);
+    return {
+      idempotencyKey:
+        explicitKey ??
+        `social-agent-tool:${task.id}:${stepId}:${toolName}:${this.simpleHash(input)}`,
+      generatedIdempotencyKey: !explicitKey,
+      timeoutMs,
+      maxRetries,
+      retryable: maxRetries > 0,
+      highRisk,
+      mandatoryApproval,
+      compensationAction: this.compensationActionForTool(toolName),
+    };
+  }
+
+  private withReliabilityInput(
+    input: Record<string, unknown>,
+    reliability: ToolReliabilityContract,
+  ): Record<string, unknown> {
+    const metadata = this.toolInput.isRecord(input.metadata)
+      ? input.metadata
+      : {};
+    return {
+      ...input,
+      idempotencyKey: input.idempotencyKey ?? reliability.idempotencyKey,
+      metadata: {
+        ...metadata,
+        idempotencyKey:
+          metadata.idempotencyKey ??
+          input.idempotencyKey ??
+          reliability.idempotencyKey,
+        reliability: {
+          timeoutMs: reliability.timeoutMs,
+          maxRetries: reliability.maxRetries,
+          retryable: reliability.retryable,
+          highRisk: reliability.highRisk,
+          mandatoryApproval: reliability.mandatoryApproval,
+          generatedIdempotencyKey: reliability.generatedIdempotencyKey,
+          compensationAction: reliability.compensationAction,
+        },
+      },
+    };
+  }
+
+  private withReliabilityOutput(
+    output: Record<string, unknown>,
+    reliability: ToolReliabilityContract,
+  ): Record<string, unknown> {
+    return {
+      ...output,
+      reliability: {
+        idempotencyKey: reliability.idempotencyKey,
+        retryable: reliability.retryable,
+        timeoutMs: reliability.timeoutMs,
+        maxRetries: reliability.maxRetries,
+        highRisk: reliability.highRisk,
+        compensationAction: reliability.compensationAction,
+      },
+    };
+  }
+
+  private findIdempotentToolCall(
+    task: AgentTask,
+    toolName: SocialAgentToolName,
+    idempotencyKey: string,
+  ): SocialAgentToolCallRecord | null {
+    const calls = Array.isArray(task.toolCalls) ? task.toolCalls : [];
+    for (const raw of [...calls].reverse()) {
+      const call = raw as Partial<SocialAgentToolCallRecord>;
+      if (call.toolName !== toolName) continue;
+      if (call.status !== 'succeeded' && call.status !== 'blocked') continue;
+      const existingKey = this.readIdempotencyKey(call.input ?? {});
+      if (existingKey === idempotencyKey) {
+        return call as SocialAgentToolCallRecord;
+      }
+    }
+    return null;
+  }
+
+  private async dispatchToolWithReliability(
+    task: AgentTask,
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+    stepId: string,
+    reliability: ToolReliabilityContract,
+  ): Promise<unknown> {
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt <= reliability.maxRetries; attempt += 1) {
+      try {
+        return await this.withTimeout(
+          this.dispatchTool(task, toolName, input, stepId),
+          reliability.timeoutMs,
+          toolName,
+        );
+      } catch (error) {
+        lastError = error;
+        if (!this.shouldRetryTool(error, reliability, attempt)) break;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  }
+
+  private withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    toolName: SocialAgentToolName,
+  ): Promise<T> {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error(`tool_timeout:${toolName}:${timeoutMs}`));
+      }, timeoutMs);
+      promise.then(
+        (value) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          resolve(value);
+        },
+        (error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        },
+      );
+    });
+  }
+
+  private shouldRetryTool(
+    error: unknown,
+    reliability: ToolReliabilityContract,
+    attempt: number,
+  ): boolean {
+    if (attempt >= reliability.maxRetries) return false;
+    if (!reliability.retryable || reliability.highRisk) return false;
+    const message = error instanceof Error ? error.message : String(error);
+    return /timeout|temporar|network|rate|unavailable|ECONN|ETIMEDOUT|EAI_AGAIN/i.test(
+      message,
+    );
+  }
+
+  private reliableErrorPayload(
+    error: unknown,
+    reliability: ToolReliabilityContract,
+  ): Record<string, unknown> {
+    const payload = this.toolInput.errorPayload(error);
+    return {
+      ...payload,
+      retryable: reliability.retryable && !reliability.highRisk,
+      userMessage: this.userSafeToolFailureMessage(payload, reliability),
+      idempotencyKey: reliability.idempotencyKey,
+      timeoutMs: reliability.timeoutMs,
+      maxRetries: reliability.maxRetries,
+      highRisk: reliability.highRisk,
+      compensationAction: reliability.compensationAction,
+      compensationStatus: reliability.highRisk
+        ? 'manual_review_required'
+        : 'retry_available',
+    };
+  }
+
+  private userSafeToolFailureMessage(
+    payload: Record<string, unknown>,
+    reliability: ToolReliabilityContract,
+  ): string {
+    const message = this.toolInput.string(payload.message) ?? '';
+    if (/approval|confirm|确认|APPROVAL_REQUIRED/i.test(message)) {
+      return '这一步需要你确认后才能继续，我没有执行会影响他人的动作。';
+    }
+    if (/timeout|timed? out|tool_timeout/i.test(message)) {
+      return reliability.highRisk
+        ? '这个高风险动作执行超时了，我不会自动重试，避免重复发送或重复创建。你可以确认状态后再决定是否重试。'
+        : '工具响应超时了，我已经停止本次执行；这个动作可以安全重试。';
+    }
+    if (reliability.highRisk) {
+      return '这个高风险动作没有完成，我没有继续自动重试。请先确认状态，再决定是否重新执行或撤回。';
+    }
+    return '工具调用失败了，我保留了上下文和幂等标记，你可以让我重试或换一种方式继续。';
+  }
+
+  private readIdempotencyKey(input: Record<string, unknown>): string | null {
+    const direct = this.toolInput.string(input.idempotencyKey);
+    if (direct) return direct;
+    const metadata = this.toolInput.isRecord(input.metadata)
+      ? input.metadata
+      : null;
+    const nested = metadata
+      ? this.toolInput.string(metadata.idempotencyKey)
+      : null;
+    return nested || null;
+  }
+
+  private toolTimeoutMs(toolName: SocialAgentToolName): number {
+    const envKey = `FITMEET_AGENT_TOOL_${toolName.toUpperCase()}_TIMEOUT_MS`;
+    const specific = this.positiveInt(process.env[envKey]);
+    if (specific) return specific;
+    const shared = this.positiveInt(process.env.FITMEET_AGENT_TOOL_TIMEOUT_MS);
+    if (shared) return shared;
+    if (this.isHighRiskTool(toolName)) return 12_000;
+    if (
+      toolName === SocialAgentToolName.SearchMatches ||
+      toolName === SocialAgentToolName.SearchActivities ||
+      toolName === SocialAgentToolName.SearchPublicIntents
+    ) {
+      return 15_000;
+    }
+    return 10_000;
+  }
+
+  private toolRetryCount(
+    toolName: SocialAgentToolName,
+    highRisk: boolean,
+    explicitIdempotencyKey: string | null,
+  ): number {
+    const envKey = `FITMEET_AGENT_TOOL_${toolName.toUpperCase()}_RETRIES`;
+    const specific = this.positiveInt(process.env[envKey]);
+    if (specific !== null) return highRisk ? 0 : specific;
+    const shared = this.positiveInt(process.env.FITMEET_AGENT_TOOL_RETRIES);
+    if (shared !== null) return highRisk ? 0 : shared;
+    if (highRisk) return explicitIdempotencyKey ? 0 : 0;
+    return 1;
+  }
+
+  private isHighRiskTool(toolName: SocialAgentToolName): boolean {
+    return [
+      SocialAgentToolName.SendMessage,
+      SocialAgentToolName.SendMessageToCandidate,
+      SocialAgentToolName.ReplyMessage,
+      SocialAgentToolName.ConnectCandidate,
+      SocialAgentToolName.AddFriend,
+      SocialAgentToolName.CreateActivity,
+      SocialAgentToolName.InviteActivity,
+      SocialAgentToolName.JoinActivity,
+      SocialAgentToolName.OfflineMeeting,
+      SocialAgentToolName.ShareLocation,
+      SocialAgentToolName.Payment,
+      SocialAgentToolName.PublishSocialRequest,
+    ].includes(toolName);
+  }
+
+  private compensationActionForTool(
+    toolName: SocialAgentToolName,
+  ): string | null {
+    switch (toolName) {
+      case SocialAgentToolName.PublishSocialRequest:
+      case SocialAgentToolName.CreateSocialRequest:
+        return 'cancel_social_request_or_unpublish_public_intent';
+      case SocialAgentToolName.CreateActivity:
+      case SocialAgentToolName.InviteActivity:
+      case SocialAgentToolName.JoinActivity:
+      case SocialAgentToolName.OfflineMeeting:
+        return 'cancel_or_update_activity_and_notify_participants';
+      case SocialAgentToolName.SendMessage:
+      case SocialAgentToolName.SendMessageToCandidate:
+      case SocialAgentToolName.ReplyMessage:
+        return 'send_correction_or_retraction_message';
+      case SocialAgentToolName.ConnectCandidate:
+      case SocialAgentToolName.AddFriend:
+        return 'remove_connection_or_mark_contact_request_cancelled';
+      case SocialAgentToolName.ShareLocation:
+        return 'stop_location_sharing_and_notify_counterpart';
+      case SocialAgentToolName.Payment:
+        return 'cancel_payment_intent_or_refund_via_manual_review';
+      case SocialAgentToolName.UpdateAiProfileFromAnswers:
+      case SocialAgentToolName.UpdateProfileFromAgentContext:
+        return 'revert_profile_or_life_graph_field_from_audit';
+      default:
+        return null;
+    }
+  }
+
+  private positiveInt(value: unknown): number | null {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) return null;
+    return Math.trunc(parsed);
+  }
+
+  private simpleHash(value: unknown): string {
+    const text = this.toolInput.safeUnknownText(value);
+    let hash = 0;
+    for (let index = 0; index < text.length; index += 1) {
+      hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
+    }
+    return hash.toString(36);
+  }
+
   private async executePlanStep(
     task: AgentTask,
     step: StepRecord,
@@ -519,17 +1025,47 @@ export class SocialAgentToolExecutorService {
     const stepId = this.toolCallFactory.stepId(step) || `step_${index + 1}`;
     const toolName = this.toolCallFactory.resolveToolName(step);
     const input = this.toolCallFactory.stepInput(step);
+    const reliability = this.buildToolReliabilityContract(
+      task,
+      toolName,
+      input,
+      stepId,
+    );
+    const executionInput = this.withReliabilityInput(input, reliability);
     const startedAt = new Date();
     const callId = this.toolCallFactory.safeToolCallId(
       task.id,
       toolName,
       startedAt,
     );
-    const policy = this.toolExecutionPolicy.buildPolicyMetadata(
+    const policy =
+      await this.toolExecutionPolicy.buildPolicyMetadataWithPatches(
+        task,
+        toolName,
+        executionInput,
+      );
+    const duplicateCall = this.findIdempotentToolCall(
       task,
       toolName,
-      input,
+      reliability.idempotencyKey,
     );
+    if (duplicateCall) {
+      await this.createTaskEvent(
+        task,
+        AgentTaskEventType.ToolReturned,
+        buildSocialAgentToolReturnedEvent({
+          toolName,
+          stepId,
+          toolCallId: duplicateCall.id,
+          inputSummary: this.taskMemory.preview(
+            this.toolInput.safeUnknownText(executionInput),
+            240,
+          ),
+          call: duplicateCall,
+        }),
+      );
+      return duplicateCall;
+    }
 
     await this.createTaskEvent(
       task,
@@ -538,7 +1074,7 @@ export class SocialAgentToolExecutorService {
         toolName,
         stepId,
         toolCallId: callId,
-        input,
+        input: executionInput,
       }),
     );
     await this.createTaskEvent(
@@ -548,27 +1084,29 @@ export class SocialAgentToolExecutorService {
         toolName,
         stepId,
         toolCallId: callId,
-        input,
-        policy,
+        input: executionInput,
+        policy: {
+          ...policy,
+          reliability,
+        },
       }),
     );
     const inputSummary = this.taskMemory.preview(
-      this.toolInput.safeUnknownText(input),
+      this.toolInput.safeUnknownText(executionInput),
       240,
     );
 
     try {
-      this.toolExecutionPolicy.assertToolAllowed({
-        mode: task.permissionMode,
-        step,
+      await this.confirmationPolicy.validateDangerousAdhocActionTarget(
+        task,
         toolName,
-      });
+        executionInput,
+      );
       this.toolExecutionPolicy.assertHighRiskFrequencyLimit(task, toolName);
-      this.confirmationPolicy.assertAgentConnectionBound(task, toolName, input);
       const gatedOutput = await this.maybeGateActionByRisk(
         task,
         toolName,
-        input,
+        executionInput,
         stepId,
         policy.sceneRisk as SceneRiskPolicyResult,
       );
@@ -578,12 +1116,17 @@ export class SocialAgentToolExecutorService {
           stepId,
           toolName,
           status: 'succeeded',
-          input,
-          output: gatedOutput,
+          input: executionInput,
+          output: this.withReliabilityOutput(gatedOutput, reliability),
           error: null,
           startedAt,
         });
-        await this.recordActionSideEffects(task, toolName, input, call);
+        await this.recordActionSideEffects(
+          task,
+          toolName,
+          executionInput,
+          call,
+        );
         await this.createTaskEvent(
           task,
           AgentTaskEventType.ToolReturned,
@@ -609,19 +1152,38 @@ export class SocialAgentToolExecutorService {
         );
         return call;
       }
-      const output = await this.dispatchTool(task, toolName, input, stepId);
-      const outputRecord = this.toolInput.asRecord(output);
+      this.toolExecutionPolicy.assertToolAllowed({
+        mode: task.permissionMode,
+        step,
+        toolName,
+      });
+      this.confirmationPolicy.assertAgentConnectionBound(
+        task,
+        toolName,
+        executionInput,
+      );
+      const output = await this.dispatchToolWithReliability(
+        task,
+        toolName,
+        executionInput,
+        stepId,
+        reliability,
+      );
+      const outputRecord = this.withReliabilityOutput(
+        this.toolInput.asRecord(output),
+        reliability,
+      );
       const call = this.toolCallFactory.buildToolCall({
         id: callId,
         stepId,
         toolName,
         status: 'succeeded',
-        input,
+        input: executionInput,
         output: outputRecord,
         error: null,
         startedAt,
       });
-      await this.recordActionSideEffects(task, toolName, input, call);
+      await this.recordActionSideEffects(task, toolName, executionInput, call);
       await this.createTaskEvent(
         task,
         AgentTaskEventType.ToolReturned,
@@ -651,14 +1213,19 @@ export class SocialAgentToolExecutorService {
         stepId,
         toolName,
         status: blocked ? 'blocked' : 'failed',
-        input,
+        input: executionInput,
         output: null,
-        error: this.toolInput.errorPayload(error),
+        error: this.reliableErrorPayload(error, reliability),
         startedAt,
       });
       this.logToolFailure(task, toolName, stepId, call, error);
       try {
-        await this.recordActionSideEffects(task, toolName, input, call);
+        await this.recordActionSideEffects(
+          task,
+          toolName,
+          executionInput,
+          call,
+        );
       } catch (sideEffectError) {
         call.error = {
           ...(call.error ?? {}),
@@ -791,20 +1358,40 @@ export class SocialAgentToolExecutorService {
     stepId: string,
     policy: SceneRiskPolicyResult,
   ): Promise<Record<string, unknown> | null> {
+    if (this.isDraftOnlySocialRequestTool(toolName, input)) return null;
+
     const decision = buildSocialAgentRiskGateDecision({
       task,
       toolName,
       toolInput: input,
       stepId,
       policy,
-      hasUserApproval: this.confirmationPolicy.hasUserApproval(input),
+      hasUserApproval:
+        this.confirmationPolicy.hasExplicitApprovalCredential(input),
     });
 
     if (decision.kind === 'none') return null;
     if (decision.kind === 'simulated') return decision.output;
 
     const approval = await this.approvals.create(decision.approvalInput);
-    return buildSocialAgentPendingApprovalOutput({ approval, policy });
+    return buildSocialAgentPendingApprovalOutput({
+      approval,
+      policy: decision.policy,
+    });
+  }
+
+  private isDraftOnlySocialRequestTool(
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+  ): boolean {
+    if (toolName !== SocialAgentToolName.CreateSocialRequest) return false;
+    const mode = this.toolInput.string(input.mode ?? input.intent);
+    return (
+      mode === 'ai_draft' ||
+      mode === 'private_draft' ||
+      mode === 'draft_only' ||
+      mode === 'draft'
+    );
   }
 
   private async updateAiProfileFromAnswers(
@@ -927,26 +1514,21 @@ export class SocialAgentToolExecutorService {
         });
 
     if (!parsed.shouldSyncPublicIntent) {
-      return {
-        ...this.toolInput.asRecord(request),
-        socialRequest: request,
-        socialRequestId: request.id,
-      };
+      return buildSocialAgentSocialRequestResult({
+        request: this.toolInput.asRecord(request),
+        asRecord: (value) => this.toolInput.asRecord(value),
+      });
     }
 
     const publicIntent = await this.socialRequests.syncPublicIntentById(
       request.id,
       task.ownerUserId,
     );
-    return {
-      ...this.toolInput.asRecord(request),
-      socialRequest: request,
-      socialRequestId: request.id,
-      publicIntent,
-      publicIntentId: publicIntent.id,
-      publicIntentStatus: publicIntent.status,
-      synced: true,
-    };
+    return buildSocialAgentSocialRequestResult({
+      request: this.toolInput.asRecord(request),
+      publicIntent: this.toolInput.asRecord(publicIntent),
+      asRecord: (value) => this.toolInput.asRecord(value),
+    });
   }
 
   private async searchMatches(
@@ -1074,20 +1656,10 @@ export class SocialAgentToolExecutorService {
     const displayName =
       this.toolInput.string(candidate.displayName ?? candidate.nickname) ??
       '对方';
-    return {
+    return buildSocialAgentDraftOpenerResult({
       message,
-      confirmation: {
-        actionType: 'send_message',
-        title: `这条消息会发送给${displayName}`,
-        body: '我先帮你写好了，你确认后我再发。确认前不会发送、加好友或创建活动。',
-        primaryAction: '确认发送',
-        secondaryActions: ['语气更自然', '更简短', '重新生成', '取消'],
-        safetyBoundary:
-          '建议先站内沟通，第一次见面选择公共场所，不急着交换联系方式。',
-      },
-      meetLoopStage: 'opener_drafted',
-      nextStep: 'user_confirmation_required',
-    };
+      displayName,
+    });
   }
 
   async resolveCandidateTargetUser(
@@ -1116,24 +1688,12 @@ export class SocialAgentToolExecutorService {
         stepId,
       ),
     );
-    const messageId =
-      this.toolInput.string(output.id ?? output.messageId) ?? null;
-    const conversationId = this.toolInput.string(output.conversationId) ?? null;
-    return {
-      ...output,
-      success: true,
+    return buildSocialAgentCandidateMessageActionResult({
+      output,
       taskId: task.id,
       targetUserId,
-      candidateUserId: targetUserId,
-      messageId,
-      conversationId,
-      status: output.skipped ? 'skipped' : 'sent',
-      messageAction: {
-        status: output.skipped ? 'skipped' : 'sent',
-        messageId,
-        conversationId,
-      },
-    };
+      string: (value) => this.toolInput.string(value),
+    });
   }
 
   private async sendMessage(
@@ -1303,15 +1863,16 @@ export class SocialAgentToolExecutorService {
   ): Promise<Record<string, unknown>> {
     const limit = this.toolInput.number(input.limit);
     const approvals = await this.approvals.getPending(task.ownerUserId);
-    return { approvals: limit ? approvals.slice(0, limit) : approvals };
+    return buildSocialAgentPendingApprovalsToolOutput(approvals, limit);
   }
 
   private async approveAction(
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<unknown> {
-    const approvalId = this.toolInput.number(input.approvalId ?? input.id);
-    if (!approvalId) throw new BadRequestException('approvalId is required');
+    const approvalId = readSocialAgentApprovalToolId(input, (value) =>
+      this.toolInput.number(value),
+    );
     return this.approvals.approve(approvalId, task.ownerUserId, (approval) =>
       this.approvalDispatcher.dispatch(approval),
     );
@@ -1321,8 +1882,9 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<unknown> {
-    const approvalId = this.toolInput.number(input.approvalId ?? input.id);
-    if (!approvalId) throw new BadRequestException('approvalId is required');
+    const approvalId = readSocialAgentApprovalToolId(input, (value) =>
+      this.toolInput.number(value),
+    );
     return this.approvals.reject(approvalId, task.ownerUserId);
   }
 
@@ -1330,25 +1892,16 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    const memory = this.taskMemory.currentTaskMemory(task);
-    const summary = {
-      taskId: task.id,
-      title: task.title,
-      goal: task.goal,
-      status: task.status,
-      statusReason: task.statusReason,
-      permissionMode: task.permissionMode,
-      riskLevel: task.riskLevel,
-      plan: Array.isArray(task.plan) ? task.plan.slice(-10) : [],
-      recentToolCalls: Array.isArray(task.toolCalls)
-        ? task.toolCalls.slice(-10)
-        : [],
-      result: this.toolInput.isRecord(task.result) ? task.result : {},
-      memory,
-    };
-    const shouldPersist = this.toolInput.bool(
-      input.persistLongTerm ?? input.writeLongTerm,
-    );
+    const summary = buildSocialAgentCurrentTaskSummary({
+      task,
+      memory: this.taskMemory.currentTaskMemory(task),
+      isRecord: (value): value is Record<string, unknown> =>
+        this.toolInput.isRecord(value),
+    });
+    const shouldPersist = shouldPersistSocialAgentCurrentTaskSummary({
+      request: input,
+      bool: (value) => this.toolInput.bool(value),
+    });
     return {
       summary,
       longTermMemory: shouldPersist
@@ -1549,11 +2102,12 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     call: SocialAgentToolCallRecord,
   ): Promise<void> {
-    const policy = this.toolExecutionPolicy.buildPolicyMetadata(
-      task,
-      toolName,
-      input,
-    );
+    const policy =
+      await this.toolExecutionPolicy.buildPolicyMetadataWithPatches(
+        task,
+        toolName,
+        input,
+      );
     await this.actionSideEffects.record({
       task,
       toolName,

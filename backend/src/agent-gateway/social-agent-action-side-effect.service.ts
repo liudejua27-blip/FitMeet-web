@@ -46,6 +46,9 @@ type ToolAuditDetails = {
   requiresApproval: boolean;
   userConfirmed: boolean;
   executed: boolean;
+  reversible: boolean;
+  compensationAction: string | null;
+  compensationStatus: 'not_needed' | 'available' | 'manual_review_required';
   sceneType: string;
   approvalId: number | null;
   status: SocialAgentToolCallRecord['status'];
@@ -156,7 +159,9 @@ export class SocialAgentActionSideEffectService {
         input.call,
       ),
       riskLevel: scenePolicy
-        ? getSocialAgentToolRiskLevelForPolicy(scenePolicy.riskLevel)
+        ? input.policy.mandatoryApproval === true
+          ? AgentActionRiskLevel.High
+          : getSocialAgentToolRiskLevelForPolicy(scenePolicy.riskLevel)
         : getSocialAgentToolRiskLevel(input.toolName),
       requiresApproval:
         typeof input.policy.requiresApproval === 'boolean'
@@ -165,6 +170,14 @@ export class SocialAgentActionSideEffectService {
       userConfirmed: this.hasUserApproval(input.input),
       executed:
         input.call.status === 'succeeded' && !pendingApproval && !simulated,
+      reversible: this.isReversible(input.toolName, pendingApproval, simulated),
+      compensationAction: this.compensationActionForTool(input.toolName),
+      compensationStatus: this.compensationStatus(
+        input.call,
+        input.toolName,
+        pendingApproval,
+        simulated,
+      ),
       sceneType: scenePolicy?.sceneType ?? 'general',
       approvalId: getSocialAgentApprovalId(
         input.toolName,
@@ -227,15 +240,69 @@ export class SocialAgentActionSideEffectService {
   }
 
   private hasUserApproval(input: Record<string, unknown>): boolean {
-    if (this.number(input.approvalId) || this.number(input.approvalRequestId)) {
-      return true;
-    }
-    const metadata = this.isRecord(input.metadata) ? input.metadata : {};
-    return (
-      this.bool(input.userConfirmed) ||
-      this.bool(input.confirmedByUser) ||
-      this.string(metadata.confirmationSource) === 'social_agent_chat'
+    return Boolean(
+      this.number(input.approvalId) || this.number(input.approvalRequestId),
     );
+  }
+
+  private isReversible(
+    toolName: SocialAgentToolName,
+    pendingApproval: boolean,
+    simulated: boolean,
+  ): boolean {
+    if (pendingApproval || simulated) return true;
+    return [
+      SocialAgentToolName.PublishSocialRequest,
+      SocialAgentToolName.CreateSocialRequest,
+      SocialAgentToolName.CreateActivity,
+      SocialAgentToolName.InviteActivity,
+      SocialAgentToolName.JoinActivity,
+      SocialAgentToolName.SaveCandidate,
+    ].includes(toolName);
+  }
+
+  private compensationActionForTool(
+    toolName: SocialAgentToolName,
+  ): string | null {
+    switch (toolName) {
+      case SocialAgentToolName.PublishSocialRequest:
+      case SocialAgentToolName.CreateSocialRequest:
+        return 'cancel_social_request_or_unpublish_public_intent';
+      case SocialAgentToolName.CreateActivity:
+      case SocialAgentToolName.InviteActivity:
+      case SocialAgentToolName.JoinActivity:
+      case SocialAgentToolName.OfflineMeeting:
+        return 'cancel_or_update_activity_and_notify_participants';
+      case SocialAgentToolName.SendMessage:
+      case SocialAgentToolName.SendMessageToCandidate:
+      case SocialAgentToolName.ReplyMessage:
+        return 'send_correction_or_retraction_message';
+      case SocialAgentToolName.ConnectCandidate:
+      case SocialAgentToolName.AddFriend:
+        return 'remove_connection_or_mark_contact_request_cancelled';
+      case SocialAgentToolName.ShareLocation:
+        return 'stop_location_sharing_and_notify_counterpart';
+      case SocialAgentToolName.Payment:
+        return 'cancel_payment_intent_or_refund_via_manual_review';
+      case SocialAgentToolName.UpdateAiProfileFromAnswers:
+      case SocialAgentToolName.UpdateProfileFromAgentContext:
+        return 'revert_profile_or_life_graph_field_from_audit';
+      default:
+        return null;
+    }
+  }
+
+  private compensationStatus(
+    call: SocialAgentToolCallRecord,
+    toolName: SocialAgentToolName,
+    pendingApproval: boolean,
+    simulated: boolean,
+  ): 'not_needed' | 'available' | 'manual_review_required' {
+    if (pendingApproval || simulated) return 'not_needed';
+    if (call.status !== 'succeeded') return 'manual_review_required';
+    return this.isReversible(toolName, false, false)
+      ? 'available'
+      : 'manual_review_required';
   }
 
   private actionStatusForCall(

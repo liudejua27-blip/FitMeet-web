@@ -13,7 +13,14 @@ export type FitMeetRequest = Request & {
 export type SocialAgentRunBody = {
   goal?: string;
   permissionMode?: AgentTaskPermissionMode;
+  taskId?: number | null;
+  city?: string | null;
   idempotencyKey?: string | null;
+  clientContext?: {
+    timezone?: string | null;
+    locale?: string | null;
+    source?: string | null;
+  } | null;
 };
 
 export type SocialAgentReplanRunBody = {
@@ -26,6 +33,12 @@ export type SocialAgentRouteMessageBody = {
   message?: string | null;
   taskId?: number | null;
   hasCandidates?: boolean;
+  idempotencyKey?: string | null;
+  clientContext?: {
+    timezone?: string | null;
+    locale?: string | null;
+    source?: string | null;
+  } | null;
 };
 
 export type SocialAgentSendMessageBody = {

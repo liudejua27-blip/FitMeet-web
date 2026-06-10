@@ -103,7 +103,7 @@ describe('SocialAgentRouteEntranceService', () => {
     const result = await service.enter({
       ownerUserId: 7,
       body: {
-        taskId: '101',
+        taskId: 101,
         message: '  帮我找青岛周末跑步搭子  ',
         hasCandidates: true,
       },
@@ -119,6 +119,7 @@ describe('SocialAgentRouteEntranceService', () => {
       7,
       101,
       '帮我找青岛周末跑步搭子',
+      null,
     );
     expect(messageLog.recordUserMessage).toHaveBeenCalledWith(
       task,

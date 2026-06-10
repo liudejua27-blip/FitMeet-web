@@ -3,13 +3,15 @@ export type FitMeetAlphaAgentName =
   | 'Agent Brain'
   | 'Life Graph Agent'
   | 'Social Match Agent'
-  | 'Meet Loop Agent';
+  | 'Meet Loop Agent'
+  | 'Math Agent';
 
 export type FitMeetAlphaCardType =
   | 'profile_proposal'
   | 'candidate_card'
   | 'opener_approval'
   | 'activity_plan'
+  | 'activity_status'
   | 'checkin_card'
   | 'review_card'
   | 'audit_update'
@@ -42,6 +44,8 @@ export type FitMeetAgentSchemaAction =
   | 'activity.modify_location'
   | 'activity.check_in'
   | 'activity.complete'
+  | 'activity.upload_proof'
+  | 'activity.view_detail'
   | 'review.submit'
   | 'life_graph.accept_update'
   | 'life_graph.reject_update';
@@ -56,6 +60,8 @@ export interface FitMeetAlphaCardAction {
     | 'save_candidate'
     | 'create_activity'
     | 'generate_opener'
+    | 'view_activity'
+    | 'upload_proof'
     | 'see_more'
     | 'filter_school'
     | 'filter_gender_female'
@@ -101,6 +107,26 @@ export interface FitMeetAgentTrace {
     name: string;
     status: 'passed' | 'blocked' | 'skipped';
     reasons?: string[];
+  }>;
+  observations?: Array<{
+    agent: FitMeetAlphaAgentName;
+    intent?: string | null;
+    readiness?: string | null;
+    nextAction?: string | null;
+    critique?: string | null;
+  }>;
+  subagentHandoffs?: Array<{
+    agent: FitMeetAlphaAgentName;
+    memoryScope?: string | null;
+    input: Record<string, unknown>;
+    toolCalls: Array<{
+      toolName: string;
+      input: Record<string, unknown>;
+      status: 'planned' | 'observed' | 'skipped';
+    }>;
+    observation: Record<string, unknown>;
+    critique: string;
+    handoffOutput: Record<string, unknown>;
   }>;
 }
 

@@ -141,6 +141,7 @@ describe('SocialAgentRouteProfileTurnService', () => {
     expect(result).toMatchObject({
       handled: true,
       task,
+      assistantMessage: expect.stringContaining('现在开始搜索'),
       savedContext: true,
       profileUpdated: true,
       profileUpdateProposal: null,
@@ -156,6 +157,15 @@ describe('SocialAgentRouteProfileTurnService', () => {
       latestIntent: {
         intent: 'profile_update',
         message: '我周末下午比较有空',
+      },
+    });
+    expect(task.memory).toMatchObject({
+      taskMemory: {
+        currentTask: {
+          awaitingSearchConfirmation: true,
+          waitingFor: 'availability_boundaries_or_search_confirmation',
+          lastCompletedStep: 'profile_saved',
+        },
       },
     });
     expect(taskRepo.save).toHaveBeenCalledWith(task);
@@ -185,6 +195,8 @@ describe('SocialAgentRouteProfileTurnService', () => {
 
       expect(result).toMatchObject({
         handled: true,
+        assistantMessage:
+          expect.stringContaining('不会自动发送消息、加好友或创建活动'),
         savedContext: true,
         profileUpdated: true,
       });

@@ -83,6 +83,7 @@ const WEB_APP_REQUIRED_PATHS = {
   '/social-agent/chat/tasks/{taskId}/replan-run': 'post',
   '/social-agent/chat/tasks/{taskId}/append-context': 'post',
   '/social-agent/chat/tasks/{taskId}/actions': 'post',
+  '/social-agent/chat/tasks/{taskId}/actions/stream': 'post',
   '/agents/inbox/conversations': 'get',
   '/agents/inbox/conversations/{conversationId}/messages': 'get',
   '/agents/inbox/events': 'get',
@@ -238,6 +239,7 @@ describe('AppController', () => {
           '/social-agent/chat/tasks/{taskId}/replan-run',
           '/social-agent/chat/tasks/{taskId}/append-context',
           '/social-agent/chat/tasks/{taskId}/actions',
+          '/social-agent/chat/tasks/{taskId}/actions/stream',
           '/social-agent/chat/tasks/{taskId}/save-candidate',
           '/social-agent/chat/tasks/{taskId}/send-message',
           '/social-agent/chat/tasks/{taskId}/connect-candidate',
@@ -1072,6 +1074,42 @@ describe('AppController', () => {
       ).toEqual({
         $ref: '#/components/responses/UserFacingAgentResponse',
       });
+      expect(
+        contract.components.schemas.SocialAgentCardActionInput.properties
+          .action,
+      ).toMatchObject({
+        type: 'string',
+        enum: expect.arrayContaining([
+          'activity.upload_proof',
+          'activity.view_detail',
+          'life_graph.accept_update',
+          'life_graph.reject_update',
+        ]),
+      });
+      expect(
+        contract.components.schemas.UserFacingAgentResponse.properties.cards
+          .items,
+      ).toEqual({ $ref: '#/components/schemas/FitMeetAlphaCard' });
+      expect(
+        contract.components.schemas.FitMeetAlphaCard.properties.type,
+      ).toEqual({ $ref: '#/components/schemas/FitMeetAlphaCardType' });
+      expect(contract.components.schemas.FitMeetAlphaCardType.enum).toEqual(
+        expect.arrayContaining(['activity_status', 'profile_proposal']),
+      );
+      expect(
+        contract.components.schemas.FitMeetAlphaCardAction.properties.action
+          .enum,
+      ).toEqual(expect.arrayContaining(['view_activity', 'upload_proof']));
+      expect(
+        contract.components.schemas.FitMeetAlphaCardAction.properties
+          .schemaAction,
+      ).toEqual({ $ref: '#/components/schemas/FitMeetAgentSchemaAction' });
+      expect(contract.components.schemas.FitMeetAgentSchemaAction.enum).toEqual(
+        expect.arrayContaining([
+          'activity.upload_proof',
+          'activity.view_detail',
+        ]),
+      );
       expect(contract.components.schemas.SocialAgentReplanInput).toMatchObject({
         required: ['userMessage'],
         properties: {
@@ -1139,7 +1177,10 @@ function collectControllerRoutes(
     const controllerPaths = toPathArray(
       Reflect.getMetadata(PATH_METADATA, controller),
     );
-    const prototype = controller.prototype as Record<string, unknown>;
+    const prototype = controller.prototype as unknown as Record<
+      string,
+      unknown
+    >;
 
     return Object.getOwnPropertyNames(prototype).flatMap((propertyKey) => {
       const handler = prototype[propertyKey];

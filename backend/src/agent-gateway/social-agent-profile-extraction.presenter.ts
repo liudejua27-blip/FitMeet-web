@@ -10,6 +10,7 @@ type ChatMessage = {
 export function buildSocialAgentProfileExtractionMessages(
   task: AgentTask,
   sourceMessage: string,
+  extraRules: string[] = [],
 ): ChatMessage[] {
   return [
     {
@@ -19,6 +20,7 @@ export function buildSocialAgentProfileExtractionMessages(
         'Return only one valid JSON object.',
         'Allowed keys: gender, age, heightCm, weightKg, city, school, area, mbti, zodiac, personality, targetPreference, activityType, availableTimes, boundaries.',
         'Use strings or string arrays only. Do not invent missing facts.',
+        ...extraRules.map((rule) => `Self-improve rule: ${rule}`),
       ].join('\n'),
     },
     {

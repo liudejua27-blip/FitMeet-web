@@ -14,7 +14,14 @@ import {
   sanitizeForDisplay,
 } from '../common/display-text.util';
 import { ActivitiesService } from '../activities/activities.service';
-import type { CheckinActivityDto } from '../activities/dto/activity.dto';
+import type {
+  CheckinActivityDto,
+  SubmitActivityProofDto,
+} from '../activities/dto/activity.dto';
+import {
+  ActivityProofPrivacyMode,
+  ActivityProofType,
+} from '../activities/entities/activity-proof.entity';
 import { RecordLifeGraphBehaviorEventDto } from '../life-graph/dto/life-graph.dto';
 import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 import { LifeGraphService } from '../life-graph/life-graph.service';
@@ -32,10 +39,13 @@ import {
 import { AgentSessionAssemblerService } from './agent-session-assembler.service';
 import {
   buildSocialAgentActivityCompletionCard,
+  buildSocialAgentActivityDetailCard,
   buildSocialAgentActivityPlanCard,
   buildSocialAgentCardActionRouteResult,
   buildSocialAgentCheckinCard,
   buildSocialAgentLifeGraphUpdateCard,
+  buildSocialAgentProofSubmittedCard,
+  buildSocialAgentProofUploadPromptCard,
   buildSocialAgentReviewCard,
   createSocialAgentActivityDtoFromPayload,
   mergeSocialAgentActivityPayload,
@@ -54,6 +64,7 @@ import {
   transitionSocialAgentState,
 } from './social-agent-memory.util';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
+import { AgentL5RuntimeService } from './agent-l5-runtime.service';
 
 @Injectable()
 export class SocialAgentMeetLoopService {
@@ -75,6 +86,7 @@ export class SocialAgentMeetLoopService {
     @Optional()
     @Inject(forwardRef(() => ActivitiesService))
     private readonly activities?: ActivitiesService,
+    @Optional() private readonly l5Runtime?: AgentL5RuntimeService,
   ) {}
 
   async performActivityAction(
@@ -97,6 +109,12 @@ export class SocialAgentMeetLoopService {
     }
     if (body.action === 'activity.complete') {
       return this.completeActivityFromCardAction(ownerUserId, taskId, body);
+    }
+    if (body.action === 'activity.view_detail') {
+      return this.viewActivityDetailFromCardAction(ownerUserId, taskId, body);
+    }
+    if (body.action === 'activity.upload_proof') {
+      return this.uploadProofFromCardAction(ownerUserId, taskId, body);
     }
     if (body.action === 'review.submit') {
       return this.submitReviewFromCardAction(ownerUserId, taskId, body);
@@ -161,6 +179,10 @@ export class SocialAgentMeetLoopService {
       lastCompletedStep: 'activity_draft_created',
     });
     await this.taskRepo.save(task);
+    await this.persistMeetLoopState(task, 'activity_draft_created', {
+      waitingFor: 'activity_confirmation',
+      payload,
+    });
 
     const card = buildSocialAgentActivityPlanCard({
       taskId: task.id,
@@ -250,6 +272,10 @@ export class SocialAgentMeetLoopService {
       lastCompletedStep: 'activity_confirmed',
     });
     await this.taskRepo.save(task);
+    await this.persistMeetLoopState(task, 'activity_confirmed', {
+      waitingFor: 'activity_check_in',
+      payload: this.meetLoopPayload(task),
+    });
 
     const card = buildSocialAgentCheckinCard({
       taskId: task.id,
@@ -322,6 +348,10 @@ export class SocialAgentMeetLoopService {
       lastCompletedStep: 'activity_checked_in',
     });
     await this.taskRepo.save(task);
+    await this.persistMeetLoopState(task, 'activity_checked_in', {
+      waitingFor: 'activity_completion',
+      payload: this.meetLoopPayload(task),
+    });
 
     const card = buildSocialAgentActivityCompletionCard({
       taskId: task.id,
@@ -406,6 +436,10 @@ export class SocialAgentMeetLoopService {
       lastCompletedStep: 'activity_completed',
     });
     await this.taskRepo.save(task);
+    await this.persistMeetLoopState(task, 'activity_completed', {
+      waitingFor: 'review',
+      payload: this.meetLoopPayload(task),
+    });
 
     const card = buildSocialAgentReviewCard({
       taskId: task.id,
@@ -501,6 +535,16 @@ export class SocialAgentMeetLoopService {
       lastCompletedStep: 'trust_score_updated',
     });
     await this.taskRepo.save(task);
+    await this.persistMeetLoopState(task, 'review_submitted', {
+      waitingFor: 'trust_score_update',
+      payload: this.meetLoopPayload(task),
+      review: { rating, comment, submittedAt: now },
+    });
+    await this.persistMeetLoopState(task, 'trust_score_updated', {
+      waitingFor: '',
+      payload: this.meetLoopPayload(task),
+      review: { rating, comment, submittedAt: now },
+    });
 
     const card = buildSocialAgentLifeGraphUpdateCard({
       taskId: task.id,
@@ -527,6 +571,179 @@ export class SocialAgentMeetLoopService {
         rating,
         trustScoreDelta,
       },
+      AgentTaskEventActor.Agent,
+    );
+    await this.recordAssistantMessage(task, assistantMessage, result);
+    return result;
+  }
+
+  private async uploadProofFromCardAction(
+    ownerUserId: number,
+    taskId: number,
+    body: SocialAgentCardActionBody,
+  ): Promise<SocialAgentIntentRouteResult> {
+    const task = await this.assertTaskOwner(taskId, ownerUserId);
+    const payload = this.mergeActivityPayload(task, body.payload ?? {});
+    const activityId = this.number(payload.activityId) ?? null;
+    if (!activityId || !this.hasProofPayload(payload) || !this.activities) {
+      const card = buildSocialAgentProofUploadPromptCard({
+        taskId: task.id,
+        activityId,
+      });
+      transitionSocialAgentState(task, 'activity_completed', {
+        objective: 'meet_loop',
+        nextStep: '等待你在活动详情里上传完成证明',
+        shouldSearchNow: false,
+        awaitingSearchConfirmation: false,
+        waitingFor: 'activity_proof_upload',
+        lastCompletedStep: 'activity_proof_requested',
+      });
+      await this.taskRepo.save(task);
+      await this.persistMeetLoopState(task, 'activity_completed', {
+        waitingFor: 'activity_proof_upload',
+        payload: this.meetLoopPayload(task, payload),
+      });
+      const assistantMessage =
+        '我已经定位到活动证明这一步。请打开活动详情上传场景照、签到或文字说明；我不会要求露脸，也不会公开精确位置。';
+      const result = this.cardActionRouteResult(task, assistantMessage, [card]);
+      await this.writeEvent(
+        task,
+        AgentTaskEventType.Note,
+        'Agent meet loop requested activity proof upload',
+        { action: body.action, activityId },
+        AgentTaskEventActor.Agent,
+      );
+      await this.recordAssistantMessage(task, assistantMessage, result);
+      return result;
+    }
+
+    const dto = this.proofDtoFromPayload(payload);
+    const proof = await this.activities.submitProof(
+      activityId,
+      ownerUserId,
+      dto,
+    );
+    const proofRecord = proof as unknown as Record<string, unknown>;
+    const proofId = this.number(proofRecord.id);
+    task.result = {
+      ...(task.result ?? {}),
+      meetLoop: {
+        ...readSocialAgentMeetLoopState(task, (value) => this.isRecord(value)),
+        ...payload,
+        activityId,
+        proofId,
+        proofType: dto.proofType,
+        proofStatus: 'pending',
+        status: 'proof_submitted',
+        loopStage: 'activity_completed',
+        proofSubmittedAt: new Date().toISOString(),
+      },
+    };
+    transitionSocialAgentState(task, 'activity_completed', {
+      objective: 'meet_loop',
+      nextStep: '等待对方确认活动证明',
+      shouldSearchNow: false,
+      awaitingSearchConfirmation: false,
+      waitingFor: 'activity_proof_review',
+      lastCompletedStep: 'activity_proof_submitted',
+    });
+    await this.taskRepo.save(task);
+    await this.persistMeetLoopState(task, 'proof_submitted', {
+      waitingFor: 'activity_proof_review',
+      payload: this.meetLoopPayload(task),
+    });
+
+    const card = buildSocialAgentProofSubmittedCard({
+      taskId: task.id,
+      activityId,
+      proofId,
+      proofType: dto.proofType,
+    });
+    const assistantMessage =
+      '活动证明已提交，当前等待对方确认。确认完成后，我会继续更新活动履约状态和 Life Graph。';
+    const result = this.cardActionRouteResult(task, assistantMessage, [card]);
+    await this.writeEvent(
+      task,
+      AgentTaskEventType.Note,
+      'Agent meet loop submitted activity proof',
+      { action: body.action, activityId, proofId, proofType: dto.proofType },
+      AgentTaskEventActor.Agent,
+    );
+    await this.recordAssistantMessage(task, assistantMessage, result);
+    return result;
+  }
+
+  private async viewActivityDetailFromCardAction(
+    ownerUserId: number,
+    taskId: number,
+    body: SocialAgentCardActionBody,
+  ): Promise<SocialAgentIntentRouteResult> {
+    const task = await this.assertTaskOwner(taskId, ownerUserId);
+    const payload = this.mergeActivityPayload(task, body.payload ?? {});
+    const activityId = this.number(payload.activityId) ?? null;
+    if (!activityId || !this.activities) {
+      const card = buildSocialAgentActivityDetailCard({
+        taskId: task.id,
+        activityId,
+        unavailableReason: !activityId
+          ? '缺少活动 ID，暂时无法打开详情。'
+          : '当前后端未接入活动详情服务，请稍后从活动页面查看。',
+      });
+      const assistantMessage =
+        '我暂时无法直接读取这次活动详情。你可以从活动页查看，或者继续告诉我需要调整时间、地点或证明。';
+      const result = this.cardActionRouteResult(task, assistantMessage, [card]);
+      await this.recordAssistantMessage(task, assistantMessage, result);
+      return result;
+    }
+    if (!this.isTaskRelatedActivity(task, activityId)) {
+      throw new NotFoundException(
+        `Activity ${activityId} is not linked to social agent task ${task.id}`,
+      );
+    }
+
+    const activity = (await this.activities.findOne(
+      activityId,
+    )) as unknown as Record<string, unknown>;
+    const proofs = (await this.activities.listProofs(activityId)) as unknown[];
+    const proofRecords = proofs.filter(
+      (proof): proof is Record<string, unknown> => this.isRecord(proof),
+    );
+    const card = buildSocialAgentActivityDetailCard({
+      taskId: task.id,
+      activityId,
+      activity,
+      proofs: proofRecords,
+    });
+    transitionSocialAgentState(task, 'activity_completed', {
+      objective: 'meet_loop',
+      nextStep: '查看活动详情、上传证明或等待对方确认',
+      shouldSearchNow: false,
+      awaitingSearchConfirmation: false,
+      waitingFor: 'activity_detail_or_proof',
+      lastCompletedStep: 'activity_detail_viewed',
+    });
+    task.result = {
+      ...(task.result ?? {}),
+      meetLoop: {
+        ...readSocialAgentMeetLoopState(task, (value) => this.isRecord(value)),
+        activityId,
+        status: cleanDisplayText(activity.status, '') || 'detail_viewed',
+        proofCount: proofRecords.length,
+        loopStage: 'activity_completed',
+        detailViewedAt: new Date().toISOString(),
+      },
+    };
+    await this.taskRepo.save(task);
+    const assistantMessage =
+      proofRecords.length > 0
+        ? '这是当前活动详情和证明状态。你可以继续补充证明，或等待对方确认。'
+        : '这是当前活动详情。还没有证明记录，如果活动已完成，可以继续上传证明。';
+    const result = this.cardActionRouteResult(task, assistantMessage, [card]);
+    await this.writeEvent(
+      task,
+      AgentTaskEventType.Note,
+      'Agent meet loop viewed activity detail',
+      { action: body.action, activityId, proofCount: proofRecords.length },
       AgentTaskEventActor.Agent,
     );
     await this.recordAssistantMessage(task, assistantMessage, result);
@@ -585,6 +802,45 @@ export class SocialAgentMeetLoopService {
       ...(confirmed as unknown as Record<string, unknown>),
       invitedUserId: dto.invitedUserId ?? null,
     };
+  }
+
+  private async persistMeetLoopState(
+    task: AgentTask,
+    stage:
+      | 'activity_draft_created'
+      | 'activity_confirmed'
+      | 'activity_checked_in'
+      | 'activity_completed'
+      | 'proof_submitted'
+      | 'review_submitted'
+      | 'trust_score_updated',
+    input: {
+      waitingFor: string;
+      payload?: Record<string, unknown> | null;
+      review?: Record<string, unknown> | null;
+    },
+  ): Promise<void> {
+    const payload = this.isRecord(input.payload) ? input.payload : {};
+    await this.l5Runtime?.transitionMeetLoop({
+      ownerUserId: task.ownerUserId,
+      agentTaskId: task.id,
+      activityId: this.number(payload.activityId),
+      candidateUserId: this.number(
+        payload.candidateUserId ?? payload.targetUserId,
+      ),
+      stage,
+      waitingFor: input.waitingFor,
+      state: payload,
+      review: input.review ?? null,
+    });
+  }
+
+  private meetLoopPayload(
+    task: AgentTask,
+    fallback: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    const result = this.isRecord(task.result) ? task.result : {};
+    return this.isRecord(result.meetLoop) ? result.meetLoop : fallback;
   }
 
   private mergeActivityPayload(
@@ -747,6 +1003,61 @@ export class SocialAgentMeetLoopService {
 
   private isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  private hasProofPayload(payload: Record<string, unknown>): boolean {
+    return Boolean(
+      cleanDisplayText(payload.photoUrl, '') ||
+      cleanDisplayText(payload.note, '') ||
+      cleanDisplayText(payload.locationApprox, '') ||
+      cleanDisplayText(payload.proofType, ''),
+    );
+  }
+
+  private proofDtoFromPayload(
+    payload: Record<string, unknown>,
+  ): SubmitActivityProofDto {
+    return {
+      proofType: this.proofType(payload.proofType),
+      ...(cleanDisplayText(payload.photoUrl, '')
+        ? { photoUrl: cleanDisplayText(payload.photoUrl, '') }
+        : {}),
+      ...(cleanDisplayText(payload.note, '')
+        ? { note: cleanDisplayText(payload.note, '') }
+        : {}),
+      ...(cleanDisplayText(payload.locationApprox, '')
+        ? { locationApprox: cleanDisplayText(payload.locationApprox, '') }
+        : {}),
+      privacyMode: this.proofPrivacyMode(payload.privacyMode),
+    };
+  }
+
+  private proofType(value: unknown): ActivityProofType {
+    return typeof value === 'string' &&
+      Object.values(ActivityProofType).includes(value as ActivityProofType)
+      ? (value as ActivityProofType)
+      : ActivityProofType.ScenePhoto;
+  }
+
+  private proofPrivacyMode(value: unknown): ActivityProofPrivacyMode {
+    return typeof value === 'string' &&
+      Object.values(ActivityProofPrivacyMode).includes(
+        value as ActivityProofPrivacyMode,
+      )
+      ? (value as ActivityProofPrivacyMode)
+      : ActivityProofPrivacyMode.SceneOnly;
+  }
+
+  private isTaskRelatedActivity(task: AgentTask, activityId: number): boolean {
+    const result = this.isRecord(task.result) ? task.result : {};
+    const meetLoop = this.isRecord(result.meetLoop) ? result.meetLoop : {};
+    const draft = this.isRecord(result.activityDraft)
+      ? result.activityDraft
+      : {};
+    return (
+      this.number(meetLoop.activityId) === activityId ||
+      this.number(draft.activityId) === activityId
+    );
   }
 
   private number(value: unknown): number | null {

@@ -11,6 +11,7 @@ import { cleanDisplayText } from '../common/display-text.util';
 import { UserSocialProfile } from '../users/user-social-profile.entity';
 import {
   LifeGraphCompletenessDto,
+  LifeGraphAuditLogDto,
   CorrectLifeGraphDto,
   LifeGraphDynamicSignalsDto,
   LifeGraphBehaviorEventDto,
@@ -32,6 +33,7 @@ import {
   LifeGraphResponseDto,
   UpdateLifeGraphDto,
   UpdateLifeGraphFieldDto,
+  LifeGraphExportDto,
 } from './dto/life-graph.dto';
 import { LifeGraphAuditLog } from './entities/life-graph-audit-log.entity';
 import { LifeGraphBehaviorEvent } from './entities/life-graph-behavior-event.entity';
@@ -46,6 +48,7 @@ import {
   LifeGraphAuditAction,
   LifeGraphBehaviorEventType,
   LifeGraphCorrectionType,
+  LifeGraphDataTier,
   LifeGraphFieldCategory,
   LifeGraphProposalStatus,
   LifeGraphFieldSource,
@@ -54,6 +57,13 @@ import {
   LifeGraphUpdateAuditStatus,
 } from './life-graph.enums';
 import { RealtimeEventService } from '../realtime/realtime-event.service';
+import {
+  classifyLifeGraphField,
+  redactLifeGraphValueForTier,
+  shouldExposeInMatching,
+} from './life-graph-privacy.util';
+import { redactSensitiveValue } from '../common/privacy-redaction.util';
+import { LifeGraphComplianceService } from './life-graph-compliance.service';
 
 type LifeGraphFieldDefinition = {
   category: LifeGraphFieldCategory;
@@ -437,6 +447,8 @@ export class LifeGraphService {
     @Optional()
     @InjectRepository(LifeGraphCorrection)
     private readonly corrections?: Repository<LifeGraphCorrection>,
+    @Optional()
+    private readonly compliance?: LifeGraphComplianceService,
   ) {}
 
   async getLifeGraph(userId: number): Promise<LifeGraphResponseDto> {
@@ -448,6 +460,13 @@ export class LifeGraphService {
       fields,
       profile,
     );
+    void this.auditSensitiveFieldAccess({
+      userId,
+      action: 'read_profile',
+      purpose: 'user_life_graph_page',
+      route: 'GET /life-graph/me',
+      fields,
+    });
     return {
       profile: this.toProfileDto(profile),
       fields: this.groupFields(fields),
@@ -504,6 +523,13 @@ export class LifeGraphService {
   async getMatchSignals(userId: number): Promise<LifeGraphMatchSignalsDto> {
     await this.ensureLifeGraph(userId);
     const fields = this.matchSignalFields(await this.findActiveFields(userId));
+    void this.auditSensitiveFieldAccess({
+      userId,
+      action: 'read_match_signals',
+      purpose: 'matching_context',
+      route: 'GET /life-graph/match-signals',
+      fields,
+    });
     const signals = {
       identity: this.signalGroup(fields, LifeGraphFieldCategory.Identity),
       socialIntent: this.signalGroup(
@@ -1800,7 +1826,7 @@ export class LifeGraphService {
   async getAuditLogs(
     userId: number,
     options: { limit?: number; cursor?: string } = {},
-  ) {
+  ): Promise<LifeGraphAuditLogDto[]> {
     const limit = Math.min(Math.max(Number(options.limit) || 50, 1), 100);
     const cursorDate = options.cursor ? new Date(options.cursor) : null;
     const logs = await this.auditLogs.find({
@@ -1811,10 +1837,7 @@ export class LifeGraphService {
       order: { createdAt: 'DESC', id: 'DESC' },
       take: limit,
     });
-    return logs.map((log) => ({
-      ...log,
-      createdAt: log.createdAt.toISOString(),
-    }));
+    return logs.map((log) => this.toAuditLogDto(log, true));
   }
 
   async extractFromChat(
@@ -1957,6 +1980,26 @@ export class LifeGraphService {
           status: 'rejected',
           rejectedAt: new Date().toISOString(),
         });
+        continue;
+      }
+      if (
+        (field.status === 'conflict' || field.status === 'revoked_conflict') &&
+        input.allowConflicts !== true
+      ) {
+        await this.writeAuditLog({
+          userId,
+          category: field.category,
+          fieldKey: field.fieldKey,
+          oldValue: field.oldValue,
+          newValue: field.fieldValue,
+          source: LifeGraphFieldSource.AiInferred,
+          confidence: field.confidence,
+          action: LifeGraphAuditAction.ConflictDetected,
+          reason: 'conflict_requires_explicit_user_override',
+          taskId: proposal.taskId,
+          messageId: proposal.messageId,
+        });
+        nextFields.push(field);
         continue;
       }
       await this.upsertField(
@@ -2118,6 +2161,193 @@ export class LifeGraphService {
       payload: await this.getCompleteness(userId),
     });
     return this.getLifeGraph(userId);
+  }
+
+  async exportLifeGraph(userId: number): Promise<LifeGraphExportDto> {
+    const profile = await this.ensureLifeGraph(userId);
+    const fields = await this.findActiveFields(userId);
+    void this.auditSensitiveFieldAccess({
+      userId,
+      action: 'export',
+      purpose: 'user_confirmed_export',
+      route: 'POST /life-graph/export-requests/:id/confirm',
+      fields,
+    });
+    const auditLogs = await this.auditLogs.find({
+      where: { userId },
+      order: { createdAt: 'DESC', id: 'DESC' },
+      take: 1000,
+    });
+    const tiers = Object.values(LifeGraphDataTier).reduce(
+      (acc, tier) => {
+        acc[tier] = 0;
+        return acc;
+      },
+      {} as Record<LifeGraphDataTier, number>,
+    );
+    for (const field of fields) {
+      tiers[this.classifyStoredField(field)] += 1;
+    }
+    return {
+      exportedAt: new Date().toISOString(),
+      profile: {
+        ...this.toProfileDto(profile),
+        currentSocialGoal: cleanDisplayText(
+          redactSensitiveValue(profile.currentSocialGoal),
+          '',
+        ),
+        aiSummary: cleanDisplayText(
+          redactSensitiveValue(profile.aiSummary),
+          '',
+        ),
+      },
+      fields: this.groupFields(fields, true),
+      auditLogs: auditLogs.map((log) => this.toAuditLogDto(log, true)),
+      behaviorEvents:
+        (
+          await this.behaviorEvents?.find({
+            where: { userId },
+            order: { createdAt: 'DESC', id: 'DESC' },
+            take: 1000,
+          })
+        )?.map((event) => ({
+          ...this.toBehaviorEventDto(event),
+          metadata: redactSensitiveValue(event.metadata) as Record<
+            string,
+            unknown
+          >,
+          naturalSummary: cleanDisplayText(
+            redactSensitiveValue(event.naturalSummary),
+            '',
+          ),
+        })) ?? [],
+      signalScores:
+        (
+          await this.signalScores?.find({
+            where: { userId },
+            order: { updatedAt: 'DESC', id: 'DESC' },
+            take: 1000,
+          })
+        )?.map((score) => ({
+          ...this.toSignalScoreDto(score),
+          explanation: cleanDisplayText(
+            redactSensitiveValue(score.explanation),
+            '',
+          ),
+          evidence: redactSensitiveValue(score.evidence) as Record<
+            string,
+            unknown
+          >,
+        })) ?? [],
+      updateAudits:
+        (
+          await this.updateAudits?.find({
+            where: { userId },
+            order: { createdAt: 'DESC', id: 'DESC' },
+            take: 1000,
+          })
+        )?.map((audit) => ({
+          ...this.toUpdateAuditDto(audit),
+          before: redactSensitiveValue(audit.before) as Record<string, unknown>,
+          after: redactSensitiveValue(audit.after) as Record<string, unknown>,
+          userFacingSummary: cleanDisplayText(
+            redactSensitiveValue(audit.userFacingSummary),
+            '',
+          ),
+        })) ?? [],
+      corrections:
+        (
+          await this.corrections?.find({
+            where: { userId },
+            order: { createdAt: 'DESC', id: 'DESC' },
+            take: 1000,
+          })
+        )?.map((correction) => ({
+          ...this.toCorrectionDto(correction),
+          note: cleanDisplayText(redactSensitiveValue(correction.note), ''),
+          previousValue: redactSensitiveValue(
+            correction.previousValue,
+          ) as Record<string, unknown>,
+          correctedValue: redactSensitiveValue(
+            correction.correctedValue,
+          ) as Record<string, unknown>,
+        })) ?? [],
+      privacy: {
+        redacted: true,
+        tiers,
+      },
+    };
+  }
+
+  async deleteLifeGraphMemory(
+    userId: number,
+    input: { includeAuditLogs?: boolean } = {},
+  ): Promise<{ deleted: true; revokedFields: number }> {
+    const activeFields = await this.findActiveFields(userId);
+    void this.auditSensitiveFieldAccess({
+      userId,
+      action: 'delete',
+      purpose: 'user_confirmed_delete',
+      route: 'POST /life-graph/delete-requests/:id/confirm',
+      fields: activeFields,
+      metadata: {
+        includeAuditLogs: input.includeAuditLogs === true,
+        revokedFields: activeFields.length,
+      },
+    });
+    const now = new Date();
+    await this.fields.update(
+      { userId, revoked: false },
+      { revoked: true, revokedAt: now },
+    );
+    await this.proposals.update(
+      { userId },
+      {
+        status: LifeGraphProposalStatus.Revoked,
+        rejectedAt: now,
+      },
+    );
+    await this.behaviorEvents?.delete({ userId });
+    await this.signalScores?.delete({ userId });
+    await this.updateAudits?.delete({ userId });
+    await this.corrections?.delete({ userId });
+    await this.profiles.update(
+      { userId },
+      {
+        completenessScore: 0,
+        currentSocialGoal: '',
+        aiSummary: '',
+        lastUpdatedAt: now,
+      },
+    );
+    if (input.includeAuditLogs === true) {
+      await this.auditLogs.delete({ userId });
+    } else {
+      await this.writeAuditLog({
+        userId,
+        category: LifeGraphFieldCategory.PrivacyBoundary,
+        fieldKey: 'all_memory',
+        oldValue: { revokedFields: activeFields.length },
+        newValue: null,
+        source: LifeGraphFieldSource.Manual,
+        confidence: 1,
+        action: LifeGraphAuditAction.Revoked,
+        reason: 'user_deleted_life_graph_memory',
+      });
+    }
+    this.logEvent('life_graph.memory_deleted', {
+      userId,
+      category: LifeGraphFieldCategory.PrivacyBoundary,
+      fieldKey: 'all_memory',
+      action: LifeGraphAuditAction.Revoked,
+      source: LifeGraphFieldSource.Manual,
+    });
+    this.realtime?.emitToUser({
+      userId,
+      eventType: 'life_graph:updated',
+      payload: { deleted: true, revokedFields: activeFields.length },
+    });
+    return { deleted: true, revokedFields: activeFields.length };
   }
 
   async ensureLifeGraph(userId: number): Promise<LifeGraphProfile> {
@@ -2477,24 +2707,33 @@ export class LifeGraphService {
       signalType === LifeGraphSignalType.Entertainment ||
       signalType === LifeGraphSignalType.Weak;
     const isSensitive = signalType === LifeGraphSignalType.Sensitive;
+    const dataTier = classifyLifeGraphField({
+      category: update.category,
+      fieldKey: update.fieldKey,
+      signalType,
+    });
     const visibleInRecommendationReason =
       update.visibleInRecommendationReason ??
-      (!isEntertainment && !isSensitive);
+      (!isEntertainment &&
+        !isSensitive &&
+        dataTier !== LifeGraphDataTier.Sensitive &&
+        dataTier !== LifeGraphDataTier.UserSecret);
     const userCanDisableForMatching =
       update.userCanDisableForMatching ?? isEntertainment;
+    const blockedSensitiveMatchingKeys = [
+      'birthDate',
+      'preciseLocationSharing',
+      'healthDataEnabled',
+      'periodCycleEnabled',
+      'contactSharing',
+      'paymentBoundary',
+      'paymentAutoExecution',
+    ];
+    const defaultEnabledForMatching =
+      shouldExposeInMatching(dataTier) &&
+      !(isSensitive && blockedSensitiveMatchingKeys.includes(update.fieldKey));
     const enabledForMatching =
-      update.enabledForMatching ??
-      (isSensitive
-        ? ![
-            'birthDate',
-            'preciseLocationSharing',
-            'healthDataEnabled',
-            'periodCycleEnabled',
-            'contactSharing',
-            'paymentBoundary',
-            'paymentAutoExecution',
-          ].includes(update.fieldKey)
-        : true);
+      update.enabledForMatching ?? defaultEnabledForMatching;
 
     return {
       signalType,
@@ -2611,7 +2850,10 @@ export class LifeGraphService {
 
   private matchSignalFields(fields: LifeGraphField[]): LifeGraphField[] {
     return fields.filter(
-      (field) => !field.revoked && field.enabledForMatching !== false,
+      (field) =>
+        !field.revoked &&
+        field.enabledForMatching !== false &&
+        shouldExposeInMatching(this.classifyStoredField(field)),
     );
   }
 
@@ -2628,12 +2870,15 @@ export class LifeGraphService {
       )
       .reduce<Record<string, unknown>>((signals, field) => {
         const metadata = this.resolveStoredSignalMetadata(field);
+        const dataTier = this.classifyStoredField(field);
         signals[field.fieldKey] = {
-          value: field.fieldValue,
+          value: redactLifeGraphValueForTier(field.fieldValue, dataTier),
           source: field.source,
           confidence: field.confidence,
           confirmedByUser: field.confirmedByUser,
           revoked: field.revoked,
+          dataTier,
+          redacted: dataTier !== LifeGraphDataTier.PublicProfile,
           ...metadata,
         };
         return signals;
@@ -2642,6 +2887,7 @@ export class LifeGraphService {
 
   private groupFields(
     fields: LifeGraphField[],
+    redacted = false,
   ): Record<LifeGraphFieldCategory, LifeGraphFieldDto[]> {
     const grouped = Object.values(LifeGraphFieldCategory).reduce(
       (acc, category) => {
@@ -2651,7 +2897,7 @@ export class LifeGraphService {
       {} as Record<LifeGraphFieldCategory, LifeGraphFieldDto[]>,
     );
     for (const field of fields) {
-      grouped[field.category].push(this.toFieldDto(field));
+      grouped[field.category].push(this.toFieldDto(field, redacted));
     }
     return grouped;
   }
@@ -2702,6 +2948,20 @@ export class LifeGraphService {
     }
   }
 
+  private async auditSensitiveFieldAccess(input: {
+    userId: number;
+    action: string;
+    purpose: string;
+    route: string;
+    fields: LifeGraphField[];
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    await this.compliance?.auditSensitiveAccess({
+      actorUserId: input.userId,
+      ...input,
+    });
+  }
+
   private logEvent(
     event: string,
     data: {
@@ -2745,14 +3005,22 @@ export class LifeGraphService {
     };
   }
 
-  private toFieldDto(field: LifeGraphField): LifeGraphFieldDto {
+  private toFieldDto(
+    field: LifeGraphField,
+    redacted = false,
+  ): LifeGraphFieldDto {
     const signalMetadata = this.resolveStoredSignalMetadata(field);
+    const dataTier = this.classifyStoredField(field);
     return {
       id: field.id,
       userId: field.userId,
       category: field.category,
       fieldKey: field.fieldKey,
-      fieldValue: field.fieldValue,
+      fieldValue: redacted
+        ? redactLifeGraphValueForTier(field.fieldValue, dataTier)
+        : field.fieldValue,
+      dataTier,
+      redacted,
       source: field.source,
       confidence: field.confidence,
       confirmedByUser: field.confirmedByUser,
@@ -2768,6 +3036,45 @@ export class LifeGraphService {
       createdAt: field.createdAt.toISOString(),
       updatedAt: field.updatedAt.toISOString(),
     };
+  }
+
+  private toAuditLogDto(
+    log: LifeGraphAuditLog,
+    redacted = true,
+  ): LifeGraphAuditLogDto {
+    const dataTier = classifyLifeGraphField({
+      category: log.category,
+      fieldKey: log.fieldKey,
+    });
+    return {
+      id: log.id,
+      userId: log.userId,
+      fieldKey: log.fieldKey,
+      category: log.category,
+      oldValue: redacted
+        ? redactLifeGraphValueForTier(log.oldValue, dataTier)
+        : log.oldValue,
+      newValue: redacted
+        ? redactLifeGraphValueForTier(log.newValue, dataTier)
+        : log.newValue,
+      redacted,
+      source: log.source,
+      confidence: log.confidence,
+      action: log.action,
+      reason: cleanDisplayText(redactSensitiveValue(log.reason), ''),
+      taskId: log.taskId,
+      messageId: log.messageId,
+      createdAt: log.createdAt.toISOString(),
+    };
+  }
+
+  private classifyStoredField(field: LifeGraphField): LifeGraphDataTier {
+    const signalMetadata = this.resolveStoredSignalMetadata(field);
+    return classifyLifeGraphField({
+      category: field.category,
+      fieldKey: field.fieldKey,
+      signalType: signalMetadata.signalType,
+    });
   }
 
   private effectiveFieldConfidence(field: LifeGraphField): number {

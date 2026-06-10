@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 
 import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
+import { fitMeetAlphaAgentForNextAgent } from './fitmeet-alpha-agent-topology';
 
 describe('FitMeetAlphaAgentSdkService', () => {
   const config = {
@@ -57,6 +58,16 @@ describe('FitMeetAlphaAgentSdkService', () => {
       ]),
     );
     expect(decision.agentTrace.sdkEnabled).toBe(false);
+    expect(decision.agentTrace.observations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          agent: 'Social Match Agent',
+          intent: 'find_nearby_partner',
+          readiness: 'search',
+          nextAction: 'plan_tool_search',
+        }),
+      ]),
+    );
   });
 
   it('asks a warm clarification before searching for vague low-pressure companionship', async () => {
@@ -85,14 +96,15 @@ describe('FitMeetAlphaAgentSdkService', () => {
   it('keeps the five beta task flows routable without SDK execution', async () => {
     const service = new FitMeetAlphaAgentSdkService(config);
     const samples = [
-      ['完善 Life Graph', 'complete_life_graph'],
-      ['分析我的生活节奏', 'analyze_life_rhythm'],
-      ['推荐本周活动', 'recommend_weekly_activity'],
-      ['查看我的画像变化', 'view_profile_changes'],
-      ['下班后找附近健身搭子', 'find_nearby_partner'],
+      ['完善 Life Graph', 'complete_life_graph', 'Life Graph Agent'],
+      ['分析我的生活节奏', 'analyze_life_rhythm', 'Life Graph Agent'],
+      ['推荐本周活动', 'recommend_weekly_activity', 'Social Match Agent'],
+      ['查看我的画像变化', 'view_profile_changes', 'Life Graph Agent'],
+      ['5公里30分钟配速是多少', 'fitness_math', 'Math Agent'],
+      ['下班后找附近健身搭子', 'find_nearby_partner', 'Social Match Agent'],
     ];
 
-    for (const [message, intent] of samples) {
+    for (const [message, intent, agentName] of samples) {
       const decision = await service.prepareTurn({
         ownerUserId: 1,
         taskId: 101,
@@ -102,6 +114,9 @@ describe('FitMeetAlphaAgentSdkService', () => {
 
       expect(decision.safety.blocked).toBe(false);
       expect(decision.structuredIntent).toMatchObject({ intent });
+      expect(
+        fitMeetAlphaAgentForNextAgent(decision.structuredIntent?.['nextAgent']),
+      ).toBe(agentName);
       expect(decision.structuredIntent?.['betaScore']).toBeGreaterThanOrEqual(
         60,
       );

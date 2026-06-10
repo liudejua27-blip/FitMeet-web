@@ -8,6 +8,7 @@ import {
   ParseIntPipe,
   Post,
   Req,
+  Optional,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -37,6 +38,7 @@ import {
 } from './social-agent-tool-executor.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
 import { rememberSocialAgentShortTerm } from './social-agent-memory.util';
+import { AgentLoopService } from './agent-loop.service';
 import {
   cleanDisplayText,
   sanitizeForDisplay,
@@ -76,6 +78,8 @@ export class SocialAgentTasksController {
     private readonly planner: SocialAgentPlannerService,
     private readonly executor: SocialAgentToolExecutorService,
     private readonly chat: SocialAgentChatService,
+    @Optional()
+    private readonly agentLoop?: AgentLoopService,
   ) {}
 
   /** POST /api/social-agent/tasks */
@@ -151,7 +155,46 @@ export class SocialAgentTasksController {
     @Param('id', ParseIntPipe) id: number,
   ) {
     await this.assertTaskOwner(id, req.user.id);
-    return this.planner.planTask(id);
+    let planResult: Awaited<
+      ReturnType<SocialAgentPlannerService['planTask']>
+    > | null = null;
+    const loopService = this.agentLoop ?? new AgentLoopService();
+    const execution = await loopService.execute({
+      taskId: id,
+      goal: `Plan Social Agent task ${id}`,
+      agent: 'Agent Brain',
+      maxToolCalls: 1,
+      timeoutMs: 30_000,
+      plan: {
+        reason: 'Manual task planning must pass through the unified AgentLoop.',
+        tools: [
+          {
+            agent: 'Agent Brain',
+            toolName: 'task_plan_plan_only',
+            input: {},
+          },
+        ],
+      },
+      runner: async () => {
+        planResult = await this.planner.planTask(id);
+        return {
+          taskId: planResult.taskId,
+          source: planResult.source,
+          fallbackReason: planResult.fallbackReason ?? null,
+          planStepCount: planResult.plan.length,
+        };
+      },
+    });
+    if (!planResult) {
+      throw new Error('AgentLoop did not produce a plan result');
+    }
+    const result = planResult as Awaited<
+      ReturnType<SocialAgentPlannerService['planTask']>
+    >;
+    return {
+      ...result,
+      agentLoop: execution.loop,
+    };
   }
 
   /** POST /api/social-agent/tasks/:id/replan */
@@ -163,11 +206,55 @@ export class SocialAgentTasksController {
     @Body() body: ReplanBody,
   ) {
     await this.assertTaskOwner(id, req.user.id);
-    return this.planner.replanTask(id, {
-      reason: this.normalizeReplanReason(body.reason),
-      userMessage: optionalString(body.userMessage),
-      failure: isRecord(body.failure) ? body.failure : null,
+    let replanResult: Awaited<
+      ReturnType<SocialAgentPlannerService['replanTask']>
+    > | null = null;
+    const loopService = this.agentLoop ?? new AgentLoopService();
+    const execution = await loopService.execute({
+      taskId: id,
+      goal: `Replan Social Agent task ${id}`,
+      agent: 'Agent Brain',
+      maxToolCalls: 1,
+      timeoutMs: 30_000,
+      plan: {
+        reason: 'Manual task replan must pass through the unified AgentLoop.',
+        tools: [
+          {
+            agent: 'Agent Brain',
+            toolName: 'task_replan_plan_only',
+            input: {
+              reason: this.normalizeReplanReason(body.reason),
+              userMessage: optionalString(body.userMessage),
+              failure: isRecord(body.failure) ? body.failure : null,
+            },
+          },
+        ],
+      },
+      runner: async ({ input }) => {
+        replanResult = await this.planner.replanTask(id, {
+          reason: this.normalizeReplanReason(body.reason),
+          userMessage: optionalString(input.userMessage),
+          failure: isRecord(input.failure) ? input.failure : null,
+        });
+        return {
+          taskId: replanResult.taskId,
+          source: replanResult.source,
+          fallbackReason: replanResult.fallbackReason ?? null,
+          replanAttempt: replanResult.replanAttempt,
+          planStepCount: replanResult.plan.length,
+        };
+      },
     });
+    if (!replanResult) {
+      throw new Error('AgentLoop did not produce a replan result');
+    }
+    const result = replanResult as Awaited<
+      ReturnType<SocialAgentPlannerService['replanTask']>
+    >;
+    return {
+      ...result,
+      agentLoop: execution.loop,
+    };
   }
 
   /** POST /api/social-agent/tasks/:id/run-next */

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { AgentTaskPermissionMode } from '../entities/agent-task.entity';
+import type { LifeGraphProposalDto } from '../../life-graph/dto/life-graph.dto';
 import type {
   FitMeetAgentSafety,
   FitMeetAlphaCard,
@@ -58,7 +59,87 @@ export class UserFacingResponseSanitizerService {
   }
 
   private readCards(result: SanitizableAgentResult): FitMeetAlphaCard[] {
-    return 'cards' in result ? (result.cards ?? []) : [];
+    const cards = 'cards' in result ? (result.cards ?? []) : [];
+    if (!('profileUpdateProposal' in result) || !result.profileUpdateProposal) {
+      return cards;
+    }
+    if (cards.some((card) => card.type === 'profile_proposal')) return cards;
+    return [
+      ...cards,
+      this.profileProposalCard(result.profileUpdateProposal, result.taskId),
+    ];
+  }
+
+  private profileProposalCard(
+    proposal: LifeGraphProposalDto,
+    taskId: number | null,
+  ): FitMeetAlphaCard {
+    const resolvedTaskId = taskId ?? proposal.taskId;
+    return {
+      id: `life_graph_proposal:${proposal.proposalId}`,
+      type: 'profile_proposal',
+      title: '建议更新 Life Graph',
+      body:
+        proposal.aiSummary ||
+        '我识别到一些可以用于后续推荐的画像信息，请确认是否保存。',
+      status: 'waiting_confirmation',
+      data: {
+        taskId: resolvedTaskId,
+        proposalId: proposal.proposalId,
+        proposedFields: proposal.proposedFields.map(
+          (field) =>
+            `${field.category}.${field.fieldKey}: ${this.displayValue(
+              field.fieldValue,
+            )}`,
+        ),
+        fields: proposal.proposedFields,
+        confirmationRequired: proposal.confirmationRequired,
+        missingFields: proposal.missingFields,
+      },
+      actions: [
+        {
+          id: `life_graph_accept:${proposal.proposalId}`,
+          label: '确认保存',
+          action: 'confirm_profile_update',
+          schemaAction: 'life_graph.accept_update',
+          loopStage: 'life_graph_updated',
+          requiresConfirmation: true,
+          payload: {
+            taskId: resolvedTaskId,
+            proposalId: proposal.proposalId,
+          },
+        },
+        {
+          id: `life_graph_reject:${proposal.proposalId}`,
+          label: '暂不保存',
+          action: 'refine_request',
+          schemaAction: 'life_graph.reject_update',
+          loopStage: 'life_graph_updated',
+          requiresConfirmation: false,
+          payload: {
+            taskId: resolvedTaskId,
+            proposalId: proposal.proposalId,
+          },
+        },
+      ],
+    };
+  }
+
+  private displayValue(value: unknown): string {
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => this.readText(item, ''))
+        .filter(Boolean)
+        .join('、');
+    }
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+    ) {
+      return String(value);
+    }
+    return '已识别';
   }
 
   private readPendingConfirmations(

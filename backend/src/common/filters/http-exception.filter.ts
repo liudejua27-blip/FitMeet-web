@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { redactSensitiveValue } from '../privacy-redaction.util';
 
 interface ErrorResponseBody {
   message?: string | string[];
@@ -69,7 +70,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
           status,
           code: descriptor.code,
           userId: this.requestUserId(request),
-          response: exceptionResponse,
+          response: redactSensitiveValue(exceptionResponse),
         }),
       );
     }

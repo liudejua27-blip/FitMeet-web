@@ -5,6 +5,7 @@ import {
   productHelpFallbackReply,
   workflowHelpReply,
 } from './social-agent-chat-replies';
+import { socialAgentFitnessMathReply } from './social-agent-fitness-math-reply';
 import type { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
 import { hasSocialAgentSearchContext } from './social-agent-candidate-context.presenter';
 import type {
@@ -37,6 +38,8 @@ export function socialAgentAssistantMessageForRoute(input: {
   if (route.intent === 'casual_chat') return casualChatReply(message);
   if (route.intent === 'product_help') return productHelpFallbackReply(message);
   if (route.intent === 'workflow_help') return workflowHelpReply();
+  if (route.intent === 'fitness_math')
+    return socialAgentFitnessMathReply(message);
   if (
     route.intent === 'profile_enrichment' ||
     route.intent === 'profile_enrichment_request' ||

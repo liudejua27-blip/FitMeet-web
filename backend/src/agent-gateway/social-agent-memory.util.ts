@@ -597,6 +597,18 @@ export function recordSocialAgentPendingAction(
   return memory;
 }
 
+export function clearSocialAgentPendingAction(
+  task: AgentTask,
+  actionId: number,
+): SocialAgentTaskMemory {
+  const memory = readSocialAgentTaskMemory(task);
+  memory.pendingActions = memory.pendingActions.filter(
+    (item) => item.id !== actionId,
+  );
+  writeSocialAgentTaskMemory(task, memory);
+  return memory;
+}
+
 export function recordSocialAgentRecommendedCandidates(
   task: AgentTask,
   ids: number[],

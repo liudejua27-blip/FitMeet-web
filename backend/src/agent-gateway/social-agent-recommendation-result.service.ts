@@ -7,6 +7,7 @@ import {
   sanitizeForDisplay,
 } from '../common/display-text.util';
 import { LifeGraphService } from '../life-graph/life-graph.service';
+import { AgentSelfImproveService } from './agent-self-improve.service';
 import { AgentQualityEvaluatorService } from './agent-quality/agent-quality-evaluator.service';
 import {
   AgentTask,
@@ -68,6 +69,8 @@ export class SocialAgentRecommendationResultService {
     private readonly tonePolicy?: TonePolicyService,
     @Optional()
     private readonly agentQuality?: AgentQualityEvaluatorService,
+    @Optional()
+    private readonly selfImprove?: AgentSelfImproveService,
   ) {}
 
   async completeRecommendationResult(input: {
@@ -79,6 +82,7 @@ export class SocialAgentRecommendationResultService {
     searchResult: SocialAgentCandidateSearchResult;
     statusReason: string;
     emit?: StreamEmit;
+    signal?: AbortSignal | null;
     alphaTurn?: FitMeetAlphaTurnDecision;
     buildMemoryContext: (task: AgentTask) => unknown;
     toEventDto: (event: AgentTaskEvent) => Record<string, unknown>;
@@ -168,6 +172,17 @@ export class SocialAgentRecommendationResultService {
       : null;
     const fallbackAssistantMessage =
       searchResult.message || buildRecommendationAssistantMessage(candidates);
+    let assistantStreamed = false;
+    const streamAssistantDelta = async (delta: string) => {
+      if (!delta) return;
+      assistantStreamed = true;
+      await emit?.({
+        type: 'assistant_delta',
+        messageId: `agent-message:${task.id}`,
+        delta,
+        source: 'llm',
+      });
+    };
     const assistantMessage =
       this.tonePolicy?.safeAssistantMessage(
         await this.generateRecommendationAssistantMessage({
@@ -176,6 +191,8 @@ export class SocialAgentRecommendationResultService {
           candidates,
           searchResult,
           fallbackReply: fallbackAssistantMessage,
+          onDelta: emit ? streamAssistantDelta : undefined,
+          signal: input.signal,
           buildMemoryContext: input.buildMemoryContext,
         }),
         fallbackAssistantMessage,
@@ -213,7 +230,14 @@ export class SocialAgentRecommendationResultService {
       structuredIntent: alphaTurn?.structuredIntent,
     };
     this.evaluateAgentQuality(result);
-    await emit?.({ type: 'result', result });
+    if (assistantStreamed) {
+      await emit?.({
+        type: 'assistant_done',
+        messageId: `agent-message:${task.id}`,
+        source: 'llm',
+      });
+    }
+    await emit?.({ type: 'result', result, assistantStreamed });
     return result;
   }
 
@@ -223,51 +247,59 @@ export class SocialAgentRecommendationResultService {
     candidates: SocialAgentChatCandidate[];
     searchResult: SocialAgentCandidateSearchResult;
     fallbackReply: string;
+    onDelta?: (delta: string) => void | Promise<void>;
+    signal?: AbortSignal | null;
     buildMemoryContext: (task: AgentTask) => unknown;
   }): Promise<string> {
     if (!this.finalResponses) return input.fallbackReply;
-    return this.finalResponses.generate({
-      userMessage: cleanDisplayText(input.draft.rawText, input.task.goal),
-      intent: 'candidate_search',
-      agentState: readSocialAgentCurrentAgentState(input.task),
-      conversationHistory: buildSocialAgentLlmConversationHistory(input.task),
-      memoryContext: input.buildMemoryContext(input.task) as Record<
-        string,
-        unknown
-      >,
-      taskContext: summarizeSocialAgentTaskMemoryForLlm(input.task),
-      plannerDecision: readSocialAgentConversationBrainDecision(input.task),
-      toolResults: [
-        {
-          tool: 'search_real_candidates',
-          success: true,
-          candidateCount: input.candidates.length,
+    return this.finalResponses.generate(
+      {
+        userMessage: cleanDisplayText(input.draft.rawText, input.task.goal),
+        intent: 'candidate_search',
+        agentState: readSocialAgentCurrentAgentState(input.task),
+        conversationHistory: buildSocialAgentLlmConversationHistory(input.task),
+        memoryContext: input.buildMemoryContext(input.task) as Record<
+          string,
+          unknown
+        >,
+        taskContext: summarizeSocialAgentTaskMemoryForLlm(input.task),
+        plannerDecision: readSocialAgentConversationBrainDecision(input.task),
+        toolResults: [
+          {
+            tool: 'search_real_candidates',
+            success: true,
+            candidateCount: input.candidates.length,
+            emptyReason: input.searchResult.emptyReason,
+            message: input.searchResult.message,
+            debugReasons: input.searchResult.debugReasons,
+          },
+        ],
+        searchResults: {
+          socialRequestDraft: this.safeDraftForEvent(input.draft),
+          candidates: input.candidates.map((candidate) => ({
+            userId: candidate.userId,
+            candidateUserId: candidate.candidateUserId ?? candidate.userId,
+            nickname: candidate.nickname,
+            score: candidate.score,
+            reasons: candidate.reasons,
+            commonTags: candidate.commonTags,
+            risk: candidate.risk,
+            source: candidate.source,
+          })),
           emptyReason: input.searchResult.emptyReason,
-          message: input.searchResult.message,
-          debugReasons: input.searchResult.debugReasons,
         },
-      ],
-      searchResults: {
-        socialRequestDraft: this.safeDraftForEvent(input.draft),
-        candidates: input.candidates.map((candidate) => ({
-          userId: candidate.userId,
-          candidateUserId: candidate.candidateUserId ?? candidate.userId,
-          nickname: candidate.nickname,
-          score: candidate.score,
-          reasons: candidate.reasons,
-          commonTags: candidate.commonTags,
-          risk: candidate.risk,
-          source: candidate.source,
-        })),
-        emptyReason: input.searchResult.emptyReason,
+        safetyRules: socialAgentFinalResponseSafetyRules(),
+        responseGoal:
+          input.candidates.length > 0
+            ? '自然说明搜索结果，突出最相关候选人，并提醒下一步动作需要用户确认。'
+            : '自然说明当前没有找到真实候选人，并给出放宽条件、补充信息或发布需求的下一步。',
+        fallbackReply: input.fallbackReply,
       },
-      safetyRules: socialAgentFinalResponseSafetyRules(),
-      responseGoal:
-        input.candidates.length > 0
-          ? '自然说明搜索结果，突出最相关候选人，并提醒下一步动作需要用户确认。'
-          : '自然说明当前没有找到真实候选人，并给出放宽条件、补充信息或发布需求的下一步。',
-      fallbackReply: input.fallbackReply,
-    });
+      {
+        ...(input.onDelta ? { onDelta: input.onDelta } : {}),
+        signal: input.signal,
+      },
+    );
   }
 
   private evaluateAgentQuality(result: SocialAgentChatRunResult): void {
@@ -297,6 +329,21 @@ export class SocialAgentRecommendationResultService {
           .map((check) => check.id),
       }),
     );
+    void this.selfImprove
+      ?.recordQualityFailure({
+        taskId: result.taskId,
+        qualityReport: report,
+        assistantMessage: result.assistantMessage,
+        source: 'social_agent_recommendation_result',
+        context: {
+          emptyReason: result.emptyReason,
+          candidateCount: result.candidates.length,
+          hasApprovalActions: result.approvalRequiredActions.length > 0,
+          blockedBySafety: result.safety?.blocked === true,
+          structuredIntentReadiness: result.structuredIntent?.readiness,
+        },
+      })
+      .catch(() => undefined);
   }
 
   private rememberShortTermCandidates(

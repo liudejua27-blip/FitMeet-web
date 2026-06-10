@@ -111,6 +111,7 @@ const INTENT_KIND_MAP: Record<SocialAgentIntentType, SocialAgentRagDocKind[]> =
     profile_enrichment: ['user_memory_summary'],
     profile_enrichment_request: ['user_memory_summary'],
     correction_or_clarification: ['user_memory_summary'],
+    fitness_math: [],
     profile_update: ['user_memory_summary'],
     social_search: [
       'opening_templates',

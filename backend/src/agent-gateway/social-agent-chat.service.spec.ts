@@ -59,6 +59,7 @@ describe('SocialAgentChatService', () => {
       7,
       { goal: '找青岛跑步搭子' },
       emit,
+      {},
     );
   });
 
@@ -68,7 +69,7 @@ describe('SocialAgentChatService', () => {
     await service.routeMessage(7, { message: '你好' });
     await service.handleMessage(7, { message: '帮我找人' });
     await service.performCardAction(7, 101, {
-      action: 'candidate.save',
+      action: 'candidate.like',
       payload: { candidateUserId: 22 },
     });
 
@@ -79,7 +80,7 @@ describe('SocialAgentChatService', () => {
       message: '帮我找人',
     });
     expect(turnFacade.performCardAction).toHaveBeenCalledWith(7, 101, {
-      action: 'candidate.save',
+      action: 'candidate.like',
       payload: { candidateUserId: 22 },
     });
   });

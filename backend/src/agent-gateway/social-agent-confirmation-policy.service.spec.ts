@@ -84,7 +84,7 @@ describe('SocialAgentConfirmationPolicyService', () => {
     ).toBe(input);
   });
 
-  it('allows chat-confirmed messages without an agent connection', () => {
+  it('does not treat chat metadata as an approval credential', () => {
     const { service } = makeService();
 
     expect(() =>
@@ -93,7 +93,7 @@ describe('SocialAgentConfirmationPolicyService', () => {
         SocialAgentToolName.SendMessage,
         { metadata: { confirmationSource: 'social_agent_chat' } },
       ),
-    ).not.toThrow();
+    ).toThrow(BadRequestException);
   });
 
   it('requires an agent connection for unconfirmed real social actions', () => {

@@ -1,4 +1,13 @@
 import { AgentTaskPermissionMode } from './entities/agent-task.entity';
+import {
+  ApprovalRiskLevel,
+  ApprovalType,
+} from './entities/agent-approval-request.entity';
+import {
+  LifeGraphFieldCategory,
+  LifeGraphFieldSource,
+  LifeGraphProposalStatus,
+} from '../life-graph/life-graph.enums';
 import { toUserFacingAgentResponse } from './user-facing-agent-response';
 
 describe('toUserFacingAgentResponse', () => {
@@ -127,10 +136,10 @@ describe('toUserFacingAgentResponse', () => {
         queuedRun: null,
         pendingApproval: {
           id: 9,
-          type: 'send_message',
+          type: ApprovalType.SendMessage,
           actionType: 'send_message',
           summary: '发送开场白给小林',
-          riskLevel: 'medium',
+          riskLevel: ApprovalRiskLevel.Medium,
           payload: { message: 'hello', traceId: 'trace-2' },
           expiresAt: null,
         },
@@ -145,10 +154,10 @@ describe('toUserFacingAgentResponse', () => {
     expect(response.pendingConfirmations).toEqual([
       {
         id: 9,
-        type: 'send_message',
+        type: ApprovalType.SendMessage,
         actionType: 'send_message',
         summary: '发送开场白给小林',
-        riskLevel: 'medium',
+        riskLevel: ApprovalRiskLevel.Medium,
         expiresAt: null,
       },
     ]);
@@ -207,6 +216,18 @@ describe('toUserFacingAgentResponse', () => {
                 action: 'create_activity',
                 requiresConfirmation: true,
               },
+              {
+                id: 'view-activity',
+                label: '查看详情',
+                action: 'view_activity',
+                requiresConfirmation: false,
+              },
+              {
+                id: 'upload-proof',
+                label: '上传证明',
+                action: 'upload_proof',
+                requiresConfirmation: false,
+              },
             ],
           },
         ],
@@ -225,6 +246,102 @@ describe('toUserFacingAgentResponse', () => {
         action: 'create_activity',
         schemaAction: 'activity.confirm_create',
         loopStage: 'activity_draft_created',
+      }),
+      expect.objectContaining({
+        action: 'view_activity',
+        schemaAction: 'activity.view_detail',
+        loopStage: 'activity_completed',
+      }),
+      expect.objectContaining({
+        action: 'upload_proof',
+        schemaAction: 'activity.upload_proof',
+        loopStage: 'activity_completed',
+      }),
+    ]);
+  });
+
+  it('turns Life Graph proposals into confirmable user-facing cards', () => {
+    const response = toUserFacingAgentResponse(
+      {
+        intent: 'profile_enrichment',
+        confidence: 1,
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+        shouldSearch: false,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'direct_reply',
+        source: 'rules',
+        action: 'answer',
+        taskId: 101,
+        assistantMessage: '我识别到以下画像信息，是否保存到你的 Life Graph？',
+        savedContext: true,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: null,
+        queuedRun: null,
+        pendingApproval: null,
+        activityResults: [],
+        cards: [],
+        profileUpdateProposal: {
+          proposalId: 77,
+          userId: 7,
+          taskId: 101,
+          messageId: null,
+          status: LifeGraphProposalStatus.Proposed,
+          aiSummary: '识别到周末下午和跑步偏好。',
+          confirmationRequired: true,
+          createdAt: new Date(0).toISOString(),
+          confirmedAt: null,
+          rejectedAt: null,
+          missingFields: [],
+          proposedFields: [
+            {
+              proposalFieldId: 'lifestyle:availableTimes:1',
+              category: LifeGraphFieldCategory.Lifestyle,
+              fieldKey: 'availableTimes',
+              fieldValue: ['周末下午'],
+              source: LifeGraphFieldSource.AiInferred,
+              confidence: 0.9,
+              reason: '用户提到周末下午一般有空',
+              requiresUserConfirmation: true,
+              status: 'proposed',
+              conflict: false,
+              oldValue: null,
+            },
+          ],
+        },
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      },
+      AgentTaskPermissionMode.Confirm,
+    );
+
+    expect(response.cards).toEqual([
+      expect.objectContaining({
+        id: 'life_graph_proposal:77',
+        type: 'profile_proposal',
+        status: 'waiting_confirmation',
+        data: expect.objectContaining({
+          taskId: 101,
+          proposalId: 77,
+          proposedFields: ['lifestyle.availableTimes: 周末下午'],
+        }),
+        actions: [
+          expect.objectContaining({
+            schemaAction: 'life_graph.accept_update',
+            payload: { taskId: 101, proposalId: 77 },
+          }),
+          expect.objectContaining({
+            schemaAction: 'life_graph.reject_update',
+            payload: { taskId: 101, proposalId: 77 },
+          }),
+        ],
       }),
     ]);
   });

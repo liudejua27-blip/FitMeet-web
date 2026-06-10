@@ -46,11 +46,16 @@ function makePolicyService(
     FitMeetAgentToolRegistryService,
     'getToolByExecutorName'
   > = new FitMeetAgentToolRegistryService(),
+  selfImprove?: {
+    publishedToolPolicyPatches: jest.Mock;
+    publishedSafetyPolicyPatches: jest.Mock;
+  },
 ) {
   return new SocialAgentToolExecutionPolicyService(
     new AgentPermissionService(),
     registry as FitMeetAgentToolRegistryService,
     new SceneRiskPolicyService(),
+    selfImprove as never,
   );
 }
 
@@ -146,12 +151,15 @@ describe('SocialAgentToolExecutionPolicyService', () => {
 
   it('rejects tools that are not registered for the current permission mode', () => {
     const service = makePolicyService({
-      getToolByExecutorName: jest.fn(() => ({
-        name: 'payment',
-        category: 'payment',
-        requiresApproval: true,
-        permissionMode: [AgentTaskPermissionMode.LimitedAuto],
-      })),
+      getToolByExecutorName: jest.fn(
+        () =>
+          ({
+            name: 'payment',
+            category: 'payment',
+            requiresApproval: true,
+            permissionMode: [AgentTaskPermissionMode.LimitedAuto],
+          }) as never,
+      ),
     });
 
     expect(() =>
@@ -165,12 +173,15 @@ describe('SocialAgentToolExecutionPolicyService', () => {
 
   it('maps legacy open mode to limited auto for registry checks', () => {
     const service = makePolicyService({
-      getToolByExecutorName: jest.fn(() => ({
-        name: 'send_message',
-        category: 'message',
-        requiresApproval: false,
-        permissionMode: [AgentTaskPermissionMode.LimitedAuto],
-      })),
+      getToolByExecutorName: jest.fn(
+        () =>
+          ({
+            name: 'send_message',
+            category: 'message',
+            requiresApproval: false,
+            permissionMode: [AgentTaskPermissionMode.LimitedAuto],
+          }) as never,
+      ),
     });
 
     expect(() =>
@@ -180,5 +191,52 @@ describe('SocialAgentToolExecutionPolicyService', () => {
         toolName: SocialAgentToolName.SendMessage,
       }),
     ).not.toThrow();
+  });
+
+  it('applies published tool and safety policy patches to runtime metadata', async () => {
+    const selfImprove = {
+      publishedToolPolicyPatches: jest.fn().mockResolvedValue([
+        {
+          forceRequiresApproval: true,
+          forceRiskLevel: 'high',
+          executionContract: 'human_review_required',
+        },
+      ]),
+      publishedSafetyPolicyPatches: jest.fn().mockResolvedValue([
+        {
+          forceMinRiskLevel: 'critical',
+          requireDoubleConfirmation: true,
+          blockedActions: ['auto_execute'],
+          safetyPrompt: 'Self-improve safety rule applied.',
+        },
+      ]),
+    };
+    const service = makePolicyService(undefined, selfImprove);
+
+    const policy = await service.buildPolicyMetadataWithPatches(
+      makeTask(),
+      SocialAgentToolName.SendMessage,
+      { text: '今晚发消息约见面' },
+    );
+
+    expect(selfImprove.publishedToolPolicyPatches).toHaveBeenCalledWith(
+      SocialAgentToolName.SendMessage,
+    );
+    expect(policy).toMatchObject({
+      requiresApproval: true,
+      requiresDoubleConfirmation: true,
+      riskLevel: 'high',
+      highRisk: true,
+      executionContract: 'human_review_required',
+      selfImproveToolPolicyApplied: true,
+      selfImproveSafetyPolicyApplied: true,
+      sceneRisk: expect.objectContaining({
+        riskLevel: 'critical',
+        blockedActions: expect.arrayContaining(['auto_execute']),
+        safetyPrompts: expect.arrayContaining([
+          'Self-improve safety rule applied.',
+        ]),
+      }),
+    });
   });
 });

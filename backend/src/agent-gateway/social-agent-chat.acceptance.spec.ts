@@ -26,6 +26,7 @@ import { SocialAgentFollowUpContextService } from './social-agent-follow-up-cont
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
 import { SocialAgentCardActionRouterService } from './social-agent-card-action-router.service';
+import { SocialAgentLifeGraphCardActionService } from './social-agent-life-graph-card-action.service';
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 import { SocialAgentReplanProgressService } from './social-agent-replan-progress.service';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
@@ -44,11 +45,13 @@ import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile
 import { SocialAgentRunRecommendationService } from './social-agent-run-recommendation.service';
 import { SocialAgentReplanRunService } from './social-agent-replan-run.service';
 import { SocialAgentRouteTurnService } from './social-agent-route-turn.service';
+import { SocialAgentRouteAgentLoopRunnerService } from './social-agent-route-agent-loop-runner.service';
 import { SocialAgentQueuedRunService } from './social-agent-queued-run.service';
 import { SocialAgentRunOrchestratorService } from './social-agent-run-orchestrator.service';
 import { SocialAgentSessionQueryService } from './social-agent-session-query.service';
 import { SocialAgentReplanFacadeService } from './social-agent-replan-facade.service';
 import { SocialAgentInitialSearchQueueService } from './social-agent-initial-search-queue.service';
+import { SocialAgentChatTurnCallbacksService } from './social-agent-chat-turn-callbacks.service';
 import { SocialAgentChatTurnFacadeService } from './social-agent-chat-turn-facade.service';
 import { SocialAgentChatRunFacadeService } from './social-agent-chat-run-facade.service';
 import { SocialAgentChatSessionFacadeService } from './social-agent-chat-session-facade.service';
@@ -628,8 +631,6 @@ function makeHarness(options: Record<string, unknown> = {}) {
   const routeTurns =
     (options.routeTurns as SocialAgentRouteTurnService | undefined) ??
     new SocialAgentRouteTurnService(
-      taskLifecycle as never,
-      routeContext as never,
       new SocialAgentRouteCandidateConfirmationService(
         candidateActions as never,
         messageLog as never,
@@ -639,20 +640,26 @@ function makeHarness(options: Record<string, unknown> = {}) {
         messageLog as never,
         metrics as never,
       ),
-      new SocialAgentRouteConversationTurnService(
-        chatLlm as never,
-        profileEnrichment as never,
-        routeContext as never,
-      ),
       new SocialAgentRouteEntranceService(
         messageLog as never,
         taskLifecycle as never,
         mainAgentTurn as never,
       ),
-      profileTurns as never,
-      searchTurns as never,
-      actionTurns as never,
       routeDecisions as never,
+      new SocialAgentRouteAgentLoopRunnerService(
+        taskLifecycle as never,
+        routeContext as never,
+        new SocialAgentRouteConversationTurnService(
+          chatLlm as never,
+          profileEnrichment as never,
+          routeContext as never,
+        ),
+        profileTurns as never,
+        searchTurns as never,
+        actionTurns as never,
+        undefined,
+        undefined,
+      ),
     );
   const queuedRuns =
     (options.queuedRuns as SocialAgentQueuedRunService | undefined) ??
@@ -693,6 +700,14 @@ function makeHarness(options: Record<string, unknown> = {}) {
     new SocialAgentCardActionRouterService(
       candidateActions as never,
       meetLoop as never,
+      ((options.lifeGraphCardActions as
+        | SocialAgentLifeGraphCardActionService
+        | undefined) ??
+        new SocialAgentLifeGraphCardActionService(
+          taskRepo as never,
+          eventRepo as never,
+          options.lifeGraph as never,
+        )) as never,
     );
   const replanFacade =
     (options.replanFacade as SocialAgentReplanFacadeService | undefined) ??
@@ -713,13 +728,20 @@ function makeHarness(options: Record<string, unknown> = {}) {
       runOrchestrator as never,
       options.tonePolicy as never,
     );
+  const turnCallbacks =
+    (options.turnCallbacks as
+      | SocialAgentChatTurnCallbacksService
+      | undefined) ??
+    new SocialAgentChatTurnCallbacksService(
+      replanFacade as never,
+      initialSearchQueue as never,
+    );
   const turnFacade =
     (options.turnFacade as SocialAgentChatTurnFacadeService | undefined) ??
     new SocialAgentChatTurnFacadeService(
       routeTurns as never,
       cardActionRouter as never,
-      replanFacade as never,
-      initialSearchQueue as never,
+      turnCallbacks as never,
     );
   const runFacade =
     (options.runFacade as SocialAgentChatRunFacadeService | undefined) ??
@@ -774,6 +796,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     cardActionRouter,
     replanFacade,
     initialSearchQueue,
+    turnCallbacks,
     turnFacade,
     runFacade,
   };
@@ -913,6 +936,7 @@ describe('SocialAgentChat acceptance flow', () => {
           }),
         ]),
       }),
+      expect.objectContaining({ signal: undefined }),
     );
   });
 
@@ -1026,6 +1050,70 @@ describe('SocialAgentChat acceptance flow', () => {
       expect.any(Object),
       expect.any(Number),
     );
+  });
+
+  it('confirms a Life Graph proposal through the card action endpoint', async () => {
+    const lifeGraph = {
+      confirmUpdate: jest.fn().mockResolvedValue({
+        proposalId: 77,
+        userId: 7,
+        taskId: 101,
+        messageId: null,
+        status: 'confirmed',
+        aiSummary: '识别到周末下午、跑步搭子和附近偏好。',
+        confirmationRequired: true,
+        createdAt: new Date(0).toISOString(),
+        confirmedAt: new Date(0).toISOString(),
+        rejectedAt: null,
+        missingFields: [],
+        proposedFields: [
+          {
+            proposalFieldId: 'lifestyle:availableTimes:1',
+            category: 'lifestyle',
+            fieldKey: 'availableTimes',
+            fieldValue: ['周末下午'],
+            source: 'ai_inferred',
+            confidence: 0.9,
+            reason: '用户提到周末下午一般有空',
+            requiresUserConfirmation: true,
+            status: 'confirmed',
+            conflict: false,
+            oldValue: null,
+          },
+        ],
+      }),
+      rejectUpdate: jest.fn(),
+    };
+    const { service, taskRepo } = makeHarness({ lifeGraph });
+    await taskRepo.save(makeTask());
+
+    const result = await service.performCardAction(7, 101, {
+      action: 'life_graph.accept_update',
+      payload: {
+        taskId: 101,
+        cardData: { proposalId: 77 },
+      },
+    });
+
+    expect(lifeGraph.confirmUpdate).toHaveBeenCalledWith(7, {
+      proposalId: 77,
+    });
+    expect(result).toMatchObject({
+      intent: 'action_request',
+      action: 'reply',
+      profileUpdated: true,
+      assistantMessage: expect.stringContaining('已保存 1 条 Life Graph 信息'),
+    });
+    const savedTask = taskRepo.save.mock.calls.at(-1)?.[0] as AgentTask;
+    expect(savedTask.memory).toMatchObject({
+      taskMemory: {
+        currentTask: expect.objectContaining({
+          state: 'profile_saved',
+          waitingFor: 'availability_boundaries_or_search_confirmation',
+          lastCompletedStep: 'life_graph_profile_confirmed',
+        }),
+      },
+    });
   });
 
   it('uses previous profile facts when the user corrects the agent', async () => {
@@ -1173,7 +1261,7 @@ describe('SocialAgentChat acceptance flow', () => {
 
       expect(result.intent).toBe('safety_or_boundary');
       expect(result.savedContext).toBe(true);
-      expect(result.assistantMessage).toContain('已记住这条安全边界');
+      expect(result.assistantMessage).toContain('边界');
       expect(metrics.recordError).toHaveBeenCalledWith(
         'context_append_event_failed',
       );
@@ -2284,14 +2372,38 @@ describe('SocialAgentChat acceptance flow', () => {
         }),
       );
 
+      const proofStep = await service.performCardAction(7, 101, {
+        action: 'activity.upload_proof',
+        payload: {
+          taskId: 101,
+          activityId: 700,
+          note: '操场完成慢跑',
+          locationApprox: '青岛大学操场附近',
+        },
+      });
+
+      expect(proofStep).toMatchObject({
+        intent: 'action_request',
+        action: 'reply',
+        assistantMessage: expect.stringContaining('打开活动详情上传'),
+        cards: [
+          expect.objectContaining({
+            type: 'activity_status',
+            data: expect.objectContaining({
+              proofStatus: '待上传证明',
+            }),
+          }),
+        ],
+      });
+
       const savedTask = taskRepo.save.mock.calls.at(-1)?.[0] as AgentTask;
-      expect(savedTask.result).toMatchObject({
-        meetLoop: expect.objectContaining({
-          status: 'review_submitted',
-          loopStage: 'trust_score_updated',
-          lifeGraphUpdated: true,
-          trustScoreDelta: 2,
-        }),
+      expect(savedTask.memory).toMatchObject({
+        taskMemory: {
+          currentTask: expect.objectContaining({
+            waitingFor: 'activity_proof_upload',
+            lastCompletedStep: 'activity_proof_requested',
+          }),
+        },
       });
     });
 
@@ -2320,6 +2432,26 @@ describe('SocialAgentChat acceptance flow', () => {
           status: 'completed',
         }),
         review: jest.fn().mockResolvedValue({ ok: true }),
+        submitProof: jest.fn().mockResolvedValue({
+          id: 801,
+          proofType: 'scene_photo',
+          status: 'pending',
+        }),
+        findOne: jest.fn().mockResolvedValue({
+          id: 700,
+          title: '周末慢跑',
+          description: '公共场所慢跑',
+          status: 'in_progress',
+          city: '青岛',
+          locationName: '青岛大学附近公共场所',
+          proofRequired: true,
+          proofPolicy: 'mutual_or_proof',
+        }),
+        listProofs: jest
+          .fn()
+          .mockResolvedValue([
+            { id: 800, proofType: 'checkin', status: 'accepted' },
+          ]),
       };
       const lifeGraph = {
         recordBehaviorEvent: jest.fn().mockResolvedValue({
@@ -2380,6 +2512,29 @@ describe('SocialAgentChat acceptance flow', () => {
         ],
       });
 
+      const detail = await service.performCardAction(7, 101, {
+        action: 'activity.view_detail',
+        payload: {
+          taskId: 101,
+          activityId: 700,
+        },
+      });
+      expect(activities.findOne).toHaveBeenCalledWith(700);
+      expect(activities.listProofs).toHaveBeenCalledWith(700);
+      expect(detail).toMatchObject({
+        intent: 'action_request',
+        action: 'reply',
+        cards: [
+          expect.objectContaining({
+            type: 'activity_status',
+            data: expect.objectContaining({
+              activityId: 700,
+              proofStatus: '1 条证明已确认',
+            }),
+          }),
+        ],
+      });
+
       const checkin = await service.performCardAction(7, 101, {
         action: 'activity.check_in',
         payload: confirm.cards?.[0]?.actions[0]?.payload ?? {},
@@ -2410,6 +2565,32 @@ describe('SocialAgentChat acceptance flow', () => {
         5,
         '真实活动顺利完成。',
       );
+
+      const proof = await service.performCardAction(7, 101, {
+        action: 'activity.upload_proof',
+        payload: {
+          taskId: 101,
+          activityId: 700,
+          proofType: 'scene_photo',
+          note: '操场完成慢跑',
+        },
+      });
+      expect(activities.submitProof).toHaveBeenCalledWith(
+        700,
+        7,
+        expect.objectContaining({
+          proofType: 'scene_photo',
+          note: '操场完成慢跑',
+          privacyMode: 'scene_only',
+        }),
+      );
+      expect(proof.cards?.[0]).toMatchObject({
+        type: 'activity_status',
+        data: expect.objectContaining({
+          proofId: 801,
+          proofStatus: '证明待对方确认',
+        }),
+      });
       expect(lifeGraph.recordBehaviorEvent).toHaveBeenCalledTimes(1);
       expect(lifeGraph.recordBehaviorEvent).toHaveBeenCalledWith(
         7,

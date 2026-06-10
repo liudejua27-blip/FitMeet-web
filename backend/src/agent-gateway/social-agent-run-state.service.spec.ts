@@ -254,7 +254,7 @@ describe('SocialAgentRunStateService', () => {
     const result = {
       taskId: 101,
       status: AgentTaskStatus.AwaitingConfirmation,
-      visibleSteps: [{ id: 'done', label: '已完成', status: 'done' }],
+      visibleSteps: [{ id: 'done', label: '已完成', status: 'done' as const }],
       assistantMessage: '已刷新候选人',
       socialRequestDraft: null,
       candidates: [{ userId: 22 }],

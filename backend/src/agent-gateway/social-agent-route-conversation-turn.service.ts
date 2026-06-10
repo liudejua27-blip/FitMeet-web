@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { AgentTask } from './entities/agent-task.entity';
 import { LifeGraphProposalDto } from '../life-graph/dto/life-graph.dto';
 import type { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
+import type { StreamEmit } from './social-agent-chat.types';
 import type { LongTermMemorySnapshot } from './social-agent-long-term-memory.service';
 import { shouldUseSocialAgentLlmDirectReply } from './social-agent-route-response.presenter';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
@@ -17,6 +18,8 @@ type HandleRouteConversationTurnInput = {
   profile: Record<string, unknown> | null;
   longTermSnapshot: LongTermMemorySnapshot | null;
   brainToolResults: Array<Record<string, unknown>>;
+  emit?: StreamEmit;
+  signal?: AbortSignal | null;
 };
 
 type HandleRouteConversationTurnResult = {
@@ -26,6 +29,7 @@ type HandleRouteConversationTurnResult = {
   savedContext: boolean;
   profileUpdated: boolean;
   profileUpdateProposal: LifeGraphProposalDto | null;
+  assistantStreamed?: boolean;
 };
 
 @Injectable()
@@ -47,7 +51,16 @@ export class SocialAgentRouteConversationTurnService {
         intent: input.route.intent,
         buildMemoryContext: (currentTask) =>
           this.routeContext.buildMemoryContext(currentTask, null),
+        emit: input.emit,
+        signal: input.signal,
       });
+      if (handled.assistantStreamed) {
+        await input.emit?.({
+          type: 'assistant_done',
+          messageId: `agent-message:${handled.task.id}`,
+          source: 'llm',
+        });
+      }
 
       return {
         handled: true,
@@ -56,10 +69,12 @@ export class SocialAgentRouteConversationTurnService {
         savedContext: handled.savedContext,
         profileUpdated: handled.profileUpdated,
         profileUpdateProposal: handled.profileUpdateProposal ?? null,
+        assistantStreamed: handled.assistantStreamed,
       };
     }
 
     if (shouldUseSocialAgentLlmDirectReply(input.route)) {
+      let assistantStreamed = false;
       const assistantMessage = await this.chatLlm.generateConversationalAnswer({
         message: input.message,
         route: input.route,
@@ -71,12 +86,33 @@ export class SocialAgentRouteConversationTurnService {
           input.longTermSnapshot,
         ),
         toolResults: input.brainToolResults,
+        onDelta: input.emit
+          ? async (delta) => {
+              if (!delta) return;
+              assistantStreamed = true;
+              await input.emit?.({
+                type: 'assistant_delta',
+                messageId: `agent-message:${input.task.id}`,
+                delta,
+                source: 'llm',
+              });
+            }
+          : undefined,
+        signal: input.signal,
       });
+      if (assistantStreamed) {
+        await input.emit?.({
+          type: 'assistant_done',
+          messageId: `agent-message:${input.task.id}`,
+          source: 'llm',
+        });
+      }
 
       return {
         handled: true,
         task: input.task,
         assistantMessage,
+        assistantStreamed,
         savedContext: false,
         profileUpdated: false,
         profileUpdateProposal: null,

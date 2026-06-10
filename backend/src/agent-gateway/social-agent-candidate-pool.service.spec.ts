@@ -167,13 +167,13 @@ function makeService(
 ) {
   const users = repo(options.users ?? [realUser(1), realUser(2)]);
   const profiles = repo(options.profiles ?? []);
-  const delegates = repo([]);
+  const delegates = repo<unknown>([]);
   const publicIntents = repo(options.publicIntents ?? []);
-  const legacyRequests = repo([]);
+  const legacyRequests = repo<unknown>([]);
   const socialRequests = repo(options.socialRequests ?? []);
   const activities = repo(options.activities ?? []);
-  const candidates = repo([]);
-  const tasks = repo([]);
+  const candidates = repo<Record<string, unknown>>([]);
+  const tasks = repo<unknown>([]);
   const safety = {
     getMutualBlockUserIds: jest.fn(
       async () => new Set(options.blockedIds ?? []),

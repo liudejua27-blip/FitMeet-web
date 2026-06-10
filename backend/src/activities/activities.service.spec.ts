@@ -21,12 +21,19 @@ import { RealtimeEventService } from '../realtime/realtime-event.service';
 import { UserSocialRequest } from '../social-requests/social-request.entity';
 import { User } from '../users/user.entity';
 
-type MockRepo<T extends object> = Pick<
-  Repository<T>,
-  'create' | 'find' | 'findOne' | 'query' | 'save' | 'update'
->;
+type MockRepo<T extends object> = {
+  create: jest.Mock<T, [unknown?]>;
+  find: jest.Mock<Promise<T[]>, [unknown?]>;
+  findOne: jest.Mock<Promise<T | null>, [unknown?]>;
+  query: jest.Mock<Promise<unknown>, [string?, unknown[]?]>;
+  save: jest.Mock<Promise<T>, [unknown]>;
+  update: jest.Mock<
+    Promise<{ affected: number; raw: unknown[]; generatedMaps: unknown[] }>,
+    [unknown?, unknown?]
+  >;
+};
 
-function repo<T extends object>(): jest.Mocked<MockRepo<T>> {
+function repo<T extends object>(): MockRepo<T> {
   return {
     create: jest.fn((value: unknown) => value as T),
     find: jest.fn(() => Promise.resolve([])),
@@ -83,7 +90,7 @@ describe('ActivitiesService Life Graph behavior events', () => {
   let proofRepo: jest.Mocked<MockRepo<ActivityProof>>;
   let userRepo: jest.Mocked<MockRepo<User>>;
   let service: ActivitiesService;
-  let lifeGraph: jest.Mocked<Pick<LifeGraphService, 'recordBehaviorEvent'>>;
+  let lifeGraph: { recordBehaviorEvent: jest.Mock };
 
   beforeEach(() => {
     const templateRepo = repo<ActivityTemplate>();
@@ -123,12 +130,12 @@ describe('ActivitiesService Life Graph behavior events', () => {
     };
 
     service = new ActivitiesService(
-      templateRepo as Repository<ActivityTemplate>,
-      activityRepo as Repository<SocialActivity>,
-      proofRepo as Repository<ActivityProof>,
-      userRepo as Repository<User>,
-      socialRequestRepo as Repository<UserSocialRequest>,
-      publicIntentRepo as Repository<PublicSocialIntent>,
+      templateRepo as unknown as Repository<ActivityTemplate>,
+      activityRepo as unknown as Repository<SocialActivity>,
+      proofRepo as unknown as Repository<ActivityProof>,
+      userRepo as unknown as Repository<User>,
+      socialRequestRepo as unknown as Repository<UserSocialRequest>,
+      publicIntentRepo as unknown as Repository<PublicSocialIntent>,
       moderation,
       meetsService,
       ai,
@@ -140,7 +147,9 @@ describe('ActivitiesService Life Graph behavior events', () => {
   it('records completion events for all participants', async () => {
     const activity = buildActivity();
     activityRepo.findOne.mockResolvedValue(activity);
-    activityRepo.save.mockImplementation((value) => Promise.resolve(value));
+    activityRepo.save.mockImplementation((value) =>
+      Promise.resolve(value as SocialActivity),
+    );
 
     await service.complete(activity.id, 1);
 
@@ -175,7 +184,9 @@ describe('ActivitiesService Life Graph behavior events', () => {
   it('records cancellation only for the actor who cancelled', async () => {
     const activity = buildActivity({ creatorId: 1 });
     activityRepo.findOne.mockResolvedValue(activity);
-    activityRepo.save.mockImplementation((value) => Promise.resolve(value));
+    activityRepo.save.mockImplementation((value) =>
+      Promise.resolve(value as SocialActivity),
+    );
 
     await service.cancel(activity.id, 1);
 
@@ -193,7 +204,9 @@ describe('ActivitiesService Life Graph behavior events', () => {
   it('records a positive review as reviewer preference feedback', async () => {
     const activity = buildActivity({ status: SocialActivityStatus.Completed });
     activityRepo.findOne.mockResolvedValue(activity);
-    activityRepo.save.mockImplementation((value) => Promise.resolve(value));
+    activityRepo.save.mockImplementation((value) =>
+      Promise.resolve(value as SocialActivity),
+    );
 
     await service.review(activity.id, 1, 5, '对方很守时，节奏也舒服');
 
@@ -220,7 +233,9 @@ describe('ActivitiesService Life Graph behavior events', () => {
   it('records a negative review as reviewer preference feedback', async () => {
     const activity = buildActivity({ status: SocialActivityStatus.Completed });
     activityRepo.findOne.mockResolvedValue(activity);
-    activityRepo.save.mockImplementation((value) => Promise.resolve(value));
+    activityRepo.save.mockImplementation((value) =>
+      Promise.resolve(value as SocialActivity),
+    );
 
     await service.review(activity.id, 1, 2, '时间不太合适');
 
@@ -239,7 +254,9 @@ describe('ActivitiesService Life Graph behavior events', () => {
   it('does not block completion when Life Graph recording fails', async () => {
     const activity = buildActivity();
     activityRepo.findOne.mockResolvedValue(activity);
-    activityRepo.save.mockImplementation((value) => Promise.resolve(value));
+    activityRepo.save.mockImplementation((value) =>
+      Promise.resolve(value as SocialActivity),
+    );
     lifeGraph.recordBehaviorEvent.mockRejectedValueOnce(
       new Error('life graph unavailable'),
     );

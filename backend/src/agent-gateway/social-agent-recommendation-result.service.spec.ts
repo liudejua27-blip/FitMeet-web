@@ -12,6 +12,7 @@ import type {
   SocialAgentRequestDraft,
   SocialAgentVisibleStep,
 } from './social-agent-chat.types';
+import { SocialRequestType } from '../social-requests/social-request.entity';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -34,9 +35,11 @@ function makeDraft(): SocialAgentRequestDraft {
     rawText: '今晚青岛轻松跑步',
     title: '今晚青岛轻松跑步',
     description: '公开地点，低压力，一起轻松跑。',
+    type: SocialRequestType.RunningPartner,
     city: '青岛',
     activityType: 'running',
     socialRequestId: 301,
+    mode: 'draft',
     interestTags: ['跑步', '低压力'],
     radiusKm: 5,
     metadata: { source: 'test' },
@@ -207,9 +210,6 @@ describe('SocialAgentRecommendationResultService', () => {
         agentTrace: { plan: 'ok' } as never,
         structuredIntent: { requiresSearch: true } as never,
         assistantMessage: '',
-        route: null as never,
-        conversationMode: 'search',
-        reason: 'test',
       },
       buildMemoryContext: () => ({ memory: 'context' }),
       toEventDto: (event) => ({
@@ -258,6 +258,9 @@ describe('SocialAgentRecommendationResultService', () => {
             candidateCount: 1,
           }),
         ],
+      }),
+      expect.objectContaining({
+        onDelta: expect.any(Function),
       }),
     );
     expect(tonePolicy.safeAssistantMessage).toHaveBeenCalledWith(

@@ -89,10 +89,21 @@ function makeService() {
   };
 }
 
+function makeSecurityRequests() {
+  return {
+    createRequest: jest.fn(),
+    confirmExportRequest: jest.fn(),
+    confirmDeleteRequest: jest.fn(),
+  };
+}
+
 describe('LifeGraphController', () => {
   it('handles GET /api/life-graph/me', async () => {
     const service = makeService();
-    const controller = new LifeGraphController(service as never);
+    const controller = new LifeGraphController(
+      service as never,
+      makeSecurityRequests() as never,
+    );
 
     await expect(controller.getMe(req)).resolves.toMatchObject({
       profile: { userId: 7 },
@@ -102,7 +113,10 @@ describe('LifeGraphController', () => {
 
   it('handles PATCH /api/life-graph/me', async () => {
     const service = makeService();
-    const controller = new LifeGraphController(service as never);
+    const controller = new LifeGraphController(
+      service as never,
+      makeSecurityRequests() as never,
+    );
     const body = { city: '青岛' };
 
     await controller.updateMe(req, body as never);
@@ -112,7 +126,10 @@ describe('LifeGraphController', () => {
 
   it('handles POST /api/life-graph/extract-from-chat', async () => {
     const service = makeService();
-    const controller = new LifeGraphController(service as never);
+    const controller = new LifeGraphController(
+      service as never,
+      makeSecurityRequests() as never,
+    );
     const body = { message: '周末下午想找跑步搭子' };
 
     await controller.extractFromChat(req, body as never);
@@ -122,7 +139,10 @@ describe('LifeGraphController', () => {
 
   it('handles POST /api/life-graph/confirm-update', async () => {
     const service = makeService();
-    const controller = new LifeGraphController(service as never);
+    const controller = new LifeGraphController(
+      service as never,
+      makeSecurityRequests() as never,
+    );
 
     await controller.confirmUpdate(req, { proposalId: 10 });
 
@@ -131,7 +151,10 @@ describe('LifeGraphController', () => {
 
   it('handles POST /api/life-graph/reject-update', async () => {
     const service = makeService();
-    const controller = new LifeGraphController(service as never);
+    const controller = new LifeGraphController(
+      service as never,
+      makeSecurityRequests() as never,
+    );
 
     await controller.rejectUpdate(req, { proposalId: 10, reason: '不保存' });
 
@@ -143,7 +166,10 @@ describe('LifeGraphController', () => {
 
   it('handles POST /api/life-graph/revoke-field', async () => {
     const service = makeService();
-    const controller = new LifeGraphController(service as never);
+    const controller = new LifeGraphController(
+      service as never,
+      makeSecurityRequests() as never,
+    );
     const body = {
       category: LifeGraphFieldCategory.FitnessActivity,
       fieldKey: 'sportsPreferences',
@@ -156,7 +182,10 @@ describe('LifeGraphController', () => {
 
   it('handles GET /api/life-graph/completeness', async () => {
     const service = makeService();
-    const controller = new LifeGraphController(service as never);
+    const controller = new LifeGraphController(
+      service as never,
+      makeSecurityRequests() as never,
+    );
 
     await expect(controller.getCompleteness(req)).resolves.toMatchObject({
       completenessScore: 72,
@@ -165,7 +194,10 @@ describe('LifeGraphController', () => {
 
   it('handles GET /api/life-graph/match-signals', async () => {
     const service = makeService();
-    const controller = new LifeGraphController(service as never);
+    const controller = new LifeGraphController(
+      service as never,
+      makeSecurityRequests() as never,
+    );
 
     await controller.getMatchSignals(req);
 
@@ -174,7 +206,10 @@ describe('LifeGraphController', () => {
 
   it('handles GET /api/life-graph/audit with pagination params', async () => {
     const service = makeService();
-    const controller = new LifeGraphController(service as never);
+    const controller = new LifeGraphController(
+      service as never,
+      makeSecurityRequests() as never,
+    );
 
     await controller.getAudit(req, '20', '2026-05-26T00:00:00.000Z');
 
@@ -186,7 +221,10 @@ describe('LifeGraphController', () => {
 
   it('handles behavior signals and correction endpoints', async () => {
     const service = makeService();
-    const controller = new LifeGraphController(service as never);
+    const controller = new LifeGraphController(
+      service as never,
+      makeSecurityRequests() as never,
+    );
     const eventBody = {
       eventType: LifeGraphBehaviorEventType.ActivityCompleted,
       naturalSummary: '你完成了一次跑步约练。',

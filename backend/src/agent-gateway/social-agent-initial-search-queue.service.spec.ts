@@ -67,7 +67,7 @@ function makeRunResult(
 ): SocialAgentChatRunResult {
   return {
     taskId: 101,
-    status: AgentTaskStatus.Completed,
+    status: AgentTaskStatus.Succeeded,
     visibleSteps: [],
     assistantMessage: '已找到合适候选人',
     socialRequestDraft: null,

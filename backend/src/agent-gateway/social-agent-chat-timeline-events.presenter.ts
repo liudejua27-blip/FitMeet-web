@@ -134,6 +134,8 @@ function isStatusEventType(eventType: AgentTaskEventType | null): boolean {
     eventType === AgentTaskEventType.PlanUpdated ||
     eventType === AgentTaskEventType.StepStarted ||
     eventType === AgentTaskEventType.StepCompleted ||
+    eventType === AgentTaskEventType.ConfirmationRequested ||
+    eventType === AgentTaskEventType.ConfirmationReceived ||
     eventType === AgentTaskEventType.SocialAgentContextAppended ||
     eventType === AgentTaskEventType.SocialAgentReplanQueued ||
     eventType === AgentTaskEventType.SocialAgentReplanStarted ||

@@ -7,7 +7,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { MoreThan, Repository } from 'typeorm';
 import {
   AgentApprovalRequest,
   ApprovalRiskLevel,
@@ -25,8 +25,16 @@ import {
   ActionResult,
   LoggedAction,
 } from './entities/agent-activity-log.entity';
+import {
+  AgentTask,
+  AgentTaskEvent,
+  AgentTaskEventActor,
+  AgentTaskEventType,
+} from './entities/agent-task.entity';
 import { AgentWebhookService } from './agent-webhook.service';
 import { RealtimeEventService } from '../realtime/realtime-event.service';
+import { clearSocialAgentPendingAction } from './social-agent-memory.util';
+import { sanitizeForDisplay } from '../common/display-text.util';
 
 /**
  * Approval lifecycle helpers + risk classifier.
@@ -50,6 +58,12 @@ export class AgentApprovalService {
     private readonly webhooks: AgentWebhookService,
     @Optional()
     private readonly realtime?: RealtimeEventService,
+    @Optional()
+    @InjectRepository(AgentTask)
+    private readonly taskRepo?: Repository<AgentTask>,
+    @Optional()
+    @InjectRepository(AgentTaskEvent)
+    private readonly eventRepo?: Repository<AgentTaskEvent>,
   ) {}
 
   // ───────────────────────────────────────────────
@@ -492,16 +506,27 @@ export class AgentApprovalService {
   }
 
   async getPending(userId: number) {
+    await this.expireStalePendingApprovals({ userId });
     return this.repo.find({
-      where: { userId, status: ApprovalStatus.Pending },
+      where: {
+        userId,
+        status: ApprovalStatus.Pending,
+        expiresAt: MoreThan(new Date()),
+      },
       order: { createdAt: 'DESC' },
       take: 100,
     });
   }
 
   async getPendingForTask(userId: number, agentTaskId: number) {
+    await this.expireStalePendingApprovals({ userId, agentTaskId });
     return this.repo.find({
-      where: { userId, agentTaskId, status: ApprovalStatus.Pending },
+      where: {
+        userId,
+        agentTaskId,
+        status: ApprovalStatus.Pending,
+        expiresAt: MoreThan(new Date()),
+      },
       order: { createdAt: 'DESC' },
       take: 50,
     });
@@ -539,12 +564,15 @@ export class AgentApprovalService {
     }
     if (row.expiresAt < new Date()) {
       row.status = ApprovalStatus.Expired;
-      await this.repo.save(row);
+      const expired = await this.repo.save(row);
+      await this.clearResolvedTaskPendingAction(expired);
+      await this.writeApprovalTaskEvent(expired, 'expired');
       throw new BadRequestException('Approval has expired');
     }
     row.status = ApprovalStatus.Approved;
     row.respondedAt = new Date();
     const saved = await this.repo.save(row);
+    await this.clearResolvedTaskPendingAction(saved);
 
     let dispatched = false;
     let dispatchResult: unknown;
@@ -560,6 +588,10 @@ export class AgentApprovalService {
         );
       }
     }
+    await this.writeApprovalTaskEvent(saved, 'approved', {
+      dispatched,
+      dispatchError,
+    });
     void this.emitApprovalWebhook(saved, 'approval.approved', {
       dispatched,
       dispatchResult,
@@ -592,6 +624,8 @@ export class AgentApprovalService {
     row.status = ApprovalStatus.Rejected;
     row.respondedAt = new Date();
     const saved = await this.repo.save(row);
+    await this.clearResolvedTaskPendingAction(saved);
+    await this.writeApprovalTaskEvent(saved, 'rejected');
     await this.writeDecisionLog(saved, ActionResult.Blocked);
     void this.emitApprovalWebhook(saved, 'approval.rejected');
     this.realtime?.emitToUser({
@@ -666,6 +700,104 @@ export class AgentApprovalService {
         `Failed to write approval decision log ${approval.id}: ${(err as Error).message}`,
       );
     }
+  }
+
+  private async clearResolvedTaskPendingAction(
+    approval: AgentApprovalRequest,
+  ): Promise<void> {
+    if (!this.taskRepo || !approval.agentTaskId) return;
+    try {
+      const task = await this.taskRepo.findOne({
+        where: {
+          id: approval.agentTaskId,
+          ownerUserId: approval.userId,
+        },
+      });
+      if (!task) return;
+      clearSocialAgentPendingAction(task, approval.id);
+      await this.taskRepo.save(task);
+    } catch (err) {
+      this.logger.warn(
+        `Failed to clear pending task action for approval ${approval.id}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  private async expireStalePendingApprovals(input: {
+    userId: number;
+    agentTaskId?: number;
+  }): Promise<void> {
+    const rows = await this.repo.find({
+      where: {
+        userId: input.userId,
+        ...(input.agentTaskId ? { agentTaskId: input.agentTaskId } : {}),
+        status: ApprovalStatus.Pending,
+      },
+      take: input.agentTaskId ? 50 : 100,
+    });
+    const now = new Date();
+    const expiredRows = rows.filter((row) => row.expiresAt < now);
+    for (const row of expiredRows) {
+      row.status = ApprovalStatus.Expired;
+      const saved = await this.repo.save(row);
+      await this.clearResolvedTaskPendingAction(saved);
+      await this.writeApprovalTaskEvent(saved, 'expired');
+    }
+  }
+
+  private async writeApprovalTaskEvent(
+    approval: AgentApprovalRequest,
+    decision: 'approved' | 'rejected' | 'expired',
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
+    if (!this.eventRepo || !approval.agentTaskId) return;
+    const summary = this.approvalDecisionSummary(approval, decision);
+    try {
+      await this.eventRepo.save(
+        this.eventRepo.create({
+          taskId: approval.agentTaskId,
+          ownerUserId: approval.userId,
+          eventType: AgentTaskEventType.ConfirmationReceived,
+          actor:
+            decision === 'expired'
+              ? AgentTaskEventActor.System
+              : AgentTaskEventActor.User,
+          summary,
+          payload: sanitizeForDisplay({
+            approvalId: approval.id,
+            approvalType: approval.type,
+            actionType: approval.actionType,
+            status: approval.status,
+            decision,
+            riskLevel: approval.riskLevel,
+            summary: approval.summary,
+            relatedSocialRequestId: approval.relatedSocialRequestId,
+            relatedCandidateId: approval.relatedCandidateId,
+            relatedActivityId: approval.relatedActivityId,
+            respondedAt: approval.respondedAt,
+            expiresAt: approval.expiresAt,
+            ...extra,
+          }) as Record<string, unknown>,
+        }),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Failed to write approval task event ${approval.id}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  private approvalDecisionSummary(
+    approval: AgentApprovalRequest,
+    decision: 'approved' | 'rejected' | 'expired',
+  ): string {
+    const label =
+      decision === 'approved'
+        ? '用户已批准'
+        : decision === 'rejected'
+          ? '用户已拒绝'
+          : '确认请求已过期';
+    return `${label}：${approval.summary || approval.actionType || approval.type}`;
   }
 
   private toLoggedAction(approval: AgentApprovalRequest): LoggedAction {

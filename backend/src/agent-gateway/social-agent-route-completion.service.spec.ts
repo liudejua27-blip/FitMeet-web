@@ -49,7 +49,7 @@ function makeQueuedRun(
   return {
     taskId: 101,
     runId: 'run-101',
-    status: AgentTaskStatus.Queued,
+    status: AgentTaskStatus.Pending,
     runStatus: 'queued',
     visibleSteps: [],
     assistantMessage: '已进入后台继续搜索。',

@@ -8,6 +8,10 @@ import {
   AgentSettings,
   AgentSettingsMode,
 } from './entities/agent-settings.entity';
+import {
+  AgentTaskEventActor,
+  AgentTaskEventType,
+} from './entities/agent-task.entity';
 
 function makeSettings(overrides: Partial<AgentSettings> = {}): AgentSettings {
   return {
@@ -158,5 +162,243 @@ describe('AgentApprovalService pending approval realtime idempotency', () => {
       status: ApprovalStatus.Approved,
     });
     expect(dispatcher).not.toHaveBeenCalled();
+  });
+
+  it('clears task pending actions when a pending approval is approved or rejected', async () => {
+    const approvals = [
+      {
+        id: 12,
+        userId: 1,
+        agentConnectionId: null,
+        agentTaskId: 101,
+        type: ApprovalType.SendMessage,
+        actionType: 'send_candidate_message',
+        skillName: 'send_candidate_message',
+        status: ApprovalStatus.Pending,
+        riskLevel: ApprovalRiskLevel.Medium,
+        summary: 'send a message',
+        payload: {},
+        expiresAt: new Date(Date.now() + 10000),
+      },
+      {
+        id: 13,
+        userId: 1,
+        agentConnectionId: null,
+        agentTaskId: 101,
+        type: ApprovalType.SendMessage,
+        actionType: 'send_candidate_message',
+        skillName: 'send_candidate_message',
+        status: ApprovalStatus.Pending,
+        riskLevel: ApprovalRiskLevel.Medium,
+        summary: 'send another message',
+        payload: {},
+        expiresAt: new Date(Date.now() + 10000),
+      },
+    ];
+    const task = {
+      id: 101,
+      ownerUserId: 1,
+      memory: {
+        taskMemory: {
+          pendingActions: [
+            {
+              id: 12,
+              type: 'send_message',
+              actionType: 'send_candidate_message',
+              summary: 'send a message',
+              riskLevel: 'medium',
+              at: '2026-06-07T00:00:00.000Z',
+            },
+            {
+              id: 13,
+              type: 'send_message',
+              actionType: 'send_candidate_message',
+              summary: 'send another message',
+              riskLevel: 'medium',
+              at: '2026-06-07T00:01:00.000Z',
+            },
+          ],
+        },
+      },
+    };
+    const repo = {
+      findOne: jest.fn(({ where }: { where: { id: number } }) =>
+        Promise.resolve(approvals.find((approval) => approval.id === where.id)),
+      ),
+      save: jest.fn((approval) => Promise.resolve(approval)),
+    };
+    const logRepo = {
+      create: jest.fn((input) => input),
+      save: jest.fn((input) => Promise.resolve(input)),
+    };
+    const taskRepo = {
+      findOne: jest.fn().mockResolvedValue(task),
+      save: jest.fn((input) => Promise.resolve(input)),
+    };
+    const eventRepo = {
+      create: jest.fn((input) => input),
+      save: jest.fn((input) => Promise.resolve(input)),
+    };
+    const service = new AgentApprovalService(
+      repo as never,
+      logRepo as never,
+      { emitToConnection: jest.fn() } as never,
+      { emitToUser: jest.fn() } as never,
+      taskRepo as never,
+      eventRepo as never,
+    );
+
+    await service.approve(12, 1);
+    await service.reject(13, 1);
+
+    expect(task.memory).toMatchObject({
+      taskMemory: {
+        pendingActions: [],
+      },
+    });
+    expect(taskRepo.findOne).toHaveBeenCalledWith({
+      where: { id: 101, ownerUserId: 1 },
+    });
+    expect(taskRepo.save).toHaveBeenCalledTimes(2);
+    expect(eventRepo.save).toHaveBeenCalledTimes(2);
+    expect(eventRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        ownerUserId: 1,
+        eventType: AgentTaskEventType.ConfirmationReceived,
+        actor: AgentTaskEventActor.User,
+        summary: '用户已批准：send a message',
+        payload: expect.objectContaining({
+          approvalId: 12,
+          decision: 'approved',
+          status: ApprovalStatus.Approved,
+        }),
+      }),
+    );
+    expect(eventRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        ownerUserId: 1,
+        eventType: AgentTaskEventType.ConfirmationReceived,
+        actor: AgentTaskEventActor.User,
+        summary: '用户已拒绝：send another message',
+        payload: expect.objectContaining({
+          approvalId: 13,
+          decision: 'rejected',
+          status: ApprovalStatus.Rejected,
+        }),
+      }),
+    );
+  });
+
+  it('expires stale task approvals before returning pending approvals for restore', async () => {
+    const expired = {
+      id: 21,
+      userId: 1,
+      agentConnectionId: null,
+      agentTaskId: 101,
+      type: ApprovalType.SendMessage,
+      actionType: 'send_candidate_message',
+      skillName: 'send_candidate_message',
+      status: ApprovalStatus.Pending,
+      riskLevel: ApprovalRiskLevel.Medium,
+      summary: 'expired message',
+      payload: {},
+      expiresAt: new Date(Date.now() - 1000),
+    };
+    const active = {
+      id: 22,
+      userId: 1,
+      agentConnectionId: null,
+      agentTaskId: 101,
+      type: ApprovalType.SendMessage,
+      actionType: 'send_candidate_message',
+      skillName: 'send_candidate_message',
+      status: ApprovalStatus.Pending,
+      riskLevel: ApprovalRiskLevel.Medium,
+      summary: 'active message',
+      payload: {},
+      expiresAt: new Date(Date.now() + 10000),
+    };
+    const task = {
+      id: 101,
+      ownerUserId: 1,
+      memory: {
+        taskMemory: {
+          pendingActions: [
+            {
+              id: 21,
+              type: 'send_message',
+              actionType: 'send_candidate_message',
+              summary: 'expired message',
+              riskLevel: 'medium',
+              at: '2026-06-07T00:00:00.000Z',
+            },
+            {
+              id: 22,
+              type: 'send_message',
+              actionType: 'send_candidate_message',
+              summary: 'active message',
+              riskLevel: 'medium',
+              at: '2026-06-07T00:01:00.000Z',
+            },
+          ],
+        },
+      },
+    };
+    const repo = {
+      find: jest
+        .fn()
+        .mockResolvedValueOnce([expired, active])
+        .mockResolvedValueOnce([active]),
+      save: jest.fn((approval) => Promise.resolve(approval)),
+    };
+    const taskRepo = {
+      findOne: jest.fn().mockResolvedValue(task),
+      save: jest.fn((input) => Promise.resolve(input)),
+    };
+    const eventRepo = {
+      create: jest.fn((input) => input),
+      save: jest.fn((input) => Promise.resolve(input)),
+    };
+    const service = new AgentApprovalService(
+      repo as never,
+      {} as never,
+      { emitToConnection: jest.fn() } as never,
+      undefined,
+      taskRepo as never,
+      eventRepo as never,
+    );
+
+    const result = await service.getPendingForTask(1, 101);
+
+    expect(result).toEqual([active]);
+    expect(expired.status).toBe(ApprovalStatus.Expired);
+    expect(repo.save).toHaveBeenCalledWith(expired);
+    expect(task.memory).toMatchObject({
+      taskMemory: {
+        pendingActions: [
+          expect.objectContaining({
+            id: 22,
+            actionType: 'send_candidate_message',
+          }),
+        ],
+      },
+    });
+    expect(taskRepo.save).toHaveBeenCalledWith(task);
+    expect(eventRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        ownerUserId: 1,
+        eventType: AgentTaskEventType.ConfirmationReceived,
+        actor: AgentTaskEventActor.System,
+        summary: '确认请求已过期：expired message',
+        payload: expect.objectContaining({
+          approvalId: 21,
+          decision: 'expired',
+          status: ApprovalStatus.Expired,
+        }),
+      }),
+    );
   });
 });

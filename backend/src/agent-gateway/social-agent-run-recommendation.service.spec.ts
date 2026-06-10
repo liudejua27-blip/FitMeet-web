@@ -173,6 +173,12 @@ describe('SocialAgentRunRecommendationService', () => {
       taskId: 101,
       status: AgentTaskStatus.AwaitingConfirmation,
       candidates: [expect.objectContaining({ userId: 22 })],
+      agentLoop: expect.objectContaining({
+        status: 'completed',
+        toolBudget: expect.objectContaining({
+          usedToolCalls: 6,
+        }),
+      }),
     });
     expect(result.result.visibleSteps.map((step) => step.id)).toEqual([
       'understand',
@@ -212,9 +218,19 @@ describe('SocialAgentRunRecommendationService', () => {
         AgentTaskEventType.TaskSucceeded,
       ]),
     );
-    expect(streamEvents.at(-1)).toMatchObject({
-      type: 'step',
-      step: { id: 'done', status: 'done' },
-    });
+    expect(streamEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'step',
+          step: expect.objectContaining({ id: 'done', status: 'done' }),
+        }),
+        expect.objectContaining({
+          type: 'step',
+          step: expect.objectContaining({
+            id: expect.stringContaining('loop_tool_recommendation'),
+          }),
+        }),
+      ]),
+    );
   });
 });

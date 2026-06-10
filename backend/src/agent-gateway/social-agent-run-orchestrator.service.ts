@@ -18,11 +18,13 @@ import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.s
 import type {
   SocialAgentChatRunBody,
   SocialAgentChatRunResult,
+  SocialAgentStreamOptions,
   SocialAgentVisibleStep,
   StreamEmit,
 } from './social-agent-chat.types';
 import { buildSocialAgentRunCompletionSnapshot } from './social-agent-run-completion.presenter';
 import { TonePolicyService } from './response-quality/tone-policy.service';
+import { AgentSelfImproveService } from './agent-self-improve.service';
 
 @Injectable()
 export class SocialAgentRunOrchestratorService {
@@ -36,12 +38,15 @@ export class SocialAgentRunOrchestratorService {
     private readonly fitMeetRuntime?: FitMeetAgentRuntimeService,
     @Optional()
     private readonly tonePolicy?: TonePolicyService,
+    @Optional()
+    private readonly selfImprove?: AgentSelfImproveService,
   ) {}
 
   async run(
     ownerUserId: number,
     body: SocialAgentChatRunBody,
     emit?: StreamEmit,
+    options: SocialAgentStreamOptions = {},
   ): Promise<SocialAgentChatRunResult> {
     const goal = cleanDisplayText(body.goal, '').trim();
     if (!goal) throw new BadRequestException('请输入你的社交需求');
@@ -82,6 +87,7 @@ export class SocialAgentRunOrchestratorService {
       permissionMode,
       visibleSteps,
       emit,
+      signal: options.signal,
       visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
       completeRuntimeClarification: async (result) => {
         await this.fitMeetRuntime?.completeRun({
@@ -105,6 +111,7 @@ export class SocialAgentRunOrchestratorService {
       visibleSteps,
       emit,
       alphaTurn,
+      signal: options.signal,
       visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
       recordRuntimeStep: async (input) => {
         await this.fitMeetRuntime?.recordStep({
@@ -136,6 +143,17 @@ export class SocialAgentRunOrchestratorService {
       status: completion.status,
       assistantMessage: result.assistantMessage,
       resultPayload: completion.resultPayload,
+    });
+    await this.selfImprove?.recordOnlineReplayFromRoute({
+      ownerUserId,
+      taskId: task.id,
+      userMessage: goal,
+      assistantMessage: result.assistantMessage,
+      route: {
+        intent: result.structuredIntent?.intent ?? 'social_search',
+        source: 'run_orchestrator',
+      },
+      result: result as unknown as Record<string, unknown>,
     });
     return result;
   }

@@ -1,4 +1,5 @@
 import { AgentTaskStatus } from './entities/agent-task.entity';
+import type { AgentLoopRun } from './agent-loop.types';
 
 export enum SocialAgentToolName {
   GetMyProfile = 'get_my_profile',
@@ -69,4 +70,5 @@ export interface SocialAgentRunNextResult extends SocialAgentTaskExecutionResult
   status: AgentTaskStatus;
   handledReply: boolean;
   decision: Record<string, unknown> | null;
+  agentLoop?: AgentLoopRun;
 }

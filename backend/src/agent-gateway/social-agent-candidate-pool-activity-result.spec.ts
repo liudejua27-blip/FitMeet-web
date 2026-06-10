@@ -9,14 +9,14 @@ import {
 import type { CandidatePoolResolvedQuery } from './social-agent-candidate-pool-query';
 
 const query: CandidatePoolResolvedQuery = {
-  ownerUserId: 1,
   city: '青岛',
+  intent: 'social_search',
   activityType: 'coffee_chat',
   interestTags: ['咖啡', '拍照'],
   timePreference: '周末',
+  locationPreference: '',
   rawText: '周末找人喝咖啡拍照',
   socialRequestId: 50,
-  source: 'direct',
 };
 
 const explanation = {
@@ -76,7 +76,10 @@ describe('social-agent-candidate-pool-activity-result', () => {
     });
     expect(result.matchScore).toBeGreaterThan(0);
     expect(result.matchReasons).toEqual(
-      expect.arrayContaining(['来自真实活动或公开约练卡片。', '城市匹配：青岛。']),
+      expect.arrayContaining([
+        '来自真实活动或公开约练卡片。',
+        '城市匹配：青岛。',
+      ]),
     );
     expect(explain).toHaveBeenCalledWith(
       expect.objectContaining({

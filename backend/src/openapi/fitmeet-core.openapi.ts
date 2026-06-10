@@ -1,3 +1,68 @@
+const fitMeetAlphaCardTypes = [
+  'profile_proposal',
+  'candidate_card',
+  'opener_approval',
+  'activity_plan',
+  'activity_status',
+  'checkin_card',
+  'review_card',
+  'audit_update',
+  'safety_boundary',
+];
+
+const fitMeetAlphaCardActions = [
+  'confirm_profile_update',
+  'send_message',
+  'connect_candidate',
+  'save_candidate',
+  'create_activity',
+  'generate_opener',
+  'view_activity',
+  'upload_proof',
+  'see_more',
+  'filter_school',
+  'filter_gender_female',
+  'dislike_candidate',
+  'check_in',
+  'submit_review',
+  'refine_request',
+];
+
+const fitMeetAgentSchemaActions = [
+  'candidate.like',
+  'candidate.skip',
+  'candidate.more_like_this',
+  'candidate.generate_opener',
+  'opener.confirm_send',
+  'opener.regenerate',
+  'activity.confirm_create',
+  'activity.modify_time',
+  'activity.modify_location',
+  'activity.check_in',
+  'activity.complete',
+  'activity.upload_proof',
+  'activity.view_detail',
+  'review.submit',
+  'life_graph.accept_update',
+  'life_graph.reject_update',
+];
+
+const fitMeetAgentLoopStages = [
+  'social_search',
+  'candidate_recommendation',
+  'candidate_selected',
+  'opener_draft_created',
+  'opener_confirmed',
+  'message_sent',
+  'activity_draft_created',
+  'activity_confirmed',
+  'activity_checked_in',
+  'activity_completed',
+  'review_submitted',
+  'life_graph_updated',
+  'trust_score_updated',
+];
+
 export const fitMeetCoreOpenApi = {
   openapi: '3.1.0',
   info: {
@@ -1186,6 +1251,32 @@ export const fitMeetCoreOpenApi = {
         },
       },
     },
+    '/social-agent/chat/messages/stream': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentHandleMessageStream',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SocialAgentRouteMessageInput',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description:
+              'Server-sent events using the unified user-facing Agent streaming protocol.',
+            content: { 'text/event-stream': { schema: { type: 'string' } } },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
     '/social-agent/chat/route-message': {
       post: {
         tags: ['social-agent-chat'],
@@ -1203,6 +1294,32 @@ export const fitMeetCoreOpenApi = {
         },
         responses: {
           '200': { $ref: '#/components/responses/UserFacingAgentResponse' },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/route-message/stream': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentRouteMessageStream',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SocialAgentRouteMessageInput',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description:
+              'Server-sent events using the unified user-facing Agent streaming protocol.',
+            content: { 'text/event-stream': { schema: { type: 'string' } } },
+          },
           '400': { $ref: '#/components/responses/Error' },
           '401': { $ref: '#/components/responses/Error' },
         },
@@ -1248,7 +1365,7 @@ export const fitMeetCoreOpenApi = {
         responses: {
           '200': {
             description:
-              'Server-sent events with status, progress, result, and error events',
+              'Server-sent events with status, progress, result, and error events. Each event includes a lifecycle field for Agent UI state mapping.',
             content: { 'text/event-stream': { schema: { type: 'string' } } },
           },
           '400': { $ref: '#/components/responses/Error' },
@@ -1492,6 +1609,41 @@ export const fitMeetCoreOpenApi = {
         },
         responses: {
           '200': { $ref: '#/components/responses/UserFacingAgentResponse' },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/tasks/{taskId}/messages/stream': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentHandleTaskMessageStream',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SocialAgentRouteMessageInput',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description:
+              'Server-sent events using the unified user-facing Agent streaming protocol.',
+            content: { 'text/event-stream': { schema: { type: 'string' } } },
+          },
           '400': { $ref: '#/components/responses/Error' },
           '401': { $ref: '#/components/responses/Error' },
           '404': { $ref: '#/components/responses/Error' },
@@ -1748,6 +1900,483 @@ export const fitMeetCoreOpenApi = {
           '400': { $ref: '#/components/responses/Error' },
           '401': { $ref: '#/components/responses/Error' },
           '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/tasks/{taskId}/actions/stream': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentPerformActionStream',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SocialAgentCardActionInput',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Server-sent events for card action execution',
+            content: {
+              'text/event-stream': {
+                schema: { type: 'string' },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/l5/dashboard': {
+      get: {
+        tags: ['social-agent-l5'],
+        operationId: 'socialAgentL5Dashboard',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 200 },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Agent L5 runtime dashboard with replay, subagent memory, meet-loop, canary, and auto-runner panels.',
+            content: { 'application/json': { schema: { type: 'object' } } },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/l5/replay-samples': {
+      get: {
+        tags: ['social-agent-l5'],
+        operationId: 'socialAgentL5ReplaySamples',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 200 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Online replay samples captured for Agent evals.',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { type: 'object' } },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/l5/subagent-memory': {
+      get: {
+        tags: ['social-agent-l5'],
+        operationId: 'socialAgentL5SubagentMemory',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'agentName',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 200 },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Persisted subagent planner input, tool calls, observations, critique, and handoff output.',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { type: 'object' } },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/l5/meet-loop-states': {
+      get: {
+        tags: ['social-agent-l5'],
+        operationId: 'socialAgentL5MeetLoopStates',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'stage',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 200 },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Meet Loop state-machine rows from invite through review and Life Graph writeback.',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { type: 'object' } },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/l5/patch-effects': {
+      get: {
+        tags: ['social-agent-l5'],
+        operationId: 'socialAgentL5PatchEffects',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'patchId',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer' },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 200 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Canary patch online metrics and decisions.',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { type: 'object' } },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/l5/auto-runs': {
+      get: {
+        tags: ['social-agent-l5'],
+        operationId: 'socialAgentL5AutoRuns',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 200 },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Auto self-improve patch queue with eval, rollout, and rollback metadata.',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { type: 'object' } },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/l5/observability': {
+      get: {
+        tags: ['social-agent-l5'],
+        operationId: 'socialAgentL5Observability',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description:
+              'Production observability snapshot with trace counters, token latency, tool latency, failure reasons, approval blocks, satisfaction, and alerts.',
+            content: { 'application/json': { schema: { type: 'object' } } },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/l5/observability/satisfaction': {
+      post: {
+        tags: ['social-agent-l5'],
+        operationId: 'socialAgentL5RecordSatisfaction',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['score'],
+                properties: {
+                  score: { type: 'number', minimum: 0, maximum: 1 },
+                  source: { type: 'string' },
+                  traceId: { type: 'string', nullable: true },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description:
+              'Updated production observability snapshot after recording user satisfaction.',
+            content: { 'application/json': { schema: { type: 'object' } } },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/l5/subagent-worker-jobs': {
+      get: {
+        tags: ['social-agent-l5'],
+        operationId: 'socialAgentL5SubagentWorkerJobs',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'queueName',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 200 },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'PostgreSQL-backed subagent worker jobs with queue status, attempts, locks, and results.',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { type: 'object' } },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/l5/subagent-worker-jobs/{id}/requeue': {
+      post: {
+        tags: ['social-agent-l5'],
+        operationId: 'socialAgentL5RequeueSubagentWorkerJob',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Requeues a failed or cancelled subagent worker job.',
+            content: { 'application/json': { schema: { type: 'object' } } },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/l5/subagent-worker-jobs/{id}/cancel': {
+      post: {
+        tags: ['social-agent-l5'],
+        operationId: 'socialAgentL5CancelSubagentWorkerJob',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Cancels a queued subagent worker job.',
+            content: { 'application/json': { schema: { type: 'object' } } },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/self-improve/runner/run-once': {
+      post: {
+        tags: ['social-agent-l5'],
+        operationId: 'socialAgentSelfImproveRunnerRunOnce',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description:
+              'Runs one self-improve automation cycle: cluster failures, create patches, evaluate, canary, and reconcile.',
+            content: { 'application/json': { schema: { type: 'object' } } },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/admin/rbac/roles': {
+      get: {
+        tags: ['admin-rbac'],
+        operationId: 'adminRbacListRoles',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Lists admin RBAC roles and attached permissions.',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { type: 'object' } },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '403': { $ref: '#/components/responses/Error' },
+        },
+      },
+      post: {
+        tags: ['admin-rbac'],
+        operationId: 'adminRbacCreateRole',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { type: 'object' },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Creates an admin role.',
+            content: { 'application/json': { schema: { type: 'object' } } },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '403': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/admin/rbac/users/{userId}/roles': {
+      get: {
+        tags: ['admin-rbac'],
+        operationId: 'adminRbacListUserRoles',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'userId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Lists roles and effective permissions for a user.',
+            content: { 'application/json': { schema: { type: 'object' } } },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '403': { $ref: '#/components/responses/Error' },
+        },
+      },
+      put: {
+        tags: ['admin-rbac'],
+        operationId: 'adminRbacSetUserRoles',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'userId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { type: 'object' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Replaces admin role assignments for a user.',
+            content: { 'application/json': { schema: { type: 'object' } } },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '403': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/admin/rbac/audit-logs': {
+      get: {
+        tags: ['admin-rbac'],
+        operationId: 'adminRbacAuditLogs',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 200 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Lists admin RBAC access and mutation audit logs.',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { type: 'object' } },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '403': { $ref: '#/components/responses/Error' },
         },
       },
     },
@@ -2659,6 +3288,8 @@ export const fitMeetCoreOpenApi = {
         required: ['goal'],
         properties: {
           goal: { type: 'string', minLength: 1 },
+          taskId: { type: ['integer', 'null'] },
+          city: { type: ['string', 'null'] },
           permissionMode: {
             type: 'string',
             enum: [
@@ -2671,6 +3302,15 @@ export const fitMeetCoreOpenApi = {
             ],
           },
           idempotencyKey: { type: 'string' },
+          clientContext: {
+            type: 'object',
+            additionalProperties: true,
+            properties: {
+              timezone: { type: 'string' },
+              locale: { type: 'string' },
+              source: { type: 'string', enum: ['web', 'ios'] },
+            },
+          },
         },
       },
       SocialAgentChatRunResult: {
@@ -2718,7 +3358,7 @@ export const fitMeetCoreOpenApi = {
           },
           cards: {
             type: 'array',
-            items: { type: 'object', additionalProperties: true },
+            items: { $ref: '#/components/schemas/FitMeetAlphaCard' },
           },
           safety: {
             type: 'object',
@@ -2742,14 +3382,81 @@ export const fitMeetCoreOpenApi = {
           message: { type: 'string' },
           taskId: { type: 'integer' },
           hasCandidates: { type: 'boolean' },
+          idempotencyKey: { type: 'string' },
+          clientContext: {
+            type: 'object',
+            additionalProperties: true,
+            properties: {
+              timezone: { type: 'string' },
+              locale: { type: 'string' },
+              source: { type: 'string', enum: ['web', 'ios'] },
+            },
+          },
         },
       },
       SocialAgentCardActionInput: {
         type: 'object',
         required: ['action'],
         properties: {
-          action: { type: 'string' },
+          action: {
+            type: 'string',
+            enum: fitMeetAgentSchemaActions,
+          },
+          idempotencyKey: { type: 'string' },
           payload: { type: 'object', additionalProperties: true },
+        },
+      },
+      FitMeetAlphaCardType: {
+        type: 'string',
+        enum: fitMeetAlphaCardTypes,
+      },
+      FitMeetAgentSchemaAction: {
+        type: 'string',
+        enum: fitMeetAgentSchemaActions,
+      },
+      FitMeetAgentLoopStage: {
+        type: 'string',
+        enum: fitMeetAgentLoopStages,
+      },
+      FitMeetAlphaCardAction: {
+        type: 'object',
+        required: ['id', 'label', 'action', 'requiresConfirmation'],
+        additionalProperties: true,
+        properties: {
+          id: { type: 'string' },
+          label: { type: 'string' },
+          action: {
+            type: 'string',
+            enum: fitMeetAlphaCardActions,
+          },
+          schemaAction: {
+            $ref: '#/components/schemas/FitMeetAgentSchemaAction',
+          },
+          loopStage: {
+            $ref: '#/components/schemas/FitMeetAgentLoopStage',
+          },
+          requiresConfirmation: { type: 'boolean' },
+          payload: { type: 'object', additionalProperties: true },
+        },
+      },
+      FitMeetAlphaCard: {
+        type: 'object',
+        required: ['id', 'type', 'title', 'data', 'actions'],
+        additionalProperties: true,
+        properties: {
+          id: { type: 'string' },
+          type: { $ref: '#/components/schemas/FitMeetAlphaCardType' },
+          title: { type: 'string' },
+          body: { type: 'string' },
+          status: {
+            type: 'string',
+            enum: ['ready', 'waiting_confirmation', 'completed', 'blocked'],
+          },
+          data: { type: 'object', additionalProperties: true },
+          actions: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/FitMeetAlphaCardAction' },
+          },
         },
       },
       SocialAgentCandidateActionInput: {
@@ -3057,7 +3764,7 @@ export const fitMeetCoreOpenApi = {
           lightStatus: { type: 'string' },
           cards: {
             type: 'array',
-            items: { type: 'object', additionalProperties: true },
+            items: { $ref: '#/components/schemas/FitMeetAlphaCard' },
           },
           safeStatus: { type: 'object', additionalProperties: true },
           pendingConfirmations: {

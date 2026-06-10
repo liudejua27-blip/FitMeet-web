@@ -182,7 +182,15 @@ describe('SocialAgentMainAgentTurnService', () => {
         boundaryNotes: [],
         requiredConfirmations: [],
       },
-      cards: [{ id: 'safety', type: 'safety_boundary', data: {}, actions: [] }],
+      cards: [
+        {
+          id: 'safety',
+          type: 'safety_boundary',
+          title: '安全提醒',
+          data: {},
+          actions: [],
+        },
+      ],
       structuredIntent: { intent: 'unsafe' },
     });
     const { messageLog, metrics, savedEvents, service, taskRepo } =

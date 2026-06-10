@@ -46,7 +46,7 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
     updatedAt: new Date('2026-06-05T00:04:00.000Z'),
     createdAt: new Date('2026-06-05T00:00:00.000Z'),
     ...overrides,
-  } as AgentTask;
+  } as unknown as AgentTask;
   task.result = withSocialAgentStoredRun(task.result, {
     taskId: task.id,
     runId: 'sar_restore_1',
@@ -68,7 +68,7 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
       visibleSteps: [{ id: 'done', label: '完成', status: 'done' }],
       assistantMessage: '我找到了一个合适候选人',
       socialRequestDraft: null,
-      candidates: [{ userId: 22, nickname: 'Alex' }],
+      candidates: [{ userId: 22, nickname: 'Alex' } as never],
       approvalRequiredActions: [],
       events: [],
     },
@@ -85,13 +85,33 @@ function makeEvent(): AgentTaskEvent {
     actor: AgentTaskEventActor.Agent,
     summary: '已返回候选卡片',
     payload: {
-      candidates: [{ userId: 22, nickname: 'Alex' }],
+      candidates: [{ userId: 22, nickname: 'Alex' } as never],
       message: '我找到了一个合适候选人',
     },
     stepId: null,
     toolCallId: null,
     createdAt: new Date('2026-06-05T00:03:00.000Z'),
-  } as AgentTaskEvent;
+  } as unknown as AgentTaskEvent;
+}
+
+function makeApprovalDecisionEvent(): AgentTaskEvent {
+  return {
+    id: 502,
+    taskId: 101,
+    ownerUserId: 7,
+    eventType: AgentTaskEventType.ConfirmationReceived,
+    actor: AgentTaskEventActor.User,
+    summary: '用户已批准：发送第一条消息',
+    payload: {
+      approvalId: 301,
+      actionType: 'send_message',
+      status: 'approved',
+      decision: 'approved',
+    },
+    stepId: null,
+    toolCallId: null,
+    createdAt: new Date('2026-06-05T00:05:00.000Z'),
+  } as unknown as AgentTaskEvent;
 }
 
 function makeApproval(): AgentApprovalRequest {
@@ -103,12 +123,13 @@ function makeApproval(): AgentApprovalRequest {
     riskLevel: ApprovalRiskLevel.Low,
     payload: { targetUserId: 22 },
     expiresAt: new Date('2026-06-05T01:00:00.000Z'),
-  } as AgentApprovalRequest;
+  } as unknown as AgentApprovalRequest;
 }
 
 function makeHarness(
   options: {
     approvalsReject?: boolean;
+    events?: AgentTaskEvent[];
     task?: AgentTask | null;
   } = {},
 ) {
@@ -117,7 +138,9 @@ function makeHarness(
     findOne: jest.fn().mockResolvedValue(task),
   };
   const eventRepo = {
-    find: jest.fn().mockResolvedValue(task ? [makeEvent()] : []),
+    find: jest
+      .fn()
+      .mockResolvedValue(task ? (options.events ?? [makeEvent()]) : []),
   };
   const approvals = {
     getPendingForTask: jest
@@ -208,7 +231,9 @@ describe('SocialAgentSessionRestoreService', () => {
   });
 
   it('builds timeline messages and preserves candidate action state', async () => {
-    const { service } = makeHarness();
+    const { service } = makeHarness({
+      events: [makeEvent(), makeApprovalDecisionEvent()],
+    });
 
     const timeline = await service.buildTaskTimeline({
       ownerUserId: 7,
@@ -230,6 +255,11 @@ describe('SocialAgentSessionRestoreService', () => {
           role: 'assistant',
           kind: 'candidates',
           text: '我找到了一个合适候选人',
+        }),
+        expect.objectContaining({
+          role: 'system',
+          kind: 'status',
+          text: '用户已批准：发送第一条消息',
         }),
       ]),
     );

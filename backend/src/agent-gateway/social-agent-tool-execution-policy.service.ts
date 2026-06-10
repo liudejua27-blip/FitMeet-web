@@ -1,5 +1,6 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable, Optional } from '@nestjs/common';
 
+import { AgentSelfImproveService } from './agent-self-improve.service';
 import { AgentPermissionService } from './agent-permission.service';
 import {
   AgentTask,
@@ -11,6 +12,7 @@ import {
   getSocialAgentPermissionActionForTool,
   getSocialAgentToolRiskLevelForPolicy,
   getSocialAgentToolSceneActionType,
+  requiresMandatorySocialAgentApproval,
   SOCIAL_AGENT_HIGH_RISK_TOOL_DAILY_LIMITS,
 } from './social-agent-tool-policy';
 import {
@@ -24,6 +26,8 @@ export class SocialAgentToolExecutionPolicyService {
     private readonly permissions: AgentPermissionService,
     private readonly toolRegistry: FitMeetAgentToolRegistryService,
     private readonly sceneRisk: SceneRiskPolicyService,
+    @Optional()
+    private readonly selfImprove?: AgentSelfImproveService,
   ) {}
 
   assertToolAllowed(input: {
@@ -112,7 +116,12 @@ export class SocialAgentToolExecutionPolicyService {
           input.exactLocation,
       ),
     });
+    const mandatoryApproval = requiresMandatorySocialAgentApproval(
+      toolName,
+      input,
+    );
     const highRisk =
+      mandatoryApproval ||
       toolName === SocialAgentToolName.OfflineMeeting ||
       toolName === SocialAgentToolName.CreateActivity ||
       toolName === SocialAgentToolName.JoinActivity ||
@@ -127,9 +136,11 @@ export class SocialAgentToolExecutionPolicyService {
       registryToolName: registeredTool?.name ?? null,
       category: registeredTool?.category ?? null,
       requiresApproval:
+        mandatoryApproval ||
         sceneRisk.requiresConfirmation ||
         registeredTool?.requiresApproval ||
         false,
+      mandatoryApproval,
       requiresDoubleConfirmation: sceneRisk.requiresDoubleConfirmation,
       riskLevel: getSocialAgentToolRiskLevelForPolicy(sceneRisk.riskLevel),
       sceneRisk,
@@ -157,6 +168,124 @@ export class SocialAgentToolExecutionPolicyService {
     };
   }
 
+  async buildPolicyMetadataWithPatches(
+    task: AgentTask,
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown> = {},
+  ): Promise<Record<string, unknown>> {
+    const base = this.buildPolicyMetadata(task, toolName, input);
+    if (!this.selfImprove) return base;
+    const [toolPatches, safetyPatches] = await Promise.all([
+      this.selfImprove.publishedToolPolicyPatches(toolName).catch(() => []),
+      this.selfImprove
+        .publishedSafetyPolicyPatches('scene_risk')
+        .catch(() => []),
+    ]);
+    let policy = base;
+    for (const patch of safetyPatches) {
+      policy = this.applySafetyPolicyPatch(policy, patch);
+    }
+    for (const patch of toolPatches) {
+      policy = this.applyToolPolicyPatch(policy, patch);
+    }
+    return policy;
+  }
+
+  private applyToolPolicyPatch(
+    policy: Record<string, unknown>,
+    patch: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const next = { ...policy };
+    if (typeof patch.forceRequiresApproval === 'boolean') {
+      next.requiresApproval = patch.forceRequiresApproval;
+    }
+    if (typeof patch.requiresApproval === 'boolean') {
+      next.requiresApproval = patch.requiresApproval;
+    }
+    if (this.isPolicyRiskLevel(patch.forceRiskLevel)) {
+      next.riskLevel = patch.forceRiskLevel;
+      next.highRisk = patch.forceRiskLevel === 'high';
+    }
+    if (typeof patch.executionContract === 'string') {
+      next.executionContract = patch.executionContract;
+    }
+    if (
+      typeof patch.dailyLimit === 'number' &&
+      Number.isFinite(patch.dailyLimit)
+    ) {
+      next.dailyLimit = Math.max(0, Math.floor(patch.dailyLimit));
+    }
+    if (patch.blocked === true) {
+      next.executionContract = 'blocked_by_self_improve_policy';
+      next.requiresApproval = true;
+      next.highRisk = true;
+    }
+    next.selfImproveToolPolicyApplied = true;
+    return next;
+  }
+
+  private applySafetyPolicyPatch(
+    policy: Record<string, unknown>,
+    patch: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const sceneRisk = this.asRecord(policy.sceneRisk);
+    const nextSceneRisk = { ...sceneRisk };
+    if (this.isSceneRiskLevel(patch.forceMinRiskLevel)) {
+      nextSceneRisk.riskLevel = this.maxSceneRisk(
+        this.string(sceneRisk.riskLevel) ?? 'low',
+        patch.forceMinRiskLevel,
+      );
+      policy = {
+        ...policy,
+        riskLevel:
+          nextSceneRisk.riskLevel === 'critical'
+            ? 'high'
+            : nextSceneRisk.riskLevel,
+        highRisk:
+          nextSceneRisk.riskLevel === 'high' ||
+          nextSceneRisk.riskLevel === 'critical' ||
+          policy.highRisk === true,
+      };
+    } else {
+      policy = { ...policy };
+    }
+    if (typeof patch.requireConfirmation === 'boolean') {
+      nextSceneRisk.requiresConfirmation =
+        patch.requireConfirmation ||
+        nextSceneRisk.requiresConfirmation === true;
+      policy.requiresApproval =
+        patch.requireConfirmation || policy.requiresApproval === true;
+    }
+    if (typeof patch.requireDoubleConfirmation === 'boolean') {
+      nextSceneRisk.requiresDoubleConfirmation =
+        patch.requireDoubleConfirmation ||
+        nextSceneRisk.requiresDoubleConfirmation === true;
+      policy.requiresDoubleConfirmation =
+        patch.requireDoubleConfirmation ||
+        policy.requiresDoubleConfirmation === true;
+    }
+    nextSceneRisk.blockedActions = [
+      ...new Set([
+        ...this.stringList(sceneRisk.blockedActions),
+        ...this.stringList(patch.blockedActions),
+      ]),
+    ];
+    nextSceneRisk.safetyPrompts = [
+      ...new Set([
+        ...this.stringList(sceneRisk.safetyPrompts),
+        ...this.stringList(patch.safetyPrompts),
+        ...(typeof patch.safetyPrompt === 'string' && patch.safetyPrompt.trim()
+          ? [patch.safetyPrompt.trim()]
+          : []),
+      ]),
+    ];
+    return {
+      ...policy,
+      sceneRisk: nextSceneRisk,
+      selfImproveSafetyPolicyApplied: true,
+    };
+  }
+
   private string(value: unknown): string | undefined {
     return typeof value === 'string' && value.trim() ? value.trim() : undefined;
   }
@@ -178,5 +307,45 @@ export class SocialAgentToolExecutionPolicyService {
     } catch {
       return String(value);
     }
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
+  private stringList(value: unknown): string[] {
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === 'string')
+      : [];
+  }
+
+  private isPolicyRiskLevel(
+    value: unknown,
+  ): value is 'low' | 'medium' | 'high' {
+    return value === 'low' || value === 'medium' || value === 'high';
+  }
+
+  private isSceneRiskLevel(
+    value: unknown,
+  ): value is 'low' | 'medium' | 'high' | 'critical' {
+    return (
+      value === 'low' ||
+      value === 'medium' ||
+      value === 'high' ||
+      value === 'critical'
+    );
+  }
+
+  private maxSceneRisk(
+    left: string,
+    right: 'low' | 'medium' | 'high' | 'critical',
+  ): 'low' | 'medium' | 'high' | 'critical' {
+    const order = ['low', 'medium', 'high', 'critical'] as const;
+    const normalizedLeft = this.isSceneRiskLevel(left) ? left : 'low';
+    return order.indexOf(normalizedLeft) >= order.indexOf(right)
+      ? normalizedLeft
+      : right;
   }
 }

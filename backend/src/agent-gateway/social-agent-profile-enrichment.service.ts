@@ -23,7 +23,10 @@ import {
 import { readSocialAgentConversationHistory } from './social-agent-chat-memory.presenter';
 import type { SocialAgentBrainTurnDecision } from './social-agent-brain.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
-import type { ExtractedProfileFields } from './social-agent-chat.types';
+import type {
+  ExtractedProfileFields,
+  StreamEmit,
+} from './social-agent-chat.types';
 import type { SocialAgentMemoryContext } from './social-agent-memory-context.service';
 import {
   SocialAgentToolExecutorService,
@@ -57,12 +60,15 @@ export class SocialAgentProfileEnrichmentService {
     message: string;
     intent: SocialAgentIntentType;
     buildMemoryContext: MemoryContextBuilder;
+    emit?: StreamEmit;
+    signal?: AbortSignal | null;
   }): Promise<{
     assistantMessage: string;
     savedContext: boolean;
     profileUpdated: boolean;
     profileUpdateProposal?: LifeGraphProposalDto | null;
     task: AgentTask;
+    assistantStreamed?: boolean;
   }> {
     const { ownerUserId, task, message, intent, buildMemoryContext } = input;
 
@@ -176,6 +182,7 @@ export class SocialAgentProfileEnrichmentService {
       });
       await this.taskRepo.save(task);
       const fallbackReply = this.profileUpdatedReply(mergedProfile, output);
+      let assistantStreamed = false;
       return {
         assistantMessage: await this.chatLlm.generateAgentBrainReply({
           message,
@@ -187,11 +194,25 @@ export class SocialAgentProfileEnrichmentService {
           toolOutput: output,
           fallbackReply,
           memoryContext: buildMemoryContext(task),
+          onDelta: input.emit
+            ? async (delta) => {
+                if (!delta) return;
+                assistantStreamed = true;
+                await input.emit?.({
+                  type: 'assistant_delta',
+                  messageId: `agent-message:${task.id}`,
+                  delta,
+                  source: 'llm',
+                });
+              }
+            : undefined,
+          signal: input.signal,
         }),
         savedContext: true,
         profileUpdated: call.status === 'succeeded',
         profileUpdateProposal: null,
         task,
+        assistantStreamed,
       };
     }
 
@@ -209,6 +230,8 @@ export class SocialAgentProfileEnrichmentService {
       lastCompletedStep: 'profile_extracted',
     });
     transitionSocialAgentState(task, 'profile_detected');
+    await this.taskRepo.save(task);
+    let assistantStreamed = false;
     return {
       assistantMessage: await this.chatLlm.generateAgentBrainReply({
         message,
@@ -222,11 +245,25 @@ export class SocialAgentProfileEnrichmentService {
         sourceMessage,
         fallbackReply,
         memoryContext: buildMemoryContext(task),
+        onDelta: input.emit
+          ? async (delta) => {
+              if (!delta) return;
+              assistantStreamed = true;
+              await input.emit?.({
+                type: 'assistant_delta',
+                messageId: `agent-message:${task.id}`,
+                delta,
+                source: 'llm',
+              });
+            }
+          : undefined,
+        signal: input.signal,
       }),
       savedContext: true,
       profileUpdated: false,
       profileUpdateProposal: null,
       task,
+      assistantStreamed,
     };
   }
 

@@ -13,6 +13,7 @@ import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.s
 type EnterRouteTurnInput = {
   ownerUserId: number;
   body: SocialAgentRouteMessageBody;
+  signal?: AbortSignal | null;
 };
 
 type EnterRouteTurnResult = {
@@ -39,6 +40,7 @@ export class SocialAgentRouteEntranceService {
       input.ownerUserId,
       this.number(input.body.taskId),
       message,
+      input.body.idempotencyKey ?? null,
     );
     await this.messageLog.recordUserMessage(task, message);
 
@@ -48,6 +50,7 @@ export class SocialAgentRouteEntranceService {
       message,
       hasCandidates: input.body.hasCandidates === true,
       startedAt,
+      signal: input.signal,
     });
 
     task = mainAgentTurn.task;

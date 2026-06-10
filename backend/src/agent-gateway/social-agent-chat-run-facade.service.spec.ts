@@ -22,7 +22,7 @@ describe('SocialAgentChatRunFacadeService', () => {
     });
 
     expect(runOrchestrator.run).toHaveBeenNthCalledWith(1, 7, body);
-    expect(runOrchestrator.run).toHaveBeenNthCalledWith(2, 7, body, emit);
+    expect(runOrchestrator.run).toHaveBeenNthCalledWith(2, 7, body, emit, {});
   });
 
   it('wires queued runs to the orchestrator and user-facing step labels', async () => {

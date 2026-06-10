@@ -127,12 +127,26 @@ describe('social-agent-chat-final-response.presenter', () => {
       message: '帮我解释一下',
       route: makeRoute(),
       task: makeTask(),
-      memoryContext: { longTerm: { city: '青岛' } },
+      memoryContext: {
+        longTerm: {
+          profileFacts: { city: '青岛' },
+          preferences: {},
+          boundaries: {},
+          activityPreferences: {},
+          socialGoals: [],
+          availability: [],
+          matchSignals: {},
+          taskCount: 0,
+          updatedAt: null,
+        },
+      } as never,
       toolResults: [{ name: 'get_conversation_history', success: true }],
       fallbackReply: '可以。',
     });
 
-    expect(input.memoryContext).toEqual({ longTerm: { city: '青岛' } });
+    expect(input.memoryContext).toMatchObject({
+      longTerm: { profileFacts: { city: '青岛' } },
+    });
     expect(input.toolResults).toEqual([
       { name: 'get_conversation_history', success: true },
     ]);

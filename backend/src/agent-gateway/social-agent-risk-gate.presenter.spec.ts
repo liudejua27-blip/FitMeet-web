@@ -60,7 +60,7 @@ describe('social-agent-risk-gate.presenter', () => {
     expect(
       buildSocialAgentRiskGateDecision({
         task,
-        toolName: SocialAgentToolName.SendMessage,
+        toolName: SocialAgentToolName.DraftOpener,
         toolInput: { targetUserId: 2, text: 'Hi' },
         stepId: 'step_1',
         policy: { ...basePolicy, requiresConfirmation: false },

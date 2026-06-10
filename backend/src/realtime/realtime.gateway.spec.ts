@@ -1,7 +1,17 @@
 import { RealtimeGateway } from './realtime.gateway';
 import { RealtimeEventService } from './realtime-event.service';
+import { Socket } from 'socket.io';
 
-function socket(token?: string) {
+type TestRealtimeSocket = Socket & {
+  joined: string[];
+  emitted: Array<{ event: string; payload: unknown }>;
+  join: jest.Mock<void, [string]>;
+  leave: jest.Mock;
+  emit: jest.Mock<void, [string, unknown]>;
+  disconnect: jest.Mock<void, [boolean?]>;
+};
+
+function socket(token?: string): TestRealtimeSocket {
   const joined: string[] = [];
   const emitted: Array<{ event: string; payload: unknown }> = [];
   return {
@@ -20,7 +30,7 @@ function socket(token?: string) {
     disconnect: jest.fn(),
     joined,
     emitted,
-  } as never;
+  } as unknown as TestRealtimeSocket;
 }
 
 describe('RealtimeGateway', () => {

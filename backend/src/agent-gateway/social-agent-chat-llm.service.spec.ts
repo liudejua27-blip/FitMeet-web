@@ -67,10 +67,13 @@ function makeRoute(
 function makeService(
   configValues: Record<string, string | undefined>,
   metrics: { recordError: jest.Mock } = { recordError: jest.fn() },
+  selfImprove?: { publishedLifeGraphExtractionRules: jest.Mock },
 ): SocialAgentChatLlmService {
   return new SocialAgentChatLlmService(
     metrics as never,
     new SocialAgentChatDeepSeekClientService(makeConfig(configValues) as never),
+    undefined,
+    selfImprove as never,
   );
 }
 
@@ -322,5 +325,38 @@ describe('SocialAgentChatLlmService', () => {
         (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
       ).model,
     ).toBe('deepseek-v4-flash');
+  });
+
+  it('injects published life graph extraction rules into structured extraction', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          choices: [{ message: { content: JSON.stringify({ city: '青岛' }) } }],
+        }),
+    });
+    global.fetch = fetchMock as never;
+    const selfImprove = {
+      publishedLifeGraphExtractionRules: jest
+        .fn()
+        .mockResolvedValue(['Extract availableTimes only when explicit.']),
+    };
+    const service = makeService(
+      {
+        DEEPSEEK_API_KEY: 'test-key',
+        DEEPSEEK_BASE_URL: 'https://deepseek.test',
+      },
+      { recordError: jest.fn() },
+      selfImprove,
+    );
+
+    await service.extractProfileFieldsWithLlm(makeTask(), '我在青岛。');
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
+    ) as { messages: Array<{ role: string; content: string }> };
+    expect(body.messages[0].content).toContain(
+      'Self-improve rule: Extract availableTimes only when explicit.',
+    );
   });
 });

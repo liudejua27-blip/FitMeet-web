@@ -4,62 +4,28 @@ import { Agent, run, tool } from '@openai/agents';
 import { z } from 'zod';
 
 import { cleanDisplayText } from '../common/display-text.util';
+import { AgentLoopService } from './agent-loop.service';
+import {
+  enforceFitMeetAlphaStructuredIntentHandoff,
+  FitMeetAlphaStructuredIntentSchema as StructuredIntentSchema,
+  normalizeFitMeetAlphaStructuredIntentOutput,
+} from './fitmeet-alpha-structured-intent';
 import type {
+  FitMeetAlphaAgentName,
   FitMeetAgentSafety,
   FitMeetAgentTrace,
   FitMeetAlphaCard,
   FitMeetAlphaTurnDecision,
   FitMeetAlphaTurnInput,
 } from './fitmeet-alpha-agent.types';
+import {
+  FITMEET_ALPHA_AGENT_HANDOFFS,
+  FITMEET_ALPHA_AGENT_PATH,
+  fitMeetAlphaAgentForNextAgent,
+} from './fitmeet-alpha-agent-topology';
 import { CardCopywriterService } from './response-quality/card-copywriter.service';
 import { SafetyCopyService } from './response-quality/safety-copy.service';
 import { TonePolicyService } from './response-quality/tone-policy.service';
-
-const StructuredIntentSchema = z.object({
-  intent: z
-    .enum([
-      'complete_life_graph',
-      'find_nearby_partner',
-      'analyze_life_rhythm',
-      'recommend_weekly_activity',
-      'view_profile_changes',
-      'general_social_need',
-      'blocked',
-    ])
-    .default('general_social_need'),
-  activityType: z.string().default(''),
-  locationText: z.string().default(''),
-  timePreference: z.string().default(''),
-  relationshipGoal: z.string().default(''),
-  targetPeople: z.string().default(''),
-  requiredConstraints: z.array(z.string()).default([]),
-  optionalPreferences: z.array(z.string()).default([]),
-  agentPlan: z.array(z.string()).default([]),
-  betaScore: z.number().min(0).max(100).default(72),
-  missingInformation: z.array(z.string()).default([]),
-  safetyNotes: z.array(z.string()).default([]),
-  needState: z
-    .enum([
-      'explicit_search',
-      'ambiguous_companionship',
-      'low_pressure_social',
-      'profile_work',
-      'activity_recommendation',
-      'safety_blocked',
-    ])
-    .default('explicit_search'),
-  socialPressureLevel: z.enum(['low', 'medium', 'high']).default('medium'),
-  readiness: z
-    .enum(['clarify', 'search', 'answer', 'block', 'confirm'])
-    .default('search'),
-  clarifyingQuestion: z.string().default(''),
-  requiresSearch: z.boolean().default(true),
-  requiresSafetyBoundary: z.boolean().default(true),
-  nextAgent: z
-    .enum(['life_graph', 'social_match', 'meet_loop', 'answer'])
-    .default('social_match'),
-  requiresConfirmation: z.boolean().default(true),
-});
 
 type AlphaAgentBundle = {
   mainAgent: Agent<any, any>;
@@ -73,6 +39,7 @@ export class FitMeetAlphaAgentSdkService {
 
   constructor(
     private readonly config: ConfigService,
+    @Optional() private readonly agentLoop?: AgentLoopService,
     @Optional() private readonly tone?: TonePolicyService,
     @Optional() private readonly safetyCopy?: SafetyCopyService,
     @Optional() private readonly cardCopywriter?: CardCopywriterService,
@@ -110,14 +77,14 @@ export class FitMeetAlphaAgentSdkService {
         assistantMessage:
           this.safetyCopy?.refusal(safety) ||
           '这个请求涉及安全或合规风险，我不能帮你执行匹配、联系或线下邀约。你可以换成公开、尊重边界的社交需求，例如“周末下午找同城跑步搭子”。',
-        structuredIntent: {
+        structuredIntent: enforceFitMeetAlphaStructuredIntentHandoff({
           intent: 'blocked',
           needState: 'safety_blocked',
           readiness: 'block',
           requiresSearch: false,
           requiresSafetyBoundary: true,
           requiresConfirmation: true,
-        },
+        }),
       };
     }
 
@@ -125,9 +92,19 @@ export class FitMeetAlphaAgentSdkService {
       return {
         traceId,
         safety,
-        agentTrace,
+        agentTrace: {
+          ...agentTrace,
+          ...this.traceSubagents(
+            enforceFitMeetAlphaStructuredIntentHandoff(
+              this.ruleStructuredIntent(message),
+            ),
+            message,
+          ),
+        },
         cards: [],
-        structuredIntent: this.ruleStructuredIntent(message),
+        structuredIntent: enforceFitMeetAlphaStructuredIntentHandoff(
+          this.ruleStructuredIntent(message),
+        ),
       };
     }
 
@@ -148,14 +125,19 @@ export class FitMeetAlphaAgentSdkService {
           },
         },
       );
-      const structuredIntent = this.normalizeStructuredIntent(
-        result.finalOutput,
-        message,
-      );
+      const structuredIntent = normalizeFitMeetAlphaStructuredIntentOutput({
+        output: result.finalOutput,
+        fallbackMessage: message,
+        fallbackIntent: (fallbackMessage) =>
+          this.ruleStructuredIntent(fallbackMessage),
+      });
       return {
         traceId,
         safety,
-        agentTrace,
+        agentTrace: {
+          ...agentTrace,
+          ...this.traceSubagents(structuredIntent, message),
+        },
         cards: [],
         structuredIntent,
       };
@@ -176,6 +158,7 @@ export class FitMeetAlphaAgentSdkService {
             ...agentTrace.guardrails,
             { name: 'openai-agents-sdk-run', status: 'skipped' },
           ],
+          ...this.traceSubagents(this.ruleStructuredIntent(message), message),
         },
         cards: [],
         structuredIntent: this.ruleStructuredIntent(message),
@@ -401,6 +384,108 @@ export class FitMeetAlphaAgentSdkService {
     return cards;
   }
 
+  private subagentObservations(
+    structuredIntent: Record<string, unknown>,
+  ): NonNullable<FitMeetAgentTrace['observations']> {
+    const nextAgent =
+      fitMeetAlphaAgentForNextAgent(structuredIntent.nextAgent) ??
+      'FitMeet Main Agent';
+    const readiness =
+      typeof structuredIntent.readiness === 'string'
+        ? structuredIntent.readiness
+        : null;
+    const intent =
+      typeof structuredIntent.intent === 'string'
+        ? structuredIntent.intent
+        : null;
+    const shouldSearch = structuredIntent.requiresSearch === true;
+    const requiresConfirmation = structuredIntent.requiresConfirmation === true;
+    return [
+      {
+        agent: nextAgent,
+        intent,
+        readiness,
+        nextAction: shouldSearch
+          ? 'plan_tool_search'
+          : requiresConfirmation
+            ? 'wait_user_confirmation'
+            : readiness === 'clarify'
+              ? 'ask_clarifying_question'
+              : 'answer_directly',
+        critique: this.subagentCritique(nextAgent, structuredIntent),
+      },
+    ];
+  }
+
+  private traceSubagents(
+    structuredIntent: Record<string, unknown>,
+    message: string,
+  ): Pick<FitMeetAgentTrace, 'observations' | 'subagentHandoffs'> {
+    const observations = this.subagentObservations(structuredIntent);
+    const agent = observations[0]?.agent ?? 'FitMeet Main Agent';
+    return {
+      observations,
+      subagentHandoffs: [
+        this.agentLoop?.buildHandoff({
+          agent,
+          input: {
+            message,
+            structuredIntent,
+          },
+          toolNames: this.toolNamesForSubagent(agent),
+          observation: {
+            intent: structuredIntent.intent ?? null,
+            readiness: structuredIntent.readiness ?? null,
+            requiresSearch: structuredIntent.requiresSearch === true,
+            requiresConfirmation:
+              structuredIntent.requiresConfirmation === true,
+          },
+          handoffOutput: {
+            nextAgent: structuredIntent.nextAgent ?? null,
+            nextAction: observations[0]?.nextAction ?? null,
+          },
+        }) ?? {
+          agent,
+          input: { message, structuredIntent },
+          toolCalls: [],
+          observation: {},
+          critique: 'AgentLoopService unavailable; handoff trace only.',
+          handoffOutput: {},
+        },
+      ],
+    };
+  }
+
+  private toolNamesForSubagent(agent: FitMeetAlphaAgentName): string[] {
+    if (agent === 'Life Graph Agent') {
+      return ['get_user_profile', 'update_profile_from_agent_context'];
+    }
+    if (agent === 'Social Match Agent') {
+      return ['create_social_request', 'search_real_candidates'];
+    }
+    if (agent === 'Meet Loop Agent') {
+      return ['send_message_to_candidate', 'create_activity'];
+    }
+    if (agent === 'Math Agent') return ['calculate_fitness_math'];
+    return [];
+  }
+
+  private subagentCritique(
+    agentName: FitMeetAgentTrace['agentPath'][number],
+    structuredIntent: Record<string, unknown>,
+  ): string {
+    if (structuredIntent.readiness === 'clarify') {
+      return `${agentName} should ask one low-pressure clarification before calling tools.`;
+    }
+    if (structuredIntent.requiresSearch === true) {
+      return `${agentName} should emit a plan, call owned tools, observe results, then replan only if evidence is insufficient.`;
+    }
+    if (structuredIntent.requiresConfirmation === true) {
+      return `${agentName} should keep the action behind user confirmation and record the decision.`;
+    }
+    return `${agentName} can answer directly and update memory only after explicit user consent.`;
+  }
+
   private getBundle(): AlphaAgentBundle {
     if (this.bundle) return this.bundle;
 
@@ -444,6 +529,16 @@ export class FitMeetAlphaAgentSdkService {
       tools: [classifyNeed],
     });
 
+    const mathAgent = new Agent({
+      name: 'Math Agent',
+      handoffDescription:
+        '轻量运动计算智能体，处理配速、时间、距离和基础热量估算，不读写用户数据。',
+      instructions:
+        '你是 FitMeet Math Agent。只做无副作用运动计算，例如配速、距离、时间、粗略热量估算和训练节奏解释。不要给医疗建议，不要读取或写入用户画像，不要搜索候选人，不要创建活动。输出必须说明估算前提。',
+      outputType: StructuredIntentSchema,
+      tools: [classifyNeed],
+    });
+
     const inputGuardrail = {
       name: 'fitmeet-main-agent-input-safety',
       runInParallel: false,
@@ -461,8 +556,8 @@ export class FitMeetAlphaAgentSdkService {
       name: 'FitMeet Main Agent',
       handoffDescription: 'FitMeet Agent 总入口、总调度器和安全边界控制器。',
       instructions:
-        '你是 FitMeet Main Agent。先做安全过滤，再判断意图，必要时 handoff 给 Life Graph Agent、Social Match Agent 或 Meet Loop Agent。不要直接执行数据库或外部动作；所有发消息、加好友、创建线下活动和敏感画像更新都必须用户确认。输出必须符合结构化 schema，并给出 Beta 阶段可执行的 agentPlan。',
-      handoffs: [lifeGraphAgent, socialMatchAgent, meetLoopAgent],
+        '你是 FitMeet Main Agent。先做安全过滤，再判断意图，必要时 handoff 给 Life Graph Agent、Social Match Agent、Meet Loop Agent 或 Math Agent。不要直接执行数据库或外部动作；所有发消息、加好友、创建线下活动和敏感画像更新都必须用户确认。输出必须符合结构化 schema，并给出 Beta 阶段可执行的 agentPlan。',
+      handoffs: [lifeGraphAgent, socialMatchAgent, meetLoopAgent, mathAgent],
       inputGuardrails: [inputGuardrail],
       outputType: StructuredIntentSchema,
       tools: [classifyNeed],
@@ -471,30 +566,10 @@ export class FitMeetAlphaAgentSdkService {
     const bundle: AlphaAgentBundle = {
       mainAgent,
       traceTemplate: {
-        agentPath: [
-          'FitMeet Main Agent',
-          'Agent Brain',
-          'Life Graph Agent',
-          'Social Match Agent',
-          'Meet Loop Agent',
-        ],
-        handoffs: [
-          {
-            from: 'FitMeet Main Agent',
-            to: 'Life Graph Agent',
-            reason: '读取授权画像、偏好、边界和生活节奏。',
-          },
-          {
-            from: 'FitMeet Main Agent',
-            to: 'Social Match Agent',
-            reason: '解析社交需求并生成候选推荐。',
-          },
-          {
-            from: 'FitMeet Main Agent',
-            to: 'Meet Loop Agent',
-            reason: '在用户确认后推进消息、连接、活动和评价闭环。',
-          },
-        ],
+        agentPath: [...FITMEET_ALPHA_AGENT_PATH],
+        handoffs: FITMEET_ALPHA_AGENT_HANDOFFS.map((handoff) => ({
+          ...handoff,
+        })),
         guardrails: [],
       },
     };
@@ -631,6 +706,34 @@ export class FitMeetAlphaAgentSdkService {
         clarifyingQuestion: ambiguous.question,
         requiresSearch: false,
         requiresSafetyBoundary: true,
+        requiresConfirmation: false,
+      };
+    }
+
+    if (this.isFitnessMathRequest(text)) {
+      return {
+        intent: 'fitness_math',
+        nextAgent: 'math',
+        activityType: activityType || '运动',
+        locationText,
+        timePreference,
+        relationshipGoal,
+        targetPeople,
+        missingInformation: [],
+        requiredConstraints,
+        optionalPreferences,
+        agentPlan: [
+          'Math Agent 识别距离、时间、体重或配速信息',
+          '只做无副作用估算，不读取或写入用户数据',
+          '输出计算结果和估算前提',
+        ],
+        betaScore: 74,
+        needState: 'fitness_math',
+        socialPressureLevel: 'low',
+        readiness: 'answer',
+        clarifyingQuestion: '',
+        requiresSearch: false,
+        requiresSafetyBoundary: false,
         requiresConfirmation: false,
       };
     }
@@ -784,27 +887,6 @@ export class FitMeetAlphaAgentSdkService {
     };
   }
 
-  private normalizeStructuredIntent(
-    output: unknown,
-    fallbackMessage: string,
-  ): Record<string, unknown> {
-    const parsed = StructuredIntentSchema.safeParse(output);
-    if (parsed.success) return parsed.data;
-    if (typeof output === 'string') {
-      try {
-        const json: unknown = JSON.parse(output);
-        const jsonParsed = StructuredIntentSchema.safeParse(json);
-        if (jsonParsed.success) return jsonParsed.data;
-      } catch {
-        return {
-          ...this.ruleStructuredIntent(fallbackMessage),
-          modelOutput: output.slice(0, 1000),
-        };
-      }
-    }
-    return this.ruleStructuredIntent(fallbackMessage);
-  }
-
   private safetyCard(id: string, safety: FitMeetAgentSafety): FitMeetAlphaCard {
     if (this.cardCopywriter) return this.cardCopywriter.safetyCard(id, safety);
     return {
@@ -854,6 +936,20 @@ export class FitMeetAlphaAgentSdkService {
     if (/羽毛球|网球|篮球|足球|飞盘/.test(text)) return '球类运动';
     if (/爬山|徒步|露营|户外/.test(text)) return '户外活动';
     return '';
+  }
+
+  private isFitnessMathRequest(text: string): boolean {
+    return (
+      /(配速|热量|卡路里|消耗|公里.*分钟|分钟.*公里|跑.*多久|多久.*跑|bmi|体重指数|心率区间|训练心率|训练量|周跑量|每周.*每次|一周.*每次)/i.test(
+        text,
+      ) ||
+      /(计算|估算).{0,16}(配速|热量|卡路里|消耗|公里|跑步|骑行|游泳|bmi|体重指数|心率|训练量|周跑量)/i.test(
+        text,
+      ) ||
+      /(配速|热量|卡路里|消耗|公里|跑步|骑行|游泳|bmi|体重指数|心率|训练量|周跑量).{0,16}(计算|估算)/i.test(
+        text,
+      )
+    );
   }
 
   private ambiguousLowPressureIntent(input: {

@@ -2,11 +2,14 @@ import { AgentTaskPermissionMode } from './entities/agent-task.entity';
 import type { AgentTask } from './entities/agent-task.entity';
 import {
   buildSocialAgentActivityCompletionCard,
+  buildSocialAgentActivityDetailCard,
   buildSocialAgentActivityPlanCard,
   buildSocialAgentCardActionRouteResult,
   buildSocialAgentCheckinCard,
   buildSocialAgentLifeGraphUpdateCard,
   buildSocialAgentOpenerApprovalCard,
+  buildSocialAgentProofSubmittedCard,
+  buildSocialAgentProofUploadPromptCard,
   buildSocialAgentReviewCard,
   createSocialAgentActivityDtoFromPayload,
   mergeSocialAgentActivityPayload,
@@ -181,6 +184,55 @@ describe('social agent card action presenter', () => {
       canCorrect: true,
       canRevoke: true,
     });
+    expect(
+      buildSocialAgentProofUploadPromptCard({
+        taskId: 101,
+        activityId: 700,
+      }).actions?.[0],
+    ).toMatchObject({
+      schemaAction: 'activity.view_detail',
+      action: 'view_activity',
+    });
+    expect(
+      buildSocialAgentProofSubmittedCard({
+        taskId: 101,
+        activityId: 700,
+        proofId: 800,
+        proofType: 'scene_photo',
+      }).data,
+    ).toMatchObject({
+      status: 'proof_submitted',
+      proofStatus: '证明待对方确认',
+    });
+    expect(
+      buildSocialAgentActivityDetailCard({
+        taskId: 101,
+        activityId: 700,
+        activity: {
+          title: '周末慢跑',
+          status: 'completed',
+          city: '青岛',
+          locationName: '青岛大学操场',
+          proofRequired: true,
+          proofPolicy: 'mutual_or_proof',
+        },
+        proofs: [{ id: 800, status: 'pending', proofType: 'scene_photo' }],
+      }),
+    ).toMatchObject({
+      type: 'activity_status',
+      title: '周末慢跑',
+      data: expect.objectContaining({
+        status: 'completed',
+        proofCount: 1,
+        proofStatus: '1 条证明待确认',
+      }),
+      actions: [
+        expect.objectContaining({
+          schemaAction: 'activity.upload_proof',
+          action: 'upload_proof',
+        }),
+      ],
+    });
   });
 
   it('merges activity payloads from draft, meet loop, and current payload', () => {
@@ -228,6 +280,9 @@ describe('social agent card action presenter', () => {
     );
     expect(messageForSocialAgentSchemaAction('opener.regenerate')).toBe(
       '重新生成开场白',
+    );
+    expect(messageForSocialAgentSchemaAction('activity.upload_proof')).toBe(
+      '上传活动证明',
     );
   });
 });

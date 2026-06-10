@@ -8,7 +8,7 @@ describe('social-agent-run-completion.presenter', () => {
     expect(
       buildSocialAgentRunCompletionSnapshot(
         makeResult({
-          candidates: [{ targetUserId: 22 }],
+          candidates: [{ targetUserId: 22 } as never],
           approvalRequiredActions: [],
         }),
       ),
@@ -27,7 +27,7 @@ describe('social-agent-run-completion.presenter', () => {
       buildSocialAgentRunCompletionSnapshot(
         makeResult({
           candidates: [],
-          approvalRequiredActions: [{ actionType: 'send_message' }],
+          approvalRequiredActions: [{ actionType: 'send_message' } as never],
         }),
       ),
     ).toEqual({

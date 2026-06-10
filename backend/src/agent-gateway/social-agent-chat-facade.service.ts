@@ -12,6 +12,7 @@ import type {
   SocialAgentRouteMessageBody,
   SocialAgentSessionSnapshot,
   SocialAgentTaskTimelineSnapshot,
+  SocialAgentStreamOptions,
   StreamEmit,
 } from './social-agent-chat.types';
 import { SocialAgentReplanFacadeService } from './social-agent-replan-facade.service';
@@ -49,12 +50,42 @@ export class SocialAgentChatService {
     return this.turnFacade.handleMessage(ownerUserId, body);
   }
 
+  async handleMessageStream(
+    ownerUserId: number,
+    body: SocialAgentRouteMessageBody,
+    emit: StreamEmit,
+    options: SocialAgentStreamOptions = {},
+  ): Promise<SocialAgentIntentRouteResult> {
+    return this.turnFacade.handleMessageStream(
+      ownerUserId,
+      body,
+      emit,
+      options,
+    );
+  }
+
   async performCardAction(
     ownerUserId: number,
     taskId: number,
     body: SocialAgentCardActionBody,
   ): Promise<SocialAgentIntentRouteResult> {
     return this.turnFacade.performCardAction(ownerUserId, taskId, body);
+  }
+
+  async performCardActionStream(
+    ownerUserId: number,
+    taskId: number,
+    body: SocialAgentCardActionBody,
+    emit: StreamEmit,
+    options: SocialAgentStreamOptions = {},
+  ): Promise<SocialAgentIntentRouteResult> {
+    return this.turnFacade.performCardActionStream(
+      ownerUserId,
+      taskId,
+      body,
+      emit,
+      options,
+    );
   }
 
   async runQueued(
@@ -68,8 +99,9 @@ export class SocialAgentChatService {
     ownerUserId: number,
     body: SocialAgentChatRunBody,
     emit: StreamEmit,
+    options: SocialAgentStreamOptions = {},
   ): Promise<SocialAgentChatRunResult> {
-    return this.runFacade.runStream(ownerUserId, body, emit);
+    return this.runFacade.runStream(ownerUserId, body, emit, options);
   }
 
   async replanAndRefresh(

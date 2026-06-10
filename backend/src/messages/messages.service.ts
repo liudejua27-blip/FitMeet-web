@@ -42,6 +42,7 @@ import {
   isDisplayableText,
   sanitizeForDisplay,
 } from '../common/display-text.util';
+import { redactSensitiveText } from '../common/privacy-redaction.util';
 import { RealtimeEventService } from '../realtime/realtime-event.service';
 
 type SendMessageOptions = {
@@ -216,7 +217,7 @@ export class MessagesService {
 
     return messages.map((message) => ({
       id: message._id.toString(),
-      text: cleanDisplayText(message.text, '消息内容已隐藏'),
+      text: this.messageTextForDisplay(message.text),
       source: message.source ?? 'user',
       card: message.card ?? null,
       time: new Date(message.createdAt as Date | string).toLocaleTimeString(
@@ -236,7 +237,7 @@ export class MessagesService {
     text: string,
     options: SendMessageOptions = {},
   ) {
-    const content = cleanDisplayText(text, '').trim();
+    const content = this.normalizeMessageContent(text);
     if (!content) throw new BadRequestException('消息内容不能为空');
 
     const oid = this.toConversationObjectId(conversationId);
@@ -325,7 +326,7 @@ export class MessagesService {
       throw error;
     }
 
-    const safeText = cleanDisplayText(content, '消息内容已隐藏');
+    const safeText = this.messageTextForDisplay(content);
     const update: Record<string, unknown> = {
       lastMessage: safeText,
       lastMessageTime: new Date(),
@@ -402,7 +403,7 @@ export class MessagesService {
 
     const realtimePayload = {
       id: msg._id.toString(),
-      text: cleanDisplayText(msg.text, '消息内容已隐藏'),
+      text: this.messageTextForDisplay(msg.text),
       source: msg.source ?? 'user',
       card: msg.card ?? null,
       senderId,
@@ -444,7 +445,7 @@ export class MessagesService {
 
     return {
       id: msg._id.toString(),
-      text: cleanDisplayText(msg.text, '消息内容已隐藏'),
+      text: this.messageTextForDisplay(msg.text),
       source: msg.source ?? 'user',
       card: msg.card ?? null,
       senderId,
@@ -767,7 +768,7 @@ export class MessagesService {
     return messages.reverse().map((message) => ({
       id: String(message._id),
       conversationId,
-      text: cleanDisplayText(message.text, '消息内容已隐藏'),
+      text: this.messageTextForDisplay(message.text),
       source: message.source ?? 'user',
       card: message.card ?? null,
       metadata: message.metadata ?? null,
@@ -798,7 +799,7 @@ export class MessagesService {
       metadata?: Record<string, unknown>;
     } = {},
   ) {
-    const content = cleanDisplayText(text, '').trim();
+    const content = this.normalizeMessageContent(text);
     if (!content) throw new BadRequestException('content is required');
 
     const oid = this.toConversationObjectId(conversationId);
@@ -897,7 +898,7 @@ export class MessagesService {
 
     return {
       id: msg._id.toString(),
-      text: cleanDisplayText(msg.text, '消息内容已隐藏'),
+      text: this.messageTextForDisplay(msg.text),
       source: msg.source ?? 'ai_delegate',
       card: msg.card ?? null,
       senderId,
@@ -969,7 +970,7 @@ export class MessagesService {
         agentConnectionId: Number(message.agentConnectionId),
         ownerUserId: Number(message.ownerUserId),
         fromUserId: Number(message.senderId),
-        text: cleanDisplayText(message.text, '消息内容已隐藏'),
+        text: this.messageTextForDisplay(message.text),
         metadata: message.metadata ?? null,
         createdAt: message.createdAt,
       }));
@@ -1260,9 +1261,7 @@ export class MessagesService {
     text: string;
     unreadCount: number;
   }) {
-    const contentPreview = this.preview(
-      cleanDisplayText(input.text, '消息内容已隐藏'),
-    );
+    const contentPreview = this.preview(this.messageTextForDisplay(input.text));
     const sender = await this.userRepo.findOne({
       where: { id: input.fromUserId },
     });
@@ -1543,6 +1542,15 @@ export class MessagesService {
     return normalized.length > 160
       ? `${normalized.slice(0, 157)}...`
       : normalized;
+  }
+
+  private normalizeMessageContent(value: unknown): string {
+    return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+  }
+
+  private messageTextForDisplay(value: unknown): string {
+    const content = this.normalizeMessageContent(value);
+    return content ? redactSensitiveText(content) : '消息内容已隐藏';
   }
 
   private toObjectId(value: string | Types.ObjectId): Types.ObjectId {

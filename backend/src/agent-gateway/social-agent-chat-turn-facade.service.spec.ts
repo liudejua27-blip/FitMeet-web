@@ -19,6 +19,12 @@ type CardActionInput = {
 
 describe('SocialAgentChatTurnFacadeService', () => {
   it('wires route turn callbacks to replan and initial search services', async () => {
+    const callbacks = {
+      replanAndRefresh: jest.fn().mockResolvedValue({ runId: 'run-1' }),
+      queueInitialSearchForTask: jest
+        .fn()
+        .mockResolvedValue({ runId: 'run-2' }),
+    };
     const routeTurns = {
       handleMessage: jest.fn(async (input: RouteTurnInput) => {
         await input.replanAndRefresh(7, 101, {
@@ -30,19 +36,13 @@ describe('SocialAgentChatTurnFacadeService', () => {
       }),
     };
     const cardActionRouter = { perform: jest.fn() };
-    const replanFacade = {
-      replanAndRefresh: jest.fn().mockResolvedValue({ runId: 'run-1' }),
-    };
-    const initialSearchQueue = {
-      queueInitialSearchForTask: jest
-        .fn()
-        .mockResolvedValue({ runId: 'run-2' }),
+    const turnCallbacks = {
+      forOwner: jest.fn().mockReturnValue(callbacks),
     };
     const service = new SocialAgentChatTurnFacadeService(
       routeTurns as never,
       cardActionRouter as never,
-      replanFacade as never,
-      initialSearchQueue as never,
+      turnCallbacks as never,
     );
 
     await expect(
@@ -55,15 +55,16 @@ describe('SocialAgentChatTurnFacadeService', () => {
         body: { message: '帮我找跑步搭子' },
       }),
     );
-    expect(replanFacade.replanAndRefresh).toHaveBeenCalledWith(7, 101, {
+    expect(turnCallbacks.forOwner).toHaveBeenCalledWith(7);
+    expect(callbacks.replanAndRefresh).toHaveBeenCalledWith(7, 101, {
       userMessage: '换成周末下午',
       reason: 'user_follow_up',
     });
-    expect(initialSearchQueue.queueInitialSearchForTask).toHaveBeenCalledWith({
-      ownerUserId: 7,
-      task: { id: 101 },
-      goal: '周末跑步',
-    });
+    expect(callbacks.queueInitialSearchForTask).toHaveBeenCalledWith(
+      7,
+      { id: 101 },
+      '周末跑步',
+    );
   });
 
   it('routes card actions back through the same owner message flow', async () => {
@@ -84,8 +85,12 @@ describe('SocialAgentChatTurnFacadeService', () => {
     const service = new SocialAgentChatTurnFacadeService(
       routeTurns as never,
       cardActionRouter as never,
-      { replanAndRefresh: jest.fn() } as never,
-      { queueInitialSearchForTask: jest.fn() } as never,
+      {
+        forOwner: jest.fn().mockReturnValue({
+          replanAndRefresh: jest.fn(),
+          queueInitialSearchForTask: jest.fn(),
+        }),
+      } as never,
     );
 
     await expect(

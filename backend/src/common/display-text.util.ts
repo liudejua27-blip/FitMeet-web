@@ -44,8 +44,12 @@ export function isDisplayableText(value: unknown): boolean {
 }
 
 export function sanitizeForDisplay(value: unknown): unknown {
-  if (typeof value === 'string')
-    return cleanDisplayText(value, SANITIZED_TEXT_FALLBACK);
+  if (typeof value === 'string') {
+    return cleanDisplayText(
+      redactSensitiveText(value),
+      SANITIZED_TEXT_FALLBACK,
+    );
+  }
   if (Array.isArray(value)) {
     return value
       .map(sanitizeForDisplay)
@@ -58,9 +62,13 @@ export function sanitizeForDisplay(value: unknown): unknown {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, item]) => [
         key,
-        sanitizeForDisplay(item),
+        sanitizeForDisplay(redactSensitiveValue(item, key)),
       ]),
     );
   }
   return value;
 }
+import {
+  redactSensitiveText,
+  redactSensitiveValue,
+} from './privacy-redaction.util';

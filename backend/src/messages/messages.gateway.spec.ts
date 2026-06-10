@@ -25,7 +25,7 @@ describe('MessagesGateway', () => {
   let messagesService: jest.Mocked<
     Pick<MessagesService, 'sendMessage' | 'getParticipantIds'>
   >;
-  let jwtService: jest.Mocked<Pick<JwtService, 'verify'>>;
+  let jwtService: { verify: jest.Mock };
   let emit: jest.Mock;
   let server: { to: jest.Mock };
 

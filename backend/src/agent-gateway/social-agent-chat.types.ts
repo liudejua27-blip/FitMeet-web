@@ -27,6 +27,7 @@ import type {
   FitMeetAgentTrace,
   FitMeetAlphaCard,
 } from './fitmeet-alpha-agent.types';
+import type { AgentLoopRun, SubagentHandoffResult } from './agent-loop.types';
 
 export interface SocialAgentVisibleStep {
   id: string;
@@ -100,12 +101,30 @@ export interface SocialAgentChatRunResult {
   traceId?: string;
   agentTrace?: FitMeetAgentTrace;
   structuredIntent?: Record<string, unknown>;
+  assistantStreamed?: boolean;
+  agentLoop?: AgentLoopRun;
+  subagentHandoffs?: SubagentHandoffResult[];
 }
 
 export type SocialAgentChatStreamEvent =
   | { type: 'task'; taskId: number; status: AgentTaskStatus }
   | { type: 'step'; step: SocialAgentVisibleStep }
-  | { type: 'result'; result: SocialAgentChatRunResult }
+  | {
+      type: 'assistant_delta';
+      delta: string;
+      messageId?: string;
+      source?: 'llm' | 'fallback';
+    }
+  | {
+      type: 'assistant_done';
+      messageId?: string;
+      source?: 'llm' | 'fallback';
+    }
+  | {
+      type: 'result';
+      result: SocialAgentChatRunResult;
+      assistantStreamed?: boolean;
+    }
   | { type: 'error'; message: string };
 
 export type SocialAgentRequestDraft = NonNullable<
@@ -115,7 +134,14 @@ export type SocialAgentRequestDraft = NonNullable<
 export type SocialAgentChatRunBody = {
   goal?: string;
   permissionMode?: AgentTaskPermissionMode;
+  taskId?: number | null;
+  city?: string | null;
   idempotencyKey?: string | null;
+  clientContext?: {
+    timezone?: string | null;
+    locale?: string | null;
+    source?: string | null;
+  } | null;
 };
 
 export type SocialAgentChatReplanRunBody = {
@@ -128,11 +154,21 @@ export type SocialAgentRouteMessageBody = {
   message?: string | null;
   taskId?: number | null;
   hasCandidates?: boolean;
+  idempotencyKey?: string | null;
+  clientContext?: {
+    timezone?: string | null;
+    locale?: string | null;
+    source?: string | null;
+  } | null;
 };
 
 export type StreamEmit = (
   event: SocialAgentChatStreamEvent,
 ) => void | Promise<void>;
+
+export type SocialAgentStreamOptions = {
+  signal?: AbortSignal | null;
+};
 
 export type SocialAgentIntentAction =
   | 'answer'
@@ -170,6 +206,9 @@ export interface SocialAgentIntentRouteResult {
   traceId?: string;
   agentTrace?: FitMeetAgentTrace;
   structuredIntent?: Record<string, unknown>;
+  assistantStreamed?: boolean;
+  agentLoop?: AgentLoopRun;
+  subagentHandoffs?: SubagentHandoffResult[];
 }
 
 export interface SocialAgentPendingApprovalSnapshot {

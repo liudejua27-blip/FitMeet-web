@@ -18,26 +18,11 @@ describe('SocialAgentRouteTurnService', () => {
       shouldReplan: false,
       entities: {},
     };
-    const taskLifecycle = {
-      assertTaskOwner: jest.fn().mockResolvedValue(refreshedTask),
-    };
-    const routeContext = {
-      buildMemoryContext: jest.fn().mockReturnValue({ memory: true }),
-    };
     const candidateConfirmations = {
       handle: jest.fn().mockResolvedValue({ handled: false, task }),
     };
     const completions = {
-      complete: jest.fn(async (input) => ({ completed: true, ...input })),
-    };
-    const conversationTurns = {
-      handle: jest.fn().mockResolvedValue({
-        handled: false,
-        task,
-        savedContext: false,
-        profileUpdated: false,
-        profileUpdateProposal: null,
-      }),
+      complete: jest.fn((input) => ({ completed: true, ...input })),
     };
     const entrance = {
       enter: jest.fn().mockResolvedValue({
@@ -45,31 +30,6 @@ describe('SocialAgentRouteTurnService', () => {
         startedAt: '2026-06-07T01:00:00.000Z',
         task,
       }),
-    };
-    const profileTurns = {
-      handle: jest.fn().mockResolvedValue({
-        handled: false,
-        task,
-        savedContext: false,
-        profileUpdated: false,
-        profileUpdateProposal: null,
-      }),
-    };
-    const searchTurns = {
-      handle: jest.fn().mockResolvedValue({
-        handled: false,
-        savedContext: false,
-        activityResults: [],
-        queuedRun: null,
-        runMode: null,
-      }),
-    };
-    const actionTurns = {
-      handle: jest.fn(async (input) => ({
-        handled: input.route.intent === 'action_request',
-        assistantMessage: input.assistantMessage,
-        pendingApproval: null,
-      })),
     };
     const routeDecisions = {
       prepare: jest.fn().mockResolvedValue({
@@ -80,33 +40,47 @@ describe('SocialAgentRouteTurnService', () => {
         brainToolResults: [],
       }),
     };
+    const routeLoopRunner = {
+      run: jest.fn().mockResolvedValue({
+        task,
+        state: {
+          savedContext: false,
+          profileUpdated: false,
+          queuedRun: null,
+          runMode: null,
+          assistantMessage: '好的，我来处理。',
+          activityResults: [],
+          profileUpdateProposal: null,
+          assistantStreamed: false,
+          agentLoop: { runId: 'loop_1', steps: [] },
+          subagentHandoffs: [],
+        },
+        loop: { runId: 'loop_1', steps: [] },
+        actionTurn: {
+          handled: false,
+          assistantMessage: '好的，我来处理。',
+          pendingApproval: null,
+        },
+        subagentHandoffs: [],
+      }),
+    };
     const deps = {
       task,
       refreshedTask,
       route,
-      taskLifecycle,
-      routeContext,
       candidateConfirmations,
       completions,
-      conversationTurns,
       entrance,
-      profileTurns,
-      searchTurns,
-      actionTurns,
       routeDecisions,
+      routeLoopRunner,
       ...overrides,
     };
     const service = new SocialAgentRouteTurnService(
-      deps.taskLifecycle as never,
-      deps.routeContext as never,
       deps.candidateConfirmations as never,
       deps.completions as never,
-      deps.conversationTurns as never,
       deps.entrance as never,
-      deps.profileTurns as never,
-      deps.searchTurns as never,
-      deps.actionTurns as never,
       deps.routeDecisions as never,
+      deps.routeLoopRunner as never,
     );
 
     return { service, deps };
@@ -136,7 +110,7 @@ describe('SocialAgentRouteTurnService', () => {
     expect(deps.completions.complete).not.toHaveBeenCalled();
   });
 
-  it('returns candidate confirmation results before conversation/search/action turns', async () => {
+  it('returns candidate confirmation results before route loop execution', async () => {
     const candidateResult = {
       action: 'reply',
       assistantMessage: 'Candidate confirmed.',
@@ -160,23 +134,40 @@ describe('SocialAgentRouteTurnService', () => {
       }),
     ).resolves.toBe(candidateResult);
 
-    expect(deps.conversationTurns.handle).not.toHaveBeenCalled();
-    expect(deps.searchTurns.handle).not.toHaveBeenCalled();
-    expect(deps.actionTurns.handle).not.toHaveBeenCalled();
+    expect(deps.routeLoopRunner.run).not.toHaveBeenCalled();
     expect(deps.completions.complete).not.toHaveBeenCalled();
   });
 
-  it('refreshes task ownership after queueing a search before completion', async () => {
+  it('passes route loop output to completion', async () => {
     const queuedRun = { taskId: 101, runId: 'sar_run_1', status: 'queued' };
     const { service, deps } = makeService({
-      searchTurns: {
-        handle: jest.fn().mockResolvedValue({
-          handled: true,
-          assistantMessage: 'Search queued.',
-          savedContext: true,
-          activityResults: [{ type: 'search', status: 'queued' }],
-          queuedRun,
-          runMode: 'initial',
+      routeLoopRunner: {
+        run: jest.fn().mockResolvedValue({
+          task: {
+            id: 101,
+            ownerUserId: 7,
+            result: {},
+            statusReason: 'refreshed_after_queue',
+          },
+          state: {
+            savedContext: true,
+            profileUpdated: false,
+            queuedRun,
+            runMode: 'initial',
+            assistantMessage: 'Search queued.',
+            activityResults: [{ type: 'search', status: 'queued' }],
+            profileUpdateProposal: null,
+            assistantStreamed: false,
+            agentLoop: { runId: 'loop_1', steps: [] },
+            subagentHandoffs: [],
+          },
+          loop: { runId: 'loop_1', steps: [] },
+          actionTurn: {
+            handled: false,
+            assistantMessage: 'Search queued.',
+            pendingApproval: null,
+          },
+          subagentHandoffs: [{ agent: 'Social Match Agent' }],
         }),
       },
     });
@@ -190,12 +181,12 @@ describe('SocialAgentRouteTurnService', () => {
       }),
     ).resolves.toMatchObject({ completed: true });
 
-    expect(deps.taskLifecycle.assertTaskOwner).toHaveBeenCalledWith(101, 7);
-    expect(deps.actionTurns.handle).toHaveBeenCalledWith(
+    expect(deps.routeLoopRunner.run).toHaveBeenCalledWith(
       expect.objectContaining({
         ownerUserId: 7,
-        task: deps.refreshedTask,
-        assistantMessage: 'Search queued.',
+        task: deps.task,
+        message: 'find a running partner',
+        decision: expect.objectContaining({ route: deps.route }),
       }),
     );
     expect(deps.completions.complete).toHaveBeenCalledWith(
@@ -205,6 +196,7 @@ describe('SocialAgentRouteTurnService', () => {
         runMode: 'initial',
         savedContext: true,
         activityResults: [{ type: 'search', status: 'queued' }],
+        subagentHandoffs: [{ agent: 'Social Match Agent' }],
         startedAt: '2026-06-07T01:00:00.000Z',
       }),
     );

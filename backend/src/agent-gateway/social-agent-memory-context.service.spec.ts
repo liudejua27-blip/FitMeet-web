@@ -45,7 +45,7 @@ function makeTask(): AgentTask {
     completedAt: null,
     createdAt: new Date(0),
     updatedAt: new Date(0),
-  } as AgentTask;
+  } as unknown as AgentTask;
 }
 
 describe('SocialAgentMemoryContextService', () => {

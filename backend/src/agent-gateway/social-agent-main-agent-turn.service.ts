@@ -4,6 +4,7 @@ import {
   AgentTask,
   AgentTaskPermissionMode,
 } from './entities/agent-task.entity';
+import { AgentLoopService } from './agent-loop.service';
 import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
 import type { FitMeetAlphaTurnDecision } from './fitmeet-alpha-agent.types';
 import type {
@@ -21,6 +22,8 @@ export class SocialAgentMainAgentTurnService {
     private readonly turnResults: SocialAgentMainAgentTurnResultService,
     @Optional()
     private readonly alphaAgent?: FitMeetAlphaAgentSdkService,
+    @Optional()
+    private readonly agentLoop?: AgentLoopService,
   ) {}
 
   async handleRouteTurn(input: {
@@ -29,38 +32,37 @@ export class SocialAgentMainAgentTurnService {
     message: string;
     hasCandidates: boolean;
     startedAt: number;
+    signal?: AbortSignal | null;
   }): Promise<{
     task: AgentTask;
     result: SocialAgentIntentRouteResult | null;
   }> {
-    const alphaTurn = await this.alphaAgent?.prepareTurn({
+    return this.executeMainAgentTurnLoop({
       ownerUserId: input.ownerUserId,
-      taskId: input.task.id,
+      task: input.task,
       message: input.message,
       permissionMode: input.task.permissionMode,
       context: { hasCandidates: input.hasCandidates },
+      flow: 'route_turn',
+      signal: input.signal,
+      resultFactory: async (alphaTurn) => {
+        if (alphaTurn?.safety.blocked) {
+          return this.turnResults.handleBlockedRouteTurn({
+            task: input.task,
+            alphaTurn,
+            startedAt: input.startedAt,
+          });
+        }
+        if (socialAgentAlphaNeedsClarification(alphaTurn)) {
+          return this.turnResults.handleClarificationRouteTurn({
+            task: input.task,
+            alphaTurn,
+            startedAt: input.startedAt,
+          });
+        }
+        return null;
+      },
     });
-    if (alphaTurn?.safety.blocked) {
-      return {
-        task: input.task,
-        result: await this.turnResults.handleBlockedRouteTurn({
-          task: input.task,
-          alphaTurn,
-          startedAt: input.startedAt,
-        }),
-      };
-    }
-    if (socialAgentAlphaNeedsClarification(alphaTurn)) {
-      return {
-        task: input.task,
-        result: await this.turnResults.handleClarificationRouteTurn({
-          task: input.task,
-          alphaTurn,
-          startedAt: input.startedAt,
-        }),
-      };
-    }
-    return { task: input.task, result: null };
   }
 
   async handleRunTurn(input: {
@@ -71,6 +73,7 @@ export class SocialAgentMainAgentTurnService {
     visibleSteps: SocialAgentVisibleStep[];
     emit?: StreamEmit;
     visibleStepLabel: (id: string, label: string) => string;
+    signal?: AbortSignal | null;
     completeRuntimeClarification?: (
       result: SocialAgentChatRunResult,
     ) => Promise<void>;
@@ -79,38 +82,106 @@ export class SocialAgentMainAgentTurnService {
     result: SocialAgentChatRunResult | null;
     alphaTurn?: FitMeetAlphaTurnDecision;
   }> {
-    const alphaTurn = await this.alphaAgent?.prepareTurn({
+    const loopResult = await this.executeMainAgentTurnLoop({
       ownerUserId: input.ownerUserId,
-      taskId: input.task.id,
+      task: input.task,
       message: input.message,
       permissionMode: input.permissionMode,
       context: { flow: 'run_stream' },
+      flow: 'run_turn',
+      signal: input.signal,
+      resultFactory: async (alphaTurn) => {
+        if (alphaTurn?.safety.blocked) {
+          return this.turnResults.handleBlockedRunTurn({
+            ownerUserId: input.ownerUserId,
+            task: input.task,
+            alphaTurn,
+            visibleSteps: input.visibleSteps,
+            emit: input.emit,
+          });
+        }
+        if (socialAgentAlphaNeedsClarification(alphaTurn)) {
+          const result = await this.turnResults.handleClarificationRunTurn({
+            ownerUserId: input.ownerUserId,
+            task: input.task,
+            alphaTurn,
+            visibleSteps: input.visibleSteps,
+            emit: input.emit,
+            visibleStepLabel: input.visibleStepLabel,
+          });
+          await input.completeRuntimeClarification?.(result);
+          return result;
+        }
+        return null;
+      },
     });
-    if (alphaTurn?.safety.blocked) {
-      return {
-        task: input.task,
-        alphaTurn,
-        result: await this.turnResults.handleBlockedRunTurn({
+    return {
+      task: loopResult.task,
+      result: loopResult.result,
+      alphaTurn: loopResult.alphaTurn,
+    };
+  }
+
+  private async executeMainAgentTurnLoop<TResult>(input: {
+    ownerUserId: number;
+    task: AgentTask;
+    message: string;
+    permissionMode: AgentTaskPermissionMode;
+    context: Record<string, unknown>;
+    flow: 'route_turn' | 'run_turn';
+    signal?: AbortSignal | null;
+    resultFactory: (
+      alphaTurn?: FitMeetAlphaTurnDecision,
+    ) => Promise<TResult | null>;
+  }): Promise<{
+    task: AgentTask;
+    result: TResult | null;
+    alphaTurn?: FitMeetAlphaTurnDecision;
+  }> {
+    let alphaTurn: FitMeetAlphaTurnDecision | undefined;
+    let result: TResult | null = null;
+    const loopService = this.agentLoop ?? new AgentLoopService();
+    const execution = await loopService.execute({
+      taskId: input.task.id,
+      goal: input.message,
+      agent: 'FitMeet Main Agent',
+      plan: {
+        reason: 'Main Agent turn decisions execute only through AgentLoop.',
+        tools: [
+          {
+            agent: 'Agent Brain',
+            toolName: 'main_agent_prepare_turn',
+            input: {
+              flow: input.flow,
+              permissionMode: input.permissionMode,
+              context: input.context,
+            },
+          },
+        ],
+      },
+      maxToolCalls: 1,
+      maxRetries: 0,
+      signal: input.signal,
+      runner: async () => {
+        alphaTurn = await this.alphaAgent?.prepareTurn({
           ownerUserId: input.ownerUserId,
-          task: input.task,
-          alphaTurn,
-          visibleSteps: input.visibleSteps,
-          emit: input.emit,
-        }),
-      };
+          taskId: input.task.id,
+          message: input.message,
+          permissionMode: input.permissionMode,
+          context: input.context,
+        });
+        result = await input.resultFactory(alphaTurn);
+        return {
+          handled: Boolean(result),
+          blocked: alphaTurn?.safety.blocked === true,
+          needsClarification: socialAgentAlphaNeedsClarification(alphaTurn),
+          traceId: alphaTurn?.traceId ?? null,
+        };
+      },
+    });
+    if (result && typeof result === 'object' && 'agentLoop' in result) {
+      (result as { agentLoop?: unknown }).agentLoop ??= execution.loop;
     }
-    if (socialAgentAlphaNeedsClarification(alphaTurn)) {
-      const result = await this.turnResults.handleClarificationRunTurn({
-        ownerUserId: input.ownerUserId,
-        task: input.task,
-        alphaTurn,
-        visibleSteps: input.visibleSteps,
-        emit: input.emit,
-        visibleStepLabel: input.visibleStepLabel,
-      });
-      await input.completeRuntimeClarification?.(result);
-      return { task: input.task, result, alphaTurn };
-    }
-    return { task: input.task, result: null, alphaTurn };
+    return { task: input.task, result, alphaTurn };
   }
 }

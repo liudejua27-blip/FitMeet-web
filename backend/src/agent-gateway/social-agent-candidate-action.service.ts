@@ -32,6 +32,21 @@ import {
   buildSocialAgentOpenerApprovalCard,
   readSocialAgentCardActionCandidate,
 } from './social-agent-card-action.presenter';
+import { buildSocialAgentCandidateConnectResult } from './social-agent-candidate-connect-result.presenter';
+import { buildSocialAgentDirectCandidateMessageResult } from './social-agent-direct-candidate-message-result.presenter';
+import {
+  buildSocialAgentCandidateActionApprovalInput,
+  buildSocialAgentCandidateActionApprovalState,
+} from './social-agent-candidate-action-approval.presenter';
+import {
+  buildSocialAgentCandidateMessageDraft,
+  readSocialAgentCardActionDraftCandidate,
+} from './social-agent-candidate-message-draft.presenter';
+import {
+  buildSocialAgentOpenerDraftApprovalInput,
+  buildSocialAgentOpenerDraftState,
+} from './social-agent-opener-draft-action.presenter';
+import { buildSocialAgentConfirmedCandidateMessageState } from './social-agent-confirmed-candidate-message.presenter';
 import type {
   CandidateTargetBody,
   SocialAgentCardActionBody,
@@ -46,6 +61,7 @@ import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memor
 import {
   appendSocialAgentShortTermTurn,
   appendShortTermMemoryItem,
+  clearSocialAgentPendingAction,
   readSocialAgentTaskMemory,
   recordSocialAgentPendingAction,
   recordSocialAgentShortTermAction,
@@ -85,7 +101,6 @@ export class SocialAgentCandidateActionService {
   }): Promise<SocialAgentPendingApprovalSnapshot | null> {
     const { ownerUserId, task, message, route } = input;
     try {
-      const inferred = this.inferApprovalTypeFromMessage(message);
       const candidates = readSocialAgentStoredCandidateSummaries(task);
       const firstCandidate = candidates[0] as
         | Record<string, unknown>
@@ -93,38 +108,31 @@ export class SocialAgentCandidateActionService {
       const targetUserId =
         this.number(firstCandidate?.candidateUserId) ??
         this.number(firstCandidate?.userId);
-      const payload: Record<string, unknown> = {
-        source: 'social_agent_chat',
-        userMessage: message,
-        intent: route.intent,
-        entities: route.entities,
-        candidateUserId: targetUserId,
-        agentTaskId: task.id,
-      };
-      const approval = await this.approvals.create({
-        userId: ownerUserId,
-        agentConnectionId: null,
-        agentTaskId: task.id,
-        type: inferred.type,
-        actionType: inferred.actionType,
-        skillName: inferred.actionType,
-        payload,
-        summary: inferred.summary(message, firstCandidate),
-        riskLevel: inferred.riskLevel,
-        reason: '由 Social Agent 聊天意图路由生成，待用户在前端确认。',
-        createdBy: 'agent',
-        relatedCandidateId:
-          this.number(firstCandidate?.candidateRecordId) ?? null,
+      const approval = await this.approvals.create(
+        buildSocialAgentCandidateActionApprovalInput({
+          ownerUserId,
+          taskId: task.id,
+          message,
+          route,
+          candidate: firstCandidate,
+          targetUserId,
+          relatedCandidateId:
+            this.number(firstCandidate?.candidateRecordId) ?? null,
+        }),
+      );
+      const pendingApproval = this.toPendingApprovalSnapshot(approval);
+      const approvalState = buildSocialAgentCandidateActionApprovalState({
+        pendingApproval,
+        at: new Date().toISOString(),
       });
-      transitionSocialAgentState(task, 'confirmation_required', {
-        objective: 'candidate_action',
-        nextStep: '等待用户确认候选人动作',
-        shouldSearchNow: false,
-        awaitingSearchConfirmation: false,
-        waitingFor: 'action_confirmation',
-        lastCompletedStep: 'approval_created',
-      });
-      return this.toPendingApprovalSnapshot(approval);
+      transitionSocialAgentState(
+        task,
+        'confirmation_required',
+        approvalState.transitionPatch,
+      );
+      recordSocialAgentPendingAction(task, approvalState.pendingAction);
+      await this.taskRepo.save(task);
+      return pendingApproval;
     } catch (error) {
       this.logger.warn(
         JSON.stringify({
@@ -144,6 +152,9 @@ export class SocialAgentCandidateActionService {
   ): Promise<SocialAgentIntentRouteResult> {
     const task = await this.assertTaskOwner(taskId, ownerUserId);
     const payload = body.payload ?? {};
+    const schemaAction =
+      cleanDisplayText(body.action, 'candidate.generate_opener') ||
+      'candidate.generate_opener';
     const candidate = readSocialAgentCardActionCandidate({
       payload,
       task,
@@ -163,78 +174,52 @@ export class SocialAgentCandidateActionService {
         '',
       ).trim() || this.candidateMessageDraft(task);
 
-    const approval = await this.approvals.create({
-      userId: ownerUserId,
-      agentConnectionId: null,
-      agentTaskId: task.id,
-      type: ApprovalType.SendMessage,
-      actionType: 'send_candidate_message',
-      skillName: 'send_candidate_message',
-      payload: {
-        source: 'agent_card_action',
-        schemaAction: body.action,
-        agentTaskId: task.id,
-        candidateUserId: targetUserId,
+    const approval = await this.approvals.create(
+      buildSocialAgentOpenerDraftApprovalInput({
+        ownerUserId,
+        taskId: task.id,
+        action: schemaAction,
         targetUserId,
         candidate,
-        message: draft,
-        suggestedOpener: draft,
-      },
-      summary: targetUserId
-        ? `发送开场白给候选人 #${targetUserId}`
-        : '发送开场白给候选人',
-      riskLevel: ApprovalRiskLevel.Medium,
-      reason: 'FitMeet Agent 已生成开场白草稿，等待用户确认后再发送。',
-      createdBy: 'agent',
-      relatedCandidateId: this.number(candidate.candidateRecordId) ?? null,
-    });
+        draft,
+        relatedCandidateId: this.number(candidate.candidateRecordId) ?? null,
+      }),
+    );
     const pendingApproval = this.toPendingApprovalSnapshot(approval);
-    recordSocialAgentPendingAction(task, {
-      id: pendingApproval.id,
-      type: pendingApproval.type,
-      actionType: pendingApproval.actionType,
-      summary: pendingApproval.summary,
-      riskLevel: pendingApproval.riskLevel,
+    const openerDraft = buildSocialAgentOpenerDraftState({
+      action: schemaAction,
+      targetUserId,
+      candidate,
+      draft,
+      approvalId: approval.id,
+      pendingApproval,
       at: new Date().toISOString(),
     });
+    recordSocialAgentPendingAction(task, openerDraft.pendingAction);
     task.result = {
       ...(task.result ?? {}),
-      cardActionDraft: {
-        action: body.action,
-        targetUserId,
-        candidate,
-        message: draft,
-        approvalId: approval.id,
-      },
+      cardActionDraft: openerDraft.cardActionDraft,
     };
-    transitionSocialAgentState(task, 'confirmation_required', {
-      objective: 'candidate_messaging',
-      nextStep: '等待你确认是否发送开场白',
-      shouldSearchNow: false,
-      awaitingSearchConfirmation: false,
-      waitingFor: 'message_confirmation',
-      lastCompletedStep: 'opener_draft_created',
-    });
+    transitionSocialAgentState(
+      task,
+      'confirmation_required',
+      openerDraft.transitionPatch,
+    );
     await this.taskRepo.save(task);
 
-    const displayName =
-      cleanDisplayText(candidate.displayName ?? candidate.nickname, '') ||
-      '对方';
     const card = buildSocialAgentOpenerApprovalCard({
       taskId: task.id,
       targetUserId,
       approvalId: approval.id,
       candidate,
-      displayName,
+      displayName: openerDraft.displayName,
       draft,
       regeneratePayload: payload,
     });
 
-    const assistantMessage =
-      '我先帮你写了一条低压力的开场白。你确认前，我不会替你发送。';
     const result = this.cardActionRouteResult(
       task,
-      assistantMessage,
+      openerDraft.assistantMessage,
       [card],
       pendingApproval,
     );
@@ -242,10 +227,14 @@ export class SocialAgentCandidateActionService {
       task,
       AgentTaskEventType.ConfirmationRequested,
       'Agent card action created opener approval',
-      { action: body.action, approvalId: approval.id },
+      { action: schemaAction, approvalId: approval.id },
       AgentTaskEventActor.Agent,
     );
-    await this.recordAssistantMessage(task, assistantMessage, result);
+    await this.recordAssistantMessage(
+      task,
+      openerDraft.assistantMessage,
+      result,
+    );
     return result;
   }
 
@@ -294,32 +283,30 @@ export class SocialAgentCandidateActionService {
     );
     this.assertToolActionSucceeded(action, '发送消息失败，请稍后再试');
 
-    const output = this.isRecord(action.output) ? action.output : {};
-    const messageId =
-      cleanDisplayText(output.id ?? output.messageId, '') || null;
-    const conversationId = cleanDisplayText(output.conversationId, '') || null;
-    this.rememberCandidateAction(task, targetUserId, {
-      send: 'sent',
-      conversationId,
-      messageId,
+    const confirmedMessage = buildSocialAgentConfirmedCandidateMessageState({
+      action,
+      targetUserId,
+      candidate,
+      text,
       candidateRecordId,
       socialRequestId,
-      toolCallId: action.id,
     });
-    transitionSocialAgentState(task, 'message_action', {
-      objective: 'candidate_messaging',
-      nextStep: '等待候选人回复',
-      shouldSearchNow: false,
-      awaitingSearchConfirmation: false,
-      waitingFor: 'candidate_reply',
-      lastCompletedStep: 'message_sent',
-    });
+    this.rememberCandidateAction(
+      task,
+      targetUserId,
+      confirmedMessage.candidateActionPatch,
+    );
+    clearSocialAgentPendingAction(task, pendingMessageAction.id);
+    transitionSocialAgentState(
+      task,
+      'message_action',
+      confirmedMessage.transitionPatch,
+    );
     await this.taskRepo.save(task);
 
-    const name = cleanDisplayText(candidate.nickname, `用户 #${targetUserId}`);
     return {
       task,
-      assistantMessage: `已确认发送给${name}：${text}`,
+      assistantMessage: confirmedMessage.assistantMessage,
     };
   }
 
@@ -423,28 +410,33 @@ export class SocialAgentCandidateActionService {
       ownerUserId,
     );
     this.assertToolActionSucceeded(messageAction, '发送消息失败，请稍后再试');
-    const output = this.isRecord(messageAction.output)
-      ? messageAction.output
-      : {};
-    const messageId =
-      cleanDisplayText(output.id ?? output.messageId, '') || null;
-    const conversationId = cleanDisplayText(output.conversationId, '') || null;
-    const candidate = this.isRecord(output.candidate) ? output.candidate : null;
-    const outputStatus = cleanDisplayText(output.status, '') || null;
-    const requiresApproval =
-      outputStatus === 'pending_approval' ||
-      outputStatus === 'pending' ||
-      output.requiresApproval === true;
+    const messageResult = buildSocialAgentDirectCandidateMessageResult({
+      taskId,
+      targetUserId,
+      messageAction,
+    });
+    const requiresApproval = messageResult.status === 'pending_approval';
+    const approvalId = this.number(messageResult.approvalId);
 
     const task = await this.assertTaskOwner(taskId, ownerUserId);
     this.rememberCandidateAction(task, targetUserId, {
       send: requiresApproval ? 'pendingApproval' : 'sent',
-      conversationId,
-      messageId,
+      conversationId: messageResult.conversationId,
+      messageId: messageResult.messageId,
       candidateRecordId,
       socialRequestId,
       toolCallId: messageAction.id,
     });
+    if (requiresApproval && approvalId) {
+      recordSocialAgentPendingAction(task, {
+        id: approvalId,
+        type: ApprovalType.SendMessage,
+        actionType: 'send_candidate_message',
+        summary: `发送消息给候选人 #${targetUserId}`,
+        riskLevel: ApprovalRiskLevel.Medium,
+        at: new Date().toISOString(),
+      });
+    }
     transitionSocialAgentState(
       task,
       requiresApproval ? 'confirmation_required' : 'message_action',
@@ -463,29 +455,7 @@ export class SocialAgentCandidateActionService {
     );
     await this.taskRepo.save(task);
 
-    return {
-      success: messageAction.status === 'succeeded' || requiresApproval,
-      taskId,
-      targetUserId,
-      candidateUserId: targetUserId,
-      status: requiresApproval
-        ? 'pending_approval'
-        : messageAction.status === 'succeeded'
-          ? 'sent'
-          : 'failed',
-      messageId,
-      conversationId,
-      approvalId: this.number(output.approvalId),
-      requiresApproval: requiresApproval || undefined,
-      message: requiresApproval ? '发送消息需要你确认' : undefined,
-      candidateStatus: cleanDisplayText(candidate?.status, '') || null,
-      messageAction: {
-        status: requiresApproval ? 'pending_approval' : 'sent',
-        conversationId,
-        messageId,
-      },
-      toolCall: messageAction,
-    };
+    return messageResult;
   }
 
   async connectCandidate(
@@ -504,14 +474,16 @@ export class SocialAgentCandidateActionService {
       body as Record<string, unknown>,
       ownerUserId,
     );
+    const candidateRecordId = this.number(body.candidateRecordId);
+    const socialRequestId = this.number(body.socialRequestId);
 
     const friendAction = await this.executor.executeToolAction(
       taskId,
       SocialAgentToolName.AddFriend,
       {
         targetUserId,
-        candidateRecordId: this.number(body.candidateRecordId),
-        socialRequestId: this.number(body.socialRequestId),
+        candidateRecordId,
+        socialRequestId,
         openConversation: true,
         candidate: body.candidate ?? {},
         metadata: {
@@ -522,19 +494,45 @@ export class SocialAgentCandidateActionService {
     );
     this.assertToolActionSucceeded(friendAction, '加好友失败，请稍后再试');
 
-    const friendOutput = this.isRecord(friendAction.output)
-      ? friendAction.output
-      : {};
-    const friendRequestId =
-      cleanDisplayText(
-        friendOutput.friendRequestId ??
-          friendOutput.followId ??
-          friendOutput.id,
-        '',
-      ) || null;
+    const connectResult = buildSocialAgentCandidateConnectResult({
+      taskId,
+      targetUserId,
+      friendAction,
+    });
+    const requiresApproval = connectResult.status === 'pending_approval';
+    const approvalId = this.number(connectResult.approvalId);
+    if (requiresApproval) {
+      task = await this.assertTaskOwner(taskId, ownerUserId);
+      this.rememberCandidateAction(task, targetUserId, {
+        connect: 'pendingApproval',
+        candidateRecordId,
+        socialRequestId,
+        toolCallId: friendAction.id,
+      });
+      if (approvalId) {
+        recordSocialAgentPendingAction(task, {
+          id: approvalId,
+          type: ApprovalType.ContactRequest,
+          actionType: 'connect_candidate',
+          summary: `加好友/连接候选人 #${targetUserId}`,
+          riskLevel: ApprovalRiskLevel.Medium,
+          at: new Date().toISOString(),
+        });
+      }
+      transitionSocialAgentState(task, 'confirmation_required', {
+        objective: 'candidate_messaging',
+        nextStep: '等待用户确认加好友/连接候选人',
+        shouldSearchNow: false,
+        awaitingSearchConfirmation: false,
+        waitingFor: 'connect_confirmation',
+        lastCompletedStep: 'connect_approval_created',
+      });
+      await this.taskRepo.save(task);
+      return connectResult;
+    }
     task = await this.assertTaskOwner(taskId, ownerUserId);
-    const conversationId =
-      cleanDisplayText(friendOutput.conversationId, '') || null;
+    const conversationId = connectResult.conversationId;
+    const friendRequestId = connectResult.friendRequestId;
 
     await this.writeEvent(
       task,
@@ -557,16 +555,16 @@ export class SocialAgentCandidateActionService {
       targetUserId,
       connectedCandidate: {
         targetUserId,
-        candidateRecordId: this.number(body.candidateRecordId),
-        socialRequestId: this.number(body.socialRequestId),
+        candidateRecordId,
+        socialRequestId,
       },
     });
     this.rememberCandidateAction(task, targetUserId, {
       connect: 'connected',
       conversationId,
       friendRequestId,
-      candidateRecordId: this.number(body.candidateRecordId),
-      socialRequestId: this.number(body.socialRequestId),
+      candidateRecordId,
+      socialRequestId,
       toolCallId: friendAction.id,
     });
     transitionSocialAgentState(task, 'message_action', {
@@ -580,80 +578,14 @@ export class SocialAgentCandidateActionService {
     await this.taskRepo.save(task);
     void this.longTermMemory?.summarizeTask(task).catch(() => undefined);
 
-    return {
-      taskId,
-      targetUserId,
-      candidateUserId: targetUserId,
-      success: true,
-      status: 'connected',
-      following: true,
-      friendRequestId,
-      conversationId,
-      friendAction: {
-        success: true,
-        status: 'connected',
-        targetUserId,
-        candidateUserId: targetUserId,
-        following: true,
-        conversationId,
-        friendRequestId,
-      },
-      toolCall: friendAction,
-    };
+    return connectResult;
   }
 
   candidateMessageDraft(task: AgentTask): string {
-    const draft = this.cardActionDraft(task);
-    const draftMessage = cleanDisplayText(
-      draft.message ?? draft.suggestedOpener,
-      '',
-    ).trim();
-    if (draftMessage) return draftMessage;
-    const candidate = readSocialAgentStoredCandidateSummaries(task)[0];
-    const suggested = cleanDisplayText(candidate?.suggestedMessage, '').trim();
-    if (suggested) return suggested;
-    return '你好，看到你也在附近，想先站内聊聊看看是否方便一起约练。';
-  }
-
-  private inferApprovalTypeFromMessage(message: string): {
-    type: ApprovalType;
-    actionType: string;
-    riskLevel: ApprovalRiskLevel;
-    summary: (msg: string, candidate?: Record<string, unknown>) => string;
-  } {
-    if (/(加好友|关注|加微信|加联系方式)/.test(message)) {
-      return {
-        type: ApprovalType.ContactRequest,
-        actionType: 'connect_candidate',
-        riskLevel: ApprovalRiskLevel.Medium,
-        summary: (_msg, candidate) =>
-          `用户请求添加${candidate ? `候选人 #${cleanDisplayText(candidate.userId, '')}` : '候选人'}为好友/关注`,
-      };
-    }
-    if (/(发消息|打招呼|私信|联系)/.test(message)) {
-      return {
-        type: ApprovalType.SendMessage,
-        actionType: 'send_candidate_message',
-        riskLevel: ApprovalRiskLevel.Medium,
-        summary: (_msg, candidate) =>
-          `用户请求向${candidate ? `候选人 #${cleanDisplayText(candidate.userId, '')}` : '候选人'}发送消息`,
-      };
-    }
-    if (/(邀请|约|约练|约局)/.test(message)) {
-      return {
-        type: ApprovalType.JoinActivity,
-        actionType: 'invite_candidate',
-        riskLevel: ApprovalRiskLevel.Medium,
-        summary: (_msg, candidate) =>
-          `用户请求邀请${candidate ? `候选人 #${cleanDisplayText(candidate.userId, '')}` : '候选人'}参加活动`,
-      };
-    }
-    return {
-      type: ApprovalType.Custom,
-      actionType: 'social_agent_action',
-      riskLevel: ApprovalRiskLevel.Low,
-      summary: (msg) => `用户请求执行动作：${msg.slice(0, 80)}`,
-    };
+    return buildSocialAgentCandidateMessageDraft({
+      cardActionDraft: this.cardActionDraft(task),
+      candidates: readSocialAgentStoredCandidateSummaries(task),
+    });
   }
 
   private cardActionRouteResult(
@@ -816,8 +748,7 @@ export class SocialAgentCandidateActionService {
   }
 
   private cardActionDraftCandidate(task: AgentTask): Record<string, unknown> {
-    const draft = this.cardActionDraft(task);
-    return this.isRecord(draft.candidate) ? draft.candidate : {};
+    return readSocialAgentCardActionDraftCandidate(this.cardActionDraft(task));
   }
 
   private toPendingApprovalSnapshot(

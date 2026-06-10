@@ -1,7 +1,10 @@
 import {
   Body,
+  ConflictException,
   Controller,
+  Delete,
   Get,
+  Param,
   Patch,
   Post,
   Query,
@@ -12,19 +15,25 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../common/types/authenticated-request';
 import {
   ConfirmLifeGraphUpdateDto,
+  ConfirmLifeGraphSecurityRequestDto,
   CorrectLifeGraphDto,
+  CreateLifeGraphSecurityRequestDto,
   ExtractLifeGraphFromChatDto,
   RejectLifeGraphUpdateDto,
   RecordLifeGraphBehaviorEventDto,
   RevokeLifeGraphFieldDto,
   UpdateLifeGraphDto,
 } from './dto/life-graph.dto';
+import { LifeGraphSecurityRequestService } from './life-graph-security-request.service';
 import { LifeGraphService } from './life-graph.service';
 
 @UseGuards(JwtAuthGuard)
 @Controller('life-graph')
 export class LifeGraphController {
-  constructor(private readonly lifeGraph: LifeGraphService) {}
+  constructor(
+    private readonly lifeGraph: LifeGraphService,
+    private readonly securityRequests: LifeGraphSecurityRequestService,
+  ) {}
 
   @Get('me')
   getMe(@Request() req: AuthenticatedRequest) {
@@ -136,5 +145,75 @@ export class LifeGraphController {
     @Body() body: RevokeLifeGraphFieldDto,
   ) {
     return this.lifeGraph.revokeField(req.user.id, body);
+  }
+
+  @Get('export')
+  exportLifeGraph() {
+    throw new ConflictException({
+      code: 'life_graph_confirmation_required',
+      message:
+        'Life Graph export now requires a security request, cooldown, and confirmation code.',
+      nextEndpoint: '/life-graph/export-requests',
+    });
+  }
+
+  @Post('export-requests')
+  createExportRequest(
+    @Request() req: AuthenticatedRequest,
+    @Body() body: CreateLifeGraphSecurityRequestDto,
+  ) {
+    return this.securityRequests.createRequest(
+      req.user.id,
+      'export',
+      body ?? {},
+    );
+  }
+
+  @Post('export-requests/:id/confirm')
+  confirmExportRequest(
+    @Request() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: ConfirmLifeGraphSecurityRequestDto,
+  ) {
+    return this.securityRequests.confirmExportRequest(
+      req.user.id,
+      Number(id),
+      body,
+    );
+  }
+
+  @Delete('me')
+  deleteLifeGraphMemory() {
+    throw new ConflictException({
+      code: 'life_graph_confirmation_required',
+      message:
+        'Life Graph deletion now requires a security request, cooldown, and confirmation code.',
+      nextEndpoint: '/life-graph/delete-requests',
+    });
+  }
+
+  @Post('delete-requests')
+  createDeleteRequest(
+    @Request() req: AuthenticatedRequest,
+    @Body() body: CreateLifeGraphSecurityRequestDto,
+  ) {
+    return this.securityRequests.createRequest(
+      req.user.id,
+      'delete',
+      body ?? {},
+    );
+  }
+
+  @Post('delete-requests/:id/confirm')
+  confirmDeleteRequest(
+    @Request() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: ConfirmLifeGraphSecurityRequestDto,
+  ) {
+    return this.securityRequests.confirmDeleteRequest(
+      req.user.id,
+      Number(id),
+      body,
+    );
   }
 }

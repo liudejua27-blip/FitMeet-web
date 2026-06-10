@@ -87,6 +87,10 @@ export class AgentCardAssemblerService {
         return 'candidate.like';
       case 'create_activity':
         return 'activity.confirm_create';
+      case 'view_activity':
+        return 'activity.view_detail';
+      case 'upload_proof':
+        return 'activity.upload_proof';
       case 'generate_opener':
         return 'candidate.generate_opener';
       case 'see_more':
@@ -117,6 +121,9 @@ export class AgentCardAssemblerService {
         return 'opener_draft_created';
       case 'create_activity':
         return 'activity_draft_created';
+      case 'view_activity':
+      case 'upload_proof':
+        return 'activity_completed';
       case 'check_in':
         return 'activity_confirmed';
       case 'submit_review':
@@ -136,6 +143,8 @@ export class AgentCardAssemblerService {
         return 'opener_draft_created';
       case 'activity_plan':
         return 'activity_draft_created';
+      case 'activity_status':
+        return 'activity_completed';
       case 'checkin_card':
         return 'activity_confirmed';
       case 'review_card':
