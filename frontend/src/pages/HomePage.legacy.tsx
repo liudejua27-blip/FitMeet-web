@@ -26,7 +26,7 @@ const communityModes = [
     desc: '发现或发起线下运动局，按时间、地点、人数和安全信息快速判断。',
     image: '/images/fitmeet/generated/match-run-ai.webp',
     tags: ['公开活动', '群组约练', '线下见面'],
-    href: '/meet',
+    href: '/discover',
   },
   {
     id: 'log',
@@ -438,7 +438,7 @@ const TrustAndCta = memo(function TrustAndCta({
                   {isLoggedIn ? '立即探索' : '立即加入'}
                 </button>
                 <Link
-                  to="/meet"
+                  to="/discover"
                   className="rounded-xl border border-white/15 bg-white/[0.05] px-7 py-3.5 text-sm font-black text-white transition hover:border-white/30"
                 >
                   浏览约练

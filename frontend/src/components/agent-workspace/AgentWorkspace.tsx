@@ -1,35 +1,21 @@
-import {
-  type CSSProperties,
-  type FormEvent,
-  type ReactNode,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   CalendarDays,
-  ChartNoAxesCombined,
-  Check,
-  ChevronRight,
-  ChevronsLeft,
+  ChevronDown,
   Clock3,
-  Dumbbell,
-  Eye,
   Footprints,
-  Home,
-  LockKeyhole,
-  MapPin,
+  MessageSquarePlus,
+  PanelLeftClose,
+  PanelLeftOpen,
   PersonStanding,
-  Plus,
+  RotateCcw,
   Send,
   ShieldCheck,
-  SlidersHorizontal,
   Sparkles,
-  Target,
-  TrendingUp,
-  UsersRound,
+  Square,
+  UserRound,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -56,7 +42,6 @@ import {
   PromptInputTextarea,
 } from '../ai-elements/prompt-input';
 import {
-  socialAgentApi,
   type FitMeetAlphaCard,
   type FitMeetAlphaCardAction,
   type FitMeetAgentSchemaAction,
@@ -65,7 +50,6 @@ import {
   type UserFacingAgentProgressKind,
   type UserFacingAgentLightStatus,
   type UserFacingAgentResponse,
-  type UserFacingAgentStreamEvent,
 } from '../../api/socialAgentApi';
 import { activitiesApi, type ActivityProof, type SocialActivity } from '../../api/activitiesApi';
 import { lifeGraphApi, type LifeGraphResponse } from '../../api/lifeGraphApi';
@@ -75,11 +59,30 @@ import {
   type AgentPageModuleAuditResult,
 } from '../../debug/agentPageModuleAudit';
 import { loadAgentTaskEvents, type AgentTaskDebugEvent } from '../../debug/agentTaskEvents';
-import { LifeGraphOnboardingModal } from './LifeGraphAgentFlow';
-import { useLifeGraphAgentResults } from './useLifeGraphAgentResults';
+import {
+  AntGuide,
+  type AntGuideCopy,
+  type AntGuideState,
+  type AntGuideTarget,
+} from '../agent/ant-guide';
+import { AGENT_FLOW_INTERESTS } from './agentFlow.constants';
+import { useAgentFlow } from './useAgentFlow';
+import {
+  createAgentAdapter,
+  resolveAgentAdapterMode,
+  mapAgentError,
+  type AgentError,
+  type AgentLifecycle,
+  type AgentStreamEvent,
+} from './api';
 
 type AgentView = 'home' | 'chat' | 'settings' | 'projects' | 'history';
-type AgentThreadMessage = { id: string; role: 'user' | 'assistant'; content: string };
+type AgentThreadMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  status?: 'streaming' | 'done' | 'error';
+};
 type StepState = 'pending' | 'running' | 'success' | 'waiting' | 'error';
 type Step = {
   id: string;
@@ -113,6 +116,24 @@ type ActivityDetailState = {
   activity: SocialActivity;
   proofs: ActivityProof[];
 };
+type AgentRecoveryState = {
+  kind: 'failed' | 'stopped' | 'action_failed' | 'missing_info' | 'unauthorized' | 'safety';
+  title: string;
+  message: string;
+  prompt: string;
+  retryable: boolean;
+};
+type AgentSidebarSectionId =
+  | 'new'
+  | 'recent'
+  | 'profile'
+  | 'settings'
+  | 'projects'
+  | 'history'
+  | 'pet';
+
+const AGENT_PET_STORAGE_KEY = 'fitmeet-agent-pet-enabled';
+const AGENT_BRAND_ICON_SRC = '/favicon-192.png';
 
 const technicalPublicTextPattern =
   /\b(traceId|agentTrace|structuredIntent|planner|tool\s*call|toolCall|toolCalls|DeepSeek|OpenAI|raw JSON|stack)\b|Life Graph Agent|Social Match Agent|Meet Loop Agent|工具调用|数据库字段|错误堆栈/i;
@@ -129,48 +150,105 @@ const baseSteps: Step[] = [
 
 const naturalPromptIdeas: AgentSuggestionItem[] = [
   {
-    text: '今晚想出门走走',
-    detail: '找一个同城、低压力、不会尬聊的人。',
-    icon: PersonStanding,
-    tone: 'sage',
-    prompt: '今晚想出门走走，找个低压力的人一起散步',
-  },
-  {
     text: '找个跑步搭子',
-    detail: '时间、距离和强度都别太拧巴。',
+    detail: '一起跑步，互相激励',
     icon: Footprints,
-    tone: 'blue',
+    tone: 'sage',
     prompt: '今晚想找青岛大学附近跑步搭子',
   },
   {
-    text: '整理我的社交边界',
-    detail: '哪些可以主动，哪些需要慢一点。',
+    text: '今晚出门走走',
+    detail: '散步、逛街、喝杯咖啡',
+    icon: PersonStanding,
+    tone: 'violet',
+    prompt: '今晚出门走走，找个低压力的人一起散步',
+  },
+  {
+    text: '这周轻社交',
+    detail: '轻松见面，认识新朋友',
+    icon: CalendarDays,
+    tone: 'blue',
+    action: 'weekly',
+  },
+  {
+    text: '帮我整理社交边界',
+    detail: '设定偏好，守护舒适感',
     icon: ShieldCheck,
     tone: 'gold',
     action: 'life_graph',
   },
+];
+
+const agentWorkbenchCards: Array<{
+  label: string;
+  title: string;
+  detail: string;
+  icon: LucideIcon;
+}> = [
   {
-    text: '这周有什么轻松活动',
-    detail: '不卷、不赶场，能自然认识人。',
+    label: 'Persona',
+    title: '人物画像',
+    detail: '先读取你的兴趣、节奏和舒适边界',
+    icon: UserRound,
+  },
+  {
+    label: 'Safety',
+    title: '权限边界',
+    detail: '每次执行前都能看到可用权限',
+    icon: ShieldCheck,
+  },
+  {
+    label: 'Match',
+    title: '匹配计划',
+    detail: '把人、地点、时间排进同一个计划',
     icon: CalendarDays,
-    tone: 'clay',
-    action: 'weekly',
   },
   {
-    text: '看看我最近的节奏',
-    detail: '适合热闹一点，还是先恢复能量。',
-    icon: ChartNoAxesCombined,
-    tone: 'mint',
-    action: 'rhythm',
-  },
-  {
-    text: '谁和我节奏接近',
-    detail: '从作息、活动和聊天方式里找线索。',
-    icon: UsersRound,
-    tone: 'violet',
-    action: 'changes',
+    label: 'Memory',
+    title: '最近需求',
+    detail: '延续上一次的偏好与反馈',
+    icon: Clock3,
   },
 ];
+
+function readStoredPetEnabled() {
+  if (typeof window === 'undefined') return true;
+  return window.localStorage.getItem(AGENT_PET_STORAGE_KEY) !== 'false';
+}
+
+function shouldShowAgentPet({
+  petEnabled,
+  guideState,
+  input,
+  isRunning,
+  sessionRestoring,
+  userResult,
+  recovery,
+  petNudged,
+  surface,
+}: {
+  petEnabled: boolean;
+  guideState: AntGuideState;
+  input: string;
+  isRunning: boolean;
+  sessionRestoring: boolean;
+  userResult: UserFacingAgentResponse | null;
+  recovery: AgentRecoveryState | null;
+  petNudged: boolean;
+  surface: 'start' | 'thread';
+}) {
+  if (!petEnabled) return false;
+  if (surface === 'start') {
+    return petNudged || guideState !== 'idle' || input.trim().length > 0 || Boolean(recovery);
+  }
+  return (
+    isRunning ||
+    sessionRestoring ||
+    guideState !== 'idle' ||
+    Boolean(userResult) ||
+    Boolean(recovery)
+  );
+}
 
 export function AgentWorkspace({ view }: { view: AgentView }) {
   const params = useParams();
@@ -182,8 +260,9 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
   const [userResult, setUserResult] = useState<UserFacingAgentResponse | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [mode, setMode] = useState<SocialAgentPermissionMode>('limited_auto');
+  const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
+  const [sessionRestoring, setSessionRestoring] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [lifeGraphOpen, setLifeGraphOpen] = useState(false);
   const [lifeGraph, setLifeGraph] = useState<LifeGraphResponse | null>(null);
   const [privacy, setPrivacy] = useState<AgentPrivacySettings>({
     showBodyInfo: false,
@@ -191,19 +270,32 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
   });
   const [activityDetail, setActivityDetail] = useState<ActivityDetailState | null>(null);
   const [activityLoading, setActivityLoading] = useState(false);
+  const [recovery, setRecovery] = useState<AgentRecoveryState | null>(null);
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugEvents, setDebugEvents] = useState<AgentTaskDebugEvent[]>([]);
   const [debugLoading, setDebugLoading] = useState(false);
-  const { setResult: setLifeGraphResult, resultNode: lifeGraphResultNode } =
-    useLifeGraphAgentResults();
+  const [petEnabled, setPetEnabled] = useState(readStoredPetEnabled);
+  const [petNudged, setPetNudged] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const finishedRef = useRef(false);
+  const stopRequestedRef = useRef(false);
+  const skipNextRestoreRef = useRef(false);
   const shellView = view === 'chat' || params.taskId ? 'chat' : view;
+  const agentAdapterMode = useMemo(() => resolveAgentAdapterMode(), []);
+  const isRealAgent = agentAdapterMode === 'real';
+  const agentAdapter = useMemo(() => createAgentAdapter(agentAdapterMode), [agentAdapterMode]);
+  const agentFlow = useAgentFlow(agentAdapter);
+  const completeAgentFlowResponse = agentFlow.completeResponse;
+  const routeTaskId = numberFromUnknown(params.taskId);
 
   useEffect(() => {
     document.title = 'FitMeet Agent';
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(AGENT_PET_STORAGE_KEY, String(petEnabled));
+  }, [petEnabled]);
 
   useEffect(() => {
     if (!isLoggedIn) return undefined;
@@ -221,6 +313,56 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
   }, [isLoggedIn]);
 
   useEffect(() => {
+    if (!isRealAgent || !isLoggedIn) return undefined;
+    if (skipNextRestoreRef.current) {
+      skipNextRestoreRef.current = false;
+      return undefined;
+    }
+    let cancelled = false;
+    setSessionRestoring(true);
+    void agentAdapter
+      .restoreSession(routeTaskId ?? undefined)
+      .then((restored) => {
+        if (cancelled || !restored) return;
+        setActiveTaskId(restored.taskId ?? null);
+        setUserResult(restored.response);
+        setRecovery(null);
+        completeAgentFlowResponse(restored.response);
+        const restoredMessage = publicText(
+          restored.response.assistantMessage,
+          '我已经恢复了上一次 Agent 会话。',
+        );
+        setMessages((current) =>
+          current.length > 0
+            ? current
+            : [
+                {
+                  id: nextId('assistant'),
+                  role: 'assistant',
+                  content: restoredMessage,
+                },
+              ],
+        );
+        if (shellView !== 'chat') navigate('/agent/chat', { replace: true });
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setSessionRestoring(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    agentAdapter,
+    completeAgentFlowResponse,
+    isLoggedIn,
+    isRealAgent,
+    navigate,
+    routeTaskId,
+    shellView,
+  ]);
+
+  useEffect(() => {
     if (!isRunning) {
       setElapsed(0);
       return undefined;
@@ -233,14 +375,20 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
   }, [isRunning]);
 
   useEffect(() => {
+    if (userResult && !isRunning) return;
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, steps, userResult]);
+  }, [isRunning, messages, steps, userResult]);
 
   const submit = async (event?: FormEvent, prompt?: string) => {
     event?.preventDefault();
     const goal = (prompt ?? input).trim();
-    if (!goal || isRunning) return;
-    if (!isLoggedIn) {
+    if (!goal) {
+      agentFlow.showEmptyError();
+      setRecovery(createAgentRecoveryFromError(mapAgentError(new Error('MISSING_INFO')), ''));
+      return;
+    }
+    if (isRunning) return;
+    if (isRealAgent && !isLoggedIn) {
       openLogin();
       return;
     }
@@ -248,8 +396,11 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
     setMessages((current) => [...current, { id: nextId('user'), role: 'user', content: goal }]);
     setInput('');
     setUserResult(null);
+    setRecovery(null);
     setIsRunning(true);
     finishedRef.current = false;
+    stopRequestedRef.current = false;
+    agentFlow.beginRun();
     setSteps(
       baseSteps.map((step, index) => ({ ...step, status: index === 0 ? 'running' : 'pending' })),
     );
@@ -257,34 +408,59 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const finalResult = await socialAgentApi.runUserFacingStream(
-        { goal, permissionMode: mode, idempotencyKey: `agent-workspace-${Date.now()}` },
-        handleUserFacingStreamEvent,
-        controller.signal,
-      );
-      if (!finishedRef.current) finishUserFacing(finalResult);
-      if (shellView !== 'chat') navigate('/agent/chat', { replace: false });
-    } catch {
-      setMessages((current) => [
-        ...current,
+      const finalResult = await agentAdapter.run(
         {
-          id: nextId('assistant'),
-          role: 'assistant',
-          content:
-            '这次请求没有顺利完成。我已经保留当前对话，你可以稍后重试，或者把需求说得更具体一些。',
+          goal,
+          permissionMode: mode,
+          taskId: activeTaskId,
+          idempotencyKey: `agent-run-${Date.now()}`,
         },
-      ]);
+        {
+          onEvent: handleAgentStreamEvent,
+          signal: controller.signal,
+        },
+      );
+      setActiveTaskId(finalResult.taskId ?? activeTaskId);
+      if (!finishedRef.current) finishUserFacing(finalResult.response);
+      if (shellView !== 'chat') {
+        skipNextRestoreRef.current = true;
+        navigate('/agent/chat', { replace: false });
+      }
+    } catch (error) {
+      const stopped = stopRequestedRef.current || isAbortError(error);
+      const agentError = stopped
+        ? mapAgentError(new DOMException('Aborted', 'AbortError'))
+        : agentFlow.failWithError(error);
+      const nextRecovery = createAgentRecoveryFromError(agentError, goal);
+      setRecovery(nextRecovery);
+      if (stopped) {
+        finishAssistantDelta();
+      } else {
+        setMessages((current) => [
+          ...current,
+          {
+            id: nextId('assistant'),
+            role: 'assistant',
+            content: nextRecovery.message,
+          },
+        ]);
+      }
       setSteps((current) =>
-        current.map((step) => (step.status === 'running' ? { ...step, status: 'error' } : step)),
+        current.map((step) =>
+          step.status === 'running'
+            ? { ...step, status: stopped ? 'pending' : 'error' }
+            : step,
+        ),
       );
     } finally {
       setIsRunning(false);
       abortRef.current = null;
+      stopRequestedRef.current = false;
     }
   };
 
   const performCardAction = async (card: FitMeetAlphaCard, action: FitMeetAlphaCardAction) => {
-    if (!isLoggedIn) {
+    if (isRealAgent && !isLoggedIn) {
       openLogin();
       return;
     }
@@ -302,6 +478,7 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
       await submit(undefined, action.label);
       return;
     }
+    const lifecycle = lifecycleFromSchemaAction(schemaAction);
 
     setMessages((current) => [
       ...current,
@@ -312,8 +489,11 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
       },
     ]);
     setUserResult(null);
+    setRecovery(null);
     setIsRunning(true);
     finishedRef.current = false;
+    stopRequestedRef.current = false;
+    agentFlow.beginAction(lifecycle);
     setSteps((current) =>
       mergeStep(
         current,
@@ -323,33 +503,58 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
       ),
     );
 
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      const next = await socialAgentApi.performAction({
-        taskId,
+      const next = await agentAdapter.performAction(taskId, {
         action: schemaAction,
+        idempotencyKey: `agent-action-${taskId}-${action.id}-${Date.now()}`,
         payload: {
           ...(action.payload ?? {}),
           cardId: card.id,
           cardType: card.type,
           cardData: card.data,
         },
+      }, {
+        onEvent: handleAgentStreamEvent,
+        signal: controller.signal,
       });
-      finishUserFacing(next);
-    } catch {
-      setMessages((current) => [
-        ...current,
-        {
-          id: nextId('assistant'),
-          role: 'assistant',
-          content:
-            '这一步没有顺利完成。我没有执行任何高风险动作，你可以稍后再试，或者换一种说法继续。',
-        },
-      ]);
+      setActiveTaskId(next.taskId ?? taskId);
+      if (!finishedRef.current) finishUserFacing(next.response);
+    } catch (error) {
+      const stopped = stopRequestedRef.current || isAbortError(error);
+      const agentError = stopped
+        ? mapAgentError(new DOMException('Aborted', 'AbortError'))
+        : agentFlow.failWithError(error);
+      const nextRecovery = createAgentRecoveryFromError(
+        agentError,
+        publicText(action.label, '继续'),
+        'action_failed',
+      );
+      setRecovery(nextRecovery);
+      if (stopped) {
+        finishAssistantDelta();
+      } else {
+        setMessages((current) => [
+          ...current,
+          {
+            id: nextId('assistant'),
+            role: 'assistant',
+            content: nextRecovery.message,
+          },
+        ]);
+      }
       setSteps((current) =>
-        current.map((step) => (step.status === 'running' ? { ...step, status: 'error' } : step)),
+        current.map((step) =>
+          step.status === 'running'
+            ? { ...step, status: stopped ? 'pending' : 'error' }
+            : step,
+        ),
       );
     } finally {
       setIsRunning(false);
+      abortRef.current = null;
+      stopRequestedRef.current = false;
     }
   };
 
@@ -375,12 +580,24 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
     }
   };
 
-  const handleUserFacingStreamEvent = (event: UserFacingAgentStreamEvent) => {
+  const handleAgentStreamEvent = (event: AgentStreamEvent) => {
+    agentFlow.handleStreamEvent(event);
+    if (event.type === 'assistant_delta') {
+      appendAssistantDelta(event.delta);
+      return;
+    }
+    if (event.type === 'assistant_done') {
+      finishAssistantDelta();
+      return;
+    }
     if (event.type === 'progress') {
       setSteps((current) => mergeProgressStep(current, event));
       return;
     }
     if (event.type === 'status') {
+      if (typeof event.taskId === 'number' && event.taskId > 0) {
+        setActiveTaskId(event.taskId);
+      }
       setSteps((current) =>
         mergeStep(current, stepIdFromLightStatus(event.lightStatus), event.lightStatus, 'running'),
       );
@@ -388,21 +605,73 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
     if (event.type === 'result') finishUserFacing(event.result);
   };
 
+  const appendAssistantDelta = (delta: string) => {
+    const cleanDelta = publicText(delta, '');
+    if (!cleanDelta) return;
+    setMessages((current) => {
+      const last = current.at(-1);
+      if (last?.role === 'assistant' && last.status === 'streaming') {
+        return [
+          ...current.slice(0, -1),
+          {
+            ...last,
+            content: `${last.content}${cleanDelta}`,
+          },
+        ];
+      }
+      return [
+        ...current,
+        {
+          id: nextId('assistant-stream'),
+          role: 'assistant',
+          content: cleanDelta,
+          status: 'streaming',
+        },
+      ];
+    });
+  };
+
+  const finishAssistantDelta = () => {
+    setMessages((current) => {
+      const last = current.at(-1);
+      if (last?.role !== 'assistant' || last.status !== 'streaming') return current;
+      return [...current.slice(0, -1), { ...last, status: 'done' }];
+    });
+  };
+
   const finishUserFacing = (finalResult: UserFacingAgentResponse) => {
     if (finishedRef.current) return;
     finishedRef.current = true;
+    agentFlow.completeResponse(finalResult);
     setUserResult(finalResult);
-    setMessages((current) => [
-      ...current,
-      {
+    setRecovery(null);
+    const finalMessage = publicText(
+      finalResult.assistantMessage,
+      '我已经整理好了，下面是我建议你先看的内容。',
+    );
+    setMessages((current) => {
+      const last = current.at(-1);
+      const assistantMessage = {
         id: nextId('assistant'),
         role: 'assistant',
-        content: publicText(
-          finalResult.assistantMessage,
-          '我已经整理好了，下面是我建议你先看的内容。',
-        ),
-      },
-    ]);
+        content: finalMessage,
+        status: 'done',
+      } satisfies AgentThreadMessage;
+      if (last?.role === 'assistant' && last.status === 'streaming') {
+        return [
+          ...current.slice(0, -1),
+          {
+            ...last,
+            content: last.content.trim() ? last.content : finalMessage,
+            status: 'done',
+          },
+        ];
+      }
+      if (last?.role === 'assistant' && last.status === 'done' && last.content.trim()) {
+        return current;
+      }
+      return [...current, assistantMessage];
+    });
     setSteps((current) =>
       current.map((step) => ({
         ...step,
@@ -417,40 +686,70 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
   };
 
   const stopRun = () => {
+    stopRequestedRef.current = true;
     abortRef.current?.abort();
+    finishAssistantDelta();
     setIsRunning(false);
     setSteps((current) =>
-      current.map((step) => (step.status === 'running' ? { ...step, status: 'error' } : step)),
+      current.map((step) => (step.status === 'running' ? { ...step, status: 'pending' } : step)),
     );
   };
 
-  const startLifeGraph = () => {
-    if (!isLoggedIn) {
-      openLogin();
-      return;
-    }
-    setLifeGraphOpen(true);
-  };
-
-  const showLifeGraphResult = (type: 'rhythm' | 'weekly' | 'changes') => {
-    if (!isLoggedIn) {
-      openLogin();
-      return;
-    }
-    setLifeGraphResult(type);
+  const retryRecovery = () => {
+    if (!recovery?.prompt || isRunning) return;
+    void submit(undefined, recovery.prompt);
   };
 
   const currentGoal =
     [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
+  const guideState = agentFlow.guideState;
+  const guideTarget = agentFlow.guideTarget;
+  const guideCopy = agentFlow.guideCopy;
+  const startPetVisible = shouldShowAgentPet({
+    petEnabled,
+    guideState,
+    input,
+    isRunning,
+    sessionRestoring,
+    userResult,
+    recovery,
+    petNudged,
+    surface: 'start',
+  });
+  const threadPetVisible = shouldShowAgentPet({
+    petEnabled,
+    guideState,
+    input,
+    isRunning,
+    sessionRestoring,
+    userResult,
+    recovery,
+    petNudged,
+    surface: 'thread',
+  });
   return (
     <AgentWorkspaceLayout
-      mode={mode}
-      onModeChange={setMode}
-      userResult={userResult}
       isLanding={shellView === 'home' && messages.length === 0 && !isRunning && !userResult}
-      steps={steps}
       currentGoal={currentGoal}
       lifeGraph={lifeGraph}
+      petEnabled={petEnabled}
+      onPetEnabledChange={setPetEnabled}
+      onNewConversation={() => {
+        abortRef.current?.abort();
+        skipNextRestoreRef.current = true;
+        setInput('');
+        setMessages([]);
+        setSteps(baseSteps);
+        setUserResult(null);
+        setRecovery(null);
+        setActivityDetail(null);
+        setDebugEvents([]);
+        setDebugOpen(false);
+        setActiveTaskId(null);
+        setIsRunning(false);
+        setPetNudged(false);
+        agentFlow.reset();
+      }}
     >
       {shellView === 'settings' ? (
         <AgentSettings mode={mode} onModeChange={setMode} />
@@ -474,9 +773,19 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
                 input={input}
                 onInput={setInput}
                 onSubmit={submit}
-                onStartLifeGraph={startLifeGraph}
-                onShowLifeGraphResult={showLifeGraphResult}
-                lifeGraphResultNode={lifeGraphResultNode}
+                guideState={guideState}
+                guideTarget={guideTarget}
+                guideCopy={guideCopy}
+                petEnabled={petEnabled}
+                petVisible={startPetVisible}
+                onInputFocus={() => {
+                  setPetNudged(true);
+                  agentFlow.focusInput();
+                }}
+                onEmptySubmit={() => {
+                  setPetNudged(true);
+                  agentFlow.showEmptyError();
+                }}
               />
             ) : (
               <AgentThread
@@ -485,6 +794,7 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
                 onSubmit={submit}
                 onStop={stopRun}
                 isRunning={isRunning}
+                sessionRestoring={sessionRestoring}
                 elapsed={elapsed}
                 steps={steps}
                 messages={messages}
@@ -496,14 +806,35 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
                 debugOpen={debugOpen}
                 debugEvents={debugEvents}
                 debugLoading={debugLoading}
+                recovery={recovery}
+                guideState={guideState}
+                guideTarget={guideTarget}
+                guideCopy={guideCopy}
+                petEnabled={petEnabled}
+                petVisible={threadPetVisible}
+                flowActiveInterest={agentFlow.activeInterest}
+                flowActiveInterestIndex={agentFlow.activeInterestIndex}
+                flowLoadingRecommendations={agentFlow.loadingRecommendations}
+                flowHighlightRecommendations={agentFlow.highlightRecommendations}
+                onInputFocus={() => {
+                  setPetNudged(true);
+                  agentFlow.focusInput();
+                }}
+                onEmptySubmit={() => {
+                  setPetNudged(true);
+                  agentFlow.showEmptyError();
+                }}
+                onRecommendationFocus={agentFlow.focusRecommendation}
+                onSafetyFocus={agentFlow.focusSafety}
+                onConfirmFocus={agentFlow.focusConfirmButton}
                 onToggleDebug={loadDebugEvents}
                 onCloseActivityDetail={() => setActivityDetail(null)}
                 onAction={performCardAction}
+                onRetryRecovery={retryRecovery}
                 endRef={endRef}
               />
             )}
           </section>
-          <LifeGraphOnboardingModal open={lifeGraphOpen} onClose={() => setLifeGraphOpen(false)} />
         </div>
       )}
     </AgentWorkspaceLayout>
@@ -512,153 +843,303 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
 
 function AgentWorkspaceLayout({
   children,
-  mode,
-  onModeChange,
-  userResult,
   isLanding,
-  steps,
   currentGoal,
   lifeGraph,
+  petEnabled,
+  onPetEnabledChange,
+  onNewConversation,
 }: {
   children: ReactNode;
-  mode: SocialAgentPermissionMode;
-  onModeChange: (mode: SocialAgentPermissionMode) => void;
-  userResult: UserFacingAgentResponse | null;
   isLanding: boolean;
-  steps: Step[];
   currentGoal: string;
   lifeGraph: LifeGraphResponse | null;
+  petEnabled: boolean;
+  onPetEnabledChange: (enabled: boolean) => void;
+  onNewConversation: () => void;
 }) {
-  const activeStep =
-    steps.find((step) => step.status === 'running') ??
-    steps.find((step) => step.status === 'waiting');
-  const pendingActions = userResult?.pendingConfirmations.length ?? 0;
+  const navigate = useNavigate();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeSection, setActiveSection] = useState<AgentSidebarSectionId>('new');
   const lifeGraphScore = lifeGraph?.completeness.completenessScore ?? 0;
+  const recentConversations = [
+    currentGoal || '今晚想找慢跑搭子',
+    '这周有什么轻松活动',
+    '帮我筛选低压力见面',
+  ];
+  const sidebarItems: Array<{ id: AgentSidebarSectionId; label: string; icon: LucideIcon }> = [
+    { id: 'new', label: '新对话', icon: MessageSquarePlus },
+    { id: 'recent', label: '最近对话', icon: Clock3 },
+    { id: 'profile', label: '人物画像', icon: UserRound },
+    { id: 'settings', label: '权限控制', icon: ShieldCheck },
+    { id: 'projects', label: '我的匹配', icon: CalendarDays },
+    { id: 'history', label: '最近需求', icon: Clock3 },
+    { id: 'pet', label: petEnabled ? '隐藏小蚁' : '显示小蚁', icon: Sparkles },
+  ];
+  const goSidebar = (id: AgentSidebarSectionId) => {
+    setActiveSection(id);
+    if (id === 'new') {
+      onNewConversation();
+      navigate('/agent');
+      return;
+    }
+    if (id === 'profile') {
+      navigate('/profile/life-graph');
+      return;
+    }
+    if (id === 'settings') {
+      navigate('/agent/settings');
+      return;
+    }
+    if (id === 'projects') {
+      navigate('/agent/projects');
+      return;
+    }
+    if (id === 'history') {
+      navigate('/agent/history');
+      return;
+    }
+    if (id === 'pet') {
+      onPetEnabledChange(!petEnabled);
+    }
+  };
+
   return (
     <div
       className={clsx(
-        'agent-workspace agent-workspace--gpt',
+        'agent-workspace agent-workspace--gpt agent-minimal-shell agent-gpt-copy-shell',
         isLanding && 'agent-workspace--landing',
+        sidebarOpen
+          ? 'agent-gpt-copy-shell--sidebar-open'
+          : 'agent-gpt-copy-shell--sidebar-collapsed',
       )}
     >
-      <aside className="agent-gpt-sidebar agent-assistant-context" aria-label="轻量上下文">
-        <div className="agent-sidebar-head">
-          <Link to="/" className="agent-gpt-brand">
-            <Sparkles aria-hidden="true" />
-            <strong>FitMeet Agent</strong>
+      <aside className="agent-gpt-sidebar" aria-label="Agent 导航">
+        <div className="agent-gpt-sidebar__top">
+          <Link to="/" className="agent-gpt-sidebar__brand" aria-label="FitMeet 首页">
+            <img src={AGENT_BRAND_ICON_SRC} alt="" />
+            {sidebarOpen ? (
+              <span>
+                <strong>FitMeet</strong>
+                <small>Agent</small>
+              </span>
+            ) : null}
           </Link>
-          <button type="button" className="agent-sidebar-collapse" aria-label="收起侧栏">
-            <ChevronsLeft aria-hidden="true" />
+          <button
+            type="button"
+            aria-label={sidebarOpen ? '关闭边栏' : '打开边栏'}
+            className="agent-gpt-sidebar__toggle"
+            onClick={() => setSidebarOpen((current) => !current)}
+          >
+            {sidebarOpen ? (
+              <PanelLeftClose aria-hidden="true" />
+            ) : (
+              <PanelLeftOpen aria-hidden="true" />
+            )}
           </button>
         </div>
 
-        <nav className="agent-sidebar-nav" aria-label="Agent 导航">
-          <Link to="/agent" className="is-active">
-            <Home aria-hidden="true" />
-            首页
-          </Link>
-        </nav>
+        {sidebarOpen ? (
+          <div className="agent-gpt-sidebar__body">
+            <section className="agent-gui-command-panel" aria-label="Agent 工作模式">
+              <div className="agent-gui-mode-tabs" role="tablist" aria-label="工作模式">
+                <button type="button" className="is-active" role="tab" aria-selected="true">
+                  <Sparkles aria-hidden="true" />
+                  Agent
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected="false"
+                  onClick={() => goSidebar('profile')}
+                >
+                  <UserRound aria-hidden="true" />
+                  画像
+                </button>
+              </div>
+              <div className="agent-gui-command-list">
+                <button
+                  type="button"
+                  className={clsx('agent-gpt-sidebar__new', activeSection === 'new' && 'is-active')}
+                  onClick={() => goSidebar('new')}
+                >
+                  <MessageSquarePlus aria-hidden="true" />
+                  <span>
+                    <strong>New Agent</strong>
+                    <small>开启一次新的约见任务</small>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="agent-gui-command"
+                  onClick={() => goSidebar('projects')}
+                >
+                  <CalendarDays aria-hidden="true" />
+                  <span>
+                    <strong>新需求</strong>
+                    <small>整理场景、人选与时间</small>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="agent-gui-command"
+                  onClick={() => goSidebar('settings')}
+                >
+                  <ShieldCheck aria-hidden="true" />
+                  <span>
+                    <strong>执行边界</strong>
+                    <small>检查授权和安全策略</small>
+                  </span>
+                </button>
+              </div>
+            </section>
 
-        <section className="agent-side-card agent-side-card--goal">
-          <header>
-            <Target aria-hidden="true" />
-            <span>当前目标</span>
-          </header>
-          <div className="agent-side-inner">
-            <strong>{currentGoal || '还没有新的社交目标'}</strong>
-            <p>
-              告诉我你的想法，
-              <br />
-              我来帮你规划下一步。
-            </p>
-            <button type="button">
-              <Plus aria-hidden="true" />
-              设定新目标
-            </button>
+            <section className="agent-gpt-sidebar__section" aria-label="最近对话">
+              <div className="agent-gpt-sidebar__section-title">最近对话</div>
+              <div className="agent-gpt-sidebar__list">
+                {recentConversations.map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    className={clsx(activeSection === 'recent' && 'is-active')}
+                    onClick={() => goSidebar('recent')}
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="agent-gpt-sidebar__utility" aria-label="Agent 常用功能">
+              <button
+                type="button"
+                className={clsx(
+                  'agent-gpt-sidebar__tool',
+                  activeSection === 'profile' && 'is-active',
+                )}
+                onClick={() => goSidebar('profile')}
+              >
+                <span>
+                  <UserRound aria-hidden="true" />
+                </span>
+                <span>
+                  <strong>人物画像</strong>
+                  <small>Life Graph 完整度 {lifeGraphScore}%</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                className={clsx(
+                  'agent-gpt-sidebar__tool',
+                  activeSection === 'settings' && 'is-active',
+                )}
+                onClick={() => goSidebar('settings')}
+              >
+                <span>
+                  <ShieldCheck aria-hidden="true" />
+                </span>
+                <span>
+                  <strong>权限控制</strong>
+                  <small>管理自动执行边界</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                className={clsx(
+                  'agent-gpt-sidebar__tool',
+                  activeSection === 'projects' && 'is-active',
+                )}
+                onClick={() => goSidebar('projects')}
+              >
+                <span>
+                  <CalendarDays aria-hidden="true" />
+                </span>
+                <span>
+                  <strong>我的匹配</strong>
+                  <small>已确认与待跟进</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                className={clsx(
+                  'agent-gpt-sidebar__tool',
+                  activeSection === 'history' && 'is-active',
+                )}
+                onClick={() => goSidebar('history')}
+              >
+                <span>
+                  <Clock3 aria-hidden="true" />
+                </span>
+                <span>
+                  <strong>最近需求</strong>
+                  <small>历史推荐与记录</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                className={clsx('agent-gpt-sidebar__tool', petEnabled && 'is-active')}
+                aria-pressed={petEnabled}
+                onClick={() => goSidebar('pet')}
+              >
+                <span>
+                  <Sparkles aria-hidden="true" />
+                </span>
+                <span>
+                  <strong>智能小蚁</strong>
+                  <small>{petEnabled ? '需要时出现' : '已隐藏'}</small>
+                </span>
+              </button>
+            </section>
           </div>
-        </section>
+        ) : (
+          <nav className="agent-gpt-sidebar__collapsed-nav">
+            {sidebarItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-label={item.label}
+                  className={clsx(activeSection === item.id && 'is-active')}
+                  aria-pressed={item.id === 'pet' ? petEnabled : undefined}
+                  onClick={() => goSidebar(item.id)}
+                >
+                  <Icon aria-hidden="true" />
+                </button>
+              );
+            })}
+          </nav>
+        )}
 
-        <section className="agent-side-card agent-side-card--life">
-          <header>
-            <TrendingUp aria-hidden="true" />
-            <span>Life Graph 摘要</span>
-          </header>
-          <div className="agent-life-summary">
-            <div
-              className="agent-life-ring"
-              style={{ '--score': `${lifeGraphScore}%` } as CSSProperties}
-            >
-              <strong>{lifeGraphScore}%</strong>
-            </div>
-            <div>
-              <strong>完整度</strong>
-              <p>我会先帮你降低压力，公共场所和需要确认的方式推进。</p>
-              <Link to="/profile/life-graph">
-                查看详情
-                <ChevronRight aria-hidden="true" />
-              </Link>
-            </div>
-          </div>
-        </section>
-
-        <section className="agent-side-card agent-side-card--focus">
-          <header>
-            <Eye aria-hidden="true" />
-            <span>我正在关注</span>
-          </header>
-          <p>{activeStep?.label || '时间、地点、社交压力和安全边界'}</p>
-          <div className="agent-focus-icons" aria-hidden="true">
-            <span>
-              <Clock3 />
-            </span>
-            <span>
-              <MapPin />
-            </span>
-            <span>
-              <ShieldCheck />
-            </span>
-          </div>
-        </section>
-
-        <section className="agent-side-card agent-side-card--pending">
-          <header>
-            <LockKeyhole aria-hidden="true" />
-            <span>待确认动作</span>
-          </header>
-          <p>{pendingActions > 0 ? `${pendingActions} 个动作等待你确认` : '暂时没有待确认动作'}</p>
-          <small>
-            所有建议都会在执行前
-            <br />
-            与您确认。
-          </small>
-          <span className="agent-pending-check" aria-hidden="true">
-            <Check />
+        <div className="agent-gpt-sidebar__bottom">
+          <span>
+            <img src={AGENT_BRAND_ICON_SRC} alt="" />
           </span>
-        </section>
-
-        <div className="agent-sidebar-footer" aria-hidden="true">
-          <span />
-          <SlidersHorizontal />
-          <span />
+          {sidebarOpen ? <strong>开发者模式</strong> : null}
         </div>
       </aside>
-      <main className="agent-gpt-main">
-        <header className="agent-assistant-top">
-          <div className="agent-main-brand">
-            <Sparkles aria-hidden="true" />
-            <span>
-              <strong>FitMeet Agent</strong>
-              <small>私人社交活动助理</small>
-            </span>
+
+      <main className="agent-minimal-main">
+        <header className="agent-minimal-topbar">
+          <div className="agent-minimal-brand">
+            <strong aria-label="FitMeet Agent">
+              FitMeet <span>Agent</span>
+            </strong>
+            <small>让每一次线下认识都更安心</small>
           </div>
-          <div>
-            <AgentPermissionSelect mode={mode} onModeChange={onModeChange} compact />
-            <span className="agent-life-pill">
-              Life Graph {lifeGraphScore}% <i aria-hidden="true" />
+          <div className="agent-minimal-status">
+            <span>
+              <ShieldCheck aria-hidden="true" />
+              权限正常
+              <i aria-hidden="true" />
+            </span>
+            <span>
+              <ShieldCheck aria-hidden="true" />
+              安全优先
             </span>
           </div>
         </header>
-        {children}
+        <div className="agent-minimal-surface">{children}</div>
       </main>
     </div>
   );
@@ -668,91 +1149,88 @@ function AgentStartScreen({
   input,
   onInput,
   onSubmit,
-  onStartLifeGraph,
-  onShowLifeGraphResult,
-  lifeGraphResultNode,
+  guideState,
+  guideTarget,
+  guideCopy,
+  petEnabled,
+  petVisible,
+  onInputFocus,
+  onEmptySubmit,
 }: {
   input: string;
   onInput: (value: string) => void;
   onSubmit: (event?: FormEvent, prompt?: string) => void;
-  onStartLifeGraph: () => void;
-  onShowLifeGraphResult: (type: 'rhythm' | 'weekly' | 'changes') => void;
-  lifeGraphResultNode: ReactNode;
+  guideState: AntGuideState;
+  guideTarget: AntGuideTarget;
+  guideCopy?: AntGuideCopy;
+  petEnabled: boolean;
+  petVisible: boolean;
+  onInputFocus?: () => void;
+  onEmptySubmit?: () => void;
 }) {
   const pickIdea = (idea: AgentSuggestionItem) => {
-    if (idea.action === 'life_graph') {
-      onStartLifeGraph();
-      return;
-    }
-    if (idea.action === 'rhythm' || idea.action === 'weekly' || idea.action === 'changes') {
-      onShowLifeGraphResult(idea.action);
-      return;
-    }
-    onSubmit(undefined, idea.prompt ?? idea.text);
+    onInput(idea.prompt ?? idea.text);
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLTextAreaElement>('.agent-gpt-input__textarea')?.focus();
+    });
   };
 
   return (
-    <div className="agent-gpt-start agent-gpt-start--product">
-      <AgentInput input={input} onInput={onInput} onSubmit={onSubmit} />
-      <div className="agent-start-proof" aria-label="Agent 安全边界">
-        <span>
-          <ShieldCheck aria-hidden="true" />
-          站内先聊
-        </span>
-        <span>
-          <MapPin aria-hidden="true" />
-          公共场所优先
-        </span>
-        <span>
-          <LockKeyhole aria-hidden="true" />
-          确认后才执行
-        </span>
-      </div>
-      <section
-        className="agent-natural-prompts agent-natural-prompts--elements"
-        aria-label="你可以这样问我"
-      >
-        <div className="agent-prompt-divider" aria-hidden="true">
-          <span />
-          <strong>试试这样开始</strong>
-          <span />
+    <div className="agent-gpt-start agent-gpt-start--product agent-minimal-home agent-gpt-home-clean">
+      <div className="agent-minimal-glow" aria-hidden="true" />
+      <section className="agent-deepseek-workbench" aria-label="FitMeet Agent 工作台">
+        <div className="agent-deepseek-workbench__head">
+          <div className="agent-gpt-cover" aria-hidden="true">
+            <img src={AGENT_BRAND_ICON_SRC} alt="" />
+          </div>
+          <div>
+            <span>FitMeet Agent</span>
+            <h1>今天想让 FitMeet 帮你完成什么连接？</h1>
+          </div>
         </div>
-        <div className="agent-natural-prompts__list">
-          {naturalPromptIdeas.map((idea) => {
-            const Icon = idea.icon;
+        <p>
+          像和一个线下社交工作台对话：讲清楚想认识谁、在哪里见、哪些边界不能越过，Agent
+          会把画像、权限、匹配和跟进放进同一条任务流。
+        </p>
+        <div className="agent-deepseek-workbench__grid">
+          {agentWorkbenchCards.map((card) => {
+            const Icon = card.icon;
             return (
-              <button
-                key={idea.text}
-                type="button"
-                className={clsx(
-                  'agent-natural-suggestion',
-                  `agent-natural-suggestion--${idea.tone}`,
-                )}
-                onClick={() => pickIdea(idea)}
-              >
-                <span className="agent-natural-suggestion__icon" aria-hidden="true">
-                  <Icon />
-                </span>
-                <span className="agent-natural-suggestion__copy">
-                  <strong>{idea.text}</strong>
-                  <small>{idea.detail}</small>
-                </span>
-                <ChevronRight className="agent-natural-suggestion__arrow" aria-hidden="true" />
-              </button>
+              <article key={card.title} className="agent-deepseek-card">
+                <span>{card.label}</span>
+                <Icon aria-hidden="true" />
+                <strong>{card.title}</strong>
+                <small>{card.detail}</small>
+              </article>
             );
           })}
         </div>
       </section>
-      <div className="agent-start-footer" aria-hidden="true">
-        <span />
-        <Dumbbell />
-        <PersonStanding />
-        <UsersRound />
-        <ShieldCheck />
-        <p>理解你的节奏，守护你的边界，陪你自然连接。</p>
-        <span />
+      {petEnabled && petVisible ? (
+        <AntGuide
+          className="agent-workspace-ant-guide agent-workspace-ant-guide--home"
+          state={guideState}
+          target={guideTarget}
+          copy={guideCopy}
+          size="md"
+        />
+      ) : null}
+      <div className="agent-deepseek-composer">
+        <AgentInput
+          input={input}
+          onInput={onInput}
+          onSubmit={onSubmit}
+          onFocusInput={onInputFocus}
+          onEmptySubmit={onEmptySubmit}
+        />
+        <section className="agent-gpt-starter-row" aria-label="示例需求">
+          {naturalPromptIdeas.slice(0, 3).map((idea) => (
+            <button key={idea.text} type="button" onClick={() => pickIdea(idea)}>
+              {idea.text}
+            </button>
+          ))}
+        </section>
       </div>
-      {lifeGraphResultNode}
     </div>
   );
 }
@@ -763,6 +1241,7 @@ function AgentThread({
   onSubmit,
   onStop,
   isRunning,
+  sessionRestoring,
   elapsed,
   steps,
   messages,
@@ -774,9 +1253,25 @@ function AgentThread({
   debugOpen,
   debugEvents,
   debugLoading,
+  recovery,
+  guideState,
+  guideTarget,
+  guideCopy,
+  petEnabled,
+  petVisible,
+  flowActiveInterest,
+  flowActiveInterestIndex,
+  flowLoadingRecommendations,
+  flowHighlightRecommendations,
+  onInputFocus,
+  onEmptySubmit,
+  onRecommendationFocus,
+  onSafetyFocus,
+  onConfirmFocus,
   onToggleDebug,
   onCloseActivityDetail,
   onAction,
+  onRetryRecovery,
   endRef,
 }: {
   input: string;
@@ -784,6 +1279,7 @@ function AgentThread({
   onSubmit: (event?: FormEvent, prompt?: string) => void;
   onStop: () => void;
   isRunning: boolean;
+  sessionRestoring: boolean;
   elapsed: number;
   steps: Step[];
   messages: AgentThreadMessage[];
@@ -795,27 +1291,69 @@ function AgentThread({
   debugOpen: boolean;
   debugEvents: AgentTaskDebugEvent[];
   debugLoading: boolean;
+  recovery: AgentRecoveryState | null;
+  guideState: AntGuideState;
+  guideTarget: AntGuideTarget;
+  guideCopy?: AntGuideCopy;
+  petEnabled: boolean;
+  petVisible: boolean;
+  flowActiveInterest: string | null;
+  flowActiveInterestIndex: number;
+  flowLoadingRecommendations: boolean;
+  flowHighlightRecommendations: boolean;
+  onInputFocus?: () => void;
+  onEmptySubmit?: () => void;
+  onRecommendationFocus?: () => void;
+  onSafetyFocus?: () => void;
+  onConfirmFocus?: () => void;
   onToggleDebug: () => void;
   onCloseActivityDetail: () => void;
   onAction: (card: FitMeetAlphaCard, action: FitMeetAlphaCardAction) => void;
+  onRetryRecovery: () => void;
   endRef: React.RefObject<HTMLDivElement | null>;
 }) {
+  const assistantIsStreaming = messages.some(
+    (message) => message.role === 'assistant' && message.status === 'streaming',
+  );
   return (
     <div className="agent-gpt-thread">
+      {petEnabled && petVisible ? (
+        <AntGuide
+          className="agent-workspace-ant-guide agent-workspace-ant-guide--thread"
+          state={guideState}
+          target={guideTarget}
+          copy={guideCopy}
+          size="sm"
+        />
+      ) : null}
       <Conversation className="agent-gpt-thread__messages">
         <ConversationContent className="agent-gpt-thread__content">
           {messages.map((message) => (
             <AgentMessageBubble key={message.id} message={message} />
           ))}
-          {isRunning ? (
-            <AgentThinkingBlock elapsed={elapsed} steps={steps} onStop={onStop} />
+          {isRunning && !assistantIsStreaming ? (
+            <AgentThinkingBlock elapsed={elapsed} steps={steps} />
           ) : null}
-          {!isRunning && userResult ? <AgentProgressSummary steps={steps} /> : null}
+          {sessionRestoring ? <AgentInlineStatus text="正在恢复上一次对话..." /> : null}
+          {flowLoadingRecommendations ? (
+            <AgentMockDiscoveryPanel
+              activeInterest={flowActiveInterest}
+              activeInterestIndex={flowActiveInterestIndex}
+            />
+          ) : null}
           {userResult ? (
             <AgentPrivacyControls privacy={privacy} onChange={onPrivacyChange} />
           ) : null}
           {userResult ? (
-            <UserFacingResult result={userResult} privacy={privacy} onAction={onAction} />
+            <UserFacingResult
+              result={userResult}
+              privacy={privacy}
+              highlightRecommendations={flowHighlightRecommendations}
+              onAction={onAction}
+              onRecommendationFocus={onRecommendationFocus}
+              onSafetyFocus={onSafetyFocus}
+              onConfirmFocus={onConfirmFocus}
+            />
           ) : null}
           {activityLoading ? <AgentInlineStatus text="正在读取活动详情..." /> : null}
           {activityDetail ? (
@@ -835,12 +1373,45 @@ function AgentThread({
               onToggle={onToggleDebug}
             />
           ) : null}
+          {!isRunning && recovery ? (
+            <AgentRecoveryPanel recovery={recovery} onRetry={onRetryRecovery} />
+          ) : null}
           <div ref={endRef} />
         </ConversationContent>
         <ConversationScrollButton className="agent-gpt-scroll-button" />
       </Conversation>
-      <AgentInput compact input={input} onInput={onInput} onSubmit={onSubmit} />
+      <AgentInput
+        compact
+        input={input}
+        onInput={onInput}
+        onSubmit={onSubmit}
+        isRunning={isRunning}
+        onStop={onStop}
+        onFocusInput={onInputFocus}
+        onEmptySubmit={onEmptySubmit}
+      />
     </div>
+  );
+}
+
+function AgentRecoveryPanel({
+  recovery,
+  onRetry,
+}: {
+  recovery: AgentRecoveryState;
+  onRetry: () => void;
+}) {
+  return (
+    <section className="agent-recovery-panel" aria-live="polite">
+      <div>
+        <strong>{recovery.title}</strong>
+        <span>{recovery.message}</span>
+      </div>
+      <button type="button" onClick={onRetry}>
+        <RotateCcw aria-hidden="true" />
+        再试一次
+      </button>
+    </section>
   );
 }
 
@@ -849,42 +1420,117 @@ function AgentInput({
   input,
   onInput,
   onSubmit,
+  isRunning,
+  onStop,
+  onFocusInput,
+  onEmptySubmit,
 }: {
   compact?: boolean;
   input: string;
   onInput: (value: string) => void;
   onSubmit: (event?: FormEvent, prompt?: string) => void;
+  isRunning?: boolean;
+  onStop?: () => void;
+  onFocusInput?: () => void;
+  onEmptySubmit?: () => void;
 }) {
+  const [emptyWarning, setEmptyWarning] = useState(false);
+
   return (
     <PromptInput
-      className={clsx('agent-gpt-input', compact && 'agent-gpt-input--compact')}
-      onSubmit={(message, event) => onSubmit(event, message.text)}
+      className={clsx(
+        'agent-gpt-input',
+        compact && 'agent-gpt-input--compact',
+        emptyWarning && 'is-empty',
+      )}
+      onSubmit={(message, event) => {
+        if (!message.text.trim()) {
+          setEmptyWarning(true);
+          onEmptySubmit?.();
+          window.setTimeout(() => setEmptyWarning(false), 320);
+          return;
+        }
+        onSubmit(event, message.text);
+      }}
     >
       <PromptInputBody className="agent-gpt-input__body">
+        <span className="agent-input-spark" aria-hidden="true">
+          <Sparkles />
+        </span>
         <PromptInputTextarea
           aria-label="描述你的社交需求"
           className="agent-gpt-input__textarea"
           value={input}
           onChange={(event) => onInput(event.target.value)}
-          placeholder="例如：今晚想找个人慢跑，别太远，先站内聊"
+          onFocus={onFocusInput}
+          placeholder="例如：今晚找人散步，先站内聊"
           rows={1}
         />
-        <PromptInputSubmit aria-label="发送需求" className="agent-gpt-input__submit">
-          <Send aria-hidden="true" />
-        </PromptInputSubmit>
+        <span className="agent-model-pill">
+          FitMeet Lite
+          <ChevronDown aria-hidden="true" />
+        </span>
+        {isRunning ? (
+          <button
+            type="button"
+            aria-label="停止"
+            className="agent-gpt-input__submit agent-gpt-input__submit--stop"
+            onClick={onStop}
+          >
+            <Square aria-hidden="true" />
+          </button>
+        ) : (
+          <PromptInputSubmit aria-label="发送需求" className="agent-gpt-input__submit">
+            <Send aria-hidden="true" />
+          </PromptInputSubmit>
+        )}
       </PromptInputBody>
     </PromptInput>
+  );
+}
+
+function AgentMockDiscoveryPanel({
+  activeInterest,
+  activeInterestIndex,
+}: {
+  activeInterest: string | null;
+  activeInterestIndex: number;
+}) {
+  return (
+    <section className="agent-flow-discovery" aria-label="正在发现兴趣场景">
+      <div className="agent-flow-discovery__heading">
+        <span className="agent-gpt-pulse" aria-hidden="true" />
+        <strong>正在发现兴趣场景</strong>
+        <small>{activeInterest ? `正在点亮：${activeInterest}` : '开始理解兴趣边界'}</small>
+      </div>
+      <div className="agent-flow-interest-row" aria-label="兴趣点亮进度">
+        {AGENT_FLOW_INTERESTS.map((interest, index) => (
+          <span
+            key={interest}
+            className={clsx(
+              'agent-flow-interest-chip',
+              index <= activeInterestIndex && 'is-active',
+            )}
+          >
+            {interest}
+          </span>
+        ))}
+      </div>
+      <div className="agent-flow-loading-grid" aria-hidden="true">
+        {[0, 1, 2].map((item) => (
+          <span key={item} className="agent-flow-loading-card" />
+        ))}
+      </div>
+    </section>
   );
 }
 
 function AgentThinkingBlock({
   elapsed,
   steps,
-  onStop,
 }: {
   elapsed: number;
   steps: Step[];
-  onStop: () => void;
 }) {
   const active =
     steps.find((step) => step.status === 'running') ??
@@ -904,24 +1550,6 @@ function AgentThinkingBlock({
           ))}
         </div>
       </section>
-      <button type="button" onClick={onStop}>
-        停止
-      </button>
-    </div>
-  );
-}
-
-function AgentProgressSummary({ steps }: { steps: Step[] }) {
-  const visibleSteps = steps.filter((step) => step.status !== 'pending');
-  if (!visibleSteps.length) return null;
-
-  return (
-    <div className="agent-gpt-progress-summary" aria-label="Agent 输出状态">
-      <div className="agent-gpt-step-list">
-        {visibleSteps.map((step) => (
-          <AgentProgressRow key={step.id} step={step} />
-        ))}
-      </div>
     </div>
   );
 }
@@ -961,11 +1589,19 @@ function AgentMessageBubble({ message }: { message: AgentThreadMessage }) {
 function UserFacingResult({
   result,
   privacy,
+  highlightRecommendations,
   onAction,
+  onRecommendationFocus,
+  onSafetyFocus,
+  onConfirmFocus,
 }: {
   result: UserFacingAgentResponse;
   privacy: AgentPrivacySettings;
+  highlightRecommendations?: boolean;
   onAction: (card: FitMeetAlphaCard, action: FitMeetAlphaCardAction) => void;
+  onRecommendationFocus?: () => void;
+  onSafetyFocus?: () => void;
+  onConfirmFocus?: () => void;
 }) {
   const candidateCards = result.cards.filter((card) => card.type === 'candidate_card');
   const activityCards = result.cards.filter((card) =>
@@ -974,17 +1610,32 @@ function UserFacingResult({
   const otherCards = result.cards.filter(
     (card) => card.type !== 'candidate_card' && !activityCards.includes(card),
   );
+  const hasConfirmableCards = otherCards.some(
+    (card) =>
+      card.status === 'waiting_confirmation' ||
+      card.actions.some(
+        (action) =>
+          action.requiresConfirmation ||
+          action.schemaAction === 'opener.confirm_send' ||
+          action.action === 'send_message',
+      ),
+  );
   const safetyNotes = [
     ...result.safeStatus.boundaryNotes,
     ...result.safeStatus.requiredConfirmations.map((item) => '需要你确认：' + String(item)),
   ]
     .map((note) => publicText(note, ''))
     .filter(Boolean);
+  const taskId = findTaskId(result);
 
   return (
     <div className="agent-gpt-results agent-product-results">
       {otherCards.length ? (
-        <section className="agent-gpt-result-block agent-natural-cards">
+        <section
+          className="agent-gpt-result-block agent-natural-cards"
+          onFocus={hasConfirmableCards ? onConfirmFocus : undefined}
+          onMouseEnter={hasConfirmableCards ? onConfirmFocus : undefined}
+        >
           <div className="agent-result-heading">
             <span>我会先停下来确认</span>
             <h2>这些动作不会自动执行</h2>
@@ -1004,7 +1655,14 @@ function UserFacingResult({
       ) : null}
 
       {candidateCards.length ? (
-        <section className="agent-gpt-result-block">
+        <section
+          className={clsx(
+            'agent-gpt-result-block',
+            highlightRecommendations && 'agent-flow-result-block--active',
+          )}
+          onFocus={onRecommendationFocus}
+          onMouseEnter={onRecommendationFocus}
+        >
           <div className="agent-result-heading">
             <span>推荐给你的人</span>
             <h2>我为什么觉得合适</h2>
@@ -1024,7 +1682,11 @@ function UserFacingResult({
       ) : null}
 
       {activityCards.length ? (
-        <section className="agent-gpt-result-block">
+        <section
+          className="agent-gpt-result-block"
+          onFocus={onRecommendationFocus}
+          onMouseEnter={onRecommendationFocus}
+        >
           <div className="agent-result-heading">
             <span>约练闭环</span>
             <h2>活动状态会持续可见</h2>
@@ -1039,7 +1701,11 @@ function UserFacingResult({
       ) : null}
 
       {result.pendingConfirmations.length ? (
-        <section className="agent-gpt-result-block agent-natural-cards">
+        <section
+          className="agent-gpt-result-block agent-natural-cards"
+          onFocus={onConfirmFocus}
+          onMouseEnter={onConfirmFocus}
+        >
           <div className="agent-result-heading">
             <span>待确认</span>
             <h2>我正在等你决定</h2>
@@ -1049,13 +1715,7 @@ function UserFacingResult({
             {result.pendingConfirmations.slice(0, 4).map((confirmation) => (
               <AgentNaturalConfirmationCard
                 key={`${confirmation.type}-${confirmation.id ?? confirmation.summary}`}
-                confirmation={{
-                  id: `${confirmation.type}-${confirmation.id ?? confirmation.summary}`,
-                  title: publicText(confirmation.summary, '有一个动作正在等待你确认'),
-                  body: confirmationLabel(confirmation.actionType, confirmation.riskLevel),
-                  primaryLabel: confirmationPrimaryLabel(confirmation.actionType),
-                  secondaryLabels: confirmationSecondaryLabels(confirmation.actionType),
-                }}
+                confirmation={confirmationViewModelFromPending(confirmation, taskId, onAction)}
               />
             ))}
           </div>
@@ -1063,7 +1723,11 @@ function UserFacingResult({
       ) : null}
 
       {safetyNotes.length || result.safeStatus.blocked ? (
-        <AgentSafetyPanel pendingActions={result.pendingConfirmations.length} notes={safetyNotes} />
+        <AgentSafetyPanel
+          pendingActions={result.pendingConfirmations.length}
+          notes={safetyNotes}
+          onSafetyFocus={onSafetyFocus}
+        />
       ) : null}
 
       {!result.cards.length && !result.pendingConfirmations.length ? (
@@ -1552,9 +2216,23 @@ function AgentDebugPanel({
   );
 }
 
-function AgentSafetyPanel({ pendingActions, notes }: { pendingActions: number; notes: string[] }) {
+function AgentSafetyPanel({
+  pendingActions,
+  notes,
+  onSafetyFocus,
+}: {
+  pendingActions: number;
+  notes: string[];
+  onSafetyFocus?: () => void;
+}) {
   return (
-    <section className="agent-gpt-approval agent-safety-panel">
+    <section
+      className="agent-gpt-approval agent-safety-panel"
+      tabIndex={0}
+      onClick={onSafetyFocus}
+      onFocus={onSafetyFocus}
+      onMouseEnter={onSafetyFocus}
+    >
       <div className="agent-result-heading">
         <span>安全边界</span>
         <h2>等待你确认</h2>
@@ -1610,6 +2288,110 @@ function AgentNaturalConfirmationCard({
       </ConfirmationRequest>
     </Confirmation>
   );
+}
+
+function confirmationViewModelFromPending(
+  confirmation: UserFacingAgentResponse['pendingConfirmations'][number],
+  taskId: number | null,
+  onAction: (card: FitMeetAlphaCard, action: FitMeetAlphaCardAction) => void,
+): AgentConfirmationViewModel {
+  const id = `${confirmation.type}-${confirmation.id ?? confirmation.summary}`;
+  const action = taskId ? actionFromPendingConfirmation(confirmation, taskId) : null;
+  const card = action && taskId ? cardFromPendingConfirmation(confirmation, taskId, action) : null;
+
+  return {
+    id,
+    title: publicText(confirmation.summary, '有一个动作正在等待你确认'),
+    body: confirmationLabel(confirmation.actionType, confirmation.riskLevel),
+    primaryLabel: confirmationPrimaryLabel(confirmation.actionType),
+    secondaryLabels: confirmationSecondaryLabels(confirmation.actionType),
+    onPrimary: card && action ? () => onAction(card, action) : undefined,
+  };
+}
+
+function actionFromPendingConfirmation(
+  confirmation: UserFacingAgentResponse['pendingConfirmations'][number],
+  taskId: number,
+): FitMeetAlphaCardAction | null {
+  const actionType = confirmation.actionType.toLowerCase();
+  const summary = publicText(confirmation.summary, '确认继续');
+
+  if (actionType.includes('publish') || actionType.includes('activity')) {
+    return {
+      id: `pending-${confirmation.type}-confirm`,
+      label: confirmationPrimaryLabel(confirmation.actionType),
+      action: 'create_activity',
+      schemaAction: 'activity.confirm_create',
+      requiresConfirmation: true,
+      payload: {
+        taskId,
+        pendingConfirmationType: confirmation.type,
+        pendingConfirmationId: confirmation.id,
+        summary,
+      },
+    };
+  }
+
+  if (actionType.includes('message')) {
+    return {
+      id: `pending-${confirmation.type}-confirm`,
+      label: confirmationPrimaryLabel(confirmation.actionType),
+      action: 'send_message',
+      schemaAction: 'opener.confirm_send',
+      requiresConfirmation: true,
+      payload: {
+        taskId,
+        pendingConfirmationType: confirmation.type,
+        pendingConfirmationId: confirmation.id,
+        summary,
+      },
+    };
+  }
+
+  if (
+    actionType.includes('friend') ||
+    actionType.includes('connect') ||
+    actionType.includes('candidate') ||
+    actionType.includes('save')
+  ) {
+    return {
+      id: `pending-${confirmation.type}-confirm`,
+      label: confirmationPrimaryLabel(confirmation.actionType),
+      action: 'save_candidate',
+      schemaAction: 'candidate.like',
+      requiresConfirmation: true,
+      payload: {
+        taskId,
+        pendingConfirmationType: confirmation.type,
+        pendingConfirmationId: confirmation.id,
+        summary,
+      },
+    };
+  }
+
+  return null;
+}
+
+function cardFromPendingConfirmation(
+  confirmation: UserFacingAgentResponse['pendingConfirmations'][number],
+  taskId: number,
+  action: FitMeetAlphaCardAction,
+): FitMeetAlphaCard {
+  return {
+    id: `pending-confirmation:${confirmation.type}:${confirmation.id ?? taskId}`,
+    type: 'audit_update',
+    title: publicText(confirmation.summary, '待确认动作'),
+    body: confirmationLabel(confirmation.actionType, confirmation.riskLevel),
+    status: 'waiting_confirmation',
+    data: {
+      taskId,
+      pendingConfirmationType: confirmation.type,
+      pendingConfirmationId: confirmation.id,
+      actionType: confirmation.actionType,
+      riskLevel: confirmation.riskLevel,
+    },
+    actions: [action],
+  };
 }
 
 function AgentSettings({
@@ -1957,6 +2739,19 @@ function lightStatusFromSchemaAction(action: FitMeetAgentSchemaAction): UserFaci
   return '正在理解你的需求';
 }
 
+function lifecycleFromSchemaAction(action: FitMeetAgentSchemaAction): AgentLifecycle {
+  if (action === 'candidate.generate_opener' || action === 'opener.regenerate') {
+    return 'drafting_opener';
+  }
+  if (action === 'opener.confirm_send') return 'waiting_confirmation';
+  if (action.startsWith('candidate.')) return 'searching_candidates';
+  if (action.startsWith('activity.')) return 'waiting_confirmation';
+  if (action.startsWith('review.') || action.startsWith('life_graph.')) {
+    return 'reading_life_graph';
+  }
+  return 'analyzing_intent';
+}
+
 function numberFromUnknown(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
     return value;
@@ -2022,7 +2817,7 @@ function mergeStep(
   steps: Step[],
   id: string,
   label: string,
-  status: 'pending' | 'running' | 'done' | 'failed',
+  status: 'pending' | 'running' | 'waiting' | 'done' | 'failed',
 ): Step[] {
   const nextStatus: StepState =
     status === 'done' ? 'success' : status === 'failed' ? 'error' : status;
@@ -2087,6 +2882,32 @@ function normalizePermissionMode(mode: SocialAgentPermissionMode): SocialAgentPe
   if (mode === 'confirm' || mode === 'manual_confirm') return 'limited_auto';
   if (mode === 'lab') return 'open';
   return mode;
+}
+
+function createAgentRecoveryFromError(
+  error: AgentError,
+  prompt: string,
+  fallbackKind: AgentRecoveryState['kind'] = 'failed',
+): AgentRecoveryState {
+  const kindByCode: Partial<Record<AgentError['code'], AgentRecoveryState['kind']>> = {
+    ABORTED: 'stopped',
+    MISSING_INFO: 'missing_info',
+    UNAUTHORIZED: 'unauthorized',
+    SAFETY_BLOCKED: 'safety',
+  };
+  return {
+    kind: kindByCode[error.code] ?? fallbackKind,
+    title: error.title,
+    message: error.message,
+    prompt,
+    retryable: error.retryable,
+  };
+}
+
+function isAbortError(error: unknown): boolean {
+  if (error instanceof DOMException) return error.name === 'AbortError';
+  if (error instanceof Error) return error.name === 'AbortError';
+  return false;
 }
 
 function nextId(prefix: string) {

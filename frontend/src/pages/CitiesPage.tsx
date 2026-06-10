@@ -137,7 +137,7 @@ export const CitiesPage = memo(function CitiesPage() {
                 <Stat value={c.agents} label="AI" accent="text-aiBright" />
               </div>
               <Link
-                to="/meet"
+                to="/discover"
                 className="mt-5 inline-flex items-center gap-1 text-sm font-bold text-lime transition hover:gap-2"
               >
                 查看 {c.city} 约练 →

@@ -111,7 +111,7 @@ export const SportsPage = memo(function SportsPage() {
           {list.map((s) => (
             <Link
               key={s.id}
-              to="/meet"
+              to="/discover"
               className="group rounded-2xl border border-white/10 bg-white/[0.03] p-5 transition hover:-translate-y-1 hover:border-human/40 hover:bg-human/5"
             >
               <div className="flex items-start justify-between">
@@ -139,7 +139,7 @@ export const SportsPage = memo(function SportsPage() {
             创建自定义分类，让有同样爱好的人能找到你。我们不预设品味边界。
           </p>
           <Link
-            to="/meet"
+            to="/discover"
             className="mt-6 inline-flex items-center gap-2 rounded-xl bg-human-grad px-6 py-3 text-sm font-black text-white shadow-humanGlow transition hover:-translate-y-0.5"
           >
             发起约练 →

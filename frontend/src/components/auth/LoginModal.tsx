@@ -97,7 +97,9 @@ export function LoginModal() {
       >
         <div className="login-modal-header">
           <div className="login-modal-brand">
-            <span>F</span>
+            <span aria-hidden="true">
+              <img src="/favicon-192.png" alt="" width="36" height="36" />
+            </span>
             <div>
               <strong>FitMeet</strong>
               <small>Human plans, held lightly</small>

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentInboxApi } from '../api/agentInboxApi';
@@ -13,6 +13,14 @@ import { useAuthStore } from '../stores';
 
 const forbiddenUserArtifacts =
   /Life Graph Agent|Social Match Agent|Meet Loop Agent|traceId|agentTrace|structuredIntent|planner|tool call|toolCalls|DeepSeek|OpenAI|raw JSON|stack|审计|audit log/i;
+
+function useRealAgentAdapter() {
+  vi.stubEnv('VITE_AGENT_ADAPTER', 'real');
+}
+
+function useMockAgentAdapter() {
+  vi.stubEnv('VITE_AGENT_ADAPTER', 'mock');
+}
 
 describe('AgentWorkspacePage', () => {
   beforeEach(() => {
@@ -40,7 +48,9 @@ describe('AgentWorkspacePage', () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     useAuthStore.setState({ isLoggedIn: false, user: null, showLoginModal: false });
   });
 
@@ -51,20 +61,33 @@ describe('AgentWorkspacePage', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getAllByText('FitMeet Agent').length).toBeGreaterThan(0);
-    expect(screen.getByText('当前目标')).toBeInTheDocument();
-    expect(screen.getByText('Life Graph 摘要')).toBeInTheDocument();
-    expect(screen.getByText('我正在关注')).toBeInTheDocument();
+    expect(screen.getByLabelText('FitMeet Agent')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('img', { name: '智能小蚁正在等待你的输入' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '智能小蚁需要时出现' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByText('让每一次线下认识都更安心')).toBeInTheDocument();
+    expect(screen.queryByText('等待你的社交目标')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '关闭边栏' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /New Agent/ })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '最近对话' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Agent 常用功能' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /人物画像/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '关闭边栏' }));
+    expect(screen.getByRole('button', { name: '打开边栏' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /打开边栏/ })).toBeInTheDocument();
     expect(
       screen.getByPlaceholderText(
-        '例如：今晚想找个人慢跑，别太远，先站内聊',
+        '例如：今晚找人散步，先站内聊',
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText('站内先聊')).toBeInTheDocument();
-    expect(screen.getByText('公共场所优先')).toBeInTheDocument();
-    expect(screen.getByText('确认后才执行')).toBeInTheDocument();
-    expect(screen.getByText('试试这样开始')).toBeInTheDocument();
-    expect(screen.getByText('今晚想出门走走')).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: '今天想让 FitMeet 帮你完成什么连接？' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('今晚出门走走')).toBeInTheDocument();
     expect(screen.queryByText('五个核心任务流')).not.toBeInTheDocument();
     expect(screen.queryByText('同城社交')).not.toBeInTheDocument();
     expect(screen.queryByText(forbiddenUserArtifacts)).not.toBeInTheDocument();
@@ -101,6 +124,7 @@ describe('AgentWorkspacePage', () => {
   });
 
   it('does not render technical artifacts from streamed user-facing responses', async () => {
+    useRealAgentAdapter();
     useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
     vi.spyOn(lifeGraphApi, 'getMe').mockResolvedValue(mockLifeGraph());
     vi.spyOn(agentInboxApi, 'events').mockResolvedValue({ events: [] });
@@ -172,15 +196,14 @@ describe('AgentWorkspacePage', () => {
     fireEvent.submit(form as HTMLFormElement);
 
     await waitFor(() => expect(streamSpy).toHaveBeenCalled());
-    expect(screen.getByText('分析中')).toBeInTheDocument();
-    expect(screen.getByText('正在调用工具')).toBeInTheDocument();
-    expect(screen.getByText('分析')).toBeInTheDocument();
-    expect(screen.getByText('工具')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('推荐候选人')).toBeInTheDocument());
+    expect(screen.queryByText('分析中')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在调用工具')).not.toBeInTheDocument();
     expect(document.body.textContent ?? '').not.toMatch(forbiddenUserArtifacts);
   });
 
-  it('submits natural language suggestions through the user-facing stream', async () => {
+  it('fills the clean home input from natural language suggestions before submit', async () => {
+    useRealAgentAdapter();
     useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
     vi.spyOn(lifeGraphApi, 'getMe').mockResolvedValue(mockLifeGraph());
     vi.spyOn(agentInboxApi, 'events').mockResolvedValue({ events: [] });
@@ -198,16 +221,23 @@ describe('AgentWorkspacePage', () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(screen.getByText('今晚想出门走走'));
+    fireEvent.click(screen.getByText('今晚出门走走'));
+
+    expect(screen.getByRole('textbox')).toHaveValue('今晚出门走走，找个低压力的人一起散步');
+    expect(streamSpy).not.toHaveBeenCalled();
+    const form = screen.getByRole('textbox').closest('form');
+    expect(form).not.toBeNull();
+    fireEvent.submit(form as HTMLFormElement);
 
     await waitFor(() => expect(streamSpy).toHaveBeenCalled());
     expect(streamSpy.mock.calls[0]?.[0]).toMatchObject({
-      goal: '今晚想出门走走，找个低压力的人一起散步',
+      goal: '今晚出门走走，找个低压力的人一起散步',
       permissionMode: 'limited_auto',
     });
   });
 
-  it('links the permission dropdown to streamed Agent requests', async () => {
+  it('streams typed requests with the default permission mode from the clean home input', async () => {
+    useRealAgentAdapter();
     useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
     vi.spyOn(lifeGraphApi, 'getMe').mockResolvedValue(mockLifeGraph());
     vi.spyOn(agentInboxApi, 'events').mockResolvedValue({ events: [] });
@@ -225,18 +255,26 @@ describe('AgentWorkspacePage', () => {
       </MemoryRouter>,
     );
 
-    fireEvent.change(screen.getByLabelText('权限模式'), { target: { value: 'assist' } });
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '只帮我看看，不自动操作' } });
     fireEvent.submit(screen.getByRole('textbox').closest('form') as HTMLFormElement);
     await waitFor(() => expect(streamSpy).toHaveBeenCalledTimes(1));
-    expect(streamSpy.mock.calls[0]?.[0]).toMatchObject({ permissionMode: 'assist' });
+    expect(streamSpy.mock.calls[0]?.[0]).toMatchObject({ permissionMode: 'limited_auto' });
+  });
 
-    cleanup();
-    vi.restoreAllMocks();
+  it('restores the database-backed Agent session and continues with the active task id', async () => {
+    useRealAgentAdapter();
     useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
     vi.spyOn(lifeGraphApi, 'getMe').mockResolvedValue(mockLifeGraph());
     vi.spyOn(agentInboxApi, 'events').mockResolvedValue({ events: [] });
-    const openSpy = vi
+    const restored = mockCandidateResponse();
+    vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue({
+      hasSession: true,
+      activeTaskId: 42,
+      task: { id: 42, permissionMode: 'limited_auto', goal: '上一次想找咖啡搭子' },
+      messages: [],
+      result: restored,
+    });
+    const streamSpy = vi
       .spyOn(socialAgentApi, 'runUserFacingStream')
       .mockImplementation(async (_data, onEvent) => {
         const streamed = mockCandidateResponse();
@@ -245,19 +283,169 @@ describe('AgentWorkspacePage', () => {
       });
 
     render(
+      <MemoryRouter initialEntries={['/agent/chat/42']}>
+        <AgentWorkspacePage view="chat" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(socialAgentApi.restoreSession).toHaveBeenCalledWith(undefined));
+    await waitFor(() => expect(screen.getByText('小林')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: '继续帮我找更轻松的咖啡聊天对象' },
+    });
+    fireEvent.submit(screen.getByRole('textbox').closest('form') as HTMLFormElement);
+
+    await waitFor(() => expect(streamSpy).toHaveBeenCalled());
+    expect(streamSpy.mock.calls[0]?.[0]).toMatchObject({
+      goal: '继续帮我找更轻松的咖啡聊天对象',
+      taskId: 42,
+    });
+  });
+
+  it('drives AntGuide through the anonymous mock discovery flow', async () => {
+    useMockAgentAdapter();
+
+    render(
       <MemoryRouter initialEntries={['/agent']}>
         <AgentWorkspacePage view="home" />
       </MemoryRouter>,
     );
 
-    fireEvent.change(screen.getByLabelText('权限模式'), { target: { value: 'open' } });
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: '开放权限跑一遍推荐' } });
-    fireEvent.submit(screen.getByRole('textbox').closest('form') as HTMLFormElement);
-    await waitFor(() => expect(openSpy).toHaveBeenCalledTimes(1));
-    expect(openSpy.mock.calls[0]?.[0]).toMatchObject({ permissionMode: 'open' });
+    fireEvent.focus(screen.getByRole('textbox'));
+    expect(screen.getByRole('img', { name: '智能小蚁正在等待你的输入' })).toBeInTheDocument();
+
+    await submitPromptText('今晚想找人一起喝咖啡');
+
+    expect(
+      await screen.findByRole('img', { name: '智能小蚁正在理解你的需求' }),
+    ).toBeInTheDocument();
+
+    expect(
+      await screen.findByRole('img', { name: '智能小蚁正在发现附近场景' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '正在发现兴趣场景' })).toBeInTheDocument();
+    expect(screen.getByText('咖啡')).toBeInTheDocument();
+    expect(screen.getByText('Citywalk')).toBeInTheDocument();
+    expect(screen.getByText('散步')).toBeInTheDocument();
+    expect(screen.getByText('轻聊天')).toBeInTheDocument();
+
+    expect(await screen.findByText('咖啡轻聊搭子', {}, { timeout: 3500 })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('img', { name: '智能小蚁已找到推荐' }, { timeout: 3500 }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('生成开场白')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发送邀请' })).toBeInTheDocument();
+  });
+
+  it('uses AntGuide error, opener, confirmation, and success states in the mock flow', async () => {
+    useMockAgentAdapter();
+
+    render(
+      <MemoryRouter initialEntries={['/agent']}>
+        <AgentWorkspacePage view="home" />
+      </MemoryRouter>,
+    );
+
+    await act(async () => {
+      fireEvent.submit(screen.getByRole('textbox').closest('form') as HTMLFormElement);
+      await flushPromptInputSubmit();
+    });
+    expect(
+      await screen.findByRole('img', { name: '智能小蚁需要更多信息才能继续' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('告诉我你的兴趣、城市或想认识什么样的人，我才能继续。'),
+    ).toBeInTheDocument();
+
+    await submitPromptText('今晚想找人一起喝咖啡，不想太尴尬');
+    expect(await screen.findByText('咖啡轻聊搭子', {}, { timeout: 3500 })).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('生成开场白'));
+      await Promise.resolve();
+    });
+    expect(
+      await screen.findByRole('img', { name: '智能小蚁正在理解你的需求' }),
+    ).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: '智能小蚁已完成操作' })).toBeInTheDocument();
+    expect(screen.getByText('开场白已经准备好，你确认发送前我不会联系对方。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发送邀请' })).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '发送邀请' }));
+      await Promise.resolve();
+    });
+    expect(
+      await screen.findByRole('img', { name: '智能小蚁正在等待你确认操作' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('是否确认发送这个邀请？')).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '确认发送' }));
+      await Promise.resolve();
+    });
+    expect(await screen.findByRole('img', { name: '智能小蚁已完成操作' })).toBeInTheDocument();
+    expect(screen.getByText('下一步建议')).toBeInTheDocument();
+  });
+
+  it('moves AntGuide to confirming when users send a mock invite directly', async () => {
+    useMockAgentAdapter();
+
+    render(
+      <MemoryRouter initialEntries={['/agent']}>
+        <AgentWorkspacePage view="home" />
+      </MemoryRouter>,
+    );
+
+    await submitPromptText('今晚想找人一起喝咖啡');
+    expect(await screen.findByText('咖啡轻聊搭子', {}, { timeout: 3500 })).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '发送邀请' }));
+      await Promise.resolve();
+    });
+
+    expect(
+      await screen.findByRole('img', { name: '智能小蚁正在等待你确认操作' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('是否确认发送这个邀请？')).toBeInTheDocument();
+    expect(screen.getByText('再改一下')).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '确认发送' }));
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByRole('img', { name: '智能小蚁已完成操作' })).toBeInTheDocument();
+    expect(screen.getByText('下一步建议')).toBeInTheDocument();
+  });
+
+  it('switches AntGuide to the safety reminder state for sensitive mock requests', async () => {
+    useMockAgentAdapter();
+
+    render(
+      <MemoryRouter initialEntries={['/agent']}>
+        <AgentWorkspacePage view="home" />
+      </MemoryRouter>,
+    );
+
+    await submitPromptText('想线下见面并交换联系方式');
+
+    expect(
+      await screen.findByRole(
+        'img',
+        { name: '智能小蚁正在提示安全边界' },
+        { timeout: 3500 },
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText('建议先站内聊几句，第一次见面优先选择公共场所。').length,
+    ).toBeGreaterThan(0);
   });
 
   it('renders candidate reasoning and only shows a natural confirmation card before sending', async () => {
+    useRealAgentAdapter();
     useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
     vi.spyOn(lifeGraphApi, 'getMe').mockResolvedValue(mockLifeGraph());
     vi.spyOn(agentInboxApi, 'events').mockResolvedValue({ events: [] });
@@ -267,7 +455,12 @@ describe('AgentWorkspacePage', () => {
       return streamed;
     });
     const actionResponse = mockOpenerApprovalResponse();
-    const actionSpy = vi.spyOn(socialAgentApi, 'performAction').mockResolvedValue(actionResponse);
+    const actionSpy = vi
+      .spyOn(socialAgentApi, 'performActionStream')
+      .mockImplementation(async (_data, onEvent) => {
+        onEvent({ type: 'result', result: actionResponse });
+        return actionResponse;
+      });
 
     render(
       <MemoryRouter initialEntries={['/agent']}>
@@ -303,6 +496,7 @@ describe('AgentWorkspacePage', () => {
   });
 
   it('shows privacy controls, activity loop details, Life Graph confirmation, and debug logs', async () => {
+    useRealAgentAdapter();
     useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
     vi.spyOn(lifeGraphApi, 'getMe').mockResolvedValue(mockLifeGraph());
     vi.spyOn(agentInboxApi, 'events').mockResolvedValue({ events: [] });
@@ -368,7 +562,12 @@ describe('AgentWorkspacePage', () => {
       onEvent({ type: 'result', result: streamed });
       return streamed;
     });
-    const actionSpy = vi.spyOn(socialAgentApi, 'performAction').mockResolvedValue(streamed);
+    const actionSpy = vi
+      .spyOn(socialAgentApi, 'performActionStream')
+      .mockImplementation(async (_data, onEvent) => {
+        onEvent({ type: 'result', result: streamed });
+        return streamed;
+      });
 
     render(
       <MemoryRouter initialEntries={['/agent']}>
@@ -390,7 +589,8 @@ describe('AgentWorkspacePage', () => {
     expect(screen.getAllByText(/青岛大学操场/).length).toBeGreaterThan(0);
 
     expect(screen.getByText('约练闭环')).toBeInTheDocument();
-    fireEvent.click(screen.getAllByText('查看详情')[1]);
+    const detailButtons = screen.getAllByText('查看详情');
+    fireEvent.click(detailButtons[detailButtons.length - 1]);
     await waitFor(() => expect(activitiesApi.get).toHaveBeenCalledWith(77));
     await waitFor(() => expect(screen.getAllByText('青岛大学慢跑').length).toBeGreaterThan(1));
     expect(screen.getByText(/checkin/)).toBeInTheDocument();
@@ -399,6 +599,8 @@ describe('AgentWorkspacePage', () => {
     await waitFor(() =>
       expect(actionSpy).toHaveBeenCalledWith(
         expect.objectContaining({ taskId: 101, action: 'life_graph.accept_update' }),
+        expect.any(Function),
+        expect.any(AbortSignal),
       ),
     );
 
@@ -412,6 +614,77 @@ describe('AgentWorkspacePage', () => {
     expect(screen.getByText('Activity 状态显示')).toBeInTheDocument();
   });
 
+  it('lets users retry when the Agent stream fails without leaking technical errors', async () => {
+    useRealAgentAdapter();
+    useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
+    vi.spyOn(lifeGraphApi, 'getMe').mockResolvedValue(mockLifeGraph());
+    vi.spyOn(agentInboxApi, 'events').mockResolvedValue({ events: [] });
+    const streamed = mockCandidateResponse();
+    const streamSpy = vi
+      .spyOn(socialAgentApi, 'runUserFacingStream')
+      .mockRejectedValueOnce(new Error('upstream timeout traceId=abc stack=hidden'))
+      .mockImplementationOnce(async (_data, onEvent) => {
+        onEvent({ type: 'result', result: streamed });
+        return streamed;
+      });
+    vi.spyOn(socialAgentApi, 'handleMessageStream')
+      .mockRejectedValueOnce(new Error('server unavailable traceId=abc stack=hidden'));
+    vi.spyOn(socialAgentApi, 'handleMessage')
+      .mockRejectedValueOnce(new Error('server unavailable traceId=abc stack=hidden'));
+
+    render(
+      <MemoryRouter initialEntries={['/agent']}>
+        <AgentWorkspacePage view="home" />
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: '今晚想找青岛大学附近跑步搭子' },
+    });
+    fireEvent.submit(screen.getByRole('textbox').closest('form') as HTMLFormElement);
+
+    await waitFor(() => expect(streamSpy).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/网络暂时不稳定|服务暂时没有准备好/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /再试一次/ })).toBeInTheDocument();
+    expect(document.body.textContent ?? '').not.toMatch(forbiddenUserArtifacts);
+
+    fireEvent.click(screen.getByRole('button', { name: /再试一次/ }));
+
+    await waitFor(() => expect(streamSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText('小林')).toBeInTheDocument());
+    expect(streamSpy.mock.calls[1]?.[0]).toMatchObject({
+      goal: '今晚想找青岛大学附近跑步搭子',
+    });
+  });
+
+  it('treats a manual stop as a stopped Agent run instead of a failed request', async () => {
+    useRealAgentAdapter();
+    useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
+    vi.spyOn(lifeGraphApi, 'getMe').mockResolvedValue(mockLifeGraph());
+    vi.spyOn(agentInboxApi, 'events').mockResolvedValue({ events: [] });
+    vi.spyOn(socialAgentApi, 'runUserFacingStream').mockImplementation(
+      async (_data, _onEvent, signal) =>
+        new Promise<UserFacingAgentResponse>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+        }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/agent']}>
+        <AgentWorkspacePage view="home" />
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '先停一下' } });
+    fireEvent.submit(screen.getByRole('textbox').closest('form') as HTMLFormElement);
+    await waitFor(() => expect(screen.getByRole('button', { name: '停止' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '停止' }));
+
+    expect(await screen.findByText('已停止这次查找')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /再试一次/ })).toBeInTheDocument();
+    expect(document.body.textContent ?? '').not.toMatch(/这次请求没有顺利完成/);
+  });
+
   it('keeps the assistant surface usable at mobile width', () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
 
@@ -422,8 +695,8 @@ describe('AgentWorkspacePage', () => {
     );
 
     expect(screen.getByRole('textbox')).toBeInTheDocument();
-    expect(screen.getByText('当前目标')).toBeInTheDocument();
-    expect(screen.getByText('试试这样开始')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '关闭边栏' })).toBeInTheDocument();
+    expect(screen.getByText('今晚出门走走')).toBeInTheDocument();
     expect(document.body.textContent ?? '').not.toMatch(forbiddenUserArtifacts);
   });
 });
@@ -453,6 +726,22 @@ function mockLifeGraph(): LifeGraphResponse {
     },
     pendingProposal: null,
   };
+}
+
+async function flushPromptInputSubmit() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+async function submitPromptText(value: string) {
+  await act(async () => {
+    const textbox = screen.getByRole('textbox');
+    fireEvent.change(textbox, { target: { value } });
+    await Promise.resolve();
+    fireEvent.submit(textbox.closest('form') as HTMLFormElement);
+    await flushPromptInputSubmit();
+  });
 }
 
 function mockCandidateResponse(): UserFacingAgentResponse {

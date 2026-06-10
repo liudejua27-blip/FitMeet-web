@@ -71,7 +71,9 @@ export const fitMeetCoreEndpoints = {
     run: '/social-agent/chat/run',
     runAsync: '/social-agent/chat/run-async',
     messages: '/social-agent/chat/messages',
+    messagesStream: '/social-agent/chat/messages/stream',
     routeMessage: '/social-agent/chat/route-message',
+    routeMessageStream: '/social-agent/chat/route-message/stream',
     stream: '/social-agent/chat/stream',
     streamUser: '/social-agent/chat/stream-user',
     session: '/social-agent/chat/session',
@@ -83,6 +85,8 @@ export const fitMeetCoreEndpoints = {
       )}` as const,
     taskMessages: (taskId: number) =>
       `/social-agent/chat/tasks/${taskId}/messages` as const,
+    taskMessagesStream: (taskId: number) =>
+      `/social-agent/chat/tasks/${taskId}/messages/stream` as const,
     publishSocialRequest: (taskId: number) =>
       `/social-agent/chat/tasks/${taskId}/publish-social-request` as const,
     replanRun: (taskId: number) =>
@@ -91,6 +95,8 @@ export const fitMeetCoreEndpoints = {
       `/social-agent/chat/tasks/${taskId}/append-context` as const,
     taskActions: (taskId: number) =>
       `/social-agent/chat/tasks/${taskId}/actions` as const,
+    taskActionsStream: (taskId: number) =>
+      `/social-agent/chat/tasks/${taskId}/actions/stream` as const,
     saveCandidate: (taskId: number) =>
       `/social-agent/chat/tasks/${taskId}/save-candidate` as const,
     sendCandidateMessage: (taskId: number) =>
@@ -106,6 +112,29 @@ export const fitMeetCoreEndpoints = {
       `/social-agent/tasks/${taskId}/events` as const,
     replan: (taskId: number) =>
       `/social-agent/tasks/${taskId}/replan` as const,
+  },
+  socialAgentL5: {
+    dashboard: '/social-agent/l5/dashboard',
+    replaySamples: '/social-agent/l5/replay-samples',
+    subagentMemory: '/social-agent/l5/subagent-memory',
+    meetLoopStates: '/social-agent/l5/meet-loop-states',
+    patchEffects: '/social-agent/l5/patch-effects',
+    autoRuns: '/social-agent/l5/auto-runs',
+    observability: '/social-agent/l5/observability',
+    recordSatisfaction: '/social-agent/l5/observability/satisfaction',
+    subagentWorkerJobs: '/social-agent/l5/subagent-worker-jobs',
+    requeueSubagentWorkerJob: (id: number) =>
+      `/social-agent/l5/subagent-worker-jobs/${id}/requeue` as const,
+    cancelSubagentWorkerJob: (id: number) =>
+      `/social-agent/l5/subagent-worker-jobs/${id}/cancel` as const,
+  },
+  adminRbac: {
+    roles: '/admin/rbac/roles',
+    userRoles: (userId: number) => `/admin/rbac/users/${userId}/roles` as const,
+    auditLogs: '/admin/rbac/audit-logs',
+  },
+  socialAgentSelfImprove: {
+    runnerRunOnce: '/social-agent/self-improve/runner/run-once',
   },
   uploads: {
     image: '/uploads/image',
@@ -169,18 +198,22 @@ export const fitMeetCoreEndpointTemplates = {
     run: '/social-agent/chat/run',
     runAsync: '/social-agent/chat/run-async',
     messages: '/social-agent/chat/messages',
+    messagesStream: '/social-agent/chat/messages/stream',
     routeMessage: '/social-agent/chat/route-message',
+    routeMessageStream: '/social-agent/chat/route-message/stream',
     stream: '/social-agent/chat/stream',
     streamUser: '/social-agent/chat/stream-user',
     session: '/social-agent/chat/session',
     taskSession: '/social-agent/chat/tasks/{taskId}/session',
     taskRunStatus: '/social-agent/chat/tasks/{taskId}/runs/{runId}',
     taskMessages: '/social-agent/chat/tasks/{taskId}/messages',
+    taskMessagesStream: '/social-agent/chat/tasks/{taskId}/messages/stream',
     publishSocialRequest:
       '/social-agent/chat/tasks/{taskId}/publish-social-request',
     replanRun: '/social-agent/chat/tasks/{taskId}/replan-run',
     appendContext: '/social-agent/chat/tasks/{taskId}/append-context',
     taskActions: '/social-agent/chat/tasks/{taskId}/actions',
+    taskActionsStream: '/social-agent/chat/tasks/{taskId}/actions/stream',
     saveCandidate: '/social-agent/chat/tasks/{taskId}/save-candidate',
     sendCandidateMessage: '/social-agent/chat/tasks/{taskId}/send-message',
     connectCandidate: '/social-agent/chat/tasks/{taskId}/connect-candidate',
@@ -190,6 +223,29 @@ export const fitMeetCoreEndpointTemplates = {
     timeline: '/social-agent/tasks/{taskId}/timeline',
     events: '/social-agent/tasks/{taskId}/events',
     replan: '/social-agent/tasks/{taskId}/replan',
+  },
+  socialAgentL5: {
+    dashboard: '/social-agent/l5/dashboard',
+    replaySamples: '/social-agent/l5/replay-samples',
+    subagentMemory: '/social-agent/l5/subagent-memory',
+    meetLoopStates: '/social-agent/l5/meet-loop-states',
+    patchEffects: '/social-agent/l5/patch-effects',
+    autoRuns: '/social-agent/l5/auto-runs',
+    observability: '/social-agent/l5/observability',
+    recordSatisfaction: '/social-agent/l5/observability/satisfaction',
+    subagentWorkerJobs: '/social-agent/l5/subagent-worker-jobs',
+    requeueSubagentWorkerJob:
+      '/social-agent/l5/subagent-worker-jobs/{id}/requeue',
+    cancelSubagentWorkerJob:
+      '/social-agent/l5/subagent-worker-jobs/{id}/cancel',
+  },
+  adminRbac: {
+    roles: '/admin/rbac/roles',
+    userRoles: '/admin/rbac/users/{userId}/roles',
+    auditLogs: '/admin/rbac/audit-logs',
+  },
+  socialAgentSelfImprove: {
+    runnerRunOnce: '/social-agent/self-improve/runner/run-once',
   },
   uploads: {
     image: '/uploads/image',
@@ -213,11 +269,15 @@ export type FitMeetCoreStaticEndpoint =
   | (typeof fitMeetCoreEndpoints.agentInbox)['ackEvents']
   | (typeof fitMeetCoreEndpoints.agentProfileMatches)['list']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['messages']
+  | (typeof fitMeetCoreEndpoints.socialAgentChat)['messagesStream']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['run']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['runAsync']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['routeMessage']
+  | (typeof fitMeetCoreEndpoints.socialAgentChat)['routeMessageStream']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['stream']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['streamUser']
   | (typeof fitMeetCoreEndpoints.socialAgentChat)['session']
   | (typeof fitMeetCoreEndpoints.socialAgentTasks)['current']
+  | (typeof fitMeetCoreEndpoints.socialAgentL5)[keyof typeof fitMeetCoreEndpoints.socialAgentL5]
+  | (typeof fitMeetCoreEndpoints.socialAgentSelfImprove)[keyof typeof fitMeetCoreEndpoints.socialAgentSelfImprove]
   | (typeof fitMeetCoreEndpoints.uploads)[keyof typeof fitMeetCoreEndpoints.uploads];

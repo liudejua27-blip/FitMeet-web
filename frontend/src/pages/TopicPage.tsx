@@ -132,7 +132,7 @@ export const TopicPage = () => {
                 <div
                   key={meet.id}
                   className="p-4 rounded-xl border border-border bg-surface hover:border-borderStrong transition cursor-pointer"
-                  onClick={() => navigate('/meet')}
+                  onClick={() => navigate('/discover')}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">

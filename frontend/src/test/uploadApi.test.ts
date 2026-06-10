@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError, setToken } from '../api/baseClient';
+import { API_BASE_URL, ApiError, setToken } from '../api/baseClient';
 import { uploadImage } from '../api/uploadApi';
 
 describe('uploadApi', () => {
@@ -24,7 +24,7 @@ describe('uploadApi', () => {
 
     expect(result.url).toBe('https://cdn.fitmeet.test/avatar.webp');
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/uploads/image',
+      `${API_BASE_URL}/uploads/image`,
       expect.objectContaining({
         method: 'POST',
         body: expect.any(FormData),

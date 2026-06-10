@@ -121,13 +121,19 @@
   display: grid;
   width: 38px;
   height: 38px;
+  overflow: hidden;
   place-items: center;
   border: 1px solid var(--fm-line-strong);
   border-radius: var(--fm-radius-md);
   background: var(--fm-surface);
-  color: var(--fm-cream);
-  font-size: 14px;
-  font-weight: 900;
+}
+
+.fm-brand span img,
+.fm-footer strong img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .fm-brand strong {
@@ -676,6 +682,18 @@
   gap: 14px;
   border-top: 1px solid var(--fm-line);
   padding: 38px clamp(18px, 5vw, 78px);
+}
+
+.fm-footer strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fm-footer strong img {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--fm-radius-sm);
 }
 
 .fm-footer nav {

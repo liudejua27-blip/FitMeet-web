@@ -187,6 +187,22 @@ export interface UpdateLifeGraphInput {
   timezone?: string;
 }
 
+export interface LifeGraphSecurityRequest {
+  id: number;
+  type: 'export' | 'delete';
+  status: 'pending_cooldown' | 'ready' | 'executed' | 'expired' | 'cancelled';
+  requestedByUserId: number;
+  availableAt: string;
+  expiresAt: string;
+  confirmedAt: string | null;
+  executedAt: string | null;
+  notificationEmail: string | null;
+  notificationStatus: 'sent' | 'skipped' | 'failed';
+  createdAt: string;
+  updatedAt: string;
+  devConfirmationCode?: string;
+}
+
 export const lifeGraphApi = {
   getMe() {
     return request<LifeGraphResponse>('/life-graph/me');
@@ -241,5 +257,42 @@ export const lifeGraphApi = {
 
   getMatchSignals() {
     return request<Record<string, unknown>>('/life-graph/match-signals');
+  },
+
+  createExportRequest(data?: { notificationEmail?: string }) {
+    return request<LifeGraphSecurityRequest>('/life-graph/export-requests', {
+      method: 'POST',
+      body: JSON.stringify(data ?? {}),
+    });
+  },
+
+  confirmExportRequest(id: number, data: { confirmationCode: string }) {
+    return request<{ request: LifeGraphSecurityRequest; export: unknown }>(
+      `/life-graph/export-requests/${id}/confirm`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  },
+
+  createDeleteRequest(data?: { notificationEmail?: string }) {
+    return request<LifeGraphSecurityRequest>('/life-graph/delete-requests', {
+      method: 'POST',
+      body: JSON.stringify(data ?? {}),
+    });
+  },
+
+  confirmDeleteRequest(
+    id: number,
+    data: { confirmationCode: string; includeAuditLogs?: boolean },
+  ) {
+    return request<{ request: LifeGraphSecurityRequest; result: unknown }>(
+      `/life-graph/delete-requests/${id}/confirm`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
   },
 };

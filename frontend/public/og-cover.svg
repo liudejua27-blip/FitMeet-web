@@ -27,8 +27,7 @@
   <line x1="600" y1="0" x2="600" y2="630" stroke="#ffffff" stroke-width="0.5" opacity="0.04" />
 
   <!-- Logo box -->
-  <rect x="80" y="190" width="80" height="80" rx="18" fill="url(#lime)" filter="url(#glow)" />
-  <text x="120" y="248" font-family="Arial Black, sans-serif" font-size="48" font-weight="900" fill="#ffffff" text-anchor="middle">F</text>
+  <image href="/favicon-512.png" x="80" y="190" width="80" height="80" preserveAspectRatio="xMidYMid meet" filter="url(#glow)" />
 
   <!-- Brand name -->
   <text x="180" y="248" font-family="Arial Black, sans-serif" font-size="52" font-weight="900" fill="#f5ebe0" letter-spacing="-1">Fit</text>

@@ -155,6 +155,39 @@ export interface UserFacingAgentPendingConfirmation {
   expiresAt: string | null;
 }
 
+export type FitMeetAgentLoopStage =
+  | 'social_search'
+  | 'candidate_recommendation'
+  | 'candidate_selected'
+  | 'opener_draft_created'
+  | 'opener_confirmed'
+  | 'message_sent'
+  | 'activity_draft_created'
+  | 'activity_confirmed'
+  | 'activity_checked_in'
+  | 'activity_completed'
+  | 'review_submitted'
+  | 'life_graph_updated'
+  | 'trust_score_updated';
+
+export type FitMeetAgentSchemaAction =
+  | 'candidate.like'
+  | 'candidate.skip'
+  | 'candidate.more_like_this'
+  | 'candidate.generate_opener'
+  | 'opener.confirm_send'
+  | 'opener.regenerate'
+  | 'activity.confirm_create'
+  | 'activity.modify_time'
+  | 'activity.modify_location'
+  | 'activity.check_in'
+  | 'activity.complete'
+  | 'activity.upload_proof'
+  | 'activity.view_detail'
+  | 'review.submit'
+  | 'life_graph.accept_update'
+  | 'life_graph.reject_update';
+
 export interface UserFacingAgentResponse {
   assistantMessage: string;
   lightStatus: UserFacingAgentLightStatus;
@@ -169,6 +202,7 @@ export type FitMeetAlphaCardType =
   | 'candidate_card'
   | 'opener_approval'
   | 'activity_plan'
+  | 'activity_status'
   | 'checkin_card'
   | 'review_card'
   | 'audit_update'
@@ -184,6 +218,8 @@ export interface FitMeetAlphaCardAction {
     | 'save_candidate'
     | 'create_activity'
     | 'generate_opener'
+    | 'view_activity'
+    | 'upload_proof'
     | 'see_more'
     | 'filter_school'
     | 'filter_gender_female'
@@ -191,6 +227,8 @@ export interface FitMeetAlphaCardAction {
     | 'check_in'
     | 'submit_review'
     | 'refine_request';
+  schemaAction?: FitMeetAgentSchemaAction;
+  loopStage?: FitMeetAgentLoopStage;
   requiresConfirmation: boolean;
   payload?: Record<string, unknown>;
 }
@@ -474,7 +512,7 @@ export type SocialAgentChatStreamEvent =
 export type UserFacingAgentStreamEvent =
   | { type: 'status'; lightStatus: UserFacingAgentLightStatus }
   | { type: 'result'; result: UserFacingAgentResponse }
-  | { type: 'error'; message: string };
+  | { type: 'error'; code?: string; message: string; retryable?: boolean };
 
 type RunChatInput = {
   goal: string;

@@ -49,9 +49,7 @@ export const ProfileSettings = memo(function ProfileSettings({
     });
     setRealName('');
     setIdNumberMasked('');
-    setMessage(
-      request.status === 'approved' ? '实名认证已通过' : '实名认证申请已提交',
-    );
+    setMessage(request.status === 'approved' ? '实名认证已通过' : '实名认证申请已提交');
     await refreshSafety();
     if (request.status === 'approved') {
       await onVerificationApproved?.();
@@ -105,10 +103,7 @@ export const ProfileSettings = memo(function ProfileSettings({
       )}
 
       <SettingSection title="安全与认证">
-        <SettingStatus
-          label="实名认证"
-          value={realNameStatus}
-        />
+        <SettingStatus label="实名认证" value={realNameStatus} />
         <div className="grid gap-2 px-4 py-3.5 sm:grid-cols-[1fr_1fr_auto]">
           <input
             value={realName}
@@ -217,7 +212,7 @@ export const ProfileSettings = memo(function ProfileSettings({
         <SettingLink label="用户协议" to="/terms" />
         <SettingLink label="隐私政策" to="/privacy" />
         <SettingLink label="社区规范" to="/community" />
-        <SettingItem label="联系我们" value="support@fitapp.cn" />
+        <SettingItem label="联系我们" value="15253005312@163.com" />
       </SettingSection>
     </div>
   );

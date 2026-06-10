@@ -10,13 +10,9 @@ const PlatformPage = lazy(() =>
 const AgentWorkspacePage = lazy(() =>
   import('../pages/AgentWorkspacePage').then((m) => ({ default: m.AgentWorkspacePage })),
 );
-const FitMeetHallPage = lazy(() =>
-  import('../pages/FitMeetHallPage').then((m) => ({ default: m.FitMeetHallPage })),
-);
 const DiscoverPage = lazy(() =>
   import('../pages/DiscoverPage').then((m) => ({ default: m.DiscoverPage })),
 );
-const MeetPage = lazy(() => import('../pages/MeetPage').then((m) => ({ default: m.MeetPage })));
 const CoachPage = lazy(() =>
   import('../pages/CoachPage').then((m) => ({ default: m.CoachPage })),
 );
@@ -74,6 +70,11 @@ const DemoAgentSocialLoopPage = lazy(() =>
 const DemoInvestorPage = lazy(() =>
   import('../pages/DemoInvestorPage').then((m) => ({ default: m.DemoInvestorPage })),
 );
+const AgentGuidePlaygroundPage = lazy(() =>
+  import('../pages/AgentGuidePlaygroundPage').then((m) => ({
+    default: m.AgentGuidePlaygroundPage,
+  })),
+);
 const ProfilePage = lazy(() =>
   import('../pages/ProfilePage').then((m) => ({ default: m.ProfilePage })),
 );
@@ -100,6 +101,9 @@ const SafetyAdminPage = lazy(() =>
 );
 const AdminWaitlistPage = lazy(() =>
   import('../pages/AdminWaitlistPage').then((m) => ({ default: m.AdminWaitlistPage })),
+);
+const AgentL5AdminPage = lazy(() =>
+  import('../pages/AgentL5AdminPage').then((m) => ({ default: m.AgentL5AdminPage })),
 );
 const GeoLandingPage = lazy(() =>
   import('../pages/GeoLandingPage').then((m) => ({ default: m.GeoLandingPage })),
@@ -151,25 +155,29 @@ export function AppRoutes() {
     <Suspense fallback={<PageLoader />}>
       <Routes>
         <Route path="/" element={<PlatformPage page="home" />} />
-        <Route path="/ecosystem" element={<PlatformPage page="ecosystem" />} />
+        <Route path="/features" element={<PlatformPage page="features" />} />
+        <Route path="/ecosystem" element={<Navigate to="/features" replace />} />
         <Route path="/developers" element={<PlatformPage page="developers" />} />
         <Route path="/safety" element={<PlatformPage page="safety" />} />
         <Route path="/about" element={<PlatformPage page="about" />} />
-        <Route path="/app" element={<PlatformPage page="app" />} />
+        <Route path="/contact" element={<PlatformPage page="contact" />} />
+        <Route path="/download" element={<PlatformPage page="download" />} />
+        <Route path="/app" element={<Navigate to="/download" replace />} />
         <Route path="/demo" element={<PlatformPage page="demo" />} />
         <Route path="/life-graph" element={<PlatformPage page="lifeGraph" />} />
         <Route path="/login" element={<LoginEntry />} />
         <Route path="/legacy-home" element={<PlatformPage page="home" />} />
         <Route path="/agent" element={<AgentWorkspacePage view="home" />} />
+        <Route path="/agent/chat" element={<AgentWorkspacePage view="chat" />} />
         <Route path="/agent/chat/:taskId" element={<AgentWorkspacePage view="chat" />} />
         <Route path="/agent/settings" element={<AgentWorkspacePage view="settings" />} />
         <Route path="/agent/projects" element={<AgentWorkspacePage view="projects" />} />
         <Route path="/agent/history" element={<AgentWorkspacePage view="history" />} />
-        <Route path="/hall" element={<FitMeetHallPage />} />
-        <Route path="/nearby" element={<Navigate to="/hall" replace />} />
+        <Route path="/hall" element={<Navigate to="/discover" replace />} />
+        <Route path="/nearby" element={<Navigate to="/discover" replace />} />
         <Route path="/discover" element={<DiscoverPage />} />
-        <Route path="/meet" element={<MeetPage />} />
-        <Route path="/human" element={<Navigate to="/hall" replace />} />
+        <Route path="/meet" element={<Navigate to="/discover" replace />} />
+        <Route path="/human" element={<Navigate to="/discover" replace />} />
         <Route path="/coach" element={<CoachPage />} />
         <Route path="/pet" element={<PetPage />} />
         <Route path="/ai" element={<AiRealmPage />} />
@@ -203,7 +211,7 @@ export function AppRoutes() {
         <Route path="/agent-connect/permissions" element={<Navigate to="/agent/settings" replace />} />
         <Route path="/agent-connect/preferences" element={<Navigate to="/ai-profile" replace />} />
         <Route path="/agent-connect/activity" element={<Navigate to="/agent" replace />} />
-        <Route path="/agent-connect/social-hall" element={<Navigate to="/hall" replace />} />
+        <Route path="/agent-connect/social-hall" element={<Navigate to="/discover" replace />} />
         <Route path="/agent-connect/*" element={<Navigate to="/agent-connect" replace />} />
         <Route path="/agent-control" element={<Navigate to="/agent/settings" replace />} />
         <Route path="/social-agent" element={<Navigate to="/agent" replace />} />
@@ -272,6 +280,7 @@ export function AppRoutes() {
             </ProtectedRoute>
           }
         />
+        <Route path="/internal/demo/ant-guide" element={<AgentGuidePlaygroundPage />} />
         {ENABLE_DEMO_ROUTES ? (
           <>
             <Route path="/internal/demo/agent-social-loop" element={<DemoAgentSocialLoopPage />} />
@@ -320,7 +329,7 @@ export function AppRoutes() {
         <Route path="/guides/:slug" element={<GeoLandingPage />} />
         <Route path="/ai-hosting" element={<Navigate to="/agent" replace />} />
         <Route path="/developers/social-skills" element={<SocialSkillsDeveloperPage />} />
-        <Route path="/waitlist" element={<Navigate to="/app" replace />} />
+        <Route path="/waitlist" element={<Navigate to="/download" replace />} />
         <Route path="/press" element={<GeoLandingPage />} />
         <Route
           path="/admin/safety"
@@ -335,6 +344,14 @@ export function AppRoutes() {
           element={
             <ProtectedRoute>
               <AdminWaitlistPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/agent-l5"
+          element={
+            <ProtectedRoute>
+              <AgentL5AdminPage />
             </ProtectedRoute>
           }
         />

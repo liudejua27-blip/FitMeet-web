@@ -35,7 +35,10 @@ const timeline = [
   { year: '2025 Q1', event: 'AI 匹配引擎接入，AI 与 AI 对话原型测试' },
   { year: '2025 Q3', event: '宠物子站启动，引入宠物档案、附近约遛、借狗体验' },
   { year: '2026 Q1', event: '主站升级，正式定位为「人 + 宠物 + AI」三合一附近社交网络' },
-  { year: '2026 Q2', event: 'Social Agent 与 Profile Match Autopilot 全量开放，覆盖城市拓展至 187+' },
+  {
+    year: '2026 Q2',
+    event: 'Social Agent 与 Profile Match Autopilot 全量开放，覆盖城市拓展至 187+',
+  },
 ];
 
 const team = [
@@ -71,15 +74,16 @@ export const AboutPage = memo(function AboutPage() {
           <h1 className="mt-5 font-display text-[clamp(40px,7vw,72px)] font-black leading-[1.05] text-white">
             让附近的
             <span className="bg-gradient-to-r from-human via-petBright to-aiBright bg-clip-text text-transparent">
-              {' '}人、宠物和 AI{' '}
+              {' '}
+              人、宠物和 AI{' '}
             </span>
             ，
             <br />
             形成更自然的连接。
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-8 text-textMuted">
-            我们相信社交不该是体力活。在一个被算法切割成碎片、被陌生感稀释了温度的城市里，
-            AI 可以成为「先开口的那一个」、宠物可以成为「破冰的那一个」、附近可以成为「最自然的那一个」。
+            我们相信社交不该是体力活。在一个被算法切割成碎片、被陌生感稀释了温度的城市里， AI
+            可以成为「先开口的那一个」、宠物可以成为「破冰的那一个」、附近可以成为「最自然的那一个」。
           </p>
         </div>
       </section>
@@ -137,10 +141,7 @@ export const AboutPage = memo(function AboutPage() {
         <SectionHeader eyebrow="TEAM" title="一群想把附近做轻的人" />
         <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {team.map((t) => (
-            <div
-              key={t.dept}
-              className="rounded-2xl border border-white/10 bg-white/[0.03] p-6"
-            >
+            <div key={t.dept} className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
               <div className="font-display text-base font-black text-white">{t.dept}</div>
               <p className="mt-2 text-sm leading-6 text-textMuted">{t.desc}</p>
             </div>
@@ -152,9 +153,7 @@ export const AboutPage = memo(function AboutPage() {
       <section className="px-4 pb-24 pt-8 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-4xl rounded-3xl border border-white/10 bg-gradient-to-br from-[#1a0e08] to-[#0a0a08] p-10 text-center">
           <h2 className="font-display text-2xl font-black text-white sm:text-3xl">联系我们</h2>
-          <p className="mt-3 text-sm text-textMuted">
-            合作 partners@ourfitmeet.com · 媒体 press@ourfitmeet.com · 安全 safety@ourfitmeet.com
-          </p>
+          <p className="mt-3 text-sm text-textMuted">联系我们 15253005312@163.com</p>
           <div className="mt-6 flex flex-wrap justify-center gap-3">
             <Link
               to="/"

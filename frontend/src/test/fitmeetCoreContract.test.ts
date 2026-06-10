@@ -122,6 +122,9 @@ describe('fitMeetCoreEndpoints', () => {
     expect(fitMeetCoreEndpoints.socialAgentChat.taskActions(101)).toBe(
       '/social-agent/chat/tasks/101/actions',
     );
+    expect(fitMeetCoreEndpoints.socialAgentChat.taskActionsStream(101)).toBe(
+      '/social-agent/chat/tasks/101/actions/stream',
+    );
     expect(fitMeetCoreEndpoints.socialAgentChat.saveCandidate(101)).toBe(
       '/social-agent/chat/tasks/101/save-candidate',
     );
@@ -134,8 +137,17 @@ describe('fitMeetCoreEndpoints', () => {
     expect(fitMeetCoreEndpoints.socialAgentChat.messages).toBe(
       '/social-agent/chat/messages',
     );
+    expect(fitMeetCoreEndpoints.socialAgentChat.messagesStream).toBe(
+      '/social-agent/chat/messages/stream',
+    );
     expect(fitMeetCoreEndpoints.socialAgentChat.routeMessage).toBe(
       '/social-agent/chat/route-message',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentChat.routeMessageStream).toBe(
+      '/social-agent/chat/route-message/stream',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentChat.taskMessagesStream(101)).toBe(
+      '/social-agent/chat/tasks/101/messages/stream',
     );
     expect(fitMeetCoreEndpoints.socialAgentTasks.current).toBe(
       '/social-agent/tasks/current',
@@ -148,6 +160,33 @@ describe('fitMeetCoreEndpoints', () => {
     );
     expect(fitMeetCoreEndpoints.socialAgentTasks.replan(101)).toBe(
       '/social-agent/tasks/101/replan',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentL5.dashboard).toBe(
+      '/social-agent/l5/dashboard',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentL5.replaySamples).toBe(
+      '/social-agent/l5/replay-samples',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentL5.subagentMemory).toBe(
+      '/social-agent/l5/subagent-memory',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentL5.meetLoopStates).toBe(
+      '/social-agent/l5/meet-loop-states',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentL5.patchEffects).toBe(
+      '/social-agent/l5/patch-effects',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentL5.autoRuns).toBe(
+      '/social-agent/l5/auto-runs',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentL5.observability).toBe(
+      '/social-agent/l5/observability',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentL5.recordSatisfaction).toBe(
+      '/social-agent/l5/observability/satisfaction',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentSelfImprove.runnerRunOnce).toBe(
+      '/social-agent/self-improve/runner/run-once',
     );
   });
 
@@ -193,17 +232,21 @@ describe('fitMeetCoreEndpoints', () => {
         '/social-agent/chat/run',
         '/social-agent/chat/run-async',
         '/social-agent/chat/messages',
+        '/social-agent/chat/messages/stream',
         '/social-agent/chat/route-message',
+        '/social-agent/chat/route-message/stream',
         '/social-agent/chat/stream',
         '/social-agent/chat/stream-user',
         '/social-agent/chat/session',
         '/social-agent/chat/tasks/{taskId}/session',
         '/social-agent/chat/tasks/{taskId}/runs/{runId}',
         '/social-agent/chat/tasks/{taskId}/messages',
+        '/social-agent/chat/tasks/{taskId}/messages/stream',
         '/social-agent/chat/tasks/{taskId}/publish-social-request',
         '/social-agent/chat/tasks/{taskId}/replan-run',
         '/social-agent/chat/tasks/{taskId}/append-context',
         '/social-agent/chat/tasks/{taskId}/actions',
+        '/social-agent/chat/tasks/{taskId}/actions/stream',
         '/social-agent/chat/tasks/{taskId}/save-candidate',
         '/social-agent/chat/tasks/{taskId}/send-message',
         '/social-agent/chat/tasks/{taskId}/connect-candidate',
@@ -211,6 +254,21 @@ describe('fitMeetCoreEndpoints', () => {
         '/social-agent/tasks/{taskId}/timeline',
         '/social-agent/tasks/{taskId}/events',
         '/social-agent/tasks/{taskId}/replan',
+        '/social-agent/l5/dashboard',
+        '/social-agent/l5/replay-samples',
+        '/social-agent/l5/subagent-memory',
+        '/social-agent/l5/meet-loop-states',
+        '/social-agent/l5/patch-effects',
+        '/social-agent/l5/auto-runs',
+        '/social-agent/l5/observability',
+        '/social-agent/l5/observability/satisfaction',
+        '/social-agent/l5/subagent-worker-jobs',
+        '/social-agent/l5/subagent-worker-jobs/{id}/requeue',
+        '/social-agent/l5/subagent-worker-jobs/{id}/cancel',
+        '/social-agent/self-improve/runner/run-once',
+        '/admin/rbac/roles',
+        '/admin/rbac/users/{userId}/roles',
+        '/admin/rbac/audit-logs',
         '/uploads/image',
         '/uploads/video',
       ]),
@@ -339,6 +397,10 @@ describe('fitMeetCoreEndpoints', () => {
       {
         built: fitMeetCoreEndpoints.socialAgentChat.taskActions(101),
         template: fitMeetCoreEndpointTemplates.socialAgentChat.taskActions,
+      },
+      {
+        built: fitMeetCoreEndpoints.socialAgentChat.taskActionsStream(101),
+        template: fitMeetCoreEndpointTemplates.socialAgentChat.taskActionsStream,
       },
       {
         built: fitMeetCoreEndpoints.socialAgentChat.saveCandidate(101),

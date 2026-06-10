@@ -8,6 +8,9 @@ import './styles/agent-workspace.css';
 import './styles/website-platform.css';
 import './styles/motion-enhancements.css';
 import './styles/app-social-system.css';
+import './styles/visual-upgrades.css';
+import './styles/website-enterprise.css';
+import './styles/agent-gpt-copy-shell.css';
 import App from './App.tsx';
 
 createRoot(document.getElementById('root')!).render(

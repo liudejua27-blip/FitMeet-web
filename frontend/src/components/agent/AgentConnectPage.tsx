@@ -14,7 +14,7 @@ const navLinks = [
   { href: '/agent-control', label: '权限控制', en: 'PERMISSIONS' },
   { href: '/ai-profile', label: '偏好画像', en: 'PREFERENCES' },
   { href: '/agent-activity', label: '行为日志', en: 'ACTIVITY' },
-  { href: '/hall', label: '社交大厅', en: 'SOCIAL HALL' },
+  { href: '/discover', label: '发现', en: 'DISCOVER' },
 ] as const;
 
 export function AgentConnectPage() {
@@ -29,7 +29,9 @@ export function AgentConnectPage() {
       <div className="agent-connect-page__noise" aria-hidden="true" />
       <header className="agent-connect-nav">
         <a href="/" className="agent-connect-nav__brand">
-          <span>F</span>
+          <span aria-hidden="true">
+            <img src="/favicon-192.png" alt="" width="34" height="34" />
+          </span>
           <strong>FitMeet</strong>
           <em>Agent Gateway</em>
         </a>
@@ -129,8 +131,8 @@ function AgentConnectHome() {
           </h1>
           <p>连接你的 AI Agent，让它在授权边界内进入 FitMeet 社交宇宙。</p>
           <p>
-            Connect your AI Agent to FitMeet and let it operate within clear permissions,
-            safety boundaries, and human approval.
+            Connect your AI Agent to FitMeet and let it operate within clear permissions, safety
+            boundaries, and human approval.
           </p>
         </motion.div>
 
@@ -180,21 +182,21 @@ function AgentConnectHome() {
             <span>SELECTED AGENT</span>
             <h3>{selectedAgent?.name}</h3>
             <p>
-              当前接入边界：{selectedAgent?.permissionMode}. 所有自动化行为都需要遵循
-              Human-led, AI-assisted, permission-based 原则。
+              当前接入边界：{selectedAgent?.permissionMode}. 所有自动化行为都需要遵循 Human-led,
+              AI-assisted, permission-based 原则。
             </p>
             <div className="agent-selected-panel__links">
               <a href="/agent-control">权限设置</a>
               <a href="/ai-profile">偏好画像</a>
               <a href="/agent-activity">行为日志</a>
-              <a href="/hall">社交大厅</a>
+              <a href="/discover">发现</a>
             </div>
             {showCustomGuide && (
               <div className="agent-custom-guide">
                 <strong>Custom Agent 接入说明</strong>
                 <p>
-                  准备 Agent 名称、回调端点、权限范围与审核联系人。下一轮可以在这里扩展 API
-                  token 创建、scope 选择和 webhook 校验流程。
+                  准备 Agent 名称、回调端点、权限范围与审核联系人。下一轮可以在这里扩展 API token
+                  创建、scope 选择和 webhook 校验流程。
                 </p>
               </div>
             )}

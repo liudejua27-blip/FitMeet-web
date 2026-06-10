@@ -1,16 +1,21 @@
 export const publicWebsiteRoutes = [
   '/',
   '/legacy-home',
+  '/discover',
+  '/features',
   '/ecosystem',
+  '/download',
   '/app',
   '/demo',
   '/developers',
   '/developers/social-skills',
   '/safety',
   '/about',
+  '/contact',
   '/life-graph',
   '/profile/life-graph',
   '/admin/waitlist',
+  '/admin/agent-l5',
   '/login',
 ] as const;
 
@@ -18,9 +23,6 @@ export const agentWorkspaceRoutePrefixes = ['/agent'] as const;
 export const agentOnboardingRoutePrefixes = ['/agent-connect'] as const;
 
 export const socialFeedRoutePrefixes = [
-  '/hall',
-  '/discover',
-  '/meet',
   '/activity',
   '/social-requests',
   '/messages',

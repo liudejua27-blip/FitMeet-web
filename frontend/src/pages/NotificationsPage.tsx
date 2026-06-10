@@ -30,14 +30,14 @@ export const NotificationsPage = () => {
       if (notif.targetType === 'user' && notif.targetId) {
         navigate(`/user/${notif.targetId}`);
       } else if (notif.targetType === 'meet' && notif.targetId) {
-        navigate('/meet', { state: { highlightMeetId: notif.targetId } });
+        navigate('/discover', { state: { highlightMeetId: notif.targetId } });
       } else if (notif.targetType === 'post' && notif.targetId) {
         navigate('/discover', { state: { highlightPostId: notif.targetId } });
       } else if (notif.type === 'follow') {
         // no targetId — go to discover feed
         navigate('/discover');
       } else if (notif.type === 'meet') {
-        navigate('/meet');
+        navigate('/discover');
       }
     },
     [markAsRead, navigate],

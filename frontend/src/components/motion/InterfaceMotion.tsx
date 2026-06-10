@@ -2,6 +2,9 @@ import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 
 const introSelectors = [
+  '.fitmeet-website .fm-hero__copy > *',
+  '.fitmeet-website .fm-hero__visual',
+  '.fitmeet-website .fm-social-hero-visual',
   '.fitmeet-website .concept-home-hero__copy > *',
   '.fitmeet-website .website-page-hero > div > *',
   '.agent-workspace--landing .agent-main-brand',
@@ -13,6 +16,11 @@ const introSelectors = [
 ].join(',');
 
 const revealSelectors = [
+  '.fitmeet-website .fm-section__header',
+  '.fitmeet-website .fm-context-panel',
+  '.fitmeet-website .fm-enterprise-loop article',
+  '.fitmeet-website .fm-proof-strip article',
+  '.fitmeet-website .fm-final-cta > *',
   '.fitmeet-website .website-band__header',
   '.fitmeet-website .demand-comparison article',
   '.fitmeet-website .proof-scenario-card',
@@ -33,7 +41,7 @@ const revealSelectors = [
 ].join(',');
 
 const ambientSelectors = [
-  '.fitmeet-website .concept-home-hero__earth',
+  '.fitmeet-website .fm-world-story img',
   '.fitmeet-website .website-hero__visual',
   '.agent-workspace--landing .agent-gpt-input__submit',
 ].join(',');
@@ -84,6 +92,7 @@ export function InterfaceMotion() {
             const magneticTargets = uniqueElements(
               gsap,
               [
+                '.fitmeet-website .fm-button',
                 '.fitmeet-website .concept-button',
                 '.fitmeet-website .website-nav__actions a',
                 '.fitmeet-website .website-page-hero__actions a',

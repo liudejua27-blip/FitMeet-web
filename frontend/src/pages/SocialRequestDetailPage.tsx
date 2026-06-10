@@ -51,8 +51,7 @@ export function SocialRequestDetailPage() {
   }, []);
 
   const autopilotActive =
-    autopilotMode !== null &&
-    ['normal', 'standard', 'open'].includes(autopilotMode);
+    autopilotMode !== null && ['normal', 'standard', 'open'].includes(autopilotMode);
 
   const autopilotHintShort = autopilotActive
     ? '潜意识循环会继续帮你寻找候选人，有合适人选会进入待确认。'
@@ -110,10 +109,7 @@ export function SocialRequestDetailPage() {
 
         if (candidate.candidateRecordId) {
           try {
-            await socialRequestsApi.markCandidateMessaged(
-              reqId,
-              candidate.candidateRecordId,
-            );
+            await socialRequestsApi.markCandidateMessaged(reqId, candidate.candidateRecordId);
             setCandidates((current) =>
               current.map((item) =>
                 item.candidateRecordId === candidate.candidateRecordId
@@ -135,9 +131,7 @@ export function SocialRequestDetailPage() {
           // Request status sync is best effort; chat is the important action.
         }
 
-        navigate(
-          `/messages?conversationId=${encodeURIComponent(conversation.conversationId)}`,
-        );
+        navigate(`/messages?conversationId=${encodeURIComponent(conversation.conversationId)}`);
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : '发送消息失败');
       } finally {
@@ -192,11 +186,7 @@ export function SocialRequestDetailPage() {
   );
 
   if (!Number.isFinite(reqId)) {
-    return (
-      <div className="min-h-screen bg-[#0d0d0b] p-8 text-[#F4EFE6]">
-        无效的社交卡片 ID
-      </div>
-    );
+    return <div className="min-h-screen bg-[#0d0d0b] p-8 text-[#F4EFE6]">无效的社交卡片 ID</div>;
   }
 
   return (
@@ -221,24 +211,20 @@ export function SocialRequestDetailPage() {
               <div className="space-y-1 rounded-md border border-[#C8FF80]/30 bg-[#C8FF80]/10 px-3 py-2 text-xs text-[#C8FF80]">
                 <div>
                   发布成功
-                  {searchParams.get('synced') === '1'
-                    ? ' · 已同步到大厅'
-                    : ' · 大厅同步处理中'}
+                  {searchParams.get('synced') === '1' ? ' · 已同步到发现' : ' · 发现同步处理中'}
                   {searchParams.get('matched') !== null &&
                     ` · 已开始匹配，候选人 ${searchParams.get('matched') ?? 0} 位`}
                 </div>
-                <div className="text-[11px] text-[#C7C2B0]">
-                  {autopilotHintShort}
-                </div>
+                <div className="text-[11px] text-[#C7C2B0]">{autopilotHintShort}</div>
               </div>
             )}
 
             <SocialRequestCard request={summary} />
 
             <div className="flex items-center justify-between rounded-lg border border-[#26261d] bg-[#15150f] px-4 py-3 text-xs text-[#C7C2B0]">
-              <span>这张卡片已进入大厅和匹配池</span>
-              <Link to="/hall" className="text-[#C8FF80] hover:text-[#b8ef70]">
-                查看大厅展示
+              <span>这张卡片已进入发现和匹配池</span>
+              <Link to="/discover" className="text-[#C8FF80] hover:text-[#b8ef70]">
+                查看发现展示
               </Link>
             </div>
           </div>

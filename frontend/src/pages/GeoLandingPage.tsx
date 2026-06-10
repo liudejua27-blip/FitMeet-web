@@ -19,7 +19,7 @@ const kindLabels: Record<GeoLandingPageData['kind'], string> = {
 
 const defaultActions: GeoActionLink[] = [
   { label: '发现运动搭子', href: '/discover', variant: 'primary' },
-  { label: '浏览约练活动', href: '/meet', variant: 'secondary' },
+  { label: '浏览约练活动', href: '/discover', variant: 'secondary' },
 ];
 
 export const GeoLandingPage = () => {

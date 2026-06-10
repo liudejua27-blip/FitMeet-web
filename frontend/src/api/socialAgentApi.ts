@@ -79,6 +79,26 @@ export interface UserFacingAgentResponse {
   permissionMode: SocialAgentPermissionMode;
 }
 
+export interface UserFacingAgentSessionSnapshot {
+  hasSession: boolean;
+  activeTaskId: number | null;
+  task: {
+    id?: number;
+    goal?: string;
+    permissionMode?: SocialAgentPermissionMode;
+    status?: string;
+    title?: string;
+    updatedAt?: string;
+    createdAt?: string;
+  } | null;
+  messages: Array<Record<string, unknown>>;
+  events?: Array<Record<string, unknown>>;
+  result?: Record<string, unknown> | UserFacingAgentResponse | null;
+  latestRun?: Record<string, unknown> | null;
+  pendingApprovals?: Array<Record<string, unknown>>;
+  restoredAt?: string;
+}
+
 export type UserFacingAgentProgressKind = 'analysis' | 'tool' | 'status';
 
 export interface UserFacingAgentProgressEvent {
@@ -137,26 +157,91 @@ export interface FitMeetAlphaCard {
 }
 
 export type UserFacingAgentStreamEvent =
-  | { type: 'status'; lightStatus: UserFacingAgentLightStatus }
-  | UserFacingAgentProgressEvent
-  | { type: 'result'; result: UserFacingAgentResponse }
-  | { type: 'error'; message: string };
+  | {
+      type: 'status';
+      lifecycle?: string;
+      lightStatus: UserFacingAgentLightStatus;
+      taskId?: number;
+    }
+  | (UserFacingAgentProgressEvent & { lifecycle?: string })
+  | {
+      type: 'assistant_delta';
+      lifecycle?: string;
+      messageId?: string;
+      delta: string;
+      source?: 'llm' | 'fallback';
+    }
+  | {
+      type: 'assistant_done';
+      lifecycle?: string;
+      messageId?: string;
+      source?: 'llm' | 'fallback';
+    }
+  | {
+      type: 'agent_loop_step';
+      lifecycle?: string;
+      phase: string;
+      agentName?: string | null;
+      toolName?: string | null;
+      status?: string | null;
+      title: string;
+      detail?: string;
+    }
+  | {
+      type: 'tool_call';
+      lifecycle?: string;
+      toolName: string;
+      title: string;
+      detail?: string;
+    }
+  | {
+      type: 'tool_result';
+      lifecycle?: string;
+      toolName: string;
+      title: string;
+      detail?: string;
+      status?: string | null;
+    }
+  | {
+      type: 'approval_required';
+      lifecycle?: string;
+      approvalId: number | string | null;
+      actionType: string;
+      summary: string;
+      riskLevel: string;
+    }
+  | { type: 'result'; lifecycle?: string; result: UserFacingAgentResponse }
+  | { type: 'error'; lifecycle?: string; code?: string; message: string; retryable?: boolean };
 
 type RunChatInput = {
   goal: string;
   permissionMode: SocialAgentPermissionMode;
+  taskId?: number | null;
+  city?: string | null;
   idempotencyKey?: string;
+  clientContext?: {
+    timezone?: string;
+    locale?: string;
+    source: 'web' | 'ios';
+  };
 };
 
 type RouteMessageInput = {
   message: string;
   taskId?: number | null;
   hasCandidates?: boolean;
+  idempotencyKey?: string;
+  clientContext?: {
+    timezone?: string;
+    locale?: string;
+    source: 'web' | 'ios';
+  };
 };
 
 type AgentCardActionInput = {
   taskId: number;
   action: FitMeetAgentSchemaAction;
+  idempotencyKey?: string;
   payload?: Record<string, unknown>;
 };
 
@@ -174,13 +259,40 @@ export const socialAgentApi = {
       .then(sanitizeSocialAgentResponse);
   },
 
+  handleMessageStream: (
+    data: RouteMessageInput,
+    onEvent: (event: UserFacingAgentStreamEvent) => void,
+    signal?: AbortSignal,
+  ) => {
+    const taskId = data.taskId ?? null;
+    const path = taskId
+      ? fitMeetCoreEndpoints.socialAgentChat.taskMessagesStream(taskId)
+      : fitMeetCoreEndpoints.socialAgentChat.messagesStream;
+    return runUserFacingAgentStreamAt(path, data, onEvent, signal);
+  },
+
   routeMessage: (data: RouteMessageInput) =>
     api
-      .requestProtected<UserFacingAgentResponse>(fitMeetCoreEndpoints.socialAgentChat.routeMessage, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      })
+      .requestProtected<UserFacingAgentResponse>(
+        fitMeetCoreEndpoints.socialAgentChat.routeMessage,
+        {
+          method: 'POST',
+          body: JSON.stringify(data),
+        },
+      )
       .then(sanitizeSocialAgentResponse),
+
+  routeMessageStream: (
+    data: RouteMessageInput,
+    onEvent: (event: UserFacingAgentStreamEvent) => void,
+    signal?: AbortSignal,
+  ) =>
+    runUserFacingAgentStreamAt(
+      fitMeetCoreEndpoints.socialAgentChat.routeMessageStream,
+      data,
+      onEvent,
+      signal,
+    ),
 
   performAction: (data: AgentCardActionInput) =>
     api
@@ -190,11 +302,38 @@ export const socialAgentApi = {
           method: 'POST',
           body: JSON.stringify({
             action: data.action,
+            idempotencyKey: data.idempotencyKey,
             payload: data.payload ?? {},
           }),
         },
       )
       .then(sanitizeSocialAgentResponse),
+
+  performActionStream: (
+    data: AgentCardActionInput,
+    onEvent: (event: UserFacingAgentStreamEvent) => void,
+    signal?: AbortSignal,
+  ) =>
+    runUserFacingAgentStreamAt(
+      fitMeetCoreEndpoints.socialAgentChat.taskActionsStream(data.taskId),
+      {
+        action: data.action,
+        idempotencyKey: data.idempotencyKey,
+        payload: data.payload ?? {},
+      },
+      onEvent,
+      signal,
+    ),
+
+  restoreSession: (taskId?: number | null) => {
+    const path =
+      typeof taskId === 'number' && Number.isFinite(taskId) && taskId > 0
+        ? fitMeetCoreEndpoints.socialAgentChat.taskSession(taskId)
+        : fitMeetCoreEndpoints.socialAgentChat.session;
+    return api
+      .requestProtected<UserFacingAgentSessionSnapshot>(path)
+      .then(sanitizeSocialAgentResponse);
+  },
 
   runUserFacingStream: (
     data: RunChatInput,
@@ -212,7 +351,21 @@ async function runUserFacingAgentStream(
   onEvent: (event: UserFacingAgentStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<UserFacingAgentResponse> {
-  const response = await api.fetchWithAuth(fitMeetCoreEndpoints.socialAgentChat.streamUser, {
+  return runUserFacingAgentStreamAt(
+    fitMeetCoreEndpoints.socialAgentChat.streamUser,
+    data,
+    onEvent,
+    signal,
+  );
+}
+
+async function runUserFacingAgentStreamAt(
+  endpoint: string,
+  data: RunChatInput | RouteMessageInput | Omit<AgentCardActionInput, 'taskId'>,
+  onEvent: (event: UserFacingAgentStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<UserFacingAgentResponse> {
+  const response = await api.fetchWithAuth(endpoint, {
     method: 'POST',
     signal,
     body: JSON.stringify(data),

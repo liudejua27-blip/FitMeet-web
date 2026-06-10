@@ -36,7 +36,7 @@ const realms: Array<{
     en: 'Human Realm',
     tagline: '让汗水成为社交货币',
     desc: '约练、动态、教练、城市同好。和真实的人在真实的空间里相遇。',
-    href: '/meet',
+    href: '/discover',
     cta: '进入约练',
     signals: ['12,486 个进行中的约练', '本周新增 4,231 位伙伴', '覆盖 187 座城市'],
     accent: 'human',

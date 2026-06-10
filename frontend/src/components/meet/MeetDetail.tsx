@@ -65,7 +65,7 @@ export const MeetDetail = memo(function MeetDetail({
 
   const handleShare = useCallback(() => {
     if (!meet) return;
-    const shareUrl = `${window.location.origin}/meet?id=${meet.id}`;
+    const shareUrl = `${window.location.origin}/discover?id=${meet.id}`;
     const shareText = `来 FitMeet 一起约练「${meet.title}」：${meet.sport} · ${meet.loc}`;
     if (navigator.share) {
       navigator.share({ title: meet.title, text: shareText, url: shareUrl }).catch(() => {});

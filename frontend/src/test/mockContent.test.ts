@@ -96,9 +96,7 @@ describe('mockContent fallbacks', () => {
 
   it('keeps production feed and meet pages on real API results without mock fallback naming', () => {
     const pageSources = [
-      '../pages/MeetPage.tsx',
       '../pages/DiscoverPage.tsx',
-      '../pages/FitMeetHallPage.tsx',
       '../pages/HomePage.legacy.tsx',
     ].map((relativePath) =>
       fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8'),
