@@ -125,6 +125,6 @@ cd ${target_dir_q}
 if [ ! -f .env.production ]; then cp deploy/env.production.ecs.example .env.production; fi
 printf '\\nNext: edit %s/.env.production, copy nginx/ssl/fullchain.pem and nginx/ssl/privkey.pem, then run:\\n' ${target_dir_q}
 printf '  APP_DIR=%s ./scripts/ecs-host-preflight.sh\\n' ${target_dir_q}
-printf '  APP_DIR=%s RUN_RELEASE_PREFLIGHT=false BUILD_FRONTEND=false PUBLIC_BASE_URL=https://socialworld.world PUBLIC_API_BASE_URL=https://socialworld.world/api ./scripts/deploy-production.sh\\n' ${target_dir_q}
+printf '  APP_DIR=%s RUN_RELEASE_PREFLIGHT=false BUILD_FRONTEND=false PUBLIC_BASE_URL=https://www.ourfitmeet.cn PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api ./scripts/deploy-production.sh\\n' ${target_dir_q}
 
 EOF

@@ -179,4 +179,4 @@ ok "Installed FitMeet release into $TARGET_DIR"
 printf '\nNext server commands:\n'
 printf '  cd %s\n' "$TARGET_DIR"
 printf '  APP_DIR=%s ./scripts/ecs-host-preflight.sh\n' "$TARGET_DIR"
-printf '  APP_DIR=%s RUN_RELEASE_PREFLIGHT=false BUILD_FRONTEND=false PUBLIC_BASE_URL=https://socialworld.world PUBLIC_API_BASE_URL=https://socialworld.world/api ./scripts/deploy-production.sh\n' "$TARGET_DIR"
+printf '  APP_DIR=%s RUN_RELEASE_PREFLIGHT=false BUILD_FRONTEND=false PUBLIC_BASE_URL=https://www.ourfitmeet.cn PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api ./scripts/deploy-production.sh\n' "$TARGET_DIR"

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-WEB_ORIGIN="${WEB_ORIGIN:-https://socialworld.world}"
+WEB_ORIGIN="${WEB_ORIGIN:-https://www.ourfitmeet.cn}"
 API_BASE_URL_WAS_SET="${API_BASE_URL:-}"
-API_BASE_URL="${API_BASE_URL:-https://api.socialworld.world/api}"
+API_BASE_URL="${API_BASE_URL:-https://www.ourfitmeet.cn/api}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-12}"
 FITMEET_LAUNCH_TOPOLOGY="${FITMEET_LAUNCH_TOPOLOGY:-vercel-railway}"
 CHECK_VERCEL_WEB_DNS="${CHECK_VERCEL_WEB_DNS:-true}"
@@ -15,7 +15,7 @@ FAILURES=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/domain-readiness-check.sh [--topology vercel-railway|ecs] [--web-origin https://socialworld.world] [--api-base-url https://api.socialworld.world/api] [--print-required-records]
+Usage: scripts/domain-readiness-check.sh [--topology vercel-railway|ecs] [--web-origin https://www.ourfitmeet.cn] [--api-base-url https://www.ourfitmeet.cn/api] [--print-required-records]
 
 Checks the public FitMeet DNS/TLS/API chain before the full production smoke:
   - Web apex DNS resolves.
@@ -28,8 +28,8 @@ Checks the public FitMeet DNS/TLS/API chain before the full production smoke:
 Environment:
   FITMEET_LAUNCH_TOPOLOGY
                    Launch topology: vercel-railway or ecs. Default: vercel-railway.
-  WEB_ORIGIN       Public Web origin. Default: https://socialworld.world.
-  API_BASE_URL     Public API base URL. Default: https://api.socialworld.world/api,
+  WEB_ORIGIN       Public Web origin. Default: https://www.ourfitmeet.cn.
+  API_BASE_URL     Public API base URL. Default: https://www.ourfitmeet.cn/api,
                    or <WEB_ORIGIN>/api when topology is ecs and API_BASE_URL is not set.
   TIMEOUT_SECONDS  Per-request timeout. Default: 12.
   CHECK_VERCEL_WEB_DNS
@@ -37,7 +37,7 @@ Environment:
   EXPECTED_VERCEL_APEX_A
                    Expected Vercel apex A record. Default: 76.76.21.21.
   RAILWAY_API_DNS_TARGET
-                   Railway custom-domain CNAME target after adding api.socialworld.world
+                   Railway custom-domain CNAME target after adding the API domain
                    in Railway Settings -> Networking. Printed in the DNS plan.
   ECS_PUBLIC_IP    Aliyun ECS public IP printed in the ECS DNS plan.
 EOF
@@ -200,7 +200,7 @@ check_vercel_web_dns() {
   local dns_one_line
 
   [[ "${CHECK_VERCEL_WEB_DNS}" == "true" ]] || return 0
-  [[ "${host}" == "socialworld.world" || "${host}" == "www.socialworld.world" ]] || return 0
+  [[ "${host}" == "ourfitmeet.cn" || "${host}" == "www.ourfitmeet.cn" ]] || return 0
 
   dns_one_line="$(printf '%s' "${dns_output}" | tr '\n' ' ')"
   if printf '%s\n' "${dns_output}" | grep -Eq "(^|[[:space:]])${EXPECTED_VERCEL_APEX_A//./\\.}([[:space:]]|$)|vercel-dns\\.com\\.?$"; then

@@ -6,7 +6,7 @@ Use this path when Railway/Vercel deployment is blocked by account authorization
 
 ## Topology
 
-- Public Web origin: `https://socialworld.world`
+- Public Web origin: `https://www.ourfitmeet.cn`
 - Nginx serves `frontend/dist`
 - Nginx proxies `/api/*` and `/socket.io/*` to the NestJS backend container
 - PostgreSQL, MongoDB, Redis, Kafka, backend, and Nginx run through `docker-compose.prod.yml`
@@ -107,9 +107,9 @@ cp deploy/env.production.ecs.example .env.production
 
 Required values include:
 
-- `BASE_URL=https://socialworld.world`
-- `FRONTEND_BASE_URL=https://socialworld.world`
-- `ALLOWED_ORIGINS=https://socialworld.world,https://www.socialworld.world`
+- `BASE_URL=https://www.ourfitmeet.cn`
+- `FRONTEND_BASE_URL=https://www.ourfitmeet.cn`
+- `ALLOWED_ORIGINS=https://www.ourfitmeet.cn,https://ourfitmeet.cn`
 - PostgreSQL split vars: `DB_HOST=postgres`, `DB_PORT=5432`, `DB_USERNAME`, `DB_PASSWORD`, `DB_DATABASE`
 - Mongo split vars and `MONGO_URI=mongodb://<user>:<password>@mongo:27017/fitness_app?authSource=admin`
 - `REDIS_PASSWORD`
@@ -157,8 +157,8 @@ Or use the packaged deploy script:
 APP_DIR=/opt/FitMeet-web \
 RUN_RELEASE_PREFLIGHT=false \
 BUILD_FRONTEND=false \
-PUBLIC_BASE_URL=https://socialworld.world \
-PUBLIC_API_BASE_URL=https://socialworld.world/api \
+PUBLIC_BASE_URL=https://www.ourfitmeet.cn \
+PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api \
 ./scripts/deploy-production.sh
 ```
 
@@ -187,8 +187,8 @@ process:
 ```bash
 APP_SMOKE_SEED_PASSWORD='use-a-long-random-password' \
 APP_SMOKE_SEED_ALLOW_PRODUCTION=true \
-BASE_URL=https://socialworld.world \
-API_BASE_URL=https://socialworld.world/api \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_LAUNCH_TOPOLOGY=ecs \
 ./scripts/ecs-post-deploy-smoke.sh --prepare-app-smoke-users --run-app-smoke
 ```
@@ -214,8 +214,8 @@ TIMEOUT_SECONDS=8 ./scripts/launch-status.sh --topology ecs --skip-ios-testfligh
 ```
 
 ```bash
-BASE_URL=https://socialworld.world \
-API_BASE_URL=https://socialworld.world/api \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_LAUNCH_TOPOLOGY=ecs \
 ./scripts/verify-production.sh
 ```
@@ -223,8 +223,8 @@ FITMEET_LAUNCH_TOPOLOGY=ecs \
 With prepared staging users:
 
 ```bash
-BASE_URL=https://socialworld.world \
-API_BASE_URL=https://socialworld.world/api \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_LAUNCH_TOPOLOGY=ecs \
 APP_SMOKE_EMAIL=test@example.com \
 APP_SMOKE_PASSWORD='***' \
@@ -236,8 +236,8 @@ APP_SMOKE_RUN_MUTATIONS=true \
 Or run the combined ECS smoke entrypoint:
 
 ```bash
-BASE_URL=https://socialworld.world \
-API_BASE_URL=https://socialworld.world/api \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_LAUNCH_TOPOLOGY=ecs \
 APP_SMOKE_EMAIL=test@example.com \
 APP_SMOKE_PASSWORD='***' \
@@ -248,14 +248,14 @@ APP_SMOKE_TARGET_USER_ID=123 \
 iOS needs a matching Release API base if ECS is the final backend:
 
 ```text
-https://socialworld.world/api
+https://www.ourfitmeet.cn/api
 ```
 
-The current iOS Release default is `https://api.socialworld.world/api` for the Railway/Vercel topology. If ECS becomes the production backend, keep the app pointed at the same deployed API by using the ECS wrapper:
+The current iOS Release default is `https://www.ourfitmeet.cn/api` for the Railway/Vercel topology. If ECS becomes the production backend, keep the app pointed at the same deployed API by using the ECS wrapper:
 
 ```bash
 cd "/Users/liuchongjiang/Documents/FitMeet app"
-FITMEET_ALPHA_STAGING_BASE_URL=https://socialworld.world/api \
+FITMEET_ALPHA_STAGING_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_ALPHA_STAGING_EMAIL=test@example.com \
 FITMEET_ALPHA_STAGING_PASSWORD='***' \
 FITMEET_ALPHA_STAGING_MESSAGE_TARGET_USER_ID=123 \
@@ -263,7 +263,7 @@ Scripts/ecs-release-preflight-ios.sh --require-staging
 ```
 
 `Scripts/ecs-release-preflight-ios.sh` sets both `FITMEET_ALPHA_RELEASE_API_BASE_URL`
-and `FITMEET_ALPHA_EXPECTED_API_BASE_URL` to `https://socialworld.world/api`.
+and `FITMEET_ALPHA_EXPECTED_API_BASE_URL` to `https://www.ourfitmeet.cn/api`.
 If the ECS API host changes, set `FITMEET_ALPHA_ECS_API_BASE_URL` and make
 `FITMEET_ALPHA_STAGING_BASE_URL` match it.
 
@@ -274,5 +274,5 @@ xcodebuild archive \
   -project FitMeetAlpha.xcodeproj \
   -scheme FitMeetAlpha \
   -configuration Release \
-  FITMEET_API_BASE_URL=https://socialworld.world/api
+  FITMEET_API_BASE_URL=https://www.ourfitmeet.cn/api
 ```

@@ -79,7 +79,7 @@ describe('production deploy readiness', () => {
     );
     const gitignore = readRepoFile('.gitignore');
 
-    expect(ecsTemplate).toContain('BASE_URL=https://socialworld.world');
+    expect(ecsTemplate).toContain('BASE_URL=https://www.ourfitmeet.cn');
     expect(ecsTemplate).toContain('VITE_API_BASE_URL=/api');
     expect(ecsTemplate).toContain(
       'JWT_SECRET=CHANGE_ME_RANDOM_32_BYTE_HEX_SECRET',
@@ -277,7 +277,7 @@ describe('production deploy readiness', () => {
     expect(cloudRunbook).toContain('LiuChong27/FitMeet-Web');
     expect(cutoverChecklist).toContain('Vercel project `fit-meetweb`');
     expect(cutoverChecklist).toContain(
-      '`api.socialworld.world` has no DNS answer',
+      '`www.ourfitmeet.cn` has no DNS answer',
     );
     expect(cutoverChecklist).toContain('./scripts/launch-status.sh');
     expect(cutoverChecklist).toContain('--print-required-records');
@@ -374,10 +374,10 @@ describe('production deploy readiness', () => {
     expect(verifier).toContain('APP_SMOKE_ALLOW_REMOTE=true');
     expect(verifier).toContain('RUN_PUBLIC_INTENT_WRITE');
     expect(domainReadiness).toContain(
-      'WEB_ORIGIN="${WEB_ORIGIN:-https://socialworld.world}"',
+      'WEB_ORIGIN="${WEB_ORIGIN:-https://www.ourfitmeet.cn}"',
     );
     expect(domainReadiness).toContain(
-      'API_BASE_URL="${API_BASE_URL:-https://api.socialworld.world/api}"',
+      'API_BASE_URL="${API_BASE_URL:-https://www.ourfitmeet.cn/api}"',
     );
     expect(domainReadiness).toContain('FITMEET_LAUNCH_TOPOLOGY');
     expect(domainReadiness).toContain('CHECK_VERCEL_WEB_DNS');

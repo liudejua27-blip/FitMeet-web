@@ -6,7 +6,7 @@ COMPOSE_FILE="docker-compose.prod.yml"
 ENV_FILE=".env.production"
 RUN_RELEASE_PREFLIGHT="${RUN_RELEASE_PREFLIGHT:-true}"
 RUN_MIGRATIONS="${RUN_MIGRATIONS:-true}"
-PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://socialworld.world}"
+PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://www.ourfitmeet.cn}"
 PUBLIC_API_BASE_URL="${PUBLIC_API_BASE_URL:-}"
 
 cd "$APP_DIR"

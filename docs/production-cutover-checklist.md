@@ -19,9 +19,9 @@ These must be cleared before claiming production is live:
   `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, and
   `./.vercel/project.json` are absent, so noninteractive Vercel deploy cannot
   run until browser login/link or CI secrets are provided.
-- `socialworld.world` currently resolves to `34.216.117.25` and
+- `www.ourfitmeet.cn` currently resolves to `34.216.117.25` and
   `54.149.79.189`, not the Vercel apex target `76.76.21.21`.
-- `api.socialworld.world` has no DNS answer.
+- `www.ourfitmeet.cn` has no DNS answer.
 - Railway CLI is not installed/authenticated in the current shell; dashboard
   deploy or a logged-in CLI/token is required.
 - Docker Hub access from the current shell times out while fetching
@@ -72,9 +72,9 @@ deploy/env.production.railway.example
 
 Required production values:
 
-- `BASE_URL=https://api.socialworld.world`
-- `FRONTEND_BASE_URL=https://socialworld.world`
-- `ALLOWED_ORIGINS=https://socialworld.world,https://www.socialworld.world`
+- `BASE_URL=https://www.ourfitmeet.cn`
+- `FRONTEND_BASE_URL=https://www.ourfitmeet.cn`
+- `ALLOWED_ORIGINS=https://www.ourfitmeet.cn,https://ourfitmeet.cn`
 - `DATABASE_URL`
 - `MONGO_URI`
 - `REDIS_URL`
@@ -103,9 +103,9 @@ pnpm migration:status
 Then verify:
 
 ```bash
-curl -fsS https://api.socialworld.world/api/health
-curl -fsS https://api.socialworld.world/api/ready
-curl -fsS https://api.socialworld.world/api/openapi/fitmeet-core.json
+curl -fsS https://www.ourfitmeet.cn/api/health
+curl -fsS https://www.ourfitmeet.cn/api/ready
+curl -fsS https://www.ourfitmeet.cn/api/openapi/fitmeet-core.json
 ```
 
 ## 3. Vercel Frontend
@@ -117,7 +117,7 @@ Vercel production env:
 
 ```text
 VITE_API_BASE_URL=/api
-VITE_WS_BASE_URL=https://api.socialworld.world
+VITE_WS_BASE_URL=https://www.ourfitmeet.cn
 ```
 
 Direct CLI deploy path after login:
@@ -152,15 +152,15 @@ Print the required DNS plan:
 
 Vercel Web:
 
-- Add `socialworld.world` to the Vercel Web project.
+- Add `www.ourfitmeet.cn` to the Vercel Web project.
 - For apex DNS, set A record to `76.76.21.21` unless Vercel shows a different
   required target.
-- Add or verify `www.socialworld.world` only if the product will serve the
+- Add or verify `ourfitmeet.cn` only if the product will serve the
   `www` origin.
 
 Railway API:
 
-- Add `api.socialworld.world` as a Railway custom domain on the backend service.
+- Add `www.ourfitmeet.cn` as a Railway custom domain on the backend service.
 - Create the DNS record Railway shows in Settings -> Networking.
 
 Namecheap purchase note:
@@ -171,13 +171,13 @@ Namecheap purchase note:
 - The only required Namecheap work is DNS: apex `A` to Vercel, optional `www`
   `CNAME` to Vercel, and `api` `CNAME` to Railway.
 - Buy email hosting later only if FitMeet needs a real mailbox on
-  `@socialworld.world`.
+  `@ourfitmeet.cn`.
 
 Validate:
 
 ```bash
-WEB_ORIGIN=https://socialworld.world \
-API_BASE_URL=https://api.socialworld.world/api \
+WEB_ORIGIN=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
 ./scripts/domain-readiness-check.sh
 ```
 
@@ -186,8 +186,8 @@ API_BASE_URL=https://api.socialworld.world/api \
 Run non-mutating smoke:
 
 ```bash
-BASE_URL=https://socialworld.world \
-API_BASE_URL=https://api.socialworld.world/api \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
 ./scripts/verify-production.sh
 ```
 
@@ -203,9 +203,9 @@ pnpm -C backend run seed:app-smoke-users
 Use the printed exports, then run authenticated mutation smoke:
 
 ```bash
-BASE_URL=https://socialworld.world \
-API_BASE_URL=https://api.socialworld.world/api \
-APP_SMOKE_EMAIL=fitmeet-smoke-owner@socialworld.world \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
+APP_SMOKE_EMAIL=fitmeet-smoke-owner@ourfitmeet.cn \
 APP_SMOKE_PASSWORD='***' \
 APP_SMOKE_TARGET_USER_ID=123 \
 APP_SMOKE_RUN_MUTATIONS=true \
@@ -230,19 +230,19 @@ Expected requirements:
 - `DEVELOPMENT_TEAM` is set.
 - `PRODUCT_BUNDLE_IDENTIFIER=com.fitmeet.alpha` is registered in App Store
   Connect.
-- Release `FITMEET_API_BASE_URL=https://api.socialworld.world/api`.
+- Release `FITMEET_API_BASE_URL=https://www.ourfitmeet.cn/api`.
 - Release `FITMEET_ALLOW_BASE_URL_OVERRIDE=NO`.
-- `FITMEET_ALPHA_STAGING_BASE_URL=https://api.socialworld.world/api`.
+- `FITMEET_ALPHA_STAGING_BASE_URL=https://www.ourfitmeet.cn/api`.
 - `FITMEET_ALPHA_STAGING_EMAIL`, `FITMEET_ALPHA_STAGING_PASSWORD`, and
   `FITMEET_ALPHA_STAGING_MESSAGE_TARGET_USER_ID` are set.
 
 Then run the real staging gate:
 
 ```bash
-FITMEET_ALPHA_RELEASE_API_BASE_URL=https://api.socialworld.world/api \
-FITMEET_ALPHA_EXPECTED_API_BASE_URL=https://api.socialworld.world/api \
-FITMEET_ALPHA_STAGING_BASE_URL=https://api.socialworld.world/api \
-FITMEET_ALPHA_STAGING_EMAIL=fitmeet-smoke-owner@socialworld.world \
+FITMEET_ALPHA_RELEASE_API_BASE_URL=https://www.ourfitmeet.cn/api \
+FITMEET_ALPHA_EXPECTED_API_BASE_URL=https://www.ourfitmeet.cn/api \
+FITMEET_ALPHA_STAGING_BASE_URL=https://www.ourfitmeet.cn/api \
+FITMEET_ALPHA_STAGING_EMAIL=fitmeet-smoke-owner@ourfitmeet.cn \
 FITMEET_ALPHA_STAGING_PASSWORD='***' \
 FITMEET_ALPHA_STAGING_MESSAGE_TARGET_USER_ID=123 \
 Scripts/release-preflight-ios.sh --require-staging
@@ -252,8 +252,8 @@ After the strict gate passes, create the local TestFlight archive without
 uploading to App Store Connect:
 
 ```bash
-FITMEET_ALPHA_STAGING_BASE_URL=https://api.socialworld.world/api \
-FITMEET_ALPHA_STAGING_EMAIL=fitmeet-smoke-owner@socialworld.world \
+FITMEET_ALPHA_STAGING_BASE_URL=https://www.ourfitmeet.cn/api \
+FITMEET_ALPHA_STAGING_EMAIL=fitmeet-smoke-owner@ourfitmeet.cn \
 FITMEET_ALPHA_STAGING_PASSWORD='***' \
 FITMEET_ALPHA_STAGING_MESSAGE_TARGET_USER_ID=123 \
 Scripts/testflight-archive.sh --export
@@ -310,15 +310,15 @@ chmod +x /path/to/fitmeet-ecs-install-release.sh
 For ECS, iOS Release API must be overridden to:
 
 ```text
-https://socialworld.world/api
+https://www.ourfitmeet.cn/api
 ```
 
 Run:
 
 ```bash
 cd "/Users/liuchongjiang/Documents/FitMeet app"
-FITMEET_ALPHA_STAGING_BASE_URL=https://socialworld.world/api \
-FITMEET_ALPHA_STAGING_EMAIL=fitmeet-smoke-owner@socialworld.world \
+FITMEET_ALPHA_STAGING_BASE_URL=https://www.ourfitmeet.cn/api \
+FITMEET_ALPHA_STAGING_EMAIL=fitmeet-smoke-owner@ourfitmeet.cn \
 FITMEET_ALPHA_STAGING_PASSWORD='***' \
 FITMEET_ALPHA_STAGING_MESSAGE_TARGET_USER_ID=123 \
 Scripts/ecs-release-preflight-ios.sh --require-staging

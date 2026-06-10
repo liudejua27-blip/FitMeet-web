@@ -2,9 +2,9 @@
 set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WEB_ORIGIN="${WEB_ORIGIN:-https://socialworld.world}"
+WEB_ORIGIN="${WEB_ORIGIN:-https://www.ourfitmeet.cn}"
 API_BASE_URL_WAS_SET="${API_BASE_URL:-}"
-API_BASE_URL="${API_BASE_URL:-https://api.socialworld.world/api}"
+API_BASE_URL="${API_BASE_URL:-https://www.ourfitmeet.cn/api}"
 FITMEET_LAUNCH_TOPOLOGY="${FITMEET_LAUNCH_TOPOLOGY:-vercel-railway}"
 RUN_READINESS_TESTS="${RUN_READINESS_TESTS:-true}"
 RUN_DOMAIN_CHECK="${RUN_DOMAIN_CHECK:-true}"
@@ -35,8 +35,8 @@ mutate cloud resources, create users, write production data, or submit GitHub.
 
 Environment:
   FITMEET_LAUNCH_TOPOLOGY      Launch topology: vercel-railway or ecs. Default: vercel-railway.
-  WEB_ORIGIN                  Public Web origin. Default: https://socialworld.world.
-  API_BASE_URL                Public API base. Default: https://api.socialworld.world/api,
+  WEB_ORIGIN                  Public Web origin. Default: https://www.ourfitmeet.cn.
+  API_BASE_URL                Public API base. Default: https://www.ourfitmeet.cn/api,
                               or <WEB_ORIGIN>/api when topology is ecs and API_BASE_URL is not set.
   FITMEET_APP_DIR             iOS app repo path. Default: /Users/liuchongjiang/Documents/FitMeet app.
   FITMEET_PNPM_BIN_DIR        Optional pnpm bin directory to prepend to PATH.

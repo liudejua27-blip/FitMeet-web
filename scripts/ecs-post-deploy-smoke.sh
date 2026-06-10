@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="${APP_DIR:-${ROOT_DIR}}"
-BASE_URL="${BASE_URL:-https://socialworld.world}"
+BASE_URL="${BASE_URL:-https://www.ourfitmeet.cn}"
 API_BASE_URL="${API_BASE_URL:-${BASE_URL%/}/api}"
 PREPARE_APP_SMOKE_USERS="${PREPARE_APP_SMOKE_USERS:-false}"
 RUN_APP_SMOKE="${RUN_APP_SMOKE:-false}"
@@ -24,7 +24,7 @@ By default this is non-destructive: frontend, health, readiness, OpenAPI,
 public feed, and auth guards.
 
 Options:
-  --base-url URL                 Public Web origin. Default: https://socialworld.world
+  --base-url URL                 Public Web origin. Default: https://www.ourfitmeet.cn
   --api-base-url URL             Public API base. Default: <base-url>/api
   --prepare-app-smoke-users      Create/update dedicated smoke users first.
   --run-app-smoke                Run authenticated Web/App smoke against API.
