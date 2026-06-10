@@ -52,6 +52,11 @@ const OPTIONAL_DEEPSEEK_MODEL_KEYS = [
   'AGENT_CARD_MODEL',
 ];
 
+const RELEASE_READY_SUBAGENT_WORKER_MODES = new Set([
+  'db_queue',
+  'queue_worker_ready',
+]);
+
 export function parseEnvFile(content: string): EnvMap {
   const env: EnvMap = {};
   for (const rawLine of content.split(/\r?\n/)) {
@@ -103,6 +108,8 @@ export function buildProductionEnvReport(env: EnvMap): ProductionEnvReport {
   checkObjectStorage(env, error);
   checkAgentModel(env, error);
   checkKafka(env, error);
+  checkSubagentWorker(env, error, warning);
+  checkObservabilityAlerts(env, error);
 
   for (const key of OPTIONAL_BUT_LAUNCH_CRITICAL_KEYS) {
     if (!hasConfiguredValue(env[key])) {
@@ -370,6 +377,75 @@ function checkKafka(
 ): void {
   if (env.ENABLE_KAFKA === 'true' && !hasConfiguredValue(env.KAFKA_BROKERS)) {
     error('KAFKA_BROKERS', 'must be set when ENABLE_KAFKA=true.');
+  }
+}
+
+function checkSubagentWorker(
+  env: EnvMap,
+  error: (key: string, message: string) => void,
+  warning: (key: string, message: string) => void,
+): void {
+  const mode = `${env.FITMEET_SUBAGENT_WORKER_MODE ?? ''}`.trim().toLowerCase();
+  if (!hasConfiguredValue(mode)) {
+    error(
+      'FITMEET_SUBAGENT_WORKER_MODE',
+      'must be db_queue or queue_worker_ready so subagents run in an independent worker process before release.',
+    );
+  } else if (!RELEASE_READY_SUBAGENT_WORKER_MODES.has(mode)) {
+    error(
+      'FITMEET_SUBAGENT_WORKER_MODE',
+      'must be db_queue or queue_worker_ready; resident in-process lanes are not release-ready for complex Agent workloads.',
+    );
+  }
+  requirePositiveInt(env, 'FITMEET_SUBAGENT_WORKER_CONCURRENCY', error);
+  requirePositiveInt(env, 'FITMEET_SUBAGENT_WORKER_POLL_MS', error);
+  requirePositiveInt(env, 'FITMEET_SUBAGENT_WORKER_TIMEOUT_MS', error);
+
+  const queues = `${env.FITMEET_SUBAGENT_WORKER_QUEUE ?? ''}`
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (queues.length > 0 && queues.length < 4) {
+    warning(
+      'FITMEET_SUBAGENT_WORKER_QUEUE',
+      'custom queue list should include Life Graph, Social Match, Meet Loop, and Math worker queues unless this is an intentional partial rollout.',
+    );
+  }
+}
+
+function checkObservabilityAlerts(
+  env: EnvMap,
+  error: (key: string, message: string) => void,
+): void {
+  requireConfigured(env, 'AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL', error);
+  requireHttpsUrl(env, 'AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL', error);
+  requireConfigured(env, 'AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN', error);
+  if (hasConfiguredValue(env.AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS)) {
+    requireNonNegativeInt(env, 'AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS', error);
+  }
+}
+
+function requirePositiveInt(
+  env: EnvMap,
+  key: string,
+  error: (key: string, message: string) => void,
+): void {
+  requireConfigured(env, key, error);
+  if (!hasConfiguredValue(env[key])) return;
+  const value = Number(env[key]);
+  if (!Number.isInteger(value) || value <= 0) {
+    error(key, 'must be a positive integer.');
+  }
+}
+
+function requireNonNegativeInt(
+  env: EnvMap,
+  key: string,
+  error: (key: string, message: string) => void,
+): void {
+  const value = Number(env[key]);
+  if (!Number.isInteger(value) || value < 0) {
+    error(key, 'must be a non-negative integer.');
   }
 }
 

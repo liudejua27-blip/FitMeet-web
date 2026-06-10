@@ -203,6 +203,53 @@ services:
           cpus: '1'
           memory: 1G
 
+  # 独立 Subagent Worker - DB 队列消费，隔离 Agent 子任务崩溃与扩缩容
+  subagent-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:20-alpine}
+    container_name: fitness-subagent-worker
+    restart: always
+    command: ["node", "dist/agent-gateway/subagent-worker.cli.js"]
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_MIGRATIONS_RUN: "false"
+      DB_SYNCHRONIZE: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:29092
+      FITMEET_SUBAGENT_WORKER_ID: ${FITMEET_SUBAGENT_WORKER_ID:-compose-subagent-worker}
+      FITMEET_SUBAGENT_WORKER_MODE: ${FITMEET_SUBAGENT_WORKER_MODE:-db_queue}
+      FITMEET_SUBAGENT_WORKER_CONCURRENCY: ${FITMEET_SUBAGENT_WORKER_CONCURRENCY:-2}
+      FITMEET_SUBAGENT_WORKER_POLL_MS: ${FITMEET_SUBAGENT_WORKER_POLL_MS:-1000}
+      FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: ${FITMEET_SUBAGENT_WORKER_TIMEOUT_MS:-15000}
+      FITMEET_SUBAGENT_WORKER_QUEUE: ${FITMEET_SUBAGENT_WORKER_QUEUE:-fitmeet.subagent.life-graph-agent,fitmeet.subagent.social-match-agent,fitmeet.subagent.meet-loop-agent,fitmeet.subagent.math-agent}
+    env_file:
+      - ./.env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - fitness-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
 volumes:
   postgres_data:
   redis_data:

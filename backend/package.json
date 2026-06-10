@@ -23,6 +23,7 @@
     "db:repair:agent-modes": "node scripts/repair-agent-mode-enums-20260521.js",
     "seed:living-social-data": "ts-node -r tsconfig-paths/register scripts/seed-living-social-data.ts",
     "seed:living-social-data:dry-run": "ts-node -r tsconfig-paths/register scripts/seed-living-social-data.ts --dry-run",
+    "smoke:agent-launch-gates": "ts-node -r tsconfig-paths/register scripts/smoke-agent-launch-gates.ts",
     "start": "nest start",
     "start:dev": "nest start --watch --entryFile main.js",
     "start:debug": "nest start --debug --watch --entryFile main.js",

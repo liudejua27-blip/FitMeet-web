@@ -17,6 +17,7 @@ import {
   getSocialAgentToolRiskLevel,
   getSocialAgentToolSceneActionType,
   isConfirmableSocialAgentTool,
+  requiresMandatorySocialAgentApproval,
   shouldWriteSocialAgentActionResultInbox,
   SOCIAL_AGENT_HIGH_RISK_TOOL_DAILY_LIMITS,
 } from './social-agent-tool-policy';
@@ -116,5 +117,48 @@ describe('social agent tool policy', () => {
     expect(
       getSocialAgentToolSceneActionType(SocialAgentToolName.ShareLocation),
     ).toBe('share_location');
+  });
+
+  it('requires mandatory approval for launch-critical side effects', () => {
+    const approvalRequiredCases: Array<
+      [SocialAgentToolName, Record<string, unknown>]
+    > = [
+      [SocialAgentToolName.SendMessage, {}],
+      [SocialAgentToolName.SendMessageToCandidate, {}],
+      [SocialAgentToolName.ReplyMessage, {}],
+      [SocialAgentToolName.ConnectCandidate, {}],
+      [SocialAgentToolName.AddFriend, {}],
+      [SocialAgentToolName.CreateActivity, {}],
+      [SocialAgentToolName.InviteActivity, {}],
+      [SocialAgentToolName.JoinActivity, {}],
+      [SocialAgentToolName.OfflineMeeting, {}],
+      [SocialAgentToolName.ShareLocation, {}],
+      [SocialAgentToolName.Payment, {}],
+      [SocialAgentToolName.PublishSocialRequest, {}],
+      [SocialAgentToolName.CreateSocialRequest, { publish: true }],
+      [SocialAgentToolName.CreateSocialRequest, { mode: 'public' }],
+      [
+        SocialAgentToolName.UpdateAiProfileFromAnswers,
+        { fields: { privacyBoundary: '仅熟人可见' } },
+      ],
+      [
+        SocialAgentToolName.UpdateProfileFromAgentContext,
+        { patch: { phone: '15253005312' } },
+      ],
+    ];
+
+    for (const [toolName, input] of approvalRequiredCases) {
+      expect(requiresMandatorySocialAgentApproval(toolName, input)).toBe(true);
+    }
+
+    expect(
+      requiresMandatorySocialAgentApproval(SocialAgentToolName.SearchMatches),
+    ).toBe(false);
+    expect(
+      requiresMandatorySocialAgentApproval(
+        SocialAgentToolName.CreateSocialRequest,
+        { mode: 'draft' },
+      ),
+    ).toBe(false);
   });
 });

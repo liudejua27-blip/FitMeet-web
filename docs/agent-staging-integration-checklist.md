@@ -53,6 +53,12 @@ SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS=12000
 AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL=<staging-alert-webhook>
 AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN=<staging-alert-token>
 AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS=300000
+
+FITMEET_SUBAGENT_WORKER_MODE=db_queue
+FITMEET_SUBAGENT_WORKER_CONCURRENCY=2
+FITMEET_SUBAGENT_WORKER_POLL_MS=1000
+FITMEET_SUBAGENT_WORKER_TIMEOUT_MS=15000
+FITMEET_SUBAGENT_WORKER_QUEUE=fitmeet.subagent.life-graph-agent,fitmeet.subagent.social-match-agent,fitmeet.subagent.meet-loop-agent,fitmeet.subagent.math-agent
 ```
 
 Required optional services for broader release smoke:
@@ -113,7 +119,61 @@ VITE_API_BASE_URL=/api
    curl -fsS https://staging-api.socialworld.world/api/openapi/fitmeet-core.json
    ```
 
-7. Prepare dedicated staging smoke users and candidate data:
+7. Verify the independent subagent worker process is running. Docker Compose now
+   includes a dedicated `subagent-worker` service:
+
+   ```bash
+   docker compose -f docker-compose.prod.yml --env-file .env.production ps subagent-worker
+   docker compose -f docker-compose.prod.yml --env-file .env.production logs -f subagent-worker
+   ```
+
+   The worker must keep writing heartbeat rows for all four queues:
+
+   ```text
+   fitmeet.subagent.life-graph-agent
+   fitmeet.subagent.social-match-agent
+   fitmeet.subagent.meet-loop-agent
+   fitmeet.subagent.math-agent
+   ```
+
+   If staging is deployed on Railway, create a second service from the same
+   backend image and set its start command to:
+
+   ```bash
+   node dist/agent-gateway/subagent-worker.cli.js
+   ```
+
+   If staging uses PM2 on ECS:
+
+   ```bash
+   pm2 start dist/main.js --name fitmeet-api
+   FITMEET_SUBAGENT_WORKER_MODE=db_queue \
+   FITMEET_SUBAGENT_WORKER_CONCURRENCY=2 \
+   pm2 start dist/agent-gateway/subagent-worker.cli.js --name fitmeet-subagent-worker -i 1
+   pm2 save
+   ```
+
+   If staging uses systemd, create a separate unit for the worker process rather
+   than running it inside the API service:
+
+   ```ini
+   [Unit]
+   Description=FitMeet Subagent Worker
+   After=network.target
+
+   [Service]
+   WorkingDirectory=/opt/fitmeet/backend
+   EnvironmentFile=/opt/fitmeet/.env.production
+   Environment=FITMEET_SUBAGENT_WORKER_MODE=db_queue
+   ExecStart=/usr/bin/node dist/agent-gateway/subagent-worker.cli.js
+   Restart=always
+   RestartSec=5
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+8. Prepare dedicated staging smoke users and candidate data:
 
    ```bash
    APP_SMOKE_SEED_PASSWORD='<long-random-password>' \
@@ -121,7 +181,7 @@ VITE_API_BASE_URL=/api
    pnpm -C backend run seed:app-smoke-users
    ```
 
-8. Store the printed smoke credentials only in a local secure note or shell
+9. Store the printed smoke credentials only in a local secure note or shell
    session. Do not commit them.
 
 ## Nginx / Reverse Proxy SSE Requirements
@@ -253,12 +313,105 @@ curl -fsS \
 Repeat the same command with the same `idempotencyKey`; it must be safe and must
 not duplicate writes.
 
+## Agent Launch Gate Smoke
+
+After migrations, smoke users, RBAC bootstrap, and the independent worker are
+ready, run the release gate script from a trusted terminal:
+
+```bash
+FITMEET_API_BASE_URL=https://staging-api.socialworld.world/api \
+ADMIN_JWT='<staging-admin-jwt>' \
+USER_JWT='<staging-user-jwt>' \
+RUN_SELF_IMPROVE_SANDBOX=true \
+pnpm -C backend run smoke:agent-launch-gates
+```
+
+This script verifies:
+
+- L5 dashboard and worker job APIs are reachable through RBAC.
+- Independent subagent worker heartbeat is fresh.
+- production alert sink is configured.
+- high-risk tool endpoints return approval signals instead of executing.
+- self-improve runner and canary effect APIs are reachable when
+  `RUN_SELF_IMPROVE_SANDBOX=true`.
+
+Use these environment overrides only for controlled partial checks:
+
+```bash
+REQUIRE_SUBAGENT_WORKER=false
+ALLOW_LOG_ONLY_ALERTS=true
+RUN_SELF_IMPROVE_SANDBOX=false
+```
+
+Do not use these overrides for production go/no-go.
+
+## High-Risk Action Acceptance
+
+Before enabling complex Agent functions, manually verify each action with a real
+staging user:
+
+| Action | Required result |
+| --- | --- |
+| Send message | Creates approval request; no message sent before approval |
+| Connect candidate / add friend | Creates approval request; no relationship write before approval |
+| Create activity / invite / join | Creates approval request; repeated idempotency key is safe |
+| Publish social request | Creates approval request; draft can be saved without public publish |
+| Share precise location | Creates approval request and logs sensitive-field access |
+| Privacy profile update | Creates approval request and writes audit log |
+| Payment | Creates approval request; no payment intent is executed before approval |
+
+For each row, capture evidence for approval log, user rejection, natural
+assistant reply after rejection, retry behavior, and rollback/compensation path.
+
+## Self-Improve Sandbox Cycle
+
+Run one complete sandbox cycle before production:
+
+1. Capture at least 20 online replay samples from staging tasks.
+2. Trigger failure clustering and patch draft generation through:
+   `POST /social-agent/self-improve/runner/run-once`.
+3. Confirm low/medium-risk patches bind eval cases automatically.
+4. Confirm high-risk patches stop at human review.
+5. Run eval runner and canary reconciliation.
+6. Confirm canary metrics either promote or rollback by threshold.
+7. Store the dashboard screenshot and patch audit trail as release evidence.
+
+## Security And Privacy Gate
+
+Life Graph launch requires:
+
+- Sensitive-field masking tests for phone, location, private messages, and
+  contact identifiers.
+- Export/delete security request flow with second confirmation and cooldown.
+- RBAC roles for owner admin, agent admin, and support readonly.
+- Admin audit logs for denied access and sensitive-field reads.
+- Data retention policy configured and visible in the privacy policy page.
+- Backend logs sampled to confirm no JWTs, phone numbers, precise locations, or
+  private messages are printed.
+
+## Alerting Gate
+
+The L5 dashboard is not enough for production. Configure webhook or incident
+delivery for:
+
+- LLM failure rate.
+- tool failure rate.
+- SSE interruption rate.
+- DB slow query / migration failure.
+- worker queue backlog and stale heartbeat.
+- high-risk approval anomaly.
+
+The production env readiness checker now fails release when
+`AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL` or
+`AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN` is missing.
+
 ## Logs And TraceId Checks
 
 During smoke, tail backend logs:
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.production logs -f backend
+docker compose -f docker-compose.prod.yml --env-file .env.production logs -f subagent-worker
 ```
 
 Check:
@@ -288,6 +441,11 @@ Fill this after running against the real staging domain.
 | SSE through proxy | Config prepared | Needs staging `curl -N` evidence |
 | Session restore | Not verified | Refresh `/agent`; inspect `GET /session` |
 | Action idempotency | Not verified | Repeat same action key |
+| Independent subagent worker | Not verified | Worker heartbeat in L5 dashboard |
+| High-risk approval smoke | Not verified | `smoke:agent-launch-gates` with `USER_JWT` |
+| Self-improve sandbox cycle | Not verified | Runner + eval + canary evidence |
+| Alert delivery | Not verified | Real alert webhook receives test alert |
+| Life Graph privacy gate | Not verified | Export/delete + log masking evidence |
 | Logs and traceId | Not verified | Tail backend logs |
 
 ## Current Local Repository Status
@@ -297,6 +455,12 @@ Fill this after running against the real staging domain.
 - Social Agent endpoints required for run, action, and restore exist in the
   OpenAPI contract and runtime routes.
 - Nginx has a dedicated no-buffering proxy location for Social Agent SSE.
+- Production env readiness now requires a DB queue subagent worker and real
+  observability alert sink.
+- `docker-compose.prod.yml` includes a separate `subagent-worker` service.
+- `pnpm -C backend run smoke:agent-launch-gates` is the staging go/no-go script
+  for worker heartbeat, alert sink, high-risk approvals, and self-improve
+  sandbox reachability.
 - This document does not claim the Aliyun staging smoke has passed; it must be
   executed after the staging host, domain, TLS, env, migrations, and smoke users
   are ready.

@@ -36,6 +36,14 @@ const validEnv = {
   DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
   DEEPSEEK_CHAT_MODEL: 'deepseek-v4-pro',
   DEEPSEEK_FAST_MODEL: 'deepseek-v4-flash',
+  FITMEET_SUBAGENT_WORKER_MODE: 'db_queue',
+  FITMEET_SUBAGENT_WORKER_CONCURRENCY: '2',
+  FITMEET_SUBAGENT_WORKER_POLL_MS: '1000',
+  FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: '15000',
+  AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL:
+    'https://alerts.socialworld.world/fitmeet-agent',
+  AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN: 'alert-token-1234567890abcdef',
+  AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS: '300000',
   KAFKA_BROKERS: 'kafka:29092',
   ENABLE_KAFKA: 'true',
 };
@@ -276,6 +284,66 @@ describe('production-env-readiness', () => {
         expect.objectContaining({ key: 'DEEPSEEK_FAST_MODEL' }),
         expect.objectContaining({ key: 'AGENT_FINAL_RESPONSE_MODEL' }),
         expect.objectContaining({ key: 'AGENT_CASUAL_CHAT_MODEL' }),
+      ]),
+    );
+  });
+
+  it('requires release-ready independent subagent worker settings', () => {
+    const missingWorker = buildProductionEnvReport({
+      ...validEnv,
+      FITMEET_SUBAGENT_WORKER_MODE: '',
+      FITMEET_SUBAGENT_WORKER_CONCURRENCY: '',
+      FITMEET_SUBAGENT_WORKER_POLL_MS: '',
+      FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: '',
+    });
+    const residentWorker = buildProductionEnvReport({
+      ...validEnv,
+      FITMEET_SUBAGENT_WORKER_MODE: 'resident_in_process',
+      FITMEET_SUBAGENT_WORKER_CONCURRENCY: '0',
+      FITMEET_SUBAGENT_WORKER_POLL_MS: '1000.5',
+      FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: '-1',
+    });
+
+    expect(missingWorker.ok).toBe(false);
+    expect(residentWorker.ok).toBe(false);
+    expect(missingWorker.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_MODE' }),
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_CONCURRENCY' }),
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_POLL_MS' }),
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_TIMEOUT_MS' }),
+      ]),
+    );
+    expect(residentWorker.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_MODE' }),
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_CONCURRENCY' }),
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_POLL_MS' }),
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_TIMEOUT_MS' }),
+      ]),
+    );
+  });
+
+  it('requires real observability alert delivery for production', () => {
+    const report = buildProductionEnvReport({
+      ...validEnv,
+      AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL: 'http://localhost:9000/alerts',
+      AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN: '',
+      AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS: '-1',
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL',
+        }),
+        expect.objectContaining({
+          key: 'AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN',
+        }),
+        expect.objectContaining({
+          key: 'AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS',
+        }),
       ]),
     );
   });

@@ -337,6 +337,9 @@ describe('SocialAgentChatController user-facing stream', () => {
       observability as never,
     );
     let writableEnded = false;
+    const end = jest.fn(() => {
+      writableEnded = true;
+    });
     const response = {
       status: jest.fn(),
       setHeader: jest.fn(),
@@ -347,9 +350,7 @@ describe('SocialAgentChatController user-facing stream', () => {
       write: jest.fn((chunk: string) => {
         writes.push(chunk);
       }),
-      end: jest.fn(() => {
-        writableEnded = true;
-      }),
+      end,
       on: resEvents.on.bind(resEvents),
     } as unknown as Response;
     const request = {
@@ -377,7 +378,7 @@ describe('SocialAgentChatController user-facing stream', () => {
       }),
     );
     expect(writes.join('')).toContain('"type":"status"');
-    expect(response.end).toHaveBeenCalled();
+    expect(end).toHaveBeenCalled();
   });
 });
 
