@@ -98,6 +98,34 @@ fi
 echo "[deploy] Start API, worker, and nginx after migrations"
 "${COMPOSE[@]}" up -d --no-build backend subagent-worker nginx
 
+echo "[post] Wait for API and worker health"
+wait_for_compose_exec() {
+  local service="$1"
+  local label="$2"
+  shift 2
+  local deadline=$((SECONDS + ${DEPLOY_HEALTH_TIMEOUT_SECONDS:-150}))
+  until "${COMPOSE[@]}" exec -T "$service" "$@" >/dev/null 2>&1; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "[FAIL] Timed out waiting for ${label}" >&2
+      return 1
+    fi
+    sleep 5
+  done
+  echo "[OK] ${label}"
+}
+
+if ! wait_for_compose_exec backend "backend process" node -e "process.exit(0)"; then
+  "${COMPOSE[@]}" ps >&2
+  "${COMPOSE[@]}" logs --tail=160 backend >&2
+  exit 1
+fi
+if ! wait_for_compose_exec subagent-worker "subagent-worker dedicated healthcheck" node dist/agent-gateway/subagent-worker-healthcheck.js; then
+  echo "[FAIL] subagent-worker dedicated healthcheck failed after startup" >&2
+  "${COMPOSE[@]}" ps >&2
+  "${COMPOSE[@]}" logs --tail=160 subagent-worker >&2
+  exit 1
+fi
+
 echo "[post] Show service status"
 "${COMPOSE[@]}" ps
 

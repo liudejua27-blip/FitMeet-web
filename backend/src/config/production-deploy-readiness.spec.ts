@@ -46,6 +46,12 @@ describe('production deploy readiness', () => {
     );
     expect(deployScript).toContain('pnpm uploads:check:prod');
     expect(deployScript).toContain('pnpm db:check-critical-tables:prod');
+    expect(deployScript).toContain(
+      'subagent-worker dedicated healthcheck failed after startup',
+    );
+    expect(deployScript).toContain(
+      'node dist/agent-gateway/subagent-worker-healthcheck.js',
+    );
     expect(deployScript).not.toContain(' up -d --build');
     expect(deployScript).toContain('./scripts/verify-production.sh');
 
@@ -91,6 +97,9 @@ describe('production deploy readiness', () => {
     expect(ecsTemplate).toContain(
       'PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api',
     );
+    expect(ecsTemplate).toContain('FITMEET_PROCESS_ROLE=api');
+    expect(ecsTemplate).toContain('ENABLE_SCHEDULER=false');
+    expect(ecsTemplate).toContain('FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS=10000');
     expect(ecsTemplate).toContain('VITE_API_BASE_URL=/api');
     expect(ecsTemplate).toContain(
       'JWT_SECRET=CHANGE_ME_RANDOM_32_BYTE_HEX_SECRET',
@@ -188,6 +197,11 @@ describe('production deploy readiness', () => {
     expect(ecsPreflight).toContain('PUBLIC_API_BASE_URL targets');
     expect(ecsPreflight).toContain('check_deepseek_models');
     expect(ecsPreflight).toContain('check_worker_env');
+    expect(ecsPreflight).toContain('nginx does not depend on subagent-worker');
+    expect(ecsPreflight).toContain('backend process role is API-only');
+    expect(ecsPreflight).toContain(
+      'subagent-worker process role owns scheduler jobs',
+    );
     expect(ecsPreflight).toContain('nginx/ssl/fullchain.pem');
     expect(ecsPreflight).toContain('check_port 443');
     expect(ecsInstallRelease).toContain('Checksum verified');
@@ -349,6 +363,9 @@ describe('production deploy readiness', () => {
     const domainReadiness = readRepoFile('scripts/domain-readiness-check.sh');
 
     expect(verifier).toContain('/openapi/fitmeet-core.json');
+    expect(verifier).toContain('CHECK_LOCAL_COMPOSE_HEALTH');
+    expect(verifier).toContain('--check-local-compose-health');
+    expect(verifier).toContain('subagent-worker-healthcheck.js');
     expect(verifier).toContain('/ready');
     for (const webPath of [
       '/public/social-intents',

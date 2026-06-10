@@ -6,6 +6,9 @@ API_BASE_URL="${API_BASE_URL:-https://www.ourfitmeet.cn/api}"
 AGENT_TOKEN="${AGENT_TOKEN:-}"
 RUN_APP_SMOKE="${RUN_APP_SMOKE:-false}"
 RUN_PUBLIC_INTENT_WRITE="${RUN_PUBLIC_INTENT_WRITE:-false}"
+CHECK_LOCAL_COMPOSE_HEALTH="${CHECK_LOCAL_COMPOSE_HEALTH:-false}"
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
+ENV_FILE="${ENV_FILE:-.env.production}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-20}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -28,6 +31,7 @@ Environment:
   AGENT_TOKEN                      Optional X-Agent-Token for authorized agent manifest check.
   RUN_APP_SMOKE=true               Run backend smoke:app-core against this remote API.
   RUN_PUBLIC_INTENT_WRITE=true     Exercise public social intent write/read-back.
+  CHECK_LOCAL_COMPOSE_HEALTH=true  Also verify local ECS docker compose backend and worker health.
   APP_SMOKE_*                      Optional backend smoke credentials/options.
 EOF
 }
@@ -51,6 +55,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --run-public-intent-write)
       RUN_PUBLIC_INTENT_WRITE=true
+      ;;
+    --check-local-compose-health)
+      CHECK_LOCAL_COMPOSE_HEALTH=true
       ;;
     -h|--help)
       usage
@@ -265,6 +272,21 @@ if [[ "${RUN_APP_SMOKE}" == "true" ]]; then
     pnpm --dir "${ROOT_DIR}/backend" smoke:app-core
 else
   skip "Remote App smoke. Pass --run-app-smoke after setting APP_SMOKE_* credentials/options."
+fi
+
+if [[ "${CHECK_LOCAL_COMPOSE_HEALTH}" == "true" ]]; then
+  if [[ ! -f "${ROOT_DIR}/${COMPOSE_FILE}" || ! -f "${ROOT_DIR}/${ENV_FILE}" ]]; then
+    fail "Cannot check local compose health without ${COMPOSE_FILE} and ${ENV_FILE}"
+  fi
+  if ! command -v docker >/dev/null 2>&1; then
+    fail "docker is required for --check-local-compose-health"
+  fi
+  (
+    cd "${ROOT_DIR}"
+    docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" exec -T backend node -e "process.exit(0)" >/dev/null
+    docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" exec -T subagent-worker node dist/agent-gateway/subagent-worker-healthcheck.js >/dev/null
+  )
+  ok "Local compose backend and subagent-worker healthchecks passed"
 fi
 
 printf '\nProduction verification completed successfully for %s\n' "${BASE_URL}"

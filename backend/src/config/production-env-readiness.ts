@@ -401,6 +401,7 @@ function checkSubagentWorker(
   requirePositiveInt(env, 'FITMEET_SUBAGENT_WORKER_CONCURRENCY', error);
   requirePositiveInt(env, 'FITMEET_SUBAGENT_WORKER_POLL_MS', error);
   requirePositiveInt(env, 'FITMEET_SUBAGENT_WORKER_TIMEOUT_MS', error);
+  requirePositiveInt(env, 'FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS', error);
   requirePositiveInt(env, 'FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS', error);
 
   const queues = `${env.FITMEET_SUBAGENT_WORKER_QUEUE ?? ''}`

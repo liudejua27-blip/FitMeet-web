@@ -41,6 +41,7 @@ const validEnv = {
   FITMEET_SUBAGENT_WORKER_CONCURRENCY: '2',
   FITMEET_SUBAGENT_WORKER_POLL_MS: '1000',
   FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: '15000',
+  FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS: '10000',
   FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS: '90000',
   AGENT_OBSERVABILITY_ALERTS_ENABLED: 'false',
   AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL: '',
@@ -297,6 +298,7 @@ describe('production-env-readiness', () => {
       FITMEET_SUBAGENT_WORKER_CONCURRENCY: '',
       FITMEET_SUBAGENT_WORKER_POLL_MS: '',
       FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: '',
+      FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS: '',
       FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS: '',
     });
     const residentWorker = buildProductionEnvReport({
@@ -305,6 +307,7 @@ describe('production-env-readiness', () => {
       FITMEET_SUBAGENT_WORKER_CONCURRENCY: '0',
       FITMEET_SUBAGENT_WORKER_POLL_MS: '1000.5',
       FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: '-1',
+      FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS: '0',
       FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS: '0',
     });
 
@@ -317,6 +320,9 @@ describe('production-env-readiness', () => {
         expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_POLL_MS' }),
         expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_TIMEOUT_MS' }),
         expect.objectContaining({
+          key: 'FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS',
+        }),
+        expect.objectContaining({
           key: 'FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS',
         }),
       ]),
@@ -327,6 +333,9 @@ describe('production-env-readiness', () => {
         expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_CONCURRENCY' }),
         expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_POLL_MS' }),
         expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_TIMEOUT_MS' }),
+        expect.objectContaining({
+          key: 'FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS',
+        }),
         expect.objectContaining({
           key: 'FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS',
         }),

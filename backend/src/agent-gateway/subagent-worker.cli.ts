@@ -22,6 +22,10 @@ async function main() {
     process.env.FITMEET_SUBAGENT_WORKER_TIMEOUT_MS,
     15000,
   );
+  const heartbeatMs = positiveInt(
+    process.env.FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS,
+    Math.min(Math.max(Math.floor(pollMs * 2), 5000), 30000),
+  );
   const concurrency = positiveInt(
     process.env.FITMEET_SUBAGENT_WORKER_CONCURRENCY,
     1,
@@ -34,18 +38,20 @@ async function main() {
     .map((item) => item.trim())
     .filter(Boolean);
 
-  const heartbeat = async () => {
+  const heartbeat = async (status: 'idle' | 'running' = 'idle') => {
     await queue.reclaimTimedOutJobs();
     await Promise.all(
       queueNames.map((queueName) =>
         queue.heartbeat({
           workerId,
           queueName,
-          status: 'idle',
+          status,
           activeJobId: null,
           metadata: {
             mode: process.env.FITMEET_SUBAGENT_WORKER_MODE ?? 'db_queue',
             processId: process.pid,
+            concurrency,
+            heartbeatMs,
           },
         }),
       ),
@@ -86,10 +92,14 @@ async function main() {
   const timer = setInterval(() => {
     void tick();
   }, pollMs);
+  const heartbeatTimer = setInterval(() => {
+    void heartbeat(active.size > 0 ? 'running' : 'idle');
+  }, heartbeatMs);
 
   const shutdown = async () => {
     stopping = true;
     clearInterval(timer);
+    clearInterval(heartbeatTimer);
     await Promise.allSettled(Array.from(active));
     await app.close();
     process.exit(0);

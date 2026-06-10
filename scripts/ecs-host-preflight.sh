@@ -204,6 +204,8 @@ check_worker_env() {
   check_positive_integer_env FITMEET_SUBAGENT_WORKER_CONCURRENCY
   check_positive_integer_env FITMEET_SUBAGENT_WORKER_POLL_MS
   check_positive_integer_env FITMEET_SUBAGENT_WORKER_TIMEOUT_MS
+  check_positive_integer_env FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS
+  check_positive_integer_env FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS
 }
 
 check_ssl() {
@@ -251,6 +253,23 @@ check_compose_config() {
       pass "subagent-worker uses dedicated healthcheck"
     else
       fail "subagent-worker healthcheck must use dist/agent-gateway/subagent-worker-healthcheck.js"
+    fi
+    if grep -A40 '^  nginx:' <<<"$compose_rendered" | grep -q 'subagent-worker'; then
+      fail "nginx must not depend on subagent-worker health."
+    else
+      pass "nginx does not depend on subagent-worker"
+    fi
+    if grep -A80 '^  backend:' <<<"$compose_rendered" | grep -q 'FITMEET_PROCESS_ROLE: api' &&
+      grep -A80 '^  backend:' <<<"$compose_rendered" | grep -q 'ENABLE_SCHEDULER: "false"'; then
+      pass "backend process role is API-only"
+    else
+      fail "backend must run as FITMEET_PROCESS_ROLE=api with ENABLE_SCHEDULER=false"
+    fi
+    if grep -A100 '^  subagent-worker:' <<<"$compose_rendered" | grep -q 'FITMEET_PROCESS_ROLE: worker' &&
+      grep -A100 '^  subagent-worker:' <<<"$compose_rendered" | grep -q 'ENABLE_SCHEDULER: "true"'; then
+      pass "subagent-worker process role owns scheduler jobs"
+    else
+      fail "subagent-worker must run as FITMEET_PROCESS_ROLE=worker with ENABLE_SCHEDULER=true"
     fi
     if grep -q 'user: "0:0"' <<<"$compose_rendered" || grep -q "user: 0:0" <<<"$compose_rendered"; then
       fail "backend/subagent-worker must not run as root user 0:0"
