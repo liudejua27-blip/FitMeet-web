@@ -105,6 +105,32 @@ async function main(): Promise<void> {
   });
   assertHealthyStream(userRun, { requireRealLlm: expectRealLlmStream });
 
+  const abortedAfterDelta = await runStreamProbe({
+    label: 'messages/stream client abort after llm delta',
+    path: '/social-agent/chat/messages/stream',
+    body: {
+      message:
+        '请分六段详细讲讲如何自然认识跑步搭子，重点说开场、节奏、边界和公共场所。',
+    },
+    abortAfterDeltaCount: 1,
+  });
+  if (
+    abortedAfterDelta.abortedByClient &&
+    abortedAfterDelta.llmDeltaCount > 0 &&
+    abortedAfterDelta.doneCount === 0 &&
+    abortedAfterDelta.resultCount === 0
+  ) {
+    recordPass(
+      'client abort after llm delta',
+      `aborted after llmDelta=${abortedAfterDelta.llmDeltaCount}, totalEvents=${abortedAfterDelta.events.length}`,
+    );
+  } else {
+    recordFail(
+      'client abort after llm delta',
+      `aborted=${abortedAfterDelta.abortedByClient}, llm=${abortedAfterDelta.llmDeltaCount}, done=${abortedAfterDelta.doneCount}, result=${abortedAfterDelta.resultCount}`,
+    );
+  }
+
   const aborted = await runStreamProbe({
     label: 'messages/stream client abort',
     path: '/social-agent/chat/messages/stream',
@@ -125,6 +151,8 @@ async function main(): Promise<void> {
       `aborted=${aborted.abortedByClient}, eventCount=${aborted.events.length}, deltaCount=${aborted.deltaCount}`,
     );
   }
+
+  await sleep(300);
 
   const reconnect = await runStreamProbe({
     label: 'messages/stream reconnect after abort',
@@ -161,6 +189,7 @@ async function runStreamProbe(input: {
       headers: {
         authorization: `Bearer ${userJwt}`,
         'content-type': 'application/json',
+        connection: 'close',
       },
       body: JSON.stringify(input.body),
       signal: controller.signal,
@@ -193,6 +222,23 @@ async function runStreamProbe(input: {
           await reader.cancel().catch(() => undefined);
           return summarizeProbe(input.label, input.path, status, events, true);
         }
+        if (
+          input.abortAfterDeltaCount &&
+          deltaCount >= input.abortAfterDeltaCount
+        ) {
+          abortedByClient = true;
+          controller.abort();
+          await reader.cancel().catch(() => undefined);
+          return summarizeProbe(input.label, input.path, status, events, true);
+        }
+      }
+    }
+    if (buffer.trim()) {
+      const parsed = drainSseBuffer(`${buffer}\n\n`, startedAt);
+      buffer = parsed.remaining;
+      for (const event of parsed.events) {
+        events.push(event);
+        if (event.event === 'assistant_delta') deltaCount++;
         if (
           input.abortAfterDeltaCount &&
           deltaCount >= input.abortAfterDeltaCount
@@ -364,6 +410,10 @@ function recordPass(label: string, detail: string): void {
 function recordFail(label: string, detail: string): void {
   fail++;
   console.error(`[FAIL] ${label}: ${detail}`);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isAbortError(error: unknown): boolean {

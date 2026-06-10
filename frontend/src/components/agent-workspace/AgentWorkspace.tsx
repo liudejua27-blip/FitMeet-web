@@ -123,6 +123,13 @@ type AgentRecoveryState = {
   prompt: string;
   retryable: boolean;
 };
+type AgentThreadSnapshot = {
+  activeTaskId: number | null;
+  messages: AgentThreadMessage[];
+  userResult: UserFacingAgentResponse | null;
+  mode: SocialAgentPermissionMode;
+  savedAt: number;
+};
 type AgentSidebarSectionId =
   | 'new'
   | 'recent'
@@ -133,6 +140,8 @@ type AgentSidebarSectionId =
   | 'pet';
 
 const AGENT_PET_STORAGE_KEY = 'fitmeet-agent-pet-enabled';
+const AGENT_THREAD_STORAGE_KEY = 'fitmeet-agent-thread';
+const AGENT_THREAD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const AGENT_BRAND_ICON_SRC = '/favicon-192.png';
 
 const technicalPublicTextPattern =
@@ -216,6 +225,83 @@ function readStoredPetEnabled() {
   return window.localStorage.getItem(AGENT_PET_STORAGE_KEY) !== 'false';
 }
 
+function agentThreadStorageKey(userId?: number | string | null) {
+  return `${AGENT_THREAD_STORAGE_KEY}:${userId ?? 'current'}`;
+}
+
+function readStoredAgentThread(userId?: number | string | null): AgentThreadSnapshot | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(agentThreadStorageKey(userId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<AgentThreadSnapshot>;
+    if (!Array.isArray(parsed.messages) || typeof parsed.savedAt !== 'number') return null;
+    if (Date.now() - parsed.savedAt > AGENT_THREAD_MAX_AGE_MS) return null;
+    return {
+      activeTaskId: numberFromUnknown(parsed.activeTaskId),
+      messages: parsed.messages.filter(isAgentThreadMessage),
+      userResult: isUserFacingAgentResponse(parsed.userResult) ? parsed.userResult : null,
+      mode: isPermissionMode(parsed.mode) ? parsed.mode : 'limited_auto',
+      savedAt: parsed.savedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredAgentThread(
+  userId: number | string | null | undefined,
+  snapshot: Omit<AgentThreadSnapshot, 'savedAt'>,
+) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(
+      agentThreadStorageKey(userId),
+      JSON.stringify({ ...snapshot, savedAt: Date.now() }),
+    );
+  } catch {
+    // Local recovery is a best-effort fallback; server restore remains the source of truth.
+  }
+}
+
+function clearStoredAgentThread(userId?: number | string | null) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(agentThreadStorageKey(userId));
+}
+
+function isAgentThreadMessage(value: unknown): value is AgentThreadMessage {
+  if (!value || typeof value !== 'object') return false;
+  const message = value as Partial<AgentThreadMessage>;
+  return (
+    typeof message.id === 'string' &&
+    (message.role === 'user' || message.role === 'assistant') &&
+    typeof message.content === 'string'
+  );
+}
+
+function isUserFacingAgentResponse(value: unknown): value is UserFacingAgentResponse {
+  if (!value || typeof value !== 'object') return false;
+  const result = value as Partial<UserFacingAgentResponse>;
+  return (
+    typeof result.assistantMessage === 'string' &&
+    typeof result.lightStatus === 'string' &&
+    Array.isArray(result.cards) &&
+    Boolean(result.safeStatus) &&
+    Array.isArray(result.pendingConfirmations)
+  );
+}
+
+function isPermissionMode(value: unknown): value is SocialAgentPermissionMode {
+  return (
+    value === 'assist' ||
+    value === 'confirm' ||
+    value === 'manual_confirm' ||
+    value === 'limited_auto' ||
+    value === 'open' ||
+    value === 'lab'
+  );
+}
+
 function shouldShowAgentPet({
   petEnabled,
   guideState,
@@ -253,7 +339,7 @@ function shouldShowAgentPet({
 export function AgentWorkspace({ view }: { view: AgentView }) {
   const params = useParams();
   const navigate = useNavigate();
-  const { isLoggedIn, openLogin } = useAuthStore();
+  const { isLoggedIn, openLogin, user } = useAuthStore();
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<AgentThreadMessage[]>([]);
   const [steps, setSteps] = useState<Step[]>(baseSteps);
@@ -288,6 +374,7 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
   const agentFlow = useAgentFlow(agentAdapter);
   const completeAgentFlowResponse = agentFlow.completeResponse;
   const routeTaskId = numberFromUnknown(params.taskId);
+  const currentUserId = user?.id ?? null;
 
   useEffect(() => {
     document.title = 'FitMeet Agent';
@@ -296,6 +383,38 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
   useEffect(() => {
     window.localStorage.setItem(AGENT_PET_STORAGE_KEY, String(petEnabled));
   }, [petEnabled]);
+
+  useEffect(() => {
+    if (!isRealAgent || !isLoggedIn) return;
+    const stored = readStoredAgentThread(currentUserId);
+    if (!stored || (stored.messages.length === 0 && !stored.userResult)) return;
+    setActiveTaskId((current) => current ?? stored.activeTaskId);
+    setMode(stored.mode);
+    setUserResult((current) => current ?? stored.userResult);
+    setMessages((current) => (current.length > 0 ? current : stored.messages));
+    if (stored.userResult) {
+      completeAgentFlowResponse(stored.userResult);
+    }
+    if (shellView !== 'chat') navigate('/agent/chat', { replace: true });
+  }, [
+    completeAgentFlowResponse,
+    currentUserId,
+    isLoggedIn,
+    isRealAgent,
+    navigate,
+    shellView,
+  ]);
+
+  useEffect(() => {
+    if (!isRealAgent || !isLoggedIn) return;
+    if (messages.length === 0 && !userResult && !activeTaskId) return;
+    writeStoredAgentThread(currentUserId, {
+      activeTaskId,
+      messages,
+      userResult,
+      mode,
+    });
+  }, [activeTaskId, currentUserId, isLoggedIn, isRealAgent, messages, mode, userResult]);
 
   useEffect(() => {
     if (!isLoggedIn) return undefined;
@@ -736,6 +855,7 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
       onPetEnabledChange={setPetEnabled}
       onNewConversation={() => {
         abortRef.current?.abort();
+        clearStoredAgentThread(currentUserId);
         skipNextRestoreRef.current = true;
         setInput('');
         setMessages([]);

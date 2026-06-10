@@ -125,6 +125,44 @@ describe('SocialAgentRunRecommendationService', () => {
     const realtime = {
       emitAgentEvent: jest.fn(),
     };
+    const agentLoop = {
+      execute: jest.fn(async (input) => {
+        const observations: unknown[] = [];
+        for (const tool of input.plan.tools) {
+          observations.push(
+            await input.runner({
+              agent: tool.agent,
+              toolName: tool.toolName,
+              input: tool.input ?? {},
+              attempt: 0,
+            }),
+          );
+          await input.emit?.({
+            step: {
+              agent: tool.agent,
+              phase: 'tool',
+              toolName: tool.toolName,
+              status: 'observed',
+            },
+          });
+        }
+        return {
+          loop: {
+            runId: 'loop:recommendation',
+            taskId: input.taskId,
+            goal: input.goal,
+            status: 'completed',
+            toolBudget: { usedToolCalls: input.plan.tools.length },
+            steps: input.plan.tools.map((tool) => ({
+              agent: tool.agent,
+              toolName: tool.toolName,
+              status: 'observed',
+            })),
+            finalObservation: observations.at(-1) ?? null,
+          },
+        };
+      }),
+    };
     const recordRuntimeStep = jest.fn();
     const recordRuntimeTool = jest.fn();
     const streamEvents: Array<Record<string, unknown>> = [];
@@ -137,6 +175,7 @@ describe('SocialAgentRunRecommendationService', () => {
       taskLifecycle as never,
       routeContext as never,
       realtime as never,
+      agentLoop as never,
     );
 
     const result = await service.run({
@@ -154,6 +193,26 @@ describe('SocialAgentRunRecommendationService', () => {
     });
 
     expect(planner.planExistingTask).toHaveBeenCalledWith(task);
+    expect(agentLoop.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plan: expect.objectContaining({
+          tools: expect.arrayContaining([
+            expect.objectContaining({
+              toolName: 'recommendation_read_profile_and_plan',
+            }),
+            expect.objectContaining({
+              toolName: 'recommendation_create_social_intent',
+            }),
+            expect.objectContaining({
+              toolName: 'recommendation_search_candidates',
+            }),
+            expect.objectContaining({
+              toolName: 'recommendation_final_answer',
+            }),
+          ]),
+        }),
+      }),
+    );
     expect(draftSearch.generateDraftWithTool).toHaveBeenCalledWith(
       task,
       '今晚青岛轻松跑步',

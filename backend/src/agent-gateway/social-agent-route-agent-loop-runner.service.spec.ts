@@ -53,6 +53,41 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
     };
   }
 
+  function makeAgentLoop(options: { runTools?: boolean } = {}) {
+    const runTools = options.runTools ?? true;
+    return {
+      execute: jest.fn(async (input) => {
+        const observations: unknown[] = [];
+        if (runTools) {
+          for (const tool of input.plan.tools) {
+            observations.push(
+              await input.runner({
+                agent: tool.agent,
+                toolName: tool.toolName,
+                input: tool.input ?? {},
+                attempt: 0,
+              }),
+            );
+          }
+        }
+        return {
+          loop: {
+            runId: 'loop:route-turn',
+            taskId: input.taskId,
+            goal: input.goal,
+            status: 'completed',
+            steps: input.plan.tools.map((tool) => ({
+              agent: tool.agent,
+              toolName: tool.toolName,
+              status: 'observed',
+            })),
+            finalObservation: observations.at(-1) ?? null,
+          },
+        };
+      }),
+    };
+  }
+
   function makeService(overrides: Record<string, unknown> = {}) {
     const task = { id: 101, ownerUserId: 7, result: {} };
     const taskLifecycle = {
@@ -103,6 +138,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
       }),
     };
     const subagentWorker = makeWorker();
+    const agentLoop = makeAgentLoop();
     const deps = {
       task,
       taskLifecycle,
@@ -112,6 +148,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
       searchTurns,
       actionTurns,
       subagentWorker,
+      agentLoop,
       ...overrides,
     };
     const service = new SocialAgentRouteAgentLoopRunnerService(
@@ -122,9 +159,50 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
       deps.searchTurns as never,
       deps.actionTurns as never,
       deps.subagentWorker as never,
+      deps.agentLoop as never,
     );
     return { service, deps };
   }
+
+  it('keeps every route/search/action/profile branch behind AgentLoopService.execute', async () => {
+    const { service, deps } = makeService({
+      agentLoop: makeAgentLoop({ runTools: false }),
+    });
+
+    await service.run({
+      ownerUserId: 7,
+      task: deps.task as never,
+      state: createSocialAgentRouteTurnState('我来处理。'),
+      message: '今晚找跑步搭子',
+      decision: {
+        task: deps.task,
+        route: makeRoute({ intent: 'social_search' }),
+        profile: null,
+        longTermSnapshot: null,
+        brainToolResults: [],
+      } as never,
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask: jest.fn(),
+    });
+
+    expect(deps.agentLoop.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plan: expect.objectContaining({
+          tools: expect.arrayContaining([
+            expect.objectContaining({ toolName: 'route_conversation_turn' }),
+            expect.objectContaining({ toolName: 'route_profile_turn' }),
+            expect.objectContaining({ toolName: 'route_search_turn' }),
+            expect.objectContaining({ toolName: 'route_action_turn' }),
+          ]),
+        }),
+      }),
+    );
+    expect(deps.conversationTurns.handle).not.toHaveBeenCalled();
+    expect(deps.profileTurns.handle).not.toHaveBeenCalled();
+    expect(deps.searchTurns.handle).not.toHaveBeenCalled();
+    expect(deps.actionTurns.handle).not.toHaveBeenCalled();
+    expect(deps.subagentWorker.run).not.toHaveBeenCalled();
+  });
 
   it('executes Social Match search through the subagent worker by default', async () => {
     const { service, deps } = makeService();

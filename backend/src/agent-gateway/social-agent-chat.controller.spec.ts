@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import { EventEmitter } from 'events';
 import { AgentCardAssemblerService } from './response-quality/agent-card-assembler.service';
 import { LightStatusMapperService } from './response-quality/light-status-mapper.service';
 import { UserFacingResponseSanitizerService } from './response-quality/user-facing-response-sanitizer.service';
@@ -297,6 +298,86 @@ describe('SocialAgentChatController user-facing stream', () => {
       expect.any(Function),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it('aborts the downstream model/run signal when the SSE client disconnects', async () => {
+    let downstreamAborted = false;
+    const writes: string[] = [];
+    const reqEvents = new EventEmitter();
+    const resEvents = new EventEmitter();
+    const chat = {
+      runStream: jest.fn(async (_userId, _body, emit, options) => {
+        downstreamAborted = options.signal.aborted;
+        await emit({ type: 'task', taskId: 101 });
+        return new Promise<void>((resolve) => {
+          options.signal.addEventListener(
+            'abort',
+            () => {
+              downstreamAborted = options.signal.aborted;
+              resolve();
+            },
+            {
+              once: true,
+            },
+          );
+        });
+      }),
+    };
+    const observability = {
+      recordSse: jest.fn(),
+    };
+    const controller = new SocialAgentChatController(
+      chat as unknown as SocialAgentChatService,
+      {} as unknown as SocialAgentCandidateCommandService,
+      new UserFacingResponseSanitizerService(
+        new LightStatusMapperService(),
+        new AgentCardAssemblerService(),
+      ),
+      undefined,
+      observability as never,
+    );
+    let writableEnded = false;
+    const response = {
+      status: jest.fn(),
+      setHeader: jest.fn(),
+      flushHeaders: jest.fn(),
+      get writableEnded() {
+        return writableEnded;
+      },
+      write: jest.fn((chunk: string) => {
+        writes.push(chunk);
+      }),
+      end: jest.fn(() => {
+        writableEnded = true;
+      }),
+      on: resEvents.on.bind(resEvents),
+    } as unknown as Response;
+    const request = {
+      user: { id: 7 },
+      on: reqEvents.on.bind(reqEvents),
+    } as Parameters<SocialAgentChatController['streamUserFacingRun']>[0];
+
+    const stream = controller.streamUserFacingRun(
+      request,
+      { goal: '请详细说明 FitMeet 如何帮我认识跑步搭子' },
+      response,
+    );
+    await Promise.resolve();
+
+    expect(downstreamAborted).toBe(false);
+    resEvents.emit('close');
+    await stream;
+
+    expect(downstreamAborted).toBe(true);
+    expect(observability.recordSse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        streamName: 'user_run_stream',
+        status: 'interrupted',
+        failureReason: 'client_disconnected',
+      }),
+    );
+    expect(writes.join('')).toContain('"type":"status"');
+    expect(response.end).toHaveBeenCalled();
   });
 });
 

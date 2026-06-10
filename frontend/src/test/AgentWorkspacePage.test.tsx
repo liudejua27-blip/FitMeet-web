@@ -48,6 +48,7 @@ describe('AgentWorkspacePage', () => {
 
   afterEach(() => {
     cleanup();
+    window.localStorage.clear();
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
@@ -300,6 +301,80 @@ describe('AgentWorkspacePage', () => {
     expect(streamSpy.mock.calls[0]?.[0]).toMatchObject({
       goal: '继续帮我找更轻松的咖啡聊天对象',
       taskId: 42,
+    });
+  });
+
+  it('falls back to the local thread snapshot after a reload and keeps follow-up context', async () => {
+    useRealAgentAdapter();
+    useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
+    vi.spyOn(lifeGraphApi, 'getMe').mockResolvedValue(mockLifeGraph());
+    vi.spyOn(agentInboxApi, 'events').mockResolvedValue({ events: [] });
+    vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue({
+      hasSession: true,
+      activeTaskId: 77,
+      task: { id: 77, permissionMode: 'limited_auto', goal: '上一次想缓解线下见面紧张' },
+      messages: [{ role: 'user', content: '上一次想缓解线下见面紧张' }],
+      result: null,
+    });
+    window.localStorage.setItem(
+      'fitmeet-agent-thread:current',
+      JSON.stringify({
+        activeTaskId: 77,
+        mode: 'limited_auto',
+        savedAt: Date.now(),
+        userResult: {
+          ...mockCandidateResponse(),
+          assistantMessage: '到达现场前，先慢慢呼吸，把注意力放在脚下和周围环境。',
+          cards: [],
+        },
+        messages: [
+          {
+            id: 'stored-user',
+            role: 'user',
+            content: '我第一次线下见面有点紧张',
+          },
+          {
+            id: 'stored-assistant',
+            role: 'assistant',
+            content: '到达现场前，先慢慢呼吸，把注意力放在脚下和周围环境。',
+            status: 'done',
+          },
+        ],
+      }),
+    );
+    const streamSpy = vi
+      .spyOn(socialAgentApi, 'runUserFacingStream')
+      .mockImplementation(async (_data, onEvent) => {
+        const streamed = {
+          ...mockCandidateResponse(),
+          assistantMessage: '可以，接着刚才的话题，你只需要提前想好一句简单开场。',
+          cards: [],
+        };
+        onEvent({ type: 'assistant_delta', delta: streamed.assistantMessage, source: 'llm' });
+        onEvent({ type: 'assistant_done', source: 'llm' });
+        onEvent({ type: 'result', result: streamed });
+        return streamed;
+      });
+
+    render(
+      <MemoryRouter initialEntries={['/agent']}>
+        <AgentWorkspacePage view="home" />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText('到达现场前，先慢慢呼吸，把注意力放在脚下和周围环境。'),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: '接着刚才的话题，给我一句开场白' },
+    });
+    fireEvent.submit(screen.getByRole('textbox').closest('form') as HTMLFormElement);
+
+    await waitFor(() => expect(streamSpy).toHaveBeenCalled());
+    expect(streamSpy.mock.calls[0]?.[0]).toMatchObject({
+      goal: '接着刚才的话题，给我一句开场白',
+      taskId: 77,
     });
   });
 
