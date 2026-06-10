@@ -7,6 +7,7 @@ import {
   MessagesService,
   RecentAgentConversationSignal,
 } from '../messages/messages.service';
+import { shouldRunBackgroundJobs } from '../common/process-role.util';
 import {
   UserSocialRequest,
   UserSocialRequestStatus,
@@ -103,6 +104,7 @@ export class SocialAgentAutopilotService {
 
   @Cron('*/10 * * * * *')
   async onCron(): Promise<void> {
+    if (!shouldRunBackgroundJobs()) return;
     if (!isEnabled()) return;
     const intervalMs = configuredIntervalMs();
     if (

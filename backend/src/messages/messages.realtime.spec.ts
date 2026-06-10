@@ -3,6 +3,54 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { MessagesService } from './messages.service';
 
 describe('MessagesService realtime events', () => {
+  it('drops stale agentConnectionId before writing activity logs', async () => {
+    const connectionRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+    };
+    const activityLogRepo = {
+      create: jest.fn((input) => input),
+      save: jest.fn().mockResolvedValue({}),
+    };
+    const actionLogRepo = {
+      create: jest.fn((input) => input),
+      save: jest.fn().mockResolvedValue({}),
+    };
+    const service = new MessagesService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      connectionRepo as never,
+      activityLogRepo as never,
+      actionLogRepo as never,
+      {} as never,
+      {} as never,
+    );
+
+    await (
+      service as unknown as {
+        logAgentActivityEvent(input: {
+          agentConnectionId: number;
+          ownerUserId: number;
+          eventType: string;
+          status: string;
+        }): Promise<void>;
+      }
+    ).logAgentActivityEvent({
+      agentConnectionId: 999,
+      ownerUserId: 1,
+      eventType: 'agent.message.created',
+      status: 'sent',
+    });
+
+    expect(activityLogRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ agentConnectionId: null }),
+    );
+    expect(actionLogRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: null }),
+    );
+  });
+
   it('returns an explicit conversationId in conversation summaries for iOS', async () => {
     const conversationId = new Types.ObjectId();
     const exec = jest.fn().mockResolvedValue([

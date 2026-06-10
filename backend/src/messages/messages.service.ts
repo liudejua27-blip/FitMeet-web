@@ -1426,7 +1426,7 @@ export class MessagesService {
   }
 
   private async logAgentActivityEvent(input: {
-    agentConnectionId: number;
+    agentConnectionId: number | null;
     ownerUserId: number;
     eventType: string;
     conversationId?: string;
@@ -1436,9 +1436,13 @@ export class MessagesService {
   }) {
     if (!input.ownerUserId) return;
     try {
+      const agentConnectionId = await this.resolveActivityLogConnectionId(
+        input.agentConnectionId,
+        input.ownerUserId,
+      );
       await this.activityLogRepo.save(
         this.activityLogRepo.create({
-          agentConnectionId: input.agentConnectionId,
+          agentConnectionId,
           userId: input.ownerUserId,
           ownerUserId: input.ownerUserId,
           action: LoggedAction.AgentEvent,
@@ -1463,7 +1467,7 @@ export class MessagesService {
       );
       await this.actionLogRepo.save(
         this.actionLogRepo.create({
-          agentId: input.agentConnectionId,
+          agentId: agentConnectionId,
           ownerUserId: input.ownerUserId,
           actionType: AgentActionType.AgentEvent,
           actionStatus:
@@ -1491,6 +1495,27 @@ export class MessagesService {
         }`,
       );
     }
+  }
+
+  private async resolveActivityLogConnectionId(
+    agentConnectionId: number | null | undefined,
+    ownerUserId: number,
+  ): Promise<number | null> {
+    if (!agentConnectionId) return null;
+    const connection = await this.connectionRepo.findOne({
+      where: {
+        id: agentConnectionId,
+        userId: ownerUserId,
+      },
+      select: ['id'],
+    });
+    if (!connection) {
+      this.logger.log(
+        `Skipping stale agentConnectionId=${agentConnectionId} for ownerUserId=${ownerUserId} in agent activity log`,
+      );
+      return null;
+    }
+    return connection.id;
   }
 
   private logMessageSendFailure(

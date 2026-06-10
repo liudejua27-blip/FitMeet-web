@@ -39,10 +39,14 @@ describe('production deploy readiness', () => {
       'pnpm -C backend run check:prod-env -- "../$ENV_FILE"',
     );
     expect(deployScript.indexOf('check:prod-env')).toBeLessThan(
-      deployScript.indexOf(
-        'docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build',
-      ),
+      deployScript.indexOf('Start production dependencies'),
     );
+    expect(deployScript.indexOf('migration:run:prod')).toBeLessThan(
+      deployScript.indexOf('Start API, worker, and nginx after migrations'),
+    );
+    expect(deployScript).toContain('pnpm uploads:check:prod');
+    expect(deployScript).toContain('pnpm db:check-critical-tables:prod');
+    expect(deployScript).not.toContain(' up -d --build');
     expect(deployScript).toContain('./scripts/verify-production.sh');
 
     const releasePreflight = readRepoFile('scripts/release-preflight.sh');
@@ -276,9 +280,7 @@ describe('production deploy readiness', () => {
     expect(cloudRunbook).toContain('LiuChong27/FitMeetweb');
     expect(cloudRunbook).toContain('LiuChong27/FitMeet-Web');
     expect(cutoverChecklist).toContain('Vercel project `fit-meetweb`');
-    expect(cutoverChecklist).toContain(
-      '`www.ourfitmeet.cn` has no DNS answer',
-    );
+    expect(cutoverChecklist).toContain('`www.ourfitmeet.cn` has no DNS answer');
     expect(cutoverChecklist).toContain('./scripts/launch-status.sh');
     expect(cutoverChecklist).toContain('--print-required-records');
     expect(cutoverChecklist).toContain('Do not buy Spacemail');

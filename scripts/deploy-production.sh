@@ -5,7 +5,7 @@ APP_DIR="${APP_DIR:-/opt/fitmeet-new}"
 COMPOSE_FILE="docker-compose.prod.yml"
 ENV_FILE=".env.production"
 RUN_RELEASE_PREFLIGHT="${RUN_RELEASE_PREFLIGHT:-true}"
-RUN_MIGRATIONS="${RUN_MIGRATIONS:-true}"
+RUN_DB_MIGRATIONS="${RUN_DB_MIGRATIONS:-${RUN_MIGRATIONS:-true}}"
 PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://www.ourfitmeet.cn}"
 PUBLIC_API_BASE_URL="${PUBLIC_API_BASE_URL:-}"
 
@@ -75,22 +75,34 @@ else
   pnpm -C frontend build
 fi
 
-echo "[6/7] Build and restart production stack"
-docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build
+COMPOSE=(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
 
-if [ "$RUN_MIGRATIONS" = "true" ]; then
-  echo "[7/7] Run production migrations"
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec -T backend pnpm migration:run:prod
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec -T backend pnpm migration:status
+echo "[6/9] Start production dependencies"
+"${COMPOSE[@]}" up -d postgres redis mongo zookeeper kafka
+
+echo "[7/9] Build backend runtime images"
+"${COMPOSE[@]}" build backend subagent-worker
+
+echo "[8/9] Run production preflight inside backend image"
+"${COMPOSE[@]}" run --rm --no-deps backend pnpm uploads:check:prod
+
+if [ "$RUN_DB_MIGRATIONS" = "true" ]; then
+  echo "[9/9] Run production migrations before app startup"
+  "${COMPOSE[@]}" run --rm --no-deps backend pnpm migration:run:prod
+  "${COMPOSE[@]}" run --rm --no-deps backend pnpm db:check-critical-tables:prod
 else
-  echo "[7/7] Skip production migrations because RUN_MIGRATIONS=$RUN_MIGRATIONS"
+  echo "[9/9] Refusing to skip production table verification"
+  "${COMPOSE[@]}" run --rm --no-deps backend pnpm db:check-critical-tables:prod
 fi
 
+echo "[deploy] Start API, worker, and nginx after migrations"
+"${COMPOSE[@]}" up -d --no-build backend subagent-worker nginx
+
 echo "[post] Show service status"
-docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps
+"${COMPOSE[@]}" ps
 
 echo "[post] Check backend logs"
-docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" logs --tail=120 backend
+"${COMPOSE[@]}" logs --tail=120 backend
 
 echo "[DONE] Run production verification from your local machine:"
 echo "BASE_URL=$PUBLIC_BASE_URL API_BASE_URL=$PUBLIC_API_BASE_URL ./scripts/verify-production.sh"

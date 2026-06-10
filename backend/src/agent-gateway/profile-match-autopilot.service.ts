@@ -12,6 +12,7 @@ import {
 } from '../match/social-request-candidate.entity';
 import { MessagesService } from '../messages/messages.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { shouldRunBackgroundJobs } from '../common/process-role.util';
 import {
   UserSocialRequest,
   UserSocialRequestStatus,
@@ -82,6 +83,7 @@ export class ProfileMatchAutopilotService {
 
   @Cron('*/10 * * * * *')
   async onCron(): Promise<void> {
+    if (!shouldRunBackgroundJobs()) return;
     if (!isEnabled()) return;
     const intervalMs = configuredIntervalMs();
     if (

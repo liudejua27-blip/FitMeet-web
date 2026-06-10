@@ -11,25 +11,24 @@ import { UploadsService } from './uploads.service';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import * as fs from 'fs';
+import { ensureUploadBaseDir, ensureUploadTempDir } from './upload-paths';
 
 @Controller('uploads')
 export class UploadsController {
-  constructor(private readonly uploadsService: UploadsService) {
-    if (!fs.existsSync('./public/uploads/temp')) {
-      fs.mkdirSync('./public/uploads/temp', { recursive: true });
-    }
-    if (!fs.existsSync('./public/uploads')) {
-      fs.mkdirSync('./public/uploads', { recursive: true });
-    }
-  }
+  constructor(private readonly uploadsService: UploadsService) {}
 
   @Post('image')
   @UseGuards(JwtAuthGuard)
   @UseInterceptors(
     FileInterceptor('file', {
       storage: diskStorage({
-        destination: './public/uploads/temp', // Use a temp dir for raw uploads before processing
+        destination: (_req, _file, cb) => {
+          try {
+            cb(null, ensureUploadTempDir());
+          } catch (error) {
+            cb(error as Error, '');
+          }
+        },
         filename: (req, file, cb) => {
           const randomName = Array(32)
             .fill(null)
@@ -52,7 +51,13 @@ export class UploadsController {
   @UseInterceptors(
     FileInterceptor('file', {
       storage: diskStorage({
-        destination: './public/uploads', // Direct save for video (no processing for now)
+        destination: (_req, _file, cb) => {
+          try {
+            cb(null, ensureUploadBaseDir());
+          } catch (error) {
+            cb(error as Error, '');
+          }
+        },
         filename: (req, file, cb) => {
           const randomName = Array(32)
             .fill(null)

@@ -9,6 +9,7 @@ CHECKSUM_OUTPUT="${OUTPUT}.sha256"
 INSTALLER_OUTPUT="${OUTPUT_DIR}/fitmeet-ecs-install-release.sh"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fitmeet-ecs-deploy.XXXXXX")"
 STAGE_DIR="${TMP_DIR}/FitMeet-web"
+RUN_BACKEND_DOCKER_BUILD_CHECK="${RUN_BACKEND_DOCKER_BUILD_CHECK:-true}"
 
 # shellcheck source=scripts/lib/toolchain.sh
 source "${ROOT_DIR}/scripts/lib/toolchain.sh"
@@ -67,9 +68,21 @@ pnpm --dir "${ROOT_DIR}/backend" install --frozen-lockfile
 step "Build backend"
 pnpm --dir "${ROOT_DIR}/backend" build
 
+if [ "$RUN_BACKEND_DOCKER_BUILD_CHECK" = "true" ]; then
+  step "Build backend production Docker image"
+  require_cmd docker
+  docker build -f "${ROOT_DIR}/backend/Dockerfile.prod" "${ROOT_DIR}/backend" \
+    -t fitmeet-backend-release-check:local
+else
+  step "Skip backend production Docker image build"
+fi
+
 require_path "backend/dist/main.js"
+require_path "backend/dist/scripts/prepare-agent-smoke-seed.js"
+require_path "backend/dist/scripts/check-production-tables.js"
+require_path "backend/dist/agent-gateway/subagent-worker-healthcheck.js"
 require_path "backend/Dockerfile.prod"
-require_path "backend/scripts/prepare-app-smoke-users.ts"
+require_path "backend/src/scripts/prepare-agent-smoke-seed.ts"
 require_path "docker-compose.prod.yml"
 require_path "deploy/env.production.ecs.example"
 require_path "nginx/nginx.conf"
@@ -171,8 +184,16 @@ contains_entry '^FitMeet-web/backend/Dockerfile\.prod$' || {
   echo "[FAIL] Missing backend/Dockerfile.prod" >&2
   exit 1
 }
-contains_entry '^FitMeet-web/backend/scripts/prepare-app-smoke-users\.ts$' || {
-  echo "[FAIL] Missing backend/scripts/prepare-app-smoke-users.ts" >&2
+contains_entry '^FitMeet-web/backend/src/scripts/prepare-agent-smoke-seed\.ts$' || {
+  echo "[FAIL] Missing backend/src/scripts/prepare-agent-smoke-seed.ts" >&2
+  exit 1
+}
+contains_entry '^FitMeet-web/backend/dist/scripts/prepare-agent-smoke-seed\.js$' || {
+  echo "[FAIL] Missing backend/dist/scripts/prepare-agent-smoke-seed.js" >&2
+  exit 1
+}
+contains_entry '^FitMeet-web/backend/dist/agent-gateway/subagent-worker-healthcheck\.js$' || {
+  echo "[FAIL] Missing backend/dist/agent-gateway/subagent-worker-healthcheck.js" >&2
   exit 1
 }
 contains_entry '^FitMeet-web/docker-compose\.prod\.yml$' || {

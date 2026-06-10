@@ -106,6 +106,7 @@ export function buildProductionEnvReport(env: EnvMap): ProductionEnvReport {
   checkMongoUri(env, error);
   checkRedis(env, error);
   checkObjectStorage(env, error);
+  checkUploadTempDir(env, error);
   checkAgentModel(env, error);
   checkKafka(env, error);
   checkSubagentWorker(env, error, warning);
@@ -400,6 +401,7 @@ function checkSubagentWorker(
   requirePositiveInt(env, 'FITMEET_SUBAGENT_WORKER_CONCURRENCY', error);
   requirePositiveInt(env, 'FITMEET_SUBAGENT_WORKER_POLL_MS', error);
   requirePositiveInt(env, 'FITMEET_SUBAGENT_WORKER_TIMEOUT_MS', error);
+  requirePositiveInt(env, 'FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS', error);
 
   const queues = `${env.FITMEET_SUBAGENT_WORKER_QUEUE ?? ''}`
     .split(',')
@@ -409,6 +411,22 @@ function checkSubagentWorker(
     warning(
       'FITMEET_SUBAGENT_WORKER_QUEUE',
       'custom queue list should include Life Graph, Social Match, Meet Loop, and Math worker queues unless this is an intentional partial rollout.',
+    );
+  }
+}
+
+function checkUploadTempDir(
+  env: EnvMap,
+  error: (key: string, message: string) => void,
+): void {
+  requireConfigured(env, 'UPLOAD_TEMP_DIR', error);
+  if (
+    hasConfiguredValue(env.UPLOAD_TEMP_DIR) &&
+    !env.UPLOAD_TEMP_DIR.startsWith('/')
+  ) {
+    error(
+      'UPLOAD_TEMP_DIR',
+      'must be an absolute path; use /tmp/fitmeet/uploads/temp in ECS production.',
     );
   }
 }

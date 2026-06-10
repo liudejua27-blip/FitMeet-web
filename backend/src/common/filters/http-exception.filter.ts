@@ -61,7 +61,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         }),
         exception instanceof Error ? exception.stack : exception,
       );
-    } else {
+    } else if (!this.isExpectedVerifierAuthProbe(request, status)) {
       this.logger.warn(
         JSON.stringify({
           event: 'backend.request_failed',
@@ -188,5 +188,20 @@ export class HttpExceptionFilter implements ExceptionFilter {
   private requestUserId(request: Request): number | null {
     const user = (request as Request & { user?: { id?: number } }).user;
     return typeof user?.id === 'number' ? user.id : null;
+  }
+
+  private isExpectedVerifierAuthProbe(
+    request: Request,
+    status: number,
+  ): boolean {
+    if (status !== Number(HttpStatus.UNAUTHORIZED)) return false;
+    const userAgent = String(request.headers['user-agent'] ?? '');
+    if (!userAgent.includes('FitMeetProductionVerifier/1.0')) return false;
+    return [
+      '/api/auth/profile',
+      '/api/social-agent/chat/session',
+      '/api/messages/conversations',
+      '/api/agent/skills/manifest',
+    ].includes(this.safePath(request));
   }
 }

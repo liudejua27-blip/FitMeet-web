@@ -7,6 +7,7 @@ ENV_FILE="${ENV_FILE:-.env.production}"
 MIN_DISK_MB="${MIN_DISK_MB:-8192}"
 MIN_MEMORY_MB="${MIN_MEMORY_MB:-3072}"
 RUN_PROD_ENV_CHECK="${RUN_PROD_ENV_CHECK:-true}"
+RUN_BACKEND_DOCKER_BUILD_CHECK="${RUN_BACKEND_DOCKER_BUILD_CHECK:-false}"
 
 failures=0
 warnings=0
@@ -120,6 +121,42 @@ check_env_placeholders() {
   fi
 }
 
+env_value() {
+  local key="$1"
+  if [ ! -f "$ENV_FILE" ]; then
+    return
+  fi
+  awk -F= -v key="$key" '
+    $0 !~ /^[[:space:]]*#/ && $1 == key {
+      sub(/^[^=]*=/, "")
+      gsub(/^["'\'']|["'\'']$/, "")
+      print
+      exit
+    }
+  ' "$ENV_FILE"
+}
+
+check_domain_env() {
+  local base_url allowed_origins wechat_redirect alerts model upload_temp
+  base_url="$(env_value BASE_URL)"
+  allowed_origins="$(env_value ALLOWED_ORIGINS)"
+  wechat_redirect="$(env_value WECHAT_REDIRECT_URI)"
+  alerts="$(env_value AGENT_OBSERVABILITY_ALERTS_ENABLED)"
+  model="$(env_value DEEPSEEK_MODEL)"
+  upload_temp="$(env_value UPLOAD_TEMP_DIR)"
+
+  [ "$base_url" = "https://www.ourfitmeet.cn" ] && pass "BASE_URL targets www.ourfitmeet.cn" || fail "BASE_URL must be https://www.ourfitmeet.cn"
+  [[ "$allowed_origins" == *"https://www.ourfitmeet.cn"* && "$allowed_origins" == *"https://ourfitmeet.cn"* ]] && pass "ALLOWED_ORIGINS includes www and apex domains" || fail "ALLOWED_ORIGINS must include https://www.ourfitmeet.cn and https://ourfitmeet.cn"
+  [ "$wechat_redirect" = "https://www.ourfitmeet.cn/api/auth/wechat/callback" ] && pass "WECHAT_REDIRECT_URI targets production callback" || warn "WECHAT_REDIRECT_URI is not the production callback"
+  [ "${alerts:-false}" = "false" ] && pass "Agent alert delivery disabled for first launch" || warn "Agent alert delivery is enabled; verify webhook/token before launch."
+  if [ "$model" = "deepseek-chat" ] || [ "$model" = "deepseek-reasoner" ] || [ "$model" = "deepseek-v4" ]; then
+    fail "DEEPSEEK_MODEL must be an explicit V4 model id, not $model"
+  else
+    pass "DeepSeek model is not a legacy alias"
+  fi
+  [[ "$upload_temp" = /* ]] && pass "UPLOAD_TEMP_DIR is absolute: $upload_temp" || fail "UPLOAD_TEMP_DIR must be an absolute writable path."
+}
+
 check_ssl() {
   require_file "nginx/ssl/fullchain.pem"
   require_file "nginx/ssl/privkey.pem"
@@ -138,6 +175,13 @@ check_ssl() {
     if openssl x509 -in nginx/ssl/fullchain.pem -noout -subject -dates >/dev/null 2>&1; then
       pass "SSL certificate parses with openssl"
       openssl x509 -in nginx/ssl/fullchain.pem -noout -subject -dates
+      local san
+      san="$(openssl x509 -in nginx/ssl/fullchain.pem -noout -ext subjectAltName 2>/dev/null || true)"
+      if [[ "$san" == *"DNS:www.ourfitmeet.cn"* && "$san" == *"DNS:ourfitmeet.cn"* ]]; then
+        pass "SSL SAN covers www.ourfitmeet.cn and ourfitmeet.cn"
+      else
+        fail "SSL certificate SAN must include www.ourfitmeet.cn and ourfitmeet.cn."
+      fi
     else
       fail "nginx/ssl/fullchain.pem is not a valid X.509 certificate."
     fi
@@ -152,8 +196,36 @@ check_compose_config() {
   fi
   if docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config -q; then
     pass "Docker Compose config validates with $ENV_FILE"
+    local compose_rendered
+    compose_rendered="$(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config)"
+    if grep -q 'subagent-worker-healthcheck.js' <<<"$compose_rendered"; then
+      pass "subagent-worker uses dedicated healthcheck"
+    else
+      fail "subagent-worker healthcheck must use dist/agent-gateway/subagent-worker-healthcheck.js"
+    fi
+    if grep -q 'user: "0:0"' <<<"$compose_rendered" || grep -q "user: 0:0" <<<"$compose_rendered"; then
+      fail "backend/subagent-worker must not run as root user 0:0"
+    else
+      pass "Compose does not force root user 0:0"
+    fi
   else
     fail "Docker Compose config validation failed."
+  fi
+}
+
+check_backend_docker_build() {
+  if [ "$RUN_BACKEND_DOCKER_BUILD_CHECK" != "true" ]; then
+    warn "Skipping backend Dockerfile.prod build check because RUN_BACKEND_DOCKER_BUILD_CHECK=$RUN_BACKEND_DOCKER_BUILD_CHECK."
+    return
+  fi
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    fail "Cannot run backend Dockerfile.prod build check without a reachable Docker daemon."
+    return
+  fi
+  if docker build -f backend/Dockerfile.prod backend -t fitmeet-backend-prod-preflight:local >/dev/null; then
+    pass "backend/Dockerfile.prod builds with frozen lockfile"
+  else
+    fail "backend/Dockerfile.prod build failed."
   fi
 }
 
@@ -205,6 +277,7 @@ require_file "nginx/nginx.conf"
 require_file "scripts/deploy-production.sh"
 
 check_env_placeholders
+check_domain_env
 check_ssl
 check_disk
 check_memory
@@ -212,6 +285,7 @@ check_port 80
 check_port 443
 check_compose_config
 check_prod_env
+check_backend_docker_build
 
 if [ "$failures" -gt 0 ]; then
   printf '\n[DONE] ECS host preflight failed with %s failure(s) and %s warning(s).\n' "$failures" "$warnings" >&2

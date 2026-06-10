@@ -1,6 +1,6 @@
 # FitMeet Aliyun ECS Deployment Runbook
 
-Last updated: 2026-06-07
+Last updated: 2026-06-10
 
 Use this path when Railway/Vercel deployment is blocked by account authorization, billing, or GitHub import. It packages the current Web/backend stack for a Docker Compose deployment on an Aliyun ECS host.
 
@@ -28,7 +28,8 @@ VITE_API_BASE_URL=/api
 VITE_WS_BASE_URL=
 ```
 
-It then builds the backend and creates:
+It then builds the backend, runs a production `backend/Dockerfile.prod` build
+with `pnpm --frozen-lockfile`, and creates:
 
 ```text
 fitmeet-ecs-deploy.zip
@@ -128,9 +129,10 @@ chmod 600 nginx/ssl/privkey.pem
 ```
 
 Run the host preflight before starting containers. It checks Docker, Compose,
-required files, `.env.production`, SSL material, disk/memory, port 80/443
-availability, Docker Compose interpolation, and production env readiness when
-`pnpm` is already available:
+required files, `.env.production`, domain/origin settings, SSL material and SAN,
+upload temp directory config, subagent worker healthcheck config, disk/memory,
+port 80/443 availability, Docker Compose interpolation, and production env
+readiness when `pnpm` is already available:
 
 ```bash
 APP_DIR=/opt/FitMeet-web ./scripts/ecs-host-preflight.sh
@@ -147,7 +149,12 @@ corepack enable
 corepack prepare pnpm@10.30.3 --activate
 pnpm -C backend install --frozen-lockfile
 pnpm -C backend run check:prod-env -- ../.env.production
-docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d postgres redis mongo zookeeper kafka
+docker compose -f docker-compose.prod.yml --env-file .env.production build backend subagent-worker
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm uploads:check:prod
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm migration:run:prod
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm db:check-critical-tables:prod
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --no-build backend subagent-worker nginx
 docker compose -f docker-compose.prod.yml --env-file .env.production ps
 ```
 
@@ -162,11 +169,13 @@ PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api \
 ./scripts/deploy-production.sh
 ```
 
-The deploy script runs the same host preflight by default, then runs TypeORM
-migrations after the containers are rebuilt. Set `RUN_ECS_HOST_PREFLIGHT=false`
-only after you have already run the preflight manually. Set
-`RUN_MIGRATIONS=false` only when you are deliberately doing a no-migration
-restart.
+The deploy script runs the same host preflight by default, starts only data
+services first, builds the backend/worker images, runs upload-dir preflight,
+runs TypeORM migrations, verifies critical tables, and only then starts
+backend, subagent-worker, and nginx. Set `RUN_ECS_HOST_PREFLIGHT=false` only
+after you have already run the preflight manually. `RUN_DB_MIGRATIONS=true` is
+the production default; if you deliberately set it false, the script still
+checks that critical tables already exist before starting the app.
 
 Prepare two release smoke users for Web production smoke and iOS staging E2E:
 
@@ -196,11 +205,25 @@ FITMEET_LAUNCH_TOPOLOGY=ecs \
 The script does not write smoke credentials to the repository. It keeps them in
 the current process only, then runs `verify-production.sh`.
 
-Run migrations explicitly after services are healthy if you did not use the deploy script or set `RUN_MIGRATIONS=false`:
+Prepare Agent smoke data inside the production Docker network without
+`ts-node`:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.production exec backend pnpm migration:run:prod
-docker compose -f docker-compose.prod.yml --env-file .env.production exec backend pnpm migration:status
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm seed:agent-smoke:prod:dry-run
+
+AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true \
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm seed:agent-smoke:prod -- --allow-production
+```
+
+The Agent smoke seed refuses to write in `NODE_ENV=production` unless
+`AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true` or `--allow-production` is present.
+
+Run migrations explicitly before app startup if you are not using the deploy
+script:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm migration:run:prod
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm db:check-critical-tables:prod
 ```
 
 ## Verification

@@ -32,6 +32,7 @@ const validEnv = {
   ALIYUN_OSS_ENDPOINT: 'https://oss-cn-qingdao.aliyuncs.com',
   ALIYUN_OSS_PUBLIC_BASE_URL:
     'https://fitmeet-uploads.oss-cn-qingdao.aliyuncs.com',
+  UPLOAD_TEMP_DIR: '/tmp/fitmeet/uploads/temp',
   DEEPSEEK_API_KEY: 'deepseek-key',
   DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
   DEEPSEEK_CHAT_MODEL: 'deepseek-v4-pro',
@@ -40,6 +41,7 @@ const validEnv = {
   FITMEET_SUBAGENT_WORKER_CONCURRENCY: '2',
   FITMEET_SUBAGENT_WORKER_POLL_MS: '1000',
   FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: '15000',
+  FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS: '90000',
   AGENT_OBSERVABILITY_ALERTS_ENABLED: 'false',
   AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL: '',
   AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN: '',
@@ -295,6 +297,7 @@ describe('production-env-readiness', () => {
       FITMEET_SUBAGENT_WORKER_CONCURRENCY: '',
       FITMEET_SUBAGENT_WORKER_POLL_MS: '',
       FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: '',
+      FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS: '',
     });
     const residentWorker = buildProductionEnvReport({
       ...validEnv,
@@ -302,6 +305,7 @@ describe('production-env-readiness', () => {
       FITMEET_SUBAGENT_WORKER_CONCURRENCY: '0',
       FITMEET_SUBAGENT_WORKER_POLL_MS: '1000.5',
       FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: '-1',
+      FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS: '0',
     });
 
     expect(missingWorker.ok).toBe(false);
@@ -312,6 +316,9 @@ describe('production-env-readiness', () => {
         expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_CONCURRENCY' }),
         expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_POLL_MS' }),
         expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_TIMEOUT_MS' }),
+        expect.objectContaining({
+          key: 'FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS',
+        }),
       ]),
     );
     expect(residentWorker.errors).toEqual(
@@ -320,6 +327,9 @@ describe('production-env-readiness', () => {
         expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_CONCURRENCY' }),
         expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_POLL_MS' }),
         expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_TIMEOUT_MS' }),
+        expect.objectContaining({
+          key: 'FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS',
+        }),
       ]),
     );
   });

@@ -22,6 +22,7 @@ import {
   UserSocialRequest,
   UserSocialRequestStatus,
 } from '../social-requests/social-request.entity';
+import { shouldRunBackgroundJobs } from '../common/process-role.util';
 import {
   SocialRequestCandidate,
   SocialRequestCandidateStatus,
@@ -87,6 +88,7 @@ export class AiSocialAutopilotService {
 
   @Cron(CronExpression.EVERY_5_MINUTES)
   async onCron(): Promise<void> {
+    if (!shouldRunBackgroundJobs()) return;
     if (!isEnabled()) return;
     const intervalMs = configuredIntervalMs();
     if (

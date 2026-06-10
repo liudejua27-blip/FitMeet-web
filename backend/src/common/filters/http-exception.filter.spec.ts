@@ -3,6 +3,7 @@ import {
   BadRequestException,
   InternalServerErrorException,
   Logger,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { HttpExceptionFilter } from './http-exception.filter';
 
@@ -109,6 +110,25 @@ describe('HttpExceptionFilter', () => {
     expect(loggerError.mock.calls[0][0]).toContain('/api/ready');
     expect(loggerError.mock.calls[0][0]).not.toContain('secret');
   });
+
+  it('does not warn for expected production verifier auth probes', () => {
+    const filter = new HttpExceptionFilter();
+    const response = createResponse();
+    const host = createHost({
+      request: {
+        method: 'GET',
+        path: '/api/auth/profile',
+        url: '/api/auth/profile',
+        headers: { 'user-agent': 'FitMeetProductionVerifier/1.0' },
+      },
+      response,
+    });
+
+    filter.catch(new UnauthorizedException('Unauthorized'), host);
+
+    expect(response.status).toHaveBeenCalledWith(401);
+    expect(loggerWarn).not.toHaveBeenCalled();
+  });
 });
 
 function createResponse() {
@@ -123,6 +143,7 @@ function createHost(input: {
     method: string;
     path?: string;
     url: string;
+    headers?: Record<string, string>;
     user?: { id: number };
   };
   response: ReturnType<typeof createResponse>;
