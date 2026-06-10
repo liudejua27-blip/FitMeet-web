@@ -42,6 +42,12 @@ import type { SocialAgentCardActionBody } from './social-agent-action.types';
 import { SocialAgentCandidateCommandService } from './social-agent-candidate-command.service';
 import { AgentObservabilityService } from './agent-observability.service';
 import { SocialAgentStreamingResponseService } from './social-agent-streaming-response.service';
+import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
+
+type LlmAssistantTextResult = {
+  streamed: boolean;
+  text: string | null;
+};
 
 @Controller('social-agent/chat')
 @UseGuards(AuthGuard('jwt'))
@@ -54,6 +60,8 @@ export class SocialAgentChatController {
     private readonly streamingResponses?: SocialAgentStreamingResponseService,
     @Optional()
     private readonly observability?: AgentObservabilityService,
+    @Optional()
+    private readonly finalResponses?: SocialAgentFinalResponseService,
   ) {}
 
   @Post('run')
@@ -243,25 +251,54 @@ export class SocialAgentChatController {
 
     const signal = this.clientAbortSignal(req, res, 'user_run_stream');
     let hasAssistantDelta = false;
+    let hasAssistantDone = false;
+    let wroteResult = false;
     try {
       await this.chat.runStream(
         req.user.id,
         body ?? {},
         async (payload) => {
           if (payload.type === 'result') {
+            if (wroteResult) return;
+            let streamResult = payload.result;
+            if (!hasAssistantDelta) {
+              const streamed = await this.writeLlmAssistantTextForResult(
+                write,
+                {
+                  rawResult: streamResult as unknown as Record<string, unknown>,
+                  userMessage: body?.goal ?? '',
+                  messageId: `agent-run:${payload.result.taskId}`,
+                  signal,
+                },
+              );
+              hasAssistantDelta = streamed.streamed;
+              if (streamed.streamed) {
+                hasAssistantDone = true;
+                streamResult = {
+                  ...streamResult,
+                  assistantMessage: streamed.text ?? '',
+                  assistantStreamed: true,
+                };
+              } else {
+                const result =
+                  this.userFacingSanitizer.toUserFacingAgentResponse(
+                    streamResult,
+                    resolveUserPermissionMode(body?.permissionMode),
+                  );
+                await this.writeFallbackAssistantText(write, {
+                  text: result.assistantMessage,
+                  messageId: `agent-run:${streamResult.taskId}`,
+                  traceId: streamResult.traceId,
+                });
+                hasAssistantDelta = true;
+                hasAssistantDone = true;
+              }
+            }
             const result = this.userFacingSanitizer.toUserFacingAgentResponse(
-              payload.result,
+              streamResult,
               resolveUserPermissionMode(body?.permissionMode),
             );
             const lifecycle = lifecycleFromUserFacingResponse(result);
-            if (!hasAssistantDelta) {
-              await this.writeFallbackAssistantText(write, {
-                text: result.assistantMessage,
-                messageId: `agent-run:${payload.result.taskId}`,
-                traceId: payload.result.traceId,
-              });
-              hasAssistantDelta = true;
-            }
             this.writeApprovalRequiredEvents(
               write,
               result.pendingConfirmations,
@@ -271,6 +308,7 @@ export class SocialAgentChatController {
               lifecycle,
               result,
             });
+            wroteResult = true;
             return;
           }
 
@@ -287,12 +325,14 @@ export class SocialAgentChatController {
           }
 
           if (payload.type === 'assistant_done') {
+            if (hasAssistantDone) return;
             write('assistant_done', {
               type: 'assistant_done',
               lifecycle: 'completed',
               messageId: payload.messageId,
               source: payload.source ?? 'llm',
             });
+            hasAssistantDone = true;
             return;
           }
 
@@ -378,8 +418,25 @@ export class SocialAgentChatController {
         },
         { signal },
       );
+      let streamResult = result;
+      if (!hasAssistantDelta) {
+        const streamed = await this.writeLlmAssistantTextForResult(write, {
+          rawResult: streamResult as unknown as Record<string, unknown>,
+          userMessage: body.message ?? '',
+          messageId: `agent-message:${result.taskId ?? Date.now()}`,
+          signal,
+        });
+        hasAssistantDelta = streamed.streamed;
+        if (streamed.streamed) {
+          streamResult = {
+            ...streamResult,
+            assistantMessage: streamed.text ?? '',
+            assistantStreamed: true,
+          };
+        }
+      }
       const userFacing = this.userFacingSanitizer.toUserFacingAgentResponse(
-        result,
+        streamResult,
         result.permissionMode ?? AgentTaskPermissionMode.Confirm,
       );
       const lifecycle = lifecycleFromUserFacingResponse(userFacing);
@@ -461,8 +518,25 @@ export class SocialAgentChatController {
         },
         { signal },
       );
+      let streamResult = result;
+      if (!hasAssistantDelta) {
+        const streamed = await this.writeLlmAssistantTextForResult(write, {
+          rawResult: streamResult as unknown as Record<string, unknown>,
+          userMessage: this.actionUserMessage(body),
+          messageId: `agent-action:${result.taskId ?? taskId}`,
+          signal,
+        });
+        hasAssistantDelta = streamed.streamed;
+        if (streamed.streamed) {
+          streamResult = {
+            ...streamResult,
+            assistantMessage: streamed.text ?? '',
+            assistantStreamed: true,
+          };
+        }
+      }
       const userFacing = this.userFacingSanitizer.toUserFacingAgentResponse(
-        result,
+        streamResult,
         result.permissionMode ?? AgentTaskPermissionMode.Confirm,
       );
       const lifecycle = lifecycleFromUserFacingResponse(userFacing);
@@ -562,6 +636,153 @@ export class SocialAgentChatController {
         }
       },
     });
+  }
+
+  private async writeLlmAssistantTextForResult(
+    write: (event: string, data: UserFacingStreamEvent) => void,
+    input: {
+      rawResult: Record<string, unknown>;
+      userMessage: string;
+      messageId: string;
+      signal?: AbortSignal | null;
+    },
+  ): Promise<LlmAssistantTextResult> {
+    if (!this.finalResponses) return { streamed: false, text: null };
+    const first = await this.tryWriteLlmAssistantText(write, input);
+    if (first.streamed) return first;
+    const compactRawResult = this.compactFinalResponseResult(input.rawResult);
+    if (compactRawResult === input.rawResult) return first;
+    return this.tryWriteLlmAssistantText(write, {
+      ...input,
+      rawResult: compactRawResult,
+    });
+  }
+
+  private async tryWriteLlmAssistantText(
+    write: (event: string, data: UserFacingStreamEvent) => void,
+    input: {
+      rawResult: Record<string, unknown>;
+      userMessage: string;
+      messageId: string;
+      signal?: AbortSignal | null;
+    },
+  ): Promise<LlmAssistantTextResult> {
+    let streamed = false;
+    const streamedText: string[] = [];
+    const fallbackReply = this.stringValue(input.rawResult.assistantMessage);
+    const generated = await this.finalResponses?.generate(
+      {
+        userMessage: input.userMessage,
+        intent: this.stringValue(input.rawResult.intent),
+        route: input.rawResult,
+        agentState: this.stringValue(input.rawResult.action),
+        conversationHistory: [],
+        memoryContext: null,
+        taskContext: {
+          taskId: input.rawResult.taskId ?? null,
+          permissionMode: input.rawResult.permissionMode ?? null,
+          traceId: input.rawResult.traceId ?? null,
+        },
+        plannerDecision: this.recordValue(input.rawResult.agentLoop),
+        toolResults: this.toolResultsFromResult(input.rawResult),
+        searchResults: this.recordValue(input.rawResult.searchResults),
+        safetyRules: [
+          '只输出用户可见回复，不暴露内部 JSON、工具名、traceId 或后端状态。',
+          '高风险动作只能说明等待确认，不能说已经执行。',
+          '如果前面是澄清、拦截或工具结果，要自然说明当前状态和下一步。',
+        ],
+        responseGoal: '把当前 Agent 结果改写成自然、连续、可追问的聊天回复。',
+        fallbackReply,
+      },
+      {
+        signal: input.signal,
+        onDelta: (delta) => {
+          if (!delta) return;
+          streamed = true;
+          streamedText.push(delta);
+          write('assistant_delta', {
+            type: 'assistant_delta',
+            lifecycle: 'analyzing_intent',
+            messageId: input.messageId,
+            delta,
+            source: 'llm',
+          });
+        },
+      },
+    );
+    if (!streamed) return { streamed: false, text: null };
+    write('assistant_done', {
+      type: 'assistant_done',
+      lifecycle: 'completed',
+      messageId: input.messageId,
+      source: 'llm',
+    });
+    return {
+      streamed: true,
+      text:
+        (generated ?? streamedText.join('')).trim() || streamedText.join(''),
+    };
+  }
+
+  private compactFinalResponseResult(
+    result: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const compact: Record<string, unknown> = {};
+    for (const key of [
+      'taskId',
+      'traceId',
+      'permissionMode',
+      'assistantMessage',
+      'intent',
+      'action',
+      'agentLoop',
+      'pendingApproval',
+      'pendingConfirmations',
+      'profileUpdateProposal',
+      'cards',
+      'searchResults',
+      'subagentHandoffs',
+    ]) {
+      if (key in result) compact[key] = result[key];
+    }
+    return compact;
+  }
+
+  private toolResultsFromResult(
+    result: Record<string, unknown>,
+  ): Array<Record<string, unknown>> {
+    const values = [
+      result.activityResults,
+      result.pendingApproval,
+      result.pendingConfirmations,
+      result.profileUpdateProposal,
+      result.queuedRun,
+      result.subagentHandoffs,
+      result.cards,
+    ];
+    return values
+      .filter((value) => value !== undefined && value !== null)
+      .map((value) => this.recordValue(value) ?? { value });
+  }
+
+  private recordValue(value: unknown): Record<string, unknown> | null {
+    return typeof value === 'object' && value !== null
+      ? (value as Record<string, unknown>)
+      : null;
+  }
+
+  private stringValue(value: unknown): string {
+    return typeof value === 'string' ? value : '';
+  }
+
+  private actionUserMessage(body: SocialAgentCardActionBody): string {
+    const record = body as Record<string, unknown>;
+    return (
+      this.stringValue(record.action) ||
+      this.stringValue(record.command) ||
+      this.stringValue(record.label) ||
+      JSON.stringify(body ?? {})
+    );
   }
 
   @Post('tasks/:id/publish-social-request')

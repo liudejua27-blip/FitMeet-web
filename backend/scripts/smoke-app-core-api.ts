@@ -31,7 +31,13 @@ const API_BASE_URL = resolveApiBaseUrl();
 const REQUEST_TIMEOUT_MS = Number(process.env.APP_SMOKE_TIMEOUT_MS ?? 15000);
 const DRY_RUN = flagEnabled('APP_SMOKE_DRY_RUN');
 const RUN_MUTATIONS = flagEnabled('APP_SMOKE_RUN_MUTATIONS');
-const runId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+const runId = `smoke-${Math.random()
+  .toString(36)
+  .slice(2, 10)
+  .replace(/[0-9]/g, 'x')}-${Math.random()
+  .toString(36)
+  .slice(2, 8)
+  .replace(/[0-9]/g, 'y')}`;
 
 async function main() {
   assertRemoteIntent();
