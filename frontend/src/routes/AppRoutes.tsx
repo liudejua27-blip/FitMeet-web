@@ -70,11 +70,6 @@ const DemoAgentSocialLoopPage = lazy(() =>
 const DemoInvestorPage = lazy(() =>
   import('../pages/DemoInvestorPage').then((m) => ({ default: m.DemoInvestorPage })),
 );
-const AgentGuidePlaygroundPage = lazy(() =>
-  import('../pages/AgentGuidePlaygroundPage').then((m) => ({
-    default: m.AgentGuidePlaygroundPage,
-  })),
-);
 const ProfilePage = lazy(() =>
   import('../pages/ProfilePage').then((m) => ({ default: m.ProfilePage })),
 );
@@ -280,7 +275,6 @@ export function AppRoutes() {
             </ProtectedRoute>
           }
         />
-        <Route path="/internal/demo/ant-guide" element={<AgentGuidePlaygroundPage />} />
         {ENABLE_DEMO_ROUTES ? (
           <>
             <Route path="/internal/demo/agent-social-loop" element={<DemoAgentSocialLoopPage />} />
