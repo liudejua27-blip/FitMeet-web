@@ -6,6 +6,7 @@ COMPOSE_FILE="docker-compose.prod.yml"
 ENV_FILE=".env.production"
 RUN_RELEASE_PREFLIGHT="${RUN_RELEASE_PREFLIGHT:-true}"
 RUN_DB_MIGRATIONS="${RUN_DB_MIGRATIONS:-${RUN_MIGRATIONS:-true}}"
+PNPM_VERSION="${PNPM_VERSION:-10.30.3}"
 PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://www.ourfitmeet.cn}"
 PUBLIC_API_BASE_URL="${PUBLIC_API_BASE_URL:-}"
 
@@ -46,7 +47,7 @@ fi
 
 echo "[2/7] Prepare package manager"
 corepack enable
-corepack prepare pnpm@10.30.3 --activate
+corepack prepare pnpm@"$PNPM_VERSION" --activate
 
 if [ "$RUN_RELEASE_PREFLIGHT" = "true" ]; then
   echo "[3/7] Run Web release preflight"
@@ -77,7 +78,6 @@ fi
 
 COMPOSE=(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
 
-PNPM_VERSION="${PNPM_VERSION:-10.30.3}"
 run_backend_pnpm() {
   "${COMPOSE[@]}" run --rm --no-deps backend sh -lc \
     "corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate && pnpm \"\$@\"" \
