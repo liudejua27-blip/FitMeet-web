@@ -44,24 +44,29 @@ describe('production deploy readiness', () => {
     expect(deployScript.indexOf('migration:run:prod')).toBeLessThan(
       deployScript.indexOf('Start API, worker, and nginx after migrations'),
     );
-    expect(deployScript).toContain('pnpm uploads:check:prod');
     expect(deployScript).toContain('PNPM_VERSION="${PNPM_VERSION:-10.30.3}"');
     expect(deployScript).toContain('run_backend_pnpm()');
     expect(deployScript).toContain(
-      'corepack prepare pnpm@${PNPM_VERSION} --activate',
+      'COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare pnpm@${PNPM_VERSION} --activate',
+    );
+    expect(deployScript).toContain(
+      'COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare pnpm@"$PNPM_VERSION" --activate',
     );
     expect(deployScript).toContain('run_backend_pnpm uploads:check:prod');
     expect(deployScript).toContain('run_backend_pnpm migration:run:prod');
     expect(deployScript).toContain(
       'run_backend_pnpm db:check-critical-tables:prod',
     );
+    expect(deployScript).toContain('pnpm \\"\\$@\\"');
     expect(deployScript).not.toContain(
       'run --rm --no-deps backend pnpm uploads:check:prod',
     );
     expect(deployScript).not.toContain(
       'run --rm --no-deps backend pnpm migration:run:prod',
     );
-    expect(deployScript).toContain('pnpm db:check-critical-tables:prod');
+    expect(deployScript).not.toContain(
+      'run --rm --no-deps backend pnpm db:check-critical-tables:prod',
+    );
     expect(deployScript).toContain(
       'subagent-worker dedicated healthcheck failed after startup',
     );
@@ -72,6 +77,13 @@ describe('production deploy readiness', () => {
     expect(deployScript).toContain('./scripts/verify-production.sh');
 
     const releasePreflight = readRepoFile('scripts/release-preflight.sh');
+    const buildDeployZip = readRepoFile('scripts/build-deploy-zip.sh');
+    const toolchain = readRepoFile('scripts/lib/toolchain.sh');
+    expect(releasePreflight).toContain(
+      'corepack prepare "pnpm@${FITMEET_PNPM_VERSION:-10.30.3}" --activate',
+    );
+    expect(buildDeployZip).toContain('fitmeet_activate_pnpm');
+    expect(toolchain).toContain('FITMEET_PNPM_VERSION:-10.30.3');
     expect(releasePreflight).toContain('backend database contract tests');
     expect(releasePreflight).toContain('migration-integrity.spec.ts');
     expect(releasePreflight).toContain(

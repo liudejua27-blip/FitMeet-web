@@ -47,7 +47,7 @@ fi
 
 echo "[2/7] Prepare package manager"
 corepack enable
-corepack prepare pnpm@"$PNPM_VERSION" --activate
+COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare pnpm@"$PNPM_VERSION" --activate
 
 if [ "$RUN_RELEASE_PREFLIGHT" = "true" ]; then
   echo "[3/7] Run Web release preflight"
@@ -80,7 +80,7 @@ COMPOSE=(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
 
 run_backend_pnpm() {
   "${COMPOSE[@]}" run --rm --no-deps backend sh -lc \
-    "corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate && pnpm \"\$@\"" \
+    "corepack enable && COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare pnpm@${PNPM_VERSION} --activate && pnpm \"\$@\"" \
     sh "$@"
 }
 

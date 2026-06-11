@@ -14,6 +14,7 @@ RUN_BACKEND_DOCKER_BUILD_CHECK="${RUN_BACKEND_DOCKER_BUILD_CHECK:-true}"
 # shellcheck source=scripts/lib/toolchain.sh
 source "${ROOT_DIR}/scripts/lib/toolchain.sh"
 fitmeet_bootstrap_toolchain
+fitmeet_activate_pnpm
 
 cleanup() {
   rm -rf "${TMP_DIR}"
