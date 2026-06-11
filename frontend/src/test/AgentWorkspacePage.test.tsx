@@ -62,21 +62,25 @@ describe('AgentWorkspacePage', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByLabelText('FitMeet Agent')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '开始一个低压力任务' })).toBeInTheDocument();
     expect(
       screen.queryByRole('img', { name: '智能小蚁正在等待你的输入' }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '智能小蚁需要时出现' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    expect(screen.getByRole('button', { name: '打开用户菜单' })).toBeInTheDocument();
     expect(screen.getByText('让每一次线下认识都更安心')).toBeInTheDocument();
     expect(screen.queryByText('等待你的社交目标')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '关闭边栏' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /New Agent/ })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: '最近对话' })).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Agent 常用功能' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /人物画像/ })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Agent 常用功能' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /人物画像/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '打开用户菜单' }));
+    expect(screen.getByRole('menu', { name: '用户菜单' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /人物画像/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemcheckbox', { name: /FitMeet Pet/ })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
     fireEvent.click(screen.getByRole('button', { name: '关闭边栏' }));
     expect(screen.getByRole('button', { name: '打开边栏' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /打开边栏/ })).toBeInTheDocument();
@@ -86,7 +90,7 @@ describe('AgentWorkspacePage', () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('heading', { name: '今天想让 FitMeet 帮你完成什么连接？' }),
+      screen.getByRole('heading', { name: '开始一个低压力任务' }),
     ).toBeInTheDocument();
     expect(screen.getByText('今晚出门走走')).toBeInTheDocument();
     expect(screen.queryByText('五个核心任务流')).not.toBeInTheDocument();
@@ -378,7 +382,7 @@ describe('AgentWorkspacePage', () => {
     });
   });
 
-  it('drives AntGuide through the anonymous mock discovery flow', async () => {
+  it('drives CodexAntPet through the anonymous mock discovery flow', async () => {
     useMockAgentAdapter();
 
     render(
@@ -388,16 +392,16 @@ describe('AgentWorkspacePage', () => {
     );
 
     fireEvent.focus(screen.getByRole('textbox'));
-    expect(screen.getByRole('img', { name: '智能小蚁正在等待你的输入' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'FitMeet Pet正在等待你的输入' })).toBeInTheDocument();
 
     await submitPromptText('今晚想找人一起喝咖啡');
 
     expect(
-      await screen.findByRole('img', { name: '智能小蚁正在理解你的需求' }),
+      await screen.findByRole('img', { name: 'FitMeet Pet正在理解你的需求' }),
     ).toBeInTheDocument();
 
     expect(
-      await screen.findByRole('img', { name: '智能小蚁正在发现附近场景' }),
+      await screen.findByRole('img', { name: 'FitMeet Pet正在发现附近场景' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('region', { name: '正在发现兴趣场景' })).toBeInTheDocument();
     expect(screen.getByText('咖啡')).toBeInTheDocument();
@@ -407,13 +411,13 @@ describe('AgentWorkspacePage', () => {
 
     expect(await screen.findByText('咖啡轻聊搭子', {}, { timeout: 3500 })).toBeInTheDocument();
     expect(
-      await screen.findByRole('img', { name: '智能小蚁已找到推荐' }, { timeout: 3500 }),
+      await screen.findByRole('img', { name: 'FitMeet Pet已找到推荐' }, { timeout: 3500 }),
     ).toBeInTheDocument();
     expect(screen.getByText('生成开场白')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '发送邀请' })).toBeInTheDocument();
   });
 
-  it('uses AntGuide error, opener, confirmation, and success states in the mock flow', async () => {
+  it('uses CodexAntPet error, opener, confirmation, and success states in the mock flow', async () => {
     useMockAgentAdapter();
 
     render(
@@ -427,7 +431,7 @@ describe('AgentWorkspacePage', () => {
       await flushPromptInputSubmit();
     });
     expect(
-      await screen.findByRole('img', { name: '智能小蚁需要更多信息才能继续' }),
+      await screen.findByRole('img', { name: 'FitMeet Pet需要更多信息才能继续' }),
     ).toBeInTheDocument();
     expect(
       screen.getByText('告诉我你的兴趣、城市或想认识什么样的人，我才能继续。'),
@@ -441,9 +445,9 @@ describe('AgentWorkspacePage', () => {
       await Promise.resolve();
     });
     expect(
-      await screen.findByRole('img', { name: '智能小蚁正在理解你的需求' }),
+      await screen.findByRole('img', { name: 'FitMeet Pet正在理解你的需求' }),
     ).toBeInTheDocument();
-    expect(await screen.findByRole('img', { name: '智能小蚁已完成操作' })).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: 'FitMeet Pet已完成操作' })).toBeInTheDocument();
     expect(screen.getByText('开场白已经准备好，你确认发送前我不会联系对方。')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '发送邀请' })).toBeInTheDocument();
 
@@ -452,7 +456,7 @@ describe('AgentWorkspacePage', () => {
       await Promise.resolve();
     });
     expect(
-      await screen.findByRole('img', { name: '智能小蚁正在等待你确认操作' }),
+      await screen.findByRole('img', { name: 'FitMeet Pet正在等待你确认操作' }),
     ).toBeInTheDocument();
     expect(screen.getByText('是否确认发送这个邀请？')).toBeInTheDocument();
 
@@ -460,11 +464,11 @@ describe('AgentWorkspacePage', () => {
       fireEvent.click(screen.getByRole('button', { name: '确认发送' }));
       await Promise.resolve();
     });
-    expect(await screen.findByRole('img', { name: '智能小蚁已完成操作' })).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: 'FitMeet Pet已完成操作' })).toBeInTheDocument();
     expect(screen.getByText('下一步建议')).toBeInTheDocument();
   });
 
-  it('moves AntGuide to confirming when users send a mock invite directly', async () => {
+  it('moves CodexAntPet to confirming when users send a mock invite directly', async () => {
     useMockAgentAdapter();
 
     render(
@@ -482,7 +486,7 @@ describe('AgentWorkspacePage', () => {
     });
 
     expect(
-      await screen.findByRole('img', { name: '智能小蚁正在等待你确认操作' }),
+      await screen.findByRole('img', { name: 'FitMeet Pet正在等待你确认操作' }),
     ).toBeInTheDocument();
     expect(screen.getByText('是否确认发送这个邀请？')).toBeInTheDocument();
     expect(screen.getByText('再改一下')).toBeInTheDocument();
@@ -492,11 +496,11 @@ describe('AgentWorkspacePage', () => {
       await Promise.resolve();
     });
 
-    expect(await screen.findByRole('img', { name: '智能小蚁已完成操作' })).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: 'FitMeet Pet已完成操作' })).toBeInTheDocument();
     expect(screen.getByText('下一步建议')).toBeInTheDocument();
   });
 
-  it('switches AntGuide to the safety reminder state for sensitive mock requests', async () => {
+  it('switches CodexAntPet to the safety reminder state for sensitive mock requests', async () => {
     useMockAgentAdapter();
 
     render(
@@ -510,7 +514,7 @@ describe('AgentWorkspacePage', () => {
     expect(
       await screen.findByRole(
         'img',
-        { name: '智能小蚁正在提示安全边界' },
+        { name: 'FitMeet Pet正在提示安全边界' },
         { timeout: 3500 },
       ),
     ).toBeInTheDocument();

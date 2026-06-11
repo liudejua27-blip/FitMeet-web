@@ -54,17 +54,18 @@ import {
 import { activitiesApi, type ActivityProof, type SocialActivity } from '../../api/activitiesApi';
 import { lifeGraphApi, type LifeGraphResponse } from '../../api/lifeGraphApi';
 import { useAuthStore } from '../../stores';
+import type { UserProfile } from '../../types';
 import {
   auditAgentPageModules,
   type AgentPageModuleAuditResult,
 } from '../../debug/agentPageModuleAudit';
 import { loadAgentTaskEvents, type AgentTaskDebugEvent } from '../../debug/agentTaskEvents';
 import {
-  AntGuide,
   type AntGuideCopy,
   type AntGuideState,
   type AntGuideTarget,
 } from '../agent/ant-guide';
+import { CodexAntPet } from './CodexAntPet';
 import { AGENT_FLOW_INTERESTS } from './agentFlow.constants';
 import { useAgentFlow } from './useAgentFlow';
 import {
@@ -377,7 +378,7 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
   const currentUserId = user?.id ?? null;
 
   useEffect(() => {
-    document.title = 'FitMeet Agent';
+    document.title = 'FitMeet Agent - 低压力线下社交 AI 助手';
   }, []);
 
   useEffect(() => {
@@ -851,6 +852,7 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
       isLanding={shellView === 'home' && messages.length === 0 && !isRunning && !userResult}
       currentGoal={currentGoal}
       lifeGraph={lifeGraph}
+      user={user}
       petEnabled={petEnabled}
       onPetEnabledChange={setPetEnabled}
       onNewConversation={() => {
@@ -966,6 +968,7 @@ function AgentWorkspaceLayout({
   isLanding,
   currentGoal,
   lifeGraph,
+  user,
   petEnabled,
   onPetEnabledChange,
   onNewConversation,
@@ -974,6 +977,7 @@ function AgentWorkspaceLayout({
   isLanding: boolean;
   currentGoal: string;
   lifeGraph: LifeGraphResponse | null;
+  user: UserProfile | null;
   petEnabled: boolean;
   onPetEnabledChange: (enabled: boolean) => void;
   onNewConversation: () => void;
@@ -981,6 +985,7 @@ function AgentWorkspaceLayout({
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeSection, setActiveSection] = useState<AgentSidebarSectionId>('new');
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const lifeGraphScore = lifeGraph?.completeness.completenessScore ?? 0;
   const recentConversations = [
     currentGoal || '今晚想找慢跑搭子',
@@ -990,14 +995,10 @@ function AgentWorkspaceLayout({
   const sidebarItems: Array<{ id: AgentSidebarSectionId; label: string; icon: LucideIcon }> = [
     { id: 'new', label: '新对话', icon: MessageSquarePlus },
     { id: 'recent', label: '最近对话', icon: Clock3 },
-    { id: 'profile', label: '人物画像', icon: UserRound },
-    { id: 'settings', label: '权限控制', icon: ShieldCheck },
-    { id: 'projects', label: '我的匹配', icon: CalendarDays },
-    { id: 'history', label: '最近需求', icon: Clock3 },
-    { id: 'pet', label: petEnabled ? '隐藏小蚁' : '显示小蚁', icon: Sparkles },
   ];
   const goSidebar = (id: AgentSidebarSectionId) => {
     setActiveSection(id);
+    setUserMenuOpen(false);
     if (id === 'new') {
       onNewConversation();
       navigate('/agent');
@@ -1071,10 +1072,10 @@ function AgentWorkspaceLayout({
                   type="button"
                   role="tab"
                   aria-selected="false"
-                  onClick={() => goSidebar('profile')}
+                  onClick={() => setUserMenuOpen(true)}
                 >
                   <UserRound aria-hidden="true" />
-                  画像
+                  用户
                 </button>
               </div>
               <div className="agent-gui-command-list">
@@ -1130,86 +1131,6 @@ function AgentWorkspaceLayout({
               </div>
             </section>
 
-            <section className="agent-gpt-sidebar__utility" aria-label="Agent 常用功能">
-              <button
-                type="button"
-                className={clsx(
-                  'agent-gpt-sidebar__tool',
-                  activeSection === 'profile' && 'is-active',
-                )}
-                onClick={() => goSidebar('profile')}
-              >
-                <span>
-                  <UserRound aria-hidden="true" />
-                </span>
-                <span>
-                  <strong>人物画像</strong>
-                  <small>Life Graph 完整度 {lifeGraphScore}%</small>
-                </span>
-              </button>
-              <button
-                type="button"
-                className={clsx(
-                  'agent-gpt-sidebar__tool',
-                  activeSection === 'settings' && 'is-active',
-                )}
-                onClick={() => goSidebar('settings')}
-              >
-                <span>
-                  <ShieldCheck aria-hidden="true" />
-                </span>
-                <span>
-                  <strong>权限控制</strong>
-                  <small>管理自动执行边界</small>
-                </span>
-              </button>
-              <button
-                type="button"
-                className={clsx(
-                  'agent-gpt-sidebar__tool',
-                  activeSection === 'projects' && 'is-active',
-                )}
-                onClick={() => goSidebar('projects')}
-              >
-                <span>
-                  <CalendarDays aria-hidden="true" />
-                </span>
-                <span>
-                  <strong>我的匹配</strong>
-                  <small>已确认与待跟进</small>
-                </span>
-              </button>
-              <button
-                type="button"
-                className={clsx(
-                  'agent-gpt-sidebar__tool',
-                  activeSection === 'history' && 'is-active',
-                )}
-                onClick={() => goSidebar('history')}
-              >
-                <span>
-                  <Clock3 aria-hidden="true" />
-                </span>
-                <span>
-                  <strong>最近需求</strong>
-                  <small>历史推荐与记录</small>
-                </span>
-              </button>
-              <button
-                type="button"
-                className={clsx('agent-gpt-sidebar__tool', petEnabled && 'is-active')}
-                aria-pressed={petEnabled}
-                onClick={() => goSidebar('pet')}
-              >
-                <span>
-                  <Sparkles aria-hidden="true" />
-                </span>
-                <span>
-                  <strong>智能小蚁</strong>
-                  <small>{petEnabled ? '需要时出现' : '已隐藏'}</small>
-                </span>
-              </button>
-            </section>
           </div>
         ) : (
           <nav className="agent-gpt-sidebar__collapsed-nav">
@@ -1231,12 +1152,15 @@ function AgentWorkspaceLayout({
           </nav>
         )}
 
-        <div className="agent-gpt-sidebar__bottom">
-          <span>
-            <img src={AGENT_BRAND_ICON_SRC} alt="" />
-          </span>
-          {sidebarOpen ? <strong>开发者模式</strong> : null}
-        </div>
+        <AgentUserMenu
+          sidebarOpen={sidebarOpen}
+          user={user}
+          lifeGraphScore={lifeGraphScore}
+          petEnabled={petEnabled}
+          menuOpen={userMenuOpen}
+          onToggleMenu={() => setUserMenuOpen((open) => !open)}
+          onNavigate={goSidebar}
+        />
       </aside>
 
       <main className="agent-minimal-main">
@@ -1261,6 +1185,97 @@ function AgentWorkspaceLayout({
         </header>
         <div className="agent-minimal-surface">{children}</div>
       </main>
+    </div>
+  );
+}
+
+function AgentUserMenu({
+  sidebarOpen,
+  user,
+  lifeGraphScore,
+  petEnabled,
+  menuOpen,
+  onToggleMenu,
+  onNavigate,
+}: {
+  sidebarOpen: boolean;
+  user: UserProfile | null;
+  lifeGraphScore: number;
+  petEnabled: boolean;
+  menuOpen: boolean;
+  onToggleMenu: () => void;
+  onNavigate: (id: AgentSidebarSectionId) => void;
+}) {
+  const userName = user?.name?.trim() || '用户';
+  const initial = userName.slice(0, 1).toUpperCase();
+
+  return (
+    <div className="agent-codex-user">
+      {menuOpen ? (
+        <div className="agent-codex-user__popover" role="menu" aria-label="用户菜单">
+          <button type="button" role="menuitem" onClick={() => onNavigate('profile')}>
+            <UserRound aria-hidden="true" />
+            <span>
+              <strong>人物画像</strong>
+              <small>Life Graph 完整度 {lifeGraphScore}%</small>
+            </span>
+          </button>
+          <button type="button" role="menuitem" onClick={() => onNavigate('settings')}>
+            <ShieldCheck aria-hidden="true" />
+            <span>
+              <strong>设置</strong>
+              <small>权限、确认和安全边界</small>
+            </span>
+          </button>
+          <button type="button" role="menuitem" onClick={() => onNavigate('projects')}>
+            <CalendarDays aria-hidden="true" />
+            <span>
+              <strong>我的匹配</strong>
+              <small>已确认与待跟进</small>
+            </span>
+          </button>
+          <button type="button" role="menuitem" onClick={() => onNavigate('history')}>
+            <Clock3 aria-hidden="true" />
+            <span>
+              <strong>最近需求</strong>
+              <small>延续上一次对话上下文</small>
+            </span>
+          </button>
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={petEnabled}
+            onClick={() => onNavigate('pet')}
+          >
+            <Sparkles aria-hidden="true" />
+            <span>
+              <strong>FitMeet Pet</strong>
+              <small>{petEnabled ? '需要时出现' : '已隐藏'}</small>
+            </span>
+          </button>
+        </div>
+      ) : null}
+      <button
+        type="button"
+        className="agent-codex-user__button"
+        aria-label="打开用户菜单"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onClick={onToggleMenu}
+      >
+        <span className="agent-codex-user__avatar">
+          {user?.avatar ? <img src={user.avatar} alt="" /> : initial}
+        </span>
+        {sidebarOpen ? (
+          <>
+            <span className="agent-codex-user__text">
+              <strong>{userName}</strong>
+              <small>用户 · Life Graph {lifeGraphScore}%</small>
+            </span>
+            <ChevronDown aria-hidden="true" />
+          </>
+        ) : null}
+      </button>
     </div>
   );
 }
@@ -1298,41 +1313,38 @@ function AgentStartScreen({
   return (
     <div className="agent-gpt-start agent-gpt-start--product agent-minimal-home agent-gpt-home-clean">
       <div className="agent-minimal-glow" aria-hidden="true" />
-      <section className="agent-deepseek-workbench" aria-label="FitMeet Agent 工作台">
-        <div className="agent-deepseek-workbench__head">
+      <section className="agent-codex-home" aria-label="FitMeet Agent 首页">
+        <div className="agent-codex-home__head">
           <div className="agent-gpt-cover" aria-hidden="true">
             <img src={AGENT_BRAND_ICON_SRC} alt="" />
           </div>
           <div>
             <span>FitMeet Agent</span>
-            <h1>今天想让 FitMeet 帮你完成什么连接？</h1>
+            <h1>开始一个低压力任务</h1>
           </div>
         </div>
         <p>
-          像和一个线下社交工作台对话：讲清楚想认识谁、在哪里见、哪些边界不能越过，Agent
-          会把画像、权限、匹配和跟进放进同一条任务流。
+          说一句你想认识谁、今天能去哪里、哪些边界不能越过。FitMeet Agent 会把画像、权限、匹配和跟进整理成一条自然对话。
         </p>
-        <div className="agent-deepseek-workbench__grid">
-          {agentWorkbenchCards.map((card) => {
+        <div className="agent-codex-home__proof">
+          {agentWorkbenchCards.slice(0, 3).map((card) => {
             const Icon = card.icon;
             return (
-              <article key={card.title} className="agent-deepseek-card">
-                <span>{card.label}</span>
+              <span key={card.title}>
                 <Icon aria-hidden="true" />
                 <strong>{card.title}</strong>
-                <small>{card.detail}</small>
-              </article>
+              </span>
             );
           })}
         </div>
       </section>
       {petEnabled && petVisible ? (
-        <AntGuide
-          className="agent-workspace-ant-guide agent-workspace-ant-guide--home"
+        <CodexAntPet
           state={guideState}
           target={guideTarget}
           copy={guideCopy}
           size="md"
+          surface="home"
         />
       ) : null}
       <div className="agent-deepseek-composer">
@@ -1351,6 +1363,20 @@ function AgentStartScreen({
           ))}
         </section>
       </div>
+      <section className="agent-public-seo" aria-label="FitMeet Agent 能做什么">
+        <article>
+          <strong>低压力开场</strong>
+          <p>把“想认识人”变成一句可执行的需求，不需要先想好完整计划。</p>
+        </article>
+        <article>
+          <strong>边界先确认</strong>
+          <p>发消息、连接候选人、创建活动和写入 Life Graph 前都会停下来等你确认。</p>
+        </article>
+        <article>
+          <strong>连续追问</strong>
+          <p>Agent 会记住本轮上下文，让你像聊天一样持续调整人选、时间和场景。</p>
+        </article>
+      </section>
     </div>
   );
 }
@@ -1438,12 +1464,12 @@ function AgentThread({
   return (
     <div className="agent-gpt-thread">
       {petEnabled && petVisible ? (
-        <AntGuide
-          className="agent-workspace-ant-guide agent-workspace-ant-guide--thread"
+        <CodexAntPet
           state={guideState}
           target={guideTarget}
           copy={guideCopy}
           size="sm"
+          surface="thread"
         />
       ) : null}
       <Conversation className="agent-gpt-thread__messages">
@@ -2345,21 +2371,28 @@ function AgentSafetyPanel({
   notes: string[];
   onSafetyFocus?: () => void;
 }) {
+  const hasPendingActions = pendingActions > 0;
   return (
     <section
-      className="agent-gpt-approval agent-safety-panel"
+      className={clsx('agent-gpt-approval agent-safety-panel', !hasPendingActions && 'is-idle')}
       tabIndex={0}
       onClick={onSafetyFocus}
       onFocus={onSafetyFocus}
       onMouseEnter={onSafetyFocus}
     >
       <div className="agent-result-heading">
-        <span>安全边界</span>
-        <h2>等待你确认</h2>
-        <p>
-          当前有 {pendingActions}{' '}
-          个关键动作等待确认。即使没有待确认动作，我也不会自动交换联系方式、共享位置或发起线下见面。
-        </p>
+        <span>{hasPendingActions ? '待你确认' : '安全边界'}</span>
+        <h2>{hasPendingActions ? '等待你确认' : '开始一个低压力任务'}</h2>
+        {hasPendingActions ? (
+          <p>
+            当前有 {pendingActions}{' '}
+            个关键动作等待确认。确认前，我不会自动交换联系方式、共享位置或发起线下见面。
+          </p>
+        ) : (
+          <p>
+            当前没有待确认动作。你可以继续补充想认识的人、见面的时间地点或舒适边界，我会先帮你整理，不会突然弹出约练流程。
+          </p>
+        )}
       </div>
       <div>
         {(notes.length
