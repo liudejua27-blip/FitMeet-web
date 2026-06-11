@@ -77,6 +77,13 @@ fi
 
 COMPOSE=(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
 
+PNPM_VERSION="${PNPM_VERSION:-10.30.3}"
+run_backend_pnpm() {
+  "${COMPOSE[@]}" run --rm --no-deps backend sh -lc \
+    "corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate && pnpm \"\$@\"" \
+    sh "$@"
+}
+
 echo "[6/9] Start production dependencies"
 "${COMPOSE[@]}" up -d postgres redis mongo zookeeper kafka
 
@@ -84,15 +91,15 @@ echo "[7/9] Build backend runtime images"
 "${COMPOSE[@]}" build backend subagent-worker
 
 echo "[8/9] Run production preflight inside backend image"
-"${COMPOSE[@]}" run --rm --no-deps backend pnpm uploads:check:prod
+run_backend_pnpm uploads:check:prod
 
 if [ "$RUN_DB_MIGRATIONS" = "true" ]; then
   echo "[9/9] Run production migrations before app startup"
-  "${COMPOSE[@]}" run --rm --no-deps backend pnpm migration:run:prod
-  "${COMPOSE[@]}" run --rm --no-deps backend pnpm db:check-critical-tables:prod
+  run_backend_pnpm migration:run:prod
+  run_backend_pnpm db:check-critical-tables:prod
 else
   echo "[9/9] Refusing to skip production table verification"
-  "${COMPOSE[@]}" run --rm --no-deps backend pnpm db:check-critical-tables:prod
+  run_backend_pnpm db:check-critical-tables:prod
 fi
 
 echo "[deploy] Start API, worker, and nginx after migrations"

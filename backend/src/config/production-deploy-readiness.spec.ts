@@ -45,6 +45,22 @@ describe('production deploy readiness', () => {
       deployScript.indexOf('Start API, worker, and nginx after migrations'),
     );
     expect(deployScript).toContain('pnpm uploads:check:prod');
+    expect(deployScript).toContain('PNPM_VERSION="${PNPM_VERSION:-10.30.3}"');
+    expect(deployScript).toContain('run_backend_pnpm()');
+    expect(deployScript).toContain(
+      'corepack prepare pnpm@${PNPM_VERSION} --activate',
+    );
+    expect(deployScript).toContain('run_backend_pnpm uploads:check:prod');
+    expect(deployScript).toContain('run_backend_pnpm migration:run:prod');
+    expect(deployScript).toContain(
+      'run_backend_pnpm db:check-critical-tables:prod',
+    );
+    expect(deployScript).not.toContain(
+      'run --rm --no-deps backend pnpm uploads:check:prod',
+    );
+    expect(deployScript).not.toContain(
+      'run --rm --no-deps backend pnpm migration:run:prod',
+    );
     expect(deployScript).toContain('pnpm db:check-critical-tables:prod');
     expect(deployScript).toContain(
       'subagent-worker dedicated healthcheck failed after startup',
@@ -84,6 +100,7 @@ describe('production deploy readiness', () => {
     const ecsPreflight = readRepoFile('scripts/ecs-host-preflight.sh');
     const ecsPostDeploySmoke = readRepoFile('scripts/ecs-post-deploy-smoke.sh');
     const packageJson = readRepoFile('backend/package.json');
+    const frontendPackageJson = readRepoFile('frontend/package.json');
     const smokeSeed = readRepoFile(
       'backend/scripts/prepare-app-smoke-users.ts',
     );
@@ -222,6 +239,8 @@ describe('production deploy readiness', () => {
       'scp "$ARCHIVE" "$CHECKSUM_FILE" "$INSTALLER"',
     );
     expect(ecsUploadRelease).toContain('--upload');
+    expect(packageJson).toContain('"packageManager": "pnpm@10.30.3"');
+    expect(frontendPackageJson).toContain('"packageManager": "pnpm@10.30.3"');
     expect(packageJson).toContain('seed:app-smoke-users');
     expect(smokeSeed).toContain('APP_SMOKE_SEED_ALLOW_PRODUCTION');
     expect(smokeSeed).toContain('APP_SMOKE_TARGET_USER_ID');
