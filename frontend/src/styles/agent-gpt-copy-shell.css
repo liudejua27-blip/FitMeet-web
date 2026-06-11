@@ -2660,3 +2660,303 @@
     animation: none !important;
   }
 }
+
+/* Final ChatGPT Web pass: this is the authoritative Agent shell layer. */
+.agent-workspace.agent-gpt-copy-shell {
+  --chatgpt-sidebar-width: 260px;
+  --chatgpt-sidebar-collapsed-width: 64px;
+  --chatgpt-bg: #f7f7f4;
+  --chatgpt-sidebar: #f0eee7;
+  --chatgpt-panel: #ffffff;
+  --chatgpt-border: rgba(25, 24, 20, 0.12);
+  --chatgpt-border-strong: rgba(25, 24, 20, 0.18);
+  --chatgpt-text: #191918;
+  --chatgpt-muted: #6f6d66;
+  --chatgpt-soft: rgba(25, 24, 20, 0.055);
+  grid-template-columns: var(--chatgpt-sidebar-width) minmax(0, 1fr) !important;
+  background: var(--chatgpt-bg) !important;
+}
+
+.agent-workspace.agent-gpt-copy-shell.agent-gpt-copy-shell--sidebar-collapsed,
+.agent-workspace.agent-gpt-copy-shell.agent-workspace--landing.agent-gpt-copy-shell--sidebar-collapsed {
+  grid-template-columns: var(--chatgpt-sidebar-collapsed-width) minmax(0, 1fr) !important;
+}
+
+.agent-workspace.agent-gpt-copy-shell > .agent-gpt-sidebar,
+.agent-workspace.agent-gpt-copy-shell.agent-workspace--landing > .agent-gpt-sidebar {
+  width: var(--chatgpt-sidebar-width) !important;
+  min-width: var(--chatgpt-sidebar-width) !important;
+  max-width: var(--chatgpt-sidebar-width) !important;
+  border-right: 1px solid var(--chatgpt-border) !important;
+  background: var(--chatgpt-sidebar) !important;
+  padding: 12px 10px !important;
+}
+
+.agent-workspace.agent-gpt-copy-shell.agent-gpt-copy-shell--sidebar-collapsed > .agent-gpt-sidebar,
+.agent-workspace.agent-gpt-copy-shell.agent-workspace--landing.agent-gpt-copy-shell--sidebar-collapsed
+  > .agent-gpt-sidebar {
+  width: var(--chatgpt-sidebar-collapsed-width) !important;
+  min-width: var(--chatgpt-sidebar-collapsed-width) !important;
+  max-width: var(--chatgpt-sidebar-collapsed-width) !important;
+  padding: 10px 8px !important;
+}
+
+.agent-workspace.agent-gpt-copy-shell .agent-gpt-sidebar__brand,
+.agent-workspace.agent-gpt-copy-shell .agent-gpt-sidebar__new,
+.agent-workspace.agent-gpt-copy-shell .agent-gui-command,
+.agent-workspace.agent-gpt-copy-shell .agent-gpt-sidebar__list button,
+.agent-codex-user__button,
+.agent-codex-user__popover button {
+  border-radius: 8px !important;
+}
+
+.agent-workspace.agent-gpt-copy-shell .agent-minimal-main,
+.agent-workspace.agent-gpt-copy-shell.agent-workspace--landing .agent-minimal-main,
+.agent-workspace.agent-gpt-copy-shell .agent-minimal-surface {
+  min-width: 0 !important;
+  background: var(--chatgpt-bg) !important;
+}
+
+.agent-workspace.agent-gpt-copy-shell .agent-minimal-topbar {
+  min-height: 52px !important;
+  border-bottom: 1px solid var(--chatgpt-border) !important;
+  background: rgba(247, 247, 244, 0.86) !important;
+  padding: 10px 22px !important;
+  backdrop-filter: blur(18px);
+}
+
+.agent-workspace.agent-gpt-copy-shell.agent-workspace--landing .agent-gpt-home-clean {
+  display: grid !important;
+  width: 100% !important;
+  min-height: calc(100vh - 52px) !important;
+  height: calc(100vh - 52px) !important;
+  grid-template-rows: minmax(180px, 1fr) auto auto !important;
+  align-content: stretch !important;
+  justify-content: center !important;
+  gap: 18px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  padding: 32px 24px 96px !important;
+}
+
+.agent-codex-home {
+  align-self: end !important;
+  width: min(100%, 760px) !important;
+  gap: 14px !important;
+}
+
+.agent-codex-home__head {
+  gap: 12px !important;
+}
+
+.agent-codex-home__head .agent-gpt-cover {
+  width: 64px !important;
+  height: 64px !important;
+  border-radius: 16px !important;
+  box-shadow: none !important;
+}
+
+.agent-codex-home__head span {
+  margin-bottom: 8px !important;
+  color: var(--chatgpt-muted) !important;
+}
+
+.agent-codex-home h1 {
+  font-size: clamp(34px, 5.6vw, 56px) !important;
+  font-weight: 760 !important;
+  letter-spacing: 0 !important;
+}
+
+.agent-codex-home p {
+  width: min(100%, 620px) !important;
+  color: var(--chatgpt-muted) !important;
+  font-size: 15px !important;
+  line-height: 1.65 !important;
+}
+
+.agent-codex-home__proof {
+  display: none !important;
+}
+
+.agent-chatgpt-composer {
+  align-self: start;
+  display: grid;
+  width: min(100%, 760px);
+  gap: 10px;
+  margin-inline: auto;
+}
+
+.agent-deepseek-composer {
+  display: none !important;
+}
+
+.agent-workspace.agent-gpt-copy-shell.agent-workspace--landing .agent-gpt-input,
+.agent-workspace.agent-gpt-copy-shell .agent-gpt-input.agent-gpt-input--compact {
+  width: 100% !important;
+  border: 1px solid var(--chatgpt-border-strong) !important;
+  border-radius: 24px !important;
+  background: var(--chatgpt-panel) !important;
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.08),
+    0 0 0 1px rgba(255, 255, 255, 0.6) inset !important;
+}
+
+.agent-workspace.agent-gpt-copy-shell .agent-gpt-input .agent-gpt-input__textarea {
+  min-height: 48px !important;
+  color: var(--chatgpt-text) !important;
+}
+
+.agent-workspace.agent-gpt-copy-shell .agent-model-pill {
+  border-color: var(--chatgpt-border) !important;
+  background: rgba(247, 247, 244, 0.82) !important;
+}
+
+.agent-workspace.agent-gpt-copy-shell .agent-gpt-input .agent-gpt-input__submit {
+  border-radius: 14px !important;
+  background: #171717 !important;
+}
+
+.agent-workspace.agent-gpt-copy-shell .agent-gpt-starter-row {
+  justify-content: center !important;
+  gap: 8px !important;
+}
+
+.agent-workspace.agent-gpt-copy-shell .agent-gpt-starter-row button {
+  min-height: 30px !important;
+  border-color: var(--chatgpt-border) !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  color: var(--chatgpt-muted) !important;
+  box-shadow: none !important;
+}
+
+.agent-public-seo {
+  width: min(100%, 760px) !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  align-self: start !important;
+  margin-top: max(480px, 55vh) !important;
+  padding-bottom: 32px !important;
+}
+
+.agent-public-seo article {
+  border-color: var(--chatgpt-border) !important;
+  border-radius: 12px !important;
+  background: rgba(255, 255, 255, 0.56) !important;
+  box-shadow: none !important;
+}
+
+.agent-workspace.agent-gpt-copy-shell .agent-gpt-thread {
+  display: grid !important;
+  width: min(100%, 860px) !important;
+  height: calc(100vh - 52px) !important;
+  max-height: calc(100vh - 52px) !important;
+  grid-template-rows: minmax(0, 1fr) auto !important;
+  gap: 14px !important;
+  margin-inline: auto !important;
+  padding: 20px 20px 18px !important;
+  background: var(--chatgpt-bg) !important;
+}
+
+.agent-workspace.agent-gpt-copy-shell .agent-gpt-thread__messages {
+  overflow-y: auto !important;
+  background: transparent !important;
+}
+
+.agent-workspace.agent-gpt-copy-shell .agent-gpt-thread__content {
+  width: min(100%, 760px) !important;
+  margin-inline: auto !important;
+  padding: 18px 0 28px !important;
+}
+
+.agent-workspace.agent-gpt-copy-shell .agent-gpt-thinking__body,
+.agent-workspace.agent-gpt-copy-shell .agent-flow-discovery,
+.agent-workspace.agent-gpt-copy-shell .agent-gpt-result-block,
+.agent-workspace.agent-gpt-copy-shell .agent-safety-panel,
+.agent-workspace.agent-gpt-copy-shell .agent-recovery-panel {
+  border-color: var(--chatgpt-border) !important;
+  border-radius: 12px !important;
+  background: rgba(255, 255, 255, 0.68) !important;
+  box-shadow: none !important;
+}
+
+.codex-ant-pet {
+  z-index: 16 !important;
+}
+
+.codex-ant-pet--home {
+  right: 26px !important;
+  bottom: 88px !important;
+}
+
+.codex-ant-pet--thread {
+  right: 26px !important;
+  bottom: 86px !important;
+}
+
+@media (max-width: 900px) {
+  .agent-workspace.agent-gpt-copy-shell,
+  .agent-workspace.agent-gpt-copy-shell.agent-workspace--landing {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .agent-workspace.agent-gpt-copy-shell > .agent-gpt-sidebar,
+  .agent-workspace.agent-gpt-copy-shell.agent-workspace--landing > .agent-gpt-sidebar {
+    position: fixed !important;
+    inset: auto auto 10px 10px !important;
+    z-index: 40 !important;
+    display: block !important;
+    width: 54px !important;
+    min-width: 54px !important;
+    max-width: 54px !important;
+    height: 54px !important;
+    min-height: 54px !important;
+    max-height: 54px !important;
+    border: 0 !important;
+    background: transparent !important;
+    padding: 0 !important;
+    pointer-events: none !important;
+  }
+
+  .agent-workspace.agent-gpt-copy-shell .agent-minimal-topbar {
+    min-height: 58px !important;
+    justify-content: center !important;
+    padding: 10px 14px !important;
+  }
+
+  .agent-workspace.agent-gpt-copy-shell .agent-minimal-status {
+    display: none !important;
+  }
+
+  .agent-workspace.agent-gpt-copy-shell.agent-workspace--landing .agent-gpt-home-clean {
+    min-height: calc(100vh - 58px) !important;
+    height: calc(100vh - 58px) !important;
+    grid-template-rows: minmax(150px, 1fr) auto auto !important;
+    padding: 24px 14px 98px !important;
+  }
+
+  .agent-codex-home h1 {
+    font-size: clamp(32px, 10vw, 44px) !important;
+  }
+
+  .agent-chatgpt-composer {
+    width: 100% !important;
+  }
+
+  .agent-public-seo {
+    grid-template-columns: minmax(0, 1fr) !important;
+    margin-top: 580px !important;
+  }
+
+  .agent-workspace.agent-gpt-copy-shell .agent-gpt-thread {
+    width: 100% !important;
+    height: calc(100vh - 58px) !important;
+    max-height: calc(100vh - 58px) !important;
+    padding: 12px 12px 78px !important;
+  }
+
+  .codex-ant-pet {
+    right: 14px !important;
+    bottom: 22px !important;
+    grid-template-columns: auto !important;
+  }
+}

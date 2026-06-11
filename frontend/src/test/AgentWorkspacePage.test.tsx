@@ -63,6 +63,8 @@ describe('AgentWorkspacePage', () => {
     );
 
     expect(screen.getByRole('heading', { name: '开始一个低压力任务' })).toBeInTheDocument();
+    expect(screen.queryByText('等待你确认')).not.toBeInTheDocument();
+    expect(screen.queryByText('当前有 0 个关键动作等待确认')).not.toBeInTheDocument();
     expect(
       screen.queryByRole('img', { name: '智能小蚁正在等待你的输入' }),
     ).not.toBeInTheDocument();

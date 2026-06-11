@@ -189,38 +189,6 @@ const naturalPromptIdeas: AgentSuggestionItem[] = [
   },
 ];
 
-const agentWorkbenchCards: Array<{
-  label: string;
-  title: string;
-  detail: string;
-  icon: LucideIcon;
-}> = [
-  {
-    label: 'Persona',
-    title: '人物画像',
-    detail: '先读取你的兴趣、节奏和舒适边界',
-    icon: UserRound,
-  },
-  {
-    label: 'Safety',
-    title: '权限边界',
-    detail: '每次执行前都能看到可用权限',
-    icon: ShieldCheck,
-  },
-  {
-    label: 'Match',
-    title: '匹配计划',
-    detail: '把人、地点、时间排进同一个计划',
-    icon: CalendarDays,
-  },
-  {
-    label: 'Memory',
-    title: '最近需求',
-    detail: '延续上一次的偏好与反馈',
-    icon: Clock3,
-  },
-];
-
 function readStoredPetEnabled() {
   if (typeof window === 'undefined') return true;
   return window.localStorage.getItem(AGENT_PET_STORAGE_KEY) !== 'false';
@@ -1326,17 +1294,6 @@ function AgentStartScreen({
         <p>
           说一句你想认识谁、今天能去哪里、哪些边界不能越过。FitMeet Agent 会把画像、权限、匹配和跟进整理成一条自然对话。
         </p>
-        <div className="agent-codex-home__proof">
-          {agentWorkbenchCards.slice(0, 3).map((card) => {
-            const Icon = card.icon;
-            return (
-              <span key={card.title}>
-                <Icon aria-hidden="true" />
-                <strong>{card.title}</strong>
-              </span>
-            );
-          })}
-        </div>
       </section>
       {petEnabled && petVisible ? (
         <CodexAntPet
@@ -1347,7 +1304,7 @@ function AgentStartScreen({
           surface="home"
         />
       ) : null}
-      <div className="agent-deepseek-composer">
+      <div className="agent-chatgpt-composer">
         <AgentInput
           input={input}
           onInput={onInput}
