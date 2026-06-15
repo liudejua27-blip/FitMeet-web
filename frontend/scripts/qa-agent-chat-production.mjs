@@ -17,6 +17,7 @@ const email = process.env.FITMEET_AGENT_BROWSER_QA_EMAIL || process.env.AGENT_SM
 const password = process.env.FITMEET_AGENT_BROWSER_QA_PASSWORD || process.env.AGENT_SMOKE_PASSWORD || '';
 const allowRemote = process.env.FITMEET_AGENT_BROWSER_QA_ALLOW_REMOTE === 'true';
 const runConversation = process.env.FITMEET_AGENT_BROWSER_QA_RUN_CONVERSATION !== 'false';
+const expectedReleaseCommit = process.env.EXPECTED_RELEASE_COMMIT || process.env.FITMEET_RELEASE_COMMIT || '';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..', '..');
 const evidenceDir = path.resolve(
@@ -97,6 +98,44 @@ async function login() {
     throw new Error('Login response did not include access_token.');
   }
   return parsed;
+}
+
+async function assertDeploymentRelease() {
+  if (!expectedReleaseCommit) return { status: 'skipped', actual: 'not-required' };
+
+  const response = await fetch(`${apiBaseUrl}/health`, {
+    headers: { 'User-Agent': 'FitMeetAgentProductionBrowserQA/1.0' },
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`Release metadata check failed with ${response.status}: ${redact(body).slice(0, 240)}`);
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new Error(`Release metadata check returned non-JSON health response: ${redact(body).slice(0, 240)}`);
+  }
+
+  const actual = parsed?.release?.commit || 'unknown';
+  if (actual !== expectedReleaseCommit) {
+    throw new Error(
+      [
+        `Backend release commit mismatch: got ${actual}, expected ${expectedReleaseCommit}.`,
+        'Run this on the ECS host:',
+        `cd /opt/FitMeet-web && EXPECTED_RELEASE_COMMIT=${expectedReleaseCommit} PUBLIC_API_BASE_URL=${apiBaseUrl} ./scripts/ecs-release-diagnose.sh`,
+        'Do not use browser QA evidence until /api/health exposes the expected release.commit.',
+      ].join('\n'),
+    );
+  }
+
+  return {
+    status: 'matched',
+    actual,
+    builtAt: parsed?.release?.builtAt || 'unknown',
+    source: parsed?.release?.source || 'unknown',
+  };
 }
 
 async function waitForApp(page) {
@@ -249,6 +288,7 @@ async function main() {
     throw new Error('Refusing remote browser QA. Set FITMEET_AGENT_BROWSER_QA_ALLOW_REMOTE=true for an intentional run.');
   }
   await mkdir(evidenceDir, { recursive: true });
+  const release = await assertDeploymentRelease();
   const auth = await login();
   const browser = await chromium.launch({ headless: true });
   const lines = [
@@ -257,6 +297,9 @@ async function main() {
     `- Generated at UTC: \`${new Date().toISOString()}\``,
     `- Base URL: \`${baseUrl}\``,
     `- API Base URL: \`${apiBaseUrl}\``,
+    `- Expected release commit: \`${expectedReleaseCommit || 'not-required'}\``,
+    `- Release check: \`${release.status}\``,
+    `- Release actual commit: \`${release.actual}\``,
     `- Conversation checks: \`${runConversation}\``,
     '- Account: `[redacted-email]`',
     '',

@@ -245,6 +245,9 @@ Assert-FileContains "scripts/agent-remote-smoke-evidence.sh" @(
 Assert-FileContains "frontend/scripts/qa-agent-chat-production.mjs" @(
   "FitMeet Agent Production Browser QA",
   "FITMEET_AGENT_BROWSER_QA_ALLOW_REMOTE",
+  "EXPECTED_RELEASE_COMMIT",
+  "ecs-release-diagnose.sh",
+  "release.commit",
   "ordinary chat unexpectedly rendered social UI",
   "social intent did not clarify or render opportunities",
   "[redacted-email]"

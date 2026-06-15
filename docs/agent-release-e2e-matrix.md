@@ -25,7 +25,7 @@ green checks.
 | Backend typecheck            | `pnpm --dir backend exec tsc --noEmit`                                                                                                                                       | AgentLoop, checkpoint, smoke, controller, and presenter surfaces compile together.                                                                             |
 | Agent unit/acceptance suite  | `bash scripts/verify-agent-release.sh`                                                                                                                                       | Backend Agent specs, stranger candidate-pool safety, reminder safety, long-term memory history, frontend Agent specs, browser QA, and optional smoke commands are wired together. |
 | Browser QA                   | `pnpm --dir frontend run qa:agent-chat`                                                                                                                                      | 390 / 768 / 1024 / 1440 screenshots and assertions for shell, composer, ThreadList, actions, Tool UI, stop, feedback, branch, checkpoint actions.              |
-| Production browser QA        | `FITMEET_AGENT_BROWSER_QA_ALLOW_REMOTE=true FITMEET_AGENT_BROWSER_QA_EMAIL=<smoke-email> FITMEET_AGENT_BROWSER_QA_PASSWORD=<smoke-password> pnpm --dir frontend run qa:agent-chat:production` | Logs in with a dedicated smoke account, checks the deployed `/agent/chat` assistant-ui shell at 390 / 768 / 1024 / 1440, proves ordinary chat does not render social UI, and proves explicit social intent clarifies or renders opportunities. |
+| Production browser QA        | `EXPECTED_RELEASE_COMMIT=<release-commit> FITMEET_AGENT_BROWSER_QA_ALLOW_REMOTE=true FITMEET_AGENT_BROWSER_QA_EMAIL=<smoke-email> FITMEET_AGENT_BROWSER_QA_PASSWORD=<smoke-password> pnpm --dir frontend run qa:agent-chat:production` | First verifies `/api/health.release.commit` matches the intended release, then logs in with a dedicated smoke account, checks the deployed `/agent/chat` assistant-ui shell at 390 / 768 / 1024 / 1440, proves ordinary chat does not render social UI, and proves explicit social intent clarifies or renders opportunities. |
 | Remote smoke safety preflight | `scripts/agent-remote-smoke-preflight.sh --readiness --api-base-url https://www.ourfitmeet.cn/api`                                                                           | Checks target API, auth, dedicated smoke-account shape, remote/mutation/JWT override flags, and prints no secrets.                                              |
 | Remote smoke env template    | `deploy/agent-smoke.remote.env.example`                                                                                                                                      | Provides non-secret placeholders for the dedicated smoke account, mutation guards, readiness stop flag, and stable Opportunity journey knobs.                    |
 | Remote smoke evidence capture | `scripts/agent-remote-smoke-evidence.sh --all --prepare-agent-smoke-seed`                                                                                                   | Runs readiness, full opportunity, and SSE abort smoke through the ECS wrapper and stores a redacted markdown evidence file.                                    |
@@ -71,7 +71,11 @@ green checks.
   captures the ECS smoke output as redacted markdown release evidence.
 - `pnpm --dir frontend run qa:agent-chat:production` captures browser evidence
   under `artifacts/agent-browser-qa/`; run it only with a dedicated smoke
-  account and `FITMEET_AGENT_BROWSER_QA_ALLOW_REMOTE=true`.
+  account, `FITMEET_AGENT_BROWSER_QA_ALLOW_REMOTE=true`, and
+  `EXPECTED_RELEASE_COMMIT=<release-commit>`. If the public API is still
+  serving an older backend, the QA fails before login with an
+  `ecs-release-diagnose.sh` command instead of producing misleading browser
+  evidence.
 - Full remote smoke requires `AGENT_SMOKE_ALLOW_MUTATIONS=true`.
 - Readiness smoke sets `AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true` and stops
   before opener send, activity creation, review, and Life Graph proposal actions.
