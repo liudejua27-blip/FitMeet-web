@@ -51,14 +51,34 @@ function makeHarness() {
   const draftPublication = {
     publishDraft: jest.fn().mockResolvedValue(publishResult),
   };
+  const executeCalls: Array<Record<string, unknown>> = [];
+  const agentLoop = {
+    execute: jest.fn(async (input: Record<string, unknown>) => {
+      executeCalls.push(input);
+      const runner = input.runner as () => Promise<Record<string, unknown>>;
+      await runner();
+      return {
+        loop: {
+          runId: 'loop:101:test',
+          traceId: 'trace:test',
+          taskId: 101,
+          status: 'completed',
+          steps: [],
+        },
+      };
+    }),
+  };
   const service = new SocialAgentCandidateCommandService(
     candidateActions as never,
     draftPublication as never,
+    agentLoop as never,
   );
   return {
+    agentLoop,
     candidateActions,
     connectResult,
     draftPublication,
+    executeCalls,
     messageResult,
     publishResult,
     saveResult,
@@ -102,7 +122,8 @@ describe('SocialAgentCandidateCommandService', () => {
   });
 
   it('delegates candidate messaging without rewriting message payloads', async () => {
-    const { candidateActions, messageResult, service } = makeHarness();
+    const { candidateActions, executeCalls, messageResult, service } =
+      makeHarness();
     const body = {
       targetUserId: 22,
       candidateRecordId: 501,
@@ -122,6 +143,30 @@ describe('SocialAgentCandidateCommandService', () => {
       101,
       body,
     );
+    expect(executeCalls[0]).toMatchObject({
+      taskId: 101,
+      goal: 'candidate_command:send_candidate_message',
+      plan: {
+        reason: 'Candidate command endpoints execute only through AgentLoop.',
+        tools: [
+          {
+            agent: 'Social Match Agent',
+            toolName: 'candidate_command_execute',
+            requiresApproval: false,
+            input: expect.objectContaining({
+              command: 'send_candidate_message',
+              ownerUserId: 7,
+              taskId: 101,
+              confirmedEndpoint: true,
+              pipelineSteps: ['execute_confirmed_action'],
+              sideEffectPolicy: 'execute_only_after_user_confirmation',
+            }),
+          },
+        ],
+      },
+      maxToolCalls: 1,
+      maxRetries: 0,
+    });
   });
 
   it('delegates candidate connection commands to candidate actions', async () => {

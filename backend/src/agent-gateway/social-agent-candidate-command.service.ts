@@ -6,6 +6,7 @@ import { SocialAgentCandidateActionService } from './social-agent-candidate-acti
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
 import { SocialAgentToolCallRecord } from './social-agent-tool-executor.service';
 import type { CandidateTargetBody } from './social-agent-action.types';
+import { confirmedActionLoopToolForSocialExecution } from './social-agent-execution-pipeline.contract';
 
 @Injectable()
 export class SocialAgentCandidateCommandService {
@@ -108,28 +109,19 @@ export class SocialAgentCandidateCommandService {
     let didRun = false;
     let result: T | undefined;
     const loopService = this.agentLoop ?? new AgentLoopService();
+    const tool = confirmedActionLoopToolForSocialExecution({
+      command: input.command,
+      ownerUserId: input.ownerUserId,
+      taskId: input.taskId,
+      payload: input.input,
+    });
     await loopService.execute({
       taskId: input.taskId,
       goal: `candidate_command:${input.command}`,
       agent: 'FitMeet Main Agent',
       plan: {
         reason: 'Candidate command endpoints execute only through AgentLoop.',
-        tools: [
-          {
-            agent:
-              input.command === 'publish_draft'
-                ? 'Meet Loop Agent'
-                : 'Social Match Agent',
-            toolName: 'candidate_command_execute',
-            input: {
-              command: input.command,
-              ownerUserId: input.ownerUserId,
-              taskId: input.taskId,
-              payload: input.input,
-              confirmedEndpoint: true,
-            },
-          },
-        ],
+        tools: [tool],
       },
       maxToolCalls: 1,
       maxRetries: 0,

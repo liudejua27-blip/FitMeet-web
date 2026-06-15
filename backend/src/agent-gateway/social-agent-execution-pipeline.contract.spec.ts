@@ -1,4 +1,5 @@
 import {
+  confirmedActionLoopToolForSocialExecution,
   recommendationLoopToolsForSocialExecution,
   SOCIAL_AGENT_EXECUTION_PIPELINE,
   socialExecutionStepIds,
@@ -75,5 +76,39 @@ describe('social-agent-execution-pipeline.contract', () => {
       mode: 'private_draft_then_auto_public_if_authorized',
       sideEffectPolicy: 'no_messages_or_candidate_contact_without_approval',
     });
+  });
+
+  it('maps confirmed candidate commands onto the final execution step', () => {
+    expect(
+      confirmedActionLoopToolForSocialExecution({
+        command: 'send_candidate_message',
+        ownerUserId: 7,
+        taskId: 101,
+        payload: { targetUserId: 22, hasMessage: true },
+      }),
+    ).toMatchObject({
+      agent: 'Social Match Agent',
+      toolName: 'candidate_command_execute',
+      covers: ['execute_confirmed_action'],
+      requiresApproval: false,
+      input: {
+        command: 'send_candidate_message',
+        ownerUserId: 7,
+        taskId: 101,
+        payload: { targetUserId: 22, hasMessage: true },
+        confirmedEndpoint: true,
+        pipelineSteps: ['execute_confirmed_action'],
+        sideEffectPolicy: 'execute_only_after_user_confirmation',
+      },
+    });
+
+    expect(
+      confirmedActionLoopToolForSocialExecution({
+        command: 'publish_draft',
+        ownerUserId: 7,
+        taskId: 101,
+        payload: { socialRequestId: 55 },
+      }).agent,
+    ).toBe('Meet Loop Agent');
   });
 });

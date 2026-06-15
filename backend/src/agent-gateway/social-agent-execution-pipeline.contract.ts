@@ -39,6 +39,22 @@ export type SocialAgentRecommendationLoopTool = {
   input: Record<string, unknown>;
 };
 
+export type SocialAgentConfirmedActionLoopTool = {
+  agent: 'Meet Loop Agent' | 'Social Match Agent';
+  toolName: 'candidate_command_execute';
+  covers: ['execute_confirmed_action'];
+  input: Record<string, unknown> & {
+    command: string;
+    ownerUserId: number;
+    taskId: number;
+    payload: Record<string, unknown>;
+    confirmedEndpoint: true;
+    pipelineSteps: ['execute_confirmed_action'];
+    sideEffectPolicy: 'execute_only_after_user_confirmation';
+  };
+  requiresApproval: false;
+};
+
 export const SOCIAL_AGENT_EXECUTION_PIPELINE: readonly SocialAgentExecutionStep[] = [
   {
     id: 'check_profile_gate',
@@ -178,4 +194,30 @@ export function recommendationLoopToolsForSocialExecution(input: {
 
 export function socialExecutionStepIds(): SocialAgentExecutionStepId[] {
   return SOCIAL_AGENT_EXECUTION_PIPELINE.map((step) => step.id);
+}
+
+export function confirmedActionLoopToolForSocialExecution(input: {
+  command: string;
+  ownerUserId: number;
+  taskId: number;
+  payload: Record<string, unknown>;
+}): SocialAgentConfirmedActionLoopTool {
+  return {
+    agent:
+      input.command === 'publish_draft'
+        ? 'Meet Loop Agent'
+        : 'Social Match Agent',
+    toolName: 'candidate_command_execute',
+    covers: ['execute_confirmed_action'],
+    requiresApproval: false,
+    input: {
+      command: input.command,
+      ownerUserId: input.ownerUserId,
+      taskId: input.taskId,
+      payload: input.payload,
+      confirmedEndpoint: true,
+      pipelineSteps: ['execute_confirmed_action'],
+      sideEffectPolicy: 'execute_only_after_user_confirmation',
+    },
+  };
 }
