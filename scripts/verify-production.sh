@@ -4,6 +4,8 @@ set -euo pipefail
 BASE_URL="${BASE_URL:-https://www.ourfitmeet.cn}"
 API_BASE_URL="${API_BASE_URL:-https://www.ourfitmeet.cn/api}"
 AGENT_TOKEN="${AGENT_TOKEN:-}"
+VERIFY_USER_EMAIL="${VERIFY_USER_EMAIL:-${FITMEET_VERIFY_EMAIL:-}}"
+VERIFY_USER_PASSWORD="${VERIFY_USER_PASSWORD:-${FITMEET_VERIFY_PASSWORD:-}}"
 RUN_APP_SMOKE="${RUN_APP_SMOKE:-false}"
 RUN_PUBLIC_INTENT_WRITE="${RUN_PUBLIC_INTENT_WRITE:-false}"
 CHECK_LOCAL_COMPOSE_HEALTH="${CHECK_LOCAL_COMPOSE_HEALTH:-false}"
@@ -31,6 +33,7 @@ Environment:
   BASE_URL                         Public Web origin. Defaults to https://www.ourfitmeet.cn.
   API_BASE_URL                     Backend API base URL. Defaults to https://www.ourfitmeet.cn/api.
   AGENT_TOKEN                      Optional X-Agent-Token for authorized agent manifest check.
+  VERIFY_USER_EMAIL/PASSWORD       Optional login credentials for authenticated Agent session UX checks.
   RUN_APP_SMOKE=true               Run backend smoke:app-core against this remote API.
   RUN_PUBLIC_INTENT_WRITE=true     Exercise public social intent write/read-back.
   CHECK_LOCAL_COMPOSE_HEALTH=true  Also verify local ECS docker compose backend and worker health.
@@ -264,6 +267,56 @@ curl_status "Profile without token is protected" "${API_BASE_URL}/auth/profile" 
 curl_status "Social Agent session without token is protected" "${API_BASE_URL}/social-agent/chat/session" "401" >/dev/null
 curl_status "Messages without token are protected" "${API_BASE_URL}/messages/conversations" "401" >/dev/null
 curl_status "Agent manifest without token rejects auth" "${API_BASE_URL}/agent/skills/manifest" "401" >/dev/null
+
+if [[ -n "${VERIFY_USER_EMAIL}" && -n "${VERIFY_USER_PASSWORD}" ]]; then
+  login_output="${TMP_DIR}/verify_login.json"
+  login_status="$(
+    curl -sS -m "${TIMEOUT_SECONDS}" -o "${login_output}" -w '%{http_code}' \
+      -X POST \
+      -H 'Content-Type: application/json' \
+      -H 'User-Agent: FitMeetProductionVerifier/1.0' \
+      --data "$(node -e 'process.stdout.write(JSON.stringify({email: process.env.VERIFY_USER_EMAIL, password: process.env.VERIFY_USER_PASSWORD}))')" \
+      "${API_BASE_URL}/auth/login"
+  )"
+  [[ "${login_status}" == "200" || "${login_status}" == "201" ]] || fail "Verify user login -> ${login_status}, expected 200/201"
+  verify_access_token="$(
+    node - "${login_output}" <<'NODE'
+const fs = require('fs');
+const doc = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const token = doc.access_token || doc.accessToken || doc.token || doc.data?.accessToken || doc.data?.token || '';
+if (token) process.stdout.write(token);
+NODE
+  )"
+  [[ -n "${verify_access_token}" ]] || fail "Verify user login did not return an access token."
+  session_output="${TMP_DIR}/verify_agent_session.json"
+  session_status="$(
+    curl -sS -m "${TIMEOUT_SECONDS}" -o "${session_output}" -w '%{http_code}' \
+      -H 'User-Agent: FitMeetProductionVerifier/1.0' \
+      -H "Authorization: Bearer ${verify_access_token}" \
+      "${API_BASE_URL}/social-agent/chat/session"
+  )"
+  [[ "${session_status}" == "200" ]] || fail "Authenticated Social Agent session -> ${session_status}, expected 200"
+  node - "${session_output}" <<'NODE'
+const fs = require('fs');
+const doc = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const body = JSON.stringify(doc);
+const forbidden = [
+  '原始目标',
+  '从已保存的步骤继续',
+  '从已保存的工具步骤',
+  '从已保存的 Agent 状态',
+  '继续刚才保存的 Agent 步骤',
+];
+const leaked = forbidden.find((text) => body.includes(text));
+if (leaked) {
+  console.error(`Authenticated Social Agent session leaked stale checkpoint copy: ${leaked}`);
+  process.exit(1);
+}
+NODE
+  ok "Authenticated Social Agent session does not leak stale checkpoint recovery copy"
+else
+  skip "Authenticated Agent session UX check. Set VERIFY_USER_EMAIL and VERIFY_USER_PASSWORD."
+fi
 
 if [[ -n "${AGENT_TOKEN}" ]]; then
   agent_output="${TMP_DIR}/agent_manifest.json"
