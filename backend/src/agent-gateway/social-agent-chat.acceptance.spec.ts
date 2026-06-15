@@ -3035,6 +3035,25 @@ describe('SocialAgentChat acceptance flow', () => {
       expect(memory.lastUserMessages.length).toBeLessThanOrEqual(20);
     });
 
+    it('keeps twenty turns of ordinary chat without triggering social tools', async () => {
+      const { service, taskRepo, executor } = makeHarness();
+
+      for (let index = 1; index <= 25; index += 1) {
+        await service.routeMessage(7, {
+          message: `普通聊天第 ${index} 轮：请继续解释产品功能，不要执行任何社交动作。`,
+        });
+      }
+
+      const memory = readTaskMemory(taskRepo) as {
+        lastUserMessages: Array<{ text: string; intent: string }>;
+      };
+      expect(memory.lastUserMessages).toHaveLength(20);
+      expect(memory.lastUserMessages[0]?.text).toContain('第 6 轮');
+      expect(memory.lastUserMessages.at(-1)?.text).toContain('第 25 轮');
+      expect(memory.lastUserMessages.every((turn) => turn.intent === 'casual_chat')).toBe(true);
+      expect(executor.executeToolAction).not.toHaveBeenCalled();
+    });
+
     it('writes preferences when the intent is profile_update', async () => {
       const { service, taskRepo } = makeHarness();
       await service.routeMessage(7, { message: '我喜欢拍照和跑步，比较慢热' });
