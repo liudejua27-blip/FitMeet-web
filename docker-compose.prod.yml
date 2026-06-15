@@ -161,6 +161,9 @@ services:
     environment:
       NODE_ENV: production
       FITMEET_PROCESS_ROLE: api
+      FITMEET_RELEASE_COMMIT: ${FITMEET_RELEASE_COMMIT:-unknown}
+      FITMEET_RELEASE_SOURCE: ${FITMEET_RELEASE_SOURCE:-compose}
+      FITMEET_RELEASE_BUILT_AT: ${FITMEET_RELEASE_BUILT_AT:-}
       PORT: 3000
       DB_HOST: postgres
       DB_PORT: 5432
@@ -221,6 +224,9 @@ services:
     environment:
       NODE_ENV: production
       FITMEET_PROCESS_ROLE: worker
+      FITMEET_RELEASE_COMMIT: ${FITMEET_RELEASE_COMMIT:-unknown}
+      FITMEET_RELEASE_SOURCE: ${FITMEET_RELEASE_SOURCE:-compose}
+      FITMEET_RELEASE_BUILT_AT: ${FITMEET_RELEASE_BUILT_AT:-}
       DB_HOST: postgres
       DB_PORT: 5432
       DB_MIGRATIONS_RUN: "false"

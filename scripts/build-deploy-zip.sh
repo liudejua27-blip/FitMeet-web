@@ -11,6 +11,9 @@ TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fitmeet-ecs-deploy.XXXXXX")"
 STAGE_DIR="${TMP_DIR}/FitMeet-web"
 RUN_BACKEND_DOCKER_BUILD_CHECK="${RUN_BACKEND_DOCKER_BUILD_CHECK:-true}"
 RUN_AGENT_RELEASE_VERIFY="${RUN_AGENT_RELEASE_VERIFY:-true}"
+RELEASE_COMMIT="$(git -C "${ROOT_DIR}" rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')"
+RELEASE_BUILT_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+RELEASE_SOURCE="deploy_zip"
 
 # shellcheck source=scripts/lib/toolchain.sh
 source "${ROOT_DIR}/scripts/lib/toolchain.sh"
@@ -283,6 +286,14 @@ rsync -a "${ROOT_DIR}/" "${STAGE_DIR}/" \
   --exclude 'chrome-dom-output.txt' \
   --exclude 'chrome-test.txt'
 
+cat >"${STAGE_DIR}/release.json" <<JSON
+{
+  "commit": "${RELEASE_COMMIT}",
+  "builtAt": "${RELEASE_BUILT_AT}",
+  "source": "${RELEASE_SOURCE}"
+}
+JSON
+
 step "Create zip"
 (
   cd "${TMP_DIR}"
@@ -354,6 +365,7 @@ require_entry "scripts/vercel-prebuilt-deploy.sh" '^FitMeet-web/scripts/vercel-p
 require_entry "scripts/lib/toolchain.sh" '^FitMeet-web/scripts/lib/toolchain\.sh$'
 require_entry "docs/agent-release-e2e-matrix.md" '^FitMeet-web/docs/agent-release-e2e-matrix\.md$'
 require_entry "docs/deployment-vercel-railway.md" '^FitMeet-web/docs/deployment-vercel-railway\.md$'
+require_entry "release metadata" '^FitMeet-web/release\.json$'
 
 require_entry "Agent assistant-ui release audit" '^FitMeet-web/frontend/scripts/audit-agent-chat-release\.mjs$'
 require_entry "Agent assistant-ui browser QA" '^FitMeet-web/frontend/scripts/qa-agent-chat-shell\.mjs$'

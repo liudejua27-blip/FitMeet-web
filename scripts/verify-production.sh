@@ -6,6 +6,7 @@ API_BASE_URL="${API_BASE_URL:-https://www.ourfitmeet.cn/api}"
 AGENT_TOKEN="${AGENT_TOKEN:-}"
 VERIFY_USER_EMAIL="${VERIFY_USER_EMAIL:-${FITMEET_VERIFY_EMAIL:-}}"
 VERIFY_USER_PASSWORD="${VERIFY_USER_PASSWORD:-${FITMEET_VERIFY_PASSWORD:-}}"
+EXPECTED_RELEASE_COMMIT="${EXPECTED_RELEASE_COMMIT:-}"
 RUN_APP_SMOKE="${RUN_APP_SMOKE:-false}"
 RUN_PUBLIC_INTENT_WRITE="${RUN_PUBLIC_INTENT_WRITE:-false}"
 CHECK_LOCAL_COMPOSE_HEALTH="${CHECK_LOCAL_COMPOSE_HEALTH:-false}"
@@ -34,6 +35,7 @@ Environment:
   API_BASE_URL                     Backend API base URL. Defaults to https://www.ourfitmeet.cn/api.
   AGENT_TOKEN                      Optional X-Agent-Token for authorized agent manifest check.
   VERIFY_USER_EMAIL/PASSWORD       Optional login credentials for authenticated Agent session UX checks.
+  EXPECTED_RELEASE_COMMIT          Optional backend release commit prefix expected from /api/health.
   RUN_APP_SMOKE=true               Run backend smoke:app-core against this remote API.
   RUN_PUBLIC_INTENT_WRITE=true     Exercise public social intent write/read-back.
   CHECK_LOCAL_COMPOSE_HEALTH=true  Also verify local ECS docker compose backend and worker health.
@@ -174,6 +176,25 @@ health_body="$(curl_status "Backend health" "${API_BASE_URL}/health" "200")"
 ready_body="$(curl_status "Backend readiness" "${API_BASE_URL}/ready" "200")"
 openapi_body="$(curl_status "FitMeet core OpenAPI" "${API_BASE_URL}/openapi/fitmeet-core.json" "200")"
 feed_body="$(curl_status "Public feed" "${API_BASE_URL}/feed?page=1&limit=5" "200")"
+
+remote_release="$(
+  node - "${health_body}" "${EXPECTED_RELEASE_COMMIT}" <<'NODE'
+const fs = require('fs');
+const file = process.argv[2];
+const expected = process.argv[3] || '';
+const health = JSON.parse(fs.readFileSync(file, 'utf8'));
+const release = health.release && typeof health.release === 'object' ? health.release : {};
+const commit = String(release.commit || 'unknown');
+const source = String(release.source || 'unknown');
+const builtAt = release.builtAt ? String(release.builtAt) : '';
+if (expected && !commit.startsWith(expected) && !expected.startsWith(commit)) {
+  console.error(`Backend release commit mismatch: got ${commit}, expected ${expected}`);
+  process.exit(1);
+}
+process.stdout.write(`${commit} source=${source}${builtAt ? ` builtAt=${builtAt}` : ''}`);
+NODE
+)" || fail "Backend health release metadata did not match expected commit."
+ok "Backend release -> ${remote_release}"
 
 node - "${openapi_body}" <<'NODE'
 const fs = require('fs');

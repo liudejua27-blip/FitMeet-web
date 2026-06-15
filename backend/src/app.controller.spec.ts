@@ -183,6 +183,11 @@ describe('AppController', () => {
         status: 'ok',
         uptime: expect.any(Number),
         timestamp: expect.any(String),
+        release: {
+          commit: expect.any(String),
+          source: expect.any(String),
+          builtAt: null,
+        },
       });
     });
 
@@ -191,6 +196,11 @@ describe('AppController', () => {
         status: 'ok',
         uptime: expect.any(Number),
         timestamp: expect.any(String),
+        release: {
+          commit: expect.any(String),
+          source: expect.any(String),
+          builtAt: null,
+        },
         checks: {
           postgres: { status: 'ok', latencyMs: expect.any(Number) },
           mongo: { status: 'ok', latencyMs: expect.any(Number) },

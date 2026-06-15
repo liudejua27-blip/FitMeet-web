@@ -50,6 +50,18 @@ echo "[2/7] Prepare package manager"
 corepack enable
 COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare pnpm@"$PNPM_VERSION" --activate
 
+if [ -f "release.json" ]; then
+  FITMEET_RELEASE_COMMIT="${FITMEET_RELEASE_COMMIT:-$(node -e "const fs=require('fs');const r=JSON.parse(fs.readFileSync('release.json','utf8'));process.stdout.write(String(r.commit||'unknown'))" 2>/dev/null || printf 'unknown')}"
+  FITMEET_RELEASE_BUILT_AT="${FITMEET_RELEASE_BUILT_AT:-$(node -e "const fs=require('fs');const r=JSON.parse(fs.readFileSync('release.json','utf8'));process.stdout.write(String(r.builtAt||''))" 2>/dev/null || true)}"
+  FITMEET_RELEASE_SOURCE="${FITMEET_RELEASE_SOURCE:-$(node -e "const fs=require('fs');const r=JSON.parse(fs.readFileSync('release.json','utf8'));process.stdout.write(String(r.source||'deploy_zip'))" 2>/dev/null || printf 'deploy_zip')}"
+else
+  FITMEET_RELEASE_COMMIT="${FITMEET_RELEASE_COMMIT:-unknown}"
+  FITMEET_RELEASE_BUILT_AT="${FITMEET_RELEASE_BUILT_AT:-}"
+  FITMEET_RELEASE_SOURCE="${FITMEET_RELEASE_SOURCE:-uploaded_tree}"
+fi
+export FITMEET_RELEASE_COMMIT FITMEET_RELEASE_BUILT_AT FITMEET_RELEASE_SOURCE
+echo "[release] commit=${FITMEET_RELEASE_COMMIT} source=${FITMEET_RELEASE_SOURCE} builtAt=${FITMEET_RELEASE_BUILT_AT:-unknown}"
+
 if [ "$RUN_RELEASE_PREFLIGHT" = "true" ]; then
   echo "[3/7] Run Web release preflight"
   ./scripts/release-preflight.sh --web-only
@@ -169,7 +181,7 @@ echo "[post] Scan backend and worker logs"
 scan_deploy_logs
 
 echo "[DONE] Run production verification from your local machine:"
-echo "BASE_URL=$PUBLIC_BASE_URL API_BASE_URL=$PUBLIC_API_BASE_URL ./scripts/verify-production.sh"
-echo "BASE_URL=$PUBLIC_BASE_URL API_BASE_URL=$PUBLIC_API_BASE_URL VERIFY_USER_EMAIL='<email>' VERIFY_USER_PASSWORD='<password>' ./scripts/verify-production.sh"
+echo "BASE_URL=$PUBLIC_BASE_URL API_BASE_URL=$PUBLIC_API_BASE_URL EXPECTED_RELEASE_COMMIT=$FITMEET_RELEASE_COMMIT ./scripts/verify-production.sh"
+echo "BASE_URL=$PUBLIC_BASE_URL API_BASE_URL=$PUBLIC_API_BASE_URL EXPECTED_RELEASE_COMMIT=$FITMEET_RELEASE_COMMIT VERIFY_USER_EMAIL='<email>' VERIFY_USER_PASSWORD='<password>' ./scripts/verify-production.sh"
 echo "powershell -ExecutionPolicy Bypass -File .\\scripts\\verify-production.ps1 -BaseUrl $PUBLIC_BASE_URL -ApiBaseUrl $PUBLIC_API_BASE_URL"
 echo "curl $PUBLIC_API_BASE_URL/health"

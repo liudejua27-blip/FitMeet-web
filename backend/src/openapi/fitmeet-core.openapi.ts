@@ -1599,6 +1599,27 @@ export const fitMeetCoreOpenApi = {
         },
       },
     },
+    '/social-agent/chat/profile-gate': {
+      get: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentGetProfileGate',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description:
+              'Minimum profile readiness gate for social matching, Discover publishing, and high-risk Agent actions.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentProfileGateStatus',
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
     '/social-agent/reminders': {
       get: {
         tags: ['social-agent-reminders'],
@@ -1690,6 +1711,23 @@ export const fitMeetCoreOpenApi = {
             },
           },
           '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/reminders/disable': {
+      post: {
+        tags: ['social-agent-reminders'],
+        operationId: 'socialAgentDisableReminders',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description:
+              'Disable proactive Agent reminders for the authenticated user.',
+            content: {
+              'application/json': { schema: { type: 'object' } },
+            },
+          },
           '401': { $ref: '#/components/responses/Error' },
         },
       },
@@ -3363,12 +3401,28 @@ export const fitMeetCoreOpenApi = {
     schemas: {
       HealthPayload: {
         type: 'object',
-        required: ['status', 'uptime', 'timestamp'],
+        required: ['status', 'uptime', 'timestamp', 'release'],
         additionalProperties: false,
         properties: {
           status: { type: 'string', enum: ['ok'] },
           uptime: { type: 'number' },
           timestamp: { type: 'string', format: 'date-time' },
+          release: { $ref: '#/components/schemas/ReleaseMetadata' },
+        },
+      },
+      ReleaseMetadata: {
+        type: 'object',
+        required: ['commit', 'source', 'builtAt'],
+        additionalProperties: false,
+        properties: {
+          commit: { type: 'string' },
+          source: { type: 'string' },
+          builtAt: {
+            oneOf: [
+              { type: 'string', format: 'date-time' },
+              { type: 'null' },
+            ],
+          },
         },
       },
       ReadinessCheck: {
@@ -3382,12 +3436,13 @@ export const fitMeetCoreOpenApi = {
       },
       ReadinessPayload: {
         type: 'object',
-        required: ['status', 'uptime', 'timestamp', 'checks'],
+        required: ['status', 'uptime', 'timestamp', 'release', 'checks'],
         additionalProperties: false,
         properties: {
           status: { type: 'string', enum: ['ok'] },
           uptime: { type: 'number' },
           timestamp: { type: 'string', format: 'date-time' },
+          release: { $ref: '#/components/schemas/ReleaseMetadata' },
           checks: {
             type: 'object',
             required: ['postgres', 'mongo', 'redis'],

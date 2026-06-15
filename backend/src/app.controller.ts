@@ -26,6 +26,7 @@ export class AppController {
       status: 'ok',
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
+      release: this.releaseMetadata(),
     };
   }
 
@@ -50,6 +51,7 @@ export class AppController {
       status: 'ok',
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
+      release: this.releaseMetadata(),
       checks,
     };
   }
@@ -94,5 +96,13 @@ export class AppController {
     } catch {
       return { status: 'error' as const, latencyMs: Date.now() - startedAt };
     }
+  }
+
+  private releaseMetadata() {
+    return {
+      commit: process.env.FITMEET_RELEASE_COMMIT || 'unknown',
+      source: process.env.FITMEET_RELEASE_SOURCE || 'runtime',
+      builtAt: process.env.FITMEET_RELEASE_BUILT_AT || null,
+    };
   }
 }
