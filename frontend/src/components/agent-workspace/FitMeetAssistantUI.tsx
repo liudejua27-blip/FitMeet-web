@@ -631,7 +631,7 @@ function convertFitMeetMessage(
   if (
     message.role === 'assistant' &&
     message.result &&
-    (message.conversationIntent === 'approval' || message.result.pendingConfirmations.length > 0)
+    message.result.pendingConfirmations.length > 0
   ) {
     content.push({
       type: 'data',

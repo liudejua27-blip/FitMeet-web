@@ -573,6 +573,39 @@ describe('AgentWorkspacePage', () => {
     expect(screen.getByTestId('assistant-ui-edit-composer-root')).toHaveClass('border-[#e5e5e5]');
   });
 
+  it('does not render an approval card for non-risky clarification waiting steps', async () => {
+    useRealAgentAdapter();
+    useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
+    vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue(emptySession());
+    vi.spyOn(socialAgentApi, 'runUserFacingStream').mockImplementation(async (_data, onEvent) => {
+      const response = {
+        ...mockResponse(),
+        assistantMessage:
+          '我先确认一下，你更倾向于在青岛哪个区域活动？知道大概范围后，我再帮你看合适机会。',
+        cards: [],
+        pendingConfirmations: [],
+      };
+      onEvent({
+        type: 'progress',
+        id: 'clarify-area',
+        kind: 'analysis',
+        title: '确认需要补充的信息',
+        detail: '等待用户补充大致区域',
+        state: 'waiting',
+        metadata: { phase: 'clarify_social_intent' },
+      });
+      onEvent({ type: 'result', result: response });
+      return response;
+    });
+
+    await renderAgentPage();
+    submitPrompt('我想在青岛周末下午找一个轻松羽毛球搭子，只接受公开场所。');
+
+    expect(await screen.findByText(/更倾向于在青岛哪个区域/)).toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
+    expect(screen.queryByText('需要你确认这一步')).not.toBeInTheDocument();
+  });
+
   it('shows a lightweight assistant thinking state before the first token arrives', async () => {
     useRealAgentAdapter();
     useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });

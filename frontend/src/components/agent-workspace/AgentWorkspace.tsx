@@ -592,7 +592,7 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
       return;
     }
     if (event.type === 'progress') {
-      if (event.state === 'waiting') runConversationIntentRef.current = 'approval';
+      if (isApprovalProgressEvent(event)) runConversationIntentRef.current = 'approval';
       setSteps((current) => mergeProgressStep(current, event, runConversationIntentRef.current));
       return;
     }
@@ -1704,10 +1704,20 @@ function isSocialSurfaceCard(card: { type?: string }) {
 
 function resolveIntentFromStreamEvent(event: AgentStreamEvent) {
   if (event.type === 'approval_required') return 'approval';
-  if (event.type === 'status' && typeof event.lightStatus === 'string') {
-    if (event.lightStatus.includes('等待')) return 'approval';
-  }
+  if (event.type === 'progress' && isApprovalProgressEvent(event)) return 'approval';
   return null;
+}
+
+function isApprovalProgressEvent(event: AgentStreamEvent) {
+  if (event.type !== 'progress') return false;
+  const metadata = event.metadata;
+  if (!metadata || typeof metadata !== 'object') return false;
+  return Boolean(
+    'approvalId' in metadata ||
+      'actionType' in metadata ||
+      metadata.riskLevel ||
+      metadata.kind === 'approval_required',
+  );
 }
 
 function findTaskId(result: UserFacingAgentResponse | null): number | null {
