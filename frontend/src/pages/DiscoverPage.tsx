@@ -784,7 +784,10 @@ function MeetupMatchCard({
   );
 }
 
-function publicIntentToDiscoverMeet(intent: PublicSocialIntent, index: number): DiscoverMeet {
+export function publicIntentToDiscoverMeet(
+  intent: PublicSocialIntent,
+  index: number,
+): DiscoverMeet {
   const sport = normalizeSportGroup(intent.requestType || intent.interestTags?.[0] || 'custom');
   const color = ['#10a37f', '#f97316', '#4f46e5', '#d97706'][index % 4];
   const detailHref = intent.linkedSocialRequestId
@@ -824,7 +827,7 @@ function publicIntentToDiscoverMeet(intent: PublicSocialIntent, index: number): 
   };
 }
 
-function detailHrefForDiscoverMeet(meet: DiscoverMeet) {
+export function detailHrefForDiscoverMeet(meet: DiscoverMeet) {
   if (meet.detailHref) return meet.detailHref;
   if (meet.sourceKind === 'publicIntent' && meet.publicIntentId) {
     return `/public-intent/${encodeURIComponent(meet.publicIntentId)}`;
