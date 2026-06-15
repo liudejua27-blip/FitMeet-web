@@ -104,7 +104,7 @@ else
 fi
 
 echo "[deploy] Start API, worker, and nginx after migrations"
-"${COMPOSE[@]}" up -d --no-build backend subagent-worker nginx
+"${COMPOSE[@]}" up -d --no-build --force-recreate backend subagent-worker nginx
 
 echo "[post] Wait for API and worker health"
 wait_for_compose_exec() {
@@ -165,5 +165,6 @@ scan_deploy_logs
 
 echo "[DONE] Run production verification from your local machine:"
 echo "BASE_URL=$PUBLIC_BASE_URL API_BASE_URL=$PUBLIC_API_BASE_URL ./scripts/verify-production.sh"
+echo "BASE_URL=$PUBLIC_BASE_URL API_BASE_URL=$PUBLIC_API_BASE_URL VERIFY_USER_EMAIL='<email>' VERIFY_USER_PASSWORD='<password>' ./scripts/verify-production.sh"
 echo "powershell -ExecutionPolicy Bypass -File .\\scripts\\verify-production.ps1 -BaseUrl $PUBLIC_BASE_URL -ApiBaseUrl $PUBLIC_API_BASE_URL"
 echo "curl $PUBLIC_API_BASE_URL/health"
