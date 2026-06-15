@@ -42,6 +42,7 @@ import {
   appendShortTermMemoryItem,
   rememberSocialAgentShortTerm,
 } from './social-agent-memory.util';
+import { recommendationLoopToolsForSocialExecution } from './social-agent-execution-pipeline.contract';
 
 @Injectable()
 export class SocialAgentRunRecommendationService {
@@ -99,6 +100,10 @@ export class SocialAgentRunRecommendationService {
     let candidates: SocialAgentChatRunResult['candidates'] = [];
     let result: SocialAgentChatRunResult | null = null;
     const loopService = this.agentLoop ?? new AgentLoopService();
+    const recommendationTools = recommendationLoopToolsForSocialExecution({
+      ownerUserId: input.ownerUserId,
+      permissionMode: input.permissionMode,
+    });
     const loopExecution = await loopService.execute({
       taskId: task.id,
       goal: input.goal,
@@ -106,50 +111,14 @@ export class SocialAgentRunRecommendationService {
       plan: {
         reason:
           'Initial recommendation run executes only through AgentLoop tools.',
-        tools: [
-          {
-            agent: 'Agent Brain',
-            toolName: 'recommendation_understand_permission',
-            input: { permissionMode: input.permissionMode },
+        tools: recommendationTools.map(({ agent, toolName, covers, input }) => ({
+          agent,
+          toolName,
+          input: {
+            ...input,
+            pipelineSteps: covers,
           },
-          {
-            agent: 'Life Graph Agent',
-            toolName: 'recommendation_read_profile_and_plan',
-            input: { ownerUserId: input.ownerUserId },
-          },
-          {
-            agent: 'Social Match Agent',
-            toolName: 'recommendation_create_social_intent',
-            input: {
-              source: 'social_agent_chat',
-              mode: 'private_draft_then_auto_public_if_authorized',
-              sideEffectPolicy:
-                'no_messages_or_candidate_contact_without_approval',
-            },
-          },
-          {
-            agent: 'Social Match Agent',
-            toolName: 'recommendation_search_candidates',
-            input: {
-              source: 'social_agent_chat',
-              searchOnly: true,
-              sideEffectPolicy: 'no_contact_without_approval',
-            },
-          },
-          {
-            agent: 'Social Match Agent',
-            toolName: 'recommendation_rank_safety_and_draft',
-            input: { requiresConfirmation: true },
-          },
-          {
-            agent: 'FitMeet Main Agent',
-            toolName: 'recommendation_final_answer',
-            input: {
-              statusReason:
-                'recommendations_ready_waiting_user_confirmation',
-            },
-          },
-        ],
+        })),
       },
       maxToolCalls: 6,
       maxRetries: 0,

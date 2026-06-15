@@ -210,12 +210,27 @@ describe('SocialAgentRunRecommendationService', () => {
             }),
             expect.objectContaining({
               toolName: 'recommendation_create_social_intent',
+              input: expect.objectContaining({
+                pipelineSteps: [
+                  'create_opportunity_card_draft',
+                  'optional_publish_public_intent',
+                ],
+                sideEffectPolicy:
+                  'no_messages_or_candidate_contact_without_approval',
+              }),
             }),
             expect.objectContaining({
               toolName: 'recommendation_search_candidates',
+              input: expect.objectContaining({
+                pipelineSteps: ['search_public_candidates'],
+                sideEffectPolicy: 'no_contact_without_approval',
+              }),
             }),
             expect.objectContaining({
               toolName: 'recommendation_final_answer',
+              input: expect.objectContaining({
+                pipelineSteps: ['request_approval'],
+              }),
             }),
           ]),
         }),
