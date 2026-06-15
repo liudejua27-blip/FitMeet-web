@@ -36,9 +36,12 @@ export type FitMeetAgentSchemaAction =
   | 'candidate.like'
   | 'candidate.skip'
   | 'candidate.more_like_this'
+  | 'candidate.view_detail'
   | 'candidate.generate_opener'
+  | 'candidate.connect'
   | 'opener.confirm_send'
   | 'opener.regenerate'
+  | 'opener.reject'
   | 'activity.confirm_create'
   | 'activity.modify_time'
   | 'activity.modify_location'
@@ -48,18 +51,22 @@ export type FitMeetAgentSchemaAction =
   | 'activity.view_detail'
   | 'review.submit'
   | 'life_graph.accept_update'
-  | 'life_graph.reject_update';
+  | 'life_graph.reject_update'
+  | 'meet_loop.resume'
+  | 'meet_loop.reschedule';
 
 export interface FitMeetAlphaCardAction {
   id: string;
   label: string;
   action:
+    | FitMeetAgentSchemaAction
     | 'confirm_profile_update'
     | 'send_message'
     | 'connect_candidate'
     | 'save_candidate'
     | 'create_activity'
     | 'generate_opener'
+    | 'reject_opener'
     | 'view_activity'
     | 'upload_proof'
     | 'see_more'
@@ -68,7 +75,9 @@ export interface FitMeetAlphaCardAction {
     | 'dislike_candidate'
     | 'check_in'
     | 'submit_review'
-    | 'refine_request';
+    | 'refine_request'
+    | 'resume_meet_loop'
+    | 'reschedule_meet_loop';
   schemaAction?: FitMeetAgentSchemaAction;
   loopStage?: FitMeetAgentLoopStage;
   requiresConfirmation: boolean;
@@ -78,6 +87,14 @@ export interface FitMeetAlphaCardAction {
 export interface FitMeetAlphaCard {
   id: string;
   type: FitMeetAlphaCardType;
+  schemaVersion?: 'fitmeet.tool-ui.v1';
+  schemaType?:
+    | 'social_match.candidate'
+    | 'social_match.activity'
+    | 'life_graph.diff'
+    | 'meet_loop.timeline'
+    | 'safety.approval'
+    | 'generic.card';
   title: string;
   body?: string;
   status?: 'ready' | 'waiting_confirmation' | 'completed' | 'blocked';

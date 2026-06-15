@@ -31,6 +31,7 @@ export class NotificationsService {
       time: this.formatTime((n as { createdAt?: Date }).createdAt),
       read: n.read,
       targetId: n.targetId,
+      pushPayload: n.pushPayload ?? null,
     }));
   }
 
@@ -43,6 +44,7 @@ export class NotificationsService {
     fromAvatar?: string;
     fromColor?: string;
     targetId?: number;
+    pushPayload?: Record<string, unknown> | null;
   }) {
     const notification = await this.notifModel.create({
       userId: data.userId,
@@ -53,6 +55,7 @@ export class NotificationsService {
       fromAvatar: data.fromAvatar || 'S',
       fromColor: data.fromColor || '#38BDF8',
       targetId: data.targetId,
+      pushPayload: data.pushPayload ?? null,
     });
     this.realtime?.emitToUser({
       userId: data.userId,
@@ -62,12 +65,14 @@ export class NotificationsService {
         type: notification.type,
         text: notification.text,
         targetId: notification.targetId,
+        pushPayload: notification.pushPayload ?? null,
         read: notification.read,
       },
       notification: {
         type: data.type,
         text: data.text,
         targetId: data.targetId,
+        pushPayload: data.pushPayload ?? undefined,
       },
     });
     return notification;

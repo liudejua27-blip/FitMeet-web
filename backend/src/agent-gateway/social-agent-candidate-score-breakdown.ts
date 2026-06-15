@@ -64,6 +64,11 @@ export function buildProfileCandidateScoreBreakdown(input: {
         lifeGraphRhythmBoost(input.lifeGraphSignals),
     ),
     socialEnergy: candidateSocialEnergyScore(input.profile, input.delegate),
+    socialBoundaryFit: candidateSocialBoundaryScore(
+      input.query,
+      input.profile,
+      input.delegate,
+    ),
     relationshipGoal: Math.min(
       10,
       candidateRelationshipGoalScore(input.query, input.tags) +
@@ -126,6 +131,7 @@ export function buildPublicIntentCandidateScoreBreakdown(input: {
         lifeGraphRhythmBoost(input.lifeGraphSignals),
     ),
     socialEnergy: 5,
+    socialBoundaryFit: publicIntentSocialBoundaryScore(input.query),
     relationshipGoal: Math.min(
       10,
       candidateRelationshipGoalScore(input.query, input.tags) +
@@ -187,6 +193,41 @@ export function candidateSocialEnergyScore(
   if (/主动|外向|热情|开放|active|open|extrovert/i.test(text)) return 7;
   if (/慢热|安静|内向|克制|quiet|introvert/i.test(text)) return 6;
   return 5;
+}
+
+export function candidateSocialBoundaryScore(
+  query: CandidatePoolResolvedQuery,
+  profile: UserSocialProfile | null,
+  delegate: AiDelegateProfile | null,
+): number {
+  const text = [
+    profile?.openness,
+    profile?.socialPreference,
+    profile?.socialStyle,
+    ...(profile?.relationshipGoals ?? []),
+    ...(profile?.traits ?? []),
+    delegate?.idealPartner,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  if (query.acceptsStrangers === false) return 0;
+  if (!text.trim()) return query.acceptsStrangers === true ? 5 : 4;
+  if (/不接受陌生人|只熟人|拒绝陌生|private|closed/i.test(text)) return 1;
+  if (
+    /接受陌生人|认识新朋友|新朋友|公开|开放|低压力|慢热|边界|尊重|open|new\s*friends|low\s*pressure|boundary/i.test(
+      text,
+    )
+  ) {
+    return query.acceptsStrangers === true ? 8 : 6;
+  }
+  return query.acceptsStrangers === true ? 6 : 5;
+}
+
+export function publicIntentSocialBoundaryScore(
+  query: CandidatePoolResolvedQuery,
+): number {
+  if (query.acceptsStrangers === false) return 0;
+  return query.acceptsStrangers === true ? 8 : 6;
 }
 
 export function candidateRelationshipGoalScore(

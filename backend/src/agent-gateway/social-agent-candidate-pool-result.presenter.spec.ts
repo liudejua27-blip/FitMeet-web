@@ -16,6 +16,7 @@ const query = {
   locationPreference: '',
   rawText: '',
   socialRequestId: null,
+  acceptsStrangers: null,
 } satisfies CandidatePoolResolvedQuery;
 
 const debug = {

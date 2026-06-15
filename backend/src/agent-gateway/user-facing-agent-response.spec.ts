@@ -1,4 +1,7 @@
-import { AgentTaskPermissionMode } from './entities/agent-task.entity';
+import {
+  AgentTaskPermissionMode,
+  AgentTaskStatus,
+} from './entities/agent-task.entity';
 import {
   ApprovalRiskLevel,
   ApprovalType,
@@ -83,6 +86,7 @@ describe('toUserFacingAgentResponse', () => {
       'lightStatus',
       'pendingConfirmations',
       'permissionMode',
+      'runtime',
       'safeStatus',
     ]);
     expect(response).toMatchObject({
@@ -106,6 +110,175 @@ describe('toUserFacingAgentResponse', () => {
     expect(serialized).not.toContain('toolCalls');
     expect(serialized).not.toContain('hidden-model');
     expect(serialized).not.toContain('internal keyword match');
+  });
+
+  it('keeps safe checkpoint resume metadata while stripping internal runtime fields', () => {
+    const response = toUserFacingAgentResponse(
+      {
+        taskId: 101,
+        status: AgentTaskStatus.Executing,
+        visibleSteps: [],
+        assistantMessage: '已保存到候选排序步骤，可以重新运行这一段。',
+        socialRequestDraft: null,
+        candidates: [],
+        approvalRequiredActions: [],
+        events: [],
+        cards: [],
+        permissionMode: AgentTaskPermissionMode.Confirm,
+        runtime: {
+          checkpointId: 321,
+          checkpointType: 'step',
+          canResume: false,
+          canReplay: true,
+          canFork: true,
+          parentCheckpointId: 320,
+          threadId: 'agent-task:101',
+          idempotencyKey: 'agent-checkpoint:replay:agent-task:101:checkpoint:321:step:rank',
+          checkpointAction: 'replay',
+          resumeCursor: {
+            threadId: 'agent-task:101',
+            checkpointId: 321,
+            parentCheckpointId: 320,
+            action: 'replay',
+            stepId: 'rank',
+          },
+          sourceStep: {
+            stepId: 'rank',
+            label: '正在排序候选人',
+            toolName: 'social_match',
+          },
+          stepScope: {
+            mode: 'through_step',
+            stepCount: 3,
+            sourceCheckpointId: 320,
+          },
+          sideEffectPolicy: {
+            idempotencyKey:
+              'agent-checkpoint:replay:agent-task:101:checkpoint:321:step:rank',
+            sideEffectsBeforeResume: 'idempotent_only',
+            duplicatePolicy: 'reuse_idempotency_key',
+          },
+          traceId: 'hidden-runtime-trace',
+          planner: 'hidden-runtime-planner',
+        } as never,
+      },
+      AgentTaskPermissionMode.Confirm,
+    );
+
+    expect(response.runtime).toMatchObject({
+      checkpointId: 321,
+      checkpointType: 'step',
+      canReplay: true,
+      canFork: true,
+      parentCheckpointId: 320,
+      threadId: 'agent-task:101',
+      checkpointAction: 'replay',
+      resumeCursor: {
+        threadId: 'agent-task:101',
+        checkpointId: 321,
+        parentCheckpointId: 320,
+        action: 'replay',
+        stepId: 'rank',
+      },
+      sourceStep: {
+        stepId: 'rank',
+        label: '正在排序候选人',
+        toolName: '匹配步骤',
+      },
+      stepScope: {
+        mode: 'through_step',
+        stepCount: 3,
+        sourceCheckpointId: 320,
+      },
+      sideEffectPolicy: {
+        idempotencyKey:
+          'agent-checkpoint:replay:agent-task:101:checkpoint:321:step:rank',
+        sideEffectsBeforeResume: 'idempotent_only',
+        duplicatePolicy: 'reuse_idempotency_key',
+      },
+    });
+    const serialized = JSON.stringify(response);
+    expect(serialized).not.toContain('hidden-runtime-trace');
+    expect(serialized).not.toContain('hidden-runtime-planner');
+    expect(serialized).not.toContain('social_match');
+  });
+
+  it('keeps generic assistant-ui cards while stripping internal debug fields', () => {
+    const response = toUserFacingAgentResponse(
+      {
+        intent: 'casual_chat',
+        confidence: 1,
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+        shouldSearch: false,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'direct_reply',
+        source: 'rules',
+        action: 'reply',
+        taskId: 101,
+        assistantMessage: '我已经整理好了。',
+        savedContext: true,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: null,
+        queuedRun: null,
+        pendingApproval: null,
+        activityResults: [],
+        profileUpdateProposal: null,
+        cards: [
+          {
+            id: 'generic-summary:101',
+            type: 'safety_boundary',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'generic.card',
+            title: '整理结果',
+            body: '这是一个普通对话结果，不应伪装成社交推荐。',
+            status: 'completed',
+            data: {
+              schemaName: 'GenericResultCard',
+              schemaVersion: 'fitmeet.tool-ui.v1',
+              schemaType: 'generic.card',
+              details: ['只用于消息内展示', '不触发社交工具'],
+              traceId: 'trace-generic',
+              planner: 'hidden planner',
+              rawJson: { debug: true },
+            },
+            actions: [],
+          },
+        ],
+        safety: {
+          blocked: false,
+          level: 'low',
+          reasons: [],
+          boundaryNotes: [],
+          requiredConfirmations: [],
+        },
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      },
+      AgentTaskPermissionMode.Confirm,
+    );
+
+    expect(response.cards[0]).toMatchObject({
+      id: 'generic-summary:101',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'generic.card',
+      data: {
+        schemaName: 'GenericResultCard',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'generic.card',
+      },
+    });
+    const serialized = JSON.stringify(response);
+    expect(serialized).not.toContain('trace-generic');
+    expect(serialized).not.toContain('planner');
+    expect(serialized).not.toContain('rawJson');
   });
 
   it('maps pending approvals to natural pending confirmations', () => {
@@ -331,17 +504,251 @@ describe('toUserFacingAgentResponse', () => {
           taskId: 101,
           proposalId: 77,
           proposedFields: ['lifestyle.availableTimes: 周末下午'],
+          confirmationBoundary: '确认前不会写入长期 Life Graph。',
+          privacyBoundary: '仅保存脱敏画像偏好，不保存私聊原文或精确敏感信息。',
+          revokeHint: '确认后仍可在 Life Graph 中查看、纠正或撤回。',
+          diff: expect.objectContaining({
+            description: '只在你确认后写入长期 Life Graph。',
+            confirmationBoundary: '确认前不会写入长期 Life Graph。',
+            privacyBoundary: '仅保存脱敏画像偏好，不保存私聊原文或精确敏感信息。',
+            sourceSignals: ['用户提到周末下午一般有空'],
+          }),
         }),
         actions: [
           expect.objectContaining({
             schemaAction: 'life_graph.accept_update',
-            payload: { taskId: 101, proposalId: 77 },
+            payload: expect.objectContaining({
+              taskId: 101,
+              proposalId: 77,
+              approvalRequired: true,
+              checkpointRequired: true,
+              resumeMode: 'resume_after_approval',
+              riskLevel: 'low',
+              fieldIds: ['lifestyle:availableTimes:1'],
+            }),
           }),
           expect.objectContaining({
             schemaAction: 'life_graph.reject_update',
-            payload: { taskId: 101, proposalId: 77 },
+            payload: expect.objectContaining({
+              taskId: 101,
+              proposalId: 77,
+              checkpointRequired: true,
+              resumeMode: 'resume_after_rejection',
+              fieldIds: ['lifestyle:availableTimes:1'],
+            }),
           }),
         ],
+      }),
+    ]);
+  });
+
+  it('passes counterpart reply Life Graph writeback proposal as sanitized user-facing data', () => {
+    const response = toUserFacingAgentResponse(
+      {
+        intent: 'social_search',
+        confidence: 1,
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+        shouldSearch: false,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'direct_reply',
+        source: 'rules',
+        action: 'reply',
+        taskId: 101,
+        assistantMessage: '对方回复了，我整理了一条可确认的互动信号。',
+        savedContext: true,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: null,
+        queuedRun: null,
+        pendingApproval: null,
+        activityResults: [],
+        cards: [],
+        profileUpdateProposal: null,
+        lifeGraphWritebackProposal: {
+          schemaVersion: 'fitmeet.life_graph.writeback.v1',
+          source: 'counterpart_reply',
+          status: 'pending_user_confirmation',
+          sensitivityLevel: 'medium',
+          taskId: 101,
+          candidateUserId: 22,
+          conversationId: 'conversation-1',
+          messageId: 'message-2',
+          proposedSignals: [
+            {
+              field: 'meetLoop.counterpartIntent',
+              label: '对方回复意图',
+              value: 'ask_question',
+              confidence: 0.84,
+              traceId: 'hidden-signal-trace',
+            },
+            {
+              field: 'meetLoop.replySummary',
+              label: '脱敏互动摘要',
+              value: '对方询问见面地点。',
+              confidence: 0.76,
+              rawMessage: 'Sure, where should we meet?',
+            },
+          ],
+          confirmationBoundary:
+            '这只是画像更新建议，确认前不会写入长期 Life Graph。',
+          privacyBoundary:
+            '不保存对方私聊原文，只保存脱敏后的互动信号和下一步建议。',
+          revokeHint: '确认后仍可在 Life Graph 中撤回这次影响。',
+          traceId: 'hidden-trace',
+          planner: 'hidden-plan',
+          rawJson: { messageText: 'Sure, where should we meet?' },
+        },
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      },
+      AgentTaskPermissionMode.Confirm,
+    );
+
+    expect(response.lifeGraphWritebackProposal).toMatchObject({
+      schemaVersion: 'fitmeet.life_graph.writeback.v1',
+      source: 'counterpart_reply',
+      status: 'pending_user_confirmation',
+      sensitivityLevel: 'medium',
+      taskId: 101,
+      candidateUserId: 22,
+      conversationId: 'conversation-1',
+      messageId: 'message-2',
+      proposedSignals: [
+        {
+          field: 'meetLoop.counterpartIntent',
+          label: '对方回复意图',
+          value: 'ask_question',
+          confidence: 0.84,
+        },
+        {
+          field: 'meetLoop.replySummary',
+          label: '脱敏互动摘要',
+          value: '对方询问见面地点。',
+          confidence: 0.76,
+        },
+      ],
+      confirmationBoundary:
+        '这只是画像更新建议，确认前不会写入长期 Life Graph。',
+      privacyBoundary:
+        '不保存对方私聊原文，只保存脱敏后的互动信号和下一步建议。',
+      revokeHint: '确认后仍可在 Life Graph 中撤回这次影响。',
+    });
+
+    const serialized = JSON.stringify(response);
+    expect(serialized).not.toContain('hidden-trace');
+    expect(serialized).not.toContain('hidden-plan');
+    expect(serialized).not.toContain('hidden-signal-trace');
+    expect(serialized).not.toContain('rawJson');
+    expect(serialized).not.toContain('Sure, where should we meet?');
+  });
+
+  it('marks conflicting Life Graph proposals as explicit user-overrides only on the accept action', () => {
+    const response = toUserFacingAgentResponse(
+      {
+        intent: 'profile_enrichment',
+        confidence: 1,
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+        shouldSearch: false,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'direct_reply',
+        source: 'rules',
+        action: 'answer',
+        taskId: 101,
+        assistantMessage: '我发现这条画像和之前记录有冲突，需要你确认。',
+        savedContext: true,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: null,
+        queuedRun: null,
+        pendingApproval: null,
+        activityResults: [],
+        cards: [],
+        profileUpdateProposal: {
+          proposalId: 88,
+          userId: 7,
+          taskId: 101,
+          messageId: null,
+          status: LifeGraphProposalStatus.Proposed,
+          aiSummary: '周末下午偏好和旧记录冲突。',
+          confirmationRequired: true,
+          createdAt: new Date(0).toISOString(),
+          confirmedAt: null,
+          rejectedAt: null,
+          missingFields: [],
+          proposedFields: [
+            {
+              proposalFieldId: 'lifestyle:availableTimes:conflict',
+              category: LifeGraphFieldCategory.Lifestyle,
+              fieldKey: 'availableTimes',
+              fieldValue: ['周末下午'],
+              source: LifeGraphFieldSource.AiInferred,
+              confidence: 0.86,
+              reason: '用户这次明确说周末下午方便',
+              requiresUserConfirmation: true,
+              status: 'conflict',
+              conflict: true,
+              oldValue: ['工作日晚上'],
+            },
+          ],
+        },
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      },
+      AgentTaskPermissionMode.Confirm,
+    );
+
+    const card = response.cards[0];
+    expect(card.data).toMatchObject({
+      conflicts: ['lifestyle.availableTimes: 工作日晚上 -> 周末下午'],
+      sensitivityLevel: 'medium',
+      confirmationBoundary:
+        '确认保存表示你允许这次提案覆盖冲突的旧画像；拒绝则不会写入。',
+      privacyBoundary: '仅保存脱敏画像偏好，不保存私聊原文或精确敏感信息。',
+      diff: expect.objectContaining({
+        current: 'lifestyle.availableTimes: 工作日晚上 -> 周末下午',
+        conflicts: ['lifestyle.availableTimes: 工作日晚上 -> 周末下午'],
+        sensitivityLevel: 'medium',
+        confirmationBoundary:
+          '确认保存表示你允许这次提案覆盖冲突的旧画像；拒绝则不会写入。',
+        sourceSignals: ['用户这次明确说周末下午方便'],
+      }),
+    });
+    expect(card.actions).toEqual([
+      expect.objectContaining({
+        schemaAction: 'life_graph.accept_update',
+        payload: expect.objectContaining({
+          proposalId: 88,
+          fieldIds: ['lifestyle:availableTimes:conflict'],
+          approvalRequired: true,
+          checkpointRequired: true,
+          resumeMode: 'resume_after_approval',
+          riskLevel: 'medium',
+          allowConflicts: true,
+        }),
+      }),
+      expect.objectContaining({
+        schemaAction: 'life_graph.reject_update',
+        payload: expect.objectContaining({
+          taskId: 101,
+          proposalId: 88,
+          checkpointRequired: true,
+          resumeMode: 'resume_after_rejection',
+          fieldIds: ['lifestyle:availableTimes:conflict'],
+        }),
       }),
     ]);
   });

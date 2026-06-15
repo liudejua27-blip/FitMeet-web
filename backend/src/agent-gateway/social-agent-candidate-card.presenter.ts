@@ -12,6 +12,7 @@ import { buildCandidateEmotionalInsight } from './social-agent-candidate-emotion
 import { buildCandidateMatchedSignals } from './social-agent-candidate-display-fields';
 import { buildCandidateIdentityFields } from './social-agent-candidate-identity-fields';
 import type { CandidatePoolCandidate } from './social-agent-candidate-pool.service';
+import type { CandidatePoolResolvedQuery } from './social-agent-candidate-pool-query';
 import type { CandidatePoolSource } from './social-agent-candidate-pool-activity-result';
 import { candidateDataQuality } from './social-agent-candidate-profile-presenter';
 import {
@@ -40,6 +41,7 @@ export function buildCandidatePoolCandidate(input: {
   publicIntentId: string | null;
   socialRequestId: number | null;
   activityId: number | null;
+  query?: Pick<CandidatePoolResolvedQuery, 'acceptsStrangers'> | null;
   lifeGraphSignals?: LifeGraphUnifiedMatchSignalsDto | null;
   sceneRisk: CandidateCardSceneRisk;
   candidateExplanation: Pick<CandidateExplanationService, 'explain'>;
@@ -109,6 +111,23 @@ function buildCandidatePoolCandidateCard(input: {
   highRisk: boolean;
 }): CandidatePoolCandidate {
   const suggestedOpener = input.explanation.suggestedOpener;
+  const relationshipGoal = firstVisibleProfileText(
+    input.input.profile?.relationshipGoals,
+    input.input.lifeGraphSignals?.socialIntentSignals?.relationshipGoal,
+  );
+  const idealType = firstVisibleProfileText(
+    input.input.profile?.wantToMeet,
+    input.input.profile?.preferredTraits,
+    input.input.lifeGraphSignals?.socialIntentSignals?.wantToMeet,
+    input.input.lifeGraphSignals?.socialIntentSignals?.preferredTraits,
+  );
+  const invitePolicy =
+    input.input.profile?.agentCanStartChatAfterApproval === true
+      ? '仅在你确认后，由 Agent 发送站内邀请'
+      : '先生成开场白，你确认后再决定是否邀请';
+  const strangerPolicyLabel = candidateStrangerPolicyLabel(
+    input.input.query?.acceptsStrangers,
+  );
   return {
     source: input.input.source,
     isRealData: true,
@@ -148,12 +167,35 @@ function buildCandidatePoolCandidateCard(input: {
       riskWarnings: input.riskWarnings,
     }),
     nextAction: input.explanation.nextActionSuggestion,
+    recommendationConsent: {
+      profileDiscoverable: input.input.profile?.profileDiscoverable === true,
+      agentCanRecommendMe: input.input.profile?.agentCanRecommendMe === true,
+      sourceLabel:
+        input.input.source === 'profile_candidate'
+          ? '公开可发现且已允许 Agent 推荐'
+          : '来自公开社交意图',
+      privacyLabel: '资料已脱敏，不展示手机号、精确位置或私聊内容',
+      strangerPolicyLabel,
+    },
+    relationshipGoal,
+    idealType,
+    invitePolicy,
+    coldStartSignals: [
+      input.input.city ? `同城：${input.input.city}` : '',
+      strangerPolicyLabel,
+      input.input.commonTags.length
+        ? `共同兴趣：${input.input.commonTags.slice(0, 2).join('、')}`
+        : '',
+      input.dynamicExplanation.dynamicSignalReasons[0] ?? '',
+      input.dynamicExplanation.boundaryNotes[0] ?? '',
+    ].filter(Boolean),
     whyYouMayLike: input.dynamicExplanation.whyYouMayLike,
     whyNow: input.dynamicExplanation.whyNow,
     matchPoints: input.dynamicExplanation.matchPoints,
     boundaryNotes: input.dynamicExplanation.boundaryNotes,
     openerStrategy: input.dynamicExplanation.openerStrategy,
     dynamicSignalReasons: input.dynamicExplanation.dynamicSignalReasons,
+    preferenceHistorySignals: input.dynamicExplanation.preferenceHistoryReasons,
     continuousFilterHints: input.dynamicExplanation.continuousFilterHints,
     candidateExplanation: input.explanation,
     emotionalInsight: buildCandidateEmotionalInsight({
@@ -162,4 +204,24 @@ function buildCandidatePoolCandidateCard(input: {
     }),
     lifeGraphExplanation: input.explanation.lifeGraphExplanation,
   };
+}
+
+function candidateStrangerPolicyLabel(value: boolean | null | undefined): string {
+  if (value === true) return '你已同意查看公开可发现的陌生人机会';
+  if (value === false) return '你不接受陌生人，本次不会推荐陌生人';
+  return '仅展示公开可发现且已授权推荐的资料';
+}
+
+function firstVisibleProfileText(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const text = typeof item === 'string' ? item.trim() : '';
+        if (text) return text;
+      }
+      continue;
+    }
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
 }

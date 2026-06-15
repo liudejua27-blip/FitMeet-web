@@ -33,6 +33,18 @@ export interface SocialAgentVisibleStep {
   id: string;
   label: string;
   status: 'pending' | 'running' | 'done' | 'failed';
+  detail?: string;
+  kind?: string;
+  agentName?: string | null;
+  toolName?: string | null;
+  snapshot?: SocialAgentVisibleStepSnapshot;
+}
+
+export interface SocialAgentVisibleStepSnapshot {
+  schemaVersion: 'fitmeet.step-snapshot.v1';
+  observation: string[];
+  critique: string;
+  result: string;
 }
 
 export interface SocialAgentChatCandidate {
@@ -91,12 +103,19 @@ export interface SocialAgentChatRunResult {
         mode: 'draft';
         card?: Record<string, unknown>;
         profileUsed?: Record<string, unknown>;
+        visibilityConsent?: boolean;
+        autoPublished?: boolean;
+        publicIntentId?: string | null;
+        discoverHref?: string | null;
+        publishPolicy?: string | null;
+        publishBlockedReason?: string | null;
       })
     | null;
   candidates: SocialAgentChatCandidate[];
   approvalRequiredActions: Array<Record<string, unknown>>;
   events: Array<Record<string, unknown>>;
   cards?: FitMeetAlphaCard[];
+  lifeGraphWritebackProposal?: Record<string, unknown> | null;
   safety?: FitMeetAgentSafety;
   traceId?: string;
   agentTrace?: FitMeetAgentTrace;
@@ -104,7 +123,44 @@ export interface SocialAgentChatRunResult {
   assistantStreamed?: boolean;
   agentLoop?: AgentLoopRun;
   subagentHandoffs?: SubagentHandoffResult[];
+  runtime?: {
+    checkpointId?: number | null;
+    checkpointType?: string | null;
+    canResume?: boolean;
+    canReplay?: boolean;
+    canFork?: boolean;
+    parentCheckpointId?: number | null;
+    threadId?: string | null;
+    idempotencyKey?: string | null;
+    checkpointAction?: 'resume' | 'retry' | 'replay' | 'fork' | null;
+    resumeCursor?: {
+      threadId?: string | null;
+      checkpointId?: number | string | null;
+      parentCheckpointId?: number | string | null;
+      action?: 'resume' | 'retry' | 'replay' | 'fork' | null;
+      stepId?: string | null;
+    } | null;
+    sourceStep?: {
+      stepId: string;
+      label: string | null;
+      toolName: string | null;
+    } | null;
+    stepScope?: {
+      mode: 'full_checkpoint' | 'through_step';
+      stepCount: number;
+      sourceCheckpointId: number | null;
+    } | null;
+    sideEffectPolicy?: {
+      idempotencyKey: string;
+      sideEffectsBeforeResume: 'idempotent_only';
+      duplicatePolicy: 'reuse_idempotency_key';
+    } | null;
+  };
 }
+
+export type SocialAgentRuntimeResumeMetadata = NonNullable<
+  SocialAgentChatRunResult['runtime']
+>;
 
 export type SocialAgentChatStreamEvent =
   | { type: 'task'; taskId: number; status: AgentTaskStatus }
@@ -141,6 +197,45 @@ export type SocialAgentChatRunBody = {
     timezone?: string | null;
     locale?: string | null;
     source?: string | null;
+    threadId?: string | null;
+    checkpointId?: number | null;
+    parentCheckpointId?: number | null;
+    resumeCursor?: {
+      threadId: string;
+      checkpointId: number;
+      parentCheckpointId: number | null;
+      action: 'resume' | 'retry' | 'replay' | 'fork';
+      stepId?: string | null;
+    } | null;
+    stepId?: string | null;
+    sourceCheckpointId?: number | null;
+    sourceStepId?: string | null;
+    sourceStep?: {
+      stepId: string;
+      label: string | null;
+      toolName: string | null;
+    } | null;
+    stepScope?: {
+      mode: 'full_checkpoint' | 'through_step';
+      stepCount: number;
+      sourceCheckpointId: number | null;
+    } | null;
+    sideEffectPolicy?: {
+      idempotencyKey: string;
+      sideEffectsBeforeResume: 'idempotent_only';
+      duplicatePolicy: 'reuse_idempotency_key';
+    } | null;
+    resumeMode?:
+      | 'resume'
+      | 'resume_after_approval'
+      | 'resume_after_rejection'
+      | 'retry'
+      | 'replay'
+      | 'fork'
+      | null;
+    resumeIdempotencyKey?: string | null;
+    checkpointAction?: 'resume' | 'retry' | 'replay' | 'fork' | null;
+    decision?: 'approved' | 'rejected' | null;
   } | null;
 };
 
@@ -159,6 +254,45 @@ export type SocialAgentRouteMessageBody = {
     timezone?: string | null;
     locale?: string | null;
     source?: string | null;
+    threadId?: string | null;
+    checkpointId?: number | null;
+    parentCheckpointId?: number | null;
+    resumeCursor?: {
+      threadId: string;
+      checkpointId: number;
+      parentCheckpointId: number | null;
+      action: 'resume' | 'retry' | 'replay' | 'fork';
+      stepId?: string | null;
+    } | null;
+    stepId?: string | null;
+    sourceCheckpointId?: number | null;
+    sourceStepId?: string | null;
+    sourceStep?: {
+      stepId: string;
+      label: string | null;
+      toolName: string | null;
+    } | null;
+    stepScope?: {
+      mode: 'full_checkpoint' | 'through_step';
+      stepCount: number;
+      sourceCheckpointId: number | null;
+    } | null;
+    sideEffectPolicy?: {
+      idempotencyKey: string;
+      sideEffectsBeforeResume: 'idempotent_only';
+      duplicatePolicy: 'reuse_idempotency_key';
+    } | null;
+    resumeMode?:
+      | 'resume'
+      | 'resume_after_approval'
+      | 'resume_after_rejection'
+      | 'retry'
+      | 'replay'
+      | 'fork'
+      | null;
+    resumeIdempotencyKey?: string | null;
+    checkpointAction?: 'resume' | 'retry' | 'replay' | 'fork' | null;
+    decision?: 'approved' | 'rejected' | null;
   } | null;
 };
 
@@ -200,6 +334,7 @@ export interface SocialAgentIntentRouteResult {
   pendingApproval?: SocialAgentPendingApprovalSnapshot | null;
   activityResults?: SocialAgentActivityResult[];
   profileUpdateProposal?: LifeGraphProposalDto | null;
+  lifeGraphWritebackProposal?: Record<string, unknown> | null;
   cards?: FitMeetAlphaCard[];
   safety?: FitMeetAgentSafety;
   permissionMode?: AgentTaskPermissionMode;
@@ -209,6 +344,7 @@ export interface SocialAgentIntentRouteResult {
   assistantStreamed?: boolean;
   agentLoop?: AgentLoopRun;
   subagentHandoffs?: SubagentHandoffResult[];
+  runtime?: SocialAgentRuntimeResumeMetadata;
 }
 
 export interface SocialAgentPendingApprovalSnapshot {

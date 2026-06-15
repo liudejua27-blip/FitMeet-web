@@ -10,6 +10,7 @@ import { AgentApprovalDispatcherService } from './agent-approval-dispatcher.serv
 import { AgentSelfImproveService } from './agent-self-improve.service';
 import { ActivitiesModule } from '../activities/activities.module';
 import { SocialAgentAutopilotController } from './social-agent-autopilot.controller';
+import { SocialAgentReminderController } from './social-agent-reminder.controller';
 import { AgentSelfImproveController } from './agent-self-improve.controller';
 import { AgentL5RuntimeController } from './agent-l5-runtime.controller';
 import { SocialAgentChatController } from './social-agent-chat.controller';
@@ -40,6 +41,7 @@ import { AgentActivityLog } from './entities/agent-activity-log.entity';
 import { AgentActionLog } from './entities/agent-action-log.entity';
 import { PaymentIntent } from './entities/payment-intent.entity';
 import { AgentTask, AgentTaskEvent } from './entities/agent-task.entity';
+import { AgentRunCheckpoint } from './entities/agent-run-checkpoint.entity';
 import {
   AgentEvalCase,
   AgentReflectionRun,
@@ -125,12 +127,21 @@ import { SocialAgentChatTurnFacadeService } from './social-agent-chat-turn-facad
 import { SocialAgentChatTurnCallbacksService } from './social-agent-chat-turn-callbacks.service';
 import { SocialAgentChatRunFacadeService } from './social-agent-chat-run-facade.service';
 import { SocialAgentChatSessionFacadeService } from './social-agent-chat-session-facade.service';
+import { SocialAgentMessageFeedbackService } from './social-agent-message-feedback.service';
+import { SocialAgentReminderService } from './social-agent-reminder.service';
+import { SocialAgentThreadService } from './social-agent-thread.service';
+import { AgentRunCheckpointService } from './agent-run-checkpoint.service';
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentMetricsController } from './social-agent-metrics.controller';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentLongTermMemory } from './entities/social-agent-long-term-memory.entity';
+import { SocialAgentMessageFeedback } from './entities/social-agent-message-feedback.entity';
+import {
+  SocialAgentReminder,
+  SocialAgentReminderPreference,
+} from './entities/social-agent-reminder.entity';
 import { SocialAgentRagService } from './social-agent-rag.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { SocialAgentRouteCandidateConfirmationService } from './social-agent-route-candidate-confirmation.service';
@@ -142,6 +153,7 @@ import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-t
 import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
 import { SocialAgentRouteDecisionService } from './social-agent-route-decision.service';
 import { SocialAgentRouteAgentLoopRunnerService } from './social-agent-route-agent-loop-runner.service';
+import { SocialAgentProfileGateService } from './social-agent-profile-gate.service';
 import { SocialAgentStreamingResponseService } from './social-agent-streaming-response.service';
 import { SocialAgentTargetResolverService } from './social-agent-target-resolver.service';
 import { AgentWebhookService } from './agent-webhook.service';
@@ -219,6 +231,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
       PaymentIntent,
       AgentTask,
       AgentTaskEvent,
+      AgentRunCheckpoint,
       AgentReflectionRun,
       AgentSkillPatch,
       AgentEvalCase,
@@ -247,6 +260,9 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
       AiMatchSession,
       UserSocialProfile,
       SocialAgentLongTermMemory,
+      SocialAgentMessageFeedback,
+      SocialAgentReminderPreference,
+      SocialAgentReminder,
       User,
       SocialActivity,
     ]),
@@ -331,6 +347,10 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentChatTurnFacadeService,
     SocialAgentChatRunFacadeService,
     SocialAgentChatSessionFacadeService,
+    SocialAgentMessageFeedbackService,
+    SocialAgentReminderService,
+    SocialAgentThreadService,
+    AgentRunCheckpointService,
     SocialAgentChatService,
     FitMeetAgentRuntimeService,
     SocialAgentCandidatePoolService,
@@ -344,6 +364,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentRouteEntranceService,
     SocialAgentRouteProfileTurnService,
     SocialAgentRouteSearchTurnService,
+    SocialAgentProfileGateService,
     SocialAgentRouteActionTurnService,
     SocialAgentRouteDecisionService,
     SocialAgentRouteAgentLoopRunnerService,
@@ -378,6 +399,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     PublicSocialIntentController,
     PublicSocialSkillsController,
     SocialAgentAutopilotController,
+    SocialAgentReminderController,
     AgentSelfImproveController,
     AgentL5RuntimeController,
     SocialAgentChatController,
@@ -433,6 +455,9 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentRunStateService,
     SocialAgentSessionRestoreService,
     SocialAgentMessageLogService,
+    SocialAgentMessageFeedbackService,
+    SocialAgentThreadService,
+    AgentRunCheckpointService,
     SocialAgentTaskLifecycleService,
     SocialAgentMainAgentTurnEventsService,
     SocialAgentMainAgentTurnResultService,

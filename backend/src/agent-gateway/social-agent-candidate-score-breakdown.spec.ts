@@ -6,8 +6,10 @@ import {
   buildPublicIntentCandidateScoreBreakdown,
   candidateLifeRhythmScore,
   candidateRelationshipGoalScore,
+  candidateSocialBoundaryScore,
   candidateSafetyRiskScore,
   candidateSocialEnergyScore,
+  publicIntentSocialBoundaryScore,
 } from './social-agent-candidate-score-breakdown';
 import type { CandidatePoolResolvedQuery } from './social-agent-candidate-pool-query';
 
@@ -25,6 +27,7 @@ function query(
     locationPreference: '',
     socialRequestId: 101,
     rawText: '周末找青岛低压力跑步搭子',
+    acceptsStrangers: null,
     ...overrides,
   };
 }
@@ -83,6 +86,7 @@ describe('candidate score breakdown', () => {
       interestSimilarity: 10,
       lifeRhythm: 10,
       socialEnergy: 8,
+      socialBoundaryFit: 5,
       relationshipGoal: 9,
       trustworthiness: 9,
       safetyRisk: 6,
@@ -108,6 +112,7 @@ describe('candidate score breakdown', () => {
       interestSimilarity: 10,
       lifeRhythm: 7,
       socialEnergy: 5,
+      socialBoundaryFit: 6,
       relationshipGoal: 9,
       trustworthiness: 8,
       safetyRisk: 6,
@@ -119,6 +124,24 @@ describe('candidate score breakdown', () => {
     expect(
       candidateSocialEnergyScore(profile({ socialStyle: '慢热' }), null),
     ).toBe(6);
+    expect(
+      candidateSocialBoundaryScore(
+        query({ acceptsStrangers: true }),
+        profile({
+          openness: '愿意认识新朋友，但希望低压力开始',
+          relationshipGoals: ['运动搭子'],
+        }),
+        null,
+      ),
+    ).toBe(8);
+    expect(
+      candidateSocialBoundaryScore(
+        query({ acceptsStrangers: true }),
+        profile({ openness: '只熟人，不接受陌生人' }),
+        null,
+      ),
+    ).toBe(1);
+    expect(publicIntentSocialBoundaryScore(query({ acceptsStrangers: true }))).toBe(8);
     expect(candidateRelationshipGoalScore(query(), ['跑步'])).toBe(9);
     expect(candidateSafetyRiskScore('critical')).toBe(0);
     expect(candidateSafetyRiskScore('high')).toBe(3);

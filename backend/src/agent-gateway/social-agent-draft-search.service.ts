@@ -10,6 +10,7 @@ import {
   buildSocialAgentRequestDraft,
   toSocialAgentChatCandidate,
   toSocialAgentDraftDto,
+  toSocialAgentPublishDto,
 } from './social-agent-chat-result.presenter';
 import type {
   SocialAgentCandidateSearchResult,
@@ -20,6 +21,7 @@ import {
   SocialAgentToolExecutorService,
   SocialAgentToolName,
 } from './social-agent-tool-executor.service';
+import { readSocialAgentTaskMemory } from './social-agent-memory.util';
 
 @Injectable()
 export class SocialAgentDraftSearchService {
@@ -130,15 +132,90 @@ export class SocialAgentDraftSearchService {
     return socialRequestId;
   }
 
+  async autoPublishDraftIfAllowed(
+    task: AgentTask,
+    draft: SocialAgentRequestDraft,
+  ): Promise<SocialAgentDraftAutoPublishResult> {
+    const gate = this.evaluateAutoPublishGate(task, draft);
+    if (!gate.allowed) {
+      return {
+        autoPublished: false,
+        synced: false,
+        publicIntentId: null,
+        discoverHref: null,
+        publishPolicy: gate.publishPolicy,
+        blockedReason: gate.reason,
+      };
+    }
+
+    if (!draft.socialRequestId) {
+      return {
+        autoPublished: false,
+        synced: false,
+        publicIntentId: null,
+        discoverHref: null,
+        publishPolicy: 'blocked_missing_social_request_id',
+        blockedReason: 'missing_social_request_id',
+      };
+    }
+
+    const call = await this.executor.executeToolAction(
+      task.id,
+      SocialAgentToolName.CreateSocialRequest,
+      {
+        ...toSocialAgentPublishDto(task.id, draft),
+        socialRequestId: draft.socialRequestId,
+        mode: 'publish',
+        publish: true,
+        syncPublicIntent: true,
+        metadata: {
+          ...(draft.metadata ?? {}),
+          socialRequestId: draft.socialRequestId,
+          agentTaskId: task.id,
+          source: 'social_agent_chat',
+          visibilityConsent: true,
+          autoPublished: true,
+          publishPolicy: 'auto_after_first_public_authorization',
+          confirmationSource: 'minimum_profile_gate_public_authorization',
+        },
+      },
+      task.ownerUserId,
+    );
+
+    if (call.status !== 'succeeded') {
+      return {
+        autoPublished: false,
+        synced: false,
+        publicIntentId: null,
+        discoverHref: null,
+        publishPolicy: 'auto_publish_failed_keep_private_draft',
+        blockedReason: cleanDisplayText(call.error?.message, 'publish_failed'),
+      };
+    }
+
+    const output = this.isRecord(call.output) ? call.output : {};
+    const publicIntentId = cleanDisplayText(output.publicIntentId, '') || null;
+    return {
+      autoPublished: Boolean(publicIntentId),
+      synced: output.synced === true,
+      publicIntentId,
+      discoverHref: publicIntentId ? `/public-intent/${publicIntentId}` : null,
+      publishPolicy: 'auto_after_first_public_authorization',
+      blockedReason: null,
+    };
+  }
+
   async searchCandidates(
     task: AgentTask,
     draft: SocialAgentRequestDraft,
   ): Promise<SocialAgentCandidateSearchResult> {
+    const safetyPolicy = buildCandidateSearchSafetyPolicy(task, draft);
     const input = draft.socialRequestId
       ? {
           socialRequestId: draft.socialRequestId,
           rawText: draft.rawText,
           limit: 10,
+          safetyPolicy,
         }
       : {
           city: sanitizeCity(draft.city),
@@ -150,6 +227,7 @@ export class SocialAgentDraftSearchService {
           safetyRequirement: draft.safetyRequirement,
           rawText: draft.rawText,
           limit: 10,
+          safetyPolicy,
         };
     const call = await this.executor.executeToolAction(
       task.id,
@@ -207,4 +285,110 @@ export class SocialAgentDraftSearchService {
     const num = Number(value);
     return Number.isFinite(num) && num > 0 ? num : null;
   }
+
+  private evaluateAutoPublishGate(
+    task: AgentTask,
+    draft: SocialAgentRequestDraft,
+  ): {
+    allowed: boolean;
+    publishPolicy: string;
+    reason: string | null;
+  } {
+    const memory = readSocialAgentTaskMemory(task);
+    const text = [
+      draft.rawText,
+      draft.title,
+      draft.description,
+      draft.city,
+      draft.activityType,
+      ...(Array.isArray(draft.interestTags) ? draft.interestTags : []),
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const hasPublicConsent =
+      draft.metadata?.visibilityConsent === true ||
+      draft.metadata?.publicActivityAllowed === true ||
+      memory.boundaries.publicActivityAllowed === true ||
+      containsPublicPublishConsent(text);
+    if (!hasPublicConsent) {
+      return {
+        allowed: false,
+        publishPolicy: 'requires_user_confirmation',
+        reason: 'missing_public_visibility_consent',
+      };
+    }
+
+    if (containsSensitivePublishInfo(text)) {
+      return {
+        allowed: false,
+        publishPolicy: 'requires_confirmation_sensitive_content',
+        reason: 'sensitive_or_precise_info_detected',
+      };
+    }
+
+    return {
+      allowed: true,
+      publishPolicy: 'auto_after_first_public_authorization',
+      reason: null,
+    };
+  }
+}
+
+export type SocialAgentDraftAutoPublishResult = {
+  autoPublished: boolean;
+  synced: boolean;
+  publicIntentId: string | null;
+  discoverHref: string | null;
+  publishPolicy: string;
+  blockedReason: string | null;
+};
+
+function containsPublicPublishConsent(text: string): boolean {
+  return /(可以|愿意|同意|授权|允许).{0,8}(公开|发现页|公开发起|公开活动|发布到发现|同步到发现)/i.test(
+    text,
+  );
+}
+
+function containsSensitivePublishInfo(text: string): boolean {
+  return /(\b1[3-9]\d{9}\b|微信|vx|wechat|手机号|电话|身份证|门牌|单元|楼栋|具体地址|精确位置|联系方式|加我|私聊我|转账|支付|红包)/i.test(
+    text,
+  );
+}
+
+function buildCandidateSearchSafetyPolicy(
+  task: AgentTask,
+  draft: SocialAgentRequestDraft,
+) {
+  return {
+    policyVersion: 'fitmeet.candidate-search.v1',
+    source: 'social_agent_chat',
+    taskId: task.id,
+    socialRequestId: draft.socialRequestId ?? null,
+    candidateEligibility: {
+      profileDiscoverable: true,
+      agentCanRecommendMe: true,
+      publicOrAuthorizedSourceOnly: true,
+      excludeBlockedUsers: true,
+      excludeComplaintRisk: true,
+      excludeUnsafeMeetRisk: true,
+    },
+    privacy: {
+      redactPreciseLocation: true,
+      redactContactInfo: true,
+      exposeOnlyPublicProfileFields: true,
+      noPrivateLifeGraphLeakage: true,
+    },
+    rankingSignals: [
+      'city_or_distance',
+      'interests',
+      'time_overlap',
+      'social_boundary',
+      'activity_intensity',
+      'relationship_goal',
+      'public_life_graph_preferences',
+    ],
+    sideEffectPolicy: 'search_only_no_contact_without_approval',
+    approvalPolicy:
+      'send_message_add_friend_connect_create_activity_publish_require_checkpoint',
+  };
 }

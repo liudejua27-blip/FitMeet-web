@@ -136,7 +136,29 @@ describe('social agent tool policy', () => {
       [SocialAgentToolName.Payment, {}],
       [SocialAgentToolName.PublishSocialRequest, {}],
       [SocialAgentToolName.CreateSocialRequest, { publish: true }],
+      [SocialAgentToolName.CreateSocialRequest, { publish: 'true' }],
+      [SocialAgentToolName.CreateSocialRequest, { isPublic: true }],
+      [SocialAgentToolName.CreateSocialRequest, { public: true }],
       [SocialAgentToolName.CreateSocialRequest, { mode: 'public' }],
+      [SocialAgentToolName.CreateSocialRequest, { visibility: 'public' }],
+      [SocialAgentToolName.CreateSocialRequest, { audience: 'everyone' }],
+      [SocialAgentToolName.CreateSocialRequest, { publiclyVisible: true }],
+      [SocialAgentToolName.CreateSocialRequest, { discoverable: true }],
+      [SocialAgentToolName.CreateSocialRequest, { profileDiscoverable: true }],
+      [SocialAgentToolName.CreateSocialRequest, { agentCanRecommendMe: true }],
+      [SocialAgentToolName.CreateSocialRequest, { agentMatchingEnabled: true }],
+      [SocialAgentToolName.CreateSocialRequest, { recommendationOptIn: true }],
+      [
+        SocialAgentToolName.CreateSocialRequest,
+        { strangerRecommendationOptIn: true },
+      ],
+      [SocialAgentToolName.CreateSocialRequest, { publicIntentEnabled: true }],
+      [SocialAgentToolName.CreateSocialRequest, { visibility: 'discoverable' }],
+      [SocialAgentToolName.CreateSocialRequest, { discoverability: 'recommendable' }],
+      [
+        SocialAgentToolName.CreateSocialRequest,
+        { mode: 'public_discoverable' },
+      ],
       [
         SocialAgentToolName.UpdateAiProfileFromAnswers,
         { fields: { privacyBoundary: '仅熟人可见' } },
@@ -144,6 +166,38 @@ describe('social agent tool policy', () => {
       [
         SocialAgentToolName.UpdateProfileFromAgentContext,
         { patch: { phone: '15253005312' } },
+      ],
+      [
+        SocialAgentToolName.UpdateProfileFromAgentContext,
+        { patch: { profileDiscoverable: true, agentCanRecommendMe: true } },
+      ],
+      [
+        SocialAgentToolName.UpdateProfileFromAgentContext,
+        { patch: { profile_discoverable: true, agent_can_recommend_me: true } },
+      ],
+      [
+        SocialAgentToolName.UpdateProfileFromAgentContext,
+        { patch: { 'share-precise-location': true } },
+      ],
+      [
+        SocialAgentToolName.UpdateAiProfileFromAnswers,
+        { answers: [{ field: 'visibility', value: 'public' }] },
+      ],
+      [
+        SocialAgentToolName.UpdateAiProfileFromAnswers,
+        { answers: [{ field: 'privacy_boundary', value: '不公开联系方式' }] },
+      ],
+      [
+        SocialAgentToolName.UpdateAiProfileFromAnswers,
+        { answers: [{ path: ['visibility', 'agent_can_recommend_me'], value: true }] },
+      ],
+      [
+        SocialAgentToolName.UpdateAiProfileFromAnswers,
+        { metadata: { strangerRecommendationOptIn: true } },
+      ],
+      [
+        SocialAgentToolName.UpdateAiProfileFromAnswers,
+        { metadata: { stranger_recommendation_opt_in: true } },
       ],
     ];
 
@@ -158,6 +212,18 @@ describe('social agent tool policy', () => {
       requiresMandatorySocialAgentApproval(
         SocialAgentToolName.CreateSocialRequest,
         { mode: 'draft' },
+      ),
+    ).toBe(false);
+    expect(
+      requiresMandatorySocialAgentApproval(
+        SocialAgentToolName.CreateSocialRequest,
+        { visibility: 'private' },
+      ),
+    ).toBe(false);
+    expect(
+      requiresMandatorySocialAgentApproval(
+        SocialAgentToolName.CreateSocialRequest,
+        { mode: 'draft', city: '青岛', activityType: '羽毛球' },
       ),
     ).toBe(false);
   });

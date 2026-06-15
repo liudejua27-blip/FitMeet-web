@@ -67,6 +67,7 @@ export interface UserMemorySummaryDoc {
   kind: 'user_memory_summary';
   userId: number;
   preferencesSummary: string;
+  preferenceHistorySummary: string;
   boundariesSummary: string;
   activitySummary: string;
   matchSignalSummary: string;
@@ -380,6 +381,14 @@ function summariseSnapshot(
       `偏好特质：${snapshot.preferences.preferredTraits.slice(0, 5).join('、')}`,
     );
   }
+  const preferenceHistorySummary = snapshot.preferences.preferenceHistory
+    .filter((item) => item.confirmed)
+    .slice(-5)
+    .map(
+      (item) =>
+        `${displayPreferenceHistoryField(item.field)}:${item.value}（${item.source === 'stable_profile_fact' ? '确认画像' : '任务记忆'}）`,
+    )
+    .join('；');
 
   const boundaryBits: string[] = [];
   if (snapshot.boundaries.noNightMeet) boundaryBits.push('不约夜间见面');
@@ -418,9 +427,29 @@ function summariseSnapshot(
     kind: 'user_memory_summary',
     userId: snapshot.userId,
     preferencesSummary: prefBits.join('；') || '尚未沉淀偏好',
+    preferenceHistorySummary: preferenceHistorySummary || '尚未沉淀偏好变化',
     boundariesSummary: boundaryBits.join('；') || '尚未沉淀边界',
     activitySummary: activityBits.join('；') || '尚未沉淀活动偏好',
     matchSignalSummary: matchBits,
     taskCount: snapshot.taskCount,
   };
+}
+
+function displayPreferenceHistoryField(
+  field: LongTermMemorySnapshot['preferences']['preferenceHistory'][number]['field'],
+): string {
+  switch (field) {
+    case 'interest':
+      return '兴趣';
+    case 'socialStyle':
+      return '社交风格';
+    case 'communicationStyle':
+      return '沟通方式';
+    case 'preferredTrait':
+      return '理想特质';
+    case 'socialGoal':
+      return '社交目标';
+    case 'availability':
+      return '可约时间';
+  }
 }

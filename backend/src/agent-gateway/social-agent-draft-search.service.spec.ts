@@ -183,7 +183,13 @@ describe('SocialAgentDraftSearchService', () => {
       3,
       103,
       SocialAgentToolName.SearchMatches,
-      expect.objectContaining({ socialRequestId: 301 }),
+      expect.objectContaining({
+        socialRequestId: 301,
+        safetyPolicy: expect.objectContaining({
+          policyVersion: 'fitmeet.candidate-search.v1',
+          sideEffectPolicy: 'search_only_no_contact_without_approval',
+        }),
+      }),
       7,
     );
   });
@@ -256,6 +262,38 @@ describe('SocialAgentDraftSearchService', () => {
         socialRequestId: 301,
         rawText: '今晚青岛轻松跑步',
         limit: 10,
+        safetyPolicy: {
+          policyVersion: 'fitmeet.candidate-search.v1',
+          source: 'social_agent_chat',
+          taskId: 101,
+          socialRequestId: 301,
+          candidateEligibility: {
+            profileDiscoverable: true,
+            agentCanRecommendMe: true,
+            publicOrAuthorizedSourceOnly: true,
+            excludeBlockedUsers: true,
+            excludeComplaintRisk: true,
+            excludeUnsafeMeetRisk: true,
+          },
+          privacy: {
+            redactPreciseLocation: true,
+            redactContactInfo: true,
+            exposeOnlyPublicProfileFields: true,
+            noPrivateLifeGraphLeakage: true,
+          },
+          rankingSignals: [
+            'city_or_distance',
+            'interests',
+            'time_overlap',
+            'social_boundary',
+            'activity_intensity',
+            'relationship_goal',
+            'public_life_graph_preferences',
+          ],
+          sideEffectPolicy: 'search_only_no_contact_without_approval',
+          approvalPolicy:
+            'send_message_add_friend_connect_create_activity_publish_require_checkpoint',
+        },
       },
       7,
     );
@@ -293,6 +331,27 @@ describe('SocialAgentDraftSearchService', () => {
         radiusKm: 5,
         rawText: '今晚青岛轻松跑步',
         limit: 10,
+        safetyPolicy: expect.objectContaining({
+          candidateEligibility: expect.objectContaining({
+            profileDiscoverable: true,
+            agentCanRecommendMe: true,
+            excludeBlockedUsers: true,
+            excludeComplaintRisk: true,
+          }),
+          privacy: expect.objectContaining({
+            redactPreciseLocation: true,
+            redactContactInfo: true,
+            noPrivateLifeGraphLeakage: true,
+          }),
+          rankingSignals: expect.arrayContaining([
+            'city_or_distance',
+            'interests',
+            'time_overlap',
+            'social_boundary',
+            'activity_intensity',
+            'relationship_goal',
+          ]),
+        }),
       }),
       7,
     );

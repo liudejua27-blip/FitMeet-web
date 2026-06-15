@@ -32,6 +32,7 @@ describe('social agent candidate pool debug helpers', () => {
         locationPreference: '',
         socialRequestId: 301,
         rawText: '找跑步搭子',
+        acceptsStrangers: null,
       },
       counts: {
         users: 5,
@@ -109,6 +110,7 @@ describe('social agent candidate pool debug helpers', () => {
         locationPreference: '',
         socialRequestId: null,
         rawText: '',
+        acceptsStrangers: null,
       },
       counts: {
         users: 11,

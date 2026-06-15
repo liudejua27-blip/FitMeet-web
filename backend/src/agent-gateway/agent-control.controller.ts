@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -26,6 +27,12 @@ import {
   UpdateAgentPermissionsDto,
 } from './dto/agent-control.dto';
 import type { AgentConnection } from './entities/agent-connection.entity';
+import { AgentRunCheckpointService } from './agent-run-checkpoint.service';
+import type { AgentRunCheckpointAction } from './agent-run-checkpoint.service';
+import {
+  AgentRunCheckpointStatus,
+  type AgentRunCheckpoint,
+} from './entities/agent-run-checkpoint.entity';
 
 interface JwtReq {
   user?: { id: number };
@@ -47,6 +54,7 @@ export class AgentControlController {
     private readonly approvals: AgentApprovalService,
     private readonly dispatcher: AgentApprovalDispatcherService,
     private readonly actionLogs: AgentActionLogService,
+    private readonly checkpoints: AgentRunCheckpointService,
   ) {}
 
   // ── permissions ────────────────────────────────────────────────
@@ -150,6 +158,15 @@ export class AgentControlController {
     const dispatchError = out?.errorMessage ?? result.dispatchError;
     const approval = result.approval;
     const payloadAny = approval.payload ?? {};
+    let resume: Awaited<ReturnType<AgentRunCheckpointService['markDecision']>> =
+      null;
+    let checkpointError: string | undefined;
+    try {
+      resume = await this.checkpoints.markDecision(approval, 'approved');
+    } catch (err) {
+      checkpointError =
+        err instanceof Error ? err.message : 'Checkpoint resume failed';
+    }
     await this.actionLogs.logAgentAction({
       ownerUserId: actor.userId,
       agentId: approval.agentConnectionId ?? actor.agentConnectionId ?? null,
@@ -178,6 +195,16 @@ export class AgentControlController {
         approvalType: approval.type,
         dispatched,
         skipped,
+        schemaAction: this.text(payloadAny.schemaAction),
+        sideEffect: this.text(payloadAny.sideEffect),
+        idempotencyKey: this.text(payloadAny.idempotencyKey),
+        resumeMode: this.text(payloadAny.resumeMode),
+        checkpointRequired: payloadAny.checkpointRequired === true,
+        sourceStepId: this.text(payloadAny.sourceStepId),
+        resumeCursor: resume?.resumeCursor ?? null,
+        resumeCheckpointId: resume?.checkpointId ?? null,
+        resumeIdempotencyKey: resume?.idempotencyKey ?? null,
+        checkpointError,
       },
       reason: 'user_approved_pending_action',
     });
@@ -189,6 +216,8 @@ export class AgentControlController {
       skipped,
       result: out?.result,
       dispatchError,
+      resume,
+      checkpointError,
     };
   }
 
@@ -207,6 +236,15 @@ export class AgentControlController {
     const actor = this.resolveActor(req);
     const row = await this.approvals.reject(id, actor.userId);
     const payloadAny = row.payload ?? {};
+    let resume: Awaited<ReturnType<AgentRunCheckpointService['markDecision']>> =
+      null;
+    let checkpointError: string | undefined;
+    try {
+      resume = await this.checkpoints.markDecision(row, 'rejected');
+    } catch (err) {
+      checkpointError =
+        err instanceof Error ? err.message : 'Checkpoint resume failed';
+    }
     await this.actionLogs.logAgentAction({
       ownerUserId: actor.userId,
       agentId: row.agentConnectionId ?? actor.agentConnectionId ?? null,
@@ -227,10 +265,26 @@ export class AgentControlController {
         approvalId: row.id,
         agentTaskId: row.agentTaskId,
         approvalType: row.type,
+        schemaAction: this.text(payloadAny.schemaAction),
+        sideEffect: this.text(payloadAny.sideEffect),
+        idempotencyKey: this.text(payloadAny.idempotencyKey),
+        resumeMode: this.text(payloadAny.resumeMode),
+        checkpointRequired: payloadAny.checkpointRequired === true,
+        sourceStepId: this.text(payloadAny.sourceStepId),
+        resumeCursor: resume?.resumeCursor ?? null,
+        resumeCheckpointId: resume?.checkpointId ?? null,
+        resumeIdempotencyKey: resume?.idempotencyKey ?? null,
+        checkpointError,
       },
       reason: 'user_rejected_pending_action',
     });
-    return { ok: true, approvalId: id, status: row.status };
+    return {
+      ok: true,
+      approvalId: id,
+      status: row.status,
+      resume,
+      checkpointError,
+    };
   }
 
   /** POST /api/agent/owner/approvals/:id/reject */
@@ -245,6 +299,185 @@ export class AgentControlController {
     return this.approvals.getById(id, this.resolveActor(req).userId);
   }
 
+  /** GET /api/agent/checkpoints/tasks/:taskId/latest */
+  @Get('checkpoints/tasks/:taskId/latest')
+  async latestCheckpointForTask(
+    @Req() req: JwtReq,
+    @Param('taskId', ParseIntPipe) taskId: number,
+  ) {
+    const actor = this.resolveActor(req);
+    const checkpoint = await this.checkpoints.latestForTask(
+      actor.userId,
+      taskId,
+    );
+    return {
+      checkpoint: checkpoint ? this.checkpointSummary(checkpoint) : null,
+    };
+  }
+
+  /** POST /api/agent/checkpoints/:id/retry */
+  @Post('checkpoints/:id/retry')
+  async retryCheckpoint(
+    @Req() req: JwtReq,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.prepareCheckpointAction(req, id, 'retry');
+  }
+
+  /** POST /api/agent/checkpoints/:id/replay */
+  @Post('checkpoints/:id/replay')
+  async replayCheckpoint(
+    @Req() req: JwtReq,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.prepareCheckpointAction(req, id, 'replay');
+  }
+
+  /** POST /api/agent/checkpoints/:id/fork */
+  @Post('checkpoints/:id/fork')
+  async forkCheckpoint(
+    @Req() req: JwtReq,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.prepareCheckpointAction(req, id, 'fork');
+  }
+
+  /** POST /api/agent/checkpoints/:id/steps/:stepId/retry */
+  @Post('checkpoints/:id/steps/:stepId/retry')
+  async retryCheckpointStep(
+    @Req() req: JwtReq,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('stepId') stepId: string,
+  ) {
+    return this.prepareCheckpointStepAction(req, id, stepId, 'retry');
+  }
+
+  /** POST /api/agent/checkpoints/:id/steps/:stepId/replay */
+  @Post('checkpoints/:id/steps/:stepId/replay')
+  async replayCheckpointStep(
+    @Req() req: JwtReq,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('stepId') stepId: string,
+  ) {
+    return this.prepareCheckpointStepAction(req, id, stepId, 'replay');
+  }
+
+  /** POST /api/agent/checkpoints/:id/steps/:stepId/fork */
+  @Post('checkpoints/:id/steps/:stepId/fork')
+  async forkCheckpointStep(
+    @Req() req: JwtReq,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('stepId') stepId: string,
+  ) {
+    return this.prepareCheckpointStepAction(req, id, stepId, 'fork');
+  }
+
+  private async prepareCheckpointAction(
+    req: JwtReq,
+    checkpointId: number,
+    action: Exclude<AgentRunCheckpointAction, 'resume'>,
+  ) {
+    const actor = this.resolveActor(req);
+    return {
+      plan: await this.checkpoints.prepareAction({
+        ownerUserId: actor.userId,
+        checkpointId,
+        action,
+      }),
+      streamEndpoint: `/api/social-agent/chat/checkpoints/${checkpointId}/${action}/stream`,
+    };
+  }
+
+  private async prepareCheckpointStepAction(
+    req: JwtReq,
+    checkpointId: number,
+    stepId: string,
+    action: Exclude<AgentRunCheckpointAction, 'resume'>,
+  ) {
+    const cleanStepId = typeof stepId === 'string' ? stepId.trim() : '';
+    if (!cleanStepId) throw new BadRequestException('stepId is required');
+    const actor = this.resolveActor(req);
+    return {
+      plan: await this.checkpoints.prepareStepAction({
+        ownerUserId: actor.userId,
+        checkpointId,
+        stepId: cleanStepId,
+        action,
+      }),
+      streamEndpoint: `/api/social-agent/chat/checkpoints/${checkpointId}/steps/${encodeURIComponent(cleanStepId)}/${action}/stream`,
+    };
+  }
+
+  private checkpointSummary(checkpoint: AgentRunCheckpoint) {
+    const active = checkpoint.status === AgentRunCheckpointStatus.Active;
+    return {
+      id: checkpoint.id,
+      agentTaskId: checkpoint.agentTaskId,
+      type: checkpoint.type,
+      status: checkpoint.status,
+      phase: checkpoint.phase,
+      toolName: checkpoint.toolName,
+      stepId: checkpoint.stepId,
+      approvalRequestId: checkpoint.approvalRequestId ?? null,
+      parentCheckpointId: checkpoint.parentCheckpointId ?? null,
+      retryCount: checkpoint.retryCount,
+      replayCount: checkpoint.replayCount,
+      forkCount: checkpoint.forkCount,
+      resumeCount: checkpoint.resumeCount,
+      resumable: active,
+      canRetry: active,
+      canReplay: active,
+      canFork: active,
+      threadId: `agent-task:${checkpoint.agentTaskId}`,
+      sourceStep: checkpoint.stepId
+        ? {
+            stepId: checkpoint.stepId,
+            label: this.stepLabel(checkpoint, checkpoint.stepId),
+            toolName: this.text(checkpoint.toolName),
+          }
+        : null,
+      steps: this.checkpointStepsSummary(checkpoint),
+      createdAt: checkpoint.createdAt?.toISOString?.() ?? null,
+      updatedAt: checkpoint.updatedAt?.toISOString?.() ?? null,
+    };
+  }
+
+  private checkpointStepsSummary(checkpoint: AgentRunCheckpoint) {
+    const steps = Array.isArray(checkpoint.steps) ? checkpoint.steps : [];
+    return steps
+      .map((step, index) => {
+        if (!step || typeof step !== 'object' || Array.isArray(step)) {
+          return null;
+        }
+        const record = step as Record<string, unknown>;
+        const stepId = this.text(record.id) ?? `step-${index + 1}`;
+        const label = this.text(record.label) ?? 'Agent 步骤';
+        return {
+          stepId,
+          label,
+          status: this.text(record.status) ?? null,
+          toolName:
+            this.text(record.toolName) ??
+            (stepId === checkpoint.stepId ? this.text(checkpoint.toolName) : null),
+          retryable: true,
+          replayable: true,
+          forkable: true,
+        };
+      })
+      .filter((step): step is NonNullable<typeof step> => Boolean(step))
+      .slice(0, 12);
+  }
+
+  private stepLabel(checkpoint: AgentRunCheckpoint, stepId: string) {
+    const steps = Array.isArray(checkpoint.steps) ? checkpoint.steps : [];
+    const step = steps.find((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+      return this.text((item as Record<string, unknown>).id) === stepId;
+    });
+    if (!step || typeof step !== 'object' || Array.isArray(step)) return null;
+    return this.text((step as Record<string, unknown>).label);
+  }
+
   private resolveActor(req: JwtReq) {
     const conn = req[AGENT_CONNECTION_KEY];
     if (conn) {
@@ -256,5 +489,16 @@ export class AgentControlController {
     throw new UnauthorizedException(
       'Missing authenticated user or agent token',
     );
+  }
+
+  private text(value: unknown): string | null {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed || null;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+    return null;
   }
 }

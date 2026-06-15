@@ -34,10 +34,14 @@ export function buildSocialAgentConfirmedCandidateMessageState(input: {
       candidateRecordId: input.candidateRecordId,
       socialRequestId: input.socialRequestId,
       toolCallId: input.action.id,
+      connectionState: 'waiting_reply',
+      nextRecoverableAction: 'meet_loop.resume',
+      sideEffectPolicy: 'no_followup_without_user_confirmation',
     },
     transitionPatch: {
       objective: 'candidate_messaging',
-      nextStep: '等待候选人回复',
+      nextStep:
+        '等待候选人回复；继续发消息、发起约练或连接前仍会再次确认。',
       shouldSearchNow: false,
       awaitingSearchConfirmation: false,
       waitingFor: 'candidate_reply',

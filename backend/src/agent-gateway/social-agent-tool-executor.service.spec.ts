@@ -228,6 +228,9 @@ function makeService() {
   );
   const toolInput = new SocialAgentToolInputParserService();
   const taskMemory = new SocialAgentTaskMemoryService(toolInput);
+  const l5Runtime = {
+    transitionMeetLoop: jest.fn().mockResolvedValue(undefined),
+  };
   const paymentIntentTools = new SocialAgentPaymentIntentToolService(
     paymentIntentRepo as never,
     toolInput,
@@ -255,6 +258,7 @@ function makeService() {
     toolJsonModel,
     toolInput,
     taskMemory,
+    l5Runtime as never,
   );
   const decisionTools = new SocialAgentDecisionToolService(
     permissions,
@@ -262,6 +266,7 @@ function makeService() {
     toolCallFactory,
     toolInput,
     taskMemory,
+    l5Runtime as never,
   );
   const service = new SocialAgentToolExecutorService(
     taskRepo as never,
@@ -294,6 +299,8 @@ function makeService() {
     conversationTools,
     decisionTools,
     taskMemory,
+    undefined,
+    l5Runtime as never,
   );
 
   return {
@@ -326,10 +333,29 @@ function makeService() {
     actionSideEffects,
     toolExecutionPolicy,
     confirmationPolicy,
+    l5Runtime,
   };
 }
 
 describe('SocialAgentToolExecutorService', () => {
+  it('does not run-next a task that does not belong to the authenticated user', async () => {
+    const { service, taskRepo, messages, l5Runtime } = makeService();
+    taskRepo.findOne.mockResolvedValue(null);
+
+    await expect(service.runNext(100, 99)).rejects.toMatchObject({
+      response: expect.objectContaining({
+        statusCode: 404,
+      }),
+    });
+
+    expect(taskRepo.findOne).toHaveBeenCalledWith({
+      where: { id: 100, ownerUserId: 99 },
+    });
+    expect(messages.getAgentInboxMessages).not.toHaveBeenCalled();
+    expect(messages.sendAgentReply).not.toHaveBeenCalled();
+    expect(l5Runtime.transitionMeetLoop).not.toHaveBeenCalled();
+  });
+
   it('updates social profile from extracted agent context', async () => {
     const { service, taskRepo, socialProfiles } = makeService();
     const task = makeTask({ permissionMode: AgentTaskPermissionMode.Assist });
@@ -946,7 +972,7 @@ describe('SocialAgentToolExecutorService', () => {
   });
 
   it('runs the waiting reply loop and sends the decided reply', async () => {
-    const { service, taskRepo, messages, approvals } = makeService();
+    const { service, taskRepo, messages, approvals, l5Runtime } = makeService();
     const task = makeTask({
       status: AgentTaskStatus.WaitingReply,
       memory: {
@@ -990,7 +1016,37 @@ describe('SocialAgentToolExecutorService', () => {
       succeededSteps: 4,
       handledReply: true,
       status: AgentTaskStatus.WaitingReply,
+      cards: expect.arrayContaining([
+        expect.objectContaining({
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'meet_loop.timeline',
+          data: expect.objectContaining({
+            schemaName: 'MeetLoopTimelineCard',
+            loopStage: 'reply_received',
+            connectionState: 'reply_received',
+            counterpartIntent: 'accepted',
+            replyIntentLabel: '对方愿意继续',
+            nextSafeStep: expect.stringContaining('回复对方的问题'),
+            sideEffectPolicy: 'no_followup_without_user_confirmation',
+          }),
+        }),
+        expect.objectContaining({
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'life_graph.diff',
+          data: expect.objectContaining({
+            schemaName: 'LifeGraphDiffCard',
+            source: 'counterpart_reply',
+            loopStage: 'reply_received',
+          }),
+        }),
+      ]),
     });
+    const runNextActions = result.cards?.[0]?.actions ?? [];
+    expect(runNextActions).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ schemaAction: 'activity.confirm_create' }),
+      ]),
+    );
     expect(messages.getAgentInboxMessages).toHaveBeenCalledWith('conv_1', 7, {
       limit: 50,
     });
@@ -1010,12 +1066,57 @@ describe('SocialAgentToolExecutorService', () => {
         eventType: 'social_agent.next_action.decided',
       }),
     );
+    const nextActionInboxEvent = messages.createAgentInboxEvent.mock.calls
+      .map((call) => call[0] as Record<string, unknown>)
+      .find((event) => event.eventType === 'social_agent.next_action.decided');
+    expect(nextActionInboxEvent).toMatchObject({
+      conversationId: 'conv_1',
+      messageId: 'msg_2',
+      fromUserId: 2,
+      metadata: expect.objectContaining({
+        lifeGraphWritebackProposal: expect.objectContaining({
+          schemaVersion: 'fitmeet.life_graph.writeback.v1',
+          source: 'counterpart_reply',
+          status: 'pending_user_confirmation',
+          candidateUserId: 2,
+          conversationId: 'conv_1',
+          messageId: 'msg_2',
+          privacyBoundary: expect.stringContaining('不保存对方私聊原文'),
+        }),
+      }),
+    });
+    const proposal = (nextActionInboxEvent?.metadata as
+      | Record<string, unknown>
+      | undefined)?.lifeGraphWritebackProposal;
+    expect(JSON.stringify(proposal)).not.toContain(
+      'Sure, let us confirm the route and meeting point first.',
+    );
     expect(messages.sendAgentReply).not.toHaveBeenCalled();
     expect(approvals.create).toHaveBeenCalledWith(
       expect.objectContaining({
         skillName: SocialAgentToolName.ReplyMessage,
         actionType: 'send_message',
         agentTaskId: 100,
+      }),
+    );
+    expect(l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 1,
+        agentTaskId: 100,
+        candidateUserId: 2,
+        stage: 'reply_received',
+        waitingFor: 'action_confirmation',
+        state: expect.objectContaining({
+          conversationId: 'conv_1',
+          targetUserId: 2,
+          actionToolName: SocialAgentToolName.ReplyMessage,
+          actionStatus: 'succeeded',
+          outputSummary: expect.objectContaining({
+            pendingApproval: true,
+            status: 'pending_approval',
+          }),
+          loopStage: 'reply_received',
+        }),
       }),
     );
     expect(task.memory).toMatchObject({
@@ -1040,7 +1141,12 @@ describe('SocialAgentToolExecutorService', () => {
           }),
         ],
         replySummary: expect.any(Object),
-        nextActionDecision: expect.any(Object),
+        nextActionDecision: expect.objectContaining({
+          lifeGraphWritebackProposal: expect.objectContaining({
+            status: 'pending_user_confirmation',
+            candidateUserId: 2,
+          }),
+        }),
       },
     });
   });

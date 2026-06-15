@@ -48,10 +48,17 @@ function makeHarness(options: { activities?: unknown } = {}) {
       payload: {},
       expiresAt: new Date('2026-06-06T00:00:00.000Z'),
     }),
+    approve: jest.fn().mockResolvedValue({
+      id: 9001,
+      status: 'approved',
+    }),
   };
   const metrics = { recordError: jest.fn() };
   const lifeGraph = {
     recordBehaviorEvent: jest.fn().mockResolvedValue({ id: 1 }),
+  };
+  const l5Runtime = {
+    transitionMeetLoop: jest.fn().mockResolvedValue(undefined),
   };
   const service = new SocialAgentMeetLoopService(
     taskRepo as never,
@@ -61,11 +68,13 @@ function makeHarness(options: { activities?: unknown } = {}) {
     undefined,
     lifeGraph as never,
     options.activities as never,
+    l5Runtime as never,
   );
   return {
     approvals,
     eventRepo,
     lifeGraph,
+    l5Runtime,
     metrics,
     savedEvents,
     service,
@@ -103,12 +112,76 @@ describe('SocialAgentMeetLoopService', () => {
       action: 'await_confirmation',
       cards: [expect.objectContaining({ type: 'activity_plan' })],
     });
+    expect(harness.l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        agentTaskId: 101,
+        candidateUserId: 22,
+        stage: 'activity_draft_created',
+        waitingFor: 'activity_confirmation',
+        state: expect.objectContaining({
+          candidateUserId: 22,
+          socialRequestId: 301,
+          activityType: 'running',
+          locationName: '青岛大学附近公共场所',
+        }),
+      }),
+    );
+    const duplicateDraft = await harness.service.performActivityAction(7, 101, {
+      action: 'activity.confirm_create',
+      payload: {
+        taskId: 101,
+        candidateUserId: 22,
+        socialRequestId: 301,
+        activityType: 'running',
+        locationName: '青岛大学附近公共场所',
+      },
+    });
+    expect(harness.approvals.create).toHaveBeenCalledTimes(1);
+    const duplicateActivityAction = duplicateDraft.cards?.[0]?.actions?.find(
+      (action) => action.schemaAction === 'activity.confirm_create',
+    );
+    expect(duplicateDraft).toMatchObject({
+      action: 'await_confirmation',
+      pendingApproval: expect.objectContaining({
+        id: 9001,
+        type: 'create_activity',
+        actionType: 'create_activity',
+      }),
+    });
+    expect(duplicateDraft.cards?.[0]).toMatchObject({
+      type: 'activity_plan',
+      data: expect.objectContaining({
+        publicPlaceOnly: true,
+        noPreciseLocation: true,
+      }),
+    });
+    expect(duplicateActivityAction).toMatchObject({
+      payload: expect.objectContaining({
+        approvalId: 9001,
+        idempotentReuse: true,
+        publicPlaceOnly: true,
+        noPreciseLocation: true,
+      }),
+    });
 
     const confirmed = await harness.service.performActivityAction(7, 101, {
       action: 'activity.confirm_create',
       payload: draft.cards?.[0]?.actions?.[0]?.payload ?? {},
     });
+    expect(harness.approvals.approve).toHaveBeenCalledWith(9001, 7);
     expect(confirmed.cards?.[0]).toMatchObject({
+      type: 'review_card',
+      schemaType: 'meet_loop.timeline',
+      data: expect.objectContaining({
+        schemaType: 'meet_loop.timeline',
+        loopStage: 'activity_confirmed',
+      }),
+    });
+    const checkinCard = confirmed.cards?.find(
+      (card) => card.type === 'checkin_card',
+    );
+    expect(checkinCard).toMatchObject({
       type: 'checkin_card',
       data: expect.objectContaining({ loopStage: 'activity_confirmed' }),
     });
@@ -119,15 +192,44 @@ describe('SocialAgentMeetLoopService', () => {
         candidateUserId: 22,
       }),
     );
+    expect(harness.l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        agentTaskId: 101,
+        candidateUserId: 22,
+        stage: 'activity_confirmed',
+        waitingFor: 'activity_check_in',
+        state: expect.objectContaining({
+          candidateUserId: 22,
+          status: 'activity_confirmed',
+          loopStage: 'activity_confirmed',
+          publicPlaceOnly: true,
+          noPreciseLocation: true,
+        }),
+      }),
+    );
 
     const checkedIn = await harness.service.performActivityAction(7, 101, {
       action: 'activity.check_in',
-      payload: confirmed.cards?.[0]?.actions?.[0]?.payload ?? {},
+      payload: checkinCard?.actions?.[0]?.payload ?? {},
     });
     expect(checkedIn.cards?.[0]).toMatchObject({
       type: 'checkin_card',
       data: expect.objectContaining({ loopStage: 'activity_checked_in' }),
     });
+    expect(harness.l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        agentTaskId: 101,
+        candidateUserId: 22,
+        stage: 'activity_checked_in',
+        waitingFor: 'activity_completion',
+        state: expect.objectContaining({
+          status: 'activity_checked_in',
+          loopStage: 'activity_checked_in',
+        }),
+      }),
+    );
 
     const completed = await harness.service.performActivityAction(7, 101, {
       action: 'activity.complete',
@@ -137,6 +239,19 @@ describe('SocialAgentMeetLoopService', () => {
       type: 'review_card',
       data: expect.objectContaining({ loopStage: 'activity_completed' }),
     });
+    expect(harness.l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        agentTaskId: 101,
+        candidateUserId: 22,
+        stage: 'activity_completed',
+        waitingFor: 'review',
+        state: expect.objectContaining({
+          status: 'activity_completed',
+          loopStage: 'activity_completed',
+        }),
+      }),
+    );
 
     const reviewed = await harness.service.performActivityAction(7, 101, {
       action: 'review.submit',
@@ -168,6 +283,22 @@ describe('SocialAgentMeetLoopService', () => {
         trustScoreDelta: 2,
       }),
     });
+    expect(harness.l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        agentTaskId: 101,
+        candidateUserId: 22,
+        stage: 'trust_score_updated',
+        waitingFor: '',
+        state: expect.objectContaining({
+          status: 'review_submitted',
+          loopStage: 'trust_score_updated',
+        }),
+        review: expect.objectContaining({
+          rating: 5,
+        }),
+      }),
+    );
     expect(harness.savedEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -200,11 +331,44 @@ describe('SocialAgentMeetLoopService', () => {
         locationName: '青岛大学附近公共场所',
       },
     });
+
+    expect(activities.create).not.toHaveBeenCalled();
+    expect(activities.confirm).not.toHaveBeenCalled();
+    expect(draft).toMatchObject({
+      action: 'await_confirmation',
+      pendingApproval: expect.objectContaining({
+        type: 'create_activity',
+        actionType: 'create_activity',
+      }),
+    });
+    expect(draft.cards?.[0]).toMatchObject({
+      schemaType: 'social_match.activity',
+      data: expect.objectContaining({
+        publicPlaceOnly: true,
+        noPreciseLocation: true,
+        reviewPrompt: expect.stringContaining('简短评价'),
+      }),
+      actions: expect.arrayContaining([
+        expect.objectContaining({
+          schemaAction: 'activity.confirm_create',
+          requiresConfirmation: true,
+          payload: expect.objectContaining({
+            approvalId: expect.any(Number),
+            publicPlaceOnly: true,
+            noPreciseLocation: true,
+          }),
+        }),
+      ]),
+    });
     const confirmed = await harness.service.performActivityAction(7, 101, {
       action: 'activity.confirm_create',
       payload: draft.cards?.[0]?.actions?.[0]?.payload ?? {},
     });
 
+    expect(harness.approvals.approve).toHaveBeenCalledWith(9001, 7);
+    expect(harness.approvals.approve.mock.invocationCallOrder[0]).toBeLessThan(
+      activities.create.mock.invocationCallOrder[0],
+    );
     expect(activities.create).toHaveBeenCalledWith(
       7,
       expect.objectContaining({
@@ -215,10 +379,37 @@ describe('SocialAgentMeetLoopService', () => {
       }),
     );
     expect(activities.confirm).toHaveBeenCalledWith(700, 7);
+    expect(confirmed.cards?.[0]).toMatchObject({
+      type: 'review_card',
+      schemaType: 'meet_loop.timeline',
+      data: expect.objectContaining({
+        schemaType: 'meet_loop.timeline',
+        loopStage: 'activity_confirmed',
+        safetyBoundary: expect.stringContaining('仍需确认'),
+        timeline: expect.objectContaining({
+          nextAction: expect.stringContaining('等待你确认到达'),
+        }),
+      }),
+      actions: expect.arrayContaining([
+        expect.objectContaining({
+          schemaAction: 'meet_loop.resume',
+          requiresConfirmation: true,
+        }),
+      ]),
+    });
+    const checkinCard = confirmed.cards?.find(
+      (card) => card.type === 'checkin_card',
+    );
+    expect(checkinCard).toMatchObject({
+      data: expect.objectContaining({
+        publicPlaceOnly: true,
+        noPreciseLocation: true,
+      }),
+    });
 
     const checkedIn = await harness.service.performActivityAction(7, 101, {
       action: 'activity.check_in',
-      payload: confirmed.cards?.[0]?.actions?.[0]?.payload ?? {},
+      payload: checkinCard?.actions?.[0]?.payload ?? {},
     });
     expect(activities.checkin).toHaveBeenCalledWith(
       700,
@@ -399,4 +590,231 @@ describe('SocialAgentMeetLoopService', () => {
       }),
     });
   });
+
+  it('resumes meet-loop progress without performing high-risk side effects', async () => {
+    const harness = makeHarness();
+    await harness.taskRepo.save(
+      makeTask({
+        result: {
+          meetLoop: {
+            loopStage: 'message_sent',
+            activityId: 700,
+            candidateUserId: 22,
+          },
+        },
+      }),
+    );
+
+    const result = await harness.service.performActivityAction(7, 101, {
+      action: 'meet_loop.resume',
+      payload: {
+        taskId: 101,
+        activityId: 700,
+        candidateUserId: 22,
+        loopStage: 'message_sent',
+      },
+    });
+
+    expect(result).toMatchObject({
+      action: 'reply',
+      assistantMessage: expect.stringContaining('恢复到上次保存的邀约进度'),
+      cards: [
+        expect.objectContaining({
+          type: 'review_card',
+          data: expect.objectContaining({
+            loopStage: 'message_sent',
+            timeline: expect.objectContaining({
+              steps: expect.arrayContaining([
+                expect.objectContaining({
+                  key: 'sent',
+                  state: 'current',
+                  checkpointReady: true,
+                }),
+              ]),
+            }),
+          }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              schemaAction: 'meet_loop.resume',
+              requiresConfirmation: true,
+            }),
+          ]),
+        }),
+      ],
+    });
+    expect(harness.approvals.create).not.toHaveBeenCalled();
+    expect(harness.task.memory).toMatchObject({
+      taskMemory: {
+        currentTask: expect.objectContaining({
+          waitingFor: 'meet_loop_resume_confirmation',
+          lastCompletedStep: 'message_sent',
+        }),
+      },
+    });
+  });
+
+  it('resumes counterpart replies into continue-chat state without side effects or direct Life Graph writes', async () => {
+    const harness = makeHarness();
+    await harness.taskRepo.save(
+      makeTask({
+        result: {
+          meetLoop: {
+            loopStage: 'message_sent',
+            activityId: 700,
+            candidateUserId: 22,
+            messagePreview: '周末下午可以先在公共路线轻松跑一圈。',
+          },
+        },
+      }),
+    );
+
+    const result = await harness.service.performActivityAction(7, 101, {
+      action: 'meet_loop.resume',
+      payload: {
+        taskId: 101,
+        activityId: 700,
+        candidateUserId: 22,
+        source: 'counterpart_reply',
+        replyPreview: '可以呀，周六下午在公共操场附近见可以吗？',
+      },
+    });
+
+    expect(result).toMatchObject({
+      action: 'reply',
+      assistantMessage: expect.stringContaining('不会自动继续发消息或创建约练'),
+    });
+    const timelineCard = result.cards?.find(
+      (card) => card.schemaType === 'meet_loop.timeline',
+    );
+    const lifeGraphCard = result.cards?.find(
+      (card) => card.schemaType === 'life_graph.diff',
+    );
+    expect(timelineCard).toMatchObject({
+      type: 'review_card',
+      data: expect.objectContaining({
+        candidateUserId: 22,
+        loopStage: 'reply_received',
+        timeline: expect.objectContaining({
+          nextAction: expect.stringContaining('继续'),
+        }),
+      }),
+    });
+    expect(lifeGraphCard).toMatchObject({
+      type: 'audit_update',
+      data: expect.objectContaining({
+        schemaName: 'LifeGraphDiffCard',
+        source: 'counterpart_reply',
+        candidateUserId: 22,
+        realActivityPersisted: false,
+      }),
+    });
+    expect(harness.approvals.create).not.toHaveBeenCalled();
+    expect(harness.lifeGraph.recordBehaviorEvent).not.toHaveBeenCalled();
+    expect(harness.task.result).toMatchObject({
+      meetLoop: expect.objectContaining({
+        source: 'counterpart_reply',
+        status: 'reply_received',
+        loopStage: 'reply_received',
+        connectionState: 'reply_received',
+        lifeGraphUpdatePending: true,
+        publicPlaceOnly: true,
+        noPreciseLocation: true,
+      }),
+    });
+    expect(harness.task.memory).toMatchObject({
+      taskMemory: {
+        currentTask: expect.objectContaining({
+          objective: 'candidate_messaging',
+          state: 'messaging_candidate',
+          waitingFor: 'continue_conversation',
+          lastCompletedStep: 'counterpart_reply_received',
+        }),
+      },
+    });
+    expect(harness.l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        agentTaskId: 101,
+        activityId: 700,
+        candidateUserId: 22,
+        stage: 'reply_received',
+        waitingFor: 'continue_conversation',
+        state: expect.objectContaining({
+          source: 'counterpart_reply',
+          status: 'reply_received',
+          loopStage: 'reply_received',
+          lifeGraphUpdatePending: true,
+        }),
+      }),
+    );
+    expect(harness.savedEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: 'note',
+          summary: 'Agent meet loop counterpart reply received',
+        }),
+        expect.objectContaining({
+          eventType: 'social_agent.message.assistant',
+        }),
+      ]),
+    );
+  });
+
+  it.each([
+    'meet_loop.reschedule',
+    'activity.modify_time',
+    'activity.modify_location',
+  ] as const)(
+    'creates a reschedule checkpoint prompt for %s without notifying the other user',
+    async (action) => {
+      const harness = makeHarness();
+
+      const result = await harness.service.performActivityAction(7, 101, {
+        action,
+        payload: {
+          taskId: 101,
+          activityId: 700,
+          candidateUserId: 22,
+        },
+      });
+
+      expect(result).toMatchObject({
+        action: 'reply',
+        assistantMessage: expect.stringContaining('不会自动通知对方'),
+        cards: [
+          expect.objectContaining({
+            type: 'review_card',
+            data: expect.objectContaining({
+              loopStage: 'reschedule_requested',
+              timeline: expect.objectContaining({
+                nextAction: '告诉我新的时间范围，我会生成改期草稿。',
+                steps: expect.arrayContaining([
+                  expect.objectContaining({
+                    key: 'reschedule',
+                    state: 'current',
+                    resumeMode: 'reschedule',
+                  }),
+                ]),
+              }),
+            }),
+          }),
+        ],
+      });
+      expect(harness.approvals.create).not.toHaveBeenCalled();
+      expect(harness.task.result).toMatchObject({
+        meetLoop: expect.objectContaining({
+          status: 'reschedule_requested',
+          loopStage: 'reschedule_requested',
+        }),
+      });
+      expect(harness.task.memory).toMatchObject({
+        taskMemory: {
+          currentTask: expect.objectContaining({
+            waitingFor: 'reschedule_time_window',
+            lastCompletedStep: 'reschedule_requested',
+          }),
+        },
+      });
+    },
+  );
 });

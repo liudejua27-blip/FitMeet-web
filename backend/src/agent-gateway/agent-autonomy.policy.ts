@@ -53,16 +53,22 @@ const NORMAL_AUTO_ACTIONS = new Set<AgentAutoActionType>([
   'recommend_candidate',
   'auto_match',
   'generate_invite',
-  'send_message',
 ]);
 
 const OPEN_AUTO_ACTIONS = new Set<AgentAutoActionType>([
   ...NORMAL_AUTO_ACTIONS,
-  'add_friend',
-  'invite_activity',
-  'create_activity',
   'create_activity_draft',
   'agent_chat',
+]);
+
+const HIGH_RISK_CONFIRMATION_ACTIONS = new Set<AgentAutoActionType>([
+  'send_message',
+  'add_friend',
+  'contact_exchange',
+  'invite_activity',
+  'create_activity',
+  'offline_meeting',
+  'payment',
 ]);
 
 export function canAutoExecute(
@@ -74,6 +80,9 @@ export function canAutoExecute(
   const risk = normalizeRiskLevel(riskLevel);
 
   if (mode === AgentSettingsMode.SandboxInternal || risk === 'blocked') {
+    return false;
+  }
+  if (HIGH_RISK_CONFIRMATION_ACTIONS.has(actionType)) {
     return false;
   }
 

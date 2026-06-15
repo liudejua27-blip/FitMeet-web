@@ -86,10 +86,12 @@ import {
 import { buildCandidatePoolCandidate } from './social-agent-candidate-card.presenter';
 import {
   hasSocialAgentRecommendationBoundary,
+  hasSocialAgentSafetyExclusionBoundary,
   isSocialAgentActiveActivity,
   isSocialAgentActiveLegacyRequest,
   isSocialAgentActivePublicIntent,
   isSocialAgentActivityLikePublicIntent,
+  isSocialAgentProfileCandidateOptedIn,
 } from './social-agent-candidate-pool-eligibility';
 
 export type {
@@ -148,12 +150,24 @@ export type CandidatePoolCandidate = {
   privateReason: string;
   riskWarning: string;
   nextAction: string;
+  recommendationConsent: {
+    profileDiscoverable: boolean;
+    agentCanRecommendMe: boolean;
+    sourceLabel: string;
+    privacyLabel: string;
+    strangerPolicyLabel: string;
+  };
+  relationshipGoal: string | null;
+  idealType: string | null;
+  invitePolicy: string;
+  coldStartSignals: string[];
   whyYouMayLike: string;
   whyNow: string;
   matchPoints: string[];
   boundaryNotes: string[];
   openerStrategy: string;
   dynamicSignalReasons: string[];
+  preferenceHistorySignals: string[];
   continuousFilterHints: string[];
   candidateExplanation: CandidateExplanation;
   emotionalInsight: CandidateEmotionalInsight;
@@ -310,18 +324,29 @@ export class SocialAgentCandidatePoolService {
       ...input,
       intent: 'activity_search',
     });
-    const [counts, activities, publicIntents, blockedIds] = await Promise.all([
-      this.loadCounts(),
-      this.safeFind(this.activityRepo, { order: { updatedAt: 'DESC' } }),
-      this.safeFind(this.publicIntentRepo, { order: { updatedAt: 'DESC' } }),
-      this.loadBlockedIds(input.ownerUserId),
-    ]);
+    const [counts, activities, publicIntents, profiles, delegates, blockedIds] =
+      await Promise.all([
+        this.loadCounts(),
+        this.safeFind(this.activityRepo, { order: { updatedAt: 'DESC' } }),
+        this.safeFind(this.publicIntentRepo, { order: { updatedAt: 'DESC' } }),
+        this.safeFind(this.profileRepo, { order: { updatedAt: 'DESC' } }),
+        this.safeFind(this.aiDelegateRepo, { order: { updatedAt: 'DESC' } }),
+        this.loadBlockedIds(input.ownerUserId),
+      ]);
+    const profileMap = new Map(
+      profiles.map((profile) => [profile.userId, profile]),
+    );
+    const delegateMap = new Map(
+      delegates.map((delegate) => [delegate.userId, delegate]),
+    );
     const filtered = emptyCandidatePoolFiltered();
     const realActivities = this.buildActivityResults({
       ownerUserId: input.ownerUserId,
       query,
       activities,
       publicIntents: [],
+      profileMap,
+      delegateMap,
       blockedIds,
       filtered,
     });
@@ -333,6 +358,8 @@ export class SocialAgentCandidatePoolService {
             query,
             activities: [],
             publicIntents,
+            profileMap,
+            delegateMap,
             blockedIds,
             filtered,
           });
@@ -426,10 +453,22 @@ export class SocialAgentCandidatePoolService {
         input.filtered.blocked += 1;
         continue;
       }
+      if (input.query.acceptsStrangers === false) {
+        input.filtered.boundaryMismatch += 1;
+        continue;
+      }
       const profile = input.profileMap.get(user.id) ?? null;
       const delegate = input.delegateMap.get(user.id) ?? null;
+      if (!isSocialAgentProfileCandidateOptedIn(profile)) {
+        input.filtered.boundaryMismatch += 1;
+        continue;
+      }
       if (hasSocialAgentRecommendationBoundary(profile, delegate)) {
         input.filtered.boundaryMismatch += 1;
+        continue;
+      }
+      if (hasSocialAgentSafetyExclusionBoundary(profile, delegate)) {
+        input.filtered.blocked += 1;
         continue;
       }
       out.push(
@@ -470,12 +509,24 @@ export class SocialAgentCandidatePoolService {
         input.filtered.blocked += 1;
         continue;
       }
+      if (input.query.acceptsStrangers === false) {
+        input.filtered.boundaryMismatch += 1;
+        continue;
+      }
       const user = input.userMap.get(ownerUserId);
       if (!user) continue;
       const profile = input.profileMap.get(ownerUserId) ?? null;
       const delegate = input.delegateMap.get(ownerUserId) ?? null;
+      if (!isSocialAgentProfileCandidateOptedIn(profile)) {
+        input.filtered.boundaryMismatch += 1;
+        continue;
+      }
       if (hasSocialAgentRecommendationBoundary(profile, delegate)) {
         input.filtered.boundaryMismatch += 1;
+        continue;
+      }
+      if (hasSocialAgentSafetyExclusionBoundary(profile, delegate)) {
+        input.filtered.blocked += 1;
         continue;
       }
       out.push(
@@ -500,12 +551,24 @@ export class SocialAgentCandidatePoolService {
         input.filtered.blocked += 1;
         continue;
       }
+      if (input.query.acceptsStrangers === false) {
+        input.filtered.boundaryMismatch += 1;
+        continue;
+      }
       const user = input.userMap.get(request.userId);
       if (!user) continue;
       const profile = input.profileMap.get(request.userId) ?? null;
       const delegate = input.delegateMap.get(request.userId) ?? null;
+      if (!isSocialAgentProfileCandidateOptedIn(profile)) {
+        input.filtered.boundaryMismatch += 1;
+        continue;
+      }
       if (hasSocialAgentRecommendationBoundary(profile, delegate)) {
         input.filtered.boundaryMismatch += 1;
+        continue;
+      }
+      if (hasSocialAgentSafetyExclusionBoundary(profile, delegate)) {
+        input.filtered.blocked += 1;
         continue;
       }
       out.push(
@@ -527,6 +590,8 @@ export class SocialAgentCandidatePoolService {
     query: CandidatePoolResolvedQuery;
     activities: SocialActivity[];
     publicIntents: PublicSocialIntent[];
+    profileMap: Map<number, UserSocialProfile>;
+    delegateMap: Map<number, AiDelegateProfile>;
     blockedIds: Set<number>;
     filtered: CandidatePoolFiltered;
   }): CandidatePoolActivityResult[] {
@@ -537,8 +602,23 @@ export class SocialAgentCandidatePoolService {
           input.filtered.self += 1;
           return false;
         }
+        if (input.query.acceptsStrangers === false) {
+          input.filtered.boundaryMismatch += 1;
+          return false;
+        }
         if (input.blockedIds.has(activity.creatorId)) {
           input.filtered.blocked += 1;
+          return false;
+        }
+        if (
+          this.hasUnsafeActivityOwnerBoundary(
+            activity.creatorId,
+            input.profileMap,
+            input.delegateMap,
+            true,
+          )
+        ) {
+          input.filtered.boundaryMismatch += 1;
           return false;
         }
         return true;
@@ -557,8 +637,23 @@ export class SocialAgentCandidatePoolService {
           input.filtered.self += 1;
           return false;
         }
+        if (input.query.acceptsStrangers === false) {
+          input.filtered.boundaryMismatch += 1;
+          return false;
+        }
         if (input.blockedIds.has(ownerUserId)) {
           input.filtered.blocked += 1;
+          return false;
+        }
+        if (
+          this.hasUnsafeActivityOwnerBoundary(
+            ownerUserId,
+            input.profileMap,
+            input.delegateMap,
+            true,
+          )
+        ) {
+          input.filtered.boundaryMismatch += 1;
           return false;
         }
         return true;
@@ -567,6 +662,26 @@ export class SocialAgentCandidatePoolService {
 
     return [...activities, ...publicIntents].sort(
       (a, b) => b.matchScore - a.matchScore,
+    );
+  }
+
+  private hasUnsafeActivityOwnerBoundary(
+    ownerUserId: number,
+    profileMap: Map<number, UserSocialProfile>,
+    delegateMap: Map<number, AiDelegateProfile>,
+    requireAgentRecommendationOptIn: boolean,
+  ): boolean {
+    const profile = profileMap.get(ownerUserId) ?? null;
+    const delegate = delegateMap.get(ownerUserId) ?? null;
+    if (
+      requireAgentRecommendationOptIn &&
+      !isSocialAgentProfileCandidateOptedIn(profile)
+    ) {
+      return true;
+    }
+    return (
+      hasSocialAgentRecommendationBoundary(profile, delegate) ||
+      hasSocialAgentSafetyExclusionBoundary(profile, delegate)
     );
   }
 
@@ -617,6 +732,7 @@ export class SocialAgentCandidatePoolService {
       publicIntentId: null,
       socialRequestId: query.socialRequestId,
       activityId: null,
+      query,
       lifeGraphSignals,
       sceneRisk: this.sceneRisk,
       candidateExplanation: this.candidateExplanation,
@@ -677,6 +793,7 @@ export class SocialAgentCandidatePoolService {
       publicIntentId: intent.id,
       socialRequestId: intent.linkedSocialRequestId ?? query.socialRequestId,
       activityId: null,
+      query,
       lifeGraphSignals,
       sceneRisk: this.sceneRisk,
       candidateExplanation: this.candidateExplanation,
@@ -740,6 +857,7 @@ export class SocialAgentCandidatePoolService {
       publicIntentId: null,
       socialRequestId: request.id,
       activityId: null,
+      query,
       lifeGraphSignals,
       sceneRisk: this.sceneRisk,
       candidateExplanation: this.candidateExplanation,
@@ -878,6 +996,19 @@ export class SocialAgentCandidatePoolService {
 
   private async loadBlockedIds(ownerUserId: number): Promise<Set<number>> {
     try {
+      const safetyWithRecommendationGate = this.safety as SafetyService & {
+        getAgentRecommendationExcludedUserIds?: (
+          userId: number,
+        ) => Promise<Set<number>>;
+      };
+      if (
+        typeof safetyWithRecommendationGate.getAgentRecommendationExcludedUserIds ===
+        'function'
+      ) {
+        return await safetyWithRecommendationGate.getAgentRecommendationExcludedUserIds(
+          ownerUserId,
+        );
+      }
       return await this.safety.getMutualBlockUserIds(ownerUserId);
     } catch {
       return new Set<number>();

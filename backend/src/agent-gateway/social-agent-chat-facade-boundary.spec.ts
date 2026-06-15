@@ -942,7 +942,7 @@ describe('SocialAgentChatService facade boundary', () => {
     );
     expect(candidateConnectResultPresenterSource).toContain('friendAction');
     expect(candidateConnectResultPresenterSource).toContain(
-      '加好友/连接候选人需要你确认',
+      '发送邀请需要你确认',
     );
     expect(candidateConnectResultPresenterSource).toContain(
       'output.friendRequestId ?? output.followId ?? output.id',

@@ -17,6 +17,8 @@ export function buildSocialAgentOpenerDraftApprovalInput(input: {
   candidate: Record<string, unknown>;
   draft: string;
   relatedCandidateId: number | null;
+  idempotencyKey?: string | null;
+  safetyBoundary?: string | null;
 }): {
   userId: number;
   agentConnectionId: null;
@@ -47,6 +49,20 @@ export function buildSocialAgentOpenerDraftApprovalInput(input: {
       candidate: input.candidate,
       message: input.draft,
       suggestedOpener: input.draft,
+      safetyBoundary:
+        cleanDisplayText(input.safetyBoundary, '') ||
+        '确认前不会发送。建议先站内沟通，不急着交换联系方式。',
+      approvalRequired: true,
+      checkpointRequired: true,
+      resumeMode: 'resume_after_approval',
+      idempotencyKey:
+        cleanDisplayText(input.idempotencyKey, '') ||
+        `opener-send:${input.taskId}:${input.targetUserId ?? 'candidate'}`,
+      riskReasons: [
+        '这一步会向真实用户发送消息',
+        '发送前需要你确认语气和内容',
+        '不会自动交换联系方式或精确位置',
+      ],
     },
     summary: input.targetUserId
       ? `发送开场白给候选人 #${input.targetUserId}`

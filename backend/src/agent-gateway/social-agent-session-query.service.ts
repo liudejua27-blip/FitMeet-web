@@ -9,6 +9,7 @@ import { readSocialAgentTaskMemory } from './social-agent-memory.util';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
 import { SocialAgentSessionRestoreService } from './social-agent-session-restore.service';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
+import { inferSocialAgentThreadTitle } from './social-agent-thread-title.util';
 import type {
   SocialAgentAsyncRunSnapshot,
   SocialAgentCurrentTaskSnapshot,
@@ -78,7 +79,11 @@ export class SocialAgentSessionQueryService {
       status: task.status,
       agentState: taskMemory.currentTask.state,
       taskType: cleanDisplayText(task.taskType, 'social_agent_chat'),
-      title: cleanDisplayText(task.title, 'FitMeet Social Agent 聊天'),
+      title: inferSocialAgentThreadTitle({
+        title: task.title,
+        goal: task.goal,
+        firstMessage: taskMemory.lastUserMessages.at(0)?.text ?? null,
+      }),
       goal: cleanDisplayText(task.goal, ''),
       memory: sanitizeForDisplay(task.memory) as Record<string, unknown>,
       result: sanitizeForDisplay(task.result) as Record<string, unknown>,

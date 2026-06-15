@@ -17,6 +17,7 @@ import type {
 } from './social-agent-chat.types';
 import { readSocialAgentTimelineCandidates } from './social-agent-chat-timeline.presenter';
 import type { CandidatePoolDebugReasons } from './social-agent-candidate-pool.service';
+import { normalizeSocialAgentVisibleStepSnapshot } from './social-agent-visible-step-snapshot.presenter';
 
 export { buildSocialAgentTimelineSnapshot } from './social-agent-chat-timeline.presenter';
 
@@ -184,6 +185,7 @@ function readStoredVisibleSteps(
         cleanDisplayText(step.label, '正在处理任务'),
       ),
       status: normalizeStepStatus(step.status),
+      snapshot: normalizeSocialAgentVisibleStepSnapshot(step.snapshot),
     }))
     .filter((step) => step.id);
 }

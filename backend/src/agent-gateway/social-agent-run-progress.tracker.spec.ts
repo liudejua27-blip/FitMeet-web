@@ -47,9 +47,29 @@ describe('SocialAgentRunProgressTracker', () => {
       AgentTaskEventType.StepCompleted,
     );
 
-    expect(visibleSteps).toEqual([
-      { id: 'search', label: 'search:正在检索附近候选人', status: 'done' },
-      { id: 'rank', label: 'rank:正在排序', status: 'done' },
+    expect(visibleSteps).toMatchObject([
+      {
+        id: 'search',
+        label: 'search:正在检索附近候选人',
+        status: 'done',
+        snapshot: {
+          schemaVersion: 'fitmeet.step-snapshot.v1',
+          observation: ['candidate Count：3'],
+          critique: '这一步产生了可用观察，可以交给后续步骤继续整理。',
+          result: '已完成，并记录 1 个安全摘要字段。',
+        },
+      },
+      {
+        id: 'rank',
+        label: 'rank:正在排序',
+        status: 'done',
+        snapshot: {
+          schemaVersion: 'fitmeet.step-snapshot.v1',
+          observation: ['rank:正在排序 已完成，未暴露额外内部数据。'],
+          critique: '这一步产生了可用观察，可以交给后续步骤继续整理。',
+          result: 'rank:正在排序 已完成。',
+        },
+      },
     ]);
     expect(emitted).toEqual([
       {
@@ -66,6 +86,10 @@ describe('SocialAgentRunProgressTracker', () => {
           id: 'search',
           label: 'search:正在检索附近候选人',
           status: 'done',
+          snapshot: expect.objectContaining({
+            schemaVersion: 'fitmeet.step-snapshot.v1',
+            observation: ['candidate Count：3'],
+          }),
         },
       },
       {
@@ -74,7 +98,14 @@ describe('SocialAgentRunProgressTracker', () => {
       },
       {
         type: 'step',
-        step: { id: 'rank', label: 'rank:正在排序', status: 'done' },
+        step: {
+          id: 'rank',
+          label: 'rank:正在排序',
+          status: 'done',
+          snapshot: expect.objectContaining({
+            schemaVersion: 'fitmeet.step-snapshot.v1',
+          }),
+        },
       },
     ]);
     expect(remembered).toEqual([

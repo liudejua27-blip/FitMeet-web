@@ -43,11 +43,12 @@ import { AgentSettingsMode } from './entities/agent-settings.entity';
  * the owner's active social requests, runs the match pipeline (which
  * already enriches candidates via DeepSeek with deterministic fallbacks),
  * and decides per-candidate whether to:
- *   - auto-execute (creates a PendingAction + immediately approves it, so
- *     the existing dispatcher path runs and advances candidate/request
- *     status),
- *   - queue a PendingAction for owner approval, or
- *   - record only a planned AgentActionLog (suggestion-only mode).
+ *   - queue a PendingAction for owner approval,
+ *   - record only a planned AgentActionLog (suggestion-only mode), or
+ *   - skip already handled candidates.
+ *
+ * Even in Open autonomy, stranger outreach is never dispatched directly:
+ * sending a message still requires an explicit user approval.
  *
  * The autopilot never crashes the whole sweep — every per-agent iteration
  * is wrapped in try/catch and per-candidate work is best-effort.
@@ -297,17 +298,15 @@ export class AiSocialAutopilotService {
     const approvalRisk = mapCandidateToApprovalRisk(candidateRisk);
     const actionRisk = mapCandidateToActionRisk(candidateRisk);
 
-    const canAuto =
-      canAutoExecute('send_message', profile.autonomyLevel, candidateRisk) &&
+    const canQueueApproval =
+      profile.autonomyLevel !== AgentAutonomyLevel.Assisted &&
+      candidateRisk !== CandidateRiskLevel.High &&
       remainingCap > 0 &&
       profile.agentConnectionId !== null &&
       sanitizedMessage.length > 0;
 
-    const isAssistedOnly = !canAutoExecute(
-      'send_message',
-      profile.autonomyLevel,
-      'low',
-    );
+    const isAssistedOnly =
+      profile.autonomyLevel === AgentAutonomyLevel.Assisted;
 
     // Branch 1: Assisted/sandbox/etc. — suggestion only.
     if (isAssistedOnly) {
@@ -331,8 +330,10 @@ export class AiSocialAutopilotService {
       return 'planned';
     }
 
-    // Branch 2: Auto-execute via existing approval+dispatcher path.
-    if (canAuto) {
+    // Branch 2: Autopilot may propose outreach, but never dispatch it.
+    // Stranger-facing messages are high-risk side effects and must stay
+    // approval-gated even when the profile autonomy level is Open.
+    if (canQueueApproval) {
       const approval = await this.approvals.create({
         userId: ownerUserId,
         agentConnectionId: profile.agentConnectionId,
@@ -347,56 +348,42 @@ export class AiSocialAutopilotService {
         },
         summary: truncate(sanitizedMessage, 200),
         riskLevel: approvalRisk,
-        reason: 'autopilot_auto_execute',
+        reason: 'autopilot_requires_user_confirmation',
         createdBy: 'agent',
         relatedSocialRequestId: request.id,
         relatedCandidateId: candidate.id,
-        rationale: 'AI Social Autopilot 自动外联候选用户',
+        rationale: 'AI Social Autopilot 建议向该用户发送破冰消息，等待你的确认',
       });
 
-      const result = await this.approvals.approve(
-        approval.id,
-        ownerUserId,
-        (a) => this.dispatcher.dispatch(a),
-      );
-
-      const failed = result.dispatchError !== undefined;
       await this.actionLogs.logAgentAction({
         ownerUserId,
         agentId: profile.agentConnectionId,
         actionType: AgentActionType.SendMessage,
-        actionStatus: failed
-          ? AgentActionStatus.Failed
-          : AgentActionStatus.Executed,
+        actionStatus: AgentActionStatus.PendingApproval,
         riskLevel: actionRisk,
         targetUserId: candidate.candidateUserId,
         relatedSocialRequestId: request.id,
         relatedCandidateId: candidate.id,
         inputSummary: sanitizedMessage,
-        outputSummary: failed
-          ? `dispatch_failed: ${result.dispatchError}`
-          : 'autopilot_executed',
+        outputSummary: 'autopilot_pending_approval',
         payload: {
           approvalId: approval.id,
           autonomyLevel: profile.autonomyLevel,
           score: candidate.score,
+          sideEffectPolicy: 'approval_required_before_send',
         },
-        reason: failed
-          ? 'autopilot_dispatch_failed'
-          : 'autopilot_auto_executed',
+        reason: 'autopilot_pending_user_confirmation',
       });
-      if (!failed) {
-        this.emitAutopilotWebhook(profile.agentConnectionId, {
-          ownerUserId,
-          agentProfileId: profile.id,
-          socialRequestId: request.id,
-          candidateId: candidate.id,
-          targetUserId: candidate.candidateUserId,
-          approvalId: approval.id,
-          decision: 'executed',
-        });
-      }
-      return failed ? 'skipped' : 'executed';
+      this.emitAutopilotWebhook(profile.agentConnectionId, {
+        ownerUserId,
+        agentProfileId: profile.id,
+        socialRequestId: request.id,
+        candidateId: candidate.id,
+        targetUserId: candidate.candidateUserId,
+        approvalId: approval.id,
+        decision: 'pending',
+      });
+      return 'pending';
     }
 
     // Branch 3: Needs approval — queue PendingAction.

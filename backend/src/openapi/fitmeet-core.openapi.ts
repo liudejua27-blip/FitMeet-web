@@ -80,7 +80,9 @@ export const fitMeetCoreOpenApi = {
     { name: 'public-social-intents' },
     { name: 'messages' },
     { name: 'agent-inbox' },
+    { name: 'agent-control' },
     { name: 'social-agent-chat' },
+    { name: 'social-agent-reminders' },
     { name: 'uploads' },
   ],
   paths: {
@@ -1277,6 +1279,210 @@ export const fitMeetCoreOpenApi = {
         },
       },
     },
+    '/social-agent/chat/messages/{messageId}/feedback': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentSubmitMessageFeedback',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'messageId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                $ref: '#/components/schemas/SocialAgentMessageFeedbackInput',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Saved per-message Social Agent feedback',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentMessageFeedbackResult',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/threads': {
+      get: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentListThreads',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 100 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Recent restorable Social Agent chat threads',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['threads'],
+                  additionalProperties: true,
+                  properties: {
+                    threads: {
+                      type: 'array',
+                      items: {
+                        $ref: '#/components/schemas/SocialAgentThreadSummary',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentCreateThread',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/SocialAgentThreadInput' },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Created Social Agent chat thread',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentThreadSummary',
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/threads/{id}': {
+      get: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentGetThread',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Restorable Social Agent chat thread detail',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentThreadDetail',
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentUpdateThread',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/SocialAgentThreadInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated Social Agent chat thread',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentThreadSummary',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/threads/{id}/delete': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentDeleteThread',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Deleted Social Agent chat thread',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['ok', 'threadId'],
+                  additionalProperties: true,
+                  properties: {
+                    ok: { type: 'boolean' },
+                    threadId: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
     '/social-agent/chat/route-message': {
       post: {
         tags: ['social-agent-chat'],
@@ -1390,6 +1596,151 @@ export const fitMeetCoreOpenApi = {
             },
           },
           '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/reminders': {
+      get: {
+        tags: ['social-agent-reminders'],
+        operationId: 'socialAgentListReminders',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 50 },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'List opt-in proactive Agent reminders for the authenticated user.',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { type: 'object' } },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/reminders/preferences': {
+      get: {
+        tags: ['social-agent-reminders'],
+        operationId: 'socialAgentGetReminderPreferences',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description:
+              'Read proactive reminder preferences. Reminders are disabled by default.',
+            content: {
+              'application/json': { schema: { type: 'object' } },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+      patch: {
+        tags: ['social-agent-reminders'],
+        operationId: 'socialAgentUpdateReminderPreferences',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': { schema: { type: 'object' } },
+          },
+        },
+        responses: {
+          '200': {
+            description:
+              'Update opt-in proactive reminder preferences for the authenticated user.',
+            content: {
+              'application/json': { schema: { type: 'object' } },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/reminders/run-once': {
+      post: {
+        tags: ['social-agent-reminders'],
+        operationId: 'socialAgentRunReminderOnce',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: { force: { type: 'boolean' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description:
+              'Evaluate one safe proactive reminder. This never sends invites, connects candidates, creates activities, or publishes content.',
+            content: {
+              'application/json': { schema: { type: 'object' } },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/reminders/{id}/open': {
+      post: {
+        tags: ['social-agent-reminders'],
+        operationId: 'socialAgentOpenReminder',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Mark an authenticated user reminder as opened.',
+            content: {
+              'application/json': { schema: { type: 'object' } },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/reminders/{id}/dismiss': {
+      post: {
+        tags: ['social-agent-reminders'],
+        operationId: 'socialAgentDismissReminder',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Dismiss an authenticated user reminder.',
+            content: {
+              'application/json': { schema: { type: 'object' } },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
         },
       },
     },
@@ -1579,6 +1930,36 @@ export const fitMeetCoreOpenApi = {
             },
           },
           '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/tasks/{taskId}/run-next': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentRunTaskNext',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Low-touch continuation check for waiting-reply Social Agent tasks',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/SocialAgentRunNextResult',
+                },
+              },
+            },
+          },
           '401': { $ref: '#/components/responses/Error' },
           '404': { $ref: '#/components/responses/Error' },
         },
@@ -1932,6 +2313,500 @@ export const fitMeetCoreOpenApi = {
             content: {
               'text/event-stream': {
                 schema: { type: 'string' },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/checkpoints/{checkpointId}/resume/stream': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentResumeCheckpointStream',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'checkpointId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: true,
+                properties: {
+                  decision: { type: 'string', enum: ['approved', 'rejected'] },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description:
+              'Server-sent events that resume a durable Agent checkpoint after an interrupt.',
+            content: { 'text/event-stream': { schema: { type: 'string' } } },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/checkpoints/{checkpointId}/replay/stream': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentReplayCheckpointStream',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'checkpointId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: { type: 'object', additionalProperties: true },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description:
+              'Server-sent events that replay a durable Agent checkpoint from the saved cursor.',
+            content: { 'text/event-stream': { schema: { type: 'string' } } },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/checkpoints/{checkpointId}/retry/stream': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentRetryCheckpointStream',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'checkpointId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: { type: 'object', additionalProperties: true },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description:
+              'Server-sent events that retry a durable Agent checkpoint from the saved cursor.',
+            content: { 'text/event-stream': { schema: { type: 'string' } } },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/checkpoints/{checkpointId}/fork/stream': {
+      post: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentForkCheckpointStream',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'checkpointId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: { type: 'object', additionalProperties: true },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description:
+              'Server-sent events that fork a durable Agent checkpoint into an alternate run.',
+            content: { 'text/event-stream': { schema: { type: 'string' } } },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/chat/checkpoints/{checkpointId}/steps/{stepId}/retry/stream':
+      {
+        post: {
+          tags: ['social-agent-chat'],
+          operationId: 'socialAgentRetryCheckpointStepStream',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: 'checkpointId',
+              in: 'path',
+              required: true,
+              schema: { type: 'integer' },
+            },
+            {
+              name: 'stepId',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+            },
+          ],
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: { type: 'object', additionalProperties: true },
+              },
+            },
+          },
+          responses: {
+            '200': {
+              description:
+                'Server-sent events that retry a single saved Agent tool step.',
+              content: { 'text/event-stream': { schema: { type: 'string' } } },
+            },
+            '400': { $ref: '#/components/responses/Error' },
+            '401': { $ref: '#/components/responses/Error' },
+            '404': { $ref: '#/components/responses/Error' },
+          },
+        },
+      },
+    '/social-agent/chat/checkpoints/{checkpointId}/steps/{stepId}/replay/stream':
+      {
+        post: {
+          tags: ['social-agent-chat'],
+          operationId: 'socialAgentReplayCheckpointStepStream',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: 'checkpointId',
+              in: 'path',
+              required: true,
+              schema: { type: 'integer' },
+            },
+            {
+              name: 'stepId',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+            },
+          ],
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: { type: 'object', additionalProperties: true },
+              },
+            },
+          },
+          responses: {
+            '200': {
+              description:
+                'Server-sent events that replay a single saved Agent tool step.',
+              content: { 'text/event-stream': { schema: { type: 'string' } } },
+            },
+            '400': { $ref: '#/components/responses/Error' },
+            '401': { $ref: '#/components/responses/Error' },
+            '404': { $ref: '#/components/responses/Error' },
+          },
+        },
+      },
+    '/social-agent/chat/checkpoints/{checkpointId}/steps/{stepId}/fork/stream':
+      {
+        post: {
+          tags: ['social-agent-chat'],
+          operationId: 'socialAgentForkCheckpointStepStream',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: 'checkpointId',
+              in: 'path',
+              required: true,
+              schema: { type: 'integer' },
+            },
+            {
+              name: 'stepId',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+            },
+          ],
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: { type: 'object', additionalProperties: true },
+              },
+            },
+          },
+          responses: {
+            '200': {
+              description:
+                'Server-sent events that fork a single saved Agent tool step into an alternate run.',
+              content: { 'text/event-stream': { schema: { type: 'string' } } },
+            },
+            '400': { $ref: '#/components/responses/Error' },
+            '401': { $ref: '#/components/responses/Error' },
+            '404': { $ref: '#/components/responses/Error' },
+          },
+        },
+      },
+    '/agent/checkpoints/tasks/{taskId}/latest': {
+      get: {
+        tags: ['agent-control'],
+        operationId: 'agentLatestCheckpointForTask',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Latest durable Agent checkpoint summary for a social task.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['checkpoint'],
+                  properties: {
+                    checkpoint: {
+                      oneOf: [
+                        { $ref: '#/components/schemas/AgentCheckpointSummary' },
+                        { type: 'null' },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/agent/checkpoints/{checkpointId}/retry': {
+      post: {
+        tags: ['agent-control'],
+        operationId: 'agentPrepareCheckpointRetry',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'checkpointId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Prepare a retry plan and streaming endpoint for a durable Agent checkpoint.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/AgentCheckpointActionPlan',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/agent/checkpoints/{checkpointId}/replay': {
+      post: {
+        tags: ['agent-control'],
+        operationId: 'agentPrepareCheckpointReplay',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'checkpointId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Prepare a replay plan and streaming endpoint for a durable Agent checkpoint.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/AgentCheckpointActionPlan',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/agent/checkpoints/{checkpointId}/fork': {
+      post: {
+        tags: ['agent-control'],
+        operationId: 'agentPrepareCheckpointFork',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'checkpointId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Prepare a fork plan and streaming endpoint for a durable Agent checkpoint.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/AgentCheckpointActionPlan',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/agent/checkpoints/{checkpointId}/steps/{stepId}/retry': {
+      post: {
+        tags: ['agent-control'],
+        operationId: 'agentPrepareCheckpointStepRetry',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'checkpointId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+          {
+            name: 'stepId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Prepare a retry plan and streaming endpoint for a single saved Agent tool step.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/AgentCheckpointActionPlan',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/agent/checkpoints/{checkpointId}/steps/{stepId}/replay': {
+      post: {
+        tags: ['agent-control'],
+        operationId: 'agentPrepareCheckpointStepReplay',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'checkpointId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+          {
+            name: 'stepId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Prepare a replay plan and streaming endpoint for a single saved Agent tool step.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/AgentCheckpointActionPlan',
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/Error' },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/agent/checkpoints/{checkpointId}/steps/{stepId}/fork': {
+      post: {
+        tags: ['agent-control'],
+        operationId: 'agentPrepareCheckpointStepFork',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'checkpointId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+          {
+            name: 'stepId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Prepare a fork plan and streaming endpoint for a single saved Agent tool step.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/AgentCheckpointActionPlan',
+                },
               },
             },
           },
@@ -3394,6 +4269,156 @@ export const fitMeetCoreOpenApi = {
           },
         },
       },
+      SocialAgentThreadInput: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          title: { type: 'string', minLength: 1, maxLength: 120 },
+          branchSnapshot: {
+            $ref: '#/components/schemas/SocialAgentThreadBranchSnapshot',
+          },
+        },
+      },
+      SocialAgentThreadBranchSnapshot: {
+        type: 'object',
+        additionalProperties: true,
+        properties: {
+          activeBranchId: { type: ['string', 'null'] },
+          branchSelections: {
+            type: 'object',
+            additionalProperties: { type: 'integer', minimum: 1 },
+          },
+          branchCount: { type: ['integer', 'null'], minimum: 0 },
+          parentMessageId: { type: ['string', 'null'] },
+          updatedAt: { type: ['string', 'null'], format: 'date-time' },
+        },
+      },
+      SocialAgentThreadSummary: {
+        type: 'object',
+        required: [
+          'threadId',
+          'title',
+          'status',
+          'messageCount',
+          'updatedAt',
+          'createdAt',
+        ],
+        additionalProperties: true,
+        properties: {
+          threadId: { type: 'integer' },
+          taskId: { type: 'integer' },
+          title: { type: 'string' },
+          preview: { type: ['string', 'null'] },
+          status: { type: 'string' },
+          messageCount: { type: 'integer', minimum: 0 },
+          branch: {
+            oneOf: [
+              { $ref: '#/components/schemas/SocialAgentThreadBranchSnapshot' },
+              { type: 'null' },
+            ],
+          },
+          updatedAt: { type: 'string', format: 'date-time' },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      SocialAgentThreadDetail: {
+        type: 'object',
+        required: ['thread', 'session'],
+        additionalProperties: true,
+        properties: {
+          thread: { $ref: '#/components/schemas/SocialAgentThreadSummary' },
+          session: {
+            $ref: '#/components/schemas/SocialAgentSessionSnapshot',
+          },
+        },
+      },
+      SocialAgentMessageFeedbackInput: {
+        type: 'object',
+        required: ['value', 'source'],
+        additionalProperties: true,
+        properties: {
+          value: {
+            type: 'string',
+            enum: ['positive', 'negative'],
+          },
+          reason: { type: 'string' },
+          taskId: { type: 'integer' },
+          runId: { type: 'string' },
+          traceId: { type: 'string' },
+          source: {
+            type: 'string',
+            enum: ['agent_web'],
+          },
+          metadata: {
+            type: 'object',
+            additionalProperties: true,
+          },
+        },
+      },
+      SocialAgentMessageFeedbackResult: {
+        type: 'object',
+        required: ['ok', 'messageId', 'value', 'updatedAt'],
+        additionalProperties: true,
+        properties: {
+          ok: { type: 'boolean' },
+          messageId: { type: 'string' },
+          value: {
+            type: 'string',
+            enum: ['positive', 'negative'],
+          },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      AgentCheckpointSummary: {
+        type: 'object',
+        required: [
+          'id',
+          'agentTaskId',
+          'type',
+          'status',
+          'phase',
+          'toolName',
+          'stepId',
+          'retryCount',
+          'replayCount',
+          'forkCount',
+          'resumeCount',
+          'resumable',
+          'createdAt',
+          'updatedAt',
+        ],
+        additionalProperties: true,
+        properties: {
+          id: { type: 'integer' },
+          agentTaskId: { type: ['integer', 'null'] },
+          type: { type: 'string' },
+          status: { type: 'string' },
+          phase: { type: ['string', 'null'] },
+          toolName: { type: ['string', 'null'] },
+          stepId: { type: ['string', 'null'] },
+          approvalRequestId: { type: ['integer', 'null'] },
+          parentCheckpointId: { type: ['integer', 'null'] },
+          retryCount: { type: 'integer', minimum: 0 },
+          replayCount: { type: 'integer', minimum: 0 },
+          forkCount: { type: 'integer', minimum: 0 },
+          resumeCount: { type: 'integer', minimum: 0 },
+          resumable: { type: 'boolean' },
+          createdAt: { type: ['string', 'null'], format: 'date-time' },
+          updatedAt: { type: ['string', 'null'], format: 'date-time' },
+        },
+      },
+      AgentCheckpointActionPlan: {
+        type: 'object',
+        required: ['plan', 'streamEndpoint'],
+        additionalProperties: false,
+        properties: {
+          plan: {
+            type: 'object',
+            additionalProperties: true,
+          },
+          streamEndpoint: { type: 'string' },
+        },
+      },
       SocialAgentCardActionInput: {
         type: 'object',
         required: ['action'],
@@ -3529,6 +4554,39 @@ export const fitMeetCoreOpenApi = {
             ],
           },
           replanAttempt: { type: 'integer', minimum: 0 },
+        },
+      },
+      SocialAgentRunNextResult: {
+        type: 'object',
+        required: [
+          'taskId',
+          'executedSteps',
+          'succeededSteps',
+          'failedSteps',
+          'blockedSteps',
+          'status',
+          'handledReply',
+          'decision',
+        ],
+        additionalProperties: true,
+        properties: {
+          taskId: { type: 'integer' },
+          executedSteps: { type: 'integer', minimum: 0 },
+          succeededSteps: { type: 'integer', minimum: 0 },
+          failedSteps: { type: 'integer', minimum: 0 },
+          blockedSteps: { type: 'integer', minimum: 0 },
+          status: { type: 'string' },
+          handledReply: { type: 'boolean' },
+          decision: {
+            oneOf: [
+              { type: 'object', additionalProperties: true },
+              { type: 'null' },
+            ],
+          },
+          cards: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/FitMeetAlphaCard' },
+          },
         },
       },
       SocialAgentAppendContextResult: {

@@ -21,6 +21,7 @@ import type { FitMeetAlphaTurnDecision } from './fitmeet-alpha-agent.types';
 import { SocialAgentPlannerService } from './social-agent-planner.service';
 import { SocialProfileService } from '../users/social-profile.service';
 import { SocialAgentDraftSearchService } from './social-agent-draft-search.service';
+import type { SocialAgentDraftAutoPublishResult } from './social-agent-draft-search.service';
 import { SocialAgentRecommendationResultService } from './social-agent-recommendation-result.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
@@ -91,6 +92,7 @@ export class SocialAgentRunRecommendationService {
 
     let profileSummary: Record<string, unknown> | null = null;
     let draft: SocialAgentRequestDraft | null = null;
+    let draftPublication: SocialAgentDraftAutoPublishResult | null = null;
     let searchResult: Awaited<
       ReturnType<SocialAgentDraftSearchService['searchCandidates']>
     > | null = null;
@@ -118,12 +120,21 @@ export class SocialAgentRunRecommendationService {
           {
             agent: 'Social Match Agent',
             toolName: 'recommendation_create_social_intent',
-            input: { goal: input.goal },
+            input: {
+              source: 'social_agent_chat',
+              mode: 'private_draft_then_auto_public_if_authorized',
+              sideEffectPolicy:
+                'no_messages_or_candidate_contact_without_approval',
+            },
           },
           {
             agent: 'Social Match Agent',
             toolName: 'recommendation_search_candidates',
-            input: { goal: input.goal },
+            input: {
+              source: 'social_agent_chat',
+              searchOnly: true,
+              sideEffectPolicy: 'no_contact_without_approval',
+            },
           },
           {
             agent: 'Social Match Agent',
@@ -134,7 +145,8 @@ export class SocialAgentRunRecommendationService {
             agent: 'FitMeet Main Agent',
             toolName: 'recommendation_final_answer',
             input: {
-              statusReason: 'recommendations_ready_waiting_user_confirmation',
+              statusReason:
+                'recommendations_ready_waiting_user_confirmation',
             },
           },
         ],
@@ -263,19 +275,61 @@ export class SocialAgentRunRecommendationService {
             task.id,
             input.ownerUserId,
           );
+          draftPublication = await this.draftSearch.autoPublishDraftIfAllowed(
+            task,
+            draft,
+          );
+          draft.metadata = {
+            ...(draft.metadata ?? {}),
+            visibilityConsent:
+              draftPublication.publishPolicy ===
+                'auto_after_first_public_authorization' ||
+              draft.metadata?.visibilityConsent === true,
+            autoPublished: draftPublication.autoPublished,
+            publicIntentId: draftPublication.publicIntentId,
+            discoverHref: draftPublication.discoverHref,
+            publishPolicy: draftPublication.publishPolicy,
+            publishBlockedReason: draftPublication.blockedReason,
+          };
+          draft.visibilityConsent =
+            draft.metadata.visibilityConsent === true ||
+            draftPublication.autoPublished;
+          draft.autoPublished = draftPublication.autoPublished;
+          draft.publicIntentId = draftPublication.publicIntentId;
+          draft.discoverHref = draftPublication.discoverHref;
+          draft.publishPolicy = draftPublication.publishPolicy;
+          draft.publishBlockedReason = draftPublication.blockedReason;
+          rememberSocialAgentShortTerm(task, {
+            publishedSocialRequestId: draftPublication.autoPublished
+              ? (draft.socialRequestId ?? null)
+              : null,
+            publicIntentId: draftPublication.publicIntentId,
+            autoPublishedDiscoverHref: draftPublication.discoverHref,
+            publishStatus: draftPublication.autoPublished
+              ? 'auto_published'
+              : 'private_draft',
+          });
           await progress.recordTool(
             'fitmeet_create_social_intent',
-            FitMeetAgentToolStatus.WaitingConfirmation,
+            draftPublication.autoPublished
+              ? FitMeetAgentToolStatus.Succeeded
+              : FitMeetAgentToolStatus.WaitingConfirmation,
             { taskId: task.id, mode: 'private_draft' },
             {
               socialRequestId: draft.socialRequestId ?? null,
-              publishPolicy: 'requires_user_confirmation',
+              publishPolicy: draftPublication.publishPolicy,
+              autoPublished: draftPublication.autoPublished,
+              publicIntentId: draftPublication.publicIntentId,
+              discoverHref: draftPublication.discoverHref,
+              blockedReason: draftPublication.blockedReason,
             },
           );
           return {
             handled: true,
             phase: 'create_social_intent',
             socialRequestId: draft.socialRequestId ?? null,
+            publicIntentId: draftPublication.publicIntentId,
+            autoPublished: draftPublication.autoPublished,
           };
         }
 
@@ -362,6 +416,14 @@ export class SocialAgentRunRecommendationService {
             {
               candidateCount: candidates.length,
               policy: 'critical_actions_require_user_confirmation',
+              publishPolicy:
+                draftPublication?.publishPolicy ??
+                draft.metadata?.publishPolicy ??
+                'requires_user_confirmation',
+              publicIntentId:
+                draftPublication?.publicIntentId ??
+                draft.metadata?.publicIntentId ??
+                null,
             },
           );
           await progress.completeStep(
@@ -407,6 +469,11 @@ export class SocialAgentRunRecommendationService {
             {
               candidateCount: candidates.length,
               requiresConfirmation: true,
+              autoPublished: draftPublication?.autoPublished === true,
+              publicIntentId:
+                draftPublication?.publicIntentId ??
+                draft.metadata?.publicIntentId ??
+                null,
             },
           );
           return {
@@ -431,7 +498,10 @@ export class SocialAgentRunRecommendationService {
               draft,
               candidates,
               searchResult,
-              statusReason: 'recommendations_ready_waiting_user_confirmation',
+              statusReason:
+                draftPublication?.autoPublished === true
+                  ? 'recommendations_ready_public_intent_auto_published'
+                  : 'recommendations_ready_waiting_user_confirmation',
               emit: input.emit,
               signal: input.signal,
               alphaTurn: input.alphaTurn,

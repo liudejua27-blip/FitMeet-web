@@ -24,4 +24,35 @@ describe('privacy redaction', () => {
     expect(text).toContain('[REDACTED_BANK_CARD]');
     expect(text).toContain('[REDACTED_ADDRESS]');
   });
+
+  it('keeps assistant-ui card arrays while redacting payment card fields', () => {
+    const result = redactSensitiveValue({
+      cards: [
+        {
+          type: 'candidate_card',
+          schemaType: 'social_match.candidate',
+          data: {
+            schemaName: 'OpportunityCard',
+            opportunityCard: true,
+          },
+        },
+      ],
+      bankCard: '6222 0202 0202 0202 020',
+      creditCardNumber: '6222 0202 0202 0202 020',
+    }) as {
+      cards?: Array<Record<string, unknown>>;
+      bankCard?: string;
+      creditCardNumber?: string;
+    };
+
+    expect(result.cards?.[0]).toMatchObject({
+      type: 'candidate_card',
+      data: {
+        schemaName: 'OpportunityCard',
+        opportunityCard: true,
+      },
+    });
+    expect(result.bankCard).toBe('[REDACTED]');
+    expect(result.creditCardNumber).toBe('[REDACTED]');
+  });
 });

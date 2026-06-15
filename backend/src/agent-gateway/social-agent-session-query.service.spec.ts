@@ -173,7 +173,7 @@ describe('SocialAgentSessionQueryService', () => {
       status: AgentTaskStatus.Executing,
       agentState: 'showing_candidates',
       taskType: 'social_agent_chat',
-      title: 'FitMeet Social Agent 聊天',
+      title: '青岛跑步搭子',
       goal: '帮我找青岛附近的跑步搭子',
       memory: expect.any(Object),
       result: expect.any(Object),

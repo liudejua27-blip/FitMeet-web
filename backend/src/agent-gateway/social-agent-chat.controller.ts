@@ -7,6 +7,7 @@ import {
   Param,
   ParseIntPipe,
   Post,
+  Query,
   Req,
   Res,
   UseGuards,
@@ -20,11 +21,14 @@ import { UserFacingResponseSanitizerService } from './response-quality/user-faci
 import type {
   FitMeetRequest,
   SocialAgentConnectCandidateBody,
+  SocialAgentCheckpointActionBody,
+  SocialAgentMessageFeedbackBody,
   SocialAgentReplanRunBody,
   SocialAgentRouteMessageBody,
   SocialAgentRunBody,
   SocialAgentSaveCandidateBody,
   SocialAgentSendMessageBody,
+  SocialAgentThreadUpdateBody,
 } from './social-agent-chat.controller.types';
 import {
   lightStatusFromStep,
@@ -43,6 +47,13 @@ import { SocialAgentCandidateCommandService } from './social-agent-candidate-com
 import { AgentObservabilityService } from './agent-observability.service';
 import { SocialAgentStreamingResponseService } from './social-agent-streaming-response.service';
 import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
+import { SocialAgentMessageFeedbackService } from './social-agent-message-feedback.service';
+import { SocialAgentThreadService } from './social-agent-thread.service';
+import { SocialAgentProfileGateService } from './social-agent-profile-gate.service';
+import {
+  AgentRunCheckpointService,
+  type AgentRunCheckpointAction,
+} from './agent-run-checkpoint.service';
 
 type LlmAssistantTextResult = {
   streamed: boolean;
@@ -62,7 +73,78 @@ export class SocialAgentChatController {
     private readonly observability?: AgentObservabilityService,
     @Optional()
     private readonly finalResponses?: SocialAgentFinalResponseService,
+    @Optional()
+    private readonly messageFeedback?: SocialAgentMessageFeedbackService,
+    @Optional()
+    private readonly threads?: SocialAgentThreadService,
+    @Optional()
+    private readonly checkpoints?: AgentRunCheckpointService,
+    @Optional()
+    private readonly profileGate?: SocialAgentProfileGateService,
   ) {}
+
+  @Get('threads')
+  listThreads(@Req() req: FitMeetRequest, @Query('limit') limit?: string) {
+    return this.requireThreads().list(req.user.id, Number(limit));
+  }
+
+  @Post('threads')
+  @HttpCode(201)
+  createThread(
+    @Req() req: FitMeetRequest,
+    @Body() body: SocialAgentThreadUpdateBody,
+  ) {
+    return this.requireThreads().create(req.user.id, body?.title);
+  }
+
+  @Get('threads/:id')
+  getThread(@Req() req: FitMeetRequest, @Param('id', ParseIntPipe) id: number) {
+    return this.requireThreads().get(req.user.id, id);
+  }
+
+  @Post('threads/:id')
+  @HttpCode(200)
+  updateThread(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: SocialAgentThreadUpdateBody,
+  ) {
+    return this.requireThreads().update(
+      req.user.id,
+      id,
+      body?.title,
+      body?.branchSnapshot,
+      body?.metadata,
+    );
+  }
+
+  @Post('threads/:id/delete')
+  @HttpCode(200)
+  deleteThread(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.requireThreads().delete(req.user.id, id);
+  }
+
+  @Post('messages/:messageId/feedback')
+  @HttpCode(200)
+  submitMessageFeedback(
+    @Req() req: FitMeetRequest,
+    @Param('messageId') messageId: string,
+    @Body() body: SocialAgentMessageFeedbackBody,
+  ) {
+    return this.requireMessageFeedback().submit(req.user.id, {
+      messageId,
+      value: body?.value === 'negative' ? 'negative' : 'positive',
+      reason: body?.reason,
+      taskId: body?.taskId,
+      runId: body?.runId,
+      traceId: body?.traceId,
+      source: body?.source ?? 'agent_web',
+      metadata: body?.metadata,
+    });
+  }
 
   @Post('run')
   run(@Req() req: FitMeetRequest, @Body() body: SocialAgentRunBody) {
@@ -122,6 +204,11 @@ export class SocialAgentChatController {
   @Get('session')
   getLatestSession(@Req() req: FitMeetRequest) {
     return this.chat.getLatestSession(req.user.id);
+  }
+
+  @Get('profile-gate')
+  getProfileGate(@Req() req: FitMeetRequest) {
+    return this.requireProfileGate().getMinimumProfileStatus(req.user.id);
   }
 
   @Get('tasks/:id/session')
@@ -192,6 +279,100 @@ export class SocialAgentChatController {
     @Res() res: Response,
   ) {
     return this.streamUserFacingAction(req, id, body ?? {}, res);
+  }
+
+  @Post('checkpoints/:id/resume/stream')
+  async resumeCheckpointStream(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: SocialAgentCheckpointActionBody,
+    @Res() res: Response,
+  ) {
+    return this.streamCheckpointAction(req, id, 'resume', body ?? {}, res);
+  }
+
+  @Post('checkpoints/:id/replay/stream')
+  async replayCheckpointStream(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: SocialAgentCheckpointActionBody,
+    @Res() res: Response,
+  ) {
+    return this.streamCheckpointAction(req, id, 'replay', body ?? {}, res);
+  }
+
+  @Post('checkpoints/:id/retry/stream')
+  async retryCheckpointStream(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: SocialAgentCheckpointActionBody,
+    @Res() res: Response,
+  ) {
+    return this.streamCheckpointAction(req, id, 'retry', body ?? {}, res);
+  }
+
+  @Post('checkpoints/:id/steps/:stepId/retry/stream')
+  async retryCheckpointStepStream(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('stepId') stepId: string,
+    @Body() body: SocialAgentCheckpointActionBody,
+    @Res() res: Response,
+  ) {
+    return this.streamCheckpointStepAction(
+      req,
+      id,
+      stepId,
+      'retry',
+      body ?? {},
+      res,
+    );
+  }
+
+  @Post('checkpoints/:id/steps/:stepId/replay/stream')
+  async replayCheckpointStepStream(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('stepId') stepId: string,
+    @Body() body: SocialAgentCheckpointActionBody,
+    @Res() res: Response,
+  ) {
+    return this.streamCheckpointStepAction(
+      req,
+      id,
+      stepId,
+      'replay',
+      body ?? {},
+      res,
+    );
+  }
+
+  @Post('checkpoints/:id/steps/:stepId/fork/stream')
+  async forkCheckpointStepStream(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('stepId') stepId: string,
+    @Body() body: SocialAgentCheckpointActionBody,
+    @Res() res: Response,
+  ) {
+    return this.streamCheckpointStepAction(
+      req,
+      id,
+      stepId,
+      'fork',
+      body ?? {},
+      res,
+    );
+  }
+
+  @Post('checkpoints/:id/fork/stream')
+  async forkCheckpointStream(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: SocialAgentCheckpointActionBody,
+    @Res() res: Response,
+  ) {
+    return this.streamCheckpointAction(req, id, 'fork', body ?? {}, res);
   }
 
   @Post('stream')
@@ -561,6 +742,91 @@ export class SocialAgentChatController {
     }
   }
 
+  private async streamCheckpointAction(
+    req: FitMeetRequest,
+    checkpointId: number,
+    action: AgentRunCheckpointAction,
+    body: SocialAgentCheckpointActionBody,
+    res: Response,
+  ) {
+    const plan = await this.requireCheckpoints().prepareAction({
+      ownerUserId: req.user.id,
+      checkpointId,
+      action,
+    });
+    return this.streamUserFacingMessage(
+      req,
+      {
+        message: plan.resumePrompt,
+        taskId: plan.taskId,
+        idempotencyKey: plan.idempotencyKey,
+        clientContext: {
+          source: 'web',
+          threadId: plan.threadId,
+          checkpointId: plan.checkpointId,
+          parentCheckpointId: plan.parentCheckpointId,
+          resumeCursor: plan.resumeCursor,
+          interrupt: plan.interrupt,
+          sourceCheckpointId:
+            plan.resumeCursor.parentCheckpointId ?? checkpointId,
+          sourceStepId: plan.resumeCursor.stepId ?? null,
+          sourceStep: plan.sourceStep,
+          stepScope: plan.stepScope,
+          sideEffectPolicy: plan.sideEffectPolicy,
+          resumeMode: this.resumeModeFor(action, body.decision ?? null),
+          resumeIdempotencyKey: plan.idempotencyKey,
+          checkpointAction: action,
+          decision: body.decision ?? null,
+        },
+      },
+      res,
+    );
+  }
+
+  private async streamCheckpointStepAction(
+    req: FitMeetRequest,
+    checkpointId: number,
+    stepId: string,
+    action: Exclude<AgentRunCheckpointAction, 'resume'>,
+    body: SocialAgentCheckpointActionBody,
+    res: Response,
+  ) {
+    const plan = await this.requireCheckpoints().prepareStepAction({
+      ownerUserId: req.user.id,
+      checkpointId,
+      stepId,
+      action,
+    });
+    return this.streamUserFacingMessage(
+      req,
+      {
+        message: plan.resumePrompt,
+        taskId: plan.taskId,
+        idempotencyKey: plan.idempotencyKey,
+        clientContext: {
+          source: 'web',
+          threadId: plan.threadId,
+          checkpointId: plan.checkpointId,
+          parentCheckpointId: plan.parentCheckpointId,
+          resumeCursor: plan.resumeCursor,
+          interrupt: plan.interrupt,
+          stepId,
+          sourceCheckpointId:
+            plan.resumeCursor.parentCheckpointId ?? checkpointId,
+          sourceStepId: plan.resumeCursor.stepId ?? stepId,
+          sourceStep: plan.sourceStep,
+          stepScope: plan.stepScope,
+          sideEffectPolicy: plan.sideEffectPolicy,
+          resumeMode: this.resumeModeFor(action, body.decision ?? null),
+          resumeIdempotencyKey: plan.idempotencyKey,
+          checkpointAction: action,
+          decision: body.decision ?? null,
+        },
+      },
+      res,
+    );
+  }
+
   private clientAbortSignal(
     req: FitMeetRequest,
     res: Response,
@@ -583,6 +849,44 @@ export class SocialAgentChatController {
     req.on?.('aborted', abort);
     res.on?.('close', abort);
     return controller.signal;
+  }
+
+  private requireMessageFeedback(): SocialAgentMessageFeedbackService {
+    if (!this.messageFeedback) {
+      throw new Error('SocialAgentMessageFeedbackService is not configured');
+    }
+    return this.messageFeedback;
+  }
+
+  private requireThreads(): SocialAgentThreadService {
+    if (!this.threads) {
+      throw new Error('SocialAgentThreadService is not configured');
+    }
+    return this.threads;
+  }
+
+  private requireProfileGate(): SocialAgentProfileGateService {
+    if (!this.profileGate) {
+      throw new Error('SocialAgentProfileGateService is not configured.');
+    }
+    return this.profileGate;
+  }
+
+  private requireCheckpoints(): AgentRunCheckpointService {
+    if (!this.checkpoints) {
+      throw new Error('AgentRunCheckpointService is not configured');
+    }
+    return this.checkpoints;
+  }
+
+  private resumeModeFor(
+    action: AgentRunCheckpointAction,
+    decision: 'approved' | 'rejected' | null,
+  ) {
+    if (action !== 'resume') return action;
+    if (decision === 'approved') return 'resume_after_approval';
+    if (decision === 'rejected') return 'resume_after_rejection';
+    return 'resume';
   }
 
   private writeApprovalRequiredEvents(

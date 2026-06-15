@@ -22,6 +22,7 @@ import {
   LifeGraphMatchSignalsDto,
   LifeGraphMissingFieldDto,
   LifeGraphProfileDto,
+  LifeGraphPreferenceHistoryItemDto,
   LifeGraphUnifiedMatchSignalsDto,
   LifeGraphSignalScoreDto,
   LifeGraphUpdateAuditDto,
@@ -616,6 +617,7 @@ export class LifeGraphService {
       fields,
       profile,
     );
+    const preferenceHistory = await this.buildPreferenceHistory(userId, fields);
 
     const signals = {
       identitySignals: {
@@ -704,6 +706,7 @@ export class LifeGraphService {
         acceptsNightMeet,
       },
       confidence: { overall, byField },
+      preferenceHistory,
       missingCriticalFields,
     };
     this.logEvent('life_graph.match_signals_generated', {
@@ -1170,6 +1173,46 @@ export class LifeGraphService {
       summary,
       insights: finalInsights,
     };
+  }
+
+  private async buildPreferenceHistory(
+    userId: number,
+    fields: LifeGraphField[],
+  ): Promise<Record<string, LifeGraphPreferenceHistoryItemDto[]>> {
+    const activeKeys = new Set(
+      fields.map((field) => `${field.category}.${field.fieldKey}`),
+    );
+    if (activeKeys.size === 0) return {};
+    const logs = await this.auditLogs.find({
+      where: { userId },
+      order: { createdAt: 'DESC', id: 'DESC' },
+      take: 120,
+    });
+    const history: Record<string, LifeGraphPreferenceHistoryItemDto[]> = {};
+    for (const log of logs) {
+      const key = `${log.category}.${log.fieldKey}`;
+      if (!activeKeys.has(key)) continue;
+      const entries = history[key] ?? [];
+      if (entries.length >= 6) continue;
+      entries.push({
+        category: log.category,
+        fieldKey: log.fieldKey,
+        oldValue: log.oldValue,
+        newValue: log.newValue,
+        source: log.source,
+        confidence: log.confidence,
+        action: log.action,
+        reason: log.reason,
+        taskId: log.taskId,
+        messageId: log.messageId,
+        confirmedByUser:
+          log.action === LifeGraphAuditAction.Confirmed ||
+          log.source === LifeGraphFieldSource.Manual,
+        createdAt: log.createdAt?.toISOString?.() ?? new Date().toISOString(),
+      });
+      history[key] = entries;
+    }
+    return history;
   }
 
   private feedbackPatterns(

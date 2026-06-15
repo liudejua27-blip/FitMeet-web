@@ -1,5 +1,8 @@
 import { cleanDisplayText } from '../common/display-text.util';
-import { LifeGraphUnifiedMatchSignalsDto } from '../life-graph/dto/life-graph.dto';
+import {
+  LifeGraphPreferenceHistoryItemDto,
+  LifeGraphUnifiedMatchSignalsDto,
+} from '../life-graph/dto/life-graph.dto';
 
 export type SocialMatchDynamicExplanation = {
   whyYouMayLike: string;
@@ -8,6 +11,7 @@ export type SocialMatchDynamicExplanation = {
   boundaryNotes: string[];
   openerStrategy: string;
   dynamicSignalReasons: string[];
+  preferenceHistoryReasons: string[];
   continuousFilterHints: string[];
 };
 
@@ -58,10 +62,12 @@ export function buildSocialMatchDynamicExplanation(
       : '',
     ...input.riskWarnings,
   ]).slice(0, 4);
+  const preferenceHistoryReasons = lifeGraphPreferenceHistoryReasons(input.lifeGraphSignals);
   const dynamicSignalReasons = uniqueStrings([
     behavior?.summary,
     ...(behavior?.insights ?? []),
     ...(guidance?.rankingNotes ?? []),
+    ...preferenceHistoryReasons,
     behavior?.completionTrend === 'fragile'
       ? '最近活动履约趋势需要更轻的安排。'
       : '',
@@ -95,6 +101,7 @@ export function buildSocialMatchDynamicExplanation(
         : ['第一次建议先站内沟通，选择公共场所，不共享精确位置。'],
     openerStrategy,
     dynamicSignalReasons,
+    preferenceHistoryReasons,
     continuousFilterHints: uniqueStrings([
       ...(guidance?.suggestedFilters ?? []),
       '只看同校',
@@ -104,6 +111,55 @@ export function buildSocialMatchDynamicExplanation(
       '不想要这个类型',
     ]).slice(0, 6),
   };
+}
+
+function lifeGraphPreferenceHistoryReasons(
+  signals?: LifeGraphUnifiedMatchSignalsDto | null,
+): string[] {
+  if (!signals?.preferenceHistory) return [];
+  const entries = Object.values(signals.preferenceHistory)
+    .flat()
+    .filter((entry) => entry.confirmedByUser)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+
+  return uniqueStrings(
+    entries.map((entry) => {
+      const label = lifeGraphPreferenceLabel(entry);
+      const previous = preferenceValueLabel(entry.oldValue);
+      const next = preferenceValueLabel(entry.newValue);
+      if (!next) return '';
+      if (previous && previous !== next) {
+        return `我会优先参考你最近确认的${label}变化：从「${previous}」调整为「${next}」。`;
+      }
+      return `我会优先参考你最近确认的${label}：「${next}」。`;
+    }),
+  ).slice(0, 2);
+}
+
+function lifeGraphPreferenceLabel(entry: LifeGraphPreferenceHistoryItemDto): string {
+  const key = `${entry.category}.${entry.fieldKey}`;
+  const labels: Record<string, string> = {
+    'lifestyle.availableTimes': '可约时间',
+    'lifestyle.weekendAvailability': '周末时间',
+    'lifestyle.activeHours': '活跃时段',
+    'fitness_activity.sportsPreferences': '运动偏好',
+    'social_intent.currentSocialGoal': '当前社交目标',
+    'social_intent.relationshipGoal': '关系目标',
+    'privacy_boundary.pressurePreference': '社交压力边界',
+    'privacy_boundary.nightBoundary': '夜间见面边界',
+    'trust_safety.publicPlaceOnly': '安全边界',
+  };
+  return labels[key] ?? '偏好';
+}
+
+function preferenceValueLabel(value: unknown): string {
+  if (Array.isArray(value)) {
+    return uniqueStrings(value.map((item) => cleanDisplayText(item, '')))
+      .slice(0, 3)
+      .join('、');
+  }
+  if (typeof value === 'boolean') return value ? '是' : '否';
+  return cleanDisplayText(value, '');
 }
 
 function socialMatchWhyNow(

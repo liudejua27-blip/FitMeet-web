@@ -259,6 +259,7 @@ describe('SocialAgentMainAgentTurnService', () => {
       replyStrategy: 'ask_clarifying_question',
       assistantMessage: '你更想今晚附近走走，还是周末下午？',
       shouldQueueRun: false,
+      cards: [],
     });
     expect(task.status).toBe(AgentTaskStatus.AwaitingFeedback);
     expect(task.statusReason).toBe('main_agent_waiting_for_clarification');

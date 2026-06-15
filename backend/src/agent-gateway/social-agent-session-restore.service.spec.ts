@@ -6,6 +6,10 @@ import {
 } from './entities/agent-approval-request.entity';
 import type { AgentApprovalRequest } from './entities/agent-approval-request.entity';
 import {
+  AgentRunCheckpointStatus,
+  AgentRunCheckpointType,
+} from './entities/agent-run-checkpoint.entity';
+import {
   AgentTask,
   AgentTaskEvent,
   AgentTaskEventActor,
@@ -126,9 +130,23 @@ function makeApproval(): AgentApprovalRequest {
   } as unknown as AgentApprovalRequest;
 }
 
+function makeCheckpoint() {
+  return {
+    id: 909,
+    ownerUserId: 7,
+    agentTaskId: 101,
+    parentCheckpointId: null,
+    type: AgentRunCheckpointType.Interrupt,
+    status: AgentRunCheckpointStatus.Active,
+    resumePrompt: '继续刚才保存的 Agent 步骤。',
+    steps: [{ id: 'approval', label: '等待确认', status: 'pending' }],
+  };
+}
+
 function makeHarness(
   options: {
     approvalsReject?: boolean;
+    checkpoint?: ReturnType<typeof makeCheckpoint> | null;
     events?: AgentTaskEvent[];
     task?: AgentTask | null;
   } = {},
@@ -151,6 +169,9 @@ function makeHarness(
           : Promise.resolve([makeApproval()]),
       ),
   };
+  const checkpoints = {
+    latestForTask: jest.fn().mockResolvedValue(options.checkpoint ?? null),
+  };
   const assembler = new AgentSessionAssemblerService();
   const runState = new SocialAgentRunStateService(
     {} as never,
@@ -163,8 +184,9 @@ function makeHarness(
     approvals as unknown as AgentApprovalService,
     runState,
     assembler,
+    checkpoints as never,
   );
-  return { approvals, eventRepo, service, task, taskRepo };
+  return { approvals, checkpoints, eventRepo, service, task, taskRepo };
 }
 
 describe('SocialAgentSessionRestoreService', () => {
@@ -276,6 +298,30 @@ describe('SocialAgentSessionRestoreService', () => {
 
     expect(snapshot.pendingApprovals).toEqual([]);
     expect(snapshot.hasSession).toBe(true);
+  });
+
+  it('adds the latest checkpoint runtime to restored results', async () => {
+    const { checkpoints, service } = makeHarness({
+      checkpoint: makeCheckpoint(),
+    });
+
+    const snapshot = await service.buildSessionSnapshot({
+      ownerUserId: 7,
+      task: makeTask(),
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(checkpoints.latestForTask).toHaveBeenCalledWith(7, 101);
+    expect(snapshot.result).toMatchObject({
+      runtime: {
+        checkpointId: 909,
+        checkpointType: AgentRunCheckpointType.Interrupt,
+        canResume: true,
+        canReplay: true,
+        canFork: true,
+        parentCheckpointId: null,
+      },
+    });
   });
 
   it('returns an empty session when no restorable task exists', async () => {

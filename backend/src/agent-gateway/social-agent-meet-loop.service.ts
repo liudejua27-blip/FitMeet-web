@@ -44,6 +44,7 @@ import {
   buildSocialAgentCardActionRouteResult,
   buildSocialAgentCheckinCard,
   buildSocialAgentLifeGraphUpdateCard,
+  buildSocialAgentMeetLoopTimelineCard,
   buildSocialAgentProofSubmittedCard,
   buildSocialAgentProofUploadPromptCard,
   buildSocialAgentReviewCard,
@@ -61,6 +62,7 @@ import {
   appendSocialAgentShortTermTurn,
   recordSocialAgentPendingAction,
   recordSocialAgentShortTermAction,
+  readSocialAgentTaskMemory,
   transitionSocialAgentState,
 } from './social-agent-memory.util';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
@@ -113,13 +115,324 @@ export class SocialAgentMeetLoopService {
     if (body.action === 'activity.view_detail') {
       return this.viewActivityDetailFromCardAction(ownerUserId, taskId, body);
     }
+    if (
+      body.action === 'activity.modify_time' ||
+      body.action === 'activity.modify_location'
+    ) {
+      return this.rescheduleMeetLoopFromCardAction(ownerUserId, taskId, body);
+    }
     if (body.action === 'activity.upload_proof') {
       return this.uploadProofFromCardAction(ownerUserId, taskId, body);
     }
     if (body.action === 'review.submit') {
       return this.submitReviewFromCardAction(ownerUserId, taskId, body);
     }
+    if (body.action === 'meet_loop.resume') {
+      return this.resumeMeetLoopFromCardAction(ownerUserId, taskId, body);
+    }
+    if (body.action === 'meet_loop.reschedule') {
+      return this.rescheduleMeetLoopFromCardAction(ownerUserId, taskId, body);
+    }
     throw new NotFoundException(`Unsupported meet-loop action: ${body.action}`);
+  }
+
+  private async resumeMeetLoopFromCardAction(
+    ownerUserId: number,
+    taskId: number,
+    body: SocialAgentCardActionBody,
+  ): Promise<SocialAgentIntentRouteResult> {
+    const task = await this.assertTaskOwner(taskId, ownerUserId);
+    const payload = this.mergeActivityPayload(task, body.payload ?? {});
+    if (this.isCounterpartReplyPayload(payload)) {
+      return this.resumeCounterpartReplyFromCardAction(task, body, payload);
+    }
+    const card = buildSocialAgentMeetLoopTimelineCard({
+      taskId: task.id,
+      activityId: this.number(payload.activityId),
+      candidateUserId: this.number(
+        payload.candidateUserId ?? payload.targetUserId,
+      ),
+      stage: cleanDisplayText(
+        payload.loopStage ?? payload.status,
+        'activity_draft_created',
+      ),
+      description: '我已恢复到上次保存的邀约进度。',
+      nextAction: '确认后继续推进，不会自动触达对方。',
+      payload,
+    });
+    transitionSocialAgentState(task, 'confirmation_required', {
+      objective: 'meet_loop',
+      nextStep: '等待你确认是否继续推进邀约',
+      shouldSearchNow: false,
+      awaitingSearchConfirmation: false,
+      waitingFor: 'meet_loop_resume_confirmation',
+      lastCompletedStep: cleanDisplayText(
+        payload.loopStage ?? payload.status,
+        'activity_draft_created',
+      ),
+    });
+    await this.taskRepo.save(task);
+    await this.persistMeetLoopState(task, 'activity_draft_created', {
+      waitingFor: 'meet_loop_resume_confirmation',
+      payload,
+    });
+    const assistantMessage =
+      '我已恢复到上次保存的邀约进度。下一步仍需要你确认，确认前不会发送消息、连接候选人或创建活动。';
+    const result = this.cardActionRouteResult(task, assistantMessage, [card]);
+    await this.writeEvent(
+      task,
+      AgentTaskEventType.Note,
+      'Agent meet loop resumed from card action',
+      { action: body.action, stage: payload.loopStage ?? payload.status },
+      AgentTaskEventActor.Agent,
+    );
+    await this.recordAssistantMessage(task, assistantMessage, result);
+    return result;
+  }
+
+  private async resumeCounterpartReplyFromCardAction(
+    task: AgentTask,
+    body: SocialAgentCardActionBody,
+    payload: Record<string, unknown>,
+  ): Promise<SocialAgentIntentRouteResult> {
+    const candidateUserId = this.number(
+      payload.candidateUserId ?? payload.targetUserId,
+    );
+    const activityId = this.number(payload.activityId);
+    const replyPreview =
+      cleanDisplayText(payload.replyPreview, '') ||
+      cleanDisplayText(payload.messagePreview, '') ||
+      cleanDisplayText(payload.counterpartReply, '') ||
+      '对方已经回复，适合继续站内聊。';
+    const counterpartIntent = this.counterpartIntentFromPayload(payload);
+    const nextSafeStep = this.nextSafeStepForCounterpartIntent(counterpartIntent);
+    const intentCopy = this.counterpartIntentCopy(counterpartIntent);
+    const now = new Date().toISOString();
+    const nextPayload: Record<string, unknown> = {
+      ...payload,
+      activityId,
+      candidateUserId,
+      targetUserId: candidateUserId,
+      source: 'counterpart_reply',
+      status: 'reply_received',
+      loopStage: 'reply_received',
+      connectionState: 'reply_received',
+      counterpartIntent,
+      nextSafeStep,
+      replyIntentLabel: intentCopy.label,
+      replyIntentDescription: intentCopy.description,
+      replyPreview,
+      repliedAt: cleanDisplayText(payload.repliedAt, '') || now,
+      publicPlaceOnly: payload.publicPlaceOnly !== false,
+      noPreciseLocation: payload.noPreciseLocation !== false,
+      lifeGraphUpdatePending: true,
+    };
+
+    task.result = {
+      ...(task.result ?? {}),
+      meetLoop: {
+        ...readSocialAgentMeetLoopState(task, (value) => this.isRecord(value)),
+        ...nextPayload,
+      },
+    };
+    transitionSocialAgentState(task, 'message_action', {
+      objective: 'candidate_messaging',
+      nextStep: '对方已回复，可以继续站内聊；发起约练或继续邀请前仍会再次确认。',
+      shouldSearchNow: false,
+      awaitingSearchConfirmation: false,
+      waitingFor: 'continue_conversation',
+      lastCompletedStep: 'counterpart_reply_received',
+    });
+    await this.taskRepo.save(task);
+    await this.l5Runtime?.transitionMeetLoop({
+      ownerUserId: task.ownerUserId,
+      agentTaskId: task.id,
+      activityId,
+      candidateUserId,
+      stage: 'reply_received',
+      waitingFor: 'continue_conversation',
+      state: nextPayload,
+      review: null,
+    });
+
+    const timelineCard = buildSocialAgentMeetLoopTimelineCard({
+      taskId: task.id,
+      activityId,
+      candidateUserId,
+      stage: 'reply_received',
+      description: intentCopy.description,
+      nextAction: nextSafeStep,
+      payload: nextPayload,
+    });
+    const lifeGraphCard = buildSocialAgentLifeGraphUpdateCard({
+      taskId: task.id,
+      activityId,
+      candidateUserId,
+      realActivityPersisted: false,
+      rating: 5,
+      comment: replyPreview,
+      positive: true,
+      trustScoreDelta: 0,
+      context: 'counterpart_reply',
+    });
+    const assistantMessage =
+      '对方已经回复了。我先把状态推进到“继续站内聊”，不会自动继续发消息或创建约练；如果你愿意，也可以把这次低压力开场的回应作为一条可撤回的 Life Graph 弱信号。';
+    const result = this.cardActionRouteResult(task, assistantMessage, [
+      timelineCard,
+      lifeGraphCard,
+    ]);
+    await this.writeEvent(
+      task,
+      AgentTaskEventType.Note,
+      'Agent meet loop counterpart reply received',
+      {
+        action: body.action,
+        activityId,
+        candidateUserId,
+        source: 'counterpart_reply',
+      },
+      AgentTaskEventActor.Agent,
+    );
+    await this.recordAssistantMessage(task, assistantMessage, result);
+    return result;
+  }
+
+  private counterpartIntentFromPayload(
+    payload: Record<string, unknown>,
+  ): 'accepted' | 'declined' | 'reschedule_requested' | 'ask_question' | 'continue_chat' {
+    const explicit =
+      cleanDisplayText(payload.counterpartIntent, '') ||
+      cleanDisplayText(payload.replyIntent, '') ||
+      cleanDisplayText(payload.intent, '') ||
+      cleanDisplayText(payload.replyStatus, '') ||
+      cleanDisplayText(payload.nextAction, '');
+    const text = explicit.toLowerCase();
+    if (/decline|reject|refuse|cancel|not_interested|不去|拒绝|算了|没空|不方便/.test(text)) {
+      return 'declined';
+    }
+    if (/reschedule|modify|change_time|another_time|改期|换时间|改时间|其他时间/.test(text)) {
+      return 'reschedule_requested';
+    }
+    if (/ask|question|location|where|when|地点|哪里|几点|时间|吗|？|\?/.test(text)) {
+      return 'ask_question';
+    }
+    if (/accept|accepted|yes|agree|confirmed|可以|好呀|行|同意|确认/.test(text)) {
+      return 'accepted';
+    }
+    return 'continue_chat';
+  }
+
+  private nextSafeStepForCounterpartIntent(
+    intent: 'accepted' | 'declined' | 'reschedule_requested' | 'ask_question' | 'continue_chat',
+  ): string {
+    if (intent === 'accepted') {
+      return '可以继续站内聊；如果要创建约练或连接对方，我会先让你确认。';
+    }
+    if (intent === 'reschedule_requested') {
+      return '先整理新的时间范围，生成改期草稿；确认前不会通知对方。';
+    }
+    if (intent === 'ask_question') {
+      return '先回复对方的问题；发送任何消息前仍会让你确认。';
+    }
+    if (intent === 'declined') {
+      return '尊重对方边界，结束这次推进；如需继续寻找，我会重新召回机会。';
+    }
+    return '继续低压力站内聊；发起约练、连接或创建活动前仍会再次确认。';
+  }
+
+  private counterpartIntentCopy(
+    intent: 'accepted' | 'declined' | 'reschedule_requested' | 'ask_question' | 'continue_chat',
+  ): { label: string; description: string } {
+    if (intent === 'accepted') {
+      return {
+        label: '对方愿意继续',
+        description:
+          '对方愿意继续互动。你可以先站内聊；如果要创建约练、连接或继续邀请，我仍会先让你确认。',
+      };
+    }
+    if (intent === 'reschedule_requested') {
+      return {
+        label: '对方想改期',
+        description:
+          '对方倾向调整时间。我可以先整理改期草稿，确认前不会通知对方。',
+      };
+    }
+    if (intent === 'ask_question') {
+      return {
+        label: '对方在追问细节',
+        description:
+          '对方在确认细节。你可以先回复问题；发送消息前仍会保留确认。',
+      };
+    }
+    if (intent === 'declined') {
+      return {
+        label: '对方暂不继续',
+        description:
+          '对方暂时不继续。我会尊重边界，不会追发消息；如果你愿意，可以重新寻找更合适的机会。',
+      };
+    }
+    return {
+      label: '对方已回复',
+      description:
+        '对方已经回复。你可以继续站内聊；如果要发起约练、连接或创建活动，我仍会先让你确认。',
+    };
+  }
+
+  private async rescheduleMeetLoopFromCardAction(
+    ownerUserId: number,
+    taskId: number,
+    body: SocialAgentCardActionBody,
+  ): Promise<SocialAgentIntentRouteResult> {
+    const task = await this.assertTaskOwner(taskId, ownerUserId);
+    const payload: Record<string, unknown> = {
+      ...this.mergeActivityPayload(task, body.payload ?? {}),
+      loopStage: 'reschedule_requested',
+    };
+    const card = buildSocialAgentMeetLoopTimelineCard({
+      taskId: task.id,
+      activityId: this.number(payload.activityId),
+      candidateUserId: this.number(
+        payload.candidateUserId ?? payload.targetUserId,
+      ),
+      stage: 'reschedule_requested',
+      description: '可以调整时间，但我会先整理改期建议，不直接通知对方。',
+      nextAction: '告诉我新的时间范围，我会生成改期草稿。',
+      payload,
+    });
+    transitionSocialAgentState(task, 'confirmation_required', {
+      objective: 'meet_loop',
+      nextStep: '等待你补充新的时间范围',
+      shouldSearchNow: false,
+      awaitingSearchConfirmation: false,
+      waitingFor: 'reschedule_time_window',
+      lastCompletedStep: 'reschedule_requested',
+    });
+    task.result = {
+      ...(task.result ?? {}),
+      meetLoop: {
+        ...readSocialAgentMeetLoopState(task, (value) => this.isRecord(value)),
+        ...payload,
+        status: 'reschedule_requested',
+        loopStage: 'reschedule_requested',
+      },
+    };
+    await this.taskRepo.save(task);
+    await this.persistMeetLoopState(task, 'activity_draft_created', {
+      waitingFor: 'reschedule_time_window',
+      payload,
+    });
+    const assistantMessage =
+      '可以改期。我会先等你给出新的时间范围，再生成改期草稿；不会自动通知对方。';
+    const result = this.cardActionRouteResult(task, assistantMessage, [card]);
+    await this.writeEvent(
+      task,
+      AgentTaskEventType.Note,
+      'Agent meet loop reschedule requested from card action',
+      { action: body.action },
+      AgentTaskEventActor.Agent,
+    );
+    await this.recordAssistantMessage(task, assistantMessage, result);
+    return result;
   }
 
   private async createActivityApprovalFromCardAction(
@@ -129,6 +442,12 @@ export class SocialAgentMeetLoopService {
   ): Promise<SocialAgentIntentRouteResult> {
     const task = await this.assertTaskOwner(taskId, ownerUserId);
     const payload = body.payload ?? {};
+    const existingPending = this.duplicatePendingActivityApprovalResult(
+      task,
+      body.action ?? 'activity.confirm_create',
+      payload,
+    );
+    if (existingPending) return existingPending;
     const approval = await this.approvals.create({
       userId: ownerUserId,
       agentConnectionId: null,
@@ -209,6 +528,60 @@ export class SocialAgentMeetLoopService {
     return result;
   }
 
+  private duplicatePendingActivityApprovalResult(
+    task: AgentTask,
+    action: string,
+    payload: Record<string, unknown>,
+  ): SocialAgentIntentRouteResult | null {
+    const result = this.isRecord(task.result) ? task.result : {};
+    const state = readSocialAgentMeetLoopState(task, (value) =>
+      this.isRecord(value),
+    );
+    const currentTask = readSocialAgentTaskMemory(task).currentTask;
+    const draft = this.isRecord(result.activityDraft)
+      ? result.activityDraft
+      : {};
+    const approvalId = this.number(draft.approvalId);
+    if (!approvalId) return null;
+    if (cleanDisplayText(draft.action, '') !== action) return null;
+    if (cleanDisplayText(state.status, '') === 'activity_confirmed') {
+      return null;
+    }
+    if (
+      cleanDisplayText(currentTask.waitingFor, '') !== 'activity_confirmation'
+    ) {
+      return null;
+    }
+    const mergedPayload = {
+      ...payload,
+      ...draft,
+      approvalId,
+      publicPlaceOnly: true,
+      noPreciseLocation: true,
+      idempotentReuse: true,
+    };
+    const pendingApproval: SocialAgentPendingApprovalSnapshot = {
+      id: approvalId,
+      type: ApprovalType.CreateActivity,
+      actionType: 'create_activity',
+      summary: '创建线下约练计划',
+      riskLevel: ApprovalRiskLevel.Medium,
+      payload: mergedPayload,
+      expiresAt: null,
+    };
+    const card = buildSocialAgentActivityPlanCard({
+      taskId: task.id,
+      approvalId,
+      payload: mergedPayload,
+    });
+    return this.cardActionRouteResult(
+      task,
+      '这份约练计划已经在等待你确认，我会复用同一个确认步骤，不会重复创建审批。',
+      [card],
+      pendingApproval,
+    );
+  }
+
   private async confirmActivityFromCardAction(
     ownerUserId: number,
     taskId: number,
@@ -220,6 +593,10 @@ export class SocialAgentMeetLoopService {
     const candidateUserId = this.number(
       payload.candidateUserId ?? payload.targetUserId,
     );
+    const approvalId = this.number(payload.approvalId);
+    if (approvalId) {
+      await this.approvals.approve(approvalId, ownerUserId);
+    }
     const realActivity = await this.createOrConfirmRealActivity(
       ownerUserId,
       payload,
@@ -277,6 +654,21 @@ export class SocialAgentMeetLoopService {
       payload: this.meetLoopPayload(task),
     });
 
+    const timelineCard = buildSocialAgentMeetLoopTimelineCard({
+      taskId: task.id,
+      activityId: resolvedActivityId,
+      candidateUserId: resolvedCandidateUserId,
+      stage: 'activity_confirmed',
+      description:
+        '约练计划已经按你的确认创建。后续签到、完成、评价和画像回写会继续保存在同一条约练进展里。',
+      nextAction:
+        '活动开始前等待你确认到达；我不会共享你的精确位置，也不会重复打扰对方。',
+      payload: {
+        activityId: resolvedActivityId,
+        candidateUserId: resolvedCandidateUserId,
+        realActivityPersisted: Boolean(realActivity),
+      },
+    });
     const card = buildSocialAgentCheckinCard({
       taskId: task.id,
       activityId: resolvedActivityId,
@@ -286,7 +678,10 @@ export class SocialAgentMeetLoopService {
 
     const assistantMessage =
       '约练计划已经创建好了。等你到达公共场所后，再点签到；我不会共享你的精确位置。';
-    const result = this.cardActionRouteResult(task, assistantMessage, [card]);
+    const result = this.cardActionRouteResult(task, assistantMessage, [
+      timelineCard,
+      card,
+    ]);
     await this.writeEvent(
       task,
       AgentTaskEventType.Note,
@@ -852,6 +1247,22 @@ export class SocialAgentMeetLoopService {
       payload,
       isRecord: (value) => this.isRecord(value),
     });
+  }
+
+  private isCounterpartReplyPayload(payload: Record<string, unknown>): boolean {
+    const source = cleanDisplayText(payload.source, '');
+    const status = cleanDisplayText(payload.status, '');
+    const loopStage = cleanDisplayText(payload.loopStage, '');
+    const connectionState = cleanDisplayText(payload.connectionState, '');
+    const replyStatus = cleanDisplayText(payload.replyStatus, '');
+    return (
+      source === 'counterpart_reply' ||
+      status === 'reply_received' ||
+      loopStage === 'reply_received' ||
+      connectionState === 'reply_received' ||
+      replyStatus === 'replied' ||
+      payload.replyReceived === true
+    );
   }
 
   private async recordLifeGraphBehaviorEvent(

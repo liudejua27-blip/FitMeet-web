@@ -76,6 +76,7 @@ function signals(
     },
     confidence: { overall: 0.9, byField: {} },
     missingCriticalFields: [],
+    preferenceHistory: {},
     ...overrides,
   };
 }

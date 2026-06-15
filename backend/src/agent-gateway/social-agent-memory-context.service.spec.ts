@@ -81,6 +81,17 @@ describe('SocialAgentMemoryContextService', () => {
           socialStyle: '',
           communicationStyle: '',
           preferredTraits: [],
+          preferenceHistory: [
+            {
+              field: 'interest',
+              value: 'running',
+              source: 'task_memory',
+              taskId: 3,
+              outcome: 'succeeded',
+              confirmed: true,
+              at: '2026-05-24T00:00:00.000Z',
+            },
+          ],
         },
         boundaries: {
           excludedGenders: [],
@@ -131,6 +142,13 @@ describe('SocialAgentMemoryContextService', () => {
     });
     expect(context.longTerm?.socialGoals).toContain('same-school women');
     expect(context.longTerm?.availability).toContain('weekend afternoon');
+    expect(context.longTerm?.recentPreferenceHistory).toEqual([
+      expect.objectContaining({
+        field: '兴趣',
+        value: 'running',
+        source: '任务记忆',
+      }),
+    ]);
     expect(context.retrievalHints.shouldRecallConversation).toBe(true);
     expect(context.retrievalHints.shouldAvoidImmediateSearch).toBe(true);
     expect(context.retrievalHints.missingProfileFields).toEqual(

@@ -6,6 +6,7 @@ import type {
   SocialAgentAsyncRunSnapshot,
   SocialAgentChatReplanRunBody,
   SocialAgentIntentRouteResult,
+  SocialAgentRuntimeResumeMetadata,
   SocialAgentRouteMessageBody,
   StreamEmit,
 } from './social-agent-chat.types';
@@ -93,6 +94,7 @@ export class SocialAgentRouteTurnService {
       state,
       message,
       decision,
+      clientContext: body.clientContext ?? null,
       emit: input.emit,
       signal: input.signal,
       replanAndRefresh: input.replanAndRefresh,
@@ -113,8 +115,56 @@ export class SocialAgentRouteTurnService {
       assistantStreamed: branchRun.state.assistantStreamed,
       agentLoop: branchRun.loop,
       subagentHandoffs: branchRun.subagentHandoffs,
+      runtime: this.runtimeFromResumeContext(branchRun.resumeContext),
       startedAt,
     });
+  }
+
+  private runtimeFromResumeContext(
+    resumeContext: Awaited<
+      ReturnType<SocialAgentRouteAgentLoopRunnerService['run']>
+    >['resumeContext'],
+  ): SocialAgentRuntimeResumeMetadata | null {
+    if (!resumeContext?.checkpointId) return null;
+    return {
+      checkpointId: resumeContext.checkpointId,
+      checkpointType:
+        resumeContext.stepScope?.mode === 'through_step'
+          ? 'step'
+          : 'checkpoint',
+      canResume: resumeContext.checkpointAction === 'resume',
+      canReplay: true,
+      canFork: true,
+      parentCheckpointId:
+        typeof resumeContext.parentCheckpointId === 'number'
+          ? resumeContext.parentCheckpointId
+          : null,
+      threadId: resumeContext.threadId,
+      idempotencyKey: resumeContext.idempotencyKey,
+      checkpointAction:
+        resumeContext.checkpointAction === 'resume' ||
+        resumeContext.checkpointAction === 'retry' ||
+        resumeContext.checkpointAction === 'replay' ||
+        resumeContext.checkpointAction === 'fork'
+          ? resumeContext.checkpointAction
+          : null,
+      resumeCursor: {
+        threadId: resumeContext.threadId,
+        checkpointId: resumeContext.checkpointId,
+        parentCheckpointId: resumeContext.parentCheckpointId,
+        action:
+          resumeContext.checkpointAction === 'resume' ||
+          resumeContext.checkpointAction === 'retry' ||
+          resumeContext.checkpointAction === 'replay' ||
+          resumeContext.checkpointAction === 'fork'
+            ? resumeContext.checkpointAction
+            : null,
+        stepId: resumeContext.sourceStepId,
+      },
+      sourceStep: resumeContext.sourceStep,
+      stepScope: resumeContext.stepScope,
+      sideEffectPolicy: resumeContext.sideEffectPolicy,
+    };
   }
 
   private async handleCandidateConfirmationInLoop(input: {

@@ -3,6 +3,7 @@ import { candidateCityMatches } from './social-agent-candidate-scoring';
 
 type CandidateReasonQuery = {
   city: string;
+  acceptsStrangers?: boolean | null;
 };
 
 export function buildProfileCandidateReasons(input: {
@@ -21,6 +22,9 @@ export function buildProfileCandidateReasons(input: {
   }
   if (input.completeness >= 0.7) reasons.push('画像信息较完整。');
   if (input.verified) reasons.push('用户已认证。');
+  if (input.query.acceptsStrangers === true) {
+    reasons.push('对方公开可发现，适合作为安全的新认识机会。');
+  }
   return reasons.slice(0, 6);
 }
 
@@ -46,5 +50,8 @@ export function buildPublicIntentCandidateReasons(input: {
   if (timePreference) reasons.push(`时间偏好：${timePreference}。`);
   const requestType = cleanDisplayText(input.intent.requestType, '');
   if (requestType) reasons.push(`需求类型：${requestType}。`);
+  if (input.query.acceptsStrangers === true) {
+    reasons.push('公开卡片可发现，适合从低压力互动开始。');
+  }
   return reasons.slice(0, 6);
 }

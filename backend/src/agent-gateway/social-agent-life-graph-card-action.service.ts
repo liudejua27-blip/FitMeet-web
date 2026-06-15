@@ -20,7 +20,6 @@ import {
   AgentTaskEventActor,
   AgentTaskEventType,
 } from './entities/agent-task.entity';
-import { FitMeetAgentSchemaAction } from './fitmeet-alpha-agent.types';
 import type { SocialAgentCardActionBody } from './social-agent-action.types';
 import { buildSocialAgentCardActionRouteResult } from './social-agent-card-action.presenter';
 import { appendSocialAgentConversationTurn } from './social-agent-chat-memory.presenter';
@@ -51,9 +50,6 @@ export class SocialAgentLifeGraphCardActionService {
     taskId: number,
     body: SocialAgentCardActionBody,
   ): Promise<SocialAgentIntentRouteResult> {
-    if (!this.lifeGraph) {
-      throw new BadRequestException('Life Graph service is not available');
-    }
     if (!this.isLifeGraphAction(body.action)) {
       throw new BadRequestException('Unsupported Life Graph action');
     }
@@ -61,16 +57,28 @@ export class SocialAgentLifeGraphCardActionService {
     const task = await this.assertTaskOwner(taskId, ownerUserId);
     const payload = body.payload ?? {};
     const proposalId = this.readProposalId(payload);
+    if (!proposalId && this.isMeetLoopLifeGraphInfluence(task, payload)) {
+      return this.performMeetLoopLifeGraphInfluenceDecision(
+        task,
+        body.action,
+        payload,
+      );
+    }
+    if (!this.lifeGraph) {
+      throw new BadRequestException('Life Graph service is not available');
+    }
     if (!proposalId) {
       throw new BadRequestException('Missing Life Graph proposalId');
     }
 
     const fieldIds = this.readFieldIds(payload);
+    const allowConflicts = this.bool(payload.allowConflicts);
     const proposal =
       body.action === 'life_graph.accept_update'
         ? await this.lifeGraph.confirmUpdate(ownerUserId, {
             proposalId,
             ...(fieldIds.length ? { fieldIds } : {}),
+            ...(allowConflicts ? { allowConflicts: true } : {}),
           })
         : await this.lifeGraph.rejectUpdate(ownerUserId, {
             proposalId,
@@ -107,6 +115,10 @@ export class SocialAgentLifeGraphCardActionService {
         status: proposal.status,
         accepted,
         decidedAt: new Date().toISOString(),
+        source: 'user_confirmed_agent_card',
+        selectedFieldIds: fieldIds,
+        allowConflicts,
+        fieldSnapshots: this.lifeGraphFieldSnapshots(proposal),
       },
     };
     await this.taskRepo.save(task);
@@ -137,10 +149,131 @@ export class SocialAgentLifeGraphCardActionService {
         proposalId: proposal.proposalId,
         proposalStatus: proposal.status,
         selectedFieldIds: fieldIds,
+        allowConflicts,
+        confirmationSource: 'agent_card_action',
+        fieldSnapshots: this.lifeGraphFieldSnapshots(proposal),
       },
       AgentTaskEventActor.User,
     );
     return result;
+  }
+
+  private async performMeetLoopLifeGraphInfluenceDecision(
+    task: AgentTask,
+    action: 'life_graph.accept_update' | 'life_graph.reject_update',
+    payload: Record<string, unknown>,
+  ): Promise<SocialAgentIntentRouteResult> {
+    const accepted = action === 'life_graph.accept_update';
+    const activityId = this.number(payload.activityId);
+    const candidateUserId = this.number(
+      payload.candidateUserId ?? payload.targetUserId,
+    );
+    const decidedAt = new Date().toISOString();
+
+    task.result = {
+      ...(task.result ?? {}),
+      meetLoop: {
+        ...this.readRecord(task.result?.['meetLoop']),
+        lifeGraphInfluenceDecision: {
+          accepted,
+          activityId,
+          candidateUserId,
+          decidedAt,
+          source: this.lifeGraphInfluenceSource(payload),
+          conversationId: cleanDisplayText(payload.conversationId, '') || null,
+          messageId: cleanDisplayText(payload.messageId, '') || null,
+        },
+      },
+      lifeGraphDecision: {
+        proposalId: null,
+        status: accepted
+          ? 'accepted_task_influence'
+          : 'rejected_task_influence',
+        accepted,
+        activityId,
+        candidateUserId,
+        source: this.lifeGraphInfluenceSource(payload),
+        conversationId: cleanDisplayText(payload.conversationId, '') || null,
+        messageId: cleanDisplayText(payload.messageId, '') || null,
+        decidedAt,
+      },
+    };
+    transitionSocialAgentState(
+      task,
+      accepted ? 'life_graph_updated' : 'activity_completed',
+      {
+        objective: 'meet_loop',
+        nextStep: accepted
+          ? '本次约练影响已保留，后续推荐会参考它'
+          : '本次约练影响已撤回，后续推荐不会继续参考它',
+        shouldSearchNow: false,
+        profileSaved: accepted,
+        awaitingSearchConfirmation: false,
+        waitingFor: '',
+        lastCompletedStep: accepted
+          ? 'meet_loop_life_graph_influence_kept'
+          : 'meet_loop_life_graph_influence_revoked',
+      },
+    );
+    await this.taskRepo.save(task);
+
+    const assistantMessage = accepted
+      ? this.lifeGraphInfluenceAcceptedReply(payload)
+      : this.lifeGraphInfluenceRejectedReply(payload);
+    const result = buildSocialAgentCardActionRouteResult({
+      task,
+      assistantMessage,
+      cards: [],
+      emptyIntentEntities: {
+        city: '',
+        activityType: '',
+        targetGender: '',
+        timePreference: '',
+        locationPreference: '',
+      },
+    });
+    result.profileUpdated = accepted;
+    await this.recordAssistantMessage(task, assistantMessage, result);
+    await this.writeEvent(
+      task,
+      AgentTaskEventType.ConfirmationReceived,
+      accepted
+        ? 'User kept Meet Loop Life Graph influence'
+        : 'User revoked Meet Loop Life Graph influence',
+      {
+        action,
+        activityId,
+        candidateUserId,
+        source: this.lifeGraphInfluenceSource(payload),
+        conversationId: cleanDisplayText(payload.conversationId, '') || null,
+        messageId: cleanDisplayText(payload.messageId, '') || null,
+      },
+      AgentTaskEventActor.User,
+    );
+    return result;
+  }
+
+  private lifeGraphInfluenceSource(payload: Record<string, unknown>): string {
+    const source = cleanDisplayText(payload.source, '');
+    return source || 'meet_loop_review';
+  }
+
+  private lifeGraphInfluenceAcceptedReply(
+    payload: Record<string, unknown>,
+  ): string {
+    if (this.lifeGraphInfluenceSource(payload) === 'counterpart_reply') {
+      return '已保留这次回复的脱敏互动信号，后续推荐会参考它。你之后仍然可以在 Life Graph 里查看、纠正或撤回。';
+    }
+    return '已保留这次约练对后续推荐的影响。你之后仍然可以在 Life Graph 里查看、纠正或撤回。';
+  }
+
+  private lifeGraphInfluenceRejectedReply(
+    payload: Record<string, unknown>,
+  ): string {
+    if (this.lifeGraphInfluenceSource(payload) === 'counterpart_reply') {
+      return '好的，这次回复不会作为长期画像偏好信号。我会保留会话上下文，但后续推荐不会继续参考这条互动信号。';
+    }
+    return '好的，这次约练评价不会继续用于后续推荐。我已经保留聊天记录本身，但不会把它作为画像偏好信号。';
   }
 
   private decisionReply(
@@ -155,6 +288,25 @@ export class SocialAgentLifeGraphCardActionService {
     ).length;
     const countText = count > 0 ? `${count} 条` : '这些';
     return `已保存 ${countText} Life Graph 信息。接下来你可以继续补充可约时间和边界，或告诉我“现在开始找搭子”。`;
+  }
+
+  private lifeGraphFieldSnapshots(proposal: LifeGraphProposalDto) {
+    return proposal.proposedFields.map((field) => ({
+      proposalFieldId: cleanDisplayText(field.proposalFieldId, '') || null,
+      category: cleanDisplayText(field.category, '') || null,
+      fieldKey: cleanDisplayText(field.fieldKey, '') || null,
+      fieldValue: sanitizeForDisplay(field.fieldValue),
+      oldValue: sanitizeForDisplay(field.oldValue),
+      source: cleanDisplayText(field.source, '') || null,
+      confidence:
+        typeof field.confidence === 'number' && Number.isFinite(field.confidence)
+          ? field.confidence
+          : null,
+      status: cleanDisplayText(field.status, '') || null,
+      conflict: field.conflict === true,
+      requiresUserConfirmation: field.requiresUserConfirmation !== false,
+      reason: cleanDisplayText(field.reason, '') || null,
+    }));
   }
 
   private readProposalId(payload: Record<string, unknown>): number | null {
@@ -174,6 +326,22 @@ export class SocialAgentLifeGraphCardActionService {
           .map((item) => cleanDisplayText(item, ''))
           .filter((item) => item.length > 0)
       : [];
+  }
+
+  private isMeetLoopLifeGraphInfluence(
+    task: AgentTask,
+    payload: Record<string, unknown>,
+  ): boolean {
+    const meetLoop = this.readRecord(task.result?.['meetLoop']);
+    const payloadStage = cleanDisplayText(payload.loopStage, '');
+    const resultStage = cleanDisplayText(meetLoop?.loopStage, '');
+    return (
+      payloadStage === 'trust_score_updated' ||
+      resultStage === 'trust_score_updated' ||
+      cleanDisplayText(payload.source, '') === 'counterpart_reply' ||
+      payload.canRevoke === true ||
+      payload.canCorrect === true
+    );
   }
 
   private async recordAssistantMessage(
@@ -271,7 +439,7 @@ export class SocialAgentLifeGraphCardActionService {
   }
 
   private isLifeGraphAction(
-    action: FitMeetAgentSchemaAction | null | undefined,
+    action: unknown,
   ): action is 'life_graph.accept_update' | 'life_graph.reject_update' {
     return (
       action === 'life_graph.accept_update' ||
@@ -288,5 +456,9 @@ export class SocialAgentLifeGraphCardActionService {
   private number(value: unknown): number | null {
     const num = Number(value);
     return Number.isFinite(num) && num > 0 ? num : null;
+  }
+
+  private bool(value: unknown): boolean {
+    return value === true || value === 'true';
   }
 }

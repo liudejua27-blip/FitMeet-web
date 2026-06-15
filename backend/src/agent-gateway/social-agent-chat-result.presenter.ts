@@ -159,6 +159,7 @@ export function buildRecommendationAssistantMessage(
     return '当前没有找到符合条件的真实用户，我可以帮你发布一个约练需求，或者你可以放宽城市、时间、兴趣条件。';
   }
   const first = candidates[0];
+  const visibleCount = Math.min(candidates.length, 3);
   const explanation = first.candidateExplanation;
   const reason =
     explanation?.fitReasons?.[0] ||
@@ -173,7 +174,7 @@ export function buildRecommendationAssistantMessage(
     explanation?.safeFirstStep ||
     first.emotionalInsight?.safeFirstStep ||
     '第一次建议选择公开场所，并先在站内确认时间、地点和边界。';
-  return `我找到了 ${candidates.length} 位真实候选人。优先看 ${first.nickname}：${reason} 开场可以这样说：${opener} 第一步建议：${safeStep}`;
+  return `我先给你整理出 ${visibleCount} 个安全机会。优先看 ${first.nickname}：${reason} 开场白可以这样说：${opener} 第一步建议：${safeStep}。你确认后我才会发送邀请或连接对方。`;
 }
 
 function normalizeSocialRequestType(value: unknown): SocialRequestType {

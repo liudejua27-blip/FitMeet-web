@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 
 import { cleanDisplayText } from '../common/display-text.util';
 import { AgentTask } from './entities/agent-task.entity';
-import type { LongTermMemorySnapshot } from './social-agent-long-term-memory.service';
+import type {
+  LongTermMemorySnapshot,
+  LongTermPreferenceHistoryItem,
+} from './social-agent-long-term-memory.service';
 import { readSocialAgentTaskMemory } from './social-agent-memory.util';
 
 export interface SocialAgentMemoryContext {
@@ -34,6 +37,7 @@ export interface SocialAgentMemoryContext {
   };
   longTerm: {
     preferences: Record<string, unknown>;
+    recentPreferenceHistory: Array<Record<string, unknown>>;
     boundaries: Record<string, unknown>;
     activityPreferences: Record<string, unknown>;
     profileFacts: Record<string, unknown>;
@@ -128,6 +132,9 @@ export class SocialAgentMemoryContextService {
       longTerm: input.longTermSnapshot
         ? {
             preferences: input.longTermSnapshot.preferences,
+            recentPreferenceHistory: recentPreferenceHistory(
+              input.longTermSnapshot.preferences.preferenceHistory,
+            ),
             boundaries: input.longTermSnapshot.boundaries,
             activityPreferences: input.longTermSnapshot.activityPreferences,
             profileFacts: input.longTermSnapshot.profileFacts,
@@ -198,5 +205,39 @@ export class SocialAgentMemoryContextService {
 
   private isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+  }
+}
+
+function recentPreferenceHistory(
+  history: LongTermPreferenceHistoryItem[],
+): Array<Record<string, unknown>> {
+  return history
+    .filter((item) => item.confirmed)
+    .slice(-8)
+    .map((item) => ({
+      field: displayPreferenceField(item.field),
+      value: item.value,
+      source:
+        item.source === 'stable_profile_fact' ? '用户确认画像' : '任务记忆',
+      at: item.at,
+    }));
+}
+
+function displayPreferenceField(
+  field: LongTermPreferenceHistoryItem['field'],
+): string {
+  switch (field) {
+    case 'interest':
+      return '兴趣';
+    case 'socialStyle':
+      return '社交风格';
+    case 'communicationStyle':
+      return '沟通方式';
+    case 'preferredTrait':
+      return '理想特质';
+    case 'socialGoal':
+      return '社交目标';
+    case 'availability':
+      return '可约时间';
   }
 }

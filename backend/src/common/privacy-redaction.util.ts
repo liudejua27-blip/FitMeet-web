@@ -1,7 +1,7 @@
 const SENSITIVE_KEY_RE =
-  /phone|mobile|tel|email|wechat|qq|openid|token|password|secret|authorization|message|content|privatechat|chat|address|location|lat|lng|latitude|longitude|precise|contact|payment|birth|health|period|privacy|idcard|identity|realname|legalname|bank|card/i;
+  /phone|mobile|tel|email|wechat|qq|openid|token|password|secret|authorization|message|content|privatechat|chat|address|location|lat|lng|latitude|longitude|precise|contact|payment|birth|health|period|privacy|idcard|identity|realname|legalname|bank(?:card)?|creditcard|credit_card|paymentcard|payment_card/i;
 const FULL_REDACT_KEY_RE =
-  /token|password|secret|authorization|openid|idcard|identity|realname|legalname|bank|card/i;
+  /token|password|secret|authorization|openid|idcard|identity|realname|legalname|bank(?:card)?|creditcard|credit_card|paymentcard|payment_card/i;
 
 const PHONE_RE = /(?<!\d)(?:\+?86[-\s]?)?1[3-9]\d[-\s]?\d{4}[-\s]?\d{4}(?!\d)/g;
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;

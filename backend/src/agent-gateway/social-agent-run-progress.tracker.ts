@@ -4,6 +4,7 @@ import {
   FitMeetAgentToolStatus,
 } from './entities/fitmeet-agent-runtime.entity';
 import type {
+  SocialAgentVisibleStepSnapshot,
   SocialAgentVisibleStep,
   StreamEmit,
 } from './social-agent-chat.types';
@@ -66,6 +67,7 @@ export class SocialAgentRunProgressTracker {
       id,
       label: publicLabel,
       status: 'done',
+      snapshot: this.stepSnapshot(id, publicLabel, eventType, payload),
     };
     this.options.visibleSteps.push(step);
     this.options.rememberStep(id, publicLabel, 'done');
@@ -79,6 +81,80 @@ export class SocialAgentRunProgressTracker {
     });
     await this.options.emit?.({ type: 'step', step });
     return step;
+  }
+
+  private stepSnapshot(
+    id: string,
+    label: string,
+    eventType: AgentTaskEventType,
+    payload: Record<string, unknown>,
+  ): SocialAgentVisibleStepSnapshot {
+    const metrics = this.safePayloadLines(payload);
+    const observation =
+      metrics.length > 0 ? metrics : [`${label} 已完成，未暴露额外内部数据。`];
+    return {
+      schemaVersion: 'fitmeet.step-snapshot.v1',
+      observation,
+      critique: this.stepCritique(id, eventType, payload),
+      result: this.stepResult(label, payload),
+    };
+  }
+
+  private safePayloadLines(payload: Record<string, unknown>): string[] {
+    return Object.entries(payload)
+      .filter(
+        ([key, value]) =>
+          this.isPublicPayloadKey(key) && this.isPublicPrimitive(value),
+      )
+      .slice(0, 4)
+      .map(([key, value]) => `${this.publicKeyLabel(key)}：${String(value)}`);
+  }
+
+  private isPublicPayloadKey(key: string): boolean {
+    return !/token|secret|password|trace|debug|raw|stack|internal|phone|mobile|email|location|lng|lat|address/i.test(
+      key,
+    );
+  }
+
+  private isPublicPrimitive(
+    value: unknown,
+  ): value is string | number | boolean {
+    if (typeof value === 'number') return Number.isFinite(value);
+    if (typeof value === 'boolean') return true;
+    return (
+      typeof value === 'string' &&
+      value.trim().length > 0 &&
+      value.length <= 120
+    );
+  }
+
+  private publicKeyLabel(key: string): string {
+    return key
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .replace(/[_-]+/g, ' ')
+      .trim();
+  }
+
+  private stepCritique(
+    id: string,
+    eventType: AgentTaskEventType,
+    payload: Record<string, unknown>,
+  ): string {
+    if (payload.error) return '这一步返回了失败信号，后续应重试或重新规划。';
+    if (/approval|confirm|risk|safety/i.test(`${id} ${eventType}`)) {
+      return '这一步涉及安全或确认边界，需要保留可恢复检查点。';
+    }
+    return '这一步产生了可用观察，可以交给后续步骤继续整理。';
+  }
+
+  private stepResult(label: string, payload: Record<string, unknown>): string {
+    if (payload.error) return '未完成，已保留上下文用于重试。';
+    const count = Object.keys(payload).filter((key) =>
+      this.isPublicPayloadKey(key),
+    ).length;
+    return count > 0
+      ? `已完成，并记录 ${count} 个安全摘要字段。`
+      : `${label} 已完成。`;
   }
 
   async recordTool(

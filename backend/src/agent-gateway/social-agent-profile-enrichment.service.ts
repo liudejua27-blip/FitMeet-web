@@ -285,28 +285,61 @@ export class SocialAgentProfileEnrichmentService {
     ownerUserId: number,
     message: string,
   ): Promise<string | null> {
+    const normalizedMessage = cleanDisplayText(message, '');
     if (
-      !this.lifeGraph ||
-      !/找|匹配|推荐|搭子|candidate|match|find/i.test(message)
+      !/找|匹配|推荐|搭子|约练|约跑|一起|认识|candidate|match|find/i.test(
+        normalizedMessage,
+      )
     ) {
       return null;
     }
-    const signals = await this.lifeGraph.getUnifiedMatchSignals(ownerUserId);
+
+    let signals: Record<string, unknown> | null = null;
+    if (this.lifeGraph) {
+      try {
+        const nextSignals =
+          await this.lifeGraph.getUnifiedMatchSignals(ownerUserId);
+        signals = this.isRecord(nextSignals) ? nextSignals : null;
+      } catch {
+        signals = null;
+      }
+    }
+    const extractedProfile = this.extractProfileFieldsFromConversation([
+      normalizedMessage,
+    ]);
     const missing: string[] = [];
+
     if (
-      !signals.lifestyleSignals.availableTimes &&
-      !signals.lifestyleSignals.weekendAvailability
+      !this.hasOpportunityCityOrArea(
+        normalizedMessage,
+        extractedProfile,
+        signals,
+      )
     ) {
-      missing.push('你一般什么时候有空');
+      missing.push('城市或常活动区域');
     }
     if (
-      signals.fitnessSignals.publicPlaceOnly !== true &&
-      signals.safetySignals.publicPlaceOnly !== true
+      !this.hasOpportunityTime(normalizedMessage, extractedProfile, signals)
     ) {
-      missing.push('第一次见面是否只接受公共场所');
+      missing.push('方便的时间');
     }
+    if (!this.hasOpportunityIntensity(normalizedMessage, signals)) {
+      missing.push('运动强度');
+    }
+    if (
+      !this.hasOpportunityBoundary(normalizedMessage, extractedProfile, signals)
+    ) {
+      missing.push('社交边界');
+    }
+
     if (missing.length === 0) return null;
-    return `我可以帮你找合适的人，但还缺 ${missing.length} 个会明显影响匹配的信息：${missing.join('？')}？补充后我再开始搜索，会更准也更安全。`;
+    const missingText = missing.slice(0, 4).join('、');
+    return [
+      '可以，我先把你的需求整理成一个安全的连接机会，再开始找人。',
+      `还差：${missingText}。`,
+      '你可以直接回复类似：“上海浦东，周末晚上，5km 慢跑，先站内聊，第一次只约公共场所”。',
+      '补齐后我会先做候选召回、安全过滤和排序，只展示少量合适机会；发送邀请前一定会再让你确认。',
+    ].join('\n');
   }
 
   async executeConversationBrainReadTools(
@@ -684,6 +717,108 @@ export class SocialAgentProfileEnrichmentService {
 
   private isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  private hasOpportunityCityOrArea(
+    message: string,
+    extractedProfile: ExtractedProfileFields,
+    signals: Record<string, unknown> | null,
+  ): boolean {
+    return Boolean(
+      extractedProfile.city ||
+      extractedProfile.nearbyArea ||
+      /(青岛|北京|上海|深圳|广州|杭州|南京|成都|武汉|西安|重庆|苏州|厦门|天津|长沙|郑州|济南|宁波|合肥|附近|周边|校区|公园|区|路|商圈)/.test(
+        message,
+      ) ||
+      this.hasAnyNamedValue(signals, [
+        'city',
+        'nearbyArea',
+        'location',
+        'locationText',
+        'activityArea',
+      ]),
+    );
+  }
+
+  private hasOpportunityTime(
+    message: string,
+    extractedProfile: ExtractedProfileFields,
+    signals: Record<string, unknown> | null,
+  ): boolean {
+    return Boolean(
+      extractedProfile.availableTimes ||
+      /(周末|今晚|明天|后天|下午|晚上|早上|上午|中午|工作日|下班|午休|本周|这周|周[一二三四五六日天]|\d{1,2}\s*[点:：])/.test(
+        message,
+      ) ||
+      this.hasAnyNamedValue(signals, [
+        'availableTimes',
+        'weekendAvailability',
+        'timePreference',
+        'preferredTime',
+      ]),
+    );
+  }
+
+  private hasOpportunityIntensity(
+    message: string,
+    signals: Record<string, unknown> | null,
+  ): boolean {
+    return Boolean(
+      /(轻松|低强度|中等|高强度|慢跑|快走|新手|入门|进阶|休闲|恢复|配速|强度|\d+\s*(?:km|公里|千米)|半马|全马|力量|拉伸)/i.test(
+        message,
+      ) ||
+      this.hasAnyNamedValue(signals, [
+        'intensity',
+        'trainingIntensity',
+        'fitnessLevel',
+        'pace',
+        'distance',
+      ]),
+    );
+  }
+
+  private hasOpportunityBoundary(
+    message: string,
+    extractedProfile: ExtractedProfileFields,
+    signals: Record<string, unknown> | null,
+  ): boolean {
+    return Boolean(
+      extractedProfile.privacyBoundary ||
+      extractedProfile.rejectRules ||
+      /(公共场所|公开地点|先线上|先聊|站内|不加微信|不交换|不透露|白天|边界|安全|女生|男生|同性|多人|不单独|不喝酒|AA|精确位置)/.test(
+        message,
+      ) ||
+      this.hasAnyNamedValue(signals, [
+        'publicPlaceOnly',
+        'privacyBoundary',
+        'rejectRules',
+        'socialBoundary',
+        'safetyBoundary',
+      ]),
+    );
+  }
+
+  private hasAnyNamedValue(value: unknown, keys: string[], depth = 0): boolean {
+    if (depth > 4 || value == null) return false;
+    if (Array.isArray(value)) {
+      return value.some((item) => this.hasAnyNamedValue(item, keys, depth + 1));
+    }
+    if (!this.isRecord(value)) return false;
+    for (const [key, entry] of Object.entries(value)) {
+      if (keys.includes(key) && this.hasUsefulValue(entry)) return true;
+      if (this.hasAnyNamedValue(entry, keys, depth + 1)) return true;
+    }
+    return false;
+  }
+
+  private hasUsefulValue(value: unknown): boolean {
+    if (value == null) return false;
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return Number.isFinite(value);
+    if (typeof value === 'string')
+      return cleanDisplayText(value, '').length > 0;
+    if (Array.isArray(value)) return value.length > 0;
+    return this.isRecord(value) && Object.keys(value).length > 0;
   }
 }
 

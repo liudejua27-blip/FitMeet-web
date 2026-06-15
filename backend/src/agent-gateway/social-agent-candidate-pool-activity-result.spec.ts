@@ -17,6 +17,7 @@ const query: CandidatePoolResolvedQuery = {
   locationPreference: '',
   rawText: '周末找人喝咖啡拍照',
   socialRequestId: 50,
+  acceptsStrangers: null,
 };
 
 const explanation = {

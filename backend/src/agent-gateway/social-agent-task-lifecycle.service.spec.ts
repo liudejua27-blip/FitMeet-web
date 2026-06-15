@@ -129,6 +129,7 @@ describe('SocialAgentTaskLifecycleService', () => {
         ownerUserId: 7,
         agentConnectionId: activeConnection.id,
         taskType: 'social_agent_chat',
+        title: '今晚跑步搭子',
         goal: '今晚跑步',
         status: AgentTaskStatus.Pending,
         idempotencyKey: 'idem-2',
@@ -155,6 +156,7 @@ describe('SocialAgentTaskLifecycleService', () => {
 
     expect(task).toMatchObject({
       ownerUserId: 7,
+      title: '普通聊天：功能咨询',
       goal: '你好',
       status: AgentTaskStatus.AwaitingFeedback,
       permissionMode: AgentTaskPermissionMode.Confirm,

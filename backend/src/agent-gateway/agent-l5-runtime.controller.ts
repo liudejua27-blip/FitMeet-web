@@ -21,6 +21,7 @@ import { FitMeetSubagentWorkerRuntimeService } from './fitmeet-subagent-worker-r
 import { AgentObservabilityService } from './agent-observability.service';
 import { SubagentWorkerQueueService } from './subagent-worker-queue.service';
 import { LifeGraphComplianceService } from '../life-graph/life-graph-compliance.service';
+import { SocialAgentMessageFeedbackService } from './social-agent-message-feedback.service';
 
 type UserSatisfactionBody = {
   score?: number;
@@ -42,6 +43,7 @@ export class AgentL5RuntimeController {
     private readonly observability: AgentObservabilityService,
     private readonly subagentWorkerQueue: SubagentWorkerQueueService,
     private readonly lifeGraphCompliance: LifeGraphComplianceService,
+    private readonly messageFeedback: SocialAgentMessageFeedbackService,
   ) {}
 
   @Get('dashboard')
@@ -63,6 +65,9 @@ export class AgentL5RuntimeController {
       Number(limit),
     );
     const observability = this.observability.snapshot();
+    const messageFeedback = await this.messageFeedback.listRecent(
+      Number(limit),
+    );
     return {
       ...dashboard,
       summary: {
@@ -79,8 +84,13 @@ export class AgentL5RuntimeController {
         activeAlerts: Array.isArray(observability.alerts)
           ? observability.alerts.length
           : 0,
+        messageFeedback: messageFeedback.length,
+        negativeMessageFeedback: messageFeedback.filter(
+          (item) => item.value === 'negative',
+        ).length,
       },
       autoRuns,
+      messageFeedback,
       workerLanes,
       workerJobs,
       workerHeartbeats,

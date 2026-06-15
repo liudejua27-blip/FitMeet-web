@@ -25,6 +25,7 @@ import type {
 import { buildSocialAgentRunCompletionSnapshot } from './social-agent-run-completion.presenter';
 import { TonePolicyService } from './response-quality/tone-policy.service';
 import { AgentSelfImproveService } from './agent-self-improve.service';
+import { AgentRunCheckpointService } from './agent-run-checkpoint.service';
 
 @Injectable()
 export class SocialAgentRunOrchestratorService {
@@ -40,6 +41,8 @@ export class SocialAgentRunOrchestratorService {
     private readonly tonePolicy?: TonePolicyService,
     @Optional()
     private readonly selfImprove?: AgentSelfImproveService,
+    @Optional()
+    private readonly checkpoints?: AgentRunCheckpointService,
   ) {}
 
   async run(
@@ -79,6 +82,20 @@ export class SocialAgentRunOrchestratorService {
       'done',
     );
     await emit?.({ type: 'task', taskId: task.id, status: task.status });
+    const checkpointingEmit: StreamEmit = async (event) => {
+      if (event.type === 'step') {
+        await this.checkpoints?.saveStep({
+          ownerUserId,
+          task,
+          goal,
+          step: event.step,
+          steps: visibleSteps,
+          traceId: null,
+          runId: runtimeRun?.id ? String(runtimeRun.id) : null,
+        });
+      }
+      await emit?.(event);
+    };
 
     const mainAgentRun = await this.mainAgentTurn.handleRunTurn({
       ownerUserId,
@@ -86,7 +103,7 @@ export class SocialAgentRunOrchestratorService {
       message: goal,
       permissionMode,
       visibleSteps,
-      emit,
+      emit: checkpointingEmit,
       signal: options.signal,
       visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
       completeRuntimeClarification: async (result) => {
@@ -109,7 +126,7 @@ export class SocialAgentRunOrchestratorService {
       goal,
       permissionMode,
       visibleSteps,
-      emit,
+      emit: checkpointingEmit,
       alphaTurn,
       signal: options.signal,
       visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
@@ -131,6 +148,23 @@ export class SocialAgentRunOrchestratorService {
     task = recommendation.task;
     const result = recommendation.result;
     const completion = buildSocialAgentRunCompletionSnapshot(result, task.id);
+    const checkpoint = await this.checkpoints?.saveResult({
+      ownerUserId,
+      task,
+      goal,
+      result,
+      steps: visibleSteps,
+    });
+    if (checkpoint) {
+      result.runtime = {
+        ...(result.runtime ?? {}),
+        checkpointId: checkpoint.id,
+        checkpointType: checkpoint.type,
+        canResume: completion.resultPayload.approvalRequiredCount > 0,
+        canReplay: true,
+        canFork: true,
+      };
+    }
     this.realtime?.emitAgentEvent(ownerUserId, 'agent:completed', {
       taskId: task.id,
       status: result.status,

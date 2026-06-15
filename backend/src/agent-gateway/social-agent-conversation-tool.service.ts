@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 
 import { MessagesService } from '../messages/messages.service';
 import { AgentTask, AgentTaskEventType } from './entities/agent-task.entity';
@@ -18,6 +18,7 @@ import { SocialAgentToolInputParserService } from './social-agent-tool-input-par
 import { SocialAgentToolJsonModelService } from './social-agent-tool-json-model.service';
 import { SocialAgentToolName } from './social-agent-tool.types';
 import type { SocialAgentShortTermMemory } from './social-agent-memory.util';
+import { AgentL5RuntimeService } from './agent-l5-runtime.service';
 
 export type SocialAgentConversationToolInboxEvent = {
   eventType: string;
@@ -54,6 +55,8 @@ export class SocialAgentConversationToolService {
     private readonly toolJsonModel: SocialAgentToolJsonModelService,
     private readonly toolInput: SocialAgentToolInputParserService,
     private readonly taskMemory: SocialAgentTaskMemoryService,
+    @Optional()
+    private readonly l5Runtime?: AgentL5RuntimeService,
   ) {}
 
   async readTaskConversationMessages(
@@ -93,6 +96,14 @@ export class SocialAgentConversationToolService {
       task.ownerUserId,
     );
     const latest = newMessages[newMessages.length - 1] ?? null;
+    if (latest) {
+      await this.persistReplyReceivedState({
+        task,
+        conversationId,
+        latest,
+        newMessageCount: newMessages.length,
+      });
+    }
     const output = {
       conversationId,
       cursor,
@@ -177,6 +188,7 @@ export class SocialAgentConversationToolService {
       fallback: () => buildFallbackSocialAgentReplySummary(messages),
       taskId: task.id,
     });
+    await this.persistReplySummaryState({ task, messages, summary });
 
     return {
       output: summary,
@@ -208,5 +220,68 @@ export class SocialAgentConversationToolService {
         },
       },
     };
+  }
+
+  private async persistReplySummaryState(input: {
+    task: AgentTask;
+    messages: SocialAgentMessageRecord[];
+    summary: Record<string, unknown>;
+  }): Promise<void> {
+    if (!this.l5Runtime) return;
+    const loop = this.taskMemory.socialLoopMemory(input.task);
+    const latest = input.messages[input.messages.length - 1] ?? null;
+    const targetUserId =
+      this.toolInput.number(latest?.senderId) ?? loop.targetUserId ?? null;
+    await this.l5Runtime.transitionMeetLoop({
+      ownerUserId: input.task.ownerUserId,
+      agentTaskId: input.task.id,
+      activityId: null,
+      candidateUserId: targetUserId,
+      stage: 'reply_received',
+      waitingFor: 'next_action_decision',
+      state: {
+        conversationId: loop.conversationId ?? latest?.conversationId ?? null,
+        targetUserId,
+        candidateUserId: targetUserId,
+        latestMessageId: latest?.id ?? loop.lastReceivedMessageId ?? null,
+        replySummary: input.summary,
+        replyIntent: this.toolInput.string(input.summary.intent) ?? null,
+        replySentiment: this.toolInput.string(input.summary.sentiment) ?? null,
+        needsReply: input.summary.needsReply,
+        messageCount: input.messages.length,
+        loopStage: 'reply_received',
+      },
+      review: null,
+    });
+  }
+
+  private async persistReplyReceivedState(input: {
+    task: AgentTask;
+    conversationId: string;
+    latest: SocialAgentMessageRecord;
+    newMessageCount: number;
+  }): Promise<void> {
+    if (!this.l5Runtime) return;
+    const loop = this.taskMemory.socialLoopMemory(input.task);
+    const targetUserId =
+      this.toolInput.number(input.latest.senderId) ?? loop.targetUserId ?? null;
+    await this.l5Runtime.transitionMeetLoop({
+      ownerUserId: input.task.ownerUserId,
+      agentTaskId: input.task.id,
+      activityId: null,
+      candidateUserId: targetUserId,
+      stage: 'reply_received',
+      waitingFor: 'reply_summary',
+      state: {
+        conversationId: input.conversationId,
+        targetUserId,
+        candidateUserId: targetUserId,
+        latestMessageId: input.latest.id,
+        latestMessagePreview: this.taskMemory.preview(input.latest.text),
+        newMessageCount: input.newMessageCount,
+        loopStage: 'reply_received',
+      },
+      review: null,
+    });
   }
 }

@@ -462,11 +462,41 @@ describe('LifeGraphService', () => {
       fieldIds: [conflictFieldId],
       allowConflicts: true,
     });
+    const unifiedAfterConfirm = await service.getUnifiedMatchSignals(1);
     expect(fields.rows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           fieldKey: 'availableTimes',
           source: LifeGraphFieldSource.AiInferred,
+          confirmedByUser: true,
+        }),
+      ]),
+    );
+    expect(unifiedAfterConfirm.lifestyleSignals.availableTimes).toEqual([
+      '周末下午',
+    ]);
+    expect(
+      unifiedAfterConfirm.preferenceHistory[
+        `${LifeGraphFieldCategory.Lifestyle}.availableTimes`
+      ],
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: LifeGraphFieldCategory.Lifestyle,
+          fieldKey: 'availableTimes',
+          oldValue: ['工作日晚上'],
+          newValue: ['周末下午'],
+          source: LifeGraphFieldSource.AiInferred,
+          action: LifeGraphAuditAction.Confirmed,
+          confirmedByUser: true,
+          reason: expect.any(String),
+          createdAt: expect.any(String),
+        }),
+        expect.objectContaining({
+          category: LifeGraphFieldCategory.Lifestyle,
+          fieldKey: 'availableTimes',
+          newValue: ['工作日晚上'],
+          source: LifeGraphFieldSource.Manual,
           confirmedByUser: true,
         }),
       ]),
@@ -489,6 +519,57 @@ describe('LifeGraphService', () => {
     );
     const signals = await service.getMatchSignals(1);
     expect(signals.lifestyle.availableTimes).toBeUndefined();
+  });
+
+  it('preserves preference change history for ordinary confirmed updates', async () => {
+    const { service } = makeService(null);
+
+    await service.updateLifeGraph(1, {
+      fields: [
+        {
+          category: LifeGraphFieldCategory.Lifestyle,
+          fieldKey: 'availableTimes',
+          fieldValue: ['工作日晚上'],
+          reason: '用户第一次确认可约时间',
+        },
+      ],
+    });
+    await service.updateLifeGraph(1, {
+      fields: [
+        {
+          category: LifeGraphFieldCategory.Lifestyle,
+          fieldKey: 'availableTimes',
+          fieldValue: ['周末下午'],
+          reason: '用户更新当前可约时间',
+        },
+      ],
+    });
+
+    const signals = await service.getUnifiedMatchSignals(1);
+    const history =
+      signals.preferenceHistory[
+        `${LifeGraphFieldCategory.Lifestyle}.availableTimes`
+      ];
+
+    expect(signals.lifestyleSignals.availableTimes).toEqual(['周末下午']);
+    expect(history).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          oldValue: ['工作日晚上'],
+          newValue: ['周末下午'],
+          source: LifeGraphFieldSource.Manual,
+          confirmedByUser: true,
+          reason: '用户更新当前可约时间',
+        }),
+        expect.objectContaining({
+          oldValue: null,
+          newValue: ['工作日晚上'],
+          source: LifeGraphFieldSource.Manual,
+          confirmedByUser: true,
+          reason: '用户第一次确认可约时间',
+        }),
+      ]),
+    );
   });
 
   it('does not create Trust Safety fields from ordinary chat extraction', async () => {

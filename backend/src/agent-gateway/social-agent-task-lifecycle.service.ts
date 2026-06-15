@@ -19,6 +19,7 @@ import {
   AgentTaskRiskLevel,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
+import { inferSocialAgentThreadTitle } from './social-agent-thread-title.util';
 
 @Injectable()
 export class SocialAgentTaskLifecycleService {
@@ -55,7 +56,7 @@ export class SocialAgentTaskLifecycleService {
         ownerUserId: input.ownerUserId,
         agentConnectionId: agent?.id ?? null,
         taskType: 'social_agent_chat',
-        title: 'FitMeet Social Agent 聊天任务',
+        title: inferSocialAgentThreadTitle({ goal: input.goal }),
         goal: input.goal,
         input: {
           source: 'social_agent_chat',
@@ -104,7 +105,7 @@ export class SocialAgentTaskLifecycleService {
         ownerUserId,
         agentConnectionId: agent?.id ?? null,
         taskType: 'social_agent_chat',
-        title: 'FitMeet Social Agent 聊天',
+        title: inferSocialAgentThreadTitle({ firstMessage: message, goal: message }),
         goal: message,
         input: {
           source: 'social_agent_chat',

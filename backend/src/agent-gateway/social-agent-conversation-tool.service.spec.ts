@@ -36,19 +36,23 @@ function makeService() {
     callJson: jest.fn(),
   };
   const toolInput = new SocialAgentToolInputParserService();
+  const l5Runtime = {
+    transitionMeetLoop: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new SocialAgentConversationToolService(
     messages as never,
     toolJsonModel as never,
     toolInput,
     new SocialAgentTaskMemoryService(toolInput),
+    l5Runtime as never,
   );
 
-  return { service, messages, toolJsonModel };
+  return { service, messages, toolJsonModel, l5Runtime };
 }
 
 describe('SocialAgentConversationToolService', () => {
   it('returns memory and event patches for unread counterpart messages', async () => {
-    const { service, messages } = makeService();
+    const { service, messages, l5Runtime } = makeService();
     messages.getAgentInboxMessages.mockResolvedValue([
       {
         id: 'msg_1',
@@ -108,10 +112,27 @@ describe('SocialAgentConversationToolService', () => {
         contentPreview: 'Sure, where should we meet?',
       },
     });
+    expect(l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 1,
+        agentTaskId: 100,
+        candidateUserId: 2,
+        stage: 'reply_received',
+        waitingFor: 'reply_summary',
+        state: expect.objectContaining({
+          conversationId: 'conv_1',
+          targetUserId: 2,
+          latestMessageId: 'msg_2',
+          latestMessagePreview: 'Sure, where should we meet?',
+          newMessageCount: 1,
+          loopStage: 'reply_received',
+        }),
+      }),
+    );
   });
 
   it('does not emit task or inbox events when there are no new messages', async () => {
-    const { service, messages } = makeService();
+    const { service, messages, l5Runtime } = makeService();
     messages.getAgentInboxMessages.mockResolvedValue([
       {
         id: 'msg_1',
@@ -133,13 +154,16 @@ describe('SocialAgentConversationToolService', () => {
       latestReceivedMessages: [],
       processedMessageIds: [],
     });
+    expect(l5Runtime.transitionMeetLoop).not.toHaveBeenCalled();
   });
 
   it('summarizes replies with model fallback wiring and inbox event patches', async () => {
-    const { service, toolJsonModel } = makeService();
+    const { service, toolJsonModel, l5Runtime } = makeService();
     toolJsonModel.callJson.mockResolvedValue({
       summary: 'Counterpart wants a meeting point.',
       sentiment: 'positive',
+      intent: 'ask_question',
+      needsReply: true,
     });
 
     const result = await service.summarizeReply(
@@ -174,11 +198,15 @@ describe('SocialAgentConversationToolService', () => {
     expect(result.output).toEqual({
       summary: 'Counterpart wants a meeting point.',
       sentiment: 'positive',
+      intent: 'ask_question',
+      needsReply: true,
     });
     expect(result.loopUpdates).toMatchObject({
       replySummary: {
         summary: 'Counterpart wants a meeting point.',
         sentiment: 'positive',
+        intent: 'ask_question',
+        needsReply: true,
       },
       sourceTool: SocialAgentToolName.SummarizeReply,
     });
@@ -186,6 +214,8 @@ describe('SocialAgentConversationToolService', () => {
       replySummary: {
         summary: 'Counterpart wants a meeting point.',
         sentiment: 'positive',
+        intent: 'ask_question',
+        needsReply: true,
       },
       currentStep: {
         id: 'summarize_reply',
@@ -202,6 +232,29 @@ describe('SocialAgentConversationToolService', () => {
         contentPreview: 'Counterpart wants a meeting point.',
       },
     });
+    expect(l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 1,
+        agentTaskId: 100,
+        candidateUserId: 2,
+        stage: 'reply_received',
+        waitingFor: 'next_action_decision',
+        state: expect.objectContaining({
+          conversationId: 'conv_1',
+          targetUserId: 2,
+          latestMessageId: 'msg_2',
+          replySummary: expect.objectContaining({
+            summary: 'Counterpart wants a meeting point.',
+            intent: 'ask_question',
+          }),
+          replyIntent: 'ask_question',
+          replySentiment: 'positive',
+          needsReply: true,
+          messageCount: 1,
+          loopStage: 'reply_received',
+        }),
+      }),
+    );
   });
 
   it('requires an agent connection and bound conversation before reading', async () => {

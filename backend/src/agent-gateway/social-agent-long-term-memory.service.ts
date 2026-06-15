@@ -7,6 +7,7 @@ import { readSocialAgentTaskMemory } from './social-agent-memory.util';
 
 const TASK_SUMMARY_LIMIT = 20;
 const MATCH_SAMPLE_LIMIT = 30;
+const PREFERENCE_HISTORY_LIMIT = 80;
 
 export type LongTermMatchSample = {
   candidateUserId: number;
@@ -19,6 +20,7 @@ export type LongTermPreferencesSnapshot = {
   socialStyle: string;
   communicationStyle: string;
   preferredTraits: string[];
+  preferenceHistory: LongTermPreferenceHistoryItem[];
 };
 
 export type LongTermBoundariesSnapshot = {
@@ -59,6 +61,22 @@ export type TaskSummaryEntry = {
   goal: string;
   status: string;
   outcome: 'succeeded' | 'failed' | 'cancelled' | 'other';
+  at: string;
+};
+
+export type LongTermPreferenceHistoryItem = {
+  field:
+    | 'interest'
+    | 'socialStyle'
+    | 'communicationStyle'
+    | 'preferredTrait'
+    | 'socialGoal'
+    | 'availability';
+  value: string;
+  source: 'task_memory' | 'stable_profile_fact';
+  taskId: number;
+  outcome: TaskSummaryEntry['outcome'];
+  confirmed: boolean;
   at: string;
 };
 
@@ -112,6 +130,7 @@ export class SocialAgentLongTermMemoryService {
         toRecord(row.preferences),
         taskMemory.preferences,
         taskMemory.stableProfileFacts,
+        summary,
       );
       row.boundaries = mergeBoundaries(
         toRecord(row.boundaries),
@@ -121,6 +140,7 @@ export class SocialAgentLongTermMemoryService {
         toRecord(row.activityPreferences),
         taskMemory.activeEntities,
         taskMemory.stableProfileFacts,
+        summary,
       );
       row.matchSignals = this.mergeMatchSignals(
         toRecord(row.matchSignals),
@@ -212,21 +232,47 @@ export class SocialAgentLongTermMemoryService {
     const bounds = toRecord(row.boundaries);
     const activity = toRecord(row.activityPreferences);
     const signals = toRecord(row.matchSignals);
+    const preferenceHistory = preferenceHistoryArray(prefs.preferenceHistory);
     return {
       userId: row.userId,
       preferences: {
-        interests: stringList(prefs.interests),
+        interests: confirmedCurrentList(
+          stringList(prefs.interests),
+          preferenceHistory,
+          'interest',
+        ),
         socialStyle:
-          typeof prefs.socialStyle === 'string' ? prefs.socialStyle : '',
+          confirmedCurrentValue(
+            typeof prefs.socialStyle === 'string' ? prefs.socialStyle : '',
+            preferenceHistory,
+            'socialStyle',
+          ),
         communicationStyle:
-          typeof prefs.communicationStyle === 'string'
-            ? prefs.communicationStyle
-            : '',
-        preferredTraits: stringList(prefs.preferredTraits),
+          confirmedCurrentValue(
+            typeof prefs.communicationStyle === 'string'
+              ? prefs.communicationStyle
+              : '',
+            preferenceHistory,
+            'communicationStyle',
+          ),
+        preferredTraits: confirmedCurrentList(
+          stringList(prefs.preferredTraits),
+          preferenceHistory,
+          'preferredTrait',
+        ),
+        preferenceHistory,
       },
       profileFacts: profileFacts(prefs.profileFacts),
-      socialGoals: stringList(prefs.socialGoals),
-      availability: stringList(prefs.availability),
+      socialGoals: confirmedCurrentList(
+        stringList(prefs.socialGoals),
+        preferenceHistory,
+        'socialGoal',
+      ),
+      availability: confirmedCurrentList(
+        stringList(prefs.availability),
+        preferenceHistory,
+        'availability',
+      ),
       boundaries: {
         excludedGenders: stringList(bounds.excludedGenders),
         noNightMeet: bounds.noNightMeet === true,
@@ -236,8 +282,16 @@ export class SocialAgentLongTermMemoryService {
       },
       activityPreferences: {
         favoriteCities: stringList(activity.favoriteCities),
-        favoriteActivityTypes: stringList(activity.favoriteActivityTypes),
-        favoriteTimePreferences: stringList(activity.favoriteTimePreferences),
+        favoriteActivityTypes: confirmedCurrentList(
+          stringList(activity.favoriteActivityTypes),
+          preferenceHistory,
+          'interest',
+        ),
+        favoriteTimePreferences: confirmedCurrentList(
+          stringList(activity.favoriteTimePreferences),
+          preferenceHistory,
+          'availability',
+        ),
         favoriteLocationPreferences: stringList(
           activity.favoriteLocationPreferences,
         ),
@@ -261,6 +315,7 @@ function emptySnapshot(userId: number): LongTermMemorySnapshot {
       socialStyle: '',
       communicationStyle: '',
       preferredTraits: [],
+      preferenceHistory: [],
     },
     boundaries: {
       excludedGenders: [],
@@ -283,63 +338,193 @@ function emptySnapshot(userId: number): LongTermMemorySnapshot {
   };
 }
 
+function confirmedCurrentList(
+  current: string[],
+  history: LongTermPreferenceHistoryItem[],
+  field: LongTermPreferenceHistoryItem['field'],
+): string[] {
+  const fieldHistory = history.filter((item) => item.field === field);
+  if (fieldHistory.length === 0) return current;
+  const confirmed = new Set(
+    fieldHistory
+      .filter((item) => item.confirmed)
+      .map((item) => item.value),
+  );
+  return current.filter((value) => confirmed.has(value));
+}
+
+function confirmedCurrentValue(
+  current: string,
+  history: LongTermPreferenceHistoryItem[],
+  field: LongTermPreferenceHistoryItem['field'],
+): string {
+  if (!current) return '';
+  const fieldHistory = history.filter((item) => item.field === field);
+  if (fieldHistory.length === 0) return current;
+  return fieldHistory.some((item) => item.confirmed && item.value === current)
+    ? current
+    : '';
+}
+
 function mergePreferences(
   previous: Record<string, unknown>,
   incoming: ReturnType<typeof readSocialAgentTaskMemory>['preferences'],
   stableProfileFacts: Record<string, string | string[]> = {},
+  summary: TaskSummaryEntry,
 ): Record<string, unknown> {
+  const shouldPromoteCurrentPreference = summary.outcome === 'succeeded';
+  const profileFactTraits = [
+    ...stringList(stableProfileFacts.preferredTraits),
+    ...stringList(stableProfileFacts.wantToMeet),
+    stringValue(stableProfileFacts.targetPreference),
+  ].filter(Boolean);
+  const socialGoals = [
+    stringValue(stableProfileFacts.socialGoal),
+    stringValue(stableProfileFacts.targetPreference),
+  ].filter(Boolean);
+  const availability = [
+    ...stringList(stableProfileFacts.availableTimes),
+    stringValue(stableProfileFacts.timePreference),
+  ].filter(Boolean);
+
   return {
     profileFacts: {
       ...profileFacts(previous.profileFacts),
-      ...stableProfileFacts,
+      ...(shouldPromoteCurrentPreference ? stableProfileFacts : {}),
     },
     interests: mergeStringList(
       stringList(previous.interests),
-      mergeStringList(
-        incoming.interests,
-        stringList(stableProfileFacts.interestTags),
-        32,
-      ),
+      shouldPromoteCurrentPreference
+        ? mergeStringList(
+            incoming.interests,
+            stringList(stableProfileFacts.interestTags),
+            32,
+          )
+        : [],
       32,
     ),
     socialStyle:
-      incoming.socialStyle ||
+      (shouldPromoteCurrentPreference ? incoming.socialStyle : '') ||
       (typeof previous.socialStyle === 'string' ? previous.socialStyle : ''),
     communicationStyle:
-      incoming.communicationStyle ||
+      (shouldPromoteCurrentPreference ? incoming.communicationStyle : '') ||
       (typeof previous.communicationStyle === 'string'
         ? previous.communicationStyle
         : ''),
     preferredTraits: mergeStringList(
       stringList(previous.preferredTraits),
-      mergeStringList(
-        incoming.preferredTraits,
-        [
-          ...stringList(stableProfileFacts.preferredTraits),
-          ...stringList(stableProfileFacts.wantToMeet),
-          stringValue(stableProfileFacts.targetPreference),
-        ].filter(Boolean),
-        24,
-      ),
+      shouldPromoteCurrentPreference
+        ? mergeStringList(incoming.preferredTraits, profileFactTraits, 24)
+        : [],
       24,
     ),
     socialGoals: mergeStringList(
       stringList(previous.socialGoals),
-      [
-        stringValue(stableProfileFacts.socialGoal),
-        stringValue(stableProfileFacts.targetPreference),
-      ].filter(Boolean),
+      shouldPromoteCurrentPreference ? socialGoals : [],
       20,
     ),
     availability: mergeStringList(
       stringList(previous.availability),
-      [
-        ...stringList(stableProfileFacts.availableTimes),
-        stringValue(stableProfileFacts.timePreference),
-      ].filter(Boolean),
+      shouldPromoteCurrentPreference ? availability : [],
       20,
     ),
+    preferenceHistory: mergePreferenceHistory(
+      preferenceHistoryArray(previous.preferenceHistory),
+      [
+        ...incoming.interests.map((value) =>
+          preferenceHistoryItem('interest', value, 'task_memory', summary),
+        ),
+        ...stringList(stableProfileFacts.interestTags).map((value) =>
+          preferenceHistoryItem(
+            'interest',
+            value,
+            'stable_profile_fact',
+            summary,
+          ),
+        ),
+        preferenceHistoryItem(
+          'socialStyle',
+          incoming.socialStyle,
+          'task_memory',
+          summary,
+        ),
+        preferenceHistoryItem(
+          'communicationStyle',
+          incoming.communicationStyle,
+          'task_memory',
+          summary,
+        ),
+        ...incoming.preferredTraits.map((value) =>
+          preferenceHistoryItem(
+            'preferredTrait',
+            value,
+            'task_memory',
+            summary,
+          ),
+        ),
+        ...profileFactTraits.map((value) =>
+          preferenceHistoryItem(
+            'preferredTrait',
+            value,
+            'stable_profile_fact',
+            summary,
+          ),
+        ),
+        ...socialGoals.map((value) =>
+          preferenceHistoryItem(
+            'socialGoal',
+            value,
+            'stable_profile_fact',
+            summary,
+          ),
+        ),
+        ...availability.map((value) =>
+          preferenceHistoryItem(
+            'availability',
+            value,
+            'stable_profile_fact',
+            summary,
+          ),
+        ),
+      ],
+    ),
   };
+}
+
+function preferenceHistoryItem(
+  field: LongTermPreferenceHistoryItem['field'],
+  value: string,
+  source: LongTermPreferenceHistoryItem['source'],
+  summary: TaskSummaryEntry,
+): LongTermPreferenceHistoryItem {
+  return {
+    field,
+    value: (value ?? '').trim(),
+    source,
+    taskId: summary.taskId,
+    outcome: summary.outcome,
+    confirmed: summary.outcome === 'succeeded',
+    at: summary.at,
+  };
+}
+
+function mergePreferenceHistory(
+  previous: LongTermPreferenceHistoryItem[],
+  next: LongTermPreferenceHistoryItem[],
+): LongTermPreferenceHistoryItem[] {
+  const out = [...previous];
+  for (const item of next) {
+    if (!item.value) continue;
+    const duplicate = out.some(
+      (existing) =>
+        existing.taskId === item.taskId &&
+        existing.field === item.field &&
+        existing.value === item.value &&
+        existing.source === item.source,
+    );
+    if (!duplicate) out.push(item);
+  }
+  return out.slice(-PREFERENCE_HISTORY_LIMIT);
 }
 
 function mergeBoundaries(
@@ -365,7 +550,22 @@ function mergeActivityPreferences(
   previous: Record<string, unknown>,
   incoming: ReturnType<typeof readSocialAgentTaskMemory>['activeEntities'],
   stableProfileFacts: Record<string, string | string[]> = {},
+  summary: TaskSummaryEntry,
 ): Record<string, unknown> {
+  if (summary.outcome !== 'succeeded') {
+    return {
+      favoriteCities: stringList(previous.favoriteCities).slice(-10),
+      favoriteActivityTypes: stringList(previous.favoriteActivityTypes).slice(
+        -10,
+      ),
+      favoriteTimePreferences: stringList(
+        previous.favoriteTimePreferences,
+      ).slice(-10),
+      favoriteLocationPreferences: stringList(
+        previous.favoriteLocationPreferences,
+      ).slice(-10),
+    };
+  }
   return {
     favoriteCities: pushIfPresent(
       stringList(previous.favoriteCities),
@@ -436,6 +636,69 @@ function sampleArray(value: unknown): LongTermMatchSample[] {
       at: typeof item.at === 'string' ? item.at : new Date(0).toISOString(),
     }))
     .filter((item) => item.candidateUserId > 0);
+}
+
+function preferenceHistoryArray(
+  value: unknown,
+): LongTermPreferenceHistoryItem[] {
+  if (!Array.isArray(value)) return [];
+  const allowedFields = new Set<LongTermPreferenceHistoryItem['field']>([
+    'interest',
+    'socialStyle',
+    'communicationStyle',
+    'preferredTrait',
+    'socialGoal',
+    'availability',
+  ]);
+  const allowedSources = new Set<LongTermPreferenceHistoryItem['source']>([
+    'task_memory',
+    'stable_profile_fact',
+  ]);
+  const allowedOutcomes = new Set<TaskSummaryEntry['outcome']>([
+    'succeeded',
+    'failed',
+    'cancelled',
+    'other',
+  ]);
+
+  return value
+    .filter(
+      (item): item is Record<string, unknown> =>
+        typeof item === 'object' && item !== null,
+    )
+    .map((item) => {
+      const field =
+        typeof item.field === 'string' &&
+        allowedFields.has(item.field as LongTermPreferenceHistoryItem['field'])
+          ? (item.field as LongTermPreferenceHistoryItem['field'])
+          : null;
+      const source =
+        typeof item.source === 'string' &&
+        allowedSources.has(
+          item.source as LongTermPreferenceHistoryItem['source'],
+        )
+          ? (item.source as LongTermPreferenceHistoryItem['source'])
+          : null;
+      const outcome =
+        typeof item.outcome === 'string' &&
+        allowedOutcomes.has(item.outcome as TaskSummaryEntry['outcome'])
+          ? (item.outcome as TaskSummaryEntry['outcome'])
+          : 'other';
+      const value = typeof item.value === 'string' ? item.value.trim() : '';
+      const taskId = typeof item.taskId === 'number' ? item.taskId : 0;
+      if (!field || !source || !value || taskId <= 0) return null;
+      return {
+        field,
+        value,
+        source,
+        taskId,
+        outcome,
+        confirmed: outcome === 'succeeded' && item.confirmed === true,
+        at: typeof item.at === 'string' ? item.at : new Date(0).toISOString(),
+      } satisfies LongTermPreferenceHistoryItem;
+    })
+    .filter((item): item is LongTermPreferenceHistoryItem => item !== null)
+    .slice(-PREFERENCE_HISTORY_LIMIT);
 }
 
 function profileFacts(value: unknown): Record<string, string | string[]> {

@@ -73,6 +73,12 @@ describe('production deploy readiness', () => {
     expect(deployScript).toContain(
       'node dist/agent-gateway/subagent-worker-healthcheck.js',
     );
+    expect(deployScript).toContain('DEPLOY_LOG_TAIL="${DEPLOY_LOG_TAIL:-600}"');
+    expect(deployScript).toContain('scan_deploy_logs');
+    expect(deployScript).toContain('fk_agent_activity_logs_connection');
+    expect(deployScript).toContain('ERR_PNPM_LOCKFILE_CONFIG_MISMATCH');
+    expect(deployScript).toContain('relation "[^"]+" does not exist');
+    expect(deployScript).toContain('Scan backend and worker logs');
     expect(deployScript).not.toContain(' up -d --build');
     expect(deployScript).toContain('./scripts/verify-production.sh');
 
@@ -145,6 +151,8 @@ describe('production deploy readiness', () => {
     expect(buildZipScript).toContain('scripts/ecs-upload-release.sh');
     expect(buildZipScript).toContain('scripts/ecs-host-preflight.sh');
     expect(buildZipScript).toContain('scripts/ecs-post-deploy-smoke.sh');
+    expect(buildZipScript).toContain('Dry-run production Agent smoke seed');
+    expect(buildZipScript).toContain('seed:agent-smoke:prod:dry-run');
     expect(buildZipScript).toContain("--exclude '.vercel/'");
     expect(buildZipScript).toContain("--exclude '.railway/'");
     expect(buildZipScript).toContain('CHECKSUM_OUTPUT="${OUTPUT}.sha256"');
@@ -182,6 +190,7 @@ describe('production deploy readiness', () => {
     expect(cloudPreflight).toContain('--check-domain');
     expect(cloudPreflight).toContain('--strict');
     expect(launchStatus).toContain('production-deploy-readiness.spec.ts');
+    expect(launchStatus).toContain('scripts/deploy-production.sh');
     expect(launchStatus).toContain('scripts/cloud-platform-preflight.sh');
     expect(launchStatus).toContain('scripts/domain-readiness-check.sh');
     expect(launchStatus).toContain('scripts/vercel-prebuilt-deploy.sh');
@@ -258,12 +267,35 @@ describe('production deploy readiness', () => {
     expect(smokeSeed).toContain('APP_SMOKE_TARGET_USER_ID');
     expect(smokeSeed).toContain('FITMEET_ALPHA_STAGING_MESSAGE_TARGET_USER_ID');
     expect(ecsPostDeploySmoke).toContain('--prepare-app-smoke-users');
+    expect(ecsPostDeploySmoke).toContain('--prepare-agent-smoke-seed');
+    expect(ecsPostDeploySmoke).toContain('--run-agent-opportunity-smoke');
+    expect(ecsPostDeploySmoke).toContain('--run-agent-sse-abort-smoke');
     expect(ecsPostDeploySmoke).toContain(
       'pnpm -C backend run seed:app-smoke-users',
     );
+    expect(ecsPostDeploySmoke).toContain(
+      'pnpm -C backend run seed:agent-smoke',
+    );
     expect(ecsPostDeploySmoke).toContain('./scripts/verify-production.sh');
     expect(ecsPostDeploySmoke).toContain('APP_SMOKE_RUN_MUTATIONS');
+    expect(ecsPostDeploySmoke).toContain('AGENT_SMOKE_ALLOW_MUTATIONS=true');
+    expect(ecsPostDeploySmoke).toContain(
+      'AGENT_SMOKE_ACTIVITY="${AGENT_SMOKE_ACTIVITY:-咖啡轻聊天}"',
+    );
+    expect(ecsPostDeploySmoke).toContain(
+      'AGENT_SMOKE_TIME="${AGENT_SMOKE_TIME:-周末下午}"',
+    );
+    expect(ecsPostDeploySmoke).toContain(
+      'AGENT_SMOKE_INTENSITY="${AGENT_SMOKE_INTENSITY:-轻松}"',
+    );
+    expect(ecsPostDeploySmoke).toContain('SCAN_COMPOSE_LOGS');
+    expect(ecsPostDeploySmoke).toContain('scan_compose_logs');
+    expect(ecsPostDeploySmoke).toContain('COMPOSE_LOG_TAIL');
+    expect(ecsPostDeploySmoke).toContain('fk_agent_activity_logs_connection');
+    expect(ecsPostDeploySmoke).toContain('ERR_PNPM_LOCKFILE_CONFIG_MISMATCH');
+    expect(ecsPostDeploySmoke).toContain('relation "[^"]+" does not exist');
     expect(ecsPostDeploySmoke).toContain('source "${export_file}"');
+    expect(ecsPostDeploySmoke).toContain('source "${agent_export_file}"');
     expect(ecsRunbook).toContain(
       'cp deploy/env.production.ecs.example .env.production',
     );
@@ -273,6 +305,12 @@ describe('production deploy readiness', () => {
     expect(ecsRunbook).toContain(
       './scripts/ecs-post-deploy-smoke.sh --run-app-smoke',
     );
+    expect(ecsRunbook).toContain('--prepare-agent-smoke-seed');
+    expect(ecsRunbook).toContain('--run-agent-opportunity-smoke');
+    expect(ecsRunbook).toContain('--run-agent-sse-abort-smoke');
+    expect(ecsRunbook).toContain('--scan-compose-logs');
+    expect(ecsRunbook).toContain('AGENT_SMOKE_ALLOW_MUTATIONS=true');
+    expect(ecsRunbook).toContain('ordinary chat does not trigger social cards');
   });
 
   it('keeps the ECS critical table check aligned with worker migrations', () => {
@@ -395,6 +433,12 @@ describe('production deploy readiness', () => {
 
     expect(verifier).toContain('/openapi/fitmeet-core.json');
     expect(verifier).toContain('CHECK_LOCAL_COMPOSE_HEALTH');
+    expect(verifier).toContain('CHECK_LOCAL_COMPOSE_LOGS');
+    expect(verifier).toContain('scan_local_compose_logs');
+    expect(verifier).toContain('COMPOSE_LOG_TAIL');
+    expect(verifier).toContain('fk_agent_activity_logs_connection');
+    expect(verifier).toContain('ERR_PNPM_LOCKFILE_CONFIG_MISMATCH');
+    expect(verifier).toContain('relation "[^"]+" does not exist');
     expect(verifier).toContain('--check-local-compose-health');
     expect(verifier).toContain('subagent-worker-healthcheck.js');
     expect(verifier).toContain('/ready');

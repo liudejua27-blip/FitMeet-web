@@ -10,12 +10,17 @@ import {
 } from './entities/social-request.entity';
 import {
   hasSocialAgentRecommendationBoundary,
+  hasSocialAgentSafetyExclusionBoundary,
+  isSocialAgentProfileCandidateOptedIn,
   isSocialAgentActiveActivity,
   isSocialAgentActiveLegacyRequest,
   isSocialAgentActivePublicIntent,
   isSocialAgentActivityLikePublicIntent,
 } from './social-agent-candidate-pool-eligibility';
-import type { CandidatePoolResolvedQuery } from './social-agent-candidate-pool-query';
+import {
+  resolveCandidatePoolStrangerPolicy,
+  type CandidatePoolResolvedQuery,
+} from './social-agent-candidate-pool-query';
 
 function publicIntent(
   overrides: Partial<PublicSocialIntent> = {},
@@ -59,6 +64,7 @@ function query(
     locationPreference: '',
     socialRequestId: null,
     rawText: '',
+    acceptsStrangers: null,
     ...overrides,
   };
 }
@@ -186,5 +192,81 @@ describe('social agent candidate pool eligibility', () => {
         null,
       ),
     ).toBe(false);
+  });
+
+  it('detects safety exclusion boundaries without blocking normal public-meeting preferences', () => {
+    expect(
+      hasSocialAgentSafetyExclusionBoundary(
+        {
+          privacyBoundary: '这个用户有举报处理中，请不要再推荐',
+          rejectRules: '',
+        } as UserSocialProfile,
+        null,
+      ),
+    ).toBe(true);
+    expect(
+      hasSocialAgentSafetyExclusionBoundary(null, {
+        boundaries: '投诉处理中，暂时禁用匹配',
+      } as never),
+    ).toBe(true);
+    expect(
+      hasSocialAgentSafetyExclusionBoundary(
+        {
+          privacyBoundary: '先站内沟通，只在公共场所见面',
+          rejectRules: '不接受深夜见面',
+        } as UserSocialProfile,
+        null,
+      ),
+    ).toBe(false);
+  });
+
+  it('requires both profile discoverability and Agent matching opt-in for cold profile candidates', () => {
+    expect(
+      isSocialAgentProfileCandidateOptedIn({
+        profileDiscoverable: true,
+        agentCanRecommendMe: true,
+      } as UserSocialProfile),
+    ).toBe(true);
+    expect(
+      isSocialAgentProfileCandidateOptedIn({
+        profileDiscoverable: true,
+        agentCanRecommendMe: false,
+      } as UserSocialProfile),
+    ).toBe(false);
+    expect(
+      isSocialAgentProfileCandidateOptedIn({
+        profileDiscoverable: false,
+        agentCanRecommendMe: true,
+      } as UserSocialProfile),
+    ).toBe(false);
+    expect(
+      isSocialAgentProfileCandidateOptedIn({
+        profileDiscoverable: false,
+        agentCanRecommendMe: false,
+      } as UserSocialProfile),
+    ).toBe(false);
+    expect(isSocialAgentProfileCandidateOptedIn(null)).toBe(false);
+  });
+
+  it('resolves explicit stranger policy from social search text', () => {
+    expect(
+      resolveCandidatePoolStrangerPolicy({
+        rawText: '青岛周末跑步，只推荐熟人，不接受陌生人',
+      }),
+    ).toBe(false);
+    expect(
+      resolveCandidatePoolStrangerPolicy({
+        rawText: '青岛周末跑步，接受陌生人，但要先站内聊',
+      }),
+    ).toBe(true);
+    expect(
+      resolveCandidatePoolStrangerPolicy({
+        explicit: false,
+        rawText: '接受陌生人',
+      }),
+    ).toBe(false);
+    expect(
+      resolveCandidatePoolStrangerPolicy({ rawText: '青岛周末跑步' }),
+    ).toBeNull();
   });
 });

@@ -11,8 +11,10 @@ describe('AgentL5RuntimeController', () => {
     ).resolves.toMatchObject({
       summary: expect.objectContaining({
         activeAlerts: 0,
+        messageFeedback: 0,
         subagentWorkerJobs: 0,
       }),
+      messageFeedback: [],
       workerJobs: [],
     });
   });
@@ -34,5 +36,6 @@ function makeController() {
       retentionPolicy: jest.fn().mockReturnValue({}),
       applyRetentionPolicy: jest.fn().mockResolvedValue({}),
     } as never,
+    { listRecent: jest.fn().mockResolvedValue([]) } as never,
   );
 }

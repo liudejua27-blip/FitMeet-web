@@ -57,7 +57,7 @@ export function buildSocialAgentCandidateConnectResult(input: {
       conversationId: null,
       approvalId: number(output.approvalId),
       requiresApproval: true,
-      message: '加好友/连接候选人需要你确认',
+      message: '发送邀请需要你确认',
       friendAction: {
         ...friendActionBase,
         status: 'pending_approval',

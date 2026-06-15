@@ -499,6 +499,7 @@ export class AgentLoopService {
 
   private requiresApproval(tool: AgentLoopToolPlan): boolean {
     if (tool.requiresApproval === true) return true;
+    if (tool.toolName === 'card_action_dispatch') return false;
     if (this.isConfirmedCandidateCommand(tool)) return false;
     const name = tool.toolName.toLowerCase();
     if (this.highRiskToolNames().some((pattern) => pattern.test(name))) {

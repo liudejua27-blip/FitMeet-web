@@ -31,6 +31,11 @@ import {
 } from './entities/agent-action-log.entity';
 import { canAutoExecute } from './agent-autonomy.policy';
 import { AgentWebhookService } from './agent-webhook.service';
+import { AgentApprovalService } from './agent-approval.service';
+import {
+  ApprovalRiskLevel,
+  ApprovalType,
+} from './entities/agent-approval-request.entity';
 
 /** Daily cap for agent-to-agent auto messages, by source agent autonomy. */
 function dailyA2ACapFor(level: AgentAutonomyLevel): number {
@@ -63,6 +68,7 @@ export class AgentDiscoveryService {
     private readonly messagesGateway: MessagesGateway,
     private readonly actionLogs: AgentActionLogService,
     private readonly webhooks: AgentWebhookService,
+    private readonly approvals: AgentApprovalService,
     @InjectRepository(AgentProfile)
     private readonly profileRepo: Repository<AgentProfile>,
     @InjectRepository(AgentConnection)
@@ -98,8 +104,9 @@ export class AgentDiscoveryService {
    * @param dto             { content, fromAgentId? }
    *                          If fromAgentId is supplied AND owned by
    *                          requestUserId, the message is recorded as
-   *                          senderType='agent' and subjected to daily
-   *                          cap + autonomy gating (rule 5).
+   *                          senderType='agent' and subjected to approval
+   *                          gating. Agent-initiated outreach never sends
+   *                          before explicit owner confirmation.
    */
   async sendMessageToAgent(
     requestUserId: number,
@@ -129,13 +136,42 @@ export class AgentDiscoveryService {
         throw new ForbiddenException('Source agent is not active');
       }
 
-      // Rule 7: agent-initiated send_message requires autonomy.
+      // Rule 7: agent-initiated send_message requires explicit approval.
       const allowed = canAutoExecute(
         'send_message',
         source.autonomyLevel,
         'low',
       );
       if (!allowed) {
+        const approval = await this.approvals.create({
+          userId: requestUserId,
+          agentConnectionId: source.agentConnectionId ?? null,
+          type:
+            target.ownerUserId == null
+              ? ApprovalType.Custom
+              : ApprovalType.SendMessage,
+          actionType: 'send_message',
+          skillName: 'agent_discovery.send_message',
+          payload: {
+            fromAgentId: source.id,
+            targetAgentId,
+            targetUserId: target.ownerUserId ?? null,
+            toUserId: target.ownerUserId ?? null,
+            content: text,
+            messageType: 'text',
+            metadata: {
+              source: 'agent_discovery',
+              a2a: true,
+              targetAgentId,
+              sourceAgentId: source.id,
+            },
+          },
+          summary: `发送 Agent 代发消息给 ${target.agentName ?? `Agent #${targetAgentId}`}`,
+          riskLevel: ApprovalRiskLevel.Medium,
+          reason:
+            'Agent 代发消息属于外联动作，必须由用户确认后才能继续。',
+          createdBy: 'agent',
+        });
         await this.actionLogs.logAgentAction({
           ownerUserId: requestUserId,
           agentId: source.agentConnectionId ?? null,
@@ -145,10 +181,15 @@ export class AgentDiscoveryService {
           targetAgentId,
           targetUserId: target.ownerUserId ?? null,
           reason: 'a2a_requires_approval',
-          payload: { fromAgentId: source.id, preview: text.slice(0, 80) },
+          payload: {
+            approvalId: approval.id,
+            fromAgentId: source.id,
+            preview: text.slice(0, 80),
+          },
         });
         return {
           status: 'pending_approval' as const,
+          approvalId: approval.id,
           reason: 'autonomy_level_requires_approval',
         };
       }
@@ -871,7 +912,8 @@ export class AgentDiscoveryService {
    * Records an invite from the caller (optionally acting through their own
    * agent) toward a target agent for a referenced activity. The actual
    * activity-join orchestration is handled elsewhere; this endpoint logs
-   * the invite intent and (when an agent is initiating) honors autonomy.
+   * the invite intent and (when an agent is initiating) requires approval
+   * before any high-risk social side effect.
    */
   async inviteAgent(
     requestUserId: number,
@@ -898,6 +940,30 @@ export class AgentDiscoveryService {
       const action = dto.activityId ? 'invite_activity' : 'add_friend';
       const allowed = canAutoExecute(action, source.autonomyLevel, 'low');
       if (!allowed) {
+        const approval = await this.approvals.create({
+          userId: requestUserId,
+          agentConnectionId: source.agentConnectionId ?? null,
+          type: dto.activityId
+            ? ApprovalType.Custom
+            : ApprovalType.ContactRequest,
+          actionType: action,
+          skillName: 'agent_discovery.invite_agent',
+          payload: {
+            fromAgentId: source.id,
+            targetAgentId,
+            targetUserId: target.ownerUserId ?? null,
+            activityId: dto.activityId ?? null,
+            note: dto.note ?? '',
+          },
+          summary: dto.activityId
+            ? `邀请 ${target.agentName ?? `Agent #${targetAgentId}`} 参加活动`
+            : `连接 ${target.agentName ?? `Agent #${targetAgentId}`}`,
+          riskLevel: ApprovalRiskLevel.Medium,
+          reason:
+            'Agent 代发邀请或连接候选属于高风险社交动作，必须由用户确认。',
+          createdBy: 'agent',
+          relatedActivityId: dto.activityId ?? null,
+        });
         await this.actionLogs.logAgentAction({
           ownerUserId: requestUserId,
           agentId: source.agentConnectionId ?? null,
@@ -910,10 +976,15 @@ export class AgentDiscoveryService {
           targetUserId: target.ownerUserId ?? null,
           relatedActivityId: dto.activityId ?? null,
           reason: 'a2a_invite_requires_approval',
-          payload: { fromAgentId: source.id, note: dto.note },
+          payload: {
+            approvalId: approval.id,
+            fromAgentId: source.id,
+            note: dto.note,
+          },
         });
         return {
           status: 'pending_approval' as const,
+          approvalId: approval.id,
           reason: 'autonomy_level_requires_approval',
         };
       }

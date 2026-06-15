@@ -7,6 +7,13 @@ import { normalizeDeepSeekIntentRouterResult } from './social-agent-intent-norma
 import { hasSocialAgentImmediateSearchRequest } from './social-agent-profile-search-boundary';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentModelRouterService } from './social-agent-model-router.service';
+import {
+  enforceSocialIntentGate,
+  hasExplicitSocialExecutionIntent,
+  isConversationOnlySocialMention,
+  isSocialAdviceQuestion,
+} from './social-agent-social-intent-gate';
+import { isAwaitingSocialOpportunityClarification } from './social-agent-opportunity-clarification';
 
 export type SocialAgentIntentType =
   | 'casual_chat'
@@ -74,7 +81,8 @@ export class SocialAgentIntentRouterService {
     input: SocialAgentIntentRouterInput,
   ): Promise<SocialAgentIntentRouterResult> {
     const message = cleanDisplayText(input.message, '').trim();
-    const fallback = this.routeByRules({ ...input, message });
+    const normalizedInput = { ...input, message };
+    const fallback = this.routeByRules(normalizedInput);
     if (!this.shouldTryDeepSeek(message, fallback)) return fallback;
 
     const startedAt = Date.now();
@@ -88,7 +96,7 @@ export class SocialAgentIntentRouterService {
         this.metrics?.recordFallback('deepseek_empty');
         return fallback;
       }
-      return enhanced;
+      return enforceSocialIntentGate(normalizedInput, enhanced);
     } catch (error) {
       this.metrics?.recordLatency(
         'deepseek_intent_route',
@@ -128,11 +136,18 @@ export class SocialAgentIntentRouterService {
       this.hasCandidateFilterRefinement(message);
     const wantsSocialSearch =
       !profileOnlyUpdate &&
-      /(帮我找|给我找|想找|想认识|找一个|找个|找人|找.*搭子|搭子.*有吗|有合适的人吗|合适的人|伙伴|好友|对象|同城朋友|匹配|搜索候选|推荐.*人|附近.*人|同城.*人|真实用户|约练用户|发布过约练|约练卡片|跑步搭子|拍照搭子|一起.*(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|骑行|city\s*walk|citywalk)|周末.*(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|骑行|city\s*walk|citywalk))/i.test(
+      hasExplicitSocialExecutionIntent(message) &&
+      /(帮我找|给我找|想找|想认识|认识.*(新朋友|朋友|人)|低压力社交|找一个|找个|找人|找.*(搭子|伙伴|朋友)|搭子.*有吗|有合适的人吗|合适的人|伙伴|好友|对象|同城朋友|匹配|搜索候选|推荐.*(人|朋友|用户)|附近.*(人|朋友|搭子)|同城.*(人|朋友|搭子)|真实用户|约练用户|发布过约练|约练卡片|跑步搭子|拍照搭子|篮球搭子|户外搭子|约练搭子|一起.*(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|户外|骑行|篮球|网球|游泳|city\s*walk|citywalk)|周末.*(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|户外|骑行|篮球|city\s*walk|citywalk))/i.test(
         text,
       );
     const wantsActivitySearch =
-      /(活动|局|约练活动|羽毛球局|跑团|课程|场地|报名|参加约练|附近有什么|有没有.*局|有什么.*活动)/i.test(
+      hasExplicitSocialExecutionIntent(message) &&
+      /(活动|局|约练活动|羽毛球局|篮球局|户外活动|跑团|课程|场地|报名|参加约练|参加.*活动|附近有什么|有没有.*局|有什么.*活动)/i.test(
+        text,
+      );
+    const wantsSocialAction =
+      hasExplicitSocialExecutionIntent(message) &&
+      /(发消息|发送.*(给|第一个|第二个|第三个|这个|那个|他|她|候选)|加好友|邀请(第一个|第二个|第三个|这个|那个|他|她|候选)|约他|约她|联系(第一个|第二个|第三个|这个|那个|他|她|候选)|收藏(第一个|第二个|第三个|这个|那个|他|她|候选)|确认发布|帮我发|帮我加|帮我邀请)/i.test(
         text,
       );
     const wantsImmediateSocialSearch =
@@ -141,6 +156,8 @@ export class SocialAgentIntentRouterService {
       text,
       wantsSocialSearch,
     );
+    const awaitingOpportunityClarification =
+      isAwaitingSocialOpportunityClarification(input.taskContext);
     const explicitlyAvoidsSending = this.explicitlyAvoidsSending(text);
     const asksWorkflowHelp = this.isWorkflowHelpQuestion(message);
     const asksProductHelp = this.isProductHelpQuestion(message);
@@ -152,6 +169,29 @@ export class SocialAgentIntentRouterService {
     if (isCorrection) {
       return this.result('correction_or_clarification', 0.92, entities, {
         replyStrategy: 'conversational_answer',
+      });
+    }
+
+    if (isConversationOnlySocialMention(message)) {
+      return this.result('casual_chat', 0.93, entities, {
+        replyStrategy: 'conversational_answer',
+      });
+    }
+
+    if (awaitingOpportunityClarification) {
+      if (
+        /(取消|先不找|不找了|不用找|暂停|算了)/i.test(text) ||
+        isConversationOnlySocialMention(message) ||
+        isSocialAdviceQuestion(message)
+      ) {
+        return this.result('casual_chat', 0.9, entities, {
+          replyStrategy: 'conversational_answer',
+        });
+      }
+      return this.result('social_search', 0.9, entities, {
+        shouldSearch: true,
+        shouldReplan: hasTask,
+        replyStrategy: 'search_candidates',
       });
     }
 
@@ -180,10 +220,27 @@ export class SocialAgentIntentRouterService {
     }
 
     if (
+      /(不想|不用|不要|先不|暂时不).{0,12}(交友|找人|约练|搭子|匹配|推荐人|活动)/i.test(
+        text,
+      ) &&
+      /(只想|就想|只是|普通).{0,12}(问|聊|咨询|问题|聊天)/i.test(text)
+    ) {
+      return this.result('casual_chat', 0.92, entities, {
+        replyStrategy: 'conversational_answer',
+      });
+    }
+
+    if (
       /(你好|hello|hi|嗨|你能做什么|你可以做什么|怎么找搭子|该怎么找|怎么聊天自然|聊天自然|你觉得怎么|建议|聊聊)/i.test(
         text,
       )
     ) {
+      return this.result('casual_chat', 0.9, entities, {
+        replyStrategy: 'conversational_answer',
+      });
+    }
+
+    if (isSocialAdviceQuestion(message)) {
       return this.result('casual_chat', 0.9, entities, {
         replyStrategy: 'conversational_answer',
       });
@@ -225,11 +282,15 @@ export class SocialAgentIntentRouterService {
       });
     }
 
-    if (
-      /(发消息|发送.*(给|第一个|第二个|第三个|这个|那个|他|她|候选)|加好友|邀请(第一个|第二个|第三个|这个|那个|他|她|候选)|约他|约她|联系(第一个|第二个|第三个|这个|那个|他|她|候选)|收藏(第一个|第二个|第三个|这个|那个|他|她|候选)|确认发布|帮我发|帮我加|帮我邀请)/i.test(
-        text,
-      )
-    ) {
+    if (wantsSocialAction && !hasCandidates && !hasTask) {
+      return this.result('candidate_followup', 0.86, entities, {
+        shouldSearch: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'direct_reply',
+      });
+    }
+
+    if (wantsSocialAction) {
       return this.result('action_request', 0.9, entities, {
         shouldExecuteAction: true,
         replyStrategy: 'execute_action',
@@ -256,7 +317,10 @@ export class SocialAgentIntentRouterService {
       );
     }
 
-    if (wantsActivitySearch && !wantsSocialSearch) {
+    if (
+      wantsActivitySearch &&
+      (!wantsSocialSearch || /(参加|报名|活动|局|课程|场地)/i.test(text))
+    ) {
       return this.result('activity_search', 0.85, entities, {
         shouldSearch: true,
         shouldReplan: hasTask,
@@ -299,7 +363,7 @@ export class SocialAgentIntentRouterService {
     const text = cleanDisplayText(message, '').trim().toLowerCase();
     if (!text) return false;
     if (
-      /(帮我找|给我找|想找|想认识|找一个|找个|找人|找.*搭子|搜索|推荐.*人|附近.*人|同城.*人|真实用户|约练用户|发布过约练|约练卡片|跑步搭子|拍照搭子)/i.test(
+      /(帮我找|给我找|想找|想认识|认识.*(新朋友|朋友|人)|找一个|找个|找人|找.*(搭子|伙伴|朋友)|搜索|推荐.*(人|朋友|用户)|附近.*(人|朋友|搭子)|同城.*(人|朋友|搭子)|真实用户|约练用户|发布过约练|约练卡片|跑步搭子|拍照搭子|篮球搭子|户外搭子|约练搭子)/i.test(
         text,
       )
     ) {
@@ -336,6 +400,9 @@ export class SocialAgentIntentRouterService {
   private isWorkflowHelpQuestion(message: string): boolean {
     const text = cleanDisplayText(message, '').trim().toLowerCase();
     if (!text) return false;
+    const workflowHelpPattern =
+      /(先.*画像.*约练|先.*人物画像|直接发布需求|发布需求.*画像|怎么开始约练|怎么.*(找人|找搭子|约练|参加活动|报名活动|加好友|发邀请|发消息|创建活动|发起活动)|如何.*(找人|找搭子|约练|参加活动|报名活动|加好友|发邀请|发消息|创建活动|发起活动)|活动.*(怎么参加|如何参加|报名流程|参与流程)|创建活动.*(先|需要).*画像|邀请.*流程|加好友.*流程|新用户.*先|下一步干什么|需要怎么做|我需要怎么做|怎么做|流程|先完善.*再|边匹配边补齐)/i;
+    if (workflowHelpPattern.test(text)) return true;
     if (
       /(帮我找|给我找|想找|想认识|找一个|找个|找人|找.*搭子|搜索|推荐.*人|附近.*人|同城.*人|真实用户|约练用户)/i.test(
         text,
@@ -343,9 +410,7 @@ export class SocialAgentIntentRouterService {
     ) {
       return false;
     }
-    return /(先.*画像.*约练|先.*人物画像|直接发布需求|发布需求.*画像|怎么开始约练|新用户.*先|下一步干什么|需要怎么做|我需要怎么做|怎么做|流程|先完善.*再|边匹配边补齐)/i.test(
-      text,
-    );
+    return workflowHelpPattern.test(text);
   }
 
   private isProfileEnrichmentRequest(message: string): boolean {
@@ -436,7 +501,7 @@ export class SocialAgentIntentRouterService {
       /(青岛|北京|上海|深圳|广州|杭州|南京|成都|武汉|西安|重庆|苏州|厦门|天津|长沙|郑州|济南|宁波|合肥)/,
     );
     const activityMatch = message.match(
-      /(拍照|跑步|羽毛球|瑜伽|健身|咖啡|徒步|骑行|篮球|足球|网球|游泳|约练|撸铁|普拉提|飞盘)/,
+      /(拍照|跑步|羽毛球|瑜伽|健身|咖啡|徒步|骑行|篮球|足球|网球|游泳|约练|撸铁|普拉提|飞盘|户外|训练|低压力社交|认识新朋友|新朋友)/,
     );
     const timeMatch = message.match(
       /(今晚|明天|后天|周末|工作日|上午|中午|下午|晚上|夜间|早上|午后)/,
@@ -508,7 +573,8 @@ export class SocialAgentIntentRouterService {
                   'replyStrategy 只能是 conversational_answer, append_context, search_candidates, search_activities, execute_action, ask_clarifying_question。',
                   'product_help 用于解释 FitMeet 产品、人物画像、匹配逻辑、权限模式、隐私边界、Agent 能力和 DeepSeek/API 问题。',
                   'profile_update 只有用户明确提供自己的城市、兴趣、可约时间、想认识的人或不接受的行为时使用；“人物画像是什么”“你可以帮我完善人物画像吗”不是 profile_update。',
-                  'workflow_help 用于回答先完善画像还是直接发布需求、下一步怎么做、怎么开始约练等流程问题。',
+                  'workflow_help 用于回答先完善画像还是直接发布需求、下一步怎么做、怎么开始约练、怎么参加活动、怎么加好友、怎么发邀请等流程问题。',
+                  '用户问“怎么找人/怎么参加活动/怎么加好友/怎么发邀请/流程是什么”是在咨询流程，不是立即执行搜索或动作。',
                   'profile_enrichment 用于用户提供画像事实，即使里面有“想找xxx”，也不要直接搜索；先抽取画像并询问是否开始搜索。',
                   'profile_enrichment_request/correction_or_clarification 用于用户要求把刚才信息写入画像或纠正“上面是画像不是搜索”。',
                   'product_help、workflow_help、profile_enrichment、profile_enrichment_request、correction_or_clarification、fitness_math、casual_chat、unknown 必须 replyStrategy=conversational_answer，且 shouldSearch=false、shouldExecuteAction=false。',

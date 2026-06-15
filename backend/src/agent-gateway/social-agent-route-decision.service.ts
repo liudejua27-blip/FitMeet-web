@@ -24,6 +24,7 @@ import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
+import { enforceSocialIntentGate } from './social-agent-social-intent-gate';
 
 type PrepareRouteDecisionInput = {
   ownerUserId: number;
@@ -36,6 +37,7 @@ type PrepareRouteDecisionResult = {
   task: AgentTask;
   profile: Record<string, unknown> | null;
   longTermSnapshot: LongTermMemorySnapshot | null;
+  taskContext: Record<string, unknown>;
   route: SocialAgentIntentRouterResult;
   brainDecision?: SocialAgentBrainTurnDecision;
   brainToolResults: Array<Record<string, unknown>>;
@@ -71,17 +73,27 @@ export class SocialAgentRouteDecisionService {
       task,
       longTermSnapshot,
     );
+    const taskContext = this.routeContext.buildTaskContext({
+      task,
+      body,
+      longTermSnapshot,
+      memoryContext,
+    });
     let route = await this.intentRouter.route({
       message,
-      taskContext: this.routeContext.buildTaskContext({
-        task,
-        body,
-        longTermSnapshot,
-        memoryContext,
-      }),
+      taskContext,
       profile: profile ?? {},
       conversationHistory: readSocialAgentConversationHistory(task),
     });
+    route = enforceSocialIntentGate(
+      {
+        message,
+        taskContext,
+        profile: profile ?? {},
+        conversationHistory: readSocialAgentConversationHistory(task),
+      },
+      route,
+    );
     const brainDecision = await this.planBrainTurn({
       message,
       route,
@@ -92,7 +104,16 @@ export class SocialAgentRouteDecisionService {
       memoryContext,
     });
     if (brainDecision) {
-      route = brainDecision.route;
+      route = enforceSocialIntentGate(
+        {
+          message,
+          taskContext,
+          profile: profile ?? {},
+          conversationHistory: readSocialAgentConversationHistory(task),
+        },
+        brainDecision.route,
+      );
+      brainDecision.route = route;
       rememberSocialAgentConversationBrainDecision(task, brainDecision);
       if (brainDecision.conversationMode === 'profile_correction') {
         this.profileEnrichment.recordProfileMisunderstanding(
@@ -119,6 +140,7 @@ export class SocialAgentRouteDecisionService {
       task,
       profile,
       longTermSnapshot,
+      taskContext,
       route,
       brainDecision,
       brainToolResults,

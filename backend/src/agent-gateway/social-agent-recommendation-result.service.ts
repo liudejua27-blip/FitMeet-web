@@ -53,6 +53,9 @@ export class SocialAgentRecommendationResultService {
   private readonly logger = new Logger(
     SocialAgentRecommendationResultService.name,
   );
+  private readonly fallbackAlphaAgent = new FitMeetAlphaAgentSdkService({
+    get: () => undefined,
+  } as never);
 
   constructor(
     @InjectRepository(AgentTask)
@@ -203,6 +206,15 @@ export class SocialAgentRecommendationResultService {
       candidates,
     );
 
+    const resultCardInput = {
+      taskId: task.id,
+      socialRequestDraft: draft as unknown as Record<string, unknown>,
+      candidates: candidates as unknown as Array<Record<string, unknown>>,
+      approvalRequiredActions,
+      safety: alphaTurn?.safety,
+      traceId: alphaTurn?.traceId,
+      lifeGraphSignals: lifeGraphSignals as Record<string, unknown> | null,
+    };
     const result = {
       taskId: task.id,
       status: task.status,
@@ -215,15 +227,9 @@ export class SocialAgentRecommendationResultService {
       candidates,
       approvalRequiredActions,
       events: events.map((event) => input.toEventDto(event)),
-      cards: this.alphaAgent?.buildResultCards({
-        taskId: task.id,
-        socialRequestDraft: draft as unknown as Record<string, unknown>,
-        candidates: candidates as unknown as Array<Record<string, unknown>>,
-        approvalRequiredActions,
-        safety: alphaTurn?.safety,
-        traceId: alphaTurn?.traceId,
-        lifeGraphSignals: lifeGraphSignals as Record<string, unknown> | null,
-      }),
+      cards: (
+        this.alphaAgent ?? this.fallbackAlphaAgent
+      ).buildResultCards(resultCardInput),
       safety: alphaTurn?.safety,
       traceId: alphaTurn?.traceId,
       agentTrace: alphaTurn?.agentTrace,

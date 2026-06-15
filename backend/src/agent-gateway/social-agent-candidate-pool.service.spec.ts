@@ -104,8 +104,8 @@ function profile(
     socialPreference: '',
     rejectRules: '',
     privacyBoundary: '',
-    profileDiscoverable: false,
-    agentCanRecommendMe: false,
+    profileDiscoverable: true,
+    agentCanRecommendMe: true,
     agentCanStartChatAfterApproval: false,
     hideSensitiveTags: true,
     aiSummary: '',
@@ -162,6 +162,7 @@ function makeService(
     socialRequests?: Array<Record<string, unknown>>;
     activities?: Array<Record<string, unknown>>;
     blockedIds?: number[];
+    recommendationExcludedIds?: number[];
     lifeGraphSignals?: Record<string, unknown> | null;
   } = {},
 ) {
@@ -177,6 +178,10 @@ function makeService(
   const safety = {
     getMutualBlockUserIds: jest.fn(
       async () => new Set(options.blockedIds ?? []),
+    ),
+    getAgentRecommendationExcludedUserIds: jest.fn(
+      async () =>
+        new Set(options.recommendationExcludedIds ?? options.blockedIds ?? []),
     ),
   };
   const lifeGraph = options.lifeGraphSignals
@@ -231,9 +236,10 @@ describe('SocialAgentCandidatePoolService', () => {
     });
   });
 
-  it('social_search returns real public_social_intents', async () => {
+  it('social_search uses public_social_intents only for profile-discoverable Agent-matching users', async () => {
     const { service } = makeService({
       publicIntents: [publicIntent('intent_2', 2)],
+      profiles: [profile(2)],
     });
 
     const result = await service.searchSocial({
@@ -242,15 +248,16 @@ describe('SocialAgentCandidatePoolService', () => {
       interestTags: ['咖啡'],
     });
 
-    expect(result.candidates).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          source: 'public_intent',
-          isRealData: true,
-          candidateUserId: 2,
-          publicIntentId: 'intent_2',
-        }),
-      ]),
+    expect(result.candidates[0]).toMatchObject({
+      isRealData: true,
+      candidateUserId: 2,
+      recommendationConsent: expect.objectContaining({
+        profileDiscoverable: true,
+        agentCanRecommendMe: true,
+      }),
+    });
+    expect(result.candidates[0].matchReasons.join(' ')).toContain(
+      '公开约练卡片',
     );
   });
 
@@ -265,6 +272,7 @@ describe('SocialAgentCandidatePoolService', () => {
         publicIntent('intent_beijing', 2, { city: '北京' }),
         publicIntent('intent_qingdao', 3, { city: '青岛' }),
       ],
+      profiles: [profile(2, { city: '北京' }), profile(3, { city: '青岛' })],
       socialRequests: [
         {
           id: 301,
@@ -338,6 +346,7 @@ describe('SocialAgentCandidatePoolService', () => {
         },
       ],
       publicIntents: [publicIntent('intent_2', 2)],
+      profiles: [profile(2)],
     });
 
     const result = await service.searchActivity({
@@ -357,6 +366,7 @@ describe('SocialAgentCandidatePoolService', () => {
   it('activity_search falls back to activity-like public_social_intents', async () => {
     const { service } = makeService({
       publicIntents: [publicIntent('intent_2', 2)],
+      profiles: [profile(2)],
     });
 
     const result = await service.searchActivity({
@@ -372,6 +382,163 @@ describe('SocialAgentCandidatePoolService', () => {
     });
   });
 
+  it('excludes activity creators with safety or recommendation-blocking boundaries', async () => {
+    const { service } = makeService({
+      activities: [
+        {
+          id: 88,
+          creatorId: 2,
+          type: ActivityType.Custom,
+          title: '青岛周末咖啡活动',
+          description: '公开咖啡活动',
+          locationName: '市南区',
+          city: '青岛',
+          status: SocialActivityStatus.Confirmed,
+          startTime: now,
+          endTime: new Date('2026-06-27T08:00:00.000Z'),
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      profiles: [
+        profile(2, {
+          privacyBoundary: '投诉处理中，请不要再推荐',
+        }),
+      ],
+    });
+
+    const result = await service.searchActivity({
+      ownerUserId: 1,
+      city: '青岛',
+      rawText: '周末咖啡活动',
+    });
+
+    expect(result.activityResults).toEqual([]);
+    expect(result.emptyReason).toBe('no_real_candidates');
+    expect(result.debug.filtered.boundaryMismatch).toBe(1);
+  });
+
+  it('requires activity-like public intents to come from users opted in to Agent recommendations', async () => {
+    const { service } = makeService({
+      publicIntents: [publicIntent('intent_2', 2)],
+      profiles: [profile(2, { agentCanRecommendMe: false })],
+    });
+
+    const result = await service.searchActivity({
+      ownerUserId: 1,
+      city: '青岛',
+      rawText: '周末咖啡活动',
+    });
+
+    expect(result.activityResults).toEqual([]);
+    expect(result.emptyReason).toBe('no_real_candidates');
+    expect(result.debug.filtered.boundaryMismatch).toBe(1);
+  });
+
+  it('requires activity creators to keep profile discovery and Agent matching enabled', async () => {
+    const { service } = makeService({
+      activities: [
+        {
+          id: 88,
+          creatorId: 2,
+          type: ActivityType.Custom,
+          title: '青岛周末咖啡活动',
+          description: '公开咖啡活动',
+          locationName: '市南区',
+          city: '青岛',
+          status: SocialActivityStatus.Confirmed,
+          startTime: now,
+          endTime: new Date('2026-06-27T08:00:00.000Z'),
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          id: 89,
+          creatorId: 3,
+          type: ActivityType.Custom,
+          title: '青岛周末轻松跑',
+          description: '公开跑步活动',
+          locationName: '五四广场',
+          city: '青岛',
+          status: SocialActivityStatus.Confirmed,
+          startTime: now,
+          endTime: new Date('2026-06-27T08:00:00.000Z'),
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      profiles: [
+        profile(2, {
+          profileDiscoverable: true,
+          agentCanRecommendMe: false,
+        }),
+        profile(3, {
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+      ],
+    });
+
+    const result = await service.searchActivity({
+      ownerUserId: 1,
+      city: '青岛',
+      rawText: '周末公开活动',
+    });
+
+    expect(result.activityResults.map((activity) => activity.activityId)).toEqual([89]);
+    expect(result.activityResults.map((activity) => activity.activityId)).not.toContain(88);
+    expect(result.debug.filtered.boundaryMismatch).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not surface activity opportunities when the user explicitly rejects strangers', async () => {
+    const { service } = makeService({
+      activities: [
+        {
+          id: 88,
+          creatorId: 2,
+          type: ActivityType.Custom,
+          title: '青岛周末咖啡活动',
+          description: '公开咖啡活动',
+          locationName: '市南区',
+          city: '青岛',
+          status: SocialActivityStatus.Confirmed,
+          startTime: now,
+          endTime: new Date('2026-06-27T08:00:00.000Z'),
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      publicIntents: [
+        publicIntent('intent_3', 3, {
+          title: '青岛周末羽毛球活动',
+          description: '公开约练活动',
+          requestType: 'badminton_partner',
+        }),
+      ],
+      profiles: [
+        profile(2, {
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+        profile(3, {
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+      ],
+    });
+
+    const result = await service.searchActivity({
+      ownerUserId: 1,
+      city: '青岛',
+      rawText: '周末活动，只推荐熟人，不接受陌生人',
+    });
+
+    expect(result.query.acceptsStrangers).toBe(false);
+    expect(result.activityResults).toEqual([]);
+    expect(result.emptyReason).toBe('no_real_candidates');
+    expect(result.debug.filtered.boundaryMismatch).toBeGreaterThanOrEqual(2);
+  });
+
   it('returns emptyReason and does not generate FitMeet User names when no real candidates exist', async () => {
     const { service } = makeService({ users: [realUser(1)] });
 
@@ -382,7 +549,7 @@ describe('SocialAgentCandidatePoolService', () => {
     expect(JSON.stringify(result)).not.toMatch(/FitMeet User/i);
   });
 
-  it('treats missing or null profileDiscoverable as recommendable', async () => {
+  it('filters profile candidates unless both discoverable and Agent matching are explicitly enabled', async () => {
     const { service } = makeService({
       profiles: [
         profile(2, {
@@ -396,10 +563,11 @@ describe('SocialAgentCandidatePoolService', () => {
 
     expect(
       result.candidates.map((candidate) => candidate.candidateUserId),
-    ).toContain(2);
+    ).not.toContain(2);
+    expect(result.emptyReason).toBe('no_real_candidates');
   });
 
-  it('treats missing or null agentCanRecommendMe as recommendable', async () => {
+  it('requires Agent matching even when the profile is publicly discoverable', async () => {
     const { service } = makeService({
       profiles: [
         profile(2, {
@@ -413,7 +581,69 @@ describe('SocialAgentCandidatePoolService', () => {
 
     expect(
       result.candidates.map((candidate) => candidate.candidateUserId),
-    ).toContain(2);
+    ).not.toContain(2);
+    expect(result.emptyReason).toBe('no_real_candidates');
+  });
+
+  it('requires public intent owners to keep profile discovery and Agent matching enabled', async () => {
+    const { service } = makeService({
+      users: [realUser(1), realUser(2), realUser(3), realUser(4)],
+      publicIntents: [
+        publicIntent('intent_2', 2),
+        publicIntent('intent_3', 3),
+        publicIntent('intent_4', 4),
+      ],
+      profiles: [
+        profile(2, {
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+        profile(3, {
+          profileDiscoverable: true,
+          agentCanRecommendMe: false,
+        }),
+        profile(4, {
+          profileDiscoverable: false,
+          agentCanRecommendMe: true,
+        }),
+      ],
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['咖啡'],
+      rawText: '想认识周末能低压力喝咖啡的新朋友',
+    });
+
+    expect(result.candidates.map((candidate) => candidate.candidateUserId)).toEqual([
+      2,
+    ]);
+    expect(
+      result.candidates.map((candidate) => candidate.candidateUserId),
+    ).not.toEqual(expect.arrayContaining([3, 4]));
+    expect(result.debug.filtered.boundaryMismatch).toBeGreaterThanOrEqual(2);
+  });
+
+  it('filters cold profile candidates when both recommendation switches are missing or disabled', async () => {
+    const { service } = makeService({
+      users: [realUser(1), realUser(2), realUser(3)],
+      profiles: [
+        profile(2, {
+          profileDiscoverable: null as never,
+          agentCanRecommendMe: null as never,
+        }),
+        profile(3, {
+          profileDiscoverable: false,
+          agentCanRecommendMe: false,
+        }),
+      ],
+    });
+
+    const result = await service.searchSocial({ ownerUserId: 1, city: '青岛' });
+
+    expect(result.candidates).toEqual([]);
+    expect(result.debug.filtered.boundaryMismatch).toBeGreaterThanOrEqual(2);
   });
 
   it('allows profileCompleteness >= 40 into the pool', async () => {
@@ -465,13 +695,334 @@ describe('SocialAgentCandidatePoolService', () => {
     ).toEqual([3]);
   });
 
-  it('keeps incomplete real users but lowers their dataQuality and score', async () => {
+  it('uses the Agent recommendation safety exclusion set before recommending strangers', async () => {
+    const { service, safety } = makeService({
+      profiles: [profile(2), profile(3)],
+      users: [realUser(1), realUser(2), realUser(3)],
+      blockedIds: [],
+      recommendationExcludedIds: [2],
+    });
+
+    const result = await service.searchSocial({ ownerUserId: 1, city: '青岛' });
+
+    expect(safety.getAgentRecommendationExcludedUserIds).toHaveBeenCalledWith(
+      1,
+    );
+    expect(
+      result.candidates.map((candidate) => candidate.candidateUserId),
+    ).toEqual([3]);
+  });
+
+  it('excludes discoverable strangers with complaint or moderation safety boundaries', async () => {
+    const { service } = makeService({
+      profiles: [
+        profile(2, {
+          nickname: '安全候选',
+          privacyBoundary: '先站内沟通，只在公共场所见面',
+        }),
+        profile(3, {
+          nickname: '投诉风险候选',
+          privacyBoundary: '投诉处理中，请不要再推荐',
+        }),
+        profile(4, {
+          nickname: '风控候选',
+          rejectRules: '风控标记，暂时禁用匹配',
+        }),
+      ],
+      users: [realUser(1), realUser(2), realUser(3), realUser(4)],
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['咖啡'],
+      rawText: '想认识周末能一起喝咖啡的新朋友',
+    });
+
+    expect(
+      result.candidates.map((candidate) => candidate.candidateUserId),
+    ).toEqual([2]);
+    expect(result.debug.filtered.blocked).toBeGreaterThanOrEqual(2);
+  });
+
+  it('only surfaces opted-in and safe cold-start strangers from a mixed candidate pool', async () => {
+    const { service, candidates, safety } = makeService({
+      users: [
+        realUser(1),
+        realUser(2),
+        realUser(3),
+        realUser(4),
+        realUser(5),
+        realUser(6),
+      ],
+      profiles: [
+        profile(2, {
+          nickname: '可发现候选',
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+        profile(3, {
+          nickname: '仅 Agent 匹配候选',
+          profileDiscoverable: false,
+          agentCanRecommendMe: true,
+        }),
+        profile(4, {
+          nickname: '未授权候选',
+          profileDiscoverable: false,
+          agentCanRecommendMe: false,
+        }),
+        profile(5, {
+          nickname: '安全排除候选',
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+        profile(6, {
+          nickname: '拒绝推荐候选',
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+          privacyBoundary: '请不要推荐给陌生人',
+        }),
+      ],
+      recommendationExcludedIds: [5],
+      socialRequests: [
+        {
+          id: 301,
+          userId: 1,
+          city: '青岛',
+          rawText: '青岛周末咖啡',
+          interestTags: ['咖啡'],
+        },
+      ],
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      socialRequestId: 301,
+      city: '青岛',
+      interestTags: ['咖啡'],
+      rawText: '想认识周末能低压力喝咖啡的新朋友',
+    });
+
+    expect(safety.getAgentRecommendationExcludedUserIds).toHaveBeenCalledWith(
+      1,
+    );
+    expect(result.candidates.map((candidate) => candidate.candidateUserId)).toEqual([
+      2,
+    ]);
+    expect(result.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'profile_candidate',
+          displayName: '可发现候选',
+          isRealData: true,
+        }),
+      ]),
+    );
+    expect(
+      result.candidates.map((candidate) => candidate.candidateUserId),
+    ).not.toEqual(expect.arrayContaining([1, 3, 4, 5, 6]));
+    expect(result.debug.filtered).toMatchObject({
+      self: expect.any(Number),
+      blocked: expect.any(Number),
+      boundaryMismatch: expect.any(Number),
+    });
+    expect(result.debug.filtered.self).toBeGreaterThanOrEqual(1);
+    expect(result.debug.filtered.blocked).toBeGreaterThanOrEqual(1);
+    expect(result.debug.filtered.boundaryMismatch).toBeGreaterThanOrEqual(2);
+    expect(candidates.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not surface cold-start strangers when the user explicitly rejects strangers', async () => {
+    const { service, candidates } = makeService({
+      users: [realUser(1), realUser(2), realUser(3)],
+      profiles: [
+        profile(2, {
+          nickname: '公开可发现用户',
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+        profile(3, {
+          nickname: '公开意图用户',
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+      ],
+      publicIntents: [publicIntent('intent_3', 3)],
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['咖啡'],
+      rawText:
+        '青岛周末下午，轻松咖啡，只在公共场所，先站内聊，不接受陌生人，不公开发起活动',
+    });
+
+    expect(result.query.acceptsStrangers).toBe(false);
+    expect(result.candidates).toEqual([]);
+    expect(result.debug.filtered.boundaryMismatch).toBeGreaterThanOrEqual(2);
+    expect(candidates.save).not.toHaveBeenCalled();
+  });
+
+  it('returns only safe explainable top candidates with opener and boundary metadata', async () => {
+    const { service } = makeService({
+      users: [
+        realUser(1),
+        realUser(2),
+        realUser(3),
+        realUser(4),
+        realUser(5),
+        realUser(6),
+      ],
+      profiles: [
+        profile(2, {
+          nickname: '小林',
+          interestTags: ['跑步', '咖啡'],
+          availableTimes: ['周末下午'],
+          socialPreference: '低压力，先站内聊',
+          privacyBoundary: '公共场所，不交换联系方式',
+          relationshipGoals: ['运动搭子'],
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+        profile(3, {
+          nickname: '阿森',
+          interestTags: ['跑步'],
+          availableTimes: ['周末下午'],
+          socialPreference: '轻松慢跑',
+          privacyBoundary: '公共路线',
+          relationshipGoals: ['新朋友'],
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+        profile(4, {
+          nickname: '小周',
+          interestTags: ['健身', '跑步'],
+          availableTimes: ['周末'],
+          socialPreference: '先聊天再见面',
+          privacyBoundary: '站内沟通',
+          relationshipGoals: ['约练搭子'],
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+        profile(5, {
+          nickname: '未授权',
+          interestTags: ['跑步'],
+          profileDiscoverable: false,
+          agentCanRecommendMe: false,
+        }),
+        profile(6, {
+          nickname: '被排除',
+          interestTags: ['跑步'],
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+      ],
+      recommendationExcludedIds: [6],
+      lifeGraphSignals: {
+        identitySignals: { city: '青岛' },
+        socialIntentSignals: {
+          currentSocialGoal: '周末下午找低压力跑步搭子',
+          preferredSocialStyle: '先站内聊',
+        },
+        lifestyleSignals: { availableTimes: ['周末下午'] },
+        fitnessSignals: { sportsPreferences: ['跑步'], publicPlaceOnly: true },
+        behaviorSignals: {
+          pressurePreference: 'low',
+          locationPreference: 'same_school_or_area',
+          recommendationWeights: {
+            sameCity: 70,
+            commonInterest: 80,
+            lowPressure: 90,
+            sports: 88,
+            safetyBoundary: 90,
+          },
+          matchingGuidance: {
+            shouldPreferLowPressure: true,
+            shouldPreferSports: true,
+            shouldUsePublicPlace: true,
+            suggestedFilters: ['低压力', '公共场所'],
+            rankingNotes: ['优先低压力跑步和公共场所边界。'],
+          },
+          summary: '更适合低压力运动社交。',
+        },
+        safetySignals: {
+          publicPlaceOnly: true,
+          locationSharingAllowed: false,
+          strictConfirmationRequired: true,
+          acceptsNightMeet: false,
+        },
+        confidence: { overall: 0.86, byField: {} },
+      },
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['跑步'],
+      rawText:
+        '青岛周末下午，轻松跑步，只在公共场所，先站内聊，接受陌生人，不公开发起活动',
+      limit: 3,
+    });
+
+    expect(result.candidates).toHaveLength(3);
+    expect(result.candidates.map((candidate) => candidate.candidateUserId)).toEqual([
+      2,
+      3,
+      4,
+    ]);
+    expect(result.candidates.map((candidate) => candidate.candidateUserId)).not.toEqual(
+      expect.arrayContaining([1, 5, 6]),
+    );
+    for (const candidate of result.candidates) {
+      expect(candidate).toMatchObject({
+        isRealData: true,
+        risk: expect.objectContaining({ level: expect.any(String) }),
+        candidateExplanation: expect.objectContaining({
+          fitReasons: expect.any(Array),
+          suggestedOpener: expect.any(String),
+          safeFirstStep: expect.any(String),
+          nextActionSuggestion: expect.any(String),
+        }),
+        lifeGraphExplanation: expect.objectContaining({
+          boundaryNotes: expect.arrayContaining([
+            expect.stringContaining('公共场所'),
+          ]),
+          confidenceLevel: expect.stringMatching(/high|medium|low/),
+        }),
+      });
+      expect(candidate.candidateExplanation.fitReasons.length).toBeGreaterThan(0);
+      expect(candidate.suggestedOpener).toBeTruthy();
+      expect(candidate.suggestedOpener).toBe(candidate.suggestedMessage);
+      expect(candidate.whyYouMayLike).toBeTruthy();
+      expect(candidate.whyNow).toBeTruthy();
+      expect(candidate.matchPoints.length).toBeGreaterThan(0);
+      expect(candidate.boundaryNotes.join(' ')).toContain('公共场所');
+      expect(candidate.dynamicSignalReasons.join(' ')).toContain('低压力');
+      expect(candidate.nextAction).toMatch(/站内|消息|确认|轻量/);
+      expect(candidate.riskWarning).toContain('公共场所');
+      expect(candidate.scoreBreakdown.safetyRisk).toBeGreaterThan(0);
+      expect(candidate.scoreBreakdown.lifeGraphBehaviorFit).toBeGreaterThan(0);
+    }
+  });
+
+  it('keeps opted-in incomplete real users but lowers their dataQuality and score', async () => {
     const { service } = makeService({
       users: [
         realUser(1),
         realUser(2, { name: 'FitMeet User M5l4', city: '', interestTags: [] }),
       ],
-      profiles: [],
+      profiles: [
+        profile(2, {
+          nickname: '',
+          city: '',
+          interestTags: [],
+          availableTimes: [],
+          socialPreference: '',
+          profileDiscoverable: true,
+          agentCanRecommendMe: true,
+        }),
+      ],
     });
 
     const result = await service.searchSocial({

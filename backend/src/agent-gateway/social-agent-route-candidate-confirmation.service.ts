@@ -69,6 +69,7 @@ export class SocialAgentRouteCandidateConfirmationService {
       queuedRun: null,
       pendingApproval: null,
       activityResults: [],
+      cards: confirmedCandidateMessage.cards,
       permissionMode: task.permissionMode,
     };
 

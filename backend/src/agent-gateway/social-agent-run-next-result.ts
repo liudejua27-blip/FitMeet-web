@@ -1,4 +1,5 @@
 import { AgentTask } from './entities/agent-task.entity';
+import type { FitMeetAlphaCard } from './fitmeet-alpha-agent.types';
 import {
   SocialAgentRunNextResult,
   SocialAgentToolCallRecord,
@@ -10,6 +11,7 @@ export function buildSocialAgentRunNextResult(input: {
   calls: SocialAgentToolCallRecord[];
   handledReply: boolean;
   decision: Record<string, unknown> | null;
+  cards?: FitMeetAlphaCard[];
 }): SocialAgentRunNextResult {
   const summary = summarizeSocialAgentToolCalls(input.calls);
   return {
@@ -22,5 +24,6 @@ export function buildSocialAgentRunNextResult(input: {
     status: input.task.status,
     handledReply: input.handledReply,
     decision: input.decision,
+    ...(input.cards && input.cards.length > 0 ? { cards: input.cards } : {}),
   };
 }

@@ -75,9 +75,10 @@ export class AgentApprovalService {
    * what risk band. Pure function over (actionType, payload, settings,
    * ctx).
    *
-   * Hard rules from spec:
-   *  - first message to stranger → required
-   *  - create / join offline activity → required
+   * Hard rules from product safety spec:
+   *  - sending a message / first message → required
+   *  - add friend / connect candidate → required
+   *  - create / join / publish offline activity → required
    *  - contact exchange / location share / photo upload → required
    *  - night activity / alcohol / payment → required (high)
    *  - target user has unknown risk profile → required (high)
@@ -166,19 +167,14 @@ export class AgentApprovalService {
     let needs = false;
     switch (type) {
       case ApprovalType.SendMessage:
-        bumpRisk(ApprovalRiskLevel.Low);
-        if (settings.requireApprovalForFirstMessage && ctx.isFirstContact) {
-          needs = true;
-          bumpRisk(ApprovalRiskLevel.Medium);
-          reasons.push('first_contact_with_stranger');
-        }
-        if (
-          settings.mode === AgentSettingsMode.Basic ||
-          settings.mode === AgentSettingsMode.Assisted
-        ) {
-          needs = true;
-          reasons.push('basic_mode_blocks_auto_send');
-        }
+        needs = true;
+        bumpRisk(
+          settings.requireApprovalForFirstMessage || ctx.isFirstContact
+            ? ApprovalRiskLevel.Medium
+            : ApprovalRiskLevel.Low,
+        );
+        reasons.push('message_send_requires_explicit_approval');
+        if (ctx.isFirstContact) reasons.push('first_contact_with_stranger');
         break;
       case ApprovalType.FirstMessage:
         needs = true;
@@ -186,13 +182,9 @@ export class AgentApprovalService {
         reasons.push('first_contact_with_stranger');
         break;
       case ApprovalType.ContactRequest:
+        needs = true;
         bumpRisk(ApprovalRiskLevel.Medium);
-        if (
-          !canAutoExecute(actionType, settings.mode, ApprovalRiskLevel.Medium)
-        ) {
-          needs = true;
-          reasons.push('contact_request_requires_mode_approval');
-        }
+        reasons.push('contact_request_requires_explicit_approval');
         break;
       case ApprovalType.ContactExchange:
         needs = true;
@@ -200,16 +192,9 @@ export class AgentApprovalService {
         reasons.push('contact_exchange_requires_explicit_approval');
         break;
       case ApprovalType.CreateActivity:
+        needs = true;
         bumpRisk(ApprovalRiskLevel.Medium);
-        if (
-          settings.requireApprovalForOfflineMeeting ||
-          !canAutoExecute(actionType, settings.mode, ApprovalRiskLevel.Medium)
-        ) {
-          needs = true;
-          reasons.push(
-            'activity_invite_requires_approval_or_permission_source',
-          );
-        }
+        reasons.push('activity_create_requires_explicit_approval');
         break;
       case ApprovalType.OfflineMeeting:
         needs = true;
@@ -255,6 +240,10 @@ export class AgentApprovalService {
         reasons.push('target_risk_profile_unknown');
         break;
       case ApprovalType.PostPublish:
+        needs = true;
+        bumpRisk(ApprovalRiskLevel.Medium);
+        reasons.push('public_publish_requires_explicit_approval');
+        break;
       case ApprovalType.Custom:
       default:
         bumpRisk(ApprovalRiskLevel.Low);
@@ -282,6 +271,24 @@ export class AgentApprovalService {
       bumpRisk(ApprovalRiskLevel.High);
       reasons.push('target_risk_profile_unknown');
     }
+    const sensitiveWrite = this.classifySensitiveWrite(
+      actionType,
+      input.payload,
+    );
+    if (sensitiveWrite) {
+      needs = true;
+      bumpRisk(sensitiveWrite.riskLevel);
+      reasons.push(sensitiveWrite.reason);
+    }
+    const schemaActionWrite =
+      type === ApprovalType.Custom
+        ? this.classifySchemaActionWrite(actionType, input.payload)
+        : null;
+    if (schemaActionWrite) {
+      needs = true;
+      bumpRisk(schemaActionWrite.riskLevel);
+      reasons.push(schemaActionWrite.reason);
+    }
 
     // Master switch.
     if (settings.requireApprovalForAll) {
@@ -300,8 +307,8 @@ export class AgentApprovalService {
       riskLevel: risk,
       summary: this.buildSummary(type, input.payload),
       reasons: needs
-        ? ['approval_required_by_permission_engine', ...reasons]
-        : [`auto_execute_allowed_by_${settings.mode}`, ...reasons],
+        ? [...new Set(['approval_required_by_permission_engine', ...reasons])]
+        : [...new Set([`auto_execute_allowed_by_${settings.mode}`, ...reasons])],
     };
   }
 
@@ -352,6 +359,127 @@ export class AgentApprovalService {
         if (!s.allowContactExchange)
           return 'Agent is not allowed to exchange contact info.';
         break;
+    }
+    return null;
+  }
+
+  private classifySensitiveWrite(
+    actionType: AgentAutoActionType,
+    payload: Record<string, unknown>,
+  ): { riskLevel: ApprovalRiskLevel; reason: string } | null {
+    const raw = [
+      actionType,
+      payload.actionType,
+      payload.schemaAction,
+      payload.action,
+      payload.type,
+      payload.intent,
+      payload.fieldKey,
+      payload.category,
+    ]
+      .map((value) => (typeof value === 'string' ? value : ''))
+      .join(' ')
+      .toLowerCase();
+    if (!raw.trim()) return null;
+    if (
+      /\b(privacy|profile_visibility|visibility|discoverable|public_profile|modify_public_profile)\b/.test(
+        raw,
+      )
+    ) {
+      return {
+        riskLevel: ApprovalRiskLevel.High,
+        reason: 'privacy_change_requires_explicit_approval',
+      };
+    }
+    if (/\b(update_sensitive_profile|sensitive_profile|sensitive_tag)\b/.test(raw)) {
+      return {
+        riskLevel: ApprovalRiskLevel.High,
+        reason: 'sensitive_profile_write_requires_explicit_approval',
+      };
+    }
+    if (
+      raw.includes('life_graph.accept_update') ||
+      /\b(confirm_profile_update|memory_write|write_memory|long_term_memory|profile_update)\b/.test(
+        raw,
+      )
+    ) {
+      return {
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason: 'life_graph_memory_write_requires_explicit_approval',
+      };
+    }
+    return null;
+  }
+
+  private classifySchemaActionWrite(
+    actionType: AgentAutoActionType,
+    payload: Record<string, unknown>,
+  ): { riskLevel: ApprovalRiskLevel; reason: string } | null {
+    const raw = [
+      actionType,
+      payload.actionType,
+      payload.schemaAction,
+      payload.action,
+      payload.type,
+      payload.intent,
+      payload.toolName,
+      payload.resumeMode,
+    ]
+      .map((value) => (typeof value === 'string' ? value : ''))
+      .join(' ')
+      .toLowerCase();
+    if (!raw.trim()) return null;
+    if (
+      raw.includes('candidate.connect') ||
+      /\b(connect_candidate|add_friend)\b/.test(raw)
+    ) {
+      return {
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason: 'contact_request_requires_explicit_approval',
+      };
+    }
+    if (
+      raw.includes('opener.confirm_send') ||
+      /\b(send_message|send_candidate_message|reply_message)\b/.test(raw)
+    ) {
+      return {
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason: 'message_send_requires_explicit_approval',
+      };
+    }
+    if (
+      raw.includes('activity.confirm_create') ||
+      /\b(create_activity|invite_activity|join_activity)\b/.test(raw)
+    ) {
+      return {
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason: 'activity_create_requires_explicit_approval',
+      };
+    }
+    if (
+      raw.includes('meet_loop.resume') ||
+      raw.includes('resume_after_approval')
+    ) {
+      return {
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason: 'meet_loop_resume_requires_checkpoint_confirmation',
+      };
+    }
+    if (/\b(payment|wallet|pay)\b/.test(raw)) {
+      return {
+        riskLevel: ApprovalRiskLevel.High,
+        reason: 'payment_requires_payment_intent_and_audit',
+      };
+    }
+    if (
+      /\b(publish_social_request|public_publish|publish_activity|public_post)\b/.test(
+        raw,
+      )
+    ) {
+      return {
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason: 'public_publish_requires_explicit_approval',
+      };
     }
     return null;
   }
@@ -572,7 +700,6 @@ export class AgentApprovalService {
     row.status = ApprovalStatus.Approved;
     row.respondedAt = new Date();
     const saved = await this.repo.save(row);
-    await this.clearResolvedTaskPendingAction(saved);
 
     let dispatched = false;
     let dispatchResult: unknown;
@@ -587,6 +714,9 @@ export class AgentApprovalService {
           `Approval ${id} approved but dispatch failed: ${dispatchError}`,
         );
       }
+    }
+    if (!dispatchError && !this.isDispatchFailureResult(dispatchResult)) {
+      await this.clearResolvedTaskPendingAction(saved);
     }
     await this.writeApprovalTaskEvent(saved, 'approved', {
       dispatched,
@@ -611,6 +741,14 @@ export class AgentApprovalService {
       rooms: saved.agentTaskId ? [`agent_task:${saved.agentTaskId}`] : [],
     });
     return { approval: saved, dispatched, dispatchResult, dispatchError };
+  }
+
+  private isDispatchFailureResult(result: unknown): boolean {
+    if (!result || typeof result !== 'object' || Array.isArray(result)) {
+      return false;
+    }
+    const record = result as Record<string, unknown>;
+    return record.ok === false || typeof record.errorMessage === 'string';
   }
 
   async reject(id: number, userId: number) {

@@ -164,7 +164,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
     return { service, deps };
   }
 
-  it('keeps every route/search/action/profile branch behind AgentLoopService.execute', async () => {
+  it('keeps relevant route/search/profile branches behind AgentLoopService.execute', async () => {
     const { service, deps } = makeService({
       agentLoop: makeAgentLoop({ runTools: false }),
     });
@@ -192,16 +192,169 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
             expect.objectContaining({ toolName: 'route_conversation_turn' }),
             expect.objectContaining({ toolName: 'route_profile_turn' }),
             expect.objectContaining({ toolName: 'route_search_turn' }),
-            expect.objectContaining({ toolName: 'route_action_turn' }),
           ]),
         }),
       }),
+    );
+    const plan = deps.agentLoop.execute.mock.calls[0][0].plan.tools;
+    expect(plan).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolName: 'route_action_turn' }),
+      ]),
     );
     expect(deps.conversationTurns.handle).not.toHaveBeenCalled();
     expect(deps.profileTurns.handle).not.toHaveBeenCalled();
     expect(deps.searchTurns.handle).not.toHaveBeenCalled();
     expect(deps.actionTurns.handle).not.toHaveBeenCalled();
     expect(deps.subagentWorker.run).not.toHaveBeenCalled();
+  });
+
+  it('does not plan search or action branches for normal conversation', async () => {
+    const { service, deps } = makeService({
+      agentLoop: makeAgentLoop({ runTools: false }),
+    });
+
+    await service.run({
+      ownerUserId: 7,
+      task: deps.task as never,
+      state: createSocialAgentRouteTurnState('我来回答。'),
+      message: '我不想交友，只想问一个普通问题',
+      decision: {
+        task: deps.task,
+        route: makeRoute({
+          intent: 'casual_chat',
+          replyStrategy: 'conversational_answer',
+          shouldSearch: false,
+        }),
+        profile: null,
+        longTermSnapshot: null,
+        brainToolResults: [],
+      } as never,
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask: jest.fn(),
+    });
+
+    const plan = deps.agentLoop.execute.mock.calls[0][0].plan.tools;
+    expect(plan).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolName: 'route_conversation_turn' }),
+        expect.objectContaining({ toolName: 'route_profile_turn' }),
+      ]),
+    );
+    expect(plan).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolName: 'route_search_turn' }),
+        expect.objectContaining({ toolName: 'route_action_turn' }),
+      ]),
+    );
+  });
+
+  it('plans search when the user wants candidates but forbids automatic messages', async () => {
+    const { service, deps } = makeService({
+      agentLoop: makeAgentLoop({ runTools: false }),
+    });
+
+    await service.run({
+      ownerUserId: 7,
+      task: deps.task as never,
+      state: createSocialAgentRouteTurnState('我会先找候选人。'),
+      message:
+        '青岛周末下午，轻松跑步，只在公共场所，先站内聊，接受陌生人，先推荐真实用户，不要自动发消息',
+      decision: {
+        task: deps.task,
+        route: makeRoute({
+          intent: 'social_search',
+          replyStrategy: 'search_candidates',
+          shouldSearch: true,
+        }),
+        profile: null,
+        longTermSnapshot: null,
+        brainToolResults: [],
+      } as never,
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask: jest.fn(),
+    });
+
+    const plan = deps.agentLoop.execute.mock.calls[0][0].plan.tools;
+    expect(plan).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolName: 'route_search_turn' }),
+      ]),
+    );
+    expect(plan).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolName: 'route_action_turn' }),
+      ]),
+    );
+  });
+
+  it('does not plan candidate follow-up search without existing candidate context', async () => {
+    const { service, deps } = makeService({
+      agentLoop: makeAgentLoop({ runTools: false }),
+    });
+
+    await service.run({
+      ownerUserId: 7,
+      task: deps.task as never,
+      state: createSocialAgentRouteTurnState('我先正常回答。'),
+      message: '第二个更合适吗？',
+      decision: {
+        task: deps.task,
+        taskContext: { hasCandidates: false, hasSearchContext: false },
+        route: makeRoute({
+          intent: 'candidate_followup',
+          replyStrategy: 'conversational_answer',
+          shouldSearch: false,
+        }),
+        profile: null,
+        longTermSnapshot: null,
+        brainToolResults: [],
+      } as never,
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask: jest.fn(),
+    });
+
+    const plan = deps.agentLoop.execute.mock.calls[0][0].plan.tools;
+    expect(plan).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolName: 'route_search_turn' }),
+        expect.objectContaining({ toolName: 'route_action_turn' }),
+      ]),
+    );
+  });
+
+  it('allows candidate follow-up search only when candidate context exists', async () => {
+    const { service, deps } = makeService({
+      agentLoop: makeAgentLoop({ runTools: false }),
+    });
+
+    await service.run({
+      ownerUserId: 7,
+      task: deps.task as never,
+      state: createSocialAgentRouteTurnState('我基于刚才候选继续比较。'),
+      message: '第二个更合适吗？',
+      decision: {
+        task: deps.task,
+        taskContext: { hasCandidates: true, hasSearchContext: true },
+        route: makeRoute({
+          intent: 'candidate_followup',
+          replyStrategy: 'search_candidates',
+          shouldSearch: true,
+        }),
+        profile: null,
+        longTermSnapshot: null,
+        brainToolResults: [],
+      } as never,
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask: jest.fn(),
+    });
+
+    const plan = deps.agentLoop.execute.mock.calls[0][0].plan.tools;
+    expect(plan).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolName: 'route_search_turn' }),
+      ]),
+    );
   });
 
   it('executes Social Match search through the subagent worker by default', async () => {
@@ -235,6 +388,92 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
         expect.objectContaining({
           agent: 'Social Match Agent',
           evalHints: expect.objectContaining({ independentWorker: true }),
+        }),
+      ]),
+    );
+  });
+
+  it('propagates checkpoint resume context into AgentLoop tools and worker handoff', async () => {
+    const { service, deps } = makeService();
+    const clientContext = {
+      source: 'web',
+      threadId: 'agent-task:101',
+      checkpointId: 202,
+      parentCheckpointId: 101,
+      sourceCheckpointId: 101,
+      sourceStepId: 'search',
+      resumeMode: 'replay',
+      resumeIdempotencyKey:
+        'agent-checkpoint:replay:agent-task:101:checkpoint:202:step:search',
+      checkpointAction: 'replay',
+      resumeCursor: {
+        threadId: 'agent-task:101',
+        checkpointId: 202,
+        parentCheckpointId: 101,
+        action: 'replay',
+        stepId: 'search',
+      },
+    } as const;
+
+    const result = await service.run({
+      ownerUserId: 7,
+      task: deps.task as never,
+      state: createSocialAgentRouteTurnState('我会从保存的匹配步骤继续。'),
+      message: '重新运行刚才找青岛周末跑步搭子的匹配排序',
+      clientContext,
+      decision: {
+        task: deps.task,
+        route: makeRoute({ intent: 'social_search' }),
+        profile: null,
+        longTermSnapshot: null,
+        brainToolResults: [],
+      } as never,
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask: jest.fn(),
+    });
+
+    const resumeContext = {
+      threadId: 'agent-task:101',
+      checkpointId: 202,
+      parentCheckpointId: 101,
+      sourceCheckpointId: 101,
+      sourceStepId: 'search',
+      resumeMode: 'replay',
+      checkpointAction: 'replay',
+      decision: null,
+      idempotencyKey:
+        'agent-checkpoint:replay:agent-task:101:checkpoint:202:step:search',
+      sourceStep: null,
+      stepScope: null,
+      sideEffectPolicy: null,
+    };
+    expect(deps.agentLoop.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plan: expect.objectContaining({
+          tools: expect.arrayContaining([
+            expect.objectContaining({
+              toolName: 'route_search_turn',
+              input: expect.objectContaining({ resumeContext }),
+            }),
+          ]),
+        }),
+      }),
+    );
+    expect(deps.subagentWorker.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plannerInput: expect.objectContaining({ resumeContext }),
+        tools: expect.arrayContaining([
+          expect.objectContaining({
+            input: expect.objectContaining({ resumeContext }),
+          }),
+        ]),
+      }),
+    );
+    expect(result.subagentHandoffs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          agent: 'Social Match Agent',
+          observation: expect.objectContaining({ resumeContext }),
         }),
       ]),
     );

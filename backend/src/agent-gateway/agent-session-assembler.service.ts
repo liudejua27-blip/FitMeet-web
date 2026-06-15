@@ -11,6 +11,7 @@ import {
   type AgentApprovalRequest,
 } from './entities/agent-approval-request.entity';
 import { rememberSocialAgentShortTerm } from './social-agent-memory.util';
+import { inferSocialAgentThreadTitle } from './social-agent-thread-title.util';
 import type {
   SocialAgentActivityResult,
   SocialAgentAsyncRunSnapshot,
@@ -73,7 +74,11 @@ export class AgentSessionAssemblerService {
     return {
       id: task.id,
       status: task.status,
-      title: cleanDisplayText(task.title, 'FitMeet Social Agent 聊天'),
+      title: inferSocialAgentThreadTitle({
+        title: task.title,
+        goal: task.goal,
+        firstMessage: this.firstUserMessageFromTask(task),
+      }),
       goal: cleanDisplayText(task.goal, ''),
       permissionMode: task.permissionMode,
       statusReason: cleanDisplayText(task.statusReason, '') || null,
@@ -258,6 +263,21 @@ export class AgentSessionAssemblerService {
       ...(activityResults.length > 0 ? { activityResults } : {}),
       ...(pendingApproval ? { pendingApproval } : {}),
     };
+  }
+
+  private firstUserMessageFromTask(task: AgentTask): string | null {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const conversation = this.isRecord(memory.socialAgentConversation)
+      ? memory.socialAgentConversation
+      : {};
+    const turns = Array.isArray(conversation.turns) ? conversation.turns : [];
+    for (const turn of turns) {
+      if (!this.isRecord(turn)) continue;
+      if (cleanDisplayText(turn.role, '') !== 'user') continue;
+      const text = cleanDisplayText(turn.text ?? turn.content ?? turn.message, '');
+      if (text) return text;
+    }
+    return null;
   }
 
   private isoDate(value: Date | string | null | undefined): string {

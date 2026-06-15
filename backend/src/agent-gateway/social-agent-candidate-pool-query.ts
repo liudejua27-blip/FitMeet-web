@@ -21,6 +21,7 @@ export type CandidatePoolQuery = {
   timePreference?: string | null;
   locationPreference?: string | null;
   rawText?: string | null;
+  acceptsStrangers?: boolean | null;
   limit?: number | null;
   persistCandidates?: boolean;
 };
@@ -34,6 +35,7 @@ export type CandidatePoolResolvedQuery = {
   locationPreference: string;
   socialRequestId: number | null;
   rawText: string;
+  acceptsStrangers: boolean | null;
 };
 
 export function buildCandidatePoolResolvedQuery(input: {
@@ -73,6 +75,10 @@ export function buildCandidatePoolResolvedQuery(input: {
     inputTimePreference || extractCandidateTime(rawText),
     '',
   );
+  const acceptsStrangers = resolveCandidatePoolStrangerPolicy({
+    explicit: query.acceptsStrangers,
+    rawText,
+  });
 
   return {
     city,
@@ -83,7 +89,32 @@ export function buildCandidatePoolResolvedQuery(input: {
     locationPreference: inputLocationPreference,
     socialRequestId: input.socialRequestId,
     rawText,
+    acceptsStrangers,
   };
+}
+
+export function resolveCandidatePoolStrangerPolicy(input: {
+  explicit?: boolean | null;
+  rawText?: string | null;
+}): boolean | null {
+  if (typeof input.explicit === 'boolean') return input.explicit;
+  const text = cleanDisplayText(input.rawText, '');
+  if (!text) return null;
+  if (
+    /(不接受陌生人|不要陌生人|别推荐陌生人|不要推荐陌生人|只推荐熟人|只看熟人|只找熟人|不想认识陌生人)/i.test(
+      text,
+    )
+  ) {
+    return false;
+  }
+  if (
+    /(接受陌生人|可以接受陌生人|愿意认识陌生人|可以认识陌生人|可以推荐陌生人|愿意认识新朋友)/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  return null;
 }
 
 export function normalizeCandidatePoolArray(value: unknown): string[] {

@@ -106,7 +106,23 @@ export class LifeGraphUnifiedMatchSignalsDto {
     overall: number;
     byField: Record<string, number>;
   };
+  preferenceHistory: Record<string, LifeGraphPreferenceHistoryItemDto[]>;
   missingCriticalFields: LifeGraphMissingFieldDto[];
+}
+
+export class LifeGraphPreferenceHistoryItemDto {
+  category: LifeGraphFieldCategory;
+  fieldKey: string;
+  oldValue: unknown;
+  newValue: unknown;
+  source: LifeGraphFieldSource;
+  confidence: number | null;
+  action: LifeGraphAuditAction;
+  reason: string;
+  taskId: number | null;
+  messageId: string | null;
+  confirmedByUser: boolean;
+  createdAt: string;
 }
 
 export class LifeGraphDynamicSignalsDto {

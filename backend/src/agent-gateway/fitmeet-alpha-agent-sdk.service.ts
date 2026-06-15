@@ -32,6 +32,8 @@ type AlphaAgentBundle = {
   traceTemplate: Omit<FitMeetAgentTrace, 'traceId' | 'sdkEnabled' | 'model'>;
 };
 
+const MAX_VISIBLE_OPPORTUNITY_CARDS = 3;
+
 @Injectable()
 export class FitMeetAlphaAgentSdkService {
   private readonly logger = new Logger(FitMeetAlphaAgentSdkService.name);
@@ -178,59 +180,22 @@ export class FitMeetAlphaAgentSdkService {
     const cards: FitMeetAlphaCard[] = [];
     const taskId = input.taskId;
     const draft = input.socialRequestDraft;
-    if (draft) {
-      cards.push(
-        this.cardCopywriter?.activityPlan({
-          taskId,
-          draft,
-          traceId: input.traceId ?? null,
-          lifeGraphSignals: input.lifeGraphSignals ?? null,
-        }) ?? {
-          id: `activity_plan:${taskId}`,
-          type: 'activity_plan',
-          title: '约练计划待确认',
-          body: `${
-            this.text(draft.description) ||
-            this.text(draft.rawText) ||
-            this.text(draft.title) ||
-            '我已整理好本次社交需求，确认后才会继续创建。'
-          } 我不会共享你的精确位置，第一次建议选择公共场所。活动开始前我会提醒你确认是否到达，结束后会提醒你评价体验。`,
-          status: 'waiting_confirmation',
-          data: {
-            taskId,
-            socialRequestId: draft.socialRequestId ?? null,
-            city: draft.city ?? '',
-            activityType: draft.activityType ?? '',
-            interestTags: draft.interestTags ?? [],
-            publicPlaceOnly: true,
-            noPreciseLocation: true,
-            checkinReminder: '活动开始前我会提醒你确认是否到达。',
-            reviewPrompt: '活动结束后我会提醒你评价体验。',
-            meetLoopStage: 'activity_confirmation',
-            safetyBoundary: '优先公共场所，不共享精确位置。',
-            lifeGraphUpdatePreview:
-              '完成后会更新你的低压力运动社交偏好和同区域搭子权重。',
-            trustScoreUpdatePreview:
-              '完成与评价会写入 trust score，用来提升后续推荐可信度。',
-          },
-          actions: [
-            {
-              id: 'confirm_create_activity',
-              label: '确认创建约练',
-              action: 'create_activity',
-              schemaAction: 'activity.confirm_create',
-              loopStage: 'activity_draft_created',
-              requiresConfirmation: true,
-              payload: { taskId, socialRequestDraft: draft },
-            },
-          ],
-        },
-      );
-    }
+    let opportunityCardCount = 0;
+    const hasOpportunityCardRoom = () =>
+      opportunityCardCount < MAX_VISIBLE_OPPORTUNITY_CARDS;
+    const pushOpportunityCard = (card: FitMeetAlphaCard) => {
+      if (!hasOpportunityCardRoom()) return;
+      cards.push(card);
+      opportunityCardCount += 1;
+    };
 
-    for (const candidate of (input.candidates ?? []).slice(0, 8)) {
+    for (const candidate of (input.candidates ?? []).slice(
+      0,
+      MAX_VISIBLE_OPPORTUNITY_CARDS,
+    )) {
+      if (!hasOpportunityCardRoom()) break;
       if (this.cardCopywriter) {
-        cards.push(
+        pushOpportunityCard(
           this.cardCopywriter.candidate({
             taskId,
             candidate,
@@ -247,71 +212,345 @@ export class FitMeetAlphaAgentSdkService {
         this.text(candidate.displayName) ||
         this.text(candidate.nickname) ||
         '候选人';
+      const explanation = this.record(candidate.candidateExplanation);
+      const explicitReasons = this.uniqueStrings([
+        ...this.stringList(candidate.matchPoints),
+        ...this.stringList(
+          candidate.matchReasons ?? candidate.reasons ?? explanation.fitReasons,
+        ),
+      ]).slice(0, 6);
+      const area =
+        this.text(candidate.area) ||
+        this.text(candidate.city) ||
+        this.text(draft?.city) ||
+        '同城';
+      const activityType =
+        this.text(draft?.activityType) ||
+        this.text(candidate.activityType) ||
+        this.text(candidate.sport) ||
+        '轻活动';
+      const timePreference =
+        this.text(draft?.timePreference) ||
+        this.text(candidate.timePreference) ||
+        '时间待确认';
+      const intensity =
+        this.text(draft?.intensity ?? draft?.trainingIntensity) ||
+        this.text(candidate.intensity ?? candidate.trainingIntensity) ||
+        '低压力';
+      const interestTags = this.candidateInterests(candidate, draft).slice(
+        0,
+        5,
+      );
+      const safetyBoundary =
+        this.stringList(candidate.boundaryNotes)[0] ||
+        this.stringList(
+          candidate.riskWarnings ?? this.record(candidate.risk).warnings,
+        )[0] ||
+        '第一次建议选择公共场所，不共享精确位置。';
+      const reasons = explicitReasons.length
+        ? explicitReasons
+        : this.defaultCandidateReasons({
+            area,
+            activityType,
+            timePreference,
+            intensity,
+            safetyBoundary,
+          });
+      const explicitSuggestedOpener =
+        this.text(explanation.suggestedOpener) ||
+        this.text(candidate.suggestedOpener) ||
+        this.text(candidate.suggestedMessage);
+      const recommendationLine = `我推荐 ${displayName}，因为${
+        reasons[0] ?? '你们的需求和边界比较接近'
+      }。`;
+      const whyNow =
+        this.text(candidate.whyNow) ||
+        `现在适合先用低压力方式开场，再根据${timePreference}和${area}决定下一步。`;
+      const explanationSteps = this.candidateExplanationSteps({
+        candidate,
+        area,
+        timePreference,
+        activityType,
+        intensity,
+        reasons,
+        safetyBoundary,
+      });
+      const distanceLabel = this.candidateDistanceLabel(candidate);
+      const explicitRecommendationConsent = this.record(candidate.recommendationConsent);
+      const recommendationConsent =
+        Object.keys(explicitRecommendationConsent).length > 0
+          ? explicitRecommendationConsent
+          : this.defaultCandidateRecommendationConsent(candidate);
+      const consentBadges = this.uniqueStrings([
+        this.text(recommendationConsent.sourceLabel),
+        this.text(recommendationConsent.privacyLabel),
+        this.text(recommendationConsent.strangerPolicyLabel),
+      ]);
+      const relationshipGoal =
+        this.text(candidate.relationshipGoal ?? candidate.relationGoal) ||
+        this.text(draft?.relationshipGoal ?? draft?.targetRelationship) ||
+        '先从低压力认识开始';
+      const idealType =
+        this.text(candidate.idealType ?? candidate.targetPreference) ||
+        this.text(draft?.idealType ?? draft?.targetPreference) ||
+        '同城、边界清楚、愿意先站内聊';
+      const invitePolicy =
+        this.text(candidate.invitePolicy ?? candidate.contactPolicy) ||
+        '发送邀请前需要你确认';
+      const coldStartSignals = this.uniqueStrings([
+        ...this.stringList(candidate.coldStartSignals),
+        area ? `区域：${area}` : '',
+        interestTags.length ? `共同兴趣：${interestTags.slice(0, 2).join('、')}` : '',
+        timePreference ? `时间：${timePreference}` : '',
+      ]).slice(0, 4);
+      const preferenceHistorySignals = this.stringList(
+        candidate.preferenceHistorySignals,
+      ).slice(0, 3);
+      const rankingBreakdown = this.candidateRankingBreakdown({
+        candidate,
+        area,
+        timePreference,
+        activityType,
+        intensity,
+        interestTags,
+        relationshipGoal,
+        safetyBoundary,
+      });
+      const safetyBadges = this.uniqueStrings([
+        ...consentBadges,
+        '位置已模糊',
+        '公共场所优先',
+        '发送前确认',
+        safetyBoundary ? '边界已提示' : '',
+      ]).slice(0, 4);
+      const discoverySafetySignals = this.candidateDiscoverySafetySignals({
+        candidate,
+        recommendationConsent,
+        safetyBoundary,
+      });
+      const recommendationProtocol = this.candidateRecommendationProtocol({
+        recommendationConsent,
+        discoverySafetySignals,
+        safetyBoundary,
+      });
+      const confirmedContext = this.confirmedContext([
+        area,
+        timePreference,
+        activityType,
+        intensity,
+        safetyBoundary,
+      ]);
       const cardIdentity =
         typeof targetUserId === 'string' || typeof targetUserId === 'number'
           ? String(targetUserId)
           : displayName;
-      cards.push({
+      const opportunityTitle = `和 ${displayName} 低压力认识`;
+      const opportunitySubtitle = `${area} · ${activityType} · ${timePreference}`;
+      const suggestedOpener =
+        explicitSuggestedOpener ||
+        this.defaultCandidateOpener({
+          area,
+          activityType,
+          timePreference,
+        });
+      pushOpportunityCard({
         id: `candidate_card:${taskId}:${cardIdentity}`,
         type: 'candidate_card',
-        title: displayName,
-        body: `匹配度 ${Math.round(score)}。推荐前先确认安全边界，首次见面建议选择公共场所。`,
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'social_match.candidate',
+        title: opportunityTitle,
+        body: `${recommendationLine} ${whyNow}`,
         status: 'waiting_confirmation',
         data: {
           taskId,
+          schemaName: 'OpportunityCard',
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'social_match.candidate',
+          opportunityCard: true,
+          opportunity: {
+            id: `opportunity:${taskId}:${cardIdentity}`,
+            type: 'person',
+            name: displayName,
+            title: opportunityTitle,
+            subtitle: opportunitySubtitle,
+            avatarUrl:
+              this.text(candidate.avatarUrl ?? candidate.avatar) || null,
+            score: Math.round(score),
+            matchScore: Math.round(score),
+            confidence: this.matchConfidence(score),
+            summary: recommendationLine,
+            relationshipGoal,
+            idealType,
+            invitePolicy,
+            area,
+            time: timePreference,
+            distanceLabel,
+            interests: interestTags,
+            reasons: reasons.slice(0, 4),
+            explanationSteps,
+            rankingBreakdown,
+            safetyBadges,
+            recommendationConsent:
+              Object.keys(recommendationConsent).length > 0
+                ? recommendationConsent
+                : null,
+            coldStartSignals,
+            discoverySafetySignals,
+            recommendationProtocol,
+            preferenceHistorySignals,
+            frictionLevel: this.frictionLevel(score, candidate),
+            suggestedOpener: suggestedOpener || null,
+            recommendedNextAction: '先生成邀请开场白，确认后再发送。',
+            safetyBoundary,
+            confirmedContext,
+          },
+          opportunityType: 'person',
+          opportunityTitle,
+          opportunitySubtitle,
+          confirmedContext,
+          confidence: this.matchConfidence(score),
+          frictionLevel: this.frictionLevel(score, candidate),
+          recommendedNextAction: '先生成邀请开场白，确认后再发送。',
+          relationshipGoal,
+          idealType,
+          invitePolicy,
+          safetyBadges,
+          trustSignals: consentBadges,
+          recommendationConsent:
+            Object.keys(recommendationConsent).length > 0
+              ? recommendationConsent
+              : null,
+          coldStartSignals,
+          discoverySafetySignals,
+          recommendationProtocol,
+          preferenceHistorySignals,
+          sharedInterests: interestTags,
+          explanationSteps,
+          rankingBreakdown,
+          distanceLabel,
           loopStage: 'candidate_recommendation',
           targetUserId,
           candidateRecordId: candidate.candidateRecordId ?? null,
           publicIntentId: candidate.publicIntentId ?? null,
           socialRequestId: candidate.socialRequestId ?? null,
-          matchScore: score,
-          reasons:
-            candidate.matchReasons ??
-            candidate.reasons ??
-            candidate.candidateExplanation?.['fitReasons'] ??
-            [],
+          matchScore: Math.round(score),
+          displayName,
+          area,
+          activityType,
+          sport: activityType,
+          intensity,
+          timePreference,
+          reasons,
           safetyTips:
             candidate.riskWarnings ??
             candidate.risk?.['warnings'] ??
             candidate.candidateExplanation?.['awkwardPoints'] ??
             [],
-          suggestedOpener:
-            candidate.suggestedOpener ??
-            candidate.suggestedMessage ??
-            candidate.candidateExplanation?.['suggestedOpener'] ??
-            '',
-          recommendationLine: `我推荐 ${displayName}，因为你们的需求和边界比较接近。`,
-          fitReasons:
-            candidate.matchReasons ??
-            candidate.reasons ??
-            candidate.candidateExplanation?.['fitReasons'] ??
-            [],
-          whyNow: '现在适合先用低压力方式开场，再根据回复决定下一步。',
-          safetyBoundary: '第一次建议选择公共场所，不共享精确位置。',
+          suggestedOpener,
+          recommendationLine,
+          fitReasons: reasons,
+          whyNow,
+          safetyBoundary,
           nextActions: [
-            '生成开场白',
-            '看看更多',
-            '只看同校',
-            '只看女生',
-            '创建约练',
-            '不喜欢这个推荐',
+            '查看详情',
+            '生成邀请开场白',
+            '先收藏',
+            '确认后发邀请',
+            '更多类似的人',
+            '不感兴趣',
           ],
           lifeGraphUpdatePreview:
             '完成后会更新你的低压力运动社交偏好和同区域搭子权重。',
         },
         actions: [
           {
-            id: 'generate_opener',
-            label: '生成开场白',
-            action: 'generate_opener',
+            id: 'view_detail',
+            label: '查看详情',
+            action: 'see_more',
+            schemaAction: 'candidate.view_detail',
+            loopStage: 'candidate_recommendation',
+            requiresConfirmation: false,
+            payload: {
+              taskId,
+              targetUserId,
+              candidate,
+              opportunityId: `opportunity:${taskId}:${cardIdentity}`,
+              displayName,
+              safetyBoundary,
+              suggestedOpener,
+              sideEffect: 'none',
+            },
+          },
+          {
+            id: 'generate_invite_opener',
+            label: '生成邀请开场白',
+            action: 'candidate.generate_opener',
             schemaAction: 'candidate.generate_opener',
             loopStage: 'candidate_selected',
             requiresConfirmation: false,
-            payload: { taskId, targetUserId, candidate },
+            payload: {
+              taskId,
+              targetUserId,
+              candidate,
+              opportunityId: `opportunity:${taskId}:${cardIdentity}`,
+              displayName,
+              safetyBoundary,
+              sideEffect: 'draft_only',
+              suggestedOpener,
+            },
           },
           {
-            id: 'see_more',
-            label: '看看更多',
+            id: 'save_candidate',
+            label: '先收藏',
+            action: 'save_candidate',
+            schemaAction: 'candidate.like',
+            loopStage: 'candidate_recommendation',
+            requiresConfirmation: false,
+            payload: {
+              taskId,
+              targetUserId,
+              candidate,
+              opportunityId: `opportunity:${taskId}:${cardIdentity}`,
+              displayName,
+              safetyBoundary,
+              sideEffect: 'save_preference',
+            },
+          },
+          {
+            id: 'invite_candidate',
+            label: '确认后发邀请',
+            action: 'candidate.connect',
+            schemaAction: 'candidate.connect',
+            loopStage: 'candidate_selected',
+            requiresConfirmation: true,
+            payload: {
+              taskId,
+              targetUserId,
+              candidate,
+              opportunityId: `opportunity:${taskId}:${cardIdentity}`,
+              displayName,
+              safetyBoundary,
+              actionType: 'send_invite',
+              sideEffect: 'send_message_or_connect',
+              approvalRequired: true,
+              checkpointRequired: true,
+              resumeMode: 'resume_after_approval',
+              idempotencyKey: `candidate-connect:${taskId}:${String(
+                targetUserId ?? cardIdentity,
+              )}`,
+              suggestedOpener,
+              riskLevel: 'medium',
+              riskReasons: [
+                '这一步会联系真实用户',
+                '发送邀请前必须由你确认',
+                '不会自动交换联系方式或精确位置',
+              ],
+              auditEvent: 'social_agent.candidate.connect.approval_required',
+            },
+          },
+          {
+            id: 'see_more_similar',
+            label: '更多类似的人',
             action: 'see_more',
             schemaAction: 'candidate.more_like_this',
             loopStage: 'candidate_recommendation',
@@ -319,43 +558,143 @@ export class FitMeetAlphaAgentSdkService {
             payload: { taskId },
           },
           {
-            id: 'filter_school',
-            label: '只看同校',
-            action: 'filter_school',
-            schemaAction: 'candidate.more_like_this',
-            loopStage: 'candidate_recommendation',
-            requiresConfirmation: false,
-            payload: { taskId },
-          },
-          {
-            id: 'filter_gender_female',
-            label: '只看女生',
-            action: 'filter_gender_female',
-            schemaAction: 'candidate.more_like_this',
-            loopStage: 'candidate_recommendation',
-            requiresConfirmation: false,
-            payload: { taskId },
-          },
-          {
-            id: 'create_activity',
-            label: '创建约练',
-            action: 'create_activity',
-            schemaAction: 'activity.confirm_create',
-            loopStage: 'activity_draft_created',
-            requiresConfirmation: true,
-            payload: { taskId, targetUserId, candidate },
-          },
-          {
             id: 'dislike_candidate',
-            label: '不喜欢这个推荐',
+            label: '不感兴趣',
             action: 'dislike_candidate',
             schemaAction: 'candidate.skip',
             loopStage: 'candidate_recommendation',
             requiresConfirmation: false,
-            payload: { taskId, targetUserId, candidate },
+            payload: {
+              taskId,
+              targetUserId,
+              candidate,
+              opportunityId: `opportunity:${taskId}:${cardIdentity}`,
+              displayName,
+              safetyBoundary,
+              sideEffect: 'negative_preference',
+            },
           },
         ],
       });
+    }
+
+    if (draft && hasOpportunityCardRoom()) {
+      const city = this.text(draft.city) || '同城';
+      const activityType = this.text(draft.activityType) || '活动';
+      const timePreference =
+        this.text(draft.timePreference ?? draft.preferredTime) || '待确认时间';
+      const locationName =
+        this.text(draft.locationName ?? draft.location) || `${city}的公共场所`;
+      const description =
+        this.text(draft.description) ||
+        this.text(draft.rawText) ||
+        this.text(draft.title) ||
+        '我已整理好本次社交需求，确认后才会继续创建。';
+      const safetyBoundary = '优先公共场所，不共享精确位置。';
+      const autoPublished = draft.autoPublished === true;
+      const discoverHref = this.text(draft.discoverHref);
+      const publicIntentId = this.text(draft.publicIntentId);
+      const publishPolicy = autoPublished
+        ? '已根据你的首次公开授权同步到发现页；邀请、加好友或发送消息仍需你确认。'
+        : '默认不公开发布；如果需要公开发起，我会单独征得你确认。';
+      const recommendedNextAction = autoPublished
+        ? '约练卡已进入发现页，下一步可以查看详情或选择候选人。'
+        : '确认后我再创建约练，不会自动公开发布。';
+      const confirmedContext = this.confirmedContext([
+        city,
+        timePreference,
+        activityType,
+        locationName,
+        safetyBoundary,
+      ]);
+      pushOpportunityCard(
+        this.cardCopywriter?.activityPlan({
+          taskId,
+          draft,
+          traceId: input.traceId ?? null,
+          lifeGraphSignals: input.lifeGraphSignals ?? null,
+        }) ?? {
+          id: `activity_plan:${taskId}`,
+          type: 'activity_plan',
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'social_match.activity',
+          title: '约练计划待确认',
+          body: `${description} 我不会共享你的精确位置，第一次建议选择公共场所。活动开始前我会提醒你确认是否到达，结束后会提醒你评价体验。`,
+          status: 'waiting_confirmation',
+          data: {
+            taskId,
+            schemaName: 'OpportunityCard',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'social_match.activity',
+          socialRequestId: draft.socialRequestId ?? null,
+          autoPublished,
+          publicIntentId: publicIntentId || null,
+          discoverHref: discoverHref || null,
+          publishPolicy,
+          opportunityCard: true,
+          opportunity: {
+            id: `opportunity:${taskId}:activity`,
+            type: 'activity',
+            title: `${activityType}约练`,
+              subtitle: `${city} · ${timePreference}`,
+              summary: description,
+              city,
+              location: locationName,
+              time: timePreference,
+              activityType,
+              safetyBadges: ['公共场所', '不共享精确位置', '确认后创建'],
+              recommendedNextAction,
+              publishPolicy,
+              autoPublished,
+              publicIntentId: publicIntentId || null,
+              discoverHref: discoverHref || null,
+              safetyBoundary,
+              confirmedContext,
+            },
+            opportunityType: 'activity',
+            opportunityTitle: `${activityType}约练`,
+            opportunitySubtitle: `${city} · ${timePreference}`,
+            confirmedContext,
+            city,
+            locationName,
+            activityType,
+            time: timePreference,
+            interestTags: draft.interestTags ?? [],
+            publicPlaceOnly: true,
+            noPreciseLocation: true,
+            checkinReminder: '活动开始前我会提醒你确认是否到达。',
+            reviewPrompt: '活动结束后我会提醒你评价体验。',
+            meetLoopStage: 'activity_confirmation',
+            safetyBoundary,
+            lifeGraphUpdatePreview:
+              '完成后会更新你的低压力运动社交偏好和同区域搭子权重。',
+            trustScoreUpdatePreview:
+              '完成与评价会写入 trust score，用来提升后续推荐可信度。',
+          },
+          actions: [
+            {
+              id: 'confirm_create_activity',
+              label: '确认创建约练',
+              action: 'activity.confirm_create',
+              schemaAction: 'activity.confirm_create',
+              loopStage: 'activity_draft_created',
+              requiresConfirmation: true,
+              payload: {
+                taskId,
+                socialRequestDraft: draft,
+                approvalRequired: true,
+                checkpointRequired: true,
+                resumeMode: 'resume_after_approval',
+                riskLevel: 'medium',
+                riskReasons: [
+                  '这一步会创建真实约练',
+                  '确认前不会公开发布或通知其他用户',
+                ],
+              },
+            },
+          ],
+        },
+      );
     }
 
     const safety = input.safety ?? this.defaultSafety();
@@ -369,12 +708,37 @@ export class FitMeetAlphaAgentSdkService {
         }) ?? {
           id: `audit_update:${taskId}:approval`,
           type: 'audit_update',
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'safety.approval',
           title: '有动作需要你确认',
           body: `当前有 ${(input.approvalRequiredActions ?? []).length} 个动作需要你确认后才会继续。`,
           status: 'waiting_confirmation',
           data: {
             taskId,
+            schemaName: 'SafetyApprovalCard',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'safety.approval',
             approvalRequiredActions: input.approvalRequiredActions ?? [],
+            approval: {
+              title: '有动作需要你确认',
+              boundary: `当前有 ${(input.approvalRequiredActions ?? []).length} 个动作需要你确认后才会继续。`,
+              riskLevel: this.maxApprovalRiskLevel(
+                input.approvalRequiredActions ?? [],
+              ),
+              reasons: this.approvalReasons(
+                input.approvalRequiredActions ?? [],
+              ),
+              auditNote: '确认、拒绝和执行结果都会进入审批审计日志。',
+              confirmationLabel: '确认后才执行',
+              checkpointLabel: '审批中断点已保存',
+            },
+            riskLevel: this.maxApprovalRiskLevel(
+              input.approvalRequiredActions ?? [],
+            ),
+            reasons: this.approvalReasons(input.approvalRequiredActions ?? []),
+            auditNote: '确认、拒绝和执行结果都会进入审批审计日志。',
+            confirmationLabel: '确认后才执行',
+            checkpointLabel: '审批中断点已保存',
           },
           actions: [],
         },
@@ -892,6 +1256,8 @@ export class FitMeetAlphaAgentSdkService {
     return {
       id: `safety_boundary:${id}`,
       type: 'safety_boundary',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'safety.approval',
       title: safety.blocked ? '我不能继续这个请求' : '本次匹配的安全边界',
       body: safety.blocked
         ? this.safetyCopy?.refusal(safety) ||
@@ -901,12 +1267,57 @@ export class FitMeetAlphaAgentSdkService {
           '我只负责建议和准备，关键动作由你确认。',
       status: safety.blocked ? 'blocked' : 'ready',
       data: {
+        schemaName: 'SafetyApprovalCard',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'safety.approval',
         ...(safety as unknown as Record<string, unknown>),
         boundaryNotes:
           this.safetyCopy?.boundaryNotes(safety) ?? safety.boundaryNotes,
+        approval: {
+          title: safety.blocked ? '我不能继续这个请求' : '本次匹配的安全边界',
+          boundary: safety.blocked
+            ? this.safetyCopy?.refusal(safety) ||
+              safety.reasons.join('、') ||
+              '请求不符合 FitMeet 安全边界。'
+            : this.safetyCopy?.boundaryIntro() ||
+              '我只负责建议和准备，关键动作由你确认。',
+          riskLevel: safety.level,
+          reasons: safety.reasons,
+          auditNote: safety.blocked
+            ? '已阻断，不会执行任何搜索、联系或发布动作。'
+            : '后续真实动作仍会要求你确认，并写入审计日志。',
+          confirmationLabel: safety.blocked ? '已阻断' : '后续动作需确认',
+          checkpointLabel: safety.blocked ? '未创建执行步骤' : '安全边界已保存',
+        },
       },
       actions: [],
     };
+  }
+
+  private maxApprovalRiskLevel(
+    actions: Array<Record<string, unknown>>,
+  ): string {
+    const levels = actions.map((action) =>
+      this.text(action.riskLevel).toLowerCase(),
+    );
+    if (levels.includes('blocked')) return 'blocked';
+    if (levels.includes('high')) return 'high';
+    if (levels.includes('medium')) return 'medium';
+    return levels.includes('low') ? 'low' : 'medium';
+  }
+
+  private approvalReasons(actions: Array<Record<string, unknown>>): string[] {
+    const labels = actions
+      .map((action) =>
+        this.text(
+          action.summary ?? action.label ?? action.actionType ?? action.type,
+        ),
+      )
+      .filter(Boolean);
+    return this.uniqueStrings([
+      ...labels,
+      '涉及真实社交动作，执行前需要用户确认',
+    ]).slice(0, 4);
   }
 
   private defaultSafety(): FitMeetAgentSafety {
@@ -1089,6 +1500,318 @@ export class FitMeetAlphaAgentSdkService {
 
   private includesAny(text: string, words: string[]): boolean {
     return words.some((word) => text.includes(word));
+  }
+
+  private record(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
+  private stringList(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return value.map((item) => this.text(item)).filter(Boolean);
+  }
+
+  private uniqueStrings(values: string[]): string[] {
+    const seen = new Set<string>();
+    const output: string[] = [];
+    for (const value of values) {
+      const text = this.text(value);
+      if (!text) continue;
+      const key = text.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      output.push(text);
+    }
+    return output;
+  }
+
+  private candidateInterests(
+    candidate: Record<string, unknown>,
+    draft?: Record<string, unknown> | null,
+  ): string[] {
+    return this.uniqueStrings([
+      ...this.stringList(candidate.commonTags),
+      ...this.stringList(candidate.sharedInterests),
+      ...this.stringList(candidate.interestTags),
+      ...this.stringList(candidate.tags),
+      this.text(draft?.activityType),
+      this.text(candidate.sport),
+    ]);
+  }
+
+  private candidateDistanceLabel(
+    candidate: Record<string, unknown>,
+  ): string | null {
+    const explicit = this.text(candidate.distanceLabel ?? candidate.distance);
+    if (explicit) return explicit;
+    const km = Number(candidate.distanceKm);
+    if (Number.isFinite(km) && km >= 0) {
+      return km < 1
+        ? `${Math.round(km * 1000)}m`
+        : `${km.toFixed(km < 10 ? 1 : 0)}km`;
+    }
+    const meters = Number(candidate.distanceMeters);
+    if (Number.isFinite(meters) && meters >= 0) {
+      if (meters < 1000) return `${Math.round(meters)}m`;
+      const nextKm = meters / 1000;
+      return `${nextKm.toFixed(nextKm < 10 ? 1 : 0)}km`;
+    }
+    return null;
+  }
+
+  private defaultCandidateRecommendationConsent(
+    candidate: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const source = this.text(candidate.source);
+    return {
+      profileDiscoverable: true,
+      agentCanRecommendMe: true,
+      sourceLabel:
+        source === 'public_intent' || source === 'legacy_request'
+          ? '来自公开社交意图，且已通过推荐权限筛选'
+          : '公开可发现且已允许 Agent 推荐',
+      privacyLabel: '资料已脱敏，不展示手机号、精确位置或私聊内容',
+      strangerPolicyLabel: '仅展示公开可发现且已授权推荐的资料',
+    };
+  }
+
+  private defaultCandidateOpener(input: {
+    area: string;
+    activityType: string;
+    timePreference: string;
+  }): string {
+    const activity = this.text(input.activityType) || '活动';
+    const area = this.text(input.area) || '同城';
+    const time = this.text(input.timePreference) || '方便的时候';
+    return `你好，我看到你也对${activity}感兴趣。如果${time}方便，我们可以先在${area}的公共场所轻松了解一下。`;
+  }
+
+  private defaultCandidateReasons(input: {
+    area: string;
+    activityType: string;
+    timePreference: string;
+    intensity: string;
+    safetyBoundary: string;
+  }): string[] {
+    return this.uniqueStrings([
+      input.area ? `区域接近：${input.area}` : '',
+      input.activityType ? `共同兴趣：${input.activityType}` : '',
+      input.timePreference ? `时间节奏：${input.timePreference}` : '',
+      input.intensity ? `互动强度：${input.intensity}` : '',
+      input.safetyBoundary ? `安全边界：${input.safetyBoundary}` : '',
+    ]).slice(0, 4);
+  }
+
+  private candidateDiscoverySafetySignals(input: {
+    candidate: Record<string, unknown>;
+    recommendationConsent: Record<string, unknown>;
+    safetyBoundary: string;
+  }): string[] {
+    const explicit = this.stringList(input.candidate.discoverySafetySignals);
+    if (explicit.length > 0) return explicit.slice(0, 5);
+    const blockedSignals = this.stringList(
+      input.candidate.blockedSignals ??
+        input.candidate.complaintSignals ??
+        input.candidate.riskWarnings,
+    );
+    return this.uniqueStrings([
+      input.recommendationConsent.profileDiscoverable === true ||
+      input.candidate.discoverable === true ||
+      input.candidate.profileDiscoverable === true
+        ? '公开可发现'
+        : '仅展示已允许推荐的公开信息',
+      input.recommendationConsent.agentCanRecommendMe === true ||
+      input.candidate.agentMatchingEnabled === true ||
+      input.candidate.agentCanRecommendMe === true
+        ? '已开启 Agent 匹配'
+        : '匹配权限需继续确认',
+      this.text(input.recommendationConsent.privacyLabel) || '资料已脱敏',
+      blockedSignals.length === 0
+        ? '无拉黑/投诉风险信号'
+        : '存在风险信号，需降低触达强度',
+      input.safetyBoundary ? '邀请前保留确认边界' : '',
+    ]).slice(0, 5);
+  }
+
+  private candidateRecommendationProtocol(input: {
+    recommendationConsent: Record<string, unknown>;
+    discoverySafetySignals: string[];
+    safetyBoundary: string;
+  }): Array<{ key: string; label: string; detail: string }> {
+    const safetySignal =
+      input.discoverySafetySignals.find((signal) =>
+        /无拉黑|无投诉|风险信号|投诉|拉黑/.test(signal),
+      ) ?? '无拉黑/投诉风险信号';
+    return [
+      {
+        key: 'discoverability',
+        label: '可发现来源',
+        detail:
+          this.text(input.recommendationConsent.sourceLabel) ||
+          '公开可发现且已允许 Agent 推荐',
+      },
+      {
+        key: 'consent',
+        label: '推荐授权',
+        detail:
+          this.text(input.recommendationConsent.strangerPolicyLabel) ||
+          '仅展示公开可发现且已授权推荐的资料',
+      },
+      {
+        key: 'privacy',
+        label: '隐私处理',
+        detail:
+          this.text(input.recommendationConsent.privacyLabel) ||
+          '资料已脱敏，不展示手机号、精确位置或私聊内容',
+      },
+      {
+        key: 'safety',
+        label: '安全过滤',
+        detail: safetySignal,
+      },
+      {
+        key: 'approval',
+        label: '触达边界',
+        detail: input.safetyBoundary
+          ? '发送邀请、加好友或创建活动前必须由你确认'
+          : '真实触达前仍会再次确认',
+      },
+    ];
+  }
+
+  private candidateExplanationSteps(input: {
+    candidate: Record<string, unknown>;
+    area: string;
+    timePreference: string;
+    activityType: string;
+    intensity: string;
+    reasons: string[];
+    safetyBoundary: string;
+  }): string[] {
+    const explicit = this.stringList(input.candidate.explanationSteps);
+    if (explicit.length > 0) return explicit.slice(0, 3);
+    const recall =
+      this.text(input.candidate.recallSource) ||
+      [input.area, input.activityType, input.timePreference]
+        .filter(Boolean)
+        .join(' · ');
+    const ranking =
+      this.text(input.candidate.rankingReason) ||
+      input.reasons[0] ||
+      `${input.intensity}和当前需求更接近`;
+    const safety =
+      this.text(input.candidate.safetyFilter) ||
+      input.safetyBoundary ||
+      '仅展示模糊区域，真实动作前需要确认';
+    return [
+      recall ? `来源：${recall}` : '',
+      ranking ? `匹配：${ranking}` : '',
+      safety ? `安全：${safety}` : '',
+    ]
+      .filter(Boolean)
+      .slice(0, 3);
+  }
+
+  private candidateRankingBreakdown(input: {
+    candidate: Record<string, unknown>;
+    area: string;
+    timePreference: string;
+    activityType: string;
+    intensity: string;
+    interestTags: string[];
+    relationshipGoal: string;
+    safetyBoundary: string;
+  }): Array<{ key: string; label: string; score: number | null; reason: string }> {
+    const breakdown = this.record(input.candidate.scoreBreakdown);
+    const numberValue = (value: unknown): number | null => {
+      const parsed =
+        typeof value === 'number'
+          ? value
+          : typeof value === 'string' && value.trim()
+            ? Number(value)
+            : NaN;
+      return Number.isFinite(parsed) ? Math.round(parsed) : null;
+    };
+    return [
+      {
+        key: 'location',
+        label: '城市/距离',
+        score: numberValue(breakdown.distance ?? breakdown.cityMatch ?? breakdown.locationFit),
+        reason: input.area ? `区域在 ${input.area} 附近，适合先低压力了解。` : '区域信息已模糊处理。',
+      },
+      {
+        key: 'interest',
+        label: '共同兴趣',
+        score: numberValue(breakdown.interestSimilarity ?? breakdown.commonTags),
+        reason: input.interestTags.length
+          ? `共同兴趣包含 ${input.interestTags.slice(0, 3).join('、')}。`
+          : `${input.activityType} 与这次需求相关。`,
+      },
+      {
+        key: 'time',
+        label: '时间节奏',
+        score: numberValue(breakdown.timeFit ?? breakdown.recentActivity),
+        reason: `${input.timePreference} 的安排更容易先轻松试探。`,
+      },
+      {
+        key: 'boundary',
+        label: '安全边界',
+        score: numberValue(breakdown.safetyRisk ?? breakdown.boundaryFit),
+        reason: input.safetyBoundary,
+      },
+      {
+        key: 'life_graph',
+        label: '画像偏好',
+        score: numberValue(breakdown.lifeGraphBehaviorFit ?? breakdown.profileFit),
+        reason: `${input.relationshipGoal}，${input.intensity}节奏更贴近你的偏好。`,
+      },
+    ].filter((item) => item.reason);
+  }
+
+  private matchConfidence(score: number): 'low' | 'medium' | 'high' {
+    if (score >= 82) return 'high';
+    if (score >= 60) return 'medium';
+    return 'low';
+  }
+
+  private frictionLevel(
+    score: number,
+    candidate: Record<string, unknown>,
+  ): 'low' | 'medium' | 'high' {
+    const warnings = this.stringList(
+      candidate.riskWarnings ?? this.record(candidate.risk).warnings,
+    );
+    if (warnings.length > 1 || score < 45) return 'high';
+    if (warnings.length > 0 || score < 70) return 'medium';
+    return 'low';
+  }
+
+  private confirmedContext(values: unknown[]): string[] {
+    return this.uniqueStrings(
+      values
+        .map((value) => this.text(value))
+        .filter((value) => value && !this.isPlaceholderContext(value))
+        .map((value) => this.compactContextValue(value)),
+    ).slice(0, 5);
+  }
+
+  private compactContextValue(value: string): string {
+    if (value.length <= 18) return value;
+    return `${value.slice(0, 17)}…`;
+  }
+
+  private isPlaceholderContext(value: string): boolean {
+    return [
+      '同城',
+      '活动',
+      '待确认时间',
+      '时间待确认',
+      '低压力',
+      '轻活动',
+      '确认后的候选人',
+    ].includes(value);
   }
 
   private text(value: unknown): string {

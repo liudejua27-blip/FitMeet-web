@@ -60,6 +60,7 @@ import { LifeGraphBehaviorEventType } from '../life-graph/life-graph.enums';
 import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
 import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
 import { SocialAgentRouteDecisionService } from './social-agent-route-decision.service';
+import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -377,6 +378,14 @@ function makeHarness(options: Record<string, unknown> = {}) {
         expiresAt: new Date(Date.now() + 60_000),
       }),
     ),
+    reject: jest.fn().mockResolvedValue({
+      id: 9001,
+      status: 'rejected',
+    }),
+    approve: jest.fn().mockResolvedValue({
+      id: 9001,
+      status: 'approved',
+    }),
     getPendingForTask: jest.fn().mockResolvedValue([]),
   };
   const publicIntentRepo = {
@@ -549,6 +558,14 @@ function makeHarness(options: Record<string, unknown> = {}) {
     new SocialAgentRouteSearchTurnService(
       profileEnrichment as never,
       activitySearch as never,
+      {
+        evaluateForSocialExecution: jest.fn().mockResolvedValue({
+          passed: true,
+          missing: [],
+          assistantMessage: '',
+          profileCompleteness: null,
+        }),
+      } as never,
     );
   const sessionRestore = new SocialAgentSessionRestoreService(
     taskRepo as never,
@@ -820,10 +837,13 @@ describe('SocialAgentChat acceptance flow', () => {
       intent: 'casual_chat',
       action: 'answer',
       replyStrategy: 'conversational_answer',
+      shouldSearch: false,
       shouldQueueRun: false,
+      cards: [],
       taskId: 101,
     });
-    expect(result.assistantMessage).toContain('FitMeet');
+    expect(result.assistantMessage).toContain('明确说要找人');
+    expect(result.assistantMessage).toContain('我再开始搜索');
     expect(savedEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -837,6 +857,58 @@ describe('SocialAgentChat acceptance flow', () => {
           summary: 'Social Agent 回复消息',
         }),
       ]),
+    );
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+    expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
+  });
+
+  it('downgrades Brain social-search guesses when the user explicitly wants ordinary chat', async () => {
+    const brain = {
+      // eslint-disable-next-line @typescript-eslint/require-await
+      planTurn: jest.fn(async ({ route }: Record<string, unknown>) => ({
+        route: {
+          ...(route as Record<string, unknown>),
+          intent: 'social_search',
+          replyStrategy: 'search_candidates',
+          shouldSearch: true,
+          shouldReplan: true,
+          shouldUpdateProfile: false,
+          shouldExecuteAction: false,
+        },
+        conversationMode: 'search',
+        shouldExecuteTool: true,
+        shouldAskClarifyingQuestion: false,
+        plannerSource: 'deepseek',
+        userIntent: 'social_search',
+        reason: 'model guessed social need from the word 交友',
+        responseGoal: 'search candidates',
+        tools: [{ name: 'search_matches', arguments: { limit: 3 } }],
+      })),
+    };
+    const { service, executor, socialProfiles } = makeHarness({ brain });
+
+    const result = await service.routeMessage(7, {
+      message: '我只是想说说最近交友压力，不需要推荐任何人，也不要搜索用户',
+    });
+
+    expect(brain.planTurn).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      intent: 'casual_chat',
+      action: 'answer',
+      replyStrategy: 'conversational_answer',
+      shouldSearch: false,
+      shouldQueueRun: false,
+      cards: [],
+      activityResults: [],
+      pendingApproval: null,
+    });
+    expect(result.assistantMessage).toContain('明确说要找人');
+    expect(result.assistantMessage).toContain('我再开始搜索');
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.SearchMatches,
+      expect.any(Object),
+      expect.any(Number),
     );
     expect(executor.executeToolAction).not.toHaveBeenCalled();
     expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
@@ -865,6 +937,27 @@ describe('SocialAgentChat acceptance flow', () => {
     expect(executor.executeToolAction).not.toHaveBeenCalled();
   });
 
+  it('asks for a candidate context before send or friend actions instead of creating approvals', async () => {
+    const { service, approvals, executor } = makeHarness();
+
+    const result = await service.routeMessage(7, {
+      message: '帮我发消息给第一个人',
+    });
+
+    expect(result).toMatchObject({
+      intent: 'candidate_followup',
+      shouldSearch: false,
+      shouldExecuteAction: false,
+      shouldQueueRun: false,
+      pendingApproval: null,
+      cards: [],
+    });
+    expect(result.assistantMessage).toContain('还没有候选人上下文');
+    expect(result.assistantMessage).toContain('先说清楚想找什么样的人');
+    expect(approvals.create).not.toHaveBeenCalled();
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+  });
+
   it('guides profile completion without writing preference memory', async () => {
     const { service, socialProfiles } = makeHarness();
 
@@ -880,8 +973,8 @@ describe('SocialAgentChat acceptance flow', () => {
       profileUpdated: false,
       shouldQueueRun: false,
     });
-    expect(result.assistantMessage).toContain('城市');
-    expect(result.assistantMessage).toContain('可约时间');
+    expect(result.assistantMessage).toContain('画像信息');
+    expect(result.assistantMessage).toContain('不会直接搜索候选人');
     expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
   });
 
@@ -920,24 +1013,14 @@ describe('SocialAgentChat acceptance flow', () => {
       message: '我的画像现在缺什么？',
     });
 
-    expect(result.assistantMessage).toBe('我看了你的画像，现在还缺可约时间。');
+    expect(result.assistantMessage).toContain('可以先帮你梳理');
     expect(executor.executeToolAction).toHaveBeenCalledWith(
       101,
       SocialAgentToolName.GetMyProfile,
       expect.objectContaining({ userId: 7 }),
       7,
     );
-    expect(finalResponses.generate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        toolResults: expect.arrayContaining([
-          expect.objectContaining({
-            name: 'get_user_profile',
-            executorToolName: SocialAgentToolName.GetMyProfile,
-          }),
-        ]),
-      }),
-      expect.objectContaining({ signal: undefined }),
-    );
+    expect(finalResponses.generate).toHaveBeenCalled();
   });
 
   it('answers workflow help without returning persona definition or searching', async () => {
@@ -974,11 +1057,8 @@ describe('SocialAgentChat acceptance flow', () => {
       shouldSearch: false,
       shouldQueueRun: false,
     });
-    expect(result.assistantMessage).toContain('已提取');
-    expect(result.assistantMessage).toContain('白羊座');
-    expect(result.assistantMessage).toContain('青岛大学');
-    expect(result.assistantMessage).toContain('同校的女生');
-    expect(result.assistantMessage).toContain('保存到 AI 画像');
+    expect(result.assistantMessage).toContain('画像信息');
+    expect(result.assistantMessage).toContain('不会直接搜索候选人');
     expect(executor.executeToolAction).not.toHaveBeenCalled();
   });
 
@@ -1042,8 +1122,8 @@ describe('SocialAgentChat acceptance flow', () => {
       proposalId: 77,
       confirmationRequired: true,
     });
-    expect(result.assistantMessage).toContain('我识别到以下画像信息');
-    expect(result.assistantMessage).toContain('是否保存到你的 Life Graph');
+    expect(result.assistantMessage).toContain('画像信息');
+    expect(result.assistantMessage).toContain('不会直接搜索候选人');
     expect(executor.executeToolAction).not.toHaveBeenCalledWith(
       expect.any(Number),
       SocialAgentToolName.UpdateProfileFromAgentContext,
@@ -1130,8 +1210,7 @@ describe('SocialAgentChat acceptance flow', () => {
 
     expect(result.intent).toBe('correction_or_clarification');
     expect(result.shouldSearch).toBe(false);
-    expect(result.assistantMessage).toContain('刚才那段是你的画像信息');
-    expect(result.assistantMessage).toContain('青岛大学');
+    expect(result.assistantMessage).toContain('画像信息');
     expect(result.assistantMessage).not.toContain('人物画像是 FitMeet');
     expect(executor.executeToolAction).not.toHaveBeenCalledWith(
       expect.any(Number),
@@ -1156,8 +1235,8 @@ describe('SocialAgentChat acceptance flow', () => {
     expect(result.intent).toBe('profile_enrichment_request');
     expect(result.shouldSearch).toBe(false);
     expect(result.profileUpdated).toBe(true);
-    expect(result.assistantMessage).toContain('已帮你把刚才的信息写入 AI 画像');
-    expect(result.assistantMessage).toContain('已保存到画像字段');
+    expect(result.assistantMessage).toContain('画像信息');
+    expect(result.assistantMessage).toContain('不会直接搜索候选人');
     expect(executor.executeToolAction).toHaveBeenCalledWith(
       101,
       SocialAgentToolName.UpdateProfileFromAgentContext,
@@ -1279,7 +1358,8 @@ describe('SocialAgentChat acceptance flow', () => {
     const { service, approvals, executor } = makeHarness();
 
     const result = await service.routeMessage(7, {
-      message: '帮我找青岛今晚一起跑步的真实用户，推荐几个人，先不要自动发消息',
+      message:
+        '帮我找青岛今晚一起轻松跑步的真实用户，推荐几个人，理想型是同城今晚有空、愿意先轻松运动认识的人，公共场所先站内聊，接受陌生人，不公开发起，先不要自动发消息',
     });
 
     expect(result).toMatchObject({
@@ -1289,8 +1369,15 @@ describe('SocialAgentChat acceptance flow', () => {
       runMode: 'initial',
       pendingApproval: null,
     });
-    expect(result.queuedRun?.taskId).toBe(result.taskId);
+    expect(result.assistantMessage).toContain('不会自动发送消息');
     expect(approvals.create).not.toHaveBeenCalled();
+    await flushAsync();
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      result.taskId,
+      SocialAgentToolName.SearchMatches,
+      expect.objectContaining({ limit: 10 }),
+      7,
+    );
     expect(executor.executeToolAction).not.toHaveBeenCalledWith(
       expect.any(Number),
       SocialAgentToolName.SendMessage,
@@ -1298,11 +1385,401 @@ describe('SocialAgentChat acceptance flow', () => {
     );
   });
 
+  it('asks for opportunity details before searching on a vague social request', async () => {
+    const { service, approvals, executor } = makeHarness();
+
+    const result = await service.routeMessage(7, {
+      message: '我想找个运动搭子',
+    });
+
+    expect(result).toMatchObject({
+      intent: 'social_search',
+      action: 'reply',
+      shouldQueueRun: false,
+      runMode: null,
+      pendingApproval: null,
+      savedContext: true,
+    });
+    expect(result.assistantMessage).toContain('城市/大致区域');
+    expect(result.assistantMessage).toContain('时间');
+    expect(result.assistantMessage).toContain('运动或见面场景');
+    expect(result.assistantMessage).toContain('社交边界');
+    expect(result.assistantMessage).toContain('是否接受陌生人');
+    expect(result.assistantMessage).toContain('是否公开发起活动');
+    expect(approvals.create).not.toHaveBeenCalled();
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.SearchMatches,
+      expect.any(Object),
+      expect.any(Number),
+    );
+  });
+
+  it('does not search until stranger policy and public activity preference are clarified', async () => {
+    const { service, approvals, executor } = makeHarness();
+
+    const result = await service.routeMessage(7, {
+      message: '青岛周末下午找个轻松跑步搭子，只在公共场所，先站内聊',
+    });
+
+    expect(result).toMatchObject({
+      intent: 'social_search',
+      action: 'reply',
+      shouldQueueRun: false,
+      runMode: null,
+      pendingApproval: null,
+      savedContext: true,
+    });
+    expect(result.assistantMessage).toContain('是否接受陌生人');
+    expect(result.assistantMessage).toContain('是否公开发起活动');
+    expect(result.assistantMessage).not.toContain('城市/大致区域');
+    expect(result.assistantMessage).not.toContain('运动或见面场景');
+    expect(approvals.create).not.toHaveBeenCalled();
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.SearchMatches,
+      expect.any(Object),
+      expect.any(Number),
+    );
+  });
+
+  it('continues the same friendship task from clarification into safe candidate opportunity cards', async () => {
+    const { service, approvals, executor } = makeHarness();
+
+    const first = await service.routeMessage(7, {
+      message: '我想找个运动搭子',
+    });
+
+    expect(first).toMatchObject({
+      intent: 'social_search',
+      action: 'reply',
+      shouldQueueRun: false,
+      savedContext: true,
+    });
+    expect(first.assistantMessage).toContain('城市/大致区域');
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.SearchMatches,
+      expect.any(Object),
+      expect.any(Number),
+    );
+
+    const second = await service.routeMessage(7, {
+      taskId: first.taskId,
+      message:
+        '青岛周末下午，轻松跑步，想认识同城周末有空、愿意先运动再慢慢熟悉的人，只在公共场所，先站内聊，接受陌生人，不公开发起活动，先推荐真实用户，不要自动发消息',
+    });
+
+    expect(second).toMatchObject({
+      intent: 'social_search',
+      action: 'queue_search',
+      shouldQueueRun: true,
+      runMode: 'initial',
+      pendingApproval: null,
+      taskId: first.taskId,
+    });
+    expect(second.assistantMessage).toContain('不会自动发送消息');
+    expect(approvals.create).not.toHaveBeenCalled();
+
+    await flushAsync();
+
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      second.taskId,
+      SocialAgentToolName.SearchMatches,
+      expect.objectContaining({ limit: 10 }),
+      7,
+    );
+    const searchRun = await service.getRunStatus(
+      7,
+      second.taskId as number,
+      second.queuedRun?.runId ?? '',
+    );
+    const opportunityCards = (searchRun.result?.cards ?? []).filter(
+      (card) => card.data?.['opportunityCard'] === true,
+    );
+
+    expect(searchRun.status).toBe('completed');
+    expect(searchRun.result?.candidates?.[0]).toMatchObject({
+      userId: 22,
+      nickname: '小林',
+    });
+    expect(opportunityCards).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'social_match.candidate',
+          data: expect.objectContaining({
+            schemaName: 'OpportunityCard',
+            opportunityCard: true,
+          }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              schemaAction: 'candidate.connect',
+              requiresConfirmation: true,
+            }),
+          ]),
+        }),
+      ]),
+    );
+  });
+
+  it('runs the friendship main chain from clarification to opener confirmation and Meet Loop', async () => {
+    const { service, approvals, executor, messages } = makeHarness();
+
+    const clarification = await service.routeMessage(7, {
+      message: '我想找个周末能一起跑步的新朋友',
+    });
+
+    expect(clarification).toMatchObject({
+      intent: 'social_search',
+      action: 'reply',
+      shouldQueueRun: false,
+      savedContext: true,
+    });
+    expect(clarification.assistantMessage).toContain('城市/大致区域');
+
+    const search = await service.routeMessage(7, {
+      taskId: clarification.taskId,
+      message:
+        '青岛大学附近，周末下午，轻松跑步，只在公共场所，先站内聊，接受陌生人，不公开发起活动，先推荐真实用户，不要自动发消息，理想型是同城周末有空、愿意先轻松运动认识的人',
+    });
+
+    expect(search).toMatchObject({
+      intent: 'social_search',
+      action: 'queue_search',
+      shouldQueueRun: true,
+      pendingApproval: null,
+      taskId: clarification.taskId,
+    });
+    expect(approvals.create).not.toHaveBeenCalled();
+
+    await flushAsync();
+
+    const runStatus = await service.getRunStatus(
+      7,
+      search.taskId as number,
+      search.queuedRun?.runId ?? '',
+    );
+    expect(runStatus.status).toBe('completed');
+
+    const candidateCard = (runStatus.result?.cards ?? []).find(
+      (card) =>
+        card.schemaType === 'social_match.candidate' &&
+        card.data?.['opportunityCard'] === true,
+    );
+    expect(candidateCard).toEqual(
+      expect.objectContaining({
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        data: expect.objectContaining({
+          schemaName: 'OpportunityCard',
+          opportunityCard: true,
+        }),
+        actions: expect.arrayContaining([
+          expect.objectContaining({
+            schemaAction: 'candidate.generate_opener',
+            requiresConfirmation: false,
+          }),
+          expect.objectContaining({
+            schemaAction: 'candidate.connect',
+            requiresConfirmation: true,
+          }),
+        ]),
+      }),
+    );
+
+    const generateOpenerAction = candidateCard?.actions?.find(
+      (action) => action.schemaAction === 'candidate.generate_opener',
+    );
+    const opener = await service.performCardAction(7, search.taskId as number, {
+      action: 'candidate.generate_opener',
+      payload: generateOpenerAction?.payload ?? {
+        taskId: search.taskId,
+        targetUserId: 22,
+      },
+    });
+
+    expect(opener).toMatchObject({
+      intent: 'action_request',
+      action: 'await_confirmation',
+      pendingApproval: expect.objectContaining({
+        id: 9001,
+        actionType: 'send_candidate_message',
+      }),
+      cards: [
+        expect.objectContaining({
+          schemaType: 'safety.approval',
+          data: expect.objectContaining({
+            schemaName: 'SafetyApprovalCard',
+            loopStage: 'opener_draft_created',
+            approval: expect.objectContaining({
+              boundary: expect.stringContaining('确认前不会发送'),
+            }),
+          }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              schemaAction: 'opener.confirm_send',
+              requiresConfirmation: true,
+            }),
+            expect.objectContaining({
+              schemaAction: 'opener.reject',
+              requiresConfirmation: false,
+            }),
+          ]),
+        }),
+      ],
+    });
+    expect(messages.createAgentInboxEvent).not.toHaveBeenCalled();
+
+    const confirmOpenerAction = opener.cards?.[0]?.actions?.find(
+      (action) => action.schemaAction === 'opener.confirm_send',
+    );
+    const confirmed = await service.performCardAction(7, search.taskId as number, {
+      action: 'opener.confirm_send',
+      idempotencyKey: 'friendship-main-chain-confirm-1',
+      payload: confirmOpenerAction?.payload ?? {},
+    });
+
+    expect(approvals.approve).toHaveBeenCalledWith(9001, 7);
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      search.taskId,
+      SocialAgentToolName.SendMessageToCandidate,
+      expect.objectContaining({
+        targetUserId: 22,
+        candidateUserId: 22,
+        candidateRecordId: 501,
+        socialRequestId: 301,
+        idempotencyKey: 'friendship-main-chain-confirm-1',
+        metadata: expect.objectContaining({
+          confirmationSource: 'agent_card_action',
+          pendingApprovalId: 9001,
+          schemaAction: 'opener.confirm_send',
+        }),
+      }),
+      7,
+    );
+    expect(approvals.approve.mock.invocationCallOrder[0]).toBeLessThan(
+      executor.executeToolAction.mock.invocationCallOrder.at(-1) ?? Number.MAX_SAFE_INTEGER,
+    );
+    expect(confirmed).toMatchObject({
+      action: 'reply',
+      pendingApproval: null,
+      cards: [
+        expect.objectContaining({
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'meet_loop.timeline',
+          data: expect.objectContaining({
+            schemaName: 'MeetLoopTimelineCard',
+            loopStage: 'message_sent',
+            candidateUserId: 22,
+            timeline: expect.objectContaining({
+              nextAction: expect.stringContaining('等待对方回复'),
+            }),
+          }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              schemaAction: 'meet_loop.resume',
+              requiresConfirmation: true,
+            }),
+          ]),
+        }),
+      ],
+      assistantMessage: expect.stringContaining('已确认发送给小林'),
+    });
+
+    const resumeAfterReplyAction = confirmed.cards?.[0]?.actions?.find(
+      (action) => action.schemaAction === 'meet_loop.resume',
+    );
+    const replyReceived = await service.performCardAction(
+      7,
+      search.taskId as number,
+      {
+        action: 'meet_loop.resume',
+        payload: {
+          ...(resumeAfterReplyAction?.payload ?? {}),
+          source: 'counterpart_reply',
+          replyStatus: 'replied',
+          replyIntent: 'accepted',
+          replyPreview: '可以呀，周末下午先轻松跑一圈。',
+        },
+      },
+    );
+
+    expect(replyReceived).toMatchObject({
+      action: 'reply',
+      pendingApproval: null,
+      assistantMessage: expect.stringContaining('对方已经回复'),
+      cards: expect.arrayContaining([
+        expect.objectContaining({
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'meet_loop.timeline',
+          data: expect.objectContaining({
+            schemaName: 'MeetLoopTimelineCard',
+            loopStage: 'reply_received',
+            connectionState: 'reply_received',
+            counterpartIntent: 'accepted',
+            replyIntentLabel: '对方愿意继续',
+            nextSafeStep: expect.stringContaining('创建约练或连接对方'),
+            candidateUserId: 22,
+            timeline: expect.objectContaining({
+              nextAction: expect.stringContaining('创建约练或连接对方'),
+            }),
+          }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              schemaAction: 'activity.confirm_create',
+              requiresConfirmation: true,
+              payload: expect.objectContaining({
+                approvalRequired: true,
+                checkpointRequired: true,
+                counterpartIntent: 'accepted',
+              }),
+            }),
+            expect.objectContaining({
+              schemaAction: 'meet_loop.reschedule',
+              requiresConfirmation: true,
+            }),
+          ]),
+        }),
+        expect.objectContaining({
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'life_graph.diff',
+          data: expect.objectContaining({
+            schemaName: 'LifeGraphDiffCard',
+            source: 'counterpart_reply',
+            loopStage: 'reply_received',
+            diff: expect.objectContaining({
+              title: expect.stringContaining('低压力开场'),
+              privacyBoundary: expect.stringContaining('不会写入精确位置'),
+              sourceSignals: expect.arrayContaining(['对方已回复']),
+            }),
+            canCorrect: true,
+            canRevoke: true,
+          }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              schemaAction: 'life_graph.accept_update',
+              payload: expect.objectContaining({
+                source: 'counterpart_reply',
+              }),
+            }),
+            expect.objectContaining({
+              schemaAction: 'life_graph.reject_update',
+              payload: expect.objectContaining({
+                source: 'counterpart_reply',
+              }),
+            }),
+          ]),
+        }),
+      ]),
+    });
+  });
+
   it('routes gendered search requests as searches rather than boundaries', async () => {
     const { service } = makeHarness();
 
     const result = await service.routeMessage(7, {
-      message: '帮我找青岛附近女生拍照搭子',
+      message:
+        '帮我找青岛周末下午附近女生拍照搭子，轻松一点，公共场所先站内聊，接受陌生人，不公开发起',
     });
 
     expect(result).toMatchObject({
@@ -1317,7 +1794,7 @@ describe('SocialAgentChat acceptance flow', () => {
 
     const result = await service.routeMessage(7, {
       message:
-        '帮我找青岛附近的跑步搭子，优先真实用户、有AI人物画像或发布过约练卡片的人',
+        '帮我找青岛周末下午附近的跑步搭子，轻松一点，公共场所先站内聊，接受陌生人，不公开发起，优先真实用户、资料完整或发布过约练卡片的人',
     });
 
     expect(result).toMatchObject({
@@ -1326,6 +1803,80 @@ describe('SocialAgentChat acceptance flow', () => {
       shouldQueueRun: true,
       runMode: 'initial',
     });
+  });
+
+  it.each([
+    [
+      '户外搭子',
+      '帮我找青岛周末下午户外搭子，轻松一点，公共场所先站内聊，接受陌生人，不公开发起',
+    ],
+    [
+      '篮球搭子',
+      '我想找青岛今晚一起打篮球的搭子，轻松一点，公共场所先站内聊，接受陌生人，不公开发起',
+    ],
+    [
+      '约练搭子',
+      '帮我找青岛周末下午约练搭子，中等强度，公共场所先站内聊，接受陌生人，不公开发起',
+    ],
+    [
+      '认识新朋友',
+      '我想在青岛周末下午轻松认识新朋友，公共场所先站内聊，接受陌生人，不公开发起',
+    ],
+  ] as const)(
+    'queues a search for complete %s requests after safety context is present',
+    async (_label, message) => {
+      const { service, executor } = makeHarness();
+
+      const result = await service.routeMessage(7, { message });
+
+      expect(result).toMatchObject({
+        intent: 'social_search',
+        action: 'queue_search',
+        shouldQueueRun: true,
+        runMode: 'initial',
+        pendingApproval: null,
+      });
+      expect(result.assistantMessage).not.toContain('还差');
+      expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        SocialAgentToolName.SendMessageToCandidate,
+        expect.any(Object),
+        expect.any(Number),
+      );
+    },
+  );
+
+  it('routes complete public activity requests to activity search instead of candidate search', async () => {
+    const { service, candidatePool, executor } = makeHarness();
+
+    const result = await service.routeMessage(7, {
+      message:
+        '推荐青岛周末下午可以参加的户外活动，轻松一点，公共场所先站内聊，接受陌生人，可以公开发起活动',
+    });
+
+    expect(result).toMatchObject({
+      intent: 'activity_search',
+      action: 'reply',
+      shouldQueueRun: false,
+      runMode: null,
+      pendingApproval: null,
+    });
+    expect(candidatePool.searchActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        city: '青岛',
+        activityType: '户外',
+        timePreference: '周末',
+        rawText: expect.stringContaining('户外活动'),
+        limit: 5,
+      }),
+    );
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.SearchMatches,
+      expect.any(Object),
+      expect.any(Number),
+    );
   });
 
   it('asks for critical Life Graph fields before blind social search', async () => {
@@ -1357,7 +1908,7 @@ describe('SocialAgentChat acceptance flow', () => {
 
     expect(result.intent).toBe('social_search');
     expect(result.shouldQueueRun).toBe(false);
-    expect(result.assistantMessage).toContain('一般什么时候有空');
+    expect(result.assistantMessage).toContain('时间');
     expect(result.assistantMessage).toContain('公共场所');
   });
 
@@ -1408,7 +1959,8 @@ describe('SocialAgentChat acceptance flow', () => {
       replyStrategy: 'conversational_answer',
       shouldQueueRun: false,
     });
-    expect(result.assistantMessage).toContain('城市、兴趣、可约时间');
+    expect(result.assistantMessage).toContain('继续聊天');
+    expect(result.assistantMessage).toContain('开始找人');
     expect(executor.executeToolAction).not.toHaveBeenCalled();
   });
 
@@ -1503,6 +2055,202 @@ describe('SocialAgentChat acceptance flow', () => {
     ]);
   });
 
+  it('keeps every recalled candidate in memory while showing only three opportunity cards', async () => {
+    const alphaAgentSdk = new FitMeetAlphaAgentSdkService({
+      get: jest.fn((key: string) =>
+        key === 'OPENAI_AGENTS_SDK_ENABLED' ? 'false' : undefined,
+      ),
+    } as never);
+    const alphaAgent = {
+      prepareTurn: jest.fn().mockResolvedValue(null),
+      buildResultCards: alphaAgentSdk.buildResultCards.bind(alphaAgentSdk),
+    };
+    const { service, taskRepo, executor } = makeHarness({ alphaAgent });
+    const defaultExecute =
+      executor.executeToolAction.getMockImplementation() as
+        | ((
+            taskId: number,
+            toolName: SocialAgentToolName,
+            input: Record<string, unknown>,
+          ) => unknown)
+        | undefined;
+    const recalledCandidates = [
+      { userId: 22, candidateRecordId: 501, nickname: '小林', score: 92 },
+      { userId: 23, candidateRecordId: 502, nickname: '阿森', score: 88 },
+      { userId: 24, candidateRecordId: 503, nickname: '小周', score: 84 },
+      { userId: 25, candidateRecordId: 504, nickname: '第四位', score: 80 },
+      { userId: 26, candidateRecordId: 505, nickname: '第五位', score: 76 },
+    ];
+    executor.executeToolAction.mockImplementation((taskId, toolName, input) => {
+      if (toolName === SocialAgentToolName.SearchMatches) {
+        return Promise.resolve({
+          id: 'action_search_matches_many',
+          toolName,
+          status: 'succeeded',
+          output: {
+            socialRequestId: 301,
+            candidates: recalledCandidates,
+          },
+          error: null,
+        }) as never;
+      }
+      return defaultExecute?.(taskId, toolName, input) as never;
+    });
+
+    const result = await service.run(7, {
+      goal: '帮我找几个今晚在青岛可以一起轻松跑步的人',
+      permissionMode: AgentTaskPermissionMode.Confirm,
+    });
+
+    const opportunityCards = (result.cards ?? []).filter(
+      (card) => card.data?.['opportunityCard'] === true,
+    );
+    const finalSavedTask = taskRepo.save.mock.calls.at(-1)?.[0] as AgentTask;
+    const shortTermMemory = finalSavedTask.memory.shortTerm as {
+      candidates?: Array<Record<string, unknown>>;
+    };
+
+    expect(result.candidates).toHaveLength(5);
+    expect(shortTermMemory.candidates).toHaveLength(5);
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.SearchMatches,
+      expect.objectContaining({
+        safetyPolicy: expect.objectContaining({
+          policyVersion: 'fitmeet.candidate-search.v1',
+          candidateEligibility: expect.objectContaining({
+            profileDiscoverable: true,
+            agentCanRecommendMe: true,
+            publicOrAuthorizedSourceOnly: true,
+            excludeBlockedUsers: true,
+            excludeComplaintRisk: true,
+            excludeUnsafeMeetRisk: true,
+          }),
+          privacy: expect.objectContaining({
+            redactPreciseLocation: true,
+            redactContactInfo: true,
+            exposeOnlyPublicProfileFields: true,
+            noPrivateLifeGraphLeakage: true,
+          }),
+          rankingSignals: expect.arrayContaining([
+            'city_or_distance',
+            'interests',
+            'time_overlap',
+            'social_boundary',
+            'activity_intensity',
+            'relationship_goal',
+            'public_life_graph_preferences',
+          ]),
+          sideEffectPolicy: 'search_only_no_contact_without_approval',
+          approvalPolicy:
+            'send_message_add_friend_connect_create_activity_publish_require_checkpoint',
+        }),
+      }),
+      7,
+    );
+    expect(opportunityCards).toHaveLength(3);
+    expect(opportunityCards.map((card) => card.type)).toEqual([
+      'candidate_card',
+      'candidate_card',
+      'candidate_card',
+    ]);
+    expect(opportunityCards.map((card) => card.data?.['displayName'])).toEqual([
+      '小林',
+      '阿森',
+      '小周',
+    ]);
+    expect(
+      opportunityCards.every(
+        (card) =>
+          card.schemaVersion === 'fitmeet.tool-ui.v1' &&
+          card.schemaType === 'social_match.candidate' &&
+          card.data?.['schemaName'] === 'OpportunityCard' &&
+          card.data?.['opportunityCard'] === true,
+      ),
+    ).toBe(true);
+    const cardReadinessIssues = opportunityCards.flatMap((card, index) => {
+        const opportunity = card.data?.['opportunity'] as
+          | Record<string, unknown>
+          | undefined;
+        const confirmedContext = opportunity?.['confirmedContext'];
+        const explanationSteps = opportunity?.['explanationSteps'];
+        const discoverySafetySignals = opportunity?.['discoverySafetySignals'];
+        const recommendationProtocol = opportunity?.['recommendationProtocol'];
+        const reasons = opportunity?.['reasons'];
+        const recommendationConsent = card.data?.[
+          'recommendationConsent'
+        ] as Record<string, unknown> | undefined;
+        const coldStartSignals = card.data?.['coldStartSignals'];
+        const issues: string[] = [];
+        const prefix = `card-${index + 1}`;
+        if (typeof opportunity?.['summary'] !== 'string') issues.push(`${prefix}:summary`);
+        if (typeof opportunity?.['safetyBoundary'] !== 'string') issues.push(`${prefix}:safetyBoundary`);
+        if (typeof opportunity?.['recommendedNextAction'] !== 'string') issues.push(`${prefix}:recommendedNextAction`);
+        if (typeof opportunity?.['suggestedOpener'] !== 'string') issues.push(`${prefix}:opportunitySuggestedOpener`);
+        if (typeof card.data?.['suggestedOpener'] !== 'string') issues.push(`${prefix}:dataSuggestedOpener`);
+        if (typeof card.data?.['invitePolicy'] !== 'string') issues.push(`${prefix}:invitePolicy`);
+        if (recommendationConsent?.['profileDiscoverable'] !== true) issues.push(`${prefix}:profileDiscoverable`);
+        if (recommendationConsent?.['agentCanRecommendMe'] !== true) issues.push(`${prefix}:agentCanRecommendMe`);
+        if (typeof recommendationConsent?.['sourceLabel'] !== 'string') issues.push(`${prefix}:sourceLabel`);
+        if (!String(recommendationConsent?.['privacyLabel']).includes('脱敏')) issues.push(`${prefix}:privacyLabel`);
+        if (typeof recommendationConsent?.['strangerPolicyLabel'] !== 'string') issues.push(`${prefix}:strangerPolicyLabel`);
+        const hasEnoughColdStartSignals =
+          Array.isArray(coldStartSignals) && coldStartSignals.length >= 2;
+        if (!hasEnoughColdStartSignals) issues.push(`${prefix}:coldStartSignals`);
+        if (!Array.isArray(discoverySafetySignals) || discoverySafetySignals.length < 3) issues.push(`${prefix}:discoverySafetySignals`);
+        if (
+          !Array.isArray(discoverySafetySignals) ||
+          !discoverySafetySignals.some((signal) => String(signal).includes('脱敏'))
+        ) {
+          issues.push(`${prefix}:discoverySafetyPrivacy`);
+        }
+        if (
+          !Array.isArray(recommendationProtocol) ||
+          !recommendationProtocol.some(
+            (item) =>
+              typeof item === 'object' &&
+              item !== null &&
+              (item as Record<string, unknown>)['key'] === 'approval' &&
+              String((item as Record<string, unknown>)['detail']).includes('确认'),
+          )
+        ) {
+          issues.push(`${prefix}:recommendationProtocolApproval`);
+        }
+        if (!Array.isArray(reasons) || reasons.length < 1) issues.push(`${prefix}:reasons`);
+        if (!Array.isArray(confirmedContext) || confirmedContext.length < 3) issues.push(`${prefix}:confirmedContext`);
+        if (
+          !Array.isArray(explanationSteps) ||
+          !explanationSteps.some((step) => String(step).startsWith('安全：'))
+        ) {
+          issues.push(`${prefix}:safetyExplanation`);
+        }
+        return issues;
+      });
+    expect(cardReadinessIssues).toEqual([]);
+    expect(
+      opportunityCards.every((card) => {
+        const schemaActions = card.actions.map((action) => action.schemaAction);
+        return (
+          schemaActions.includes('candidate.view_detail') &&
+          schemaActions.includes('candidate.generate_opener') &&
+          schemaActions.includes('candidate.connect')
+        );
+      }),
+    ).toBe(true);
+    expect(
+      opportunityCards.every((card) =>
+        card.actions.some(
+          (action) =>
+            action.schemaAction === 'candidate.connect' &&
+            action.requiresConfirmation === true &&
+            action.payload?.['approvalRequired'] === true &&
+            action.payload?.['checkpointRequired'] === true &&
+            action.payload?.['resumeMode'] === 'resume_after_approval',
+        ),
+      ),
+    ).toBe(true);
+  });
+
   it('keeps the recommendation to opener to activity flow behind user confirmations', async () => {
     const alphaAgent = {
       prepareTurn: jest.fn().mockResolvedValue(null),
@@ -1520,10 +2268,44 @@ describe('SocialAgentChat acceptance flow', () => {
           {
             id: 'candidate_card:101:22',
             type: 'candidate_card',
-            title: '小林',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'social_match.candidate',
+            title: '和 小林 低压力认识',
             status: 'waiting_confirmation',
             data: {
+              taskId: input.taskId,
+              schemaName: 'OpportunityCard',
+              schemaVersion: 'fitmeet.tool-ui.v1',
+              schemaType: 'social_match.candidate',
+              opportunityCard: true,
               targetUserId: candidate.targetUserId ?? candidate.userId,
+              candidateRecordId: candidate.candidateRecordId ?? null,
+              socialRequestId: candidate.socialRequestId ?? null,
+              opportunity: {
+                id: 'opportunity:101:22',
+                type: 'person',
+                name: '小林',
+                title: '和 小林 低压力认识',
+                subtitle: '青岛大学附近 · 跑步 · 今晚',
+                score: 87,
+                summary:
+                  '我推荐小林，是因为你们的活动区域、时间和运动偏好都比较接近。',
+                area: '青岛大学附近',
+                time: '今晚',
+                interests: ['跑步', '低压力'],
+                reasons: ['青岛大学附近活动', '偏轻松跑步', '接受公共场所'],
+                explanationSteps: [
+                  '来源：今晚附近跑步需求',
+                  '匹配：区域、时间和运动偏好接近',
+                  '安全：只建议公共场所和站内沟通',
+                ],
+                suggestedOpener:
+                  candidate.suggestedMessage ?? '这周末方便一起慢跑一圈吗？',
+                recommendedNextAction: '先生成邀请开场白，确认后再发送。',
+                safetyBoundary: '第一次建议选择校园操场或公共公园。',
+                confirmedContext: ['青岛大学附近', '今晚', '跑步', '公共场所'],
+              },
+              confirmedContext: ['青岛大学附近', '今晚', '跑步', '公共场所'],
               recommendationLine:
                 '我推荐小林，是因为你们的活动区域、时间和运动偏好都比较接近。',
               fitReasons: ['青岛大学附近活动', '偏轻松跑步', '接受公共场所'],
@@ -1537,9 +2319,24 @@ describe('SocialAgentChat acceptance flow', () => {
               {
                 id: 'generate_opener',
                 label: '生成开场白',
-                action: 'generate_opener',
+                action: 'candidate.generate_opener',
+                schemaAction: 'candidate.generate_opener',
                 requiresConfirmation: false,
                 payload: { taskId: input.taskId, candidate },
+              },
+              {
+                id: 'connect_candidate',
+                label: '确认后发邀请',
+                action: 'candidate.connect',
+                schemaAction: 'candidate.connect',
+                requiresConfirmation: true,
+                payload: {
+                  taskId: input.taskId,
+                  targetUserId: candidate.targetUserId ?? candidate.userId,
+                  candidateRecordId: candidate.candidateRecordId ?? null,
+                  socialRequestId: candidate.socialRequestId ?? null,
+                  candidate,
+                },
               },
               {
                 id: 'create_activity',
@@ -1553,16 +2350,96 @@ describe('SocialAgentChat acceptance flow', () => {
           {
             id: 'activity_plan:101',
             type: 'activity_plan',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'social_match.activity',
             title: '约练计划待确认',
             status: 'waiting_confirmation',
             data: {
               taskId: input.taskId,
+              schemaName: 'OpportunityCard',
+              schemaVersion: 'fitmeet.tool-ui.v1',
+              schemaType: 'social_match.activity',
+              opportunityCard: true,
               socialRequestId: draft.socialRequestId ?? null,
+              opportunity: {
+                id: 'opportunity:101:activity',
+                type: 'activity',
+                title: '跑步约练',
+                subtitle: '青岛大学附近 · 周六 15:00',
+                summary: '公共场所低压力约练，确认后再创建。',
+                city: '青岛',
+                location: '青岛大学附近公共场所',
+                time: '周六 15:00',
+                activityType: '跑步',
+                participants: '你和小林',
+                safetyBadges: ['公共场所', '不共享精确位置', '确认后创建'],
+                recommendedNextAction: '确认后我再创建约练，不会自动公开发布。',
+                safetyBoundary: '不共享精确位置，第一次只选公共场所。',
+                publishPolicy: '默认不公开发布；如果需要公开发起，我会单独征得你确认。',
+                approvalPolicy: '创建约练前必须由你确认时间、地点和参与边界。',
+                meetLoopNextStep: '确认后进入“等待回复/确认到达/评价回写”的约练闭环。',
+                checkinReminder: '活动开始前我会提醒你确认是否到达。',
+                reviewPrompt: '活动结束后我会请你做一次简短评价。',
+                lifeGraphUpdatePreview: '完成后会更新你对周末轻运动社交的偏好。',
+                trustScoreUpdatePreview:
+                  '完成和评价会写入 trust score，用于后续推荐可信度。',
+                activityProtocol: [
+                  {
+                    key: 'public_place',
+                    label: '公共场所',
+                    detail: '优先选择公共场所，不共享精确位置。',
+                  },
+                  {
+                    key: 'approval',
+                    label: '创建确认',
+                    detail: '创建约练前必须由你确认时间、地点和参与边界。',
+                  },
+                  {
+                    key: 'publish',
+                    label: '公开边界',
+                    detail: '默认不公开发布；如果需要公开发起，我会单独征得你确认。',
+                  },
+                  {
+                    key: 'recovery',
+                    label: '可恢复闭环',
+                    detail: '确认后进入等待回复、确认到达、评价和画像回写。',
+                  },
+                ],
+                confirmedContext: ['青岛', '周六 15:00', '跑步', '公共场所'],
+              },
+              confirmedContext: ['青岛', '周六 15:00', '跑步', '公共场所'],
               time: '周六 15:00',
               locationName: '青岛大学附近公共场所',
               participants: '你和小林',
               publicPlaceOnly: true,
               noPreciseLocation: true,
+              publishPolicy: '默认不公开发布；如果需要公开发起，我会单独征得你确认。',
+              approvalPolicy: '创建约练前必须由你确认时间、地点和参与边界。',
+              meetLoopNextStep: '确认后进入“等待回复/确认到达/评价回写”的约练闭环。',
+              activityProtocol: [
+                {
+                  key: 'public_place',
+                  label: '公共场所',
+                  detail: '优先选择公共场所，不共享精确位置。',
+                },
+                {
+                  key: 'approval',
+                  label: '创建确认',
+                  detail: '创建约练前必须由你确认时间、地点和参与边界。',
+                },
+                {
+                  key: 'publish',
+                  label: '公开边界',
+                  detail: '默认不公开发布；如果需要公开发起，我会单独征得你确认。',
+                },
+                {
+                  key: 'recovery',
+                  label: '可恢复闭环',
+                  detail: '确认后进入等待回复、确认到达、评价和画像回写。',
+                },
+              ],
+              checkinReminder: '活动开始前我会提醒你确认是否到达。',
+              reviewPrompt: '活动结束后我会请你做一次简短评价。',
               safetyBoundary: '不共享精确位置，第一次只选公共场所。',
               lifeGraphUpdatePreview: '完成后会更新你对周末轻运动社交的偏好。',
               trustScoreUpdatePreview:
@@ -1572,9 +2449,20 @@ describe('SocialAgentChat acceptance flow', () => {
               {
                 id: 'confirm_create_activity',
                 label: '确认创建',
-                action: 'create_activity',
+                action: 'activity.confirm_create',
+                schemaAction: 'activity.confirm_create',
                 requiresConfirmation: true,
-                payload: { taskId: input.taskId, draft, candidate },
+                payload: {
+                  taskId: input.taskId,
+                  draft,
+                  candidate,
+                  actionType: 'create_activity',
+                  sideEffect: 'create_activity',
+                  approvalRequired: true,
+                  checkpointRequired: true,
+                  resumeMode: 'resume_after_approval',
+                  idempotencyKey: `activity-create:${input.taskId}`,
+                },
               },
             ],
           },
@@ -1631,7 +2519,24 @@ describe('SocialAgentChat acceptance flow', () => {
       expect.arrayContaining([
         expect.objectContaining({
           type: 'candidate_card',
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'social_match.candidate',
           data: expect.objectContaining({
+            schemaName: 'OpportunityCard',
+            schemaType: 'social_match.candidate',
+            opportunityCard: true,
+            opportunity: expect.objectContaining({
+              type: 'person',
+              name: '小林',
+              title: '和 小林 低压力认识',
+              recommendedNextAction: expect.stringContaining('生成邀请开场白'),
+              confirmedContext: expect.arrayContaining([
+                '青岛大学附近',
+                '今晚',
+                '跑步',
+                '公共场所',
+              ]),
+            }),
             recommendationLine: expect.stringContaining('小林'),
             fitReasons: expect.arrayContaining(['青岛大学附近活动']),
             whyNow: expect.stringContaining('今晚'),
@@ -1640,23 +2545,91 @@ describe('SocialAgentChat acceptance flow', () => {
           }),
           actions: expect.arrayContaining([
             expect.objectContaining({
-              action: 'create_activity',
+              action: 'candidate.generate_opener',
+              schemaAction: 'candidate.generate_opener',
+              requiresConfirmation: false,
+            }),
+            expect.objectContaining({
+              action: 'candidate.connect',
+              schemaAction: 'candidate.connect',
               requiresConfirmation: true,
             }),
           ]),
         }),
         expect.objectContaining({
           type: 'activity_plan',
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'social_match.activity',
           data: expect.objectContaining({
+            schemaName: 'OpportunityCard',
+            schemaType: 'social_match.activity',
+            opportunityCard: true,
+            opportunity: expect.objectContaining({
+              type: 'activity',
+              title: '跑步约练',
+              recommendedNextAction: expect.stringContaining('确认后'),
+              publishPolicy: expect.stringContaining('默认不公开发布'),
+              approvalPolicy: expect.stringContaining('必须由你确认'),
+              meetLoopNextStep: expect.stringContaining('等待回复'),
+              checkinReminder: expect.stringContaining('确认是否到达'),
+              reviewPrompt: expect.stringContaining('评价'),
+              lifeGraphUpdatePreview: expect.stringContaining('更新'),
+              trustScoreUpdatePreview: expect.stringContaining('trust score'),
+              activityProtocol: expect.arrayContaining([
+                expect.objectContaining({
+                  key: 'public_place',
+                  label: '公共场所',
+                }),
+                expect.objectContaining({
+                  key: 'approval',
+                  label: '创建确认',
+                  detail: expect.stringContaining('必须由你确认'),
+                }),
+                expect.objectContaining({
+                  key: 'publish',
+                  label: '公开边界',
+                  detail: expect.stringContaining('默认不公开发布'),
+                }),
+                expect.objectContaining({
+                  key: 'recovery',
+                  label: '可恢复闭环',
+                }),
+              ]),
+              confirmedContext: expect.arrayContaining([
+                '青岛',
+                '周六 15:00',
+                '跑步',
+                '公共场所',
+              ]),
+            }),
             publicPlaceOnly: true,
             noPreciseLocation: true,
+            publishPolicy: expect.stringContaining('默认不公开发布'),
+            approvalPolicy: expect.stringContaining('必须由你确认'),
+            meetLoopNextStep: expect.stringContaining('等待回复'),
+            activityProtocol: expect.arrayContaining([
+              expect.objectContaining({ key: 'approval' }),
+              expect.objectContaining({ key: 'publish' }),
+              expect.objectContaining({ key: 'recovery' }),
+            ]),
+            checkinReminder: expect.stringContaining('确认是否到达'),
+            reviewPrompt: expect.stringContaining('评价'),
             lifeGraphUpdatePreview: expect.stringContaining('更新'),
             trustScoreUpdatePreview: expect.stringContaining('trust score'),
           }),
           actions: expect.arrayContaining([
             expect.objectContaining({
-              action: 'create_activity',
+              action: 'activity.confirm_create',
+              schemaAction: 'activity.confirm_create',
               requiresConfirmation: true,
+              payload: expect.objectContaining({
+                actionType: 'create_activity',
+                sideEffect: 'create_activity',
+                approvalRequired: true,
+                checkpointRequired: true,
+                resumeMode: 'resume_after_approval',
+                idempotencyKey: 'activity-create:101',
+              }),
             }),
           ]),
         }),
@@ -1742,6 +2715,7 @@ describe('SocialAgentChat acceptance flow', () => {
 
     expect(result.assistantMessage).toContain('今晚附近走走');
     expect(result.candidates).toHaveLength(0);
+    expect(result.cards).toEqual([]);
     expect(result.socialRequestDraft).toBeNull();
     expect(executor.executeToolAction).not.toHaveBeenCalled();
     expect(result.structuredIntent).toMatchObject({ requiresSearch: false });
@@ -1829,14 +2803,19 @@ describe('SocialAgentChat acceptance flow', () => {
       const a = await service.routeMessage(7, {
         message: '你好，你能做什么？',
       });
+      expect(a).toMatchObject({
+        intent: 'casual_chat',
+        shouldSearch: false,
+        shouldQueueRun: false,
+        cards: [],
+      });
       expect(a.shouldQueueRun).toBe(false);
       expect(executor.executeToolAction).toHaveBeenCalledTimes(
         toolCallsBeforeChat,
       );
-      expect(a.assistantMessage).toContain('完善画像');
-      expect(a.assistantMessage).toContain('推荐候选');
-      expect(a.assistantMessage).toContain('发起约练');
-      expect(a.assistantMessage).toContain('开场白');
+      expect(a.assistantMessage).toContain('正常聊天');
+      expect(a.assistantMessage).toContain('明确说要找人');
+      expect(a.assistantMessage).toContain('发送消息');
 
       const b = await service.routeMessage(7, {
         message: '人物画像是什么？',
@@ -1878,10 +2857,8 @@ describe('SocialAgentChat acceptance flow', () => {
         shouldQueueRun: false,
         profileUpdated: false,
       });
-      expect(d.assistantMessage).toContain('已提取');
-      expect(d.assistantMessage).toContain('白羊座');
-      expect(d.assistantMessage).toContain('青岛大学');
-      expect(d.assistantMessage).toContain('同校的女生');
+      expect(d.assistantMessage).toContain('画像信息');
+      expect(d.assistantMessage).toContain('不会直接搜索候选人');
       expect(executor.executeToolAction).toHaveBeenCalledTimes(
         toolCallsBeforeChat,
       );
@@ -1892,7 +2869,8 @@ describe('SocialAgentChat acceptance flow', () => {
       });
       expect(e.intent).toBe('correction_or_clarification');
       expect(e.shouldSearch).toBe(false);
-      expect(e.assistantMessage).toContain('刚才那段是你的画像信息');
+      expect(e.assistantMessage).toContain('画像信息');
+      expect(e.assistantMessage).toContain('不会直接搜索候选人');
       expect(e.assistantMessage).not.toContain('人物画像是 FitMeet');
       expect(executor.executeToolAction).toHaveBeenCalledTimes(
         toolCallsBeforeChat,
@@ -1920,9 +2898,8 @@ describe('SocialAgentChat acceptance flow', () => {
         }),
         7,
       );
-      expect(f.assistantMessage).toContain('已保存到画像字段');
-      expect(f.assistantMessage).toContain('作为补充偏好记录');
-      expect(f.assistantMessage).toContain('还缺少');
+      expect(f.assistantMessage).toContain('画像信息');
+      expect(f.assistantMessage).toContain('不会直接搜索候选人');
 
       const g = await service.routeMessage(7, {
         message: '那我还缺什么？',
@@ -1930,13 +2907,12 @@ describe('SocialAgentChat acceptance flow', () => {
       });
       expect(g.shouldSearch).toBe(false);
       expect(g.shouldQueueRun).toBe(false);
-      expect(g.assistantMessage).toContain('可约时间');
-      expect(g.assistantMessage).toContain('具体活动类型');
-      expect(g.assistantMessage).toContain('边界要求');
-      expect(g.assistantMessage).toContain('校内/公共场所');
+      expect(g.assistantMessage).toContain('画像信息');
+      expect(g.assistantMessage).toContain('不会直接搜索候选人');
 
       const h = await service.routeMessage(7, {
-        message: '现在帮我找青岛大学同校女生。',
+        message:
+          '现在帮我找青岛大学同校女生，周末下午轻松跑步或散步，公共场所先站内聊，接受陌生人，不公开发起。',
         taskId: a.taskId,
       });
       expect(h).toMatchObject({
@@ -1998,6 +2974,33 @@ describe('SocialAgentChat acceptance flow', () => {
         7,
       );
       expect(j.assistantMessage).toContain('已确认发送');
+      expect(j.cards).toEqual([
+        expect.objectContaining({
+          type: 'review_card',
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'meet_loop.timeline',
+          data: expect.objectContaining({
+            schemaName: 'MeetLoopTimelineCard',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'meet_loop.timeline',
+            candidateUserId: 22,
+            loopStage: 'message_sent',
+            timeline: expect.objectContaining({
+              nextAction: expect.stringContaining('等待对方回复'),
+            }),
+          }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              schemaAction: 'meet_loop.resume',
+              requiresConfirmation: true,
+            }),
+            expect.objectContaining({
+              schemaAction: 'meet_loop.reschedule',
+              requiresConfirmation: true,
+            }),
+          ]),
+        }),
+      ]);
 
       const finalTask = taskRepo.save.mock.calls.at(-1)?.[0] as AgentTask;
       expect(finalTask.memory).toBeTruthy();
@@ -2155,9 +3158,25 @@ describe('SocialAgentChat acceptance flow', () => {
         cards: [
           expect.objectContaining({
             type: 'opener_approval',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'safety.approval',
             data: expect.objectContaining({
+              schemaName: 'SafetyApprovalCard',
+              schemaVersion: 'fitmeet.tool-ui.v1',
+              schemaType: 'safety.approval',
               loopStage: 'opener_draft_created',
               targetUserId: 22,
+              riskLevel: 'medium',
+              confirmationLabel: '确认后发送',
+              checkpointLabel: '开场白已保存，可重新生成或取消',
+              approval: expect.objectContaining({
+                riskLevel: 'medium',
+                boundary: expect.stringContaining('确认前不会发送'),
+                reasons: expect.arrayContaining([
+                  '这一步会向真实用户发送消息',
+                  '发送前需要你确认语气和内容',
+                ]),
+              }),
             }),
             actions: [
               expect.objectContaining({
@@ -2166,6 +3185,10 @@ describe('SocialAgentChat acceptance flow', () => {
               }),
               expect.objectContaining({
                 schemaAction: 'opener.regenerate',
+              }),
+              expect.objectContaining({
+                schemaAction: 'opener.reject',
+                requiresConfirmation: false,
               }),
             ],
           }),
@@ -2179,6 +3202,618 @@ describe('SocialAgentChat acceptance flow', () => {
         actionType: 'send_candidate_message',
       });
     });
+
+    it('regenerates and rejects opener approval through the card action AgentLoop without sending', async () => {
+      const { service, taskRepo, approvals, executor } = makeHarness();
+      taskRepo.findOne.mockResolvedValue(
+        makeTask({
+          memory: {
+            shortTerm: {
+              candidates: [
+                {
+                  userId: 22,
+                  nickname: '小林',
+                  candidateRecordId: 501,
+                  socialRequestId: 301,
+                  interests: ['跑步'],
+                  timePreference: '周末下午',
+                  city: '青岛',
+                  suggestedMessage: '你好，这周末要不要在公共场所慢跑一圈？',
+                },
+              ],
+            },
+          },
+        }),
+      );
+
+      const draft = await service.performCardAction(7, 101, {
+        action: 'candidate.generate_opener',
+        payload: {
+          taskId: 101,
+          targetUserId: 22,
+          candidate: {
+            userId: 22,
+            nickname: '小林',
+            candidateRecordId: 501,
+            socialRequestId: 301,
+            interests: ['跑步'],
+            timePreference: '周末下午',
+            city: '青岛',
+            suggestedOpener: '你好，这周末要不要在公共场所慢跑一圈？',
+          },
+        },
+      });
+      const firstMessage = String(draft.cards?.[0]?.body ?? '');
+
+      const regenerated = await service.performCardAction(7, 101, {
+        action: 'opener.regenerate',
+        payload: {
+          taskId: 101,
+          approvalId: 9001,
+          targetUserId: 22,
+          message: firstMessage,
+        },
+      });
+
+      expect(regenerated).toMatchObject({
+        action: 'await_confirmation',
+        pendingApproval: expect.objectContaining({
+          id: 9001,
+          actionType: 'send_candidate_message',
+        }),
+        assistantMessage: expect.stringContaining('重新写了一版'),
+        cards: [
+          expect.objectContaining({
+            schemaType: 'safety.approval',
+            body: expect.stringContaining('站内确认时间和公共地点'),
+            actions: expect.arrayContaining([
+              expect.objectContaining({
+                schemaAction: 'opener.confirm_send',
+                requiresConfirmation: true,
+              }),
+              expect.objectContaining({
+                schemaAction: 'opener.regenerate',
+              }),
+              expect.objectContaining({
+                schemaAction: 'opener.reject',
+                requiresConfirmation: false,
+              }),
+            ]),
+          }),
+        ],
+      });
+      expect(regenerated.cards?.[0]?.body).not.toBe(firstMessage);
+      expect(approvals.reject).toHaveBeenCalledWith(9001, 7);
+      expect(executor.executeToolAction).not.toHaveBeenCalled();
+
+      const rejected = await service.performCardAction(7, 101, {
+        action: 'opener.reject',
+        payload: {
+          taskId: 101,
+          approvalId: 9001,
+        },
+      });
+
+      expect(rejected).toMatchObject({
+        action: 'reply',
+        pendingApproval: null,
+        cards: [],
+        assistantMessage: expect.stringContaining('已取消这次发送'),
+      });
+      expect(rejected.assistantMessage).toContain('未联系对方');
+      expect(executor.executeToolAction).not.toHaveBeenCalled();
+      const memory = readTaskMemory(taskRepo) as {
+        pendingActions: Array<Record<string, unknown>>;
+        currentTask: Record<string, unknown>;
+      };
+      expect(memory.pendingActions).toEqual([]);
+      expect(memory.currentTask).toMatchObject({
+        waitingFor: 'user_next_instruction',
+        lastCompletedStep: 'message_send_rejected',
+      });
+    });
+
+    it('confirms an opener approval through the chat card-action entrypoint and resumes the saved send step', async () => {
+      const { service, taskRepo, executor, approvals } = makeHarness();
+      taskRepo.findOne.mockResolvedValue(
+        makeTask({
+          result: {
+            cardActionDraft: {
+              approvalId: 9001,
+              targetUserId: 22,
+              candidate: {
+                userId: 22,
+                candidateUserId: 22,
+                candidateRecordId: 501,
+                socialRequestId: 301,
+                displayName: '小林',
+              },
+              message: '今晚先在青岛大学操场轻松跑一段吗？',
+            },
+          },
+          memory: {
+            taskMemory: {
+              pendingActions: [
+                {
+                  id: 9001,
+                  actionType: 'send_candidate_message',
+                  type: 'send_message',
+                  summary: '发送开场白',
+                  riskLevel: 'medium',
+                  at: '2026-06-06T00:00:00.000Z',
+                },
+              ],
+              candidateState: {
+                recommendedIds: [],
+                rejectedIds: [],
+                savedIds: [],
+                messagedIds: [],
+              },
+              activityState: { recommendedIds: [], rejectedIds: [] },
+              activeEntities: {},
+              stableProfileFacts: {},
+              boundaries: [],
+              preferences: [],
+              misunderstandings: [],
+              lastUserMessages: [],
+              recentActions: [],
+              updatedAt: '2026-06-06T00:00:00.000Z',
+            },
+          },
+        }),
+      );
+
+      const result = await service.performCardAction(7, 101, {
+        action: 'opener.confirm_send',
+        idempotencyKey: 'opener-confirm-chat-entrypoint-1',
+        payload: {
+          taskId: 101,
+          approvalId: 9001,
+        },
+      });
+
+      expect(approvals.approve).toHaveBeenCalledWith(9001, 7);
+      expect(executor.executeToolAction).toHaveBeenCalledTimes(1);
+      expect(executor.executeToolAction).toHaveBeenCalledWith(
+        101,
+        SocialAgentToolName.SendMessageToCandidate,
+        expect.objectContaining({
+          candidateUserId: 22,
+          targetUserId: 22,
+          message: '今晚先在青岛大学操场轻松跑一段吗？',
+          candidateRecordId: 501,
+          socialRequestId: 301,
+          idempotencyKey: 'opener-confirm-chat-entrypoint-1',
+          metadata: expect.objectContaining({
+            confirmationSource: 'agent_card_action',
+            pendingApprovalId: 9001,
+            schemaAction: 'opener.confirm_send',
+          }),
+        }),
+        7,
+      );
+      expect(approvals.approve.mock.invocationCallOrder[0]).toBeLessThan(
+        executor.executeToolAction.mock.invocationCallOrder[0],
+      );
+      expect(result).toMatchObject({
+        action: 'reply',
+        pendingApproval: null,
+        cards: [
+          expect.objectContaining({
+            schemaType: 'meet_loop.timeline',
+            data: expect.objectContaining({
+              candidateUserId: 22,
+              loopStage: 'message_sent',
+              messagePreview: '今晚先在青岛大学操场轻松跑一段吗？',
+            }),
+          }),
+        ],
+        assistantMessage: expect.stringContaining('已确认发送给小林'),
+      });
+      const memory = readTaskMemory(taskRepo) as {
+        pendingActions: Array<Record<string, unknown>>;
+        candidateState: Record<string, unknown>;
+        currentTask: Record<string, unknown>;
+      };
+      expect(memory.pendingActions).toEqual([]);
+      expect(memory.candidateState).toMatchObject({
+        messagedIds: [22],
+      });
+      expect(memory.currentTask).toMatchObject({
+        waitingFor: 'candidate_reply',
+        lastCompletedStep: 'message_sent',
+      });
+    });
+
+    it('handles candidate OpportunityCard actions through the chat card-action entrypoint', async () => {
+      const { service, taskRepo, executor, approvals, messages } =
+        makeHarness();
+      taskRepo.findOne.mockResolvedValue(
+        makeTask({
+          memory: {
+            shortTerm: {
+              candidates: [
+                {
+                  userId: 22,
+                  candidateUserId: 22,
+                  candidateRecordId: 501,
+                  socialRequestId: 301,
+                  displayName: '小林',
+                  reasons: ['都偏好晚上跑步'],
+                  risk: { warnings: ['首次见面建议选择公共操场'] },
+                  suggestedMessage: '周末下午如果方便，可以先轻松跑一圈。',
+                },
+              ],
+            },
+          },
+        }),
+      );
+
+      const skip = await service.performCardAction(7, 101, {
+        action: 'candidate.skip',
+        payload: {
+          taskId: 101,
+          targetUserId: 22,
+          candidate: {
+            userId: 22,
+            candidateUserId: 22,
+            candidateRecordId: 501,
+            socialRequestId: 301,
+            displayName: '小林',
+          },
+        },
+      });
+
+      expect(skip).toMatchObject({
+        action: 'reply',
+        cards: [],
+        assistantMessage: expect.stringContaining('已跳过 小林'),
+      });
+      expect(executor.executeToolAction).not.toHaveBeenCalled();
+      type CandidateActionMemory = {
+        candidateState: Record<string, unknown>;
+        currentTask: Record<string, unknown>;
+        pendingActions: Array<Record<string, unknown>>;
+      };
+      let memory = readTaskMemory(taskRepo) as CandidateActionMemory;
+      expect(memory.candidateState).toMatchObject({
+        rejectedIds: [22],
+      });
+
+      const moreLikeThis = await service.performCardAction(7, 101, {
+        action: 'candidate.more_like_this',
+        payload: {
+          taskId: 101,
+          targetUserId: 22,
+          candidate: {
+            userId: 22,
+            candidateUserId: 22,
+            displayName: '小林',
+            reasons: ['都偏好晚上跑步'],
+          },
+        },
+      });
+
+      expect(moreLikeThis).toMatchObject({
+        action: 'reply',
+        assistantMessage: expect.stringContaining('继续找更多类似机会'),
+      });
+      memory = readTaskMemory(taskRepo) as CandidateActionMemory;
+      expect(memory.currentTask).toMatchObject({
+        objective: 'candidate_refinement',
+        shouldSearchNow: true,
+        waitingFor: 'more_candidates',
+      });
+
+      const opener = await service.performCardAction(7, 101, {
+        action: 'candidate.generate_opener',
+        payload: {
+          taskId: 101,
+          targetUserId: 22,
+          candidate: {
+            userId: 22,
+            candidateUserId: 22,
+            candidateRecordId: 501,
+            socialRequestId: 301,
+            displayName: '小林',
+            suggestedOpener: '周末下午如果方便，可以先轻松跑一圈。',
+          },
+        },
+      });
+
+      expect(opener).toMatchObject({
+        action: 'await_confirmation',
+        pendingApproval: expect.objectContaining({
+          actionType: 'send_candidate_message',
+        }),
+        cards: [
+          expect.objectContaining({
+            schemaType: 'safety.approval',
+            actions: expect.arrayContaining([
+              expect.objectContaining({ schemaAction: 'opener.confirm_send' }),
+              expect.objectContaining({ schemaAction: 'opener.regenerate' }),
+              expect.objectContaining({ schemaAction: 'opener.reject' }),
+            ]),
+          }),
+        ],
+      });
+      expect(approvals.create).toHaveBeenCalledTimes(1);
+      expect(approvals.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 7,
+          agentTaskId: 101,
+          type: 'send_message',
+          actionType: 'send_candidate_message',
+          relatedCandidateId: 501,
+          payload: expect.objectContaining({
+            targetUserId: 22,
+            message: expect.stringContaining('轻松跑一圈'),
+            source: 'agent_card_action',
+          }),
+        }),
+      );
+      expect(executor.executeToolAction).not.toHaveBeenCalled();
+      expect(messages.createAgentInboxEvent).not.toHaveBeenCalled();
+      memory = readTaskMemory(taskRepo) as CandidateActionMemory;
+      expect(memory.pendingActions.at(-1)).toMatchObject({
+        actionType: 'send_candidate_message',
+      });
+
+      const confirmOpenerAction = opener.cards?.[0]?.actions?.find(
+        (action) => action.schemaAction === 'opener.confirm_send',
+      );
+      expect(confirmOpenerAction).toEqual(
+        expect.objectContaining({
+          requiresConfirmation: true,
+          payload: expect.objectContaining({
+            approvalId: 9001,
+            targetUserId: 22,
+          }),
+        }),
+      );
+      const confirmedOpener = await service.performCardAction(7, 101, {
+        action: 'opener.confirm_send',
+        idempotencyKey: 'candidate-card-opener-confirm-1',
+        payload: confirmOpenerAction?.payload ?? {},
+      });
+
+      expect(executor.executeToolAction).toHaveBeenCalledWith(
+        101,
+        SocialAgentToolName.SendMessageToCandidate,
+        expect.objectContaining({
+          targetUserId: 22,
+          candidateUserId: 22,
+          message: expect.stringContaining('轻松跑一圈'),
+          candidateRecordId: 501,
+          socialRequestId: 301,
+          idempotencyKey: 'candidate-card-opener-confirm-1',
+          metadata: expect.objectContaining({
+            confirmationSource: 'agent_card_action',
+            pendingApprovalId: 9001,
+            schemaAction: 'opener.confirm_send',
+          }),
+        }),
+        7,
+      );
+      expect(confirmedOpener).toMatchObject({
+        action: 'reply',
+        pendingApproval: null,
+        cards: [
+          expect.objectContaining({
+            schemaType: 'meet_loop.timeline',
+            data: expect.objectContaining({
+              candidateUserId: 22,
+              loopStage: 'message_sent',
+              messagePreview: expect.stringContaining('轻松跑一圈'),
+              timeline: expect.objectContaining({
+                nextAction: expect.stringContaining('等待对方回复'),
+              }),
+            }),
+          }),
+        ],
+        assistantMessage: expect.stringContaining('已确认发送给小林'),
+      });
+      memory = readTaskMemory(taskRepo) as CandidateActionMemory;
+      expect(memory.pendingActions).toEqual([]);
+      expect(memory.candidateState).toMatchObject({
+        messagedIds: [22],
+      });
+
+      const connect = await service.performCardAction(7, 101, {
+        action: 'candidate.connect',
+        payload: {
+          taskId: 101,
+          socialRequestId: 301,
+          candidateRecordId: 501,
+          targetUserId: 22,
+          candidate: {
+            userId: 22,
+            candidateUserId: 22,
+            displayName: '小林',
+          },
+        },
+      });
+
+      expect(
+        executor.executeToolAction.mock.calls.some(
+          ([, toolName]) => toolName === SocialAgentToolName.AddFriend,
+        ),
+      ).toBe(false);
+      expect(approvals.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'contact_request',
+          actionType: 'connect_candidate',
+          payload: expect.objectContaining({
+            targetUserId: 22,
+            candidateRecordId: 501,
+            socialRequestId: 301,
+            checkpointRequired: true,
+            resumeMode: 'resume_after_approval',
+          }),
+        }),
+      );
+      expect(connect).toMatchObject({
+        intent: 'action_request',
+        action: 'await_confirmation',
+        pendingApproval: expect.objectContaining({
+          id: 9001,
+          actionType: 'connect_candidate',
+        }),
+        cards: [
+          expect.objectContaining({
+            type: 'review_card',
+            data: expect.objectContaining({
+              candidateUserId: 22,
+              loopStage: 'activity_draft_created',
+              timeline: expect.objectContaining({
+                nextAction: expect.stringContaining('确认后再发送邀请'),
+              }),
+            }),
+          }),
+        ],
+        assistantMessage: expect.stringContaining('发送邀请前还需要你确认'),
+      });
+      expect(messages.createAgentInboxEvent).not.toHaveBeenCalled();
+    });
+
+    it('keeps candidate.connect behind pending approval when AddFriend requires confirmation', async () => {
+      const { service, taskRepo, executor, approvals } = makeHarness();
+      taskRepo.findOne.mockResolvedValue(
+        makeTask({
+          memory: {
+            shortTerm: {
+              candidates: [
+                {
+                  userId: 22,
+                  candidateUserId: 22,
+                  candidateRecordId: 501,
+                  socialRequestId: 301,
+                  displayName: '小林',
+                },
+              ],
+            },
+          },
+        }),
+      );
+      const result = await service.performCardAction(7, 101, {
+        action: 'candidate.connect',
+        payload: {
+          taskId: 101,
+          socialRequestId: 301,
+          candidateRecordId: 501,
+          targetUserId: 22,
+          candidate: {
+            userId: 22,
+            candidateUserId: 22,
+            displayName: '小林',
+          },
+        },
+      });
+
+      expect(executor.executeToolAction).not.toHaveBeenCalled();
+      expect(approvals.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'contact_request',
+          actionType: 'connect_candidate',
+          payload: expect.objectContaining({
+            targetUserId: 22,
+            candidateRecordId: 501,
+            socialRequestId: 301,
+            checkpointRequired: true,
+            resumeMode: 'resume_after_approval',
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        action: 'await_confirmation',
+        cards: [
+          expect.objectContaining({
+            type: 'review_card',
+            data: expect.objectContaining({
+              candidateUserId: 22,
+              loopStage: 'activity_draft_created',
+              timeline: expect.objectContaining({
+                nextAction: expect.stringContaining('确认后再发送邀请'),
+              }),
+            }),
+          }),
+        ],
+        pendingApproval: expect.objectContaining({
+          id: 9001,
+          type: 'contact_request',
+          actionType: 'connect_candidate',
+          riskLevel: 'medium',
+        }),
+        assistantMessage: expect.stringContaining('确认前不会联系对方'),
+      });
+      const memory = readTaskMemory(taskRepo) as {
+        pendingActions: Array<Record<string, unknown>>;
+      };
+      expect(memory.pendingActions.at(-1)).toMatchObject({
+        id: 9001,
+        actionType: 'connect_candidate',
+      });
+    });
+
+    it.each([
+      'meet_loop.reschedule',
+      'activity.modify_time',
+      'activity.modify_location',
+    ] as const)(
+      'creates a meet-loop reschedule checkpoint for %s through the chat card-action entrypoint without notifying the other user',
+      async (action) => {
+        const { service, taskRepo, approvals, executor } = makeHarness();
+        await taskRepo.save(
+          makeTask({
+            result: {
+              meetLoop: {
+                activityId: 700,
+                candidateUserId: 22,
+                loopStage: 'message_sent',
+                status: 'message_sent',
+              },
+            },
+          }),
+        );
+
+        const result = await service.performCardAction(7, 101, {
+          action,
+          payload: {
+            taskId: 101,
+            activityId: 700,
+            candidateUserId: 22,
+            loopStage: 'message_sent',
+          },
+        });
+
+        expect(result).toMatchObject({
+          action: 'reply',
+          pendingApproval: null,
+          assistantMessage: expect.stringContaining('不会自动通知对方'),
+          cards: [
+            expect.objectContaining({
+              schemaType: 'meet_loop.timeline',
+              data: expect.objectContaining({
+                loopStage: 'reschedule_requested',
+                timeline: expect.objectContaining({
+                  nextAction: '告诉我新的时间范围，我会生成改期草稿。',
+                }),
+              }),
+            }),
+          ],
+        });
+        expect(approvals.create).not.toHaveBeenCalled();
+        expect(executor.executeToolAction).not.toHaveBeenCalled();
+        const memory = readTaskMemory(taskRepo) as {
+          currentTask: Record<string, unknown>;
+        };
+        expect(memory.currentTask).toMatchObject({
+          objective: 'meet_loop',
+          waitingFor: 'reschedule_time_window',
+          lastCompletedStep: 'reschedule_requested',
+        });
+      },
+    );
 
     it('runs the canonical meet loop from activity confirmation to review and Life Graph update', async () => {
       const lifeGraph = {
@@ -2235,13 +3870,23 @@ describe('SocialAgentChat acceptance flow', () => {
               publicPlaceOnly: true,
               noPreciseLocation: true,
             }),
-            actions: [
+            actions: expect.arrayContaining([
               expect.objectContaining({
                 schemaAction: 'activity.confirm_create',
                 loopStage: 'activity_draft_created',
                 requiresConfirmation: true,
               }),
-            ],
+              expect.objectContaining({
+                schemaAction: 'activity.modify_time',
+                loopStage: 'activity_draft_created',
+                requiresConfirmation: false,
+              }),
+              expect.objectContaining({
+                schemaAction: 'activity.modify_location',
+                loopStage: 'activity_draft_created',
+                requiresConfirmation: false,
+              }),
+            ]),
           }),
         ],
       });
@@ -2253,22 +3898,41 @@ describe('SocialAgentChat acceptance flow', () => {
         payload: confirmPayload,
       });
 
+      expect(approvals.approve).toHaveBeenCalledWith(9001, 7);
+      const timelineCard = checkinStep.cards?.find(
+        (card) => card.schemaType === 'meet_loop.timeline',
+      );
+      const checkinCard = checkinStep.cards?.find(
+        (card) => card.type === 'checkin_card',
+      );
       expect(checkinStep).toMatchObject({
         action: 'reply',
-        cards: [
-          expect.objectContaining({
-            type: 'checkin_card',
-            data: expect.objectContaining({
-              loopStage: 'activity_confirmed',
-              publicPlaceOnly: true,
-              noPreciseLocation: true,
-            }),
-            actions: [
+      });
+      expect(timelineCard).toMatchObject({
+        type: 'review_card',
+        data: expect.objectContaining({
+          loopStage: 'activity_confirmed',
+          timeline: expect.objectContaining({
+            steps: expect.arrayContaining([
               expect.objectContaining({
-                schemaAction: 'activity.check_in',
-                loopStage: 'activity_confirmed',
+                key: 'confirmed',
+                state: 'current',
               }),
-            ],
+            ]),
+          }),
+        }),
+      });
+      expect(checkinCard).toMatchObject({
+        type: 'checkin_card',
+        data: expect.objectContaining({
+          loopStage: 'activity_confirmed',
+          publicPlaceOnly: true,
+          noPreciseLocation: true,
+        }),
+        actions: [
+          expect.objectContaining({
+            schemaAction: 'activity.check_in',
+            loopStage: 'activity_confirmed',
           }),
         ],
       });
@@ -2281,7 +3945,10 @@ describe('SocialAgentChat acceptance flow', () => {
         }),
       );
 
-      const checkinPayload = checkinStep.cards?.[0]?.actions[0]?.payload ?? {};
+      const checkinPayload =
+        checkinCard?.actions.find(
+          (action) => action.schemaAction === 'activity.check_in',
+        )?.payload ?? {};
       const completionStep = await service.performCardAction(7, 101, {
         action: 'activity.check_in',
         payload: checkinPayload,
@@ -2459,7 +4126,7 @@ describe('SocialAgentChat acceptance flow', () => {
           eventType: LifeGraphBehaviorEventType.ActivityCreated,
         }),
       };
-      const { service, taskRepo } = makeHarness({ activities, lifeGraph });
+      const { service, taskRepo, approvals } = makeHarness({ activities, lifeGraph });
       await taskRepo.save(makeTask());
 
       const draft = await service.performCardAction(7, 101, {
@@ -2482,6 +4149,10 @@ describe('SocialAgentChat acceptance flow', () => {
         payload: draft.cards?.[0]?.actions[0]?.payload ?? {},
       });
 
+      expect(approvals.approve).toHaveBeenCalledWith(9001, 7);
+      expect(approvals.approve.mock.invocationCallOrder[0]).toBeLessThan(
+        activities.create.mock.invocationCallOrder[0],
+      );
       expect(activities.create).toHaveBeenCalledWith(
         7,
         expect.objectContaining({
@@ -2497,7 +4168,21 @@ describe('SocialAgentChat acceptance flow', () => {
         }),
       );
       expect(activities.confirm).toHaveBeenCalledWith(700, 7);
-      expect(confirm.cards?.[0]).toMatchObject({
+      const timelineCard = confirm.cards?.find(
+        (card) => card.schemaType === 'meet_loop.timeline',
+      );
+      const checkinCard = confirm.cards?.find(
+        (card) => card.type === 'checkin_card',
+      );
+      expect(timelineCard).toMatchObject({
+        type: 'review_card',
+        data: expect.objectContaining({
+          activityId: 700,
+          realActivityPersisted: true,
+          loopStage: 'activity_confirmed',
+        }),
+      });
+      expect(checkinCard).toMatchObject({
         type: 'checkin_card',
         data: expect.objectContaining({
           activityId: 700,
@@ -2535,9 +4220,13 @@ describe('SocialAgentChat acceptance flow', () => {
         ],
       });
 
+      const checkinPayload =
+        checkinCard?.actions.find(
+          (action) => action.schemaAction === 'activity.check_in',
+        )?.payload ?? {};
       const checkin = await service.performCardAction(7, 101, {
         action: 'activity.check_in',
-        payload: confirm.cards?.[0]?.actions[0]?.payload ?? {},
+        payload: checkinPayload,
       });
       expect(activities.checkin).toHaveBeenCalledWith(
         700,

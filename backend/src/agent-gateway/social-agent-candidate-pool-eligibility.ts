@@ -27,6 +27,9 @@ const ACTIVE_ACTIVITY_STATUSES = [
 const DISABLED_BOUNDARY_RE =
   /(不被推荐|不参与匹配|关闭推荐|不接受推荐|不要推荐|禁止推荐|退出匹配|关闭匹配)/i;
 
+const SAFETY_EXCLUSION_RE =
+  /(拉黑|屏蔽|举报|投诉|骚扰|风控|风险用户|封禁|禁用匹配|安全拦截|不再推荐|不要再推荐|投诉处理中|举报处理中)/i;
+
 export function hasSocialAgentRecommendationBoundary(
   profile: UserSocialProfile | null,
   delegate: AiDelegateProfile | null,
@@ -35,6 +38,37 @@ export function hasSocialAgentRecommendationBoundary(
     [profile?.privacyBoundary, profile?.rejectRules, delegate?.boundaries]
       .filter(Boolean)
       .join(' '),
+  );
+}
+
+export function hasSocialAgentSafetyExclusionBoundary(
+  profile: UserSocialProfile | null,
+  delegate: AiDelegateProfile | null,
+): boolean {
+  return SAFETY_EXCLUSION_RE.test(
+    [
+      profile?.privacyBoundary,
+      profile?.rejectRules,
+      delegate?.boundaries,
+      textFromRecord(profile, 'safetyNotes'),
+      textFromRecord(profile, 'moderationNotes'),
+      textFromRecord(profile, 'riskWarnings'),
+      textFromRecord(delegate, 'safetyNotes'),
+      textFromRecord(delegate, 'moderationNotes'),
+      textFromRecord(delegate, 'riskWarnings'),
+    ]
+      .filter(Boolean)
+      .join(' '),
+  );
+}
+
+export function isSocialAgentProfileCandidateOptedIn(
+  profile: UserSocialProfile | null,
+): boolean {
+  return Boolean(
+    profile &&
+      profile.profileDiscoverable === true &&
+      profile.agentCanRecommendMe === true,
   );
 }
 
@@ -82,4 +116,23 @@ export function isSocialAgentActivityLikePublicIntent(
   return /(活动|约练|跑步|羽毛球|健身|瑜伽|徒步|骑行|咖啡|拍照|摄影|city|walk|running|fitness|coffee|photo)/i.test(
     text,
   );
+}
+
+function textFromRecord(source: unknown, key: string): string {
+  if (!source || typeof source !== 'object') return '';
+  const value = (source as Record<string, unknown>)[key];
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === 'string' ? item : ''))
+      .filter(Boolean)
+      .join(' ');
+  }
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>)
+      .map((item) => (typeof item === 'string' ? item : ''))
+      .filter(Boolean)
+      .join(' ');
+  }
+  return '';
 }
