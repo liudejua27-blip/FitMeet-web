@@ -167,6 +167,11 @@ if ! wait_for_compose_exec backend "backend Agent restore patch" node -e "const 
   "${COMPOSE[@]}" ps >&2
   exit 1
 fi
+if ! wait_for_compose_exec backend "backend release metadata" node -e "const http=require('http');const expected=process.env.FITMEET_RELEASE_COMMIT||'unknown';http.get('http://127.0.0.1:3000/api/health',(r)=>{let b='';r.on('data',(c)=>b+=c);r.on('end',()=>{try{const h=JSON.parse(b);const got=String(h.release&&h.release.commit||'unknown');if(r.statusCode!==200||got==='unknown'||(expected!=='unknown'&&!got.startsWith(expected)&&!expected.startsWith(got))){console.error('release mismatch', {expected, got, status:r.statusCode});process.exit(1);}process.exit(0);}catch(e){console.error(e);process.exit(1);}});}).on('error',(e)=>{console.error(e);process.exit(1);});"; then
+  echo "[FAIL] backend /api/health does not expose the expected release metadata" >&2
+  "${COMPOSE[@]}" ps >&2
+  exit 1
+fi
 if ! wait_for_compose_exec subagent-worker "subagent-worker dedicated healthcheck" node dist/agent-gateway/subagent-worker-healthcheck.js; then
   echo "[FAIL] subagent-worker dedicated healthcheck failed after startup" >&2
   "${COMPOSE[@]}" ps >&2

@@ -73,6 +73,11 @@ describe('production deploy readiness', () => {
     expect(deployScript).toContain(
       'node dist/agent-gateway/subagent-worker-healthcheck.js',
     );
+    expect(deployScript).toContain('backend release metadata');
+    expect(deployScript).toContain('release mismatch');
+    expect(deployScript).toContain(
+      'backend /api/health does not expose the expected release metadata',
+    );
     expect(deployScript).toContain('DEPLOY_LOG_TAIL="${DEPLOY_LOG_TAIL:-600}"');
     expect(deployScript).toContain('scan_deploy_logs');
     expect(deployScript).toContain('fk_agent_activity_logs_connection');
