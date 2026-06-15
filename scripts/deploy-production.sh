@@ -9,6 +9,7 @@ RUN_DB_MIGRATIONS="${RUN_DB_MIGRATIONS:-${RUN_MIGRATIONS:-true}}"
 PNPM_VERSION="${PNPM_VERSION:-10.30.3}"
 PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://www.ourfitmeet.cn}"
 PUBLIC_API_BASE_URL="${PUBLIC_API_BASE_URL:-}"
+DEPLOY_LOG_TAIL="${DEPLOY_LOG_TAIL:-600}"
 
 cd "$APP_DIR"
 
@@ -121,6 +122,29 @@ wait_for_compose_exec() {
   echo "[OK] ${label}"
 }
 
+scan_deploy_logs() {
+  local services=(backend subagent-worker)
+  local pattern
+  pattern='EACCES|relation "[^"]+" does not exist|fk_agent_activity_logs_connection|foreign key constraint|ERR_PNPM_LOCKFILE_CONFIG_MISMATCH|ts-node: not found|yaml: did not find expected key|UnhandledPromiseRejection|\bERROR\b'
+
+  for service in "${services[@]}"; do
+    local log_file
+    log_file="$(mktemp)"
+    if ! "${COMPOSE[@]}" logs --tail="${DEPLOY_LOG_TAIL}" "${service}" >"${log_file}" 2>&1; then
+      rm -f "${log_file}"
+      echo "[FAIL] Unable to read docker compose logs for ${service}" >&2
+      exit 1
+    fi
+    if grep -Eiq "${pattern}" "${log_file}"; then
+      echo "[FAIL] Recent ${service} logs contain production failure patterns:" >&2
+      grep -Ein "${pattern}" "${log_file}" | tail -40 >&2
+      rm -f "${log_file}"
+      exit 1
+    fi
+    rm -f "${log_file}"
+  done
+}
+
 if ! wait_for_compose_exec backend "backend process" node -e "process.exit(0)"; then
   "${COMPOSE[@]}" ps >&2
   "${COMPOSE[@]}" logs --tail=160 backend >&2
@@ -136,8 +160,8 @@ fi
 echo "[post] Show service status"
 "${COMPOSE[@]}" ps
 
-echo "[post] Check backend logs"
-"${COMPOSE[@]}" logs --tail=120 backend
+echo "[post] Scan backend and worker logs"
+scan_deploy_logs
 
 echo "[DONE] Run production verification from your local machine:"
 echo "BASE_URL=$PUBLIC_BASE_URL API_BASE_URL=$PUBLIC_API_BASE_URL ./scripts/verify-production.sh"

@@ -7,6 +7,8 @@ AGENT_TOKEN="${AGENT_TOKEN:-}"
 RUN_APP_SMOKE="${RUN_APP_SMOKE:-false}"
 RUN_PUBLIC_INTENT_WRITE="${RUN_PUBLIC_INTENT_WRITE:-false}"
 CHECK_LOCAL_COMPOSE_HEALTH="${CHECK_LOCAL_COMPOSE_HEALTH:-false}"
+CHECK_LOCAL_COMPOSE_LOGS="${CHECK_LOCAL_COMPOSE_LOGS:-auto}"
+COMPOSE_LOG_TAIL="${COMPOSE_LOG_TAIL:-600}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 ENV_FILE="${ENV_FILE:-.env.production}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-20}"
@@ -32,6 +34,9 @@ Environment:
   RUN_APP_SMOKE=true               Run backend smoke:app-core against this remote API.
   RUN_PUBLIC_INTENT_WRITE=true     Exercise public social intent write/read-back.
   CHECK_LOCAL_COMPOSE_HEALTH=true  Also verify local ECS docker compose backend and worker health.
+  CHECK_LOCAL_COMPOSE_LOGS=auto|true|false
+                                   Scan backend/worker logs when local compose health is checked.
+  COMPOSE_LOG_TAIL=600             Number of recent log lines to scan per service.
   APP_SMOKE_*                      Optional backend smoke credentials/options.
 EOF
 }
@@ -88,6 +93,35 @@ skip() {
 fail() {
   printf '[FAIL] %s\n' "$1" >&2
   exit 1
+}
+
+should_check_local_compose_logs() {
+  if [[ "${CHECK_LOCAL_COMPOSE_LOGS}" == "false" ]]; then
+    return 1
+  fi
+  [[ "${CHECK_LOCAL_COMPOSE_HEALTH}" == "true" ]]
+}
+
+scan_local_compose_logs() {
+  local services=(backend subagent-worker)
+  local pattern
+  pattern='EACCES|relation "[^"]+" does not exist|fk_agent_activity_logs_connection|foreign key constraint|ERR_PNPM_LOCKFILE_CONFIG_MISMATCH|ts-node: not found|yaml: did not find expected key|UnhandledPromiseRejection|\bERROR\b'
+
+  for service in "${services[@]}"; do
+    local log_file
+    log_file="$(mktemp)"
+    if ! docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" logs --tail="${COMPOSE_LOG_TAIL}" "${service}" >"${log_file}" 2>&1; then
+      rm -f "${log_file}"
+      fail "Unable to read local compose logs for ${service}."
+    fi
+    if grep -Eiq "${pattern}" "${log_file}"; then
+      echo "[FAIL] Recent ${service} logs contain production failure patterns:" >&2
+      grep -Ein "${pattern}" "${log_file}" | tail -40 >&2
+      rm -f "${log_file}"
+      exit 1
+    fi
+    rm -f "${log_file}"
+  done
 }
 
 curl_status() {
@@ -285,6 +319,9 @@ if [[ "${CHECK_LOCAL_COMPOSE_HEALTH}" == "true" ]]; then
     cd "${ROOT_DIR}"
     docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" exec -T backend node -e "process.exit(0)" >/dev/null
     docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" exec -T subagent-worker node dist/agent-gateway/subagent-worker-healthcheck.js >/dev/null
+    if should_check_local_compose_logs; then
+      scan_local_compose_logs
+    fi
   )
   ok "Local compose backend and subagent-worker healthchecks passed"
 fi
