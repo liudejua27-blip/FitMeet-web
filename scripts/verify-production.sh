@@ -100,6 +100,21 @@ fail() {
   exit 1
 }
 
+fail_release_metadata() {
+  printf '[FAIL] %s\n' "Backend health release metadata did not match expected commit." >&2
+  if [[ -n "${EXPECTED_RELEASE_COMMIT}" ]]; then
+    cat >&2 <<EOF
+[hint] The public API is not serving the expected release (${EXPECTED_RELEASE_COMMIT}).
+[hint] On the ECS host, run:
+[hint]   cd /opt/FitMeet-web
+[hint]   EXPECTED_RELEASE_COMMIT=${EXPECTED_RELEASE_COMMIT} PUBLIC_API_BASE_URL=${API_BASE_URL} ./scripts/ecs-release-diagnose.sh
+[hint] If backend-container matches but public does not, check nginx/upstream or another stack serving the domain.
+[hint] If backend-container is also unknown/mismatched, rerun deploy-production.sh with the latest release zip installed.
+EOF
+  fi
+  exit 1
+}
+
 should_check_local_compose_logs() {
   if [[ "${CHECK_LOCAL_COMPOSE_LOGS}" == "false" ]]; then
     return 1
@@ -193,7 +208,7 @@ if (expected && !commit.startsWith(expected) && !expected.startsWith(commit)) {
 }
 process.stdout.write(`${commit} source=${source}${builtAt ? ` builtAt=${builtAt}` : ''}`);
 NODE
-)" || fail "Backend health release metadata did not match expected commit."
+)" || fail_release_metadata
 ok "Backend release -> ${remote_release}"
 
 node - "${openapi_body}" <<'NODE'
