@@ -3002,11 +3002,12 @@ describe('AgentWorkspacePage', () => {
     useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
     const restored = {
       ...mockResponse(),
-      assistantMessage: '我已经恢复了这段对话。',
+      assistantMessage: '从已保存的步骤继续：正在等待你确认。原始目标：你有什么功能',
       cards: [],
     };
     vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue({
       ...emptySession(),
+      hasSession: true,
       activeTaskId: 42,
       task: { id: 42, permissionMode: 'limited_auto', goal: '上一次的问题', status: 'succeeded' },
       result: restored,
@@ -3017,6 +3018,9 @@ describe('AgentWorkspacePage', () => {
     await renderAgentPage('/agent/chat/42');
 
     await waitFor(() => expect(socialAgentApi.restoreSession).toHaveBeenCalledWith(undefined));
+    expect(screen.getByText('我已经恢复了上一次对话。')).toBeInTheDocument();
+    expect(screen.queryByText(/原始目标/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/从已保存的步骤继续/)).not.toBeInTheDocument();
     expect(runTaskNextSpy).not.toHaveBeenCalled();
     expect(document.querySelector('.agent-gpt-result-block')).toBeNull();
     expect(document.querySelector('.codex-ant-pet')).toBeNull();

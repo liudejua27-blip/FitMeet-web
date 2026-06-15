@@ -769,34 +769,32 @@ export class AgentRunCheckpointService {
     step?: SocialAgentVisibleStep;
     approvalRequired?: boolean;
   }): string {
-    const goal = cleanDisplayText(input.goal, '当前任务');
     if (input.action === 'retry') {
       return input.step
-        ? `只重试已保存的工具步骤：${input.step.label}。保持同一任务上下文和已确认边界，避免重复执行无关步骤。原始目标：${goal}`
-        : `只重试刚才失败的工具步骤。保持同一任务上下文和已确认边界，避免重复执行无关步骤。原始目标：${goal}`;
+        ? `只重试已保存的工具步骤：${input.step.label}。保持同一任务上下文和已确认边界，避免重复执行无关步骤。`
+        : '只重试刚才失败的工具步骤。保持同一任务上下文和已确认边界，避免重复执行无关步骤。';
     }
     if (input.action === 'fork') {
       return input.step
-        ? `从已保存的工具步骤创建一条新分支继续：${input.step.label}。原始目标：${goal}`
-        : `从已保存的 Agent 状态创建一条新分支继续。原始目标：${goal}`;
+        ? `从已保存的工具步骤创建一条新分支继续：${input.step.label}。`
+        : '从已保存的 Agent 状态创建一条新分支继续。';
     }
     if (input.action === 'replay') {
       return input.step
-        ? `回放已保存的工具步骤：${input.step.label}，并基于最新状态重新整理回复。原始目标：${goal}`
-        : `回放已保存的 Agent 步骤，并基于最新状态重新整理回复。原始目标：${goal}`;
+        ? `回放已保存的工具步骤：${input.step.label}，并基于最新状态重新整理回复。`
+        : '回放已保存的 Agent 步骤，并基于最新状态重新整理回复。';
     }
     if (input.approvalRequired) {
-      return `用户已经确认刚才中断的高风险步骤。请从同一个任务的已保存中断点继续，不要重新询问已确认内容。原始目标：${goal}`;
+      return '用户已经确认刚才中断的高风险步骤。请从同一个任务的已保存中断点继续，不要重新询问已确认内容。';
     }
     if (input.step) {
-      return `从已保存的步骤继续：${input.step.label}。原始目标：${goal}`;
+      return `从已保存的步骤继续：${input.step.label}。`;
     }
-    return `继续刚才保存的 Agent 步骤。原始目标：${goal}`;
+    return '继续刚才保存的 Agent 步骤。';
   }
 
   private buildApprovalRejectedResumePrompt(goal: string): string {
-    const safeGoal = cleanDisplayText(goal, '当前任务');
-    return `用户已经拒绝刚才中断的高风险步骤。请从同一个任务的已保存中断点继续，但不要执行被拒绝的动作，不要发送消息、连接候选人或创建活动。请自然说明已取消，并给出低风险替代方案。原始目标：${safeGoal}`;
+    return '用户已经拒绝刚才中断的高风险步骤。请从同一个任务的已保存中断点继续，但不要执行被拒绝的动作，不要发送消息、连接候选人或创建活动。请自然说明已取消，并给出低风险替代方案。';
   }
 
   private toolNameFromStep(step: SocialAgentVisibleStep): string | null {

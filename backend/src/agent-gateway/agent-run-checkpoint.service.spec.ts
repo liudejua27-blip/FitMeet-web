@@ -203,6 +203,7 @@ describe('AgentRunCheckpointService', () => {
     expect(checkpoint?.resumePrompt).toContain(
       '用户已经确认刚才中断的高风险步骤',
     );
+    expect(checkpoint?.resumePrompt).not.toContain('原始目标');
   });
 
   it('returns a resume plan for the same checkpoint after approval', async () => {
@@ -531,6 +532,7 @@ describe('AgentRunCheckpointService', () => {
       idempotencyKey:
         'agent-checkpoint:retry:agent-task:42:checkpoint:2:step:search',
     });
+    expect(retry?.resumePrompt).not.toContain('原始目标');
     expect(rows[1]).toMatchObject({
       id: 2,
       type: AgentRunCheckpointType.Retry,

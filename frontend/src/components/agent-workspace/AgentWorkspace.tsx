@@ -64,7 +64,7 @@ const RUN_NEXT_LOW_TOUCH_INTERVAL_MS = 90 * 1000;
 const ASSISTANT_STREAMING_PLACEHOLDER = '\u200b';
 
 const technicalPublicTextPattern =
-  /\b(traceId|agentTrace|structuredIntent|planner|tool\s*call|toolCall|toolCalls|DeepSeek|OpenAI|raw JSON|stack)\b|Life Graph Agent|Social Match Agent|Meet Loop Agent|工具调用|数据库字段|错误堆栈/i;
+  /\b(traceId|agentTrace|structuredIntent|planner|tool\s*call|toolCall|toolCalls|DeepSeek|OpenAI|raw JSON|stack)\b|Life Graph Agent|Social Match Agent|Meet Loop Agent|工具调用|数据库字段|错误堆栈|原始目标|从已保存的步骤继续|从已保存的工具步骤|从已保存的 Agent 状态|继续刚才保存的 Agent 步骤/i;
 
 const conversationSteps: Step[] = [
   { id: 'understand', label: '正在理解你的问题', status: 'pending' },
