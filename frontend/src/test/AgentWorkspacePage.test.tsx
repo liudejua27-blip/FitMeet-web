@@ -486,6 +486,7 @@ describe('AgentWorkspacePage', () => {
     expect(screen.getByTestId('assistant-ui-sidebar-account-menu')).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /人物画像/ })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /Life Graph/ })).toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-reminder-toggle')).not.toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByTestId('assistant-ui-sidebar-account-menu')).not.toBeInTheDocument();
     expect(screen.getByText('准备开始')).toBeInTheDocument();

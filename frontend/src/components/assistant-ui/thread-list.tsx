@@ -394,7 +394,7 @@ function SidebarAccountStatus({
               aria-hidden="true"
             />
           </button>
-          {reminderToggle}
+          {!menuOpen ? reminderToggle : null}
         </div>
       )}
     </div>
