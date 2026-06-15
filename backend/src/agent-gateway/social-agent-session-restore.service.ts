@@ -22,6 +22,7 @@ import {
 } from './entities/agent-task.entity';
 import type {
   SocialAgentAsyncRunSnapshot,
+  SocialAgentChatReplanRunResult,
   SocialAgentChatRunResult,
   SocialAgentPendingApprovalSnapshot,
   SocialAgentSessionSnapshot,
@@ -83,6 +84,10 @@ export class SocialAgentSessionRestoreService {
       input.visibleStepLabel,
       'session',
     );
+
+    if (this.shouldHideGenericCheckpointSession(input.task, context)) {
+      return this.assembler.emptySession(restoredAt);
+    }
 
     return this.assembler.buildSessionSnapshot({
       task: input.task,
@@ -179,6 +184,7 @@ export class SocialAgentSessionRestoreService {
       }),
       task,
       latestCheckpoint,
+      pendingApprovals,
     );
 
     return {
@@ -207,6 +213,7 @@ export class SocialAgentSessionRestoreService {
     result: ReturnType<typeof readSocialAgentRestorableResult>,
     task: AgentTask,
     checkpoint: AgentRunCheckpoint | null,
+    pendingApprovals: SocialAgentPendingApprovalSnapshot[],
   ): ReturnType<typeof readSocialAgentRestorableResult> {
     if (!checkpoint) return result;
     const runtime = {
@@ -230,7 +237,7 @@ export class SocialAgentSessionRestoreService {
     };
     if (result) {
       return {
-        ...result,
+        ...this.sanitizeRestoredResult(result, pendingApprovals),
         runtime: {
           ...(result.runtime ?? {}),
           ...runtime,
@@ -243,9 +250,7 @@ export class SocialAgentSessionRestoreService {
       visibleSteps: Array.isArray(checkpoint.steps)
         ? checkpoint.steps.map((step) => ({ ...step }))
         : [],
-      assistantMessage:
-        cleanDisplayText(checkpoint.resumePrompt, '') ||
-        '我已经恢复到上次中断的 Agent 步骤。',
+      assistantMessage: this.safeCheckpointMessage(pendingApprovals),
       cards: [],
       socialRequestDraft: null,
       candidates: [],
@@ -259,5 +264,78 @@ export class SocialAgentSessionRestoreService {
       approvalRequiredActions: [],
       runtime,
     } as unknown as SocialAgentChatRunResult;
+  }
+
+  private sanitizeRestoredResult(
+    result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult,
+    pendingApprovals: SocialAgentPendingApprovalSnapshot[],
+  ): SocialAgentChatRunResult | SocialAgentChatReplanRunResult {
+    const assistantMessage = cleanDisplayText(result.assistantMessage, '');
+    if (!this.isStaleCheckpointCopy(assistantMessage)) return result;
+    return {
+      ...result,
+      assistantMessage: this.safeCheckpointMessage(pendingApprovals),
+      message: this.safeCheckpointMessage(pendingApprovals),
+      approvalRequiredActions:
+        pendingApprovals.length > 0 ? result.approvalRequiredActions : [],
+    };
+  }
+
+  private safeCheckpointMessage(
+    pendingApprovals: SocialAgentPendingApprovalSnapshot[],
+  ): string {
+    if (pendingApprovals.length > 0) {
+      return '还有一步需要你确认，我会在确认后继续。';
+    }
+    return '我可以继续上次的话题，也可以重新开始。';
+  }
+
+  private isStaleCheckpointCopy(value: string): boolean {
+    if (!value) return false;
+    return [
+      '原始目标',
+      '从已保存的步骤继续',
+      '从已保存的工具步骤',
+      '从已保存的 Agent 状态',
+      '继续刚才保存的 Agent 步骤',
+    ].some((pattern) => value.includes(pattern));
+  }
+
+  private shouldHideGenericCheckpointSession(
+    task: AgentTask,
+    context: {
+      pendingApprovals: SocialAgentPendingApprovalSnapshot[];
+      result: ReturnType<typeof readSocialAgentRestorableResult>;
+    },
+  ): boolean {
+    if (context.pendingApprovals.length > 0 || !context.result) return false;
+    const result = context.result;
+    if (result.assistantMessage !== this.safeCheckpointMessage([])) {
+      return false;
+    }
+    if (
+      result.socialRequestDraft ||
+      (result.candidates?.length ?? 0) > 0 ||
+      (result.cards?.length ?? 0) > 0 ||
+      (result.approvalRequiredActions?.length ?? 0) > 0
+    ) {
+      return false;
+    }
+    return this.isGenericOrdinaryGoal(cleanDisplayText(task.goal, ''));
+  }
+
+  private isGenericOrdinaryGoal(goal: string): boolean {
+    const normalized = goal.trim().toLowerCase();
+    if (!normalized) return true;
+    if (
+      /找人|约练|搭子|活动|认识|交友|好友|邀请|候选|匹配|理想型|羽毛球|跑步|健身|户外|篮球|骑行|瑜伽|游泳/.test(
+        normalized,
+      )
+    ) {
+      return false;
+    }
+    return /你有什么功能|有什么功能|能做什么|介绍一下|介绍你自己|help|hello|你好|普通聊天|功能咨询/.test(
+      normalized,
+    );
   }
 }

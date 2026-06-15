@@ -145,6 +145,7 @@ function makeCheckpoint() {
 
 function makeHarness(
   options: {
+    approvals?: AgentApprovalRequest[];
     approvalsReject?: boolean;
     checkpoint?: ReturnType<typeof makeCheckpoint> | null;
     events?: AgentTaskEvent[];
@@ -166,7 +167,7 @@ function makeHarness(
       .mockImplementation(() =>
         options.approvalsReject
           ? Promise.reject(new Error('approval db offline'))
-          : Promise.resolve([makeApproval()]),
+          : Promise.resolve(options.approvals ?? [makeApproval()]),
       ),
   };
   const checkpoints = {
@@ -321,6 +322,51 @@ describe('SocialAgentSessionRestoreService', () => {
         canFork: true,
         parentCheckpointId: null,
       },
+    });
+  });
+
+  it('silences generic stale checkpoint sessions from latest restore', async () => {
+    const task = makeTask({
+      goal: '你有什么功能',
+      status: AgentTaskStatus.WaitingReply,
+      memory: {
+        socialAgentChat: {
+          conversation: [
+            {
+              id: 'turn_user_generic',
+              role: 'user',
+              content: '你有什么功能',
+              at: '2026-06-05T00:00:00.000Z',
+            },
+          ],
+        },
+      },
+      result: {},
+    });
+    task.result = {};
+    const { service } = makeHarness({
+      approvals: [],
+      approvalsReject: false,
+      checkpoint: {
+        ...makeCheckpoint(),
+        resumePrompt:
+          '从已保存的步骤继续：正在等待你确认。原始目标：你有什么功能',
+      },
+      events: [],
+      task,
+    });
+
+    const snapshot = await service.buildSessionSnapshot({
+      ownerUserId: 7,
+      task,
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(snapshot).toMatchObject({
+      hasSession: false,
+      activeTaskId: null,
+      result: null,
+      messages: [],
     });
   });
 
