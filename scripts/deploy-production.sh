@@ -150,6 +150,11 @@ if ! wait_for_compose_exec backend "backend process" node -e "process.exit(0)"; 
   "${COMPOSE[@]}" logs --tail=160 backend >&2
   exit 1
 fi
+if ! wait_for_compose_exec backend "backend Agent restore patch" node -e "const fs=require('fs');const p='dist/agent-gateway/social-agent-session-restore.service.js';const s=fs.readFileSync(p,'utf8');if(!s.includes('shouldHideGenericCheckpointSession')||!s.includes('原始目标')) process.exit(1);"; then
+  echo "[FAIL] backend container does not contain the latest Agent session restore patch" >&2
+  "${COMPOSE[@]}" ps >&2
+  exit 1
+fi
 if ! wait_for_compose_exec subagent-worker "subagent-worker dedicated healthcheck" node dist/agent-gateway/subagent-worker-healthcheck.js; then
   echo "[FAIL] subagent-worker dedicated healthcheck failed after startup" >&2
   "${COMPOSE[@]}" ps >&2
