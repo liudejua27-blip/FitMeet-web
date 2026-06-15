@@ -59,6 +59,14 @@ const forbiddenOrdinarySocialSelectors = [
   '[data-testid="assistant-ui-approval-tool"]',
 ];
 
+const forbiddenRecoveryCopy = [
+  /原始目标/,
+  /从已保存的步骤继续/,
+  /从已保存的工具步骤/,
+  /从已保存的 Agent 状态/,
+  /继续刚才保存的 Agent 步骤/,
+];
+
 function isLocalTarget(url) {
   const parsed = new URL(url);
   return ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname);
@@ -114,6 +122,16 @@ async function assertShell(page, viewport) {
     if (count > 0) throw new Error(`${viewport.name}: forbidden legacy selector rendered: ${selector}`);
   }
   await assertNoHorizontalOverflow(page, viewport.name);
+  await assertNoStaleRecoveryCopy(page, `${viewport.name} shell`);
+}
+
+async function assertNoStaleRecoveryCopy(page, label) {
+  const text = await page.locator('body').innerText();
+  for (const pattern of forbiddenRecoveryCopy) {
+    if (pattern.test(text)) {
+      throw new Error(`${label}: leaked stale checkpoint recovery copy matching ${pattern}`);
+    }
+  }
 }
 
 async function newChat(page) {
@@ -163,6 +181,7 @@ async function assertOrdinaryChat(page) {
   if (/推荐给你的人|确认后发邀请|发送邀请前需要你确认/.test(text)) {
     throw new Error('ordinary chat leaked social recommendation copy.');
   }
+  await assertNoStaleRecoveryCopy(page, 'ordinary chat');
 }
 
 async function assertSocialIntent(page) {
@@ -269,6 +288,7 @@ async function main() {
         await assertSocialIntent(page);
         const socialShot = await screenshot(page, `${viewport.name}-social-intent`);
         lines.push(`- social intent proof: \`${path.relative(rootDir, socialShot)}\``);
+        await assertNoStaleRecoveryCopy(page, 'social intent');
       }
       await context.close();
     }
