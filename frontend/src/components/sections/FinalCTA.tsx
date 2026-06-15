@@ -13,7 +13,7 @@ export function FinalCTA() {
         </h2>
         <div className="mt-12 flex flex-col items-center justify-center gap-3 sm:flex-row">
           {gateways.map((gateway) => (
-            <PremiumButton key={gateway.id} href={gateway.href} variant="secondary">
+            <PremiumButton key={gateway.id} to={gateway.href} variant="secondary">
               {gateway.cta}
             </PremiumButton>
           ))}

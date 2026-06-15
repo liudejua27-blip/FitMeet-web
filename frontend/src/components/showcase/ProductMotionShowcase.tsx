@@ -1,5 +1,7 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { CSSProperties } from 'react';
+import { SiteLink } from '../navigation/SiteLink';
+import { navigateToDiscoverWithScrollReset } from '../../lib/scrollNavigation';
 
 const activityCards = [
   {
@@ -7,18 +9,21 @@ const activityCards = [
     meta: '2.4km · 20:30 · 低压力',
     tag: 'Agent 推荐',
     score: '94',
+    detailHref: '/discover',
   },
   {
     title: '周末力量训练',
     meta: '健身房 · 初中级 · 2 人',
     tag: '站内确认',
     score: '88',
+    detailHref: '/discover',
   },
   {
     title: '饭后散步聊天',
     meta: '附近公园 · 先线上聊',
     tag: '安全优先',
     score: '81',
+    detailHref: '/discover',
   },
 ];
 
@@ -28,6 +33,14 @@ const signalRows = [
 ];
 
 export function ProductMotionShowcase() {
+  const navigate = useNavigate();
+
+  const jumpToDiscover = () => {
+    navigateToDiscoverWithScrollReset(navigate, {
+      behavior: 'auto',
+    });
+  };
+
   return (
     <section className="product-motion-showcase" aria-label="FitMeet 产品动态展示">
       <div className="product-motion-showcase__copy">
@@ -38,7 +51,7 @@ export function ProductMotionShowcase() {
         </p>
         <div>
           <Link to="/agent">体验 Agent</Link>
-          <Link to="/discover">进入发现</Link>
+          <button type="button" onClick={jumpToDiscover}>进入发现</button>
         </div>
       </div>
 
@@ -58,13 +71,20 @@ export function ProductMotionShowcase() {
           </header>
           <main>
             {activityCards.map((card) => (
-              <article key={card.title}>
-                <div>
-                  <strong>{card.title}</strong>
-                  <p>{card.meta}</p>
-                </div>
-                <span>{card.score}</span>
-              </article>
+              <SiteLink
+                key={card.title}
+                to={card.detailHref}
+                className="product-motion-showcase__scene-card"
+                aria-label={`查看${card.title}详情`}
+              >
+                <article>
+                  <div>
+                    <strong>{card.title}</strong>
+                    <p>{card.meta}</p>
+                  </div>
+                  <span>{card.score}</span>
+                  </article>
+              </SiteLink>
             ))}
           </main>
         </div>
@@ -80,9 +100,14 @@ export function ProductMotionShowcase() {
         </div>
         <div className="product-motion-lanes">
           {activityCards.map((card, index) => (
-            <span key={card.title} style={{ '--lane-delay': `${index * -3}s` } as CSSProperties}>
+            <SiteLink
+              key={card.title}
+              to={card.detailHref}
+              className="product-motion-lane-link"
+              style={{ '--lane-delay': `${index * -3}s` } as CSSProperties}
+            >
               {card.tag} · {card.title}
-            </span>
+            </SiteLink>
           ))}
         </div>
       </div>

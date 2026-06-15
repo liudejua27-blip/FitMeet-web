@@ -23,6 +23,10 @@ export const ProfileSettings = memo(function ProfileSettings({
   const [contactPhone, setContactPhone] = useState('');
   const [contactRelation, setContactRelation] = useState('');
   const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState<'realName' | 'coach' | 'contact' | 'deleteContact' | null>(
+    null,
+  );
 
   const refreshSafety = useCallback(async () => {
     const [nextContacts, nextVerifications] = await Promise.all([
@@ -42,17 +46,25 @@ export const ProfileSettings = memo(function ProfileSettings({
       setMessage('请填写姓名和证件尾号');
       return;
     }
-    const request = await dataService.createVerificationRequest({
-      type: 'real_name',
-      realName,
-      idNumberMasked,
-    });
-    setRealName('');
-    setIdNumberMasked('');
-    setMessage(request.status === 'approved' ? '实名认证已通过' : '实名认证申请已提交');
-    await refreshSafety();
-    if (request.status === 'approved') {
-      await onVerificationApproved?.();
+    try {
+      setSaving('realName');
+      setError('');
+      const request = await dataService.createVerificationRequest({
+        type: 'real_name',
+        realName,
+        idNumberMasked,
+      });
+      setRealName('');
+      setIdNumberMasked('');
+      setMessage(request.status === 'approved' ? '实名认证已通过' : '实名认证申请已提交');
+      await refreshSafety();
+      if (request.status === 'approved') {
+        await onVerificationApproved?.();
+      }
+    } catch {
+      setError('实名认证提交失败，请稍后重试。');
+    } finally {
+      setSaving(null);
     }
   }, [idNumberMasked, onVerificationApproved, realName, refreshSafety]);
 
@@ -61,13 +73,21 @@ export const ProfileSettings = memo(function ProfileSettings({
       setMessage('请填写教练资质名称');
       return;
     }
-    await dataService.createVerificationRequest({
-      type: 'coach',
-      certName,
-    });
-    setCertName('');
-    setMessage('教练认证已通过');
-    void refreshSafety();
+    try {
+      setSaving('coach');
+      setError('');
+      await dataService.createVerificationRequest({
+        type: 'coach',
+        certName,
+      });
+      setCertName('');
+      setMessage('教练认证申请已提交');
+      void refreshSafety();
+    } catch {
+      setError('教练认证提交失败，请稍后重试。');
+    } finally {
+      setSaving(null);
+    }
   }, [certName, refreshSafety]);
 
   const addContact = useCallback(async () => {
@@ -75,16 +95,24 @@ export const ProfileSettings = memo(function ProfileSettings({
       setMessage('请填写紧急联系人姓名和手机号');
       return;
     }
-    await dataService.addEmergencyContact({
-      name: contactName,
-      phone: contactPhone,
-      relation: contactRelation || '紧急联系人',
-    });
-    setContactName('');
-    setContactPhone('');
-    setContactRelation('');
-    setMessage('紧急联系人已保存');
-    void refreshSafety();
+    try {
+      setSaving('contact');
+      setError('');
+      await dataService.addEmergencyContact({
+        name: contactName,
+        phone: contactPhone,
+        relation: contactRelation || '紧急联系人',
+      });
+      setContactName('');
+      setContactPhone('');
+      setContactRelation('');
+      setMessage('紧急联系人已保存');
+      void refreshSafety();
+    } catch {
+      setError('紧急联系人保存失败，请稍后重试。');
+    } finally {
+      setSaving(null);
+    }
   }, [contactName, contactPhone, contactRelation, refreshSafety]);
 
   const latestRealName = verifications.find((item) => item.type === 'real_name');
@@ -99,6 +127,11 @@ export const ProfileSettings = memo(function ProfileSettings({
       {message && (
         <div className="rounded-xl border border-lime/25 bg-lime/10 px-4 py-3 text-sm font-bold text-lime">
           {message}
+        </div>
+      )}
+      {error && (
+        <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-200">
+          {error}
         </div>
       )}
 
@@ -120,8 +153,9 @@ export const ProfileSettings = memo(function ProfileSettings({
           <button
             className="rounded-full bg-lime px-4 py-2 text-sm font-bold text-white"
             onClick={submitRealName}
+            disabled={saving === 'realName'}
           >
-            提交
+            {saving === 'realName' ? '提交中' : '提交'}
           </button>
         </div>
 
@@ -139,8 +173,9 @@ export const ProfileSettings = memo(function ProfileSettings({
           <button
             className="rounded-full bg-lime px-4 py-2 text-sm font-bold text-white"
             onClick={submitCoach}
+            disabled={saving === 'coach'}
           >
-            提交
+            {saving === 'coach' ? '提交中' : '提交'}
           </button>
         </div>
 
@@ -162,13 +197,22 @@ export const ProfileSettings = memo(function ProfileSettings({
               </div>
               <button
                 className="text-xs font-bold text-red-300"
-                onClick={() => {
-                  dataService.deleteEmergencyContact(contact.id).then(() => {
-                    void refreshSafety();
-                  });
+                disabled={saving === 'deleteContact'}
+                onClick={async () => {
+                  try {
+                    setSaving('deleteContact');
+                    setError('');
+                    await dataService.deleteEmergencyContact(contact.id);
+                    setMessage('紧急联系人已删除');
+                    await refreshSafety();
+                  } catch {
+                    setError('删除紧急联系人失败，请稍后重试。');
+                  } finally {
+                    setSaving(null);
+                  }
                 }}
               >
-                删除
+                {saving === 'deleteContact' ? '删除中' : '删除'}
               </button>
             </div>
           ))}
@@ -196,8 +240,9 @@ export const ProfileSettings = memo(function ProfileSettings({
           <button
             className="rounded-full border border-lime/30 px-4 py-2 text-sm font-bold text-lime transition hover:bg-lime hover:text-white"
             onClick={addContact}
+            disabled={saving === 'contact'}
           >
-            保存联系人
+            {saving === 'contact' ? '保存中' : '保存联系人'}
           </button>
         </div>
       </SettingSection>

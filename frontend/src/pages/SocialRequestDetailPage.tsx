@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import * as api from '../api/client';
+import { SiteLink } from '../components/navigation/SiteLink';
 import { activitiesApi, type ActivityType } from '../api/activitiesApi';
 import {
   socialRequestsApi,
@@ -221,11 +222,11 @@ export function SocialRequestDetailPage() {
 
             <SocialRequestCard request={summary} />
 
-            <div className="flex items-center justify-between rounded-lg border border-[#26261d] bg-[#15150f] px-4 py-3 text-xs text-[#C7C2B0]">
+              <div className="flex items-center justify-between rounded-lg border border-[#26261d] bg-[#15150f] px-4 py-3 text-xs text-[#C7C2B0]">
               <span>这张卡片已进入发现和匹配池</span>
-              <Link to="/discover" className="text-[#C8FF80] hover:text-[#b8ef70]">
+              <SiteLink to="/discover" className="text-[#C8FF80] hover:text-[#b8ef70]">
                 查看发现展示
-              </Link>
+              </SiteLink>
             </div>
           </div>
         ) : (

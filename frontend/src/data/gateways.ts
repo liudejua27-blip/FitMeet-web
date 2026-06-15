@@ -18,7 +18,7 @@ export const gateways: Gateway[] = [
     subtitle: 'Train, recover, connect.',
     description:
       'Movement, recovery, coaching, and local connection designed around the human body.',
-    href: '/human',
+    href: '/discover',
     cta: 'Explore Human',
     accent: '#8c8a6e',
     coordinates: 'HUMAN / EARTH-01',

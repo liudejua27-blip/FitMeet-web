@@ -2,7 +2,9 @@
 import clsx from 'clsx';
 import { useNavigate } from 'react-router-dom';
 import { useNotificationStore } from '../stores';
+import { navigateToDiscoverWithScrollReset } from '../lib/scrollNavigation';
 import type { AppNotification } from '../stores';
+import { socialAgentApi } from '../api/socialAgentApi';
 
 const NOTIF_ICONS: Record<AppNotification['type'], string> = {
   like: '❤️',
@@ -27,17 +29,32 @@ export const NotificationsPage = () => {
   const handleClick = useCallback(
     (notif: AppNotification) => {
       markAsRead(notif.id);
-      if (notif.targetType === 'user' && notif.targetId) {
+      if (notif.targetType === 'agent_reminder') {
+        if (notif.reminderId) {
+          void socialAgentApi.openReminder(notif.reminderId);
+        }
+        navigate(notif.route || (notif.taskId ? `/agent/chat/${notif.taskId}` : '/agent/chat'), {
+          state: {
+            agentReminder: {
+              id: notif.reminderId ?? notif.targetId ?? null,
+              taskId: notif.taskId ?? null,
+              message: notif.text,
+              source: 'notification_center',
+              context: notif.reminderContext ?? null,
+            },
+          },
+        });
+      } else if (notif.targetType === 'user' && notif.targetId) {
         navigate(`/user/${notif.targetId}`);
       } else if (notif.targetType === 'meet' && notif.targetId) {
-        navigate('/discover', { state: { highlightMeetId: notif.targetId } });
+        navigateToDiscoverWithScrollReset(navigate, { state: { highlightMeetId: notif.targetId } });
       } else if (notif.targetType === 'post' && notif.targetId) {
-        navigate('/discover', { state: { highlightPostId: notif.targetId } });
+        navigateToDiscoverWithScrollReset(navigate, { state: { highlightPostId: notif.targetId } });
       } else if (notif.type === 'follow') {
         // no targetId — go to discover feed
-        navigate('/discover');
+        navigateToDiscoverWithScrollReset(navigate);
       } else if (notif.type === 'meet') {
-        navigate('/discover');
+        navigateToDiscoverWithScrollReset(navigate);
       }
     },
     [markAsRead, navigate],

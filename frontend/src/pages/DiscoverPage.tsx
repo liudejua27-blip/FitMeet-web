@@ -1,6 +1,7 @@
-import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { CreateMeetModal, type MeetFormData } from '../components/meet';
+import { type CSSProperties, type MouseEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import clsx from 'clsx';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { SiteLink } from '../components/navigation/SiteLink';
 import * as dataService from '../services/dataService';
 import { getMeetDistanceMeters } from '../lib/distance';
 import { getBrowserLocation } from '../lib/location';
@@ -8,7 +9,14 @@ import type { Coordinates } from '../lib/amap';
 import { filterDisplayableMeets, filterDisplayablePosts } from '../data/mockContent';
 import { getSportLabel, normalizeSportGroup } from '../data/taxonomy';
 import { useAuthStore, useNotificationStore } from '../stores';
-import type { Meet, Post } from '../types';
+import type { Meet, Post, PublicSocialIntent } from '../types';
+
+type DiscoverMeet = Meet & {
+  sourceKind?: 'meet' | 'publicIntent' | 'fallback';
+  publicIntentId?: string;
+  linkedSocialRequestId?: number | null;
+  detailHref?: string;
+};
 
 type SportFilter = {
   id: string;
@@ -137,26 +145,32 @@ const fallbackMeets: Meet[] = [
 
 export const DiscoverPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const searchParamKey = searchParams.toString();
+  const focusScene = searchParams.get('focusScene')?.trim();
   const [activeSport, setActiveSport] = useState('all');
   const [activeTab, setActiveTab] = useState<'recommend' | 'nearby' | 'latest' | 'match'>(
     'recommend',
   );
-  const [meets, setMeets] = useState<Meet[]>([]);
+  const [meets, setMeets] = useState<DiscoverMeet[]>([]);
+  const [publicIntents, setPublicIntents] = useState<PublicSocialIntent[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [showCreateModal, setShowCreateModal] = useState(false);
   const [joinedMeets, setJoinedMeets] = useState<number[]>([]);
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const { isLoggedIn, openLogin } = useAuthStore();
   const { addNotification } = useNotificationStore();
+  const allowFallbackDiscoverData =
+    import.meta.env.DEV || import.meta.env.VITE_ENABLE_DISCOVER_FALLBACK === 'true';
 
   const loadDiscover = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const [meetData, feedData] = await Promise.all([
+      const [meetData, feedData, intentData] = await Promise.all([
         dataService.getMeets({ lat: userLocation?.lat, lng: userLocation?.lng }),
         dataService.getFeed({
           page: 1,
@@ -164,12 +178,26 @@ export const DiscoverPage = () => {
           lat: userLocation?.lat,
           lng: userLocation?.lng,
         }),
+        loadPublicDiscoverIntents(),
       ]);
-      setMeets(filterDisplayableMeets(meetData));
+      setMeets(
+        filterDisplayableMeets(meetData).map((meet) => ({
+          ...meet,
+          sourceKind: meet.mock ? 'fallback' : 'meet',
+          detailHref:
+            meet.activityId && meet.activityId > 0
+              ? `/activity/${meet.activityId}`
+              : meet.id > 0
+                ? `/meet/${meet.id}`
+                : undefined,
+        })),
+      );
       setPosts(filterDisplayablePosts(feedData));
+      setPublicIntents(intentData.filter((intent) => intent.status !== 'cancelled'));
     } catch {
       setMeets([]);
       setPosts([]);
+      setPublicIntents([]);
       setError('发现内容加载失败，请稍后重试。');
     } finally {
       setLoading(false);
@@ -181,12 +209,29 @@ export const DiscoverPage = () => {
   }, []);
 
   useEffect(() => {
-    void loadDiscover();
-  }, [loadDiscover]);
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [searchParamKey]);
+
+  useEffect(() => {
+    if (location.pathname === '/discover') {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    }
+  }, [location.key, location.pathname]);
 
   const displayMeets = useMemo(() => {
-    const source = meets.length > 0 ? meets : fallbackMeets;
-    let data = source;
+    const intentMeets = publicIntents.map(publicIntentToDiscoverMeet);
+    const source = [...intentMeets, ...meets];
+    const fallbackSource = fallbackMeets.map((meet) => ({
+      ...meet,
+      sourceKind: 'fallback' as const,
+      detailHref:
+        meet.id < 0
+          ? `/agent/chat?scene=${encodeURIComponent(meet.title)}`
+          : undefined,
+    }));
+    const effectiveSource =
+      source.length > 0 ? source : allowFallbackDiscoverData ? fallbackSource : [];
+    let data = effectiveSource;
     if (activeSport !== 'all') {
       data = data.filter((meet) => normalizeSportGroup(meet.type || meet.sport) === activeSport);
     }
@@ -202,15 +247,49 @@ export const DiscoverPage = () => {
       data = [...data].sort((a, b) => matchScore(b) - matchScore(a));
     }
     return data;
-  }, [activeSport, activeTab, meets]);
+  }, [activeSport, activeTab, allowFallbackDiscoverData, meets, publicIntents]);
+
+  useEffect(() => {
+    if (!focusScene) {
+      return;
+    }
+
+    const lowered = focusScene.toLowerCase();
+    const targetMeet = displayMeets.find(
+      (meet) =>
+        meet.title.toLowerCase() === lowered ||
+        meet.title.toLowerCase().includes(lowered) ||
+        (meet.loc || '').toLowerCase().includes(lowered),
+    );
+
+    if (!targetMeet) {
+      return;
+    }
+
+    const target = document.querySelector<HTMLElement>(`[data-meet-anchor="${targetMeet.id}"]`);
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [displayMeets, focusScene]);
+
+  useEffect(() => {
+    void loadDiscover();
+  }, [loadDiscover]);
 
   const liveItems = useMemo<LiveItem[]>(() => {
-    const meetItems = displayMeets.slice(0, 5).map((meet, index) => ({
+    const seen = new Set<string>();
+    const uniqueMeets = displayMeets.filter((meet) => {
+      const key = `${meet.title}-${meet.loc}-${meet.time || meet.startAt}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    const meetItems = uniqueMeets.slice(0, 4).map((meet, index) => ({
       id: `meet-${meet.id}`,
-      avatar: meet.username.slice(0, 1),
+      avatar: publicDisplayName(meet.username, index).slice(0, 1),
       color: meet.color,
-      title: index === 0 ? meet.username : meet.title,
-      body: index === 0 ? `发布了 ${getSportLabel(meet.sport)} 约练` : liveBody(meet),
+      title: index === 0 ? '附近有新的生活场景' : meet.title,
+      body: index === 0 ? `${getSportLabel(meet.sport)} · ${formatMeetTime(meet)}` : liveBody(meet),
       time: `${(index + 1) * 2}分钟前`,
     }));
     const postItems = posts.slice(0, 3).map((post, index) => ({
@@ -226,14 +305,19 @@ export const DiscoverPage = () => {
 
   const activePeople = useMemo(
     () =>
-      displayMeets.slice(0, 4).map((meet, index) => ({
+      displayMeets
+        .filter((meet) => Number.isFinite(meet.userId) && Number(meet.userId) > 0)
+        .slice(0, 4)
+        .map((meet, index) => ({
         id: meet.id,
-        name: meet.username,
+        userId: meet.userId,
+        name: publicDisplayName(meet.username, index),
         sport: getSportLabel(meet.sport),
         age: 24 + index + (meet.id > 0 ? meet.id % 4 : 0),
         distance: meet.dist || `${(0.8 + index * 0.4).toFixed(1)}km`,
-        avatar: meet.username.slice(0, 1),
+        avatar: (meet.username || 'F').slice(0, 1),
         color: meet.color,
+        href: `/user/${meet.userId}`,
       })),
     [displayMeets],
   );
@@ -254,6 +338,10 @@ export const DiscoverPage = () => {
         openLogin();
         return;
       }
+      if ((meet as DiscoverMeet).sourceKind === 'publicIntent') {
+        navigate((meet as DiscoverMeet).detailHref || '/agent/chat');
+        return;
+      }
       if (joinedMeets.includes(meet.id)) return;
       try {
         if (!meet.mock && meet.id > 0) await dataService.joinMeet(meet.id);
@@ -271,53 +359,12 @@ export const DiscoverPage = () => {
         setError('加入失败，请稍后重试。');
       }
     },
-    [addNotification, isLoggedIn, joinedMeets, loadDiscover, openLogin],
+    [addNotification, isLoggedIn, joinedMeets, loadDiscover, navigate, openLogin],
   );
 
-  const handleCreateSubmit = useCallback(
-    async (data: MeetFormData) => {
-      if (!isLoggedIn) {
-        openLogin();
-        return;
-      }
-      try {
-        const created = await dataService.createMeet({
-          title: data.title,
-          type: data.type,
-          sport: data.sport,
-          time: data.time,
-          loc: data.location,
-          address: data.address,
-          poiId: data.poiId,
-          lat: data.lat,
-          lng: data.lng,
-          maxSlots: data.maxSlots,
-          level: data.level,
-          price: data.price,
-          feeType: data.feeType,
-          groupType: data.groupType,
-          creatorType: data.creatorType,
-          clubId: data.clubId,
-          city: data.city,
-          startAt: data.startAt || data.time,
-          desc: data.desc,
-        } as Partial<Meet>);
-        setMeets((current) => filterDisplayableMeets([created, ...current]));
-        setShowCreateModal(false);
-      } catch {
-        setError('发布场景失败，请稍后重试。');
-      }
-    },
-    [isLoggedIn, openLogin],
-  );
-
-  const openCreate = () => {
-    if (!isLoggedIn) {
-      openLogin();
-      return;
-    }
-    setShowCreateModal(true);
-  };
+  const openCreate = useCallback(() => {
+    navigate('/social-request/new');
+  }, [navigate]);
 
   return (
     <div className="fitmeet-website fm-site fm-enterprise-site discover-page">
@@ -380,7 +427,7 @@ export const DiscoverPage = () => {
                   <div>
                     <strong>{meet.title}</strong>
                     <p>
-                      {meet.time || '时间待定'} · {meet.dist || '附近'}
+                      {formatMeetTime(meet)} · {meet.dist || '附近'}
                     </p>
                   </div>
                 </article>
@@ -390,6 +437,7 @@ export const DiscoverPage = () => {
               <img
                 src="/images/fitmeet/generated/fitmeet-ant-agent-cutout-transparent.png"
                 alt=""
+                aria-hidden="true"
                 width="420"
                 height="420"
               />
@@ -412,8 +460,8 @@ export const DiscoverPage = () => {
             <span>REALTIME</span>
           </div>
           <div className="match-live-strip__track">
-            {[...liveItems, ...liveItems].map((item, index) => (
-              <article key={`${item.id}-${index}`}>
+            {liveItems.map((item) => (
+              <article key={item.id}>
                 <span style={{ background: item.color }}>{item.avatar}</span>
                 <div>
                   <strong>{item.title}</strong>
@@ -462,7 +510,7 @@ export const DiscoverPage = () => {
                   <div key={index} className="match-card match-card--loading" />
                 ))}
               </div>
-            ) : (
+            ) : displayMeets.length > 0 ? (
               <div className="match-card-grid">
                 {displayMeets.slice(0, 8).map((meet, index) => (
                   <MeetupMatchCard
@@ -471,9 +519,20 @@ export const DiscoverPage = () => {
                     index={index}
                     joined={joinedMeets.includes(meet.id)}
                     distance={getMeetDistanceMeters(meet, userLocation)}
+                    detailHref={detailHrefForDiscoverMeet(meet)}
                     onJoin={() => void handleJoin(meet)}
                   />
                 ))}
+              </div>
+            ) : (
+              <div className="match-empty-state" data-testid="discover-real-empty-state">
+                <strong>暂时还没有公开场景</strong>
+                <p>
+                  你可以让 Agent 根据你的城市、时间、活动兴趣和安全边界生成第一张约练卡。
+                </p>
+                <button type="button" onClick={() => navigate('/agent/chat')}>
+                  让 Agent 帮我生成
+                </button>
               </div>
             )}
 
@@ -494,11 +553,11 @@ export const DiscoverPage = () => {
                 <button type="button">查看更多 ›</button>
               </header>
               <div className="match-people-list">
-                {activePeople.map((person) => (
+                {activePeople.length > 0 ? activePeople.map((person) => (
                   <button
                     key={person.id}
                     type="button"
-                    onClick={() => navigate(`/search?q=${encodeURIComponent(person.name)}`)}
+                    onClick={() => navigate(person.href)}
                   >
                     <span className="match-person-avatar" style={{ background: person.color }}>
                       {person.avatar}
@@ -511,7 +570,11 @@ export const DiscoverPage = () => {
                     </span>
                     <em>{person.distance}</em>
                   </button>
-                ))}
+                )) : (
+                  <p className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm leading-6 text-[#9a9487]">
+                    暂时没有公开资料完整的附近用户。你发布真实场景后，系统会优先展示可查看详情的人。
+                  </p>
+                )}
               </div>
             </section>
 
@@ -542,17 +605,12 @@ export const DiscoverPage = () => {
       </main>
 
       <DiscoverSiteFooter />
-
-      <CreateMeetModal
-        open={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        onSubmit={handleCreateSubmit}
-      />
     </div>
   );
 };
 
 function DiscoverSiteNav() {
+  const [menuOpen, setMenuOpen] = useState(false);
   const navItems = [
     { to: '/', label: '首页' },
     { to: '/discover', label: '发现' },
@@ -564,23 +622,35 @@ function DiscoverSiteNav() {
   ];
 
   return (
-    <header className="fm-nav">
+    <header className={clsx('fm-nav', menuOpen && 'is-menu-open')}>
       <Link to="/" className="fm-brand" aria-label="FitMeet 首页">
-        <span aria-hidden="true">
-          <img src="/favicon-192.png" alt="" width="38" height="38" />
+        <span>
+          <img src="/favicon-192.png" alt="FitMeet" width="38" height="38" />
         </span>
         <strong>FitMeet</strong>
       </Link>
-      <nav aria-label="FitMeet 官网导航">
-        {navItems.map((item) => (
-          <Link
-            key={item.to}
-            to={item.to}
-            aria-current={item.to === '/discover' ? 'page' : undefined}
-          >
-            {item.label}
-          </Link>
-        ))}
+      <button
+        type="button"
+        className="fm-nav__menu"
+        aria-expanded={menuOpen}
+        aria-controls="fitmeet-discover-nav"
+        onClick={() => setMenuOpen((open) => !open)}
+      >
+        {menuOpen ? '关闭菜单' : '打开菜单'}
+      </button>
+      <nav id="fitmeet-discover-nav" aria-label="FitMeet 官网导航">
+        {navItems.map((item) => {
+          const isDiscover = item.to === '/discover';
+          return isDiscover ? (
+            <SiteLink key={item.to} to={item.to} aria-current="page">
+              {item.label}
+            </SiteLink>
+          ) : (
+            <Link key={item.to} to={item.to}>
+              {item.label}
+            </Link>
+          );
+        })}
       </nav>
       <div className="fm-nav__actions">
         <Link to="/agent" className="fm-button fm-button--ghost">
@@ -601,13 +671,13 @@ function DiscoverSiteFooter() {
   return (
     <footer className="fm-footer">
       <strong>
-        <img src="/favicon-192.png" alt="" width="28" height="28" aria-hidden="true" />
+        <img src="/favicon-192.png" alt="FitMeet" width="28" height="28" />
         FitMeet
       </strong>
       <p>发现附近真实生活场景，从兴趣出发，遇见真正聊得来的人。</p>
       <nav aria-label="FitMeet 页脚导航">
         <Link to="/features">产品功能</Link>
-        <Link to="/discover">发现</Link>
+        <SiteLink to="/discover">发现</SiteLink>
         <Link to="/agent">Agent</Link>
         <Link to="/safety">安全</Link>
         <Link to="/download">下载 App</Link>
@@ -628,71 +698,219 @@ function MeetupMatchCard({
   joined,
   meet,
   onJoin,
+  detailHref,
 }: {
   distance: number | null | undefined;
   index: number;
   joined: boolean;
-  meet: Meet;
+  meet: DiscoverMeet;
   onJoin: () => void;
+  detailHref: string;
 }) {
   const score = matchScore(meet);
   const tone = ['green', 'orange', 'blue', 'gold'][index % 4];
-  const statusLabel = joined ? '已申请' : meet.status === 'matched' ? '匹配中' : '开放加入';
+  const statusLabel =
+    meet.sourceKind === 'publicIntent'
+      ? '查看详情'
+      : joined
+        ? '已申请'
+        : meet.status === 'matched'
+          ? '匹配中'
+          : '开放加入';
   const resolvedDistance =
     typeof distance === 'number' && Number.isFinite(distance)
       ? `${(distance / 1000).toFixed(1)}km`
       : meet.dist || '附近';
 
-  return (
-    <article className={`match-card match-card--${tone}`}>
-      <div className="match-card__head">
-        <span className="match-card__sport">{sportIcon(meet.sport)}</span>
-        <div>
-          <h2>{meet.title}</h2>
-          <p>青岛 · {resolvedDistance}</p>
-        </div>
-        <button type="button" aria-label="更多操作">
-          ⋯
-        </button>
-      </div>
-      <div className="match-card__meta">
-        <span>⌄ {meet.loc || '地点待定'}</span>
-        <span>{meet.time || '时间待定'}</span>
-      </div>
-      <div className="match-card__tags">
-        <button type="button" className={joined ? 'is-muted' : 'is-open'} onClick={onJoin}>
-          {statusLabel}
-        </button>
-        <span>{getSportLabel(meet.sport)}</span>
-        <span>{meet.level || '轻松'}</span>
-      </div>
-      <div className="match-card__bottom">
-        <div className="match-avatars" aria-label="已加入用户">
-          {Array.from({ length: Math.min(3, Math.max(1, meet.participants.length || 2)) }).map(
-            (_, i) => (
-              <span key={i} style={{ background: i === 0 ? meet.color : undefined }}>
-                {(meet.participants[i] || meet.username || 'F').slice(0, 1)}
-              </span>
-            ),
-          )}
-        </div>
-        <strong>
-          {meet.slots}/{meet.maxSlots} 人已加入
-        </strong>
-        <time>{index < 2 ? `${(index + 1) * 10} 分钟前` : `${(index + 1) * 15} 分钟前`}</time>
-      </div>
-      <div className="match-score" style={{ '--score': `${score}%` } as CSSProperties}>
-        <strong>{score}%</strong>
-        <span>匹配度</span>
-      </div>
-    </article>
+  const handleJoinClick = useCallback(
+    (event: MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onJoin();
+    },
+    [onJoin],
   );
+
+  return (
+    <Link to={detailHref} className="match-card-link" data-meet-anchor={meet.id}>
+      <article className={`match-card match-card--${tone}`}>
+        <div className="match-card__head">
+          <span className="match-card__sport">{sportIcon(meet.sport)}</span>
+          <div>
+            <h2>{meet.title}</h2>
+            <p>青岛 · {resolvedDistance}</p>
+          </div>
+          <span className="match-card__more" aria-hidden="true">
+            ⋯
+          </span>
+        </div>
+        <div className="match-card__meta">
+          <span>⌄ {meet.loc || '地点待定'}</span>
+          <span>{formatMeetTime(meet)}</span>
+        </div>
+        <div className="match-card__tags">
+          <button
+            type="button"
+            className={joined ? 'is-muted' : 'is-open'}
+            onClick={handleJoinClick}
+          >
+            {statusLabel}
+          </button>
+          <span>{getSportLabel(meet.sport)}</span>
+          <span>{formatLevel(meet.level)}</span>
+          {meet.sourceKind === 'publicIntent' ? <span>公开社交意图</span> : null}
+        </div>
+        <div className="match-card__bottom">
+          <div className="match-avatars" aria-label="已加入用户">
+            {Array.from({ length: Math.min(3, Math.max(1, meet.participants.length || 2)) }).map(
+              (_, i) => (
+                <span key={i} style={{ background: i === 0 ? meet.color : undefined }}>
+                  {(meet.participants[i] || meet.username || 'F').slice(0, 1)}
+                </span>
+              ),
+            )}
+          </div>
+          <strong>
+            {meet.slots}/{meet.maxSlots} 人已加入
+          </strong>
+          <time>{index < 2 ? `${(index + 1) * 10} 分钟前` : `${(index + 1) * 15} 分钟前`}</time>
+        </div>
+        <div className="match-score" style={{ '--score': `${score}%` } as CSSProperties}>
+          <strong>{score}%</strong>
+          <span>匹配度</span>
+        </div>
+      </article>
+    </Link>
+  );
+}
+
+function publicIntentToDiscoverMeet(intent: PublicSocialIntent, index: number): DiscoverMeet {
+  const sport = normalizeSportGroup(intent.requestType || intent.interestTags?.[0] || 'custom');
+  const color = ['#10a37f', '#f97316', '#4f46e5', '#d97706'][index % 4];
+  const detailHref = intent.linkedSocialRequestId
+    ? `/social-request/${intent.linkedSocialRequestId}`
+    : `/public-intent/${encodeURIComponent(intent.id)}`;
+  return {
+    id: publicIntentSyntheticId(intent.id, index),
+    userId: intent.userId ?? undefined,
+    title: intent.title || '新的社交机会',
+    type: intent.requestType || sport,
+    sport,
+    username: intent.userId ? `用户 ${intent.userId}` : 'FitMeet 用户',
+    color,
+    colorBg: `${color}22`,
+    time: intent.timePreference || '时间待定',
+    loc: intent.locationPreference || intent.loc || intent.city || '地点待定',
+    city: intent.city,
+    lat: intent.lat,
+    lng: intent.lng,
+    dist: intent.radiusKm ? `${intent.radiusKm}km 内` : '附近',
+    price: '免费',
+    slots: Math.max(1, intent.matchedCount || 1),
+    maxSlots: Math.max(3, (intent.matchedCount || 1) + 2),
+    level: publicIntentLevel(intent),
+    desc: intent.description || intent.socialGoal || '发起人正在寻找合适的同频伙伴。',
+    status: 'active',
+    participants: (intent.interestTags || []).slice(0, 3),
+    cert: intent.riskLevel !== 'high',
+    rating: Math.max(4, Math.min(5, (intent.matchSignal?.score ?? 86) / 20)),
+    meetCount: intent.matchedCount || 1,
+    startAt: intent.timePreference,
+    createdAt: intent.createdAt,
+    sourceKind: 'publicIntent',
+    publicIntentId: intent.id,
+    linkedSocialRequestId: intent.linkedSocialRequestId,
+    detailHref,
+  };
+}
+
+function detailHrefForDiscoverMeet(meet: DiscoverMeet) {
+  if (meet.detailHref) return meet.detailHref;
+  if (meet.sourceKind === 'publicIntent' && meet.publicIntentId) {
+    return `/public-intent/${encodeURIComponent(meet.publicIntentId)}`;
+  }
+  if (meet.activityId && meet.activityId > 0) return `/activity/${meet.activityId}`;
+  if (meet.id > 0) return `/meet/${meet.id}`;
+  return `/agent/chat?scene=${encodeURIComponent(meet.title)}`;
+}
+
+async function loadPublicDiscoverIntents() {
+  const statuses: Array<PublicSocialIntent['status']> = ['active', 'searching', 'matched'];
+  const batches = await Promise.all(
+    statuses.map((status) =>
+      dataService
+        .getPublicSocialIntents({
+          page: 1,
+          limit: 24,
+          status,
+        })
+        .catch(() => [] as PublicSocialIntent[]),
+    ),
+  );
+  const byId = new Map<string, PublicSocialIntent>();
+  for (const intent of batches.flat()) {
+    if (intent.status !== 'cancelled' && intent.status !== 'closed') {
+      byId.set(intent.id, intent);
+    }
+  }
+  return Array.from(byId.values()).sort(
+    (a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0),
+  );
+}
+
+function publicIntentSyntheticId(id: string, index: number) {
+  const hash = Array.from(id).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return -100000 - index - hash;
+}
+
+function publicIntentLevel(intent: PublicSocialIntent) {
+  const text = `${intent.description} ${intent.socialGoal} ${intent.interestTags?.join(' ') ?? ''}`;
+  if (/(高强度|进阶|认真|训练)/i.test(text)) return '较高强度';
+  if (/(轻松|低压力|散步|新手)/i.test(text)) return '轻松';
+  return '中等';
 }
 
 function matchScore(meet: Meet) {
   const base = meet.rating ? Math.round(meet.rating * 18) : 78;
   const slotBoost = meet.maxSlots > 0 ? Math.round((meet.slots / meet.maxSlots) * 8) : 4;
   return Math.max(72, Math.min(96, base + slotBoost));
+}
+
+function publicDisplayName(name: string | undefined, index: number) {
+  const trimmed = (name || '').trim();
+  if (!trimmed || trimmed.length <= 1 || /^(test|demo|seed|user)$/i.test(trimmed)) {
+    return `同频用户 ${index + 1}`;
+  }
+  const first = trimmed.slice(0, 1);
+  return `${first}同学`;
+}
+
+function formatLevel(level: string | undefined) {
+  if (!level || level === 'all') return '轻松';
+  return level;
+}
+
+function formatMeetTime(meet: Meet) {
+  const raw = meet.startAt || meet.time;
+  if (!raw) return '时间待定';
+  const parsed = Date.parse(raw);
+  if (!Number.isFinite(parsed)) return raw;
+  const date = new Date(parsed);
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  const prefix = sameDay
+    ? '今天'
+    : date.toDateString() === tomorrow.toDateString()
+      ? '明天'
+      : `${date.getMonth() + 1}月${date.getDate()}日`;
+  const time = date.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  return `${prefix} ${time}`;
 }
 
 function distanceValue(meet: Meet) {

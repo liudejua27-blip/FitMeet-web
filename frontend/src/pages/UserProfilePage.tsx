@@ -214,7 +214,7 @@ export const UserProfilePage = () => {
                 <button
                   key={meet.id}
                   className="w-full cursor-pointer rounded-xl border border-border bg-surface p-4 text-left transition hover:border-borderStrong"
-                  onClick={() => navigate('/discover')}
+                  onClick={() => navigate(`/meet/${meet.id}`)}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">

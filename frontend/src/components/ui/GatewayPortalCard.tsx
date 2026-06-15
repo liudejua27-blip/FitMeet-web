@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import type { Gateway } from '@/data/gateways';
+import { SiteLink } from '@/components/navigation/SiteLink';
 
 type GatewayPortalCardProps = {
   gateway: Gateway;
@@ -31,7 +31,7 @@ export function GatewayPortalCard({ gateway, delay = 0 }: GatewayPortalCardProps
       }}
       onMouseLeave={() => setTilt({ x: 0, y: 0 })}
     >
-      <Link
+      <SiteLink
         to={gateway.href}
         className="group relative block min-h-[520px] overflow-hidden border border-[#f4efe6]/10 bg-[#11110f]/70 p-7 text-[#f4efe6] backdrop-blur-xl transition duration-500 hover:border-[#f4efe6]/30"
         style={{
@@ -100,7 +100,7 @@ export function GatewayPortalCard({ gateway, delay = 0 }: GatewayPortalCardProps
             </span>
           </div>
         </div>
-      </Link>
+      </SiteLink>
     </motion.div>
   );
 }

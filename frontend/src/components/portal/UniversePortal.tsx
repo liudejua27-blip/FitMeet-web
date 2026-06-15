@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { SiteLink } from '../navigation/SiteLink';
 
 /**
  * UniversePortal — OurFitMeet 三界入口
@@ -207,21 +207,24 @@ function RealmCard({
   onHover: () => void;
   onLeave: () => void;
 }) {
+  const cls = [
+    'group relative isolate flex flex-col overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur-md transition-all duration-500',
+    'hover:-translate-y-1 hover:border-white/30',
+    isHovered ? realm.glowShadow : '',
+    'min-h-[440px]',
+  ].join(' ');
+
+  const sharedProps = {
+    className: cls,
+    onMouseEnter: onHover,
+    onMouseLeave: onLeave,
+    onFocus: onHover,
+    onBlur: onLeave,
+    'aria-label': `进入 ${realm.zh}界 - ${realm.en}`,
+  };
+
   return (
-    <Link
-      to={realm.href}
-      onMouseEnter={onHover}
-      onMouseLeave={onLeave}
-      onFocus={onHover}
-      onBlur={onLeave}
-      className={[
-        'group relative isolate flex flex-col overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur-md transition-all duration-500',
-        'hover:-translate-y-1 hover:border-white/30',
-        isHovered ? realm.glowShadow : '',
-        'min-h-[440px]',
-      ].join(' ')}
-      aria-label={`进入 ${realm.zh}界 - ${realm.en}`}
-    >
+    <SiteLink to={realm.href} {...sharedProps}>
       {/* Layer 1: realm background gradient */}
       <div
         className={`pointer-events-none absolute inset-0 -z-10 bg-gradient-to-br ${realm.bgGrad} opacity-60 transition-opacity duration-500 group-hover:opacity-100`}
@@ -286,7 +289,7 @@ function RealmCard({
 
       {/* Corner glyph */}
       <div className="pointer-events-none absolute -right-6 -top-6 h-32 w-32 rounded-full bg-white/5 blur-2xl transition-all duration-700 group-hover:scale-150" />
-    </Link>
+      </SiteLink>
   );
 }
 

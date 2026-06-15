@@ -5,6 +5,7 @@ export const publicWebsiteRoutes = [
   '/features',
   '/ecosystem',
   '/download',
+  '/download-app',
   '/app',
   '/demo',
   '/developers',

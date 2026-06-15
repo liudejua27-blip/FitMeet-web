@@ -1,3 +1,5 @@
+import { SiteLink } from '@/components/navigation/SiteLink';
+
 type PortalCTAProps = {
   icon: 'ecosystem' | 'enter' | 'agent';
   titleZh: string;
@@ -38,7 +40,7 @@ function PortalIcon({ icon }: { icon: PortalCTAProps['icon'] }) {
 
 export function PortalCTA({ icon, titleZh, titleEn, href, variant }: PortalCTAProps) {
   return (
-    <a className={`portal-cta portal-cta--${variant}`} href={href}>
+    <SiteLink className={`portal-cta portal-cta--${variant}`} to={href}>
       <span className="portal-cta__rings" aria-hidden="true">
         <span />
         <span />
@@ -51,6 +53,6 @@ export function PortalCTA({ icon, titleZh, titleEn, href, variant }: PortalCTAPr
       <span className="portal-cta__arrow" aria-hidden="true">
         →
       </span>
-    </a>
+    </SiteLink>
   );
 }

@@ -135,7 +135,7 @@ function PlatformRoleStrip() {
                 进入 Agent
               </Link>
               <Link
-                to="/app"
+                to="/download"
                 className="rounded-lg border border-[#C8FF80]/35 px-4 py-2 text-sm font-black text-[#DFFF9F]"
               >
                 App 内测

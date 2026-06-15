@@ -41,13 +41,6 @@
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&family=Space+Grotesk:wght@500;600;700;800&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap"
-      rel="stylesheet"
-    />
-
     <script type="application/ld+json">
       [
         {
@@ -98,7 +91,7 @@
       .geo-static-shell {
         background: #080807;
         color: #fff7ed;
-        font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         min-height: 100vh;
         padding: 40px 24px;
       }
@@ -137,7 +130,7 @@
     <div id="root">
       <main class="geo-static-shell">
         <nav aria-label="FitMeet 关键页面">
-          <a href="/">首页</a> · <a href="/discover">发现</a> · <a href="/agent">Agent</a> ·
+          <a href="/">首页</a> · <a href="/" data-spa-route="/discover" data-testid="static-discover-entry">发现</a> · <a href="/agent">Agent</a> ·
           <a href="/safety">安全与信任</a>
         </nav>
         <section>
@@ -154,6 +147,17 @@
         </section>
       </main>
     </div>
+    <script>
+      document.addEventListener('click', function (event) {
+        var link = event.target && event.target.closest ? event.target.closest('[data-spa-route]') : null;
+        if (!link || event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        var route = link.getAttribute('data-spa-route');
+        if (!route || route.charAt(0) !== '/') return;
+        event.preventDefault();
+        window.history.pushState(null, '', route);
+        window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

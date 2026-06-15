@@ -1,8 +1,9 @@
-import { lazy, Suspense, useEffect } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { NotFoundPage } from '../pages/NotFoundPage';
-import { useAuthStore } from '../stores';
+import { navigateToDiscoverWithScrollReset } from '../lib/scrollNavigation';
 
 const PlatformPage = lazy(() =>
   import('../pages/PlatformPage').then((m) => ({ default: m.PlatformPage })),
@@ -55,6 +56,9 @@ const AgentActivityPage = lazy(() =>
 const ActivityPage = lazy(() =>
   import('../pages/ActivityPage').then((m) => ({ default: m.ActivityPage })),
 );
+const MeetDetailPage = lazy(() =>
+  import('../pages/MeetDetailPage').then((m) => ({ default: m.MeetDetailPage })),
+);
 const SocialRequestNewPage = lazy(() =>
   import('../pages/SocialRequestNewPage').then((m) => ({ default: m.SocialRequestNewPage })),
 );
@@ -63,6 +67,11 @@ const SocialRequestAiPage = lazy(() =>
 );
 const SocialRequestDetailPage = lazy(() =>
   import('../pages/SocialRequestDetailPage').then((m) => ({ default: m.SocialRequestDetailPage })),
+);
+const PublicIntentDetailPage = lazy(() =>
+  import('../pages/PublicIntentDetailPage').then((m) => ({
+    default: m.PublicIntentDetailPage,
+  })),
 );
 const DemoAgentSocialLoopPage = lazy(() =>
   import('../pages/DemoAgentSocialLoopPage').then((m) => ({ default: m.DemoAgentSocialLoopPage })),
@@ -106,6 +115,7 @@ const GeoLandingPage = lazy(() =>
 const ForgotPasswordPage = lazy(() =>
   import('../pages/ForgotPasswordPage').then((m) => ({ default: m.ForgotPasswordPage })),
 );
+const LoginPage = lazy(() => import('../pages/LoginPage').then((m) => ({ default: m.LoginPage })));
 const PetPage = lazy(() => import('../pages/PetPage').then((m) => ({ default: m.PetPage })));
 const AiRealmPage = lazy(() =>
   import('../pages/AiRealmPage').then((m) => ({ default: m.AiRealmPage })),
@@ -135,14 +145,18 @@ function PageLoader() {
   );
 }
 
-function LoginEntry() {
-  const openLogin = useAuthStore((state) => state.openLogin);
+function DiscoverAliasRoute() {
+  const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
-    openLogin();
-  }, [openLogin]);
+    navigateToDiscoverWithScrollReset(navigate, {
+      search: location.search,
+      replace: true,
+    });
+  }, [navigate, location.search]);
 
-  return <Navigate to="/" replace />;
+  return null;
 }
 
 export function AppRoutes() {
@@ -157,10 +171,12 @@ export function AppRoutes() {
         <Route path="/about" element={<PlatformPage page="about" />} />
         <Route path="/contact" element={<PlatformPage page="contact" />} />
         <Route path="/download" element={<PlatformPage page="download" />} />
+        <Route path="/download-app" element={<Navigate to="/download" replace />} />
+        <Route path="/download-app/" element={<Navigate to="/download" replace />} />
         <Route path="/app" element={<Navigate to="/download" replace />} />
         <Route path="/demo" element={<PlatformPage page="demo" />} />
         <Route path="/life-graph" element={<PlatformPage page="lifeGraph" />} />
-        <Route path="/login" element={<LoginEntry />} />
+        <Route path="/login" element={<LoginPage />} />
         <Route path="/legacy-home" element={<PlatformPage page="home" />} />
         <Route path="/agent" element={<AgentWorkspacePage view="home" />} />
         <Route path="/agent/chat" element={<AgentWorkspacePage view="chat" />} />
@@ -168,14 +184,15 @@ export function AppRoutes() {
         <Route path="/agent/settings" element={<AgentWorkspacePage view="settings" />} />
         <Route path="/agent/projects" element={<AgentWorkspacePage view="projects" />} />
         <Route path="/agent/history" element={<AgentWorkspacePage view="history" />} />
-        <Route path="/hall" element={<Navigate to="/discover" replace />} />
-        <Route path="/nearby" element={<Navigate to="/discover" replace />} />
+        <Route path="/hall" element={<DiscoverAliasRoute />} />
+        <Route path="/nearby" element={<DiscoverAliasRoute />} />
         <Route path="/discover" element={<DiscoverPage />} />
-        <Route path="/meet" element={<Navigate to="/discover" replace />} />
-        <Route path="/human" element={<Navigate to="/discover" replace />} />
+        <Route path="/meet" element={<DiscoverAliasRoute />} />
+        <Route path="/human" element={<DiscoverAliasRoute />} />
         <Route path="/coach" element={<CoachPage />} />
         <Route path="/pet" element={<PetPage />} />
         <Route path="/ai" element={<AiRealmPage />} />
+        <Route path="/social-hall" element={<DiscoverAliasRoute />} />
         <Route path="/ai-match" element={<Navigate to="/agent" replace />} />
         <Route
           path="/ai-profile"
@@ -206,7 +223,7 @@ export function AppRoutes() {
         <Route path="/agent-connect/permissions" element={<Navigate to="/agent/settings" replace />} />
         <Route path="/agent-connect/preferences" element={<Navigate to="/ai-profile" replace />} />
         <Route path="/agent-connect/activity" element={<Navigate to="/agent" replace />} />
-        <Route path="/agent-connect/social-hall" element={<Navigate to="/discover" replace />} />
+        <Route path="/agent-connect/social-hall" element={<DiscoverAliasRoute />} />
         <Route path="/agent-connect/*" element={<Navigate to="/agent-connect" replace />} />
         <Route path="/agent-control" element={<Navigate to="/agent/settings" replace />} />
         <Route path="/social-agent" element={<Navigate to="/agent" replace />} />
@@ -243,6 +260,8 @@ export function AppRoutes() {
           }
         />
         <Route path="/activity/:id" element={<ActivityPage />} />
+        <Route path="/meet/:id" element={<MeetDetailPage />} />
+        <Route path="/public-intent/:id" element={<PublicIntentDetailPage />} />
         <Route
           path="/social-request/new"
           element={

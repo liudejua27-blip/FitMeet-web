@@ -1,5 +1,6 @@
 import { heroCopy, type HeroLanguage } from '@/data/heroCopy';
 import { LanguageToggle } from './LanguageToggle';
+import { SiteLink } from '@/components/navigation/SiteLink';
 
 type HeroNavigationProps = {
   currentLang: HeroLanguage;
@@ -13,7 +14,7 @@ export function HeroNavigation({ currentLang, onLanguageChange }: HeroNavigation
     ['#gateways', nav.ecosystem],
     ['#gateways', nav.gateway],
     ['#symbiosis', nav.symbiosis],
-    ['/human', nav.enter],
+    ['/discover', nav.enter],
   ] as const;
 
   return (
@@ -27,9 +28,9 @@ export function HeroNavigation({ currentLang, onLanguageChange }: HeroNavigation
         </a>
         <div className="hero-nav__links">
           {items.map(([href, label]) => (
-            <a key={`${href}-${label}`} href={href}>
+            <SiteLink key={`${href}-${label}`} to={href}>
               {label}
-            </a>
+            </SiteLink>
           ))}
         </div>
         <LanguageToggle currentLang={currentLang} onChange={onLanguageChange} />

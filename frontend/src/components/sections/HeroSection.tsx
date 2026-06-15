@@ -1,5 +1,7 @@
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { PremiumButton } from '@/components/ui/PremiumButton';
+import { navigateToDiscoverWithScrollReset } from '@/lib/scrollNavigation';
 
 const fadeUp = {
   hidden: { opacity: 0, y: 28 },
@@ -7,6 +9,12 @@ const fadeUp = {
 };
 
 export function HeroSection() {
+  const navigate = useNavigate();
+
+  const jumpToDiscover = () => {
+    navigateToDiscoverWithScrollReset(navigate);
+  };
+
   return (
     <section className="relative z-10 flex min-h-[100svh] items-end overflow-hidden px-5 pb-20 pt-28 sm:px-8 md:items-center md:pb-0 lg:px-12">
       <div className="absolute inset-x-0 bottom-0 h-56 bg-gradient-to-b from-transparent to-[#090908]" />
@@ -52,7 +60,7 @@ export function HeroSection() {
             className="mt-10 flex flex-col gap-3 sm:flex-row"
           >
             <PremiumButton href="#gateways">Explore Ecosystem</PremiumButton>
-            <PremiumButton href="/human" variant="secondary">
+            <PremiumButton variant="secondary" onClick={jumpToDiscover}>
               Enter FitMeet
             </PremiumButton>
             <PremiumButton href="#gateways" variant="ghost">

@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { SiteLink } from '../components/navigation/SiteLink';
 
 /**
  * CitiesPage — 城市与附近生活
@@ -136,12 +137,11 @@ export const CitiesPage = memo(function CitiesPage() {
                 <Stat value={c.pets} label="宠物" accent="text-petBright" />
                 <Stat value={c.agents} label="AI" accent="text-aiBright" />
               </div>
-              <Link
-                to="/discover"
+              <SiteLink to={`/discover?city=${encodeURIComponent(c.city)}`}
                 className="mt-5 inline-flex items-center gap-1 text-sm font-bold text-lime transition hover:gap-2"
               >
                 查看 {c.city} 约练 →
-              </Link>
+              </SiteLink>
             </article>
           ))}
         </div>

@@ -1,4 +1,5 @@
 ﻿import { useMemo, useState, useEffect } from 'react';
+import { navigateToDiscoverWithScrollReset } from '../lib/scrollNavigation';
 import { useParams, useNavigate } from 'react-router-dom';
 import * as dataService from '../services/dataService';
 import type { Post, Meet } from '../types';
@@ -82,7 +83,7 @@ export const TopicPage = () => {
                 <div
                   key={post.id}
                   className="p-4 rounded-xl border border-border bg-surface hover:border-borderStrong transition cursor-pointer"
-                  onClick={() => navigate('/discover')}
+                  onClick={() => navigateToDiscoverWithScrollReset(navigate)}
                 >
                   <div className="flex items-center gap-3 mb-2">
                     <div
@@ -132,7 +133,7 @@ export const TopicPage = () => {
                 <div
                   key={meet.id}
                   className="p-4 rounded-xl border border-border bg-surface hover:border-borderStrong transition cursor-pointer"
-                  onClick={() => navigate('/discover')}
+                  onClick={() => navigateToDiscoverWithScrollReset(navigate)}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">

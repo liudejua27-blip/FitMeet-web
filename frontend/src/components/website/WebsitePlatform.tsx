@@ -2,6 +2,7 @@ import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 're
 import clsx from 'clsx';
 import { Link, useLocation } from 'react-router-dom';
 import { waitlistApi, type WaitlistDeviceType } from '../../api/waitlistApi';
+import { SiteLink } from '../navigation/SiteLink';
 import { SocialWorldHeroVisual } from './SocialWorldHeroVisual';
 
 const SITE_URL = 'https://ourfitmeet.cn';
@@ -196,7 +197,7 @@ const infoPages: Partial<Record<WebsitePage, InfoPage>> = {
     body: '我们不想做一个让人停留更久的信息流，而是做一个让合适的人更自然见面的 Social World。',
     actions: [
       { label: '了解 Safety Center', to: '/safety', variant: 'primary' },
-      { label: '预约 App Beta', to: '/app#waitlist' },
+      { label: '预约 App Beta', to: '/download#waitlist' },
     ],
     sections: [
       {
@@ -328,30 +329,45 @@ export function WebsiteLayout({ children }: { children: ReactNode }) {
 
 function WebsiteNavbar() {
   const location = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <header className="fm-nav">
+    <header className={clsx('fm-nav', menuOpen && 'is-menu-open')}>
       <Link to="/" className="fm-brand" aria-label="FitMeet 首页">
-        <span aria-hidden="true">
-          <img src="/favicon-192.png" alt="" width="38" height="38" />
+        <span>
+          <img src="/favicon-192.png" alt="FitMeet" width="38" height="38" />
         </span>
         <strong>FitMeet</strong>
       </Link>
-      <nav aria-label="FitMeet 官网导航">
+      <button
+        type="button"
+        className="fm-nav__menu"
+        aria-expanded={menuOpen}
+        aria-controls="fitmeet-website-nav"
+        onClick={() => setMenuOpen((open) => !open)}
+      >
+        {menuOpen ? '关闭菜单' : '打开菜单'}
+      </button>
+      <nav id="fitmeet-website-nav" aria-label="FitMeet 官网导航">
         {navItems.map((item) => {
           const active =
             item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to);
           return (
-            <Link key={item.to} to={item.to} aria-current={active ? 'page' : undefined}>
+            <SiteLink
+              key={item.to}
+              to={item.to}
+              aria-current={active ? 'page' : undefined}
+              onClick={() => setMenuOpen(false)}
+            >
               {item.label}
-            </Link>
+            </SiteLink>
           );
         })}
       </nav>
       <div className="fm-nav__actions">
-        <Link to="/discover" className="fm-button fm-button--ghost">
+        <SiteLink to="/discover" className="fm-button fm-button--ghost">
           进入发现
-        </Link>
+        </SiteLink>
         <Link to="/download" className="fm-button fm-button--primary">
           打开 App
         </Link>
@@ -369,9 +385,9 @@ function HomePage() {
           <h1>让社交更简单</h1>
           <p>从兴趣出发，遇见真正聊得来的人</p>
           <div className="fm-actions">
-            <Link to="/discover" className="fm-button fm-button--primary">
+            <SiteLink to="/discover" className="fm-button fm-button--primary">
               进入发现
-            </Link>
+            </SiteLink>
             <Link to="/agent" className="fm-button fm-button--ghost">
               体验 Agent
             </Link>
@@ -458,9 +474,9 @@ function HomePage() {
         <h2>从发现开始，认识真正聊得来的人。</h2>
         <p>先进入发现页，看附近的兴趣场景和同频动态，再决定是否发起一次真实连接。</p>
         <div className="fm-actions">
-          <Link to="/discover" className="fm-button fm-button--primary">
+          <SiteLink to="/discover" className="fm-button fm-button--primary">
             进入发现
-          </Link>
+          </SiteLink>
           <Link to="/download" className="fm-button fm-button--ghost">
             打开 App
           </Link>
@@ -523,9 +539,9 @@ function FeaturesPage() {
           <Link to="/agent" className="fm-button fm-button--primary">
             体验 Agent
           </Link>
-          <Link to="/discover" className="fm-button fm-button--ghost">
+          <SiteLink to="/discover" className="fm-button fm-button--ghost">
             进入发现
-          </Link>
+          </SiteLink>
         </div>
       </section>
     </>
@@ -560,7 +576,7 @@ function SafetyCenterPage() {
         body="真实世界社交的安全，不是一个设置页，而是一整套默认机制：隐私、确认、审计、撤回、举报和数据删除。"
         actions={[
           { label: '体验免登录 Demo', to: '/demo', variant: 'primary' },
-          { label: '预约 App Beta', to: '/app#waitlist' },
+      { label: '预约 App Beta', to: '/download#waitlist' },
         ]}
         visual={<SafetySystemVisual />}
       />
@@ -679,9 +695,9 @@ function AboutContactPage() {
           <Link to="/agent" className="fm-button fm-button--primary">
             体验 Agent
           </Link>
-          <Link to="/discover" className="fm-button fm-button--ghost">
+          <SiteLink to="/discover" className="fm-button fm-button--ghost">
             进入发现
-          </Link>
+          </SiteLink>
         </div>
       </section>
     </>
@@ -960,21 +976,36 @@ function PageHero({
         <p>{body}</p>
         <div className="fm-actions">
           {actions.map((action) => (
-            <Link
+            <ActionLink
               key={action.label}
               to={action.to}
               className={clsx(
                 'fm-button',
                 action.variant === 'primary' ? 'fm-button--primary' : 'fm-button--ghost',
               )}
-            >
-              {action.label}
-            </Link>
+              label={action.label}
+            />
           ))}
         </div>
       </div>
       {visual ? <div className="fm-page-hero__visual">{visual}</div> : null}
     </section>
+  );
+}
+
+function ActionLink({
+  className,
+  label,
+  to,
+}: {
+  className: string;
+  label: string;
+  to: string;
+}) {
+  return (
+    <SiteLink to={to} className={className}>
+      {label}
+    </SiteLink>
   );
 }
 
@@ -1009,13 +1040,13 @@ function WebsiteFooter() {
   return (
     <footer className="fm-footer">
       <strong>
-        <img src="/favicon-192.png" alt="" width="28" height="28" aria-hidden="true" />
+        <img src="/favicon-192.png" alt="FitMeet" width="28" height="28" />
         FitMeet
       </strong>
       <p>Social World，从兴趣出发，遇见真正聊得来的人。</p>
       <nav aria-label="FitMeet 页脚导航">
         <Link to="/features">产品功能</Link>
-        <Link to="/discover">发现</Link>
+        <SiteLink to="/discover">发现</SiteLink>
         <Link to="/agent">Agent</Link>
         <Link to="/safety">安全</Link>
         <Link to="/download">下载 App</Link>

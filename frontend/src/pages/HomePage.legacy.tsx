@@ -1,6 +1,6 @@
 import { memo, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { SiteLink } from '../components/navigation/SiteLink';
 import {
   SPORT_TAXONOMY,
   getSportFilterLabel,
@@ -131,12 +131,11 @@ const HeroSection = memo(function HeroSection({
           </p>
 
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link
-              to="/discover"
+            <SiteLink to="/discover"
               className="inline-flex items-center justify-center rounded-xl bg-[#ff6a00] px-7 py-4 text-sm font-black text-white shadow-[0_18px_45px_rgba(255,106,0,0.32)] transition hover:bg-[#ff8126]"
             >
               开始探索
-            </Link>
+            </SiteLink>
             <button
               className="inline-flex items-center justify-center rounded-xl border border-[#ffcf9f]/55 bg-black/20 px-7 py-4 text-sm font-black text-[#ffe3cc] transition hover:border-[#ff6a00] hover:text-white"
               onClick={onLogin}
@@ -194,14 +193,14 @@ const HeroCollage = memo(function HeroCollage({
         <HeroPanel title="快速分类" action="全部分类">
           <div className="grid grid-cols-3 gap-2">
             {quickSports.slice(0, 6).map((sport) => (
-              <Link
+              <SiteLink
                 key={sport.id}
                 to={`/discover?category=${sport.id}`}
                 className="rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-xs font-black text-[#e8d5bf] transition hover:border-[#ff6a00]/60 hover:text-white"
               >
                 <span className="mr-1">{sport.icon}</span>
                 {sport.label}
-              </Link>
+              </SiteLink>
             ))}
           </div>
         </HeroPanel>
@@ -224,7 +223,7 @@ const HeroCollage = memo(function HeroCollage({
         <div className="rounded-[26px] border border-[#ff6a00]/75 bg-[radial-gradient(circle_at_100%_0%,rgba(255,106,0,0.25),transparent_35%),rgba(255,106,0,0.08)] p-5 shadow-[0_0_46px_rgba(255,106,0,0.24)]">
           <div className="flex items-center justify-between">
             <h2 className="font-display text-xl font-black text-white">其他求助</h2>
-            <Link to="/discover" className="text-xs font-black text-[#ffd2aa]">更多求助</Link>
+            <SiteLink to="/discover" className="text-xs font-black text-[#ffd2aa]">更多求助</SiteLink>
           </div>
           <div className="mt-4 rounded-2xl border border-white/10 bg-[#11100d]/88 p-4">
             <div className="flex items-center gap-3">
@@ -242,12 +241,11 @@ const HeroCollage = memo(function HeroCollage({
           </div>
         </div>
 
-        <Link
-          to="/discover"
+        <SiteLink to="/discover"
           className="block rounded-[22px] border border-mint/30 bg-mint/[0.1] p-5 text-sm font-black text-mint transition hover:border-mint/60 hover:bg-mint/[0.14]"
         >
           自定义品类入口 · 让小众兴趣也能被看见
-        </Link>
+        </SiteLink>
       </div>
     </div>
   );
@@ -271,7 +269,7 @@ const TaxonomyBrowser = memo(function TaxonomyBrowser({ featured }: { featured: 
         <div className="grid gap-5 lg:grid-cols-[180px_minmax(0,1fr)_420px]">
           <nav className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
             {SPORT_TAXONOMY.map((sport) => (
-              <Link
+              <SiteLink
                 key={sport.id}
                 to={`/discover?category=${sport.id}`}
                 className={`flex items-center justify-between border-b border-white/10 px-4 py-3 text-sm font-black transition last:border-b-0 ${
@@ -280,7 +278,7 @@ const TaxonomyBrowser = memo(function TaxonomyBrowser({ featured }: { featured: 
               >
                 <span><span className="mr-2">{sport.icon}</span>{sport.label}</span>
                 <span>›</span>
-              </Link>
+              </SiteLink>
             ))}
           </nav>
 
@@ -314,12 +312,11 @@ const TaxonomyBrowser = memo(function TaxonomyBrowser({ featured }: { featured: 
               <InfoRow label="是否需要场馆" value={selected.needsVenue ? '需要' : '不需要'} />
               <InfoRow label="是否需要教练" value={selected.needsCoach ? '建议' : '不需要'} />
             </div>
-            <Link
-              to={`/discover?category=${featured.id}`}
+            <SiteLink to={`/discover?category=${featured.id}`}
               className="mt-5 flex items-center justify-center rounded-xl bg-[#ff6a00] px-5 py-3 text-sm font-black text-white transition hover:bg-[#ff8126]"
             >
               查看{selected.label}的相关约练
-            </Link>
+            </SiteLink>
           </div>
         </div>
       </div>
@@ -334,7 +331,7 @@ const CommunityModes = memo(function CommunityModes() {
         <h2 className="font-display text-[clamp(34px,5vw,62px)] font-black text-white">三种社区模式 · 连接不同需求</h2>
         <div className="mt-8 grid gap-5 lg:grid-cols-3">
           {communityModes.map((mode) => (
-            <Link
+            <SiteLink
               key={mode.id}
               to={mode.href}
               className="group rounded-[26px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.035))] p-5 transition hover:-translate-y-1 hover:border-[#ff6a00]/55"
@@ -354,7 +351,7 @@ const CommunityModes = memo(function CommunityModes() {
               <div className="mt-5 overflow-hidden rounded-2xl border border-white/10">
                 <img alt="" className="h-48 w-full object-cover transition duration-500 group-hover:scale-[1.04]" src={mode.image} />
               </div>
-            </Link>
+            </SiteLink>
           ))}
         </div>
       </div>
@@ -374,12 +371,11 @@ const CustomCategorySection = memo(function CustomCategorySection() {
           <p className="mt-4 text-sm font-semibold leading-7 text-[#c7b49f]">
             创建你专属的运动兴趣分类，吸引同好、组织活动，建立属于你的小圈子。
           </p>
-          <Link
-            to="/discover"
+          <SiteLink to="/discover"
             className="mt-6 inline-flex rounded-xl bg-[#ff6a00] px-6 py-3 text-sm font-black text-white transition hover:bg-[#ff8126]"
           >
             创建我的分类
-          </Link>
+          </SiteLink>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -437,12 +433,11 @@ const TrustAndCta = memo(function TrustAndCta({
                 >
                   {isLoggedIn ? '立即探索' : '立即加入'}
                 </button>
-                <Link
-                  to="/discover"
+                <SiteLink to="/discover"
                   className="rounded-xl border border-white/15 bg-white/[0.05] px-7 py-3.5 text-sm font-black text-white transition hover:border-white/30"
                 >
                   浏览约练
-                </Link>
+                </SiteLink>
               </div>
             </div>
           </div>

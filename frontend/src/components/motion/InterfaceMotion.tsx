@@ -7,10 +7,9 @@ const introSelectors = [
   '.fitmeet-website .fm-social-hero-visual',
   '.fitmeet-website .concept-home-hero__copy > *',
   '.fitmeet-website .website-page-hero > div > *',
-  '.agent-workspace--landing .agent-main-brand',
-  '.agent-workspace--landing .agent-assistant-top > div:last-child',
-  '.agent-workspace--landing .agent-gpt-input',
-  '.agent-workspace--landing .agent-start-proof span',
+  '[data-testid="assistant-ui-thread-list"] a',
+  '[data-testid="assistant-ui-empty-state"] > div > *',
+  '[data-testid="assistant-ui-composer"]',
   'main h1',
   'main h2',
 ].join(',');
@@ -32,9 +31,9 @@ const revealSelectors = [
   '.fitmeet-website .concept-split > *',
   '.fitmeet-website .concept-terminal',
   '.fitmeet-website .concept-audit-list > *',
-  '.agent-workspace--landing .agent-side-card',
-  '.agent-workspace--landing .agent-natural-prompts button',
-  '.agent-workspace--landing .agent-start-footer',
+  '[data-testid="assistant-ui-thread-list"] button',
+  '[data-testid="assistant-ui-message"]',
+  '[data-testid="assistant-ui-tool-ui"]',
   'main article',
   'main [class*="Card"]',
   'main [class*="card"]',
@@ -43,7 +42,7 @@ const revealSelectors = [
 const ambientSelectors = [
   '.fitmeet-website .fm-world-story img',
   '.fitmeet-website .website-hero__visual',
-  '.agent-workspace--landing .agent-gpt-input__submit',
+  '[data-testid="assistant-ui-composer"] button[type="submit"]',
 ].join(',');
 
 export function InterfaceMotion() {
@@ -87,7 +86,7 @@ export function InterfaceMotion() {
             const ambientTargets = uniqueElements(gsap, ambientSelectors);
             const pointerSurfaces = uniqueElements(
               gsap,
-              '.fitmeet-website, .agent-workspace--landing .agent-gpt-main',
+              '.fitmeet-website, [data-testid="assistant-ui-shell"]',
             );
             const magneticTargets = uniqueElements(
               gsap,
@@ -96,8 +95,8 @@ export function InterfaceMotion() {
                 '.fitmeet-website .concept-button',
                 '.fitmeet-website .website-nav__actions a',
                 '.fitmeet-website .website-page-hero__actions a',
-                '.agent-workspace--landing .agent-gpt-input__submit',
-                '.agent-workspace--landing .agent-natural-prompts button',
+                '[data-testid="assistant-ui-composer"] button[type="submit"]',
+                '[data-testid="assistant-ui-thread-list"] button',
               ].join(','),
             ).slice(0, 80);
 
@@ -149,21 +148,6 @@ export function InterfaceMotion() {
                 repeat: -1,
                 yoyo: true,
                 overwrite: 'auto',
-              });
-            }
-
-            const footerIcons = uniqueElements(
-              gsap,
-              '.agent-workspace--landing .agent-start-footer svg',
-            );
-            if (footerIcons.length > 0) {
-              gsap.to(footerIcons, {
-                y: -2,
-                duration: 1.8,
-                ease: 'sine.inOut',
-                repeat: -1,
-                yoyo: true,
-                stagger: 0.18,
               });
             }
 

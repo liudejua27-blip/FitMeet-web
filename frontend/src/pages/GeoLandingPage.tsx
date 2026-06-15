@@ -1,4 +1,5 @@
 import { Navigate, useLocation } from 'react-router-dom';
+import { SiteLink } from '../components/navigation/SiteLink';
 import {
   findGeoLandingPage,
   getGeoJsonLd,
@@ -108,16 +109,16 @@ export const GeoLandingPage = () => {
 };
 
 const ActionLink = ({ action }: { action: GeoActionLink }) => (
-  <a
+  <SiteLink
     className={
       action.variant === 'secondary'
         ? 'rounded-xl border border-white/15 bg-white/[0.05] px-6 py-3 text-sm font-black text-white transition hover:border-[#ff6a00]/60'
         : 'rounded-xl bg-[#ff6a00] px-6 py-3 text-sm font-black text-white transition hover:bg-[#ff8126]'
     }
-    href={action.href}
+    to={action.href}
   >
     {action.label}
-  </a>
+  </SiteLink>
 );
 
 const InfoBlock = ({ items, title }: { items: string[]; title: string }) => (
@@ -150,10 +151,10 @@ const DirectorySection = ({ groups }: { groups: GeoDirectoryGroup[] }) => (
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {group.links.map((link) => (
-              <a
+              <SiteLink
                 key={`${group.title}-${link.href}-${link.label}`}
                 className="rounded-2xl border border-white/10 bg-white/[0.045] p-4 transition hover:border-[#ff6a00]/60 hover:bg-white/[0.065]"
-                href={link.href}
+                to={link.href}
               >
                 <span className="block text-base font-black text-white">{link.label}</span>
                 {link.description && (
@@ -166,7 +167,7 @@ const DirectorySection = ({ groups }: { groups: GeoDirectoryGroup[] }) => (
                     {link.meta}
                   </span>
                 )}
-              </a>
+              </SiteLink>
             ))}
           </div>
         </div>

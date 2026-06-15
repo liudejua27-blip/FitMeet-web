@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { useEffect, useMemo, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { agentConnections } from '@/data/agentMockData';
 import type { AgentConnection } from '@/types/agent';
 import { AgentConnectionCard } from './AgentConnectionCard';
@@ -8,6 +8,7 @@ import { AgentGatewayOverview } from './AgentGatewayOverview';
 import { AgentLiveControlPanel } from './AgentLiveControlPanel';
 import { AgentMiniGatewayVisual } from './AgentMiniGatewayVisual';
 import { AgentSafetyPanel } from './AgentSafetyPanel';
+import { SiteLink } from '../navigation/SiteLink';
 
 const navLinks = [
   { href: '/', label: '返回首页', en: 'HOME' },
@@ -28,23 +29,23 @@ export function AgentConnectPage() {
     <div className="agent-connect-page">
       <div className="agent-connect-page__noise" aria-hidden="true" />
       <header className="agent-connect-nav">
-        <a href="/" className="agent-connect-nav__brand">
+        <Link to="/" className="agent-connect-nav__brand">
           <span aria-hidden="true">
             <img src="/favicon-192.png" alt="" width="34" height="34" />
           </span>
           <strong>FitMeet</strong>
           <em>Agent Gateway</em>
-        </a>
+        </Link>
         <nav aria-label="Agent Connect navigation">
           {navLinks.map((link) => (
-            <a
+            <SmartNavLink
               key={link.href}
-              href={link.href}
-              aria-current={location.pathname === link.href ? 'page' : undefined}
+              to={link.href}
+              ariaCurrent={location.pathname === link.href ? 'page' : undefined}
             >
               <span>{link.label}</span>
               <small>{link.en}</small>
-            </a>
+            </SmartNavLink>
           ))}
         </nav>
         <div className="agent-connect-nav__lang" aria-label="Language selector">
@@ -186,10 +187,10 @@ function AgentConnectHome() {
               AI-assisted, permission-based 原则。
             </p>
             <div className="agent-selected-panel__links">
-              <a href="/agent-control">权限设置</a>
-              <a href="/ai-profile">偏好画像</a>
-              <a href="/agent-activity">行为日志</a>
-              <a href="/discover">发现</a>
+              <SmartNavLink to="/agent-control">权限设置</SmartNavLink>
+              <SmartNavLink to="/ai-profile">偏好画像</SmartNavLink>
+              <SmartNavLink to="/agent-activity">行为日志</SmartNavLink>
+              <SiteLink to="/discover">发现</SiteLink>
             </div>
             {showCustomGuide && (
               <div className="agent-custom-guide">
@@ -206,5 +207,21 @@ function AgentConnectHome() {
 
       <AgentSafetyPanel />
     </>
+  );
+}
+
+function SmartNavLink({
+  ariaCurrent,
+  children,
+  to,
+}: {
+  ariaCurrent?: React.AriaAttributes['aria-current'];
+  children: React.ReactNode;
+  to: string;
+}) {
+  return (
+    <SiteLink to={to} aria-current={ariaCurrent}>
+      {children}
+    </SiteLink>
   );
 }
