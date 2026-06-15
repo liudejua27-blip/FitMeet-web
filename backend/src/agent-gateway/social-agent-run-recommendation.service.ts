@@ -114,6 +114,7 @@ export class SocialAgentRunRecommendationService {
         tools: recommendationTools.map(({ agent, toolName, covers, input }) => ({
           agent,
           toolName,
+          requiresApproval: false,
           input: {
             ...input,
             pipelineSteps: covers,

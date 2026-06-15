@@ -499,6 +499,7 @@ export class AgentLoopService {
 
   private requiresApproval(tool: AgentLoopToolPlan): boolean {
     if (tool.requiresApproval === true) return true;
+    if (this.isSafeInternalPlanningTool(tool)) return false;
     if (tool.toolName === 'card_action_dispatch') return false;
     if (this.isConfirmedCandidateCommand(tool)) return false;
     const name = tool.toolName.toLowerCase();
@@ -506,6 +507,13 @@ export class AgentLoopService {
       return true;
     }
     return this.highRiskInputSurface(tool.input ?? {});
+  }
+
+  private isSafeInternalPlanningTool(tool: AgentLoopToolPlan): boolean {
+    return (
+      tool.requiresApproval === false &&
+      /^recommendation_/.test(tool.toolName)
+    );
   }
 
   private isConfirmedCandidateCommand(tool: AgentLoopToolPlan): boolean {
