@@ -5,11 +5,13 @@ import { createRealAgentAdapter } from './realAgentAdapter';
 export type AgentAdapterMode = 'mock' | 'real';
 
 export function resolveAgentAdapterMode(env: ImportMetaEnv = import.meta.env): AgentAdapterMode {
+  if (env.PROD) return 'real';
+
   const explicit = env.VITE_AGENT_ADAPTER;
   if (explicit === 'real') return 'real';
   if (explicit === 'mock') return 'mock';
   if (env.VITE_AGENT_MOCK_FLOW === 'true') return 'mock';
-  return env.PROD ? 'real' : 'mock';
+  return 'mock';
 }
 
 export function isRealAgentMode(env: ImportMetaEnv = import.meta.env): boolean {

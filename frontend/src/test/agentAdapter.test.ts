@@ -11,7 +11,7 @@ import {
 } from '../components/agent-workspace/api';
 
 describe('Agent adapter layer', () => {
-  it('defaults to the mock adapter unless real is explicitly requested', () => {
+  it('keeps production on the real adapter even when mock env flags are misconfigured', () => {
     expect(resolveAgentAdapterMode({} as ImportMetaEnv)).toBe('mock');
     expect(resolveAgentAdapterMode({ PROD: true } as unknown as ImportMetaEnv)).toBe('real');
     expect(
@@ -19,7 +19,13 @@ describe('Agent adapter layer', () => {
         PROD: true,
         VITE_AGENT_MOCK_FLOW: 'true',
       } as unknown as ImportMetaEnv),
-    ).toBe('mock');
+    ).toBe('real');
+    expect(
+      resolveAgentAdapterMode({
+        PROD: true,
+        VITE_AGENT_ADAPTER: 'mock',
+      } as unknown as ImportMetaEnv),
+    ).toBe('real');
     expect(
       resolveAgentAdapterMode({ VITE_AGENT_ADAPTER: 'mock' } as unknown as ImportMetaEnv),
     ).toBe('mock');
