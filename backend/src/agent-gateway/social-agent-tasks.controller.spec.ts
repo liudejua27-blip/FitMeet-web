@@ -1,5 +1,8 @@
 import { SocialAgentTasksController } from './social-agent-tasks.controller';
-import { SocialAgentToolExecutorService } from './social-agent-tool-executor.service';
+import {
+  SocialAgentToolExecutorService,
+  SocialAgentToolName,
+} from './social-agent-tool-executor.service';
 
 describe('SocialAgentTasksController', () => {
   it('routes run-next through the task executor with the authenticated user id', async () => {
@@ -44,5 +47,48 @@ describe('SocialAgentTasksController', () => {
       controller.runNext({ user: { id: 7 } } as never, 42),
     ).resolves.toEqual(runNextResult);
     expect(executor.runNext).toHaveBeenCalledWith(42, 7);
+  });
+
+  it('routes registered tool calls through the unified executor boundary', async () => {
+    const task = { id: 42, ownerUserId: 7 };
+    const taskRepo = {
+      findOne: jest.fn().mockResolvedValue(task),
+    };
+    const toolResult = {
+      id: 'action_search_matches_1',
+      toolName: SocialAgentToolName.SearchMatches,
+      status: 'succeeded',
+      output: { candidates: [] },
+      error: null,
+    };
+    const executor = {
+      executeToolAction: jest.fn().mockResolvedValue(toolResult),
+    };
+    const controller = new SocialAgentTasksController(
+      taskRepo as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      executor as unknown as SocialAgentToolExecutorService,
+      {} as never,
+    );
+
+    await expect(
+      controller.callRegisteredTool(
+        { user: { id: 7 } } as never,
+        42,
+        SocialAgentToolName.SearchMatches,
+        { city: '青岛', activityType: 'running' },
+      ),
+    ).resolves.toEqual(toolResult);
+    expect(taskRepo.findOne).toHaveBeenCalledWith({
+      where: { id: 42, ownerUserId: 7 },
+    });
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      42,
+      SocialAgentToolName.SearchMatches,
+      { city: '青岛', activityType: 'running' },
+      7,
+    );
   });
 });
