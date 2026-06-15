@@ -20,11 +20,13 @@ describe('Agent user route isolation', () => {
     );
   });
 
-  it('removes the old user-facing workbench files while keeping debug copies isolated', () => {
+  it('removes the old user-facing and debug workbench files', () => {
     expect(existsSync(join(srcRoot, 'components', 'agent-workbench'))).toBe(false);
     expect(existsSync(join(srcRoot, 'pages', 'SocialAgentConsolePage.tsx'))).toBe(false);
-    expect(existsSync(join(srcRoot, 'debug', 'agent-workbench', 'AgentRunTrace.tsx'))).toBe(true);
-    expect(existsSync(join(srcRoot, 'debug', 'SocialAgentConsolePage.tsx'))).toBe(true);
+    expect(existsSync(join(srcRoot, 'debug', 'agent-workbench'))).toBe(false);
+    expect(existsSync(join(srcRoot, 'debug', 'SocialAgentConsolePage.tsx'))).toBe(false);
+    expect(existsSync(join(srcRoot, 'debug', 'agentTaskEvents.ts'))).toBe(false);
+    expect(existsSync(join(srcRoot, 'debug', 'agentPageModuleAudit.ts'))).toBe(true);
   });
 
   it('allows debug API imports only inside the debug source tree', () => {
@@ -50,6 +52,43 @@ describe('Agent user route isolation', () => {
     );
   });
 
+  it('keeps retired agent copy and shell selectors out of production source', () => {
+    const forbiddenPatterns = [
+      /今天想认识什么样的人？/,
+      /开始低压力社交/,
+      /开始一个低压力任务/,
+      /找个跑步搭子/,
+      /正在调用工具/,
+      /工具已完成/,
+      /工具整理结果/,
+      /关联步骤/,
+      /return ['"]工具['"]/,
+      /agent-gpt-copy-shell/,
+      /agent-workspace--gpt/,
+      /agent-gpt-result-block/,
+      /\bagent-gpt-/,
+      /agent-workspace__/,
+      /agent-workspace--/,
+      /agent-center-input/,
+      /agent-quick-actions/,
+      /agent-context-pills/,
+      /agent-progressive-results/,
+      /\bagent-flow-/,
+      /\bagent-permission-select\b/,
+      /agent-workspace-ant-guide/,
+    ];
+    const offenders = collectSourceFiles(srcRoot)
+      .filter((file) => !relative(srcRoot, file).replace(/\\/g, '/').startsWith('test/'))
+      .flatMap((file) => {
+        const source = readFileSync(file, 'utf8');
+        return forbiddenPatterns
+          .filter((pattern) => pattern.test(source))
+          .map((pattern) => `${relative(srcRoot, file).replace(/\\/g, '/')}: ${pattern}`);
+      });
+
+    expect(offenders).toEqual([]);
+  });
+
   it('does not introduce AI SDK chat architecture dependencies into the app shell', () => {
     const packageJson = readFileSync(join(process.cwd(), 'package.json'), 'utf8');
     const allSourceText = collectSourceFiles(srcRoot)
@@ -71,7 +110,7 @@ function collectSourceFiles(dir: string): string[] {
     const fullPath = join(dir, entry);
     const stats = statSync(fullPath);
     if (stats.isDirectory()) return collectSourceFiles(fullPath);
-    if (!/\.(ts|tsx)$/.test(entry)) return [];
+    if (!/\.(ts|tsx|css)$/.test(entry)) return [];
     return [fullPath];
   });
 }

@@ -1,7 +1,7 @@
 import type {
   FitMeetAlphaCard,
   FitMeetAlphaCardAction,
-  FitMeetAgentSchemaAction,
+  FitMeetAgentCardExecutableAction,
   SocialAgentPermissionMode,
   UserFacingAgentPendingConfirmation,
   UserFacingAgentResponse,
@@ -55,10 +55,11 @@ export interface AgentRunResponse {
   response: UserFacingAgentResponse;
   lifecycle: AgentLifecycle;
   taskId?: number | null;
+  taskStatus?: string | null;
 }
 
 export interface AgentActionRequest {
-  action: FitMeetAgentSchemaAction;
+  action: FitMeetAgentCardExecutableAction;
   payload?: Record<string, unknown>;
   idempotencyKey: string;
 }

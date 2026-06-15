@@ -768,44 +768,6 @@
   padding: 44px;
 }
 
-.agent-workspace-ant-guide {
-  margin: 0 auto;
-  text-align: left;
-  width: fit-content;
-}
-
-.agent-workspace-ant-guide--home {
-  justify-content: center;
-  margin-top: 4px;
-  width: min(100%, 420px);
-}
-
-.agent-workspace-ant-guide--thread {
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid #e6eaf2;
-  border-radius: 22px;
-  box-shadow: 0 12px 32px rgba(31, 72, 148, 0.06);
-  margin-bottom: 14px;
-  padding: 12px 14px;
-  position: sticky;
-  top: 14px;
-  width: min(100%, 460px);
-  z-index: 3;
-}
-
-@media (min-width: 901px) {
-  .agent-workspace-ant-guide--thread {
-    position: fixed;
-    right: max(24px, calc((100vw - 268px - 860px) / 2 + 24px));
-    top: 78px;
-    width: min(420px, calc(100vw - 320px));
-  }
-
-  .agent-workspace-ant-guide--thread + .agent-gpt-thread__messages .agent-gpt-thread__content {
-    padding-top: 156px !important;
-  }
-}
-
 .agent-guide-playground__shell {
   display: grid;
   gap: 24px;
@@ -1017,34 +979,4 @@
 }
 
 @media (max-width: 640px) {
-  .agent-workspace-ant-guide--home {
-    align-items: center;
-    flex-direction: column;
-    justify-self: center;
-    max-width: 320px;
-    text-align: center;
-    width: calc(100vw - 32px);
-  }
-
-  .agent-workspace-ant-guide--home .ant-guide__copy {
-    justify-items: center;
-    width: 100%;
-  }
-
-  .agent-workspace-ant-guide--home .ant-guide__copy span {
-    max-width: 28ch;
-  }
-
-  .agent-workspace-ant-guide--thread {
-    left: 14px;
-    position: fixed;
-    right: 14px;
-    top: 10px;
-    width: auto;
-    z-index: 60;
-  }
-
-  .agent-workspace-ant-guide--thread + .agent-gpt-thread__messages .agent-gpt-thread__content {
-    padding-top: 146px !important;
-  }
 }

@@ -1,197 +1,1503 @@
-import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import clsx from 'clsx';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+
 import {
-  CalendarDays,
-  ChevronDown,
-  Clock3,
-  Footprints,
-  MessageSquarePlus,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PersonStanding,
-  RotateCcw,
-  Send,
-  ShieldCheck,
-  Sparkles,
-  Square,
-  UserRound,
-  type LucideIcon,
-} from 'lucide-react';
-import {
-  Conversation,
-  ConversationContent,
-  ConversationScrollButton,
-} from '../ai-elements/conversation';
-import {
-  Confirmation,
-  ConfirmationAction,
-  ConfirmationActions,
-  ConfirmationRequest,
-  ConfirmationTitle,
-} from '../ai-elements/confirmation';
-import {
-  Message as AiMessage,
-  MessageContent as AiMessageContent,
-  MessageResponse,
-} from '../ai-elements/message';
-import {
-  PromptInput,
-  PromptInputBody,
-  PromptInputSubmit,
-  PromptInputTextarea,
-} from '../ai-elements/prompt-input';
-import {
+  type FitMeetAgentCardExecutableAction,
   type FitMeetAlphaCard,
-  type FitMeetAlphaCardAction,
+  type FitMeetAgentThreadBranchSnapshot,
+  type FitMeetAgentThreadSummary,
   type FitMeetAgentSchemaAction,
+  type SocialAgentProfileGateStatus,
+  type SocialAgentReminderPreference,
+  type SocialAgentReminderScene,
+  type SocialAgentRunNextResponse,
   type SocialAgentPermissionMode,
   type UserFacingAgentProgressEvent,
-  type UserFacingAgentProgressKind,
-  type UserFacingAgentLightStatus,
   type UserFacingAgentResponse,
+  type UserFacingAgentSessionSnapshot,
+  socialAgentApi,
 } from '../../api/socialAgentApi';
-import { activitiesApi, type ActivityProof, type SocialActivity } from '../../api/activitiesApi';
-import { lifeGraphApi, type LifeGraphResponse } from '../../api/lifeGraphApi';
+import {
+  type AgentApprovalDispatchResult,
+  type AgentCheckpointSummary,
+  agentApprovalsApi,
+} from '../../api/agentApprovalsApi';
 import { useAuthStore } from '../../stores';
-import type { UserProfile } from '../../types';
 import {
-  auditAgentPageModules,
-  type AgentPageModuleAuditResult,
-} from '../../debug/agentPageModuleAudit';
-import { loadAgentTaskEvents, type AgentTaskDebugEvent } from '../../debug/agentTaskEvents';
+  FitMeetAssistantUI,
+  type FitMeetAssistantAttachment,
+  type FitMeetAssistantMessage,
+  type FitMeetAssistantRecovery,
+  type FitMeetAssistantStep,
+} from './FitMeetAssistantUI';
 import {
-  type AntGuideCopy,
-  type AntGuideState,
-  type AntGuideTarget,
-} from '../agent/ant-guide';
-import { CodexAntPet } from './CodexAntPet';
-import { AGENT_FLOW_INTERESTS } from './agentFlow.constants';
-import { useAgentFlow } from './useAgentFlow';
+  type ToolUISchemaAction,
+  toolUISchemaActionFromUnknown,
+} from '../assistant-ui/tool-ui-schema';
 import {
   createAgentAdapter,
-  resolveAgentAdapterMode,
   mapAgentError,
+  resolveAgentAdapterMode,
   type AgentError,
-  type AgentLifecycle,
   type AgentStreamEvent,
 } from './api';
 
 type AgentView = 'home' | 'chat' | 'settings' | 'projects' | 'history';
-type AgentThreadMessage = {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  status?: 'streaming' | 'done' | 'error';
-};
-type StepState = 'pending' | 'running' | 'success' | 'waiting' | 'error';
-type Step = {
-  id: string;
-  label: string;
-  status: StepState;
-  kind?: UserFacingAgentProgressKind;
-  detail?: string;
-};
-type AgentSuggestionItem = {
-  text: string;
-  detail: string;
-  icon: LucideIcon;
-  tone: 'sage' | 'blue' | 'gold' | 'clay' | 'mint' | 'violet';
-  prompt?: string;
-  action?: 'life_graph' | 'rhythm' | 'weekly' | 'changes';
-};
-type AgentConfirmationViewModel = {
-  id: string;
-  title: string;
-  body: string;
-  primaryLabel?: string;
-  secondaryLabels?: string[];
-  onPrimary?: () => void;
-  onSecondary?: (label: string) => void;
-};
-type AgentPrivacySettings = {
-  showBodyInfo: boolean;
-  showExactLocation: boolean;
-};
-type ActivityDetailState = {
-  activity: SocialActivity;
-  proofs: ActivityProof[];
-};
-type AgentRecoveryState = {
-  kind: 'failed' | 'stopped' | 'action_failed' | 'missing_info' | 'unauthorized' | 'safety';
-  title: string;
-  message: string;
-  prompt: string;
-  retryable: boolean;
-};
+type AgentConversationIntent = 'conversation' | 'social' | 'approval';
+type AgentThreadMessage = FitMeetAssistantMessage;
+type Step = FitMeetAssistantStep;
+type AgentMessageBranchState = NonNullable<AgentThreadMessage['branch']>;
+type StepState = Step['status'];
+
 type AgentThreadSnapshot = {
   activeTaskId: number | null;
   messages: AgentThreadMessage[];
   userResult: UserFacingAgentResponse | null;
   mode: SocialAgentPermissionMode;
+  branchSelections: Record<string, number>;
   savedAt: number;
 };
-type AgentSidebarSectionId =
-  | 'new'
-  | 'recent'
-  | 'profile'
-  | 'settings'
-  | 'projects'
-  | 'history'
-  | 'pet';
 
-const AGENT_PET_STORAGE_KEY = 'fitmeet-agent-pet-enabled';
 const AGENT_THREAD_STORAGE_KEY = 'fitmeet-agent-thread';
 const AGENT_THREAD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-const AGENT_BRAND_ICON_SRC = '/favicon-192.png';
+const RUN_NEXT_LOW_TOUCH_INTERVAL_MS = 90 * 1000;
+const ASSISTANT_STREAMING_PLACEHOLDER = '\u200b';
 
 const technicalPublicTextPattern =
   /\b(traceId|agentTrace|structuredIntent|planner|tool\s*call|toolCall|toolCalls|DeepSeek|OpenAI|raw JSON|stack)\b|Life Graph Agent|Social Match Agent|Meet Loop Agent|工具调用|数据库字段|错误堆栈/i;
 
-const baseSteps: Step[] = [
+const conversationSteps: Step[] = [
+  { id: 'understand', label: '正在理解你的问题', status: 'pending' },
+  { id: 'respond', label: '正在组织自然回复', status: 'pending' },
+  { id: 'safety_filter', label: '正在检查必要边界', status: 'pending' },
+];
+
+const socialSteps: Step[] = [
   { id: 'understand', label: '正在理解你的需求', status: 'pending' },
-  { id: 'profile', label: '正在结合你的 Life Graph', status: 'pending' },
-  { id: 'search', label: '正在筛选合适的人', status: 'pending' },
-  { id: 'rank', label: '正在排除时间不合适的人', status: 'pending' },
-  { id: 'safety_filter', label: '正在检查安全边界', status: 'pending' },
-  { id: 'icebreaker', label: '正在生成开场白', status: 'pending' },
-  { id: 'approval', label: '正在等待你确认', status: 'pending' },
+  { id: 'profile', label: '正在结合上下文', status: 'pending' },
+  { id: 'search', label: '正在查找合适的信息', status: 'pending' },
+  { id: 'rank', label: '正在整理可行选项', status: 'pending' },
+  { id: 'safety_filter', label: '正在检查必要边界', status: 'pending' },
+  { id: 'approval', label: '需要你确认这一步', status: 'pending' },
 ];
 
-const naturalPromptIdeas: AgentSuggestionItem[] = [
-  {
-    text: '找个跑步搭子',
-    detail: '一起跑步，互相激励',
-    icon: Footprints,
-    tone: 'sage',
-    prompt: '今晚想找青岛大学附近跑步搭子',
-  },
-  {
-    text: '今晚出门走走',
-    detail: '散步、逛街、喝杯咖啡',
-    icon: PersonStanding,
-    tone: 'violet',
-    prompt: '今晚出门走走，找个低压力的人一起散步',
-  },
-  {
-    text: '这周轻社交',
-    detail: '轻松见面，认识新朋友',
-    icon: CalendarDays,
-    tone: 'blue',
-    action: 'weekly',
-  },
-  {
-    text: '帮我整理社交边界',
-    detail: '设定偏好，守护舒适感',
-    icon: ShieldCheck,
-    tone: 'gold',
-    action: 'life_graph',
-  },
-];
+export function AgentWorkspace({ view }: { view: AgentView }) {
+  const params = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { isLoggedIn, openLogin, user } = useAuthStore();
+  const [messages, setMessages] = useState<AgentThreadMessage[]>([]);
+  const [steps, setSteps] = useState<Step[]>(conversationSteps);
+  const [userResult, setUserResult] = useState<UserFacingAgentResponse | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
+  const [mode] = useState<SocialAgentPermissionMode>('limited_auto');
+  const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
+  const [activeTaskStatus, setActiveTaskStatus] = useState<string | null>(null);
+  const [sessionRestoring, setSessionRestoring] = useState(false);
+  const [recovery, setRecovery] = useState<FitMeetAssistantRecovery | null>(null);
+  const [threads, setThreads] = useState<FitMeetAgentThreadSummary[]>([]);
+  const [threadsLoading, setThreadsLoading] = useState(false);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [branchSelections, setBranchSelections] = useState<Record<string, number>>({});
+  const [branchSyncStatus, setBranchSyncStatus] = useState<
+    Record<string, AgentMessageBranchState['syncStatus']>
+  >({});
+  const [reminderPreference, setReminderPreference] =
+    useState<SocialAgentReminderPreference | null>(null);
+  const [profileGate, setProfileGate] = useState<SocialAgentProfileGateStatus | null>(null);
+  const [reminderLoading, setReminderLoading] = useState(false);
+  const [reminderSaving, setReminderSaving] = useState(false);
+  const [reminderError, setReminderError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const finishedRef = useRef(false);
+  const stopRequestedRef = useRef(false);
+  const skipNextRestoreRef = useRef(false);
+  const branchReloadUserIdRef = useRef<string | null>(null);
+  const processedReminderRouteIdsRef = useRef<Set<string>>(new Set());
+  const runNextCheckedAtRef = useRef<Map<number, number>>(new Map());
+  const runConversationIntentRef = useRef<AgentConversationIntent>('conversation');
+  const pendingOpportunityClarificationRef = useRef(false);
+  const pendingApprovalDispatchCardsRef = useRef<FitMeetAlphaCard[]>([]);
+  const agentAdapterMode = useMemo(() => resolveAgentAdapterMode(), []);
+  const isRealAgent = agentAdapterMode === 'real';
+  const agentAdapter = useMemo(() => createAgentAdapter(agentAdapterMode), [agentAdapterMode]);
+  const routeTaskId = numberFromUnknown(params.taskId);
+  const currentUserId = user?.id ?? null;
+  const shellView = view === 'chat' || params.taskId ? 'chat' : view;
+  const focusReminderSettings =
+    new URLSearchParams(location.search).get('settings') === 'reminders';
 
-function readStoredPetEnabled() {
-  if (typeof window === 'undefined') return true;
-  return window.localStorage.getItem(AGENT_PET_STORAGE_KEY) !== 'false';
+  useEffect(() => {
+    document.title = 'FitMeet Agent - 全球社交 AI 助手';
+  }, []);
+
+  useEffect(() => {
+    if (shellView !== 'chat') {
+      navigate('/agent/chat', { replace: true });
+    }
+  }, [navigate, shellView]);
+
+  useEffect(() => {
+    if (!isRealAgent || !isLoggedIn) return;
+    const stored = readStoredAgentThread(currentUserId);
+    if (!stored || (stored.messages.length === 0 && !stored.userResult)) return;
+    setActiveTaskId((current) => current ?? stored.activeTaskId);
+    setUserResult((current) => current ?? stored.userResult);
+    setBranchSelections((current) =>
+      Object.keys(current).length > 0 ? current : stored.branchSelections,
+    );
+    setMessages((current) => {
+      if (current.length > 0) return current;
+      if (!stored.userResult) return stored.messages;
+      const messageHasResult = stored.messages.some((item) => !!item.result);
+      if (messageHasResult) return stored.messages;
+      return stored.messages.map((item, index) =>
+        item.role === 'assistant' && index === stored.messages.length - 1
+          ? { ...item, result: stored.userResult }
+          : item,
+      );
+    });
+  }, [currentUserId, isLoggedIn, isRealAgent]);
+
+  useEffect(() => {
+    if (!isRealAgent || !isLoggedIn) {
+      setProfileGate(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const next = await socialAgentApi.getProfileGate();
+        if (!cancelled) setProfileGate(next);
+      } catch {
+        if (!cancelled) setProfileGate(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUserId, isLoggedIn, isRealAgent]);
+
+  useEffect(() => {
+    if (!isRealAgent || !isLoggedIn) return;
+    if (messages.length === 0 && !userResult && !activeTaskId) return;
+    writeStoredAgentThread(currentUserId, {
+      activeTaskId,
+      messages,
+      userResult,
+      mode,
+      branchSelections,
+    });
+  }, [
+    activeTaskId,
+    branchSelections,
+    currentUserId,
+    isLoggedIn,
+    isRealAgent,
+    messages,
+    mode,
+    userResult,
+  ]);
+
+  const refreshThreads = useCallback(async () => {
+    if (!isRealAgent || !isLoggedIn) return;
+    setThreadsLoading(true);
+    try {
+      const next = await socialAgentApi.listThreads(40);
+      setThreads(next.threads);
+      if (!activeThreadId && activeTaskId) setActiveThreadId(String(activeTaskId));
+    } catch {
+      // Thread list persistence should not block the chat surface.
+    } finally {
+      setThreadsLoading(false);
+    }
+  }, [activeTaskId, activeThreadId, isLoggedIn, isRealAgent]);
+
+  useEffect(() => {
+    void refreshThreads();
+  }, [refreshThreads]);
+
+  const refreshReminderPreference = useCallback(async () => {
+    if (!isRealAgent || !isLoggedIn) {
+      setReminderPreference(null);
+      return;
+    }
+    setReminderLoading(true);
+    setReminderError(null);
+    try {
+      const preference = await socialAgentApi.getReminderPreference();
+      setReminderPreference(preference);
+    } catch {
+      setReminderError('提醒状态暂时不可用');
+    } finally {
+      setReminderLoading(false);
+    }
+  }, [isLoggedIn, isRealAgent]);
+
+  useEffect(() => {
+    void refreshReminderPreference();
+  }, [refreshReminderPreference]);
+
+  const appendRunNextCards = useCallback(
+    async (taskId: number, messageId: string, options: { force?: boolean } = {}) => {
+      if (isRunning) return;
+      const now = Date.now();
+      const lastCheckedAt = runNextCheckedAtRef.current.get(taskId) ?? 0;
+      if (!options.force && now - lastCheckedAt < RUN_NEXT_LOW_TOUCH_INTERVAL_MS) return;
+      runNextCheckedAtRef.current.set(taskId, now);
+      try {
+        const result = await socialAgentApi.runTaskNext(taskId);
+        if (!Array.isArray(result.cards) || result.cards.length === 0) return;
+        const response = responseFromRunNextResult(result);
+        setMessages((current) => {
+          if (current.some((message) => message.id === messageId)) return current;
+          const existingCardIds = new Set(
+            current.flatMap((message) => message.result?.cards.map((card) => card.id) ?? []),
+          );
+          if (response.cards.some((card) => existingCardIds.has(card.id))) return current;
+          return [
+            ...current,
+            {
+              id: messageId,
+              role: 'assistant',
+              status: 'done',
+              content: response.assistantMessage,
+              result: response,
+              taskId,
+              conversationIntent: 'social',
+              showSocialResult: true,
+            },
+          ];
+        });
+      } catch {
+        // Waiting-reply checks should never interrupt the main chat.
+      }
+    },
+    [isRunning],
+  );
+
+  useEffect(() => {
+    if (
+      !isRealAgent ||
+      !isLoggedIn ||
+      !activeTaskId ||
+      sessionRestoring ||
+      !isRunNextRestorableTaskStatus(activeTaskStatus)
+    ) {
+      return;
+    }
+    void appendRunNextCards(activeTaskId, `auto-run-next-${activeTaskId}`);
+  }, [
+    activeTaskId,
+    activeTaskStatus,
+    appendRunNextCards,
+    isLoggedIn,
+    isRealAgent,
+    sessionRestoring,
+  ]);
+
+  useEffect(() => {
+    const reminder = readAgentReminderRouteState(location.state);
+    if (!reminder) return;
+    const reminderKey = String(reminder.id ?? `${reminder.taskId ?? routeTaskId ?? 'route'}`);
+    if (processedReminderRouteIdsRef.current.has(reminderKey)) return;
+    processedReminderRouteIdsRef.current.add(reminderKey);
+    const taskId = numberFromUnknown(reminder.taskId) ?? routeTaskId;
+    if (taskId) {
+      setActiveTaskId((current) => current ?? taskId);
+      setActiveThreadId((current) => current ?? String(taskId));
+    }
+    pendingOpportunityClarificationRef.current = true;
+    setMessages((current) => {
+      const content = publicText(
+        reminder.message,
+        '你之前有一个社交机会提醒。要不要我帮你看看现在有哪些安全机会？',
+      );
+      if (current.some((message) => message.id === `reminder-${reminderKey}`)) {
+        return current;
+      }
+      return [
+        ...current,
+        {
+          id: `reminder-${reminderKey}`,
+          role: 'assistant',
+          status: 'done',
+          content,
+          taskId: taskId ?? null,
+          conversationIntent: 'social',
+          showSocialResult: false,
+          reminderId: reminder.id,
+          reminderContext: reminder.context,
+        },
+      ];
+    });
+    if (taskId && isRealAgent && isLoggedIn) {
+      void appendRunNextCards(taskId, `reminder-run-next-${reminderKey}`, { force: true });
+    }
+    navigate(location.pathname, { replace: true, state: null });
+  }, [
+    appendRunNextCards,
+    isLoggedIn,
+    isRealAgent,
+    location.pathname,
+    location.state,
+    navigate,
+    routeTaskId,
+  ]);
+
+  useEffect(() => {
+    if (!isRealAgent || !isLoggedIn) return undefined;
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      void refreshThreads();
+      if (
+        activeTaskId &&
+        !sessionRestoring &&
+        isRunNextRestorableTaskStatus(activeTaskStatus)
+      ) {
+        void appendRunNextCards(activeTaskId, `focus-run-next-${activeTaskId}-${Date.now()}`);
+      }
+    };
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [
+    activeTaskId,
+    activeTaskStatus,
+    appendRunNextCards,
+    isLoggedIn,
+    isRealAgent,
+    refreshThreads,
+    sessionRestoring,
+  ]);
+
+  useEffect(() => {
+    if (!isRealAgent || !isLoggedIn || isRunning || !activeThreadId) return;
+    const snapshot = buildBranchSnapshot(messages, branchSelections);
+    const metadata = buildThreadMetadata(messages, userResult);
+    if (!snapshot && Object.keys(metadata).length === 0) return;
+    const timeout = window.setTimeout(() => {
+      void socialAgentApi.updateThread(activeThreadId, undefined, snapshot, metadata);
+    }, 450);
+    return () => window.clearTimeout(timeout);
+  }, [activeThreadId, branchSelections, isLoggedIn, isRealAgent, isRunning, messages, userResult]);
+
+  const refreshLatestCheckpointRecovery = useCallback(
+    async (taskId: number | string | null | undefined) => {
+      if (!isRealAgent || !isLoggedIn) return;
+      if (typeof taskId !== 'number' && typeof taskId !== 'string') return;
+      try {
+        const { checkpoint } = await agentApprovalsApi.latestCheckpointForTask(taskId);
+        const nextRecovery = createCheckpointAvailableRecovery(checkpoint);
+        if (nextRecovery) setRecovery(nextRecovery);
+      } catch {
+        // Server restore remains the source of truth; missing checkpoint summaries
+        // should not block the chat shell from loading.
+      }
+    },
+    [isLoggedIn, isRealAgent],
+  );
+
+  useEffect(() => {
+    if (!isRealAgent || !isLoggedIn) return undefined;
+    if (skipNextRestoreRef.current) {
+      skipNextRestoreRef.current = false;
+      return undefined;
+    }
+    let cancelled = false;
+    setSessionRestoring(true);
+    void agentAdapter
+      .restoreSession(routeTaskId ?? undefined)
+      .then((restored) => {
+        if (cancelled || !restored) return;
+        setActiveTaskId(restored.taskId ?? null);
+        setActiveThreadId(restored.taskId ? String(restored.taskId) : null);
+        setActiveTaskStatus(restored.taskStatus ?? null);
+        setUserResult(restored.response);
+        setRecovery(null);
+        void refreshLatestCheckpointRecovery(restored.taskId ?? null);
+        const restoredIntent = intentForRestoredResponse(restored.response, 'conversation');
+        setMessages((current) =>
+          current.length > 0
+            ? current
+            : [
+                {
+                  id: nextId('assistant'),
+                  role: 'assistant',
+                  status: 'done',
+                  content: publicText(
+                    restored.response.assistantMessage,
+                    '我已经恢复了上一次对话。',
+                  ),
+                  result: restored.response,
+                  taskId: restored.taskId ?? null,
+                  conversationIntent: restoredIntent,
+                  showSocialResult: false,
+                },
+              ],
+        );
+        if (shellView !== 'chat') navigate('/agent/chat', { replace: true });
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setSessionRestoring(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    agentAdapter,
+    isLoggedIn,
+    isRealAgent,
+    navigate,
+    refreshLatestCheckpointRecovery,
+    routeTaskId,
+    shellView,
+  ]);
+
+  const submit = async (
+    event?: FormEvent,
+    prompt?: string,
+    attachments: FitMeetAssistantAttachment[] = [],
+  ) => {
+    event?.preventDefault();
+    const goal = (prompt ?? '').trim();
+    if (!goal) {
+      setRecovery(createAgentRecoveryFromError(mapAgentError(new Error('MISSING_INFO')), ''));
+      return;
+    }
+    if (isRunning) return;
+    const continuesOpportunityClarification =
+      pendingOpportunityClarificationRef.current && !cancelsOpportunityClarification(goal);
+    if (pendingOpportunityClarificationRef.current && cancelsOpportunityClarification(goal)) {
+      pendingOpportunityClarificationRef.current = false;
+    }
+    const conversationIntent = continuesOpportunityClarification ? 'social' : intentForPrompt(goal);
+    runConversationIntentRef.current = conversationIntent;
+    if (isRealAgent && !isLoggedIn) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: nextId('user'),
+          role: 'user',
+          content: goal,
+          attachments,
+          taskId: activeTaskId,
+          conversationIntent,
+        },
+      ]);
+      setRecovery(createInlineAuthRecovery(goal));
+      return;
+    }
+
+    const branchUserId = branchReloadUserIdRef.current;
+    setMessages((current) =>
+      branchUserId
+        ? current
+        : [
+            ...current,
+            {
+              id: nextId('user'),
+              role: 'user',
+              content: goal,
+              attachments,
+              taskId: activeTaskId,
+              conversationIntent,
+            },
+          ],
+    );
+    branchReloadUserIdRef.current = null;
+    setUserResult(null);
+    setRecovery(null);
+    setIsRunning(true);
+    finishedRef.current = false;
+    stopRequestedRef.current = false;
+    appendStreamingAssistant(activeTaskId, conversationIntent);
+    setSteps(
+      stepsForPrompt(goal).map((step, index) => ({
+        ...step,
+        status: index === 0 ? 'running' : 'pending',
+      })),
+    );
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const finalResult = await agentAdapter.run(
+        {
+          goal,
+          permissionMode: mode,
+          taskId: activeTaskId,
+          idempotencyKey: `agent-run-${Date.now()}`,
+        },
+        {
+          onEvent: handleAgentStreamEvent,
+          signal: controller.signal,
+        },
+      );
+      setActiveTaskId(finalResult.taskId ?? activeTaskId);
+      if (finalResult.taskId) {
+        setActiveThreadId(String(finalResult.taskId));
+        void refreshThreads();
+      }
+      if (!finishedRef.current) finishUserFacing(finalResult.response);
+      if (shellView !== 'chat') {
+        skipNextRestoreRef.current = true;
+        navigate('/agent/chat', { replace: false });
+      }
+    } catch (error) {
+      const stopped = stopRequestedRef.current || isAbortError(error);
+      const agentError = stopped
+        ? mapAgentError(new DOMException('Aborted', 'AbortError'))
+        : mapAgentError(error);
+      const nextRecovery = createAgentRecoveryFromError(agentError, goal);
+      setRecovery(nextRecovery);
+      if (stopped) {
+        finishAssistantDelta();
+      } else {
+        setMessages((current) => [
+          ...current,
+          {
+            id: nextId('assistant'),
+            role: 'assistant',
+            content: nextRecovery.message,
+            conversationIntent: runConversationIntentRef.current,
+          },
+        ]);
+      }
+      setSteps((current) =>
+        current.map((step) =>
+          step.status === 'running' ? { ...step, status: stopped ? 'pending' : 'error' } : step,
+        ),
+      );
+    } finally {
+      setIsRunning(false);
+      abortRef.current = null;
+      stopRequestedRef.current = false;
+    }
+  };
+
+  const handleAgentStreamEvent = (event: AgentStreamEvent) => {
+    const streamIntent = resolveIntentFromStreamEvent(event);
+    if (streamIntent) runConversationIntentRef.current = streamIntent;
+    if (event.type === 'assistant_delta') {
+      appendAssistantDelta(event.delta);
+      return;
+    }
+    if (event.type === 'assistant_done') {
+      finishAssistantDelta();
+      return;
+    }
+    if (event.type === 'progress') {
+      if (event.state === 'waiting') runConversationIntentRef.current = 'approval';
+      setSteps((current) => mergeProgressStep(current, event, runConversationIntentRef.current));
+      return;
+    }
+    if (event.type === 'status') {
+      if (typeof event.taskId === 'number' && event.taskId > 0) {
+        setActiveTaskId(event.taskId);
+      }
+      setSteps((current) =>
+        mergeStep(
+          current,
+          stepIdFromLightStatus(event.lightStatus),
+          event.lightStatus,
+          'running',
+          runConversationIntentRef.current,
+        ),
+      );
+      return;
+    }
+    if (event.type === 'approval_required') {
+      runConversationIntentRef.current = 'approval';
+      setSteps((current) =>
+        mergeStep(current, 'confirm', '需要你确认这一步', 'waiting', 'approval'),
+      );
+      return;
+    }
+    if (event.type === 'result') {
+      finishUserFacing(event.result);
+    }
+  };
+
+  const appendAssistantDelta = (delta: string) => {
+    const cleanDelta = publicText(delta, '');
+    if (!cleanDelta) return;
+    setMessages((current) => {
+      const last = current.at(-1);
+      if (last?.role === 'assistant' && last.status === 'streaming') {
+        const previousContent =
+          last.content === ASSISTANT_STREAMING_PLACEHOLDER ? '' : last.content;
+        return [
+          ...current.slice(0, -1),
+          {
+            ...last,
+            content: `${previousContent}${cleanDelta}`,
+          },
+        ];
+      }
+      return [
+        ...current,
+        {
+          id: nextId('assistant-stream'),
+          role: 'assistant',
+          content: cleanDelta,
+          status: 'streaming',
+          taskId: activeTaskId,
+          conversationIntent: runConversationIntentRef.current,
+        },
+      ];
+    });
+  };
+
+  const appendStreamingAssistant = (
+    taskId: number | null,
+    conversationIntent: AgentConversationIntent,
+  ) => {
+    setMessages((current) => {
+      const last = current.at(-1);
+      if (last?.role === 'assistant' && last.status === 'streaming') return current;
+      return [
+        ...current,
+        {
+          id: nextId('assistant-stream'),
+          role: 'assistant',
+          content: ASSISTANT_STREAMING_PLACEHOLDER,
+          status: 'streaming',
+          taskId,
+          conversationIntent,
+        },
+      ];
+    });
+  };
+
+  const finishAssistantDelta = () => {
+    setMessages((current) => {
+      const last = current.at(-1);
+      if (last?.role !== 'assistant' || last.status !== 'streaming') return current;
+      return [...current.slice(0, -1), { ...last, status: 'done' }];
+    });
+  };
+
+  const mergePendingApprovalDispatchCards = (
+    finalResult: UserFacingAgentResponse,
+  ): UserFacingAgentResponse => {
+    const cards = pendingApprovalDispatchCardsRef.current;
+    if (cards.length === 0) return finalResult;
+    pendingApprovalDispatchCardsRef.current = [];
+    const existingApprovalIds = new Set(
+      finalResult.cards
+        .map((card) => stringFromUnknown(card.data.approvalId))
+        .filter(Boolean),
+    );
+    const nextCards = cards.filter((card) => {
+      const approvalId = stringFromUnknown(card.data.approvalId);
+      return !approvalId || !existingApprovalIds.has(approvalId);
+    });
+    if (nextCards.length === 0) return finalResult;
+    return {
+      ...finalResult,
+      cards: [...nextCards, ...finalResult.cards],
+    };
+  };
+
+  const finishUserFacing = (finalResult: UserFacingAgentResponse) => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    const displayResult = mergePendingApprovalDispatchCards(finalResult);
+    setUserResult(displayResult);
+    setRecovery(null);
+    const finalMessage = publicText(
+      displayResult.assistantMessage,
+      '我整理好了，可以继续追问或让我接着处理下一步。',
+    );
+    const conversationIntent = intentForResponse(displayResult, runConversationIntentRef.current);
+    const showSocialResult = conversationIntent === 'social' || conversationIntent === 'approval';
+    pendingOpportunityClarificationRef.current =
+      responseAwaitsOpportunityClarification(displayResult);
+    setMessages((current) => {
+      const last = current.at(-1);
+      const assistantMessage = {
+        id: nextId('assistant'),
+        role: 'assistant',
+        content: finalMessage,
+        status: 'done',
+        result: displayResult,
+        taskId: findTaskId(displayResult) ?? activeTaskId,
+        traceId: traceIdFromResult(displayResult),
+        showSocialResult,
+        conversationIntent,
+      } satisfies AgentThreadMessage;
+      if (last?.role === 'assistant' && last.status === 'streaming') {
+        const previousContent =
+          last.content === ASSISTANT_STREAMING_PLACEHOLDER ? '' : last.content;
+        return [
+          ...current.slice(0, -1),
+          {
+            ...last,
+            content: previousContent.trim() ? previousContent : finalMessage,
+            status: 'done',
+            result: displayResult,
+            taskId: findTaskId(displayResult) ?? activeTaskId,
+            traceId: traceIdFromResult(displayResult),
+            branch: branchForAssistant(current, last.id),
+            showSocialResult,
+            conversationIntent,
+          },
+        ];
+      }
+      if (last?.role === 'assistant' && last.status === 'done' && last.content.trim()) {
+        if (!last.result) {
+          return [
+            ...current.slice(0, -1),
+            {
+              ...last,
+              result: displayResult,
+              taskId: findTaskId(displayResult) ?? activeTaskId,
+              traceId: traceIdFromResult(displayResult),
+              showSocialResult,
+              conversationIntent,
+            },
+          ];
+        }
+        if (last.content.trim() !== finalMessage.trim()) {
+          return [...current, assistantMessage];
+        }
+        return current;
+      }
+      return [...current, assistantMessage];
+    });
+    setSteps((current) =>
+      current.map((step) => ({
+        ...step,
+        status:
+          step.id === stepIdFromLightStatus(displayResult.lightStatus)
+            ? 'success'
+            : step.status === 'pending' || step.status === 'running'
+              ? 'success'
+              : step.status,
+      })),
+    );
+  };
+
+  const stopRun = () => {
+    stopRequestedRef.current = true;
+    abortRef.current?.abort();
+    finishAssistantDelta();
+    setIsRunning(false);
+    setSteps((current) =>
+      current.map((step) => (step.status === 'running' ? { ...step, status: 'pending' } : step)),
+    );
+  };
+
+  const currentGoal =
+    [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
+  const reloadLastUserMessage = () => {
+    if (!currentGoal || isRunning) return;
+    branchReloadUserIdRef.current =
+      [...messages].reverse().find((message) => message.role === 'user')?.id ?? null;
+    void submit(undefined, currentGoal);
+  };
+
+  const runCheckpointStream = async (
+    checkpointId: number | string | null | undefined,
+    action: 'resume' | 'retry' | 'replay' | 'fork',
+    decision?: 'approved' | 'rejected' | null,
+    stepId?: string | null,
+  ) => {
+    const resolvedCheckpointId =
+      typeof checkpointId === 'number' || typeof checkpointId === 'string' ? checkpointId : null;
+    if (!resolvedCheckpointId) throw new Error('当前步骤没有可恢复的检查点。');
+    if (isRunning) throw new Error('上一轮还在生成，请先停止或等待它完成。');
+    setRecovery(null);
+    setIsRunning(true);
+    finishedRef.current = false;
+    stopRequestedRef.current = false;
+    setSteps((current) =>
+      current.length > 0
+        ? current.map((step) =>
+            step.status === 'waiting' || step.status === 'error'
+              ? { ...step, status: 'running' }
+              : step,
+          )
+        : conversationSteps.map((step, index) => ({
+            ...step,
+            status: index === 0 ? 'running' : 'pending',
+          })),
+    );
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const finalResult = await socialAgentApi.runCheckpointStream(
+        {
+          checkpointId: resolvedCheckpointId,
+          action,
+          stepId,
+          decision: decision ?? null,
+        },
+        (event) => handleAgentStreamEvent(event as AgentStreamEvent),
+        controller.signal,
+      );
+      setActiveTaskId(findTaskId(finalResult) ?? activeTaskId);
+      if (!finishedRef.current) finishUserFacing(finalResult);
+    } catch (error) {
+      const stopped = stopRequestedRef.current || isAbortError(error);
+      if (stopped) {
+        finishAssistantDelta();
+      } else {
+        setRecovery(createAgentRecoveryFromError(mapAgentError(error), currentGoal));
+      }
+      setSteps((current) =>
+        current.map((step) =>
+          step.status === 'running' ? { ...step, status: stopped ? 'pending' : 'error' } : step,
+        ),
+      );
+    } finally {
+      setIsRunning(false);
+      abortRef.current = null;
+      stopRequestedRef.current = false;
+    }
+  };
+
+  const retryRecovery = () => {
+    if (!recovery || isRunning) return;
+    if (recovery.kind === 'checkpoint_available' && recovery.checkpoint) {
+      void runCheckpointStream(
+        recovery.checkpoint.checkpointId,
+        recovery.checkpoint.action,
+        null,
+        recovery.checkpoint.stepId,
+      );
+      return;
+    }
+    if (!recovery.prompt) return;
+    void submit(undefined, recovery.prompt);
+  };
+
+  const appendApprovalDispatchResultMessage = (input: {
+    approvalId: number;
+    dispatchResult?: AgentApprovalDispatchResult;
+    taskId?: number | null;
+  }) => {
+    const response = responseFromApprovalDispatchResult(input);
+    if (!response) return;
+    pendingApprovalDispatchCardsRef.current = [
+      ...pendingApprovalDispatchCardsRef.current,
+      ...response.cards,
+    ];
+    setMessages((current) => {
+      const hasRenderedCard = (message: AgentThreadMessage) =>
+        message.result?.cards.some(
+          (card) =>
+            stringFromUnknown(card.data.approvalId) === String(input.approvalId) &&
+            card.schemaType === 'meet_loop.timeline',
+        ) === true;
+      if (current.some(hasRenderedCard)) return current;
+      const targetIndex = current.findIndex(
+        (message) =>
+          message.role === 'assistant' &&
+          message.result &&
+          (message.resolvedApproval?.id === input.approvalId ||
+            message.result.pendingConfirmations.some(
+              (confirmation) => String(confirmation.id) === String(input.approvalId),
+            )),
+      );
+      if (targetIndex >= 0) {
+        return current.map((message, index) =>
+          index === targetIndex && message.result
+            ? {
+                ...message,
+                result: {
+                  ...message.result,
+                  cards: [...message.result.cards, ...response.cards],
+                },
+                showSocialResult: true,
+                conversationIntent: 'approval',
+              }
+            : message,
+        );
+      }
+      return [
+        ...current,
+        {
+          id: nextId('assistant'),
+          role: 'assistant',
+          content: response.assistantMessage,
+          status: 'done',
+          result: response,
+          taskId: input.taskId ?? activeTaskId,
+          conversationIntent: 'approval',
+          showSocialResult: true,
+        },
+      ];
+    });
+  };
+
+  const approveInlineApproval = async (approvalId: number) => {
+    if (isRunning) return;
+    const result = await agentApprovalsApi.approve(approvalId);
+    setMessages((current) =>
+      current.map((message) =>
+        message.role === 'assistant' && message.result?.pendingConfirmations.length
+          ? {
+              ...message,
+              result: {
+                ...message.result,
+                pendingConfirmations: message.result.pendingConfirmations.filter(
+                  (confirmation) => String(confirmation.id) !== String(approvalId),
+                ),
+              },
+              resolvedApproval: {
+                id: approvalId,
+                decision: 'approved',
+                summary:
+                  message.result.pendingConfirmations.find(
+                    (confirmation) => String(confirmation.id) === String(approvalId),
+                  )?.summary ?? null,
+              },
+            }
+          : message,
+      ),
+    );
+    setSteps((current) =>
+      current.map((step) => (step.status === 'waiting' ? { ...step, status: 'success' } : step)),
+    );
+    appendApprovalDispatchResultMessage({
+      approvalId,
+      dispatchResult: result.result,
+      taskId: result.resume?.taskId ?? activeTaskId,
+    });
+    if (result?.dispatched === false && result.dispatchError) {
+      setRecovery({
+        kind: 'action_failed',
+        title: '确认已记录，但执行没有完成',
+        message: publicText(result.dispatchError, '确认已记录，但后续动作没有完成。'),
+        prompt: currentGoal,
+        retryable: Boolean(currentGoal),
+      });
+      return;
+    }
+    if (result.checkpointError) {
+      setRecovery({
+        kind: 'checkpoint_failed',
+        title: '确认已执行，但恢复状态没有保存完整',
+        message: publicText(
+          result.checkpointError,
+          '确认已执行，但恢复状态没有保存完整。为了避免重复执行，我不会自动重跑这一步。你可以继续发送新的要求，我会从当前结果往后处理。',
+        ),
+        prompt: '',
+        retryable: false,
+      });
+      return;
+    }
+    if (result.resume?.checkpointId) {
+      await runCheckpointStream(result.resume.checkpointId, 'resume', 'approved');
+      return;
+    }
+    reloadLastUserMessage();
+  };
+
+  const runCardActionStream = async (input?: {
+    taskId?: number | string | null;
+    action?: string | null;
+    schemaAction?: string | null;
+    payload?: Record<string, unknown>;
+  }) => {
+    if (isRunning) throw new Error('上一轮还在生成，请先停止或等待它完成。');
+    const taskId = numberFromUnknown(input?.taskId) ?? activeTaskId;
+    if (!taskId) throw new Error('当前卡片缺少任务上下文，不能继续执行。');
+    const action = schemaActionFromToolInput(input?.schemaAction);
+    if (!action) throw new Error('当前卡片动作暂时不可执行。');
+
+    runConversationIntentRef.current =
+      action === 'opener.confirm_send' || action === 'activity.confirm_create'
+        ? 'approval'
+        : 'social';
+    setRecovery(null);
+    setIsRunning(true);
+    finishedRef.current = false;
+    stopRequestedRef.current = false;
+    setSteps(
+      socialSteps.map((step, index) => ({
+        ...step,
+        status: index === 0 ? 'running' : 'pending',
+      })),
+    );
+    let appendedActionResultMessage = shouldAppendActionResultMessage(action);
+    if (appendedActionResultMessage) {
+      appendStreamingAssistant(taskId, runConversationIntentRef.current);
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const finalResult = await agentAdapter.performAction(
+        taskId,
+        {
+          action,
+          payload: input?.payload ?? {},
+          idempotencyKey: idempotencyKeyForCardAction(taskId, action, input?.payload),
+        },
+        {
+          onEvent: (event) => {
+            if (event.type === 'result') {
+              const shouldAppendResult = shouldAppendCardActionResultMessage(action, event.result);
+              if (!shouldAppendResult) return;
+              if (!appendedActionResultMessage) {
+                appendStreamingAssistant(taskId, runConversationIntentRef.current);
+                appendedActionResultMessage = true;
+              }
+            }
+            handleAgentStreamEvent(cardActionStreamEvent(action, event));
+          },
+          signal: controller.signal,
+        },
+      );
+      setActiveTaskId(finalResult.taskId ?? taskId);
+      if (!finishedRef.current) {
+        if (shouldAppendCardActionResultMessage(action, finalResult.response)) {
+          if (!appendedActionResultMessage) {
+            appendStreamingAssistant(taskId, runConversationIntentRef.current);
+          }
+          finishUserFacing({
+            ...finalResult.response,
+            assistantMessage: assistantMessageForCardAction(action, finalResult.response),
+          });
+        } else {
+          finishedRef.current = true;
+          setSteps((current) =>
+            current.map((step) =>
+              step.status === 'running' || step.status === 'pending'
+                ? { ...step, status: 'success' }
+                : step,
+            ),
+          );
+        }
+      }
+      void refreshThreads();
+    } catch (error) {
+      const stopped = stopRequestedRef.current || isAbortError(error);
+      if (stopped) {
+        finishAssistantDelta();
+      } else {
+        setRecovery(createAgentRecoveryFromError(mapAgentError(error), currentGoal));
+      }
+      setSteps((current) =>
+        current.map((step) =>
+          step.status === 'running' ? { ...step, status: stopped ? 'pending' : 'error' } : step,
+        ),
+      );
+      if (!stopped) throw error;
+    } finally {
+      setIsRunning(false);
+      abortRef.current = null;
+      stopRequestedRef.current = false;
+    }
+  };
+
+  const rejectInlineApproval = async (approvalId: number) => {
+    if (isRunning) return;
+    const result = await agentApprovalsApi.reject(approvalId);
+    setMessages((current) =>
+      current.map((message) =>
+        message.role === 'assistant' && message.result?.pendingConfirmations.length
+          ? {
+              ...message,
+              result: {
+                ...message.result,
+                pendingConfirmations: message.result.pendingConfirmations.filter(
+                  (confirmation) => String(confirmation.id) !== String(approvalId),
+                ),
+              },
+              resolvedApproval: {
+                id: approvalId,
+                decision: 'rejected',
+                summary:
+                  message.result.pendingConfirmations.find(
+                    (confirmation) => String(confirmation.id) === String(approvalId),
+                  )?.summary ?? null,
+              },
+            }
+          : message,
+      ),
+    );
+    setSteps((current) =>
+      current.map((step) => (step.status === 'waiting' ? { ...step, status: 'success' } : step)),
+    );
+    if (result.checkpointError) {
+      setRecovery({
+        kind: 'checkpoint_failed',
+        title: '已按你的拒绝处理，但恢复状态没有保存完整',
+        message: publicText(
+          result.checkpointError,
+          '我已经按你的选择停止这一步，但恢复状态没有保存完整。为了避免重复处理，我不会自动重跑这一步。你可以继续发送新的要求，我会从当前结果往后处理。',
+        ),
+        prompt: '',
+        retryable: false,
+      });
+      return;
+    }
+    if (result.resume?.checkpointId) {
+      await runCheckpointStream(result.resume.checkpointId, 'resume', 'rejected');
+      return;
+    }
+    setMessages((current) => [
+      ...current,
+      {
+        id: nextId('assistant'),
+        role: 'assistant',
+        content: '好的，我不会执行这一步。你可以继续补充要求，或者让我换一种更稳妥的方式处理。',
+        status: 'done',
+        taskId: activeTaskId,
+        conversationIntent: 'conversation',
+      },
+    ]);
+  };
+
+  const resetConversation = () => {
+    clearStoredAgentThread(currentUserId);
+    skipNextRestoreRef.current = true;
+    setMessages([]);
+    setSteps(conversationSteps);
+    setUserResult(null);
+    setRecovery(null);
+    setActiveTaskId(null);
+    setActiveTaskStatus(null);
+    setActiveThreadId(null);
+    setBranchSelections({});
+    setIsRunning(false);
+    runConversationIntentRef.current = 'conversation';
+  };
+
+  const submitFeedback = async (messageId: string, value: 'positive' | 'negative') => {
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === messageId
+          ? {
+              ...message,
+              feedback: value,
+              feedbackStatus: 'submitting',
+              feedbackErrorValue: null,
+            }
+          : message,
+      ),
+    );
+    const message = messages.find((item) => item.id === messageId);
+    try {
+      await socialAgentApi.submitMessageFeedback(messageId, {
+        value,
+        taskId: message?.taskId ?? activeTaskId,
+        traceId: message?.traceId ?? null,
+        source: 'agent_web',
+        metadata: {
+          role: message?.role,
+          branch: message?.branch,
+        },
+      });
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === messageId
+            ? { ...item, feedbackStatus: 'submitted', feedbackErrorValue: null }
+            : item,
+        ),
+      );
+    } catch {
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === messageId
+            ? {
+                ...item,
+                feedback: message?.feedback ?? null,
+                feedbackStatus: 'failed',
+                feedbackErrorValue: value,
+              }
+            : item,
+        ),
+      );
+    }
+  };
+
+  const switchAssistantBranch = (messageId: string, direction: 'previous' | 'next') => {
+    const message = decorateAssistantBranches(messages, branchSelections).find(
+      (item) => item.id === messageId,
+    );
+    if (!message?.branch) return;
+    const groupId = message.branch.groupId;
+    const activeIndex =
+      branchSelections[groupId] ?? message.branch.activeIndex ?? message.branch.count;
+    const nextIndex =
+      direction === 'next'
+        ? Math.min(message.branch.count, activeIndex + 1)
+        : Math.max(1, activeIndex - 1);
+    const nextSelections = { ...branchSelections, [groupId]: nextIndex };
+    setBranchSelections(nextSelections);
+    setBranchSyncStatus((current) => ({ ...current, [groupId]: 'syncing' }));
+    const branchThreadId = activeThreadId ?? (activeTaskId ? String(activeTaskId) : null);
+    if (!isRealAgent || !isLoggedIn || !branchThreadId) {
+      setBranchSyncStatus((current) => ({ ...current, [groupId]: 'idle' }));
+      return;
+    }
+    const snapshot = buildBranchSnapshot(messages, nextSelections);
+    if (!snapshot) {
+      setBranchSyncStatus((current) => ({ ...current, [groupId]: 'idle' }));
+      return;
+    }
+    socialAgentApi
+      .updateThread(branchThreadId, undefined, snapshot, {
+        branchSync: {
+          action: direction,
+          groupId,
+          activeIndex: nextIndex,
+          activeBranchId: snapshot.activeBranchId,
+          branchCount: snapshot.branchCount,
+          syncedAt: new Date().toISOString(),
+          source: 'assistant-ui-branch-picker',
+        },
+        client: 'fitmeet-web',
+      })
+      .then(() => {
+        setBranchSyncStatus((current) => ({ ...current, [groupId]: 'synced' }));
+      })
+      .catch(() => {
+        setBranchSyncStatus((current) => ({ ...current, [groupId]: 'failed' }));
+      });
+  };
+
+  const loadThread = async (threadId: string) => {
+    if (!isRealAgent || !isLoggedIn || isRunning) return;
+    setSessionRestoring(true);
+    try {
+      const detail = await socialAgentApi.getThread(threadId);
+      const restored = responseFromSessionSnapshot(detail.session);
+      const nextMessages = messagesFromSessionSnapshot(
+        detail.session,
+        restored,
+        detail.thread.taskId,
+      );
+      const branchSnapshot = threadBranchSnapshot(detail.thread);
+      setActiveThreadId(detail.thread.id);
+      setActiveTaskId(detail.thread.taskId);
+      setActiveTaskStatus(
+        typeof detail.session.task?.status === 'string' ? detail.session.task.status : null,
+      );
+      setUserResult(restored);
+      setMessages(nextMessages);
+      setBranchSelections(branchSnapshot?.branchSelections ?? {});
+      setRecovery(null);
+      void refreshLatestCheckpointRecovery(detail.thread.taskId);
+      navigate(`/agent/chat/${detail.thread.taskId}`, { replace: false });
+      void socialAgentApi.updateThread(detail.thread.id, undefined, branchSnapshot, {
+        lastOpenedAt: new Date().toISOString(),
+        restoreSource: 'thread_list',
+        client: 'fitmeet-web',
+      });
+    } finally {
+      setSessionRestoring(false);
+    }
+  };
+
+  const renameThread = async (threadId: string, title: string) => {
+    setThreads((current) =>
+      current.map((thread) => (thread.id === threadId ? { ...thread, title } : thread)),
+    );
+    try {
+      const updated = await socialAgentApi.updateThread(threadId, title);
+      setThreads((current) =>
+        current.map((thread) => (thread.id === threadId ? updated.thread : thread)),
+      );
+    } catch (error) {
+      void refreshThreads();
+      throw error;
+    }
+  };
+
+  const deleteThread = async (threadId: string) => {
+    setThreads((current) => current.filter((thread) => thread.id !== threadId));
+    if (activeThreadId === threadId) {
+      resetConversation();
+    }
+    try {
+      await socialAgentApi.deleteThread(threadId);
+    } catch (error) {
+      void refreshThreads();
+      throw error;
+    }
+  };
+
+  const toggleReminders = async () => {
+    if (!isRealAgent || !isLoggedIn || reminderSaving) return;
+    setReminderSaving(true);
+    setReminderError(null);
+    const current = reminderPreference;
+    const nextEnabled = !current?.enabled;
+    if (current) setReminderPreference({ ...current, enabled: nextEnabled });
+    try {
+      const updated = nextEnabled
+        ? await socialAgentApi.updateReminderPreference({
+            enabled: true,
+            frequency: current?.frequency ?? 'weekly',
+            topics: current?.topics?.length
+              ? current.topics
+              : ['friendship', 'fitness_partner', 'activity'],
+            scenes: reminderScenesFromPreference(current),
+            quietStart: current?.quietStart ?? '09:00',
+            quietEnd: current?.quietEnd ?? '21:00',
+          })
+        : await socialAgentApi.disableReminders();
+      setReminderPreference(updated);
+    } catch {
+      if (current) setReminderPreference(current);
+      setReminderError('提醒设置没有保存');
+    } finally {
+      setReminderSaving(false);
+    }
+  };
+
+  const disableReminders = async () => {
+    if (!isRealAgent || !isLoggedIn || reminderSaving) return;
+    setReminderSaving(true);
+    setReminderError(null);
+    const current = reminderPreference;
+    if (current) setReminderPreference({ ...current, enabled: false });
+    try {
+      const updated = await socialAgentApi.disableReminders();
+      setReminderPreference(updated);
+    } catch {
+      if (current) setReminderPreference(current);
+      setReminderError('提醒设置没有保存');
+      throw new Error('reminder_disable_failed');
+    } finally {
+      setReminderSaving(false);
+    }
+  };
+
+  const dismissReminder = async (reminderId: number | string) => {
+    if (!isRealAgent || !isLoggedIn || reminderSaving) return;
+    setReminderSaving(true);
+    setReminderError(null);
+    const current = reminderPreference;
+    try {
+      const result = await socialAgentApi.dismissReminder(reminderId);
+      if (result.preference) setReminderPreference(result.preference);
+    } catch {
+      setReminderPreference(current);
+      setReminderError('提醒设置没有保存');
+      throw new Error('reminder_dismiss_failed');
+    } finally {
+      setReminderSaving(false);
+    }
+  };
+
+  const updateReminderSettings = async (
+    nextSettings: Parameters<typeof socialAgentApi.updateReminderPreference>[0],
+  ) => {
+    if (!isRealAgent || !isLoggedIn || reminderSaving) return;
+    setReminderSaving(true);
+    setReminderError(null);
+    const current = reminderPreference;
+    try {
+      const updated = await socialAgentApi.updateReminderPreference({
+        enabled: current?.enabled ?? false,
+        frequency: current?.frequency ?? 'weekly',
+        topics: current?.topics?.length
+          ? current.topics
+          : ['friendship', 'fitness_partner', 'activity'],
+        scenes: reminderScenesFromPreference(current),
+        quietStart: current?.quietStart ?? '09:00',
+        quietEnd: current?.quietEnd ?? '21:00',
+        ...nextSettings,
+      });
+      setReminderPreference(updated);
+    } catch {
+      setReminderError('提醒设置没有保存');
+    } finally {
+      setReminderSaving(false);
+    }
+  };
+
+  const decoratedMessages = decorateAssistantBranches(messages, branchSelections, branchSyncStatus);
+
+  return (
+    <FitMeetAssistantUI
+      messages={decoratedMessages}
+      threads={threads}
+      threadsLoading={threadsLoading}
+      activeThreadId={activeThreadId}
+      steps={steps}
+      isRunning={isRunning}
+      sessionRestoring={sessionRestoring}
+      recovery={recovery}
+      profileGate={profileGate}
+      requiresAuth={isRealAgent && !isLoggedIn}
+      onSubmit={submit}
+      onStop={stopRun}
+      onReloadLast={reloadLastUserMessage}
+      onFeedback={submitFeedback}
+      onBranchSwitch={switchAssistantBranch}
+      onNewConversation={() => {
+        abortRef.current?.abort();
+        resetConversation();
+      }}
+      onThreadSelect={(threadId) => void loadThread(threadId)}
+      onThreadRename={renameThread}
+      onThreadDelete={deleteThread}
+      onLogin={openLogin}
+      onRetryRecovery={retryRecovery}
+      onDismissRecovery={() => setRecovery(null)}
+      reminderPreference={reminderPreference}
+      reminderLoading={reminderLoading}
+      reminderSaving={reminderSaving}
+      reminderError={reminderError}
+      focusReminderSettings={focusReminderSettings}
+      onToggleReminders={isRealAgent && isLoggedIn ? toggleReminders : undefined}
+      onDisableReminders={isRealAgent && isLoggedIn ? disableReminders : undefined}
+      onDismissReminder={isRealAgent && isLoggedIn ? dismissReminder : undefined}
+      onUpdateReminderPreference={
+        isRealAgent && isLoggedIn ? updateReminderSettings : undefined
+      }
+      onApproveApproval={approveInlineApproval}
+      onRejectApproval={rejectInlineApproval}
+      onResumeState={(input) =>
+        runCheckpointStream(input?.checkpointId, 'resume', null, input?.stepId)
+      }
+      onRetryTool={(input) =>
+        runCheckpointStream(input?.checkpointId, 'retry', null, input?.stepId)
+      }
+      onReplayState={(input) =>
+        runCheckpointStream(input?.checkpointId, 'replay', null, input?.stepId)
+      }
+      onForkState={(input) => runCheckpointStream(input?.checkpointId, 'fork', null, input?.stepId)}
+      onCardAction={runCardActionStream}
+    />
+  );
+}
+
+function reminderScenesFromPreference(
+  preference: SocialAgentReminderPreference | null,
+): SocialAgentReminderScene[] {
+  const metadata = isRecord(preference?.metadata) ? preference?.metadata : {};
+  const scenes = Array.isArray(metadata.reminderScenes)
+    ? metadata.reminderScenes.filter(isReminderScene)
+    : [];
+  return scenes.length
+    ? scenes
+    : [
+        'weekend_opportunities',
+        'past_social_goal',
+        'activity_follow_up',
+        'life_graph_confirmation',
+      ];
+}
+
+function isReminderScene(value: unknown): value is SocialAgentReminderScene {
+  return (
+    value === 'weekend_opportunities' ||
+    value === 'past_social_goal' ||
+    value === 'activity_follow_up' ||
+    value === 'life_graph_confirmation'
+  );
 }
 
 function agentThreadStorageKey(userId?: number | string | null) {
@@ -211,6 +1517,7 @@ function readStoredAgentThread(userId?: number | string | null): AgentThreadSnap
       messages: parsed.messages.filter(isAgentThreadMessage),
       userResult: isUserFacingAgentResponse(parsed.userResult) ? parsed.userResult : null,
       mode: isPermissionMode(parsed.mode) ? parsed.mode : 'limited_auto',
+      branchSelections: sanitizeBranchSelections(parsed.branchSelections),
       savedAt: parsed.savedAt,
     };
   } catch {
@@ -229,7 +1536,7 @@ function writeStoredAgentThread(
       JSON.stringify({ ...snapshot, savedAt: Date.now() }),
     );
   } catch {
-    // Local recovery is a best-effort fallback; server restore remains the source of truth.
+    // Local recovery is best-effort; server restore remains the source of truth.
   }
 }
 
@@ -238,13 +1545,51 @@ function clearStoredAgentThread(userId?: number | string | null) {
   window.localStorage.removeItem(agentThreadStorageKey(userId));
 }
 
+function readAgentReminderRouteState(state: unknown) {
+  if (!isRecord(state)) return null;
+  const reminder = state.agentReminder;
+  if (!isRecord(reminder)) return null;
+  const message = typeof reminder.message === 'string' ? reminder.message.trim() : '';
+  if (!message) return null;
+  return {
+    id:
+      typeof reminder.id === 'number' || typeof reminder.id === 'string'
+        ? reminder.id
+        : null,
+    taskId:
+      typeof reminder.taskId === 'number' || typeof reminder.taskId === 'string'
+        ? reminder.taskId
+        : null,
+    message,
+    source: typeof reminder.source === 'string' ? reminder.source : null,
+    context: isRecord(reminder.context) ? reminder.context : null,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function sanitizeBranchSelections(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([key, raw]) => [key.trim(), Number(raw)] as const)
+      .filter(
+        ([key, index]) =>
+          key.length > 0 && Number.isFinite(index) && Number.isInteger(index) && index > 0,
+      ),
+  );
+}
+
 function isAgentThreadMessage(value: unknown): value is AgentThreadMessage {
   if (!value || typeof value !== 'object') return false;
   const message = value as Partial<AgentThreadMessage>;
   return (
     typeof message.id === 'string' &&
     (message.role === 'user' || message.role === 'assistant') &&
-    typeof message.content === 'string'
+    typeof message.content === 'string' &&
+    (!message.result || isUserFacingAgentResponse(message.result))
   );
 }
 
@@ -271,2595 +1616,445 @@ function isPermissionMode(value: unknown): value is SocialAgentPermissionMode {
   );
 }
 
-function shouldShowAgentPet({
-  petEnabled,
-  guideState,
-  input,
-  isRunning,
-  sessionRestoring,
-  userResult,
-  recovery,
-  petNudged,
-  surface,
-}: {
-  petEnabled: boolean;
-  guideState: AntGuideState;
-  input: string;
-  isRunning: boolean;
-  sessionRestoring: boolean;
-  userResult: UserFacingAgentResponse | null;
-  recovery: AgentRecoveryState | null;
-  petNudged: boolean;
-  surface: 'start' | 'thread';
-}) {
-  if (!petEnabled) return false;
-  if (surface === 'start') {
-    return petNudged || guideState !== 'idle' || input.trim().length > 0 || Boolean(recovery);
-  }
-  return (
-    isRunning ||
-    sessionRestoring ||
-    guideState !== 'idle' ||
-    Boolean(userResult) ||
-    Boolean(recovery)
-  );
-}
-
-export function AgentWorkspace({ view }: { view: AgentView }) {
-  const params = useParams();
-  const navigate = useNavigate();
-  const { isLoggedIn, openLogin, user } = useAuthStore();
-  const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<AgentThreadMessage[]>([]);
-  const [steps, setSteps] = useState<Step[]>(baseSteps);
-  const [userResult, setUserResult] = useState<UserFacingAgentResponse | null>(null);
-  const [isRunning, setIsRunning] = useState(false);
-  const [mode, setMode] = useState<SocialAgentPermissionMode>('limited_auto');
-  const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
-  const [sessionRestoring, setSessionRestoring] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const [lifeGraph, setLifeGraph] = useState<LifeGraphResponse | null>(null);
-  const [privacy, setPrivacy] = useState<AgentPrivacySettings>({
-    showBodyInfo: false,
-    showExactLocation: false,
-  });
-  const [activityDetail, setActivityDetail] = useState<ActivityDetailState | null>(null);
-  const [activityLoading, setActivityLoading] = useState(false);
-  const [recovery, setRecovery] = useState<AgentRecoveryState | null>(null);
-  const [debugOpen, setDebugOpen] = useState(false);
-  const [debugEvents, setDebugEvents] = useState<AgentTaskDebugEvent[]>([]);
-  const [debugLoading, setDebugLoading] = useState(false);
-  const [petEnabled, setPetEnabled] = useState(readStoredPetEnabled);
-  const [petNudged, setPetNudged] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
-  const endRef = useRef<HTMLDivElement | null>(null);
-  const finishedRef = useRef(false);
-  const stopRequestedRef = useRef(false);
-  const skipNextRestoreRef = useRef(false);
-  const shellView = view === 'chat' || params.taskId ? 'chat' : view;
-  const agentAdapterMode = useMemo(() => resolveAgentAdapterMode(), []);
-  const isRealAgent = agentAdapterMode === 'real';
-  const agentAdapter = useMemo(() => createAgentAdapter(agentAdapterMode), [agentAdapterMode]);
-  const agentFlow = useAgentFlow(agentAdapter);
-  const completeAgentFlowResponse = agentFlow.completeResponse;
-  const routeTaskId = numberFromUnknown(params.taskId);
-  const currentUserId = user?.id ?? null;
-
-  useEffect(() => {
-    document.title = 'FitMeet Agent - 低压力线下社交 AI 助手';
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem(AGENT_PET_STORAGE_KEY, String(petEnabled));
-  }, [petEnabled]);
-
-  useEffect(() => {
-    if (!isRealAgent || !isLoggedIn) return;
-    const stored = readStoredAgentThread(currentUserId);
-    if (!stored || (stored.messages.length === 0 && !stored.userResult)) return;
-    setActiveTaskId((current) => current ?? stored.activeTaskId);
-    setMode(stored.mode);
-    setUserResult((current) => current ?? stored.userResult);
-    setMessages((current) => (current.length > 0 ? current : stored.messages));
-    if (stored.userResult) {
-      completeAgentFlowResponse(stored.userResult);
-    }
-    if (shellView !== 'chat') navigate('/agent/chat', { replace: true });
-  }, [
-    completeAgentFlowResponse,
-    currentUserId,
-    isLoggedIn,
-    isRealAgent,
-    navigate,
-    shellView,
-  ]);
-
-  useEffect(() => {
-    if (!isRealAgent || !isLoggedIn) return;
-    if (messages.length === 0 && !userResult && !activeTaskId) return;
-    writeStoredAgentThread(currentUserId, {
-      activeTaskId,
-      messages,
-      userResult,
-      mode,
-    });
-  }, [activeTaskId, currentUserId, isLoggedIn, isRealAgent, messages, mode, userResult]);
-
-  useEffect(() => {
-    if (!isLoggedIn) return undefined;
-    let cancelled = false;
-    void lifeGraphApi
-      .getMe()
-      .then((graphResult) => {
-        if (cancelled) return;
-        setLifeGraph(graphResult);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [isLoggedIn]);
-
-  useEffect(() => {
-    if (!isRealAgent || !isLoggedIn) return undefined;
-    if (skipNextRestoreRef.current) {
-      skipNextRestoreRef.current = false;
-      return undefined;
-    }
-    let cancelled = false;
-    setSessionRestoring(true);
-    void agentAdapter
-      .restoreSession(routeTaskId ?? undefined)
-      .then((restored) => {
-        if (cancelled || !restored) return;
-        setActiveTaskId(restored.taskId ?? null);
-        setUserResult(restored.response);
-        setRecovery(null);
-        completeAgentFlowResponse(restored.response);
-        const restoredMessage = publicText(
-          restored.response.assistantMessage,
-          '我已经恢复了上一次 Agent 会话。',
-        );
-        setMessages((current) =>
-          current.length > 0
-            ? current
-            : [
-                {
-                  id: nextId('assistant'),
-                  role: 'assistant',
-                  content: restoredMessage,
-                },
-              ],
-        );
-        if (shellView !== 'chat') navigate('/agent/chat', { replace: true });
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) setSessionRestoring(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    agentAdapter,
-    completeAgentFlowResponse,
-    isLoggedIn,
-    isRealAgent,
-    navigate,
-    routeTaskId,
-    shellView,
-  ]);
-
-  useEffect(() => {
-    if (!isRunning) {
-      setElapsed(0);
-      return undefined;
-    }
-    const started = Date.now();
-    const timer = window.setInterval(() => {
-      setElapsed(Math.max(1, Math.round((Date.now() - started) / 1000)));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [isRunning]);
-
-  useEffect(() => {
-    if (userResult && !isRunning) return;
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [isRunning, messages, steps, userResult]);
-
-  const submit = async (event?: FormEvent, prompt?: string) => {
-    event?.preventDefault();
-    const goal = (prompt ?? input).trim();
-    if (!goal) {
-      agentFlow.showEmptyError();
-      setRecovery(createAgentRecoveryFromError(mapAgentError(new Error('MISSING_INFO')), ''));
-      return;
-    }
-    if (isRunning) return;
-    if (isRealAgent && !isLoggedIn) {
-      openLogin();
-      return;
-    }
-
-    setMessages((current) => [...current, { id: nextId('user'), role: 'user', content: goal }]);
-    setInput('');
-    setUserResult(null);
-    setRecovery(null);
-    setIsRunning(true);
-    finishedRef.current = false;
-    stopRequestedRef.current = false;
-    agentFlow.beginRun();
-    setSteps(
-      baseSteps.map((step, index) => ({ ...step, status: index === 0 ? 'running' : 'pending' })),
-    );
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-    try {
-      const finalResult = await agentAdapter.run(
-        {
-          goal,
-          permissionMode: mode,
-          taskId: activeTaskId,
-          idempotencyKey: `agent-run-${Date.now()}`,
-        },
-        {
-          onEvent: handleAgentStreamEvent,
-          signal: controller.signal,
-        },
-      );
-      setActiveTaskId(finalResult.taskId ?? activeTaskId);
-      if (!finishedRef.current) finishUserFacing(finalResult.response);
-      if (shellView !== 'chat') {
-        skipNextRestoreRef.current = true;
-        navigate('/agent/chat', { replace: false });
-      }
-    } catch (error) {
-      const stopped = stopRequestedRef.current || isAbortError(error);
-      const agentError = stopped
-        ? mapAgentError(new DOMException('Aborted', 'AbortError'))
-        : agentFlow.failWithError(error);
-      const nextRecovery = createAgentRecoveryFromError(agentError, goal);
-      setRecovery(nextRecovery);
-      if (stopped) {
-        finishAssistantDelta();
-      } else {
-        setMessages((current) => [
-          ...current,
-          {
-            id: nextId('assistant'),
-            role: 'assistant',
-            content: nextRecovery.message,
-          },
-        ]);
-      }
-      setSteps((current) =>
-        current.map((step) =>
-          step.status === 'running'
-            ? { ...step, status: stopped ? 'pending' : 'error' }
-            : step,
-        ),
-      );
-    } finally {
-      setIsRunning(false);
-      abortRef.current = null;
-      stopRequestedRef.current = false;
-    }
-  };
-
-  const performCardAction = async (card: FitMeetAlphaCard, action: FitMeetAlphaCardAction) => {
-    if (isRealAgent && !isLoggedIn) {
-      openLogin();
-      return;
-    }
-    if (isRunning) return;
-
-    const schemaAction = action.schemaAction ?? schemaActionFromLegacy(action.action);
-    const taskId = numberFromUnknown(action.payload?.taskId ?? card.data.taskId);
-    if (schemaAction === 'activity.view_detail' || action.action === 'view_activity') {
-      await openActivityDetail(
-        numberFromUnknown(action.payload?.activityId ?? card.data.activityId),
-      );
-      return;
-    }
-    if (!taskId) {
-      await submit(undefined, action.label);
-      return;
-    }
-    const lifecycle = lifecycleFromSchemaAction(schemaAction);
-
-    setMessages((current) => [
-      ...current,
-      {
-        id: nextId('user'),
-        role: 'user',
-        content: publicText(action.label, '继续'),
-      },
-    ]);
-    setUserResult(null);
-    setRecovery(null);
-    setIsRunning(true);
-    finishedRef.current = false;
-    stopRequestedRef.current = false;
-    agentFlow.beginAction(lifecycle);
-    setSteps((current) =>
-      mergeStep(
-        current,
-        stepIdFromSchemaAction(schemaAction),
-        lightStatusFromSchemaAction(schemaAction),
-        'running',
-      ),
-    );
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-    try {
-      const next = await agentAdapter.performAction(taskId, {
-        action: schemaAction,
-        idempotencyKey: `agent-action-${taskId}-${action.id}-${Date.now()}`,
-        payload: {
-          ...(action.payload ?? {}),
-          cardId: card.id,
-          cardType: card.type,
-          cardData: card.data,
-        },
-      }, {
-        onEvent: handleAgentStreamEvent,
-        signal: controller.signal,
-      });
-      setActiveTaskId(next.taskId ?? taskId);
-      if (!finishedRef.current) finishUserFacing(next.response);
-    } catch (error) {
-      const stopped = stopRequestedRef.current || isAbortError(error);
-      const agentError = stopped
-        ? mapAgentError(new DOMException('Aborted', 'AbortError'))
-        : agentFlow.failWithError(error);
-      const nextRecovery = createAgentRecoveryFromError(
-        agentError,
-        publicText(action.label, '继续'),
-        'action_failed',
-      );
-      setRecovery(nextRecovery);
-      if (stopped) {
-        finishAssistantDelta();
-      } else {
-        setMessages((current) => [
-          ...current,
-          {
-            id: nextId('assistant'),
-            role: 'assistant',
-            content: nextRecovery.message,
-          },
-        ]);
-      }
-      setSteps((current) =>
-        current.map((step) =>
-          step.status === 'running'
-            ? { ...step, status: stopped ? 'pending' : 'error' }
-            : step,
-        ),
-      );
-    } finally {
-      setIsRunning(false);
-      abortRef.current = null;
-      stopRequestedRef.current = false;
-    }
-  };
-
-  const openActivityDetail = async (activityId: number | null) => {
-    if (!activityId) return;
-    setActivityLoading(true);
-    try {
-      setActivityDetail(await activitiesApi.get(activityId));
-    } finally {
-      setActivityLoading(false);
-    }
-  };
-
-  const loadDebugEvents = async () => {
-    const taskId = findTaskId(userResult);
-    setDebugOpen((open) => !open);
-    if (!taskId || debugEvents.length > 0 || debugLoading) return;
-    setDebugLoading(true);
-    try {
-      setDebugEvents(await loadAgentTaskEvents(taskId));
-    } finally {
-      setDebugLoading(false);
-    }
-  };
-
-  const handleAgentStreamEvent = (event: AgentStreamEvent) => {
-    agentFlow.handleStreamEvent(event);
-    if (event.type === 'assistant_delta') {
-      appendAssistantDelta(event.delta);
-      return;
-    }
-    if (event.type === 'assistant_done') {
-      finishAssistantDelta();
-      return;
-    }
-    if (event.type === 'progress') {
-      setSteps((current) => mergeProgressStep(current, event));
-      return;
-    }
-    if (event.type === 'status') {
-      if (typeof event.taskId === 'number' && event.taskId > 0) {
-        setActiveTaskId(event.taskId);
-      }
-      setSteps((current) =>
-        mergeStep(current, stepIdFromLightStatus(event.lightStatus), event.lightStatus, 'running'),
-      );
-    }
-    if (event.type === 'result') finishUserFacing(event.result);
-  };
-
-  const appendAssistantDelta = (delta: string) => {
-    const cleanDelta = publicText(delta, '');
-    if (!cleanDelta) return;
-    setMessages((current) => {
-      const last = current.at(-1);
-      if (last?.role === 'assistant' && last.status === 'streaming') {
-        return [
-          ...current.slice(0, -1),
-          {
-            ...last,
-            content: `${last.content}${cleanDelta}`,
-          },
-        ];
-      }
-      return [
-        ...current,
-        {
-          id: nextId('assistant-stream'),
-          role: 'assistant',
-          content: cleanDelta,
-          status: 'streaming',
-        },
-      ];
-    });
-  };
-
-  const finishAssistantDelta = () => {
-    setMessages((current) => {
-      const last = current.at(-1);
-      if (last?.role !== 'assistant' || last.status !== 'streaming') return current;
-      return [...current.slice(0, -1), { ...last, status: 'done' }];
-    });
-  };
-
-  const finishUserFacing = (finalResult: UserFacingAgentResponse) => {
-    if (finishedRef.current) return;
-    finishedRef.current = true;
-    agentFlow.completeResponse(finalResult);
-    setUserResult(finalResult);
-    setRecovery(null);
-    const finalMessage = publicText(
-      finalResult.assistantMessage,
-      '我已经整理好了，下面是我建议你先看的内容。',
-    );
-    setMessages((current) => {
-      const last = current.at(-1);
-      const assistantMessage = {
-        id: nextId('assistant'),
-        role: 'assistant',
-        content: finalMessage,
-        status: 'done',
-      } satisfies AgentThreadMessage;
-      if (last?.role === 'assistant' && last.status === 'streaming') {
-        return [
-          ...current.slice(0, -1),
-          {
-            ...last,
-            content: last.content.trim() ? last.content : finalMessage,
-            status: 'done',
-          },
-        ];
-      }
-      if (last?.role === 'assistant' && last.status === 'done' && last.content.trim()) {
-        return current;
-      }
-      return [...current, assistantMessage];
-    });
-    setSteps((current) =>
-      current.map((step) => ({
-        ...step,
-        status:
-          step.id === stepIdFromLightStatus(finalResult.lightStatus)
-            ? 'success'
-            : step.status === 'pending' || step.status === 'running'
-              ? 'success'
-              : step.status,
-      })),
-    );
-  };
-
-  const stopRun = () => {
-    stopRequestedRef.current = true;
-    abortRef.current?.abort();
-    finishAssistantDelta();
-    setIsRunning(false);
-    setSteps((current) =>
-      current.map((step) => (step.status === 'running' ? { ...step, status: 'pending' } : step)),
-    );
-  };
-
-  const retryRecovery = () => {
-    if (!recovery?.prompt || isRunning) return;
-    void submit(undefined, recovery.prompt);
-  };
-
-  const currentGoal =
-    [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
-  const guideState = agentFlow.guideState;
-  const guideTarget = agentFlow.guideTarget;
-  const guideCopy = agentFlow.guideCopy;
-  const startPetVisible = shouldShowAgentPet({
-    petEnabled,
-    guideState,
-    input,
-    isRunning,
-    sessionRestoring,
-    userResult,
-    recovery,
-    petNudged,
-    surface: 'start',
-  });
-  const threadPetVisible = shouldShowAgentPet({
-    petEnabled,
-    guideState,
-    input,
-    isRunning,
-    sessionRestoring,
-    userResult,
-    recovery,
-    petNudged,
-    surface: 'thread',
-  });
-  return (
-    <AgentWorkspaceLayout
-      isLanding={shellView === 'home' && messages.length === 0 && !isRunning && !userResult}
-      currentGoal={currentGoal}
-      lifeGraph={lifeGraph}
-      user={user}
-      petEnabled={petEnabled}
-      onPetEnabledChange={setPetEnabled}
-      onNewConversation={() => {
-        abortRef.current?.abort();
-        clearStoredAgentThread(currentUserId);
-        skipNextRestoreRef.current = true;
-        setInput('');
-        setMessages([]);
-        setSteps(baseSteps);
-        setUserResult(null);
-        setRecovery(null);
-        setActivityDetail(null);
-        setDebugEvents([]);
-        setDebugOpen(false);
-        setActiveTaskId(null);
-        setIsRunning(false);
-        setPetNudged(false);
-        agentFlow.reset();
-      }}
-    >
-      {shellView === 'settings' ? (
-        <AgentSettings mode={mode} onModeChange={setMode} />
-      ) : shellView === 'projects' ? (
-        <AgentReservedView
-          title="我的匹配"
-          body="这里会沉淀你确认过、收藏过和等待继续沟通的匹配对象。"
-        />
-      ) : shellView === 'history' ? (
-        <AgentReservedView
-          title="最近需求"
-          body="这里会展示你过去发起的社交需求、Agent 推荐和确认记录。"
-        />
-      ) : (
-        <div className="agent-gpt-stage agent-gpt-stage--simple">
-          <section
-            className={clsx('agent-gpt-chat', messages.length > 0 && 'agent-gpt-chat--active')}
-          >
-            {messages.length === 0 && !isRunning && !userResult ? (
-              <AgentStartScreen
-                input={input}
-                onInput={setInput}
-                onSubmit={submit}
-                guideState={guideState}
-                guideTarget={guideTarget}
-                guideCopy={guideCopy}
-                petEnabled={petEnabled}
-                petVisible={startPetVisible}
-                onInputFocus={() => {
-                  setPetNudged(true);
-                  agentFlow.focusInput();
-                }}
-                onEmptySubmit={() => {
-                  setPetNudged(true);
-                  agentFlow.showEmptyError();
-                }}
-              />
-            ) : (
-              <AgentThread
-                input={input}
-                onInput={setInput}
-                onSubmit={submit}
-                onStop={stopRun}
-                isRunning={isRunning}
-                sessionRestoring={sessionRestoring}
-                elapsed={elapsed}
-                steps={steps}
-                messages={messages}
-                userResult={userResult}
-                privacy={privacy}
-                onPrivacyChange={setPrivacy}
-                activityDetail={activityDetail}
-                activityLoading={activityLoading}
-                debugOpen={debugOpen}
-                debugEvents={debugEvents}
-                debugLoading={debugLoading}
-                recovery={recovery}
-                guideState={guideState}
-                guideTarget={guideTarget}
-                guideCopy={guideCopy}
-                petEnabled={petEnabled}
-                petVisible={threadPetVisible}
-                flowActiveInterest={agentFlow.activeInterest}
-                flowActiveInterestIndex={agentFlow.activeInterestIndex}
-                flowLoadingRecommendations={agentFlow.loadingRecommendations}
-                flowHighlightRecommendations={agentFlow.highlightRecommendations}
-                onInputFocus={() => {
-                  setPetNudged(true);
-                  agentFlow.focusInput();
-                }}
-                onEmptySubmit={() => {
-                  setPetNudged(true);
-                  agentFlow.showEmptyError();
-                }}
-                onRecommendationFocus={agentFlow.focusRecommendation}
-                onSafetyFocus={agentFlow.focusSafety}
-                onConfirmFocus={agentFlow.focusConfirmButton}
-                onToggleDebug={loadDebugEvents}
-                onCloseActivityDetail={() => setActivityDetail(null)}
-                onAction={performCardAction}
-                onRetryRecovery={retryRecovery}
-                endRef={endRef}
-              />
-            )}
-          </section>
-        </div>
-      )}
-    </AgentWorkspaceLayout>
-  );
-}
-
-function AgentWorkspaceLayout({
-  children,
-  isLanding,
-  currentGoal,
-  lifeGraph,
-  user,
-  petEnabled,
-  onPetEnabledChange,
-  onNewConversation,
-}: {
-  children: ReactNode;
-  isLanding: boolean;
-  currentGoal: string;
-  lifeGraph: LifeGraphResponse | null;
-  user: UserProfile | null;
-  petEnabled: boolean;
-  onPetEnabledChange: (enabled: boolean) => void;
-  onNewConversation: () => void;
-}) {
-  const navigate = useNavigate();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [activeSection, setActiveSection] = useState<AgentSidebarSectionId>('new');
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const lifeGraphScore = lifeGraph?.completeness.completenessScore ?? 0;
-  const recentConversations = [
-    currentGoal || '今晚想找慢跑搭子',
-    '这周有什么轻松活动',
-    '帮我筛选低压力见面',
-  ];
-  const sidebarItems: Array<{ id: AgentSidebarSectionId; label: string; icon: LucideIcon }> = [
-    { id: 'new', label: '新对话', icon: MessageSquarePlus },
-    { id: 'recent', label: '最近对话', icon: Clock3 },
-  ];
-  const goSidebar = (id: AgentSidebarSectionId) => {
-    setActiveSection(id);
-    setUserMenuOpen(false);
-    if (id === 'new') {
-      onNewConversation();
-      navigate('/agent');
-      return;
-    }
-    if (id === 'profile') {
-      navigate('/profile/life-graph');
-      return;
-    }
-    if (id === 'settings') {
-      navigate('/agent/settings');
-      return;
-    }
-    if (id === 'projects') {
-      navigate('/agent/projects');
-      return;
-    }
-    if (id === 'history') {
-      navigate('/agent/history');
-      return;
-    }
-    if (id === 'pet') {
-      onPetEnabledChange(!petEnabled);
-    }
-  };
-
-  return (
-    <div
-      className={clsx(
-        'agent-workspace agent-workspace--gpt agent-minimal-shell agent-gpt-copy-shell',
-        isLanding && 'agent-workspace--landing',
-        sidebarOpen
-          ? 'agent-gpt-copy-shell--sidebar-open'
-          : 'agent-gpt-copy-shell--sidebar-collapsed',
-      )}
-    >
-      <aside className="agent-gpt-sidebar" aria-label="Agent 导航">
-        <div className="agent-gpt-sidebar__top">
-          <Link to="/" className="agent-gpt-sidebar__brand" aria-label="FitMeet 首页">
-            <img src={AGENT_BRAND_ICON_SRC} alt="" />
-            {sidebarOpen ? (
-              <span>
-                <strong>FitMeet</strong>
-                <small>Agent</small>
-              </span>
-            ) : null}
-          </Link>
-          <button
-            type="button"
-            aria-label={sidebarOpen ? '关闭边栏' : '打开边栏'}
-            className="agent-gpt-sidebar__toggle"
-            onClick={() => setSidebarOpen((current) => !current)}
-          >
-            {sidebarOpen ? (
-              <PanelLeftClose aria-hidden="true" />
-            ) : (
-              <PanelLeftOpen aria-hidden="true" />
-            )}
-          </button>
-        </div>
-
-        {sidebarOpen ? (
-          <div className="agent-gpt-sidebar__body">
-            <section className="agent-gui-command-panel" aria-label="Agent 工作模式">
-              <div className="agent-gui-mode-tabs" role="tablist" aria-label="工作模式">
-                <button type="button" className="is-active" role="tab" aria-selected="true">
-                  <Sparkles aria-hidden="true" />
-                  Agent
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected="false"
-                  onClick={() => setUserMenuOpen(true)}
-                >
-                  <UserRound aria-hidden="true" />
-                  用户
-                </button>
-              </div>
-              <div className="agent-gui-command-list">
-                <button
-                  type="button"
-                  className={clsx('agent-gpt-sidebar__new', activeSection === 'new' && 'is-active')}
-                  onClick={() => goSidebar('new')}
-                >
-                  <MessageSquarePlus aria-hidden="true" />
-                  <span>
-                    <strong>New Agent</strong>
-                    <small>开启一次新的约见任务</small>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="agent-gui-command"
-                  onClick={() => goSidebar('projects')}
-                >
-                  <CalendarDays aria-hidden="true" />
-                  <span>
-                    <strong>新需求</strong>
-                    <small>整理场景、人选与时间</small>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="agent-gui-command"
-                  onClick={() => goSidebar('settings')}
-                >
-                  <ShieldCheck aria-hidden="true" />
-                  <span>
-                    <strong>执行边界</strong>
-                    <small>检查授权和安全策略</small>
-                  </span>
-                </button>
-              </div>
-            </section>
-
-            <section className="agent-gpt-sidebar__section" aria-label="最近对话">
-              <div className="agent-gpt-sidebar__section-title">最近对话</div>
-              <div className="agent-gpt-sidebar__list">
-                {recentConversations.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    className={clsx(activeSection === 'recent' && 'is-active')}
-                    onClick={() => goSidebar('recent')}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-          </div>
-        ) : (
-          <nav className="agent-gpt-sidebar__collapsed-nav">
-            {sidebarItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  aria-label={item.label}
-                  className={clsx(activeSection === item.id && 'is-active')}
-                  aria-pressed={item.id === 'pet' ? petEnabled : undefined}
-                  onClick={() => goSidebar(item.id)}
-                >
-                  <Icon aria-hidden="true" />
-                </button>
-              );
-            })}
-          </nav>
-        )}
-
-        <AgentUserMenu
-          sidebarOpen={sidebarOpen}
-          user={user}
-          lifeGraphScore={lifeGraphScore}
-          petEnabled={petEnabled}
-          menuOpen={userMenuOpen}
-          onToggleMenu={() => setUserMenuOpen((open) => !open)}
-          onNavigate={goSidebar}
-        />
-      </aside>
-
-      <main className="agent-minimal-main">
-        <header className="agent-minimal-topbar">
-          <div className="agent-minimal-brand">
-            <strong aria-label="FitMeet Agent">
-              FitMeet <span>Agent</span>
-            </strong>
-            <small>让每一次线下认识都更安心</small>
-          </div>
-          <div className="agent-minimal-status">
-            <span>
-              <ShieldCheck aria-hidden="true" />
-              权限正常
-              <i aria-hidden="true" />
-            </span>
-            <span>
-              <ShieldCheck aria-hidden="true" />
-              安全优先
-            </span>
-          </div>
-        </header>
-        <div className="agent-minimal-surface">{children}</div>
-      </main>
-    </div>
-  );
-}
-
-function AgentUserMenu({
-  sidebarOpen,
-  user,
-  lifeGraphScore,
-  petEnabled,
-  menuOpen,
-  onToggleMenu,
-  onNavigate,
-}: {
-  sidebarOpen: boolean;
-  user: UserProfile | null;
-  lifeGraphScore: number;
-  petEnabled: boolean;
-  menuOpen: boolean;
-  onToggleMenu: () => void;
-  onNavigate: (id: AgentSidebarSectionId) => void;
-}) {
-  const userName = user?.name?.trim() || '用户';
-  const initial = userName.slice(0, 1).toUpperCase();
-
-  return (
-    <div className="agent-codex-user">
-      {menuOpen ? (
-        <div className="agent-codex-user__popover" role="menu" aria-label="用户菜单">
-          <button type="button" role="menuitem" onClick={() => onNavigate('profile')}>
-            <UserRound aria-hidden="true" />
-            <span>
-              <strong>人物画像</strong>
-              <small>Life Graph 完整度 {lifeGraphScore}%</small>
-            </span>
-          </button>
-          <button type="button" role="menuitem" onClick={() => onNavigate('settings')}>
-            <ShieldCheck aria-hidden="true" />
-            <span>
-              <strong>设置</strong>
-              <small>权限、确认和安全边界</small>
-            </span>
-          </button>
-          <button type="button" role="menuitem" onClick={() => onNavigate('projects')}>
-            <CalendarDays aria-hidden="true" />
-            <span>
-              <strong>我的匹配</strong>
-              <small>已确认与待跟进</small>
-            </span>
-          </button>
-          <button type="button" role="menuitem" onClick={() => onNavigate('history')}>
-            <Clock3 aria-hidden="true" />
-            <span>
-              <strong>最近需求</strong>
-              <small>延续上一次对话上下文</small>
-            </span>
-          </button>
-          <button
-            type="button"
-            role="menuitemcheckbox"
-            aria-checked={petEnabled}
-            onClick={() => onNavigate('pet')}
-          >
-            <Sparkles aria-hidden="true" />
-            <span>
-              <strong>FitMeet Pet</strong>
-              <small>{petEnabled ? '需要时出现' : '已隐藏'}</small>
-            </span>
-          </button>
-        </div>
-      ) : null}
-      <button
-        type="button"
-        className="agent-codex-user__button"
-        aria-label="打开用户菜单"
-        aria-haspopup="menu"
-        aria-expanded={menuOpen}
-        onClick={onToggleMenu}
-      >
-        <span className="agent-codex-user__avatar">
-          {user?.avatar ? <img src={user.avatar} alt="" /> : initial}
-        </span>
-        {sidebarOpen ? (
-          <>
-            <span className="agent-codex-user__text">
-              <strong>{userName}</strong>
-              <small>用户 · Life Graph {lifeGraphScore}%</small>
-            </span>
-            <ChevronDown aria-hidden="true" />
-          </>
-        ) : null}
-      </button>
-    </div>
-  );
-}
-
-function AgentStartScreen({
-  input,
-  onInput,
-  onSubmit,
-  guideState,
-  guideTarget,
-  guideCopy,
-  petEnabled,
-  petVisible,
-  onInputFocus,
-  onEmptySubmit,
-}: {
-  input: string;
-  onInput: (value: string) => void;
-  onSubmit: (event?: FormEvent, prompt?: string) => void;
-  guideState: AntGuideState;
-  guideTarget: AntGuideTarget;
-  guideCopy?: AntGuideCopy;
-  petEnabled: boolean;
-  petVisible: boolean;
-  onInputFocus?: () => void;
-  onEmptySubmit?: () => void;
-}) {
-  const pickIdea = (idea: AgentSuggestionItem) => {
-    onInput(idea.prompt ?? idea.text);
-    window.requestAnimationFrame(() => {
-      document.querySelector<HTMLTextAreaElement>('.agent-gpt-input__textarea')?.focus();
-    });
-  };
-
-  return (
-    <div className="agent-gpt-start agent-gpt-start--product agent-minimal-home agent-gpt-home-clean">
-      <div className="agent-minimal-glow" aria-hidden="true" />
-      <section className="agent-codex-home" aria-label="FitMeet Agent 首页">
-        <div className="agent-codex-home__head">
-          <div className="agent-gpt-cover" aria-hidden="true">
-            <img src={AGENT_BRAND_ICON_SRC} alt="" />
-          </div>
-          <div>
-            <span>FitMeet Agent</span>
-            <h1>开始一个低压力任务</h1>
-          </div>
-        </div>
-        <p>
-          说一句你想认识谁、今天能去哪里、哪些边界不能越过。FitMeet Agent 会把画像、权限、匹配和跟进整理成一条自然对话。
-        </p>
-      </section>
-      {petEnabled && petVisible ? (
-        <CodexAntPet
-          state={guideState}
-          target={guideTarget}
-          copy={guideCopy}
-          size="md"
-          surface="home"
-        />
-      ) : null}
-      <div className="agent-chatgpt-composer">
-        <AgentInput
-          input={input}
-          onInput={onInput}
-          onSubmit={onSubmit}
-          onFocusInput={onInputFocus}
-          onEmptySubmit={onEmptySubmit}
-        />
-        <section className="agent-gpt-starter-row" aria-label="示例需求">
-          {naturalPromptIdeas.slice(0, 3).map((idea) => (
-            <button key={idea.text} type="button" onClick={() => pickIdea(idea)}>
-              {idea.text}
-            </button>
-          ))}
-        </section>
-      </div>
-      <section className="agent-public-seo" aria-label="FitMeet Agent 能做什么">
-        <article>
-          <strong>低压力开场</strong>
-          <p>把“想认识人”变成一句可执行的需求，不需要先想好完整计划。</p>
-        </article>
-        <article>
-          <strong>边界先确认</strong>
-          <p>发消息、连接候选人、创建活动和写入 Life Graph 前都会停下来等你确认。</p>
-        </article>
-        <article>
-          <strong>连续追问</strong>
-          <p>Agent 会记住本轮上下文，让你像聊天一样持续调整人选、时间和场景。</p>
-        </article>
-      </section>
-    </div>
-  );
-}
-
-function AgentThread({
-  input,
-  onInput,
-  onSubmit,
-  onStop,
-  isRunning,
-  sessionRestoring,
-  elapsed,
-  steps,
-  messages,
-  userResult,
-  privacy,
-  onPrivacyChange,
-  activityDetail,
-  activityLoading,
-  debugOpen,
-  debugEvents,
-  debugLoading,
-  recovery,
-  guideState,
-  guideTarget,
-  guideCopy,
-  petEnabled,
-  petVisible,
-  flowActiveInterest,
-  flowActiveInterestIndex,
-  flowLoadingRecommendations,
-  flowHighlightRecommendations,
-  onInputFocus,
-  onEmptySubmit,
-  onRecommendationFocus,
-  onSafetyFocus,
-  onConfirmFocus,
-  onToggleDebug,
-  onCloseActivityDetail,
-  onAction,
-  onRetryRecovery,
-  endRef,
-}: {
-  input: string;
-  onInput: (value: string) => void;
-  onSubmit: (event?: FormEvent, prompt?: string) => void;
-  onStop: () => void;
-  isRunning: boolean;
-  sessionRestoring: boolean;
-  elapsed: number;
-  steps: Step[];
-  messages: AgentThreadMessage[];
-  userResult: UserFacingAgentResponse | null;
-  privacy: AgentPrivacySettings;
-  onPrivacyChange: (settings: AgentPrivacySettings) => void;
-  activityDetail: ActivityDetailState | null;
-  activityLoading: boolean;
-  debugOpen: boolean;
-  debugEvents: AgentTaskDebugEvent[];
-  debugLoading: boolean;
-  recovery: AgentRecoveryState | null;
-  guideState: AntGuideState;
-  guideTarget: AntGuideTarget;
-  guideCopy?: AntGuideCopy;
-  petEnabled: boolean;
-  petVisible: boolean;
-  flowActiveInterest: string | null;
-  flowActiveInterestIndex: number;
-  flowLoadingRecommendations: boolean;
-  flowHighlightRecommendations: boolean;
-  onInputFocus?: () => void;
-  onEmptySubmit?: () => void;
-  onRecommendationFocus?: () => void;
-  onSafetyFocus?: () => void;
-  onConfirmFocus?: () => void;
-  onToggleDebug: () => void;
-  onCloseActivityDetail: () => void;
-  onAction: (card: FitMeetAlphaCard, action: FitMeetAlphaCardAction) => void;
-  onRetryRecovery: () => void;
-  endRef: React.RefObject<HTMLDivElement | null>;
-}) {
-  const assistantIsStreaming = messages.some(
-    (message) => message.role === 'assistant' && message.status === 'streaming',
-  );
-  return (
-    <div className="agent-gpt-thread">
-      {petEnabled && petVisible ? (
-        <CodexAntPet
-          state={guideState}
-          target={guideTarget}
-          copy={guideCopy}
-          size="sm"
-          surface="thread"
-        />
-      ) : null}
-      <Conversation className="agent-gpt-thread__messages">
-        <ConversationContent className="agent-gpt-thread__content">
-          {messages.map((message) => (
-            <AgentMessageBubble key={message.id} message={message} />
-          ))}
-          {isRunning && !assistantIsStreaming ? (
-            <AgentThinkingBlock elapsed={elapsed} steps={steps} />
-          ) : null}
-          {sessionRestoring ? <AgentInlineStatus text="正在恢复上一次对话..." /> : null}
-          {flowLoadingRecommendations ? (
-            <AgentMockDiscoveryPanel
-              activeInterest={flowActiveInterest}
-              activeInterestIndex={flowActiveInterestIndex}
-            />
-          ) : null}
-          {userResult ? (
-            <AgentPrivacyControls privacy={privacy} onChange={onPrivacyChange} />
-          ) : null}
-          {userResult ? (
-            <UserFacingResult
-              result={userResult}
-              privacy={privacy}
-              highlightRecommendations={flowHighlightRecommendations}
-              onAction={onAction}
-              onRecommendationFocus={onRecommendationFocus}
-              onSafetyFocus={onSafetyFocus}
-              onConfirmFocus={onConfirmFocus}
-            />
-          ) : null}
-          {activityLoading ? <AgentInlineStatus text="正在读取活动详情..." /> : null}
-          {activityDetail ? (
-            <AgentActivityDetailPanel
-              detail={activityDetail}
-              privacy={privacy}
-              onClose={onCloseActivityDetail}
-            />
-          ) : null}
-          {userResult ? (
-            <AgentDebugPanel
-              open={debugOpen}
-              loading={debugLoading}
-              events={debugEvents}
-              steps={steps}
-              result={userResult}
-              onToggle={onToggleDebug}
-            />
-          ) : null}
-          {!isRunning && recovery ? (
-            <AgentRecoveryPanel recovery={recovery} onRetry={onRetryRecovery} />
-          ) : null}
-          <div ref={endRef} />
-        </ConversationContent>
-        <ConversationScrollButton className="agent-gpt-scroll-button" />
-      </Conversation>
-      <AgentInput
-        compact
-        input={input}
-        onInput={onInput}
-        onSubmit={onSubmit}
-        isRunning={isRunning}
-        onStop={onStop}
-        onFocusInput={onInputFocus}
-        onEmptySubmit={onEmptySubmit}
-      />
-    </div>
-  );
-}
-
-function AgentRecoveryPanel({
-  recovery,
-  onRetry,
-}: {
-  recovery: AgentRecoveryState;
-  onRetry: () => void;
-}) {
-  return (
-    <section className="agent-recovery-panel" aria-live="polite">
-      <div>
-        <strong>{recovery.title}</strong>
-        <span>{recovery.message}</span>
-      </div>
-      <button type="button" onClick={onRetry}>
-        <RotateCcw aria-hidden="true" />
-        再试一次
-      </button>
-    </section>
-  );
-}
-
-function AgentInput({
-  compact,
-  input,
-  onInput,
-  onSubmit,
-  isRunning,
-  onStop,
-  onFocusInput,
-  onEmptySubmit,
-}: {
-  compact?: boolean;
-  input: string;
-  onInput: (value: string) => void;
-  onSubmit: (event?: FormEvent, prompt?: string) => void;
-  isRunning?: boolean;
-  onStop?: () => void;
-  onFocusInput?: () => void;
-  onEmptySubmit?: () => void;
-}) {
-  const [emptyWarning, setEmptyWarning] = useState(false);
-
-  return (
-    <PromptInput
-      className={clsx(
-        'agent-gpt-input',
-        compact && 'agent-gpt-input--compact',
-        emptyWarning && 'is-empty',
-      )}
-      onSubmit={(message, event) => {
-        if (!message.text.trim()) {
-          setEmptyWarning(true);
-          onEmptySubmit?.();
-          window.setTimeout(() => setEmptyWarning(false), 320);
-          return;
-        }
-        onSubmit(event, message.text);
-      }}
-    >
-      <PromptInputBody className="agent-gpt-input__body">
-        <span className="agent-input-spark" aria-hidden="true">
-          <Sparkles />
-        </span>
-        <PromptInputTextarea
-          aria-label="描述你的社交需求"
-          className="agent-gpt-input__textarea"
-          value={input}
-          onChange={(event) => onInput(event.target.value)}
-          onFocus={onFocusInput}
-          placeholder="例如：今晚找人散步，先站内聊"
-          rows={1}
-        />
-        <span className="agent-model-pill">
-          FitMeet Lite
-          <ChevronDown aria-hidden="true" />
-        </span>
-        {isRunning ? (
-          <button
-            type="button"
-            aria-label="停止"
-            className="agent-gpt-input__submit agent-gpt-input__submit--stop"
-            onClick={onStop}
-          >
-            <Square aria-hidden="true" />
-          </button>
-        ) : (
-          <PromptInputSubmit aria-label="发送需求" className="agent-gpt-input__submit">
-            <Send aria-hidden="true" />
-          </PromptInputSubmit>
-        )}
-      </PromptInputBody>
-    </PromptInput>
-  );
-}
-
-function AgentMockDiscoveryPanel({
-  activeInterest,
-  activeInterestIndex,
-}: {
-  activeInterest: string | null;
-  activeInterestIndex: number;
-}) {
-  return (
-    <section className="agent-flow-discovery" aria-label="正在发现兴趣场景">
-      <div className="agent-flow-discovery__heading">
-        <span className="agent-gpt-pulse" aria-hidden="true" />
-        <strong>正在发现兴趣场景</strong>
-        <small>{activeInterest ? `正在点亮：${activeInterest}` : '开始理解兴趣边界'}</small>
-      </div>
-      <div className="agent-flow-interest-row" aria-label="兴趣点亮进度">
-        {AGENT_FLOW_INTERESTS.map((interest, index) => (
-          <span
-            key={interest}
-            className={clsx(
-              'agent-flow-interest-chip',
-              index <= activeInterestIndex && 'is-active',
-            )}
-          >
-            {interest}
-          </span>
-        ))}
-      </div>
-      <div className="agent-flow-loading-grid" aria-hidden="true">
-        {[0, 1, 2].map((item) => (
-          <span key={item} className="agent-flow-loading-card" />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function AgentThinkingBlock({
-  elapsed,
-  steps,
-}: {
-  elapsed: number;
-  steps: Step[];
-}) {
-  const active =
-    steps.find((step) => step.status === 'running') ??
-    steps.find((step) => step.status === 'waiting');
-  const visibleSteps = steps.filter((step) => step.status !== 'pending');
-  return (
-    <div className="agent-gpt-thinking">
-      <section className="agent-gpt-thinking__body" aria-live="polite" aria-label="Agent 输出状态">
-        <div className="agent-gpt-thinking__summary">
-          <span className="agent-gpt-pulse" />
-          <strong>{active?.label ?? '正在处理'}</strong>
-          <small>{elapsed}s</small>
-        </div>
-        <div className="agent-gpt-step-list">
-          {visibleSteps.map((step) => (
-            <AgentProgressRow key={step.id} step={step} />
-          ))}
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function AgentProgressRow({ step }: { step: Step }) {
-  return (
-    <details
-      className={clsx(`is-${step.status}`, step.kind && `agent-gpt-step--${step.kind}`)}
-      open={step.status === 'running' || step.status === 'waiting'}
-    >
-      <summary>
-        {step.kind ? <span>{stepKindLabel(step.kind)}</span> : null}
-        <strong>{step.label}</strong>
-      </summary>
-      <small>{step.detail || '这一步的状态已记录，点击可收起或展开。'}</small>
-    </details>
-  );
-}
-
-function AgentMessageBubble({ message }: { message: AgentThreadMessage }) {
-  return (
-    <AiMessage
-      from={message.role}
-      className={clsx('agent-gpt-message', message.role === 'user' && 'agent-gpt-message--user')}
-    >
-      <AiMessageContent className="agent-gpt-message__content">
-        {message.role === 'assistant' ? (
-          <MessageResponse>{message.content}</MessageResponse>
-        ) : (
-          message.content
-        )}
-      </AiMessageContent>
-    </AiMessage>
-  );
-}
-
-function UserFacingResult({
-  result,
-  privacy,
-  highlightRecommendations,
-  onAction,
-  onRecommendationFocus,
-  onSafetyFocus,
-  onConfirmFocus,
-}: {
-  result: UserFacingAgentResponse;
-  privacy: AgentPrivacySettings;
-  highlightRecommendations?: boolean;
-  onAction: (card: FitMeetAlphaCard, action: FitMeetAlphaCardAction) => void;
-  onRecommendationFocus?: () => void;
-  onSafetyFocus?: () => void;
-  onConfirmFocus?: () => void;
-}) {
-  const candidateCards = result.cards.filter((card) => card.type === 'candidate_card');
-  const activityCards = result.cards.filter((card) =>
-    ['activity_plan', 'activity_status', 'checkin_card', 'review_card'].includes(card.type),
-  );
-  const otherCards = result.cards.filter(
-    (card) => card.type !== 'candidate_card' && !activityCards.includes(card),
-  );
-  const hasConfirmableCards = otherCards.some(
-    (card) =>
-      card.status === 'waiting_confirmation' ||
-      card.actions.some(
-        (action) =>
-          action.requiresConfirmation ||
-          action.schemaAction === 'opener.confirm_send' ||
-          action.action === 'send_message',
-      ),
-  );
-  const safetyNotes = [
-    ...result.safeStatus.boundaryNotes,
-    ...result.safeStatus.requiredConfirmations.map((item) => '需要你确认：' + String(item)),
-  ]
-    .map((note) => publicText(note, ''))
-    .filter(Boolean);
-  const taskId = findTaskId(result);
-
-  return (
-    <div className="agent-gpt-results agent-product-results">
-      {otherCards.length ? (
-        <section
-          className="agent-gpt-result-block agent-natural-cards"
-          onFocus={hasConfirmableCards ? onConfirmFocus : undefined}
-          onMouseEnter={hasConfirmableCards ? onConfirmFocus : undefined}
-        >
-          <div className="agent-result-heading">
-            <span>我会先停下来确认</span>
-            <h2>这些动作不会自动执行</h2>
-            <p>发送消息、加好友、创建线下活动、共享位置和敏感画像更新，都需要你明确确认。</p>
-          </div>
-          <div>
-            {otherCards.slice(0, 4).map((card) => (
-              <UserFacingGenericCard
-                key={card.id}
-                card={card}
-                privacy={privacy}
-                onAction={onAction}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {candidateCards.length ? (
-        <section
-          className={clsx(
-            'agent-gpt-result-block',
-            highlightRecommendations && 'agent-flow-result-block--active',
-          )}
-          onFocus={onRecommendationFocus}
-          onMouseEnter={onRecommendationFocus}
-        >
-          <div className="agent-result-heading">
-            <span>推荐给你的人</span>
-            <h2>我为什么觉得合适</h2>
-            <p>我会把推荐理由、安全边界和下一步建议说清楚；确认前不会替你联系任何人。</p>
-          </div>
-          <div className="agent-gpt-candidates">
-            {candidateCards.slice(0, 4).map((card) => (
-              <UserFacingCandidateCard
-                key={card.id}
-                card={card}
-                privacy={privacy}
-                onAction={onAction}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {activityCards.length ? (
-        <section
-          className="agent-gpt-result-block"
-          onFocus={onRecommendationFocus}
-          onMouseEnter={onRecommendationFocus}
-        >
-          <div className="agent-result-heading">
-            <span>约练闭环</span>
-            <h2>活动状态会持续可见</h2>
-            <p>签到、上传证明、完成和评价会按时间线显示；涉及位置和身体信息默认隐藏。</p>
-          </div>
-          <div className="agent-activity-grid">
-            {activityCards.slice(0, 4).map((card) => (
-              <AgentActivityCard key={card.id} card={card} privacy={privacy} onAction={onAction} />
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {result.pendingConfirmations.length ? (
-        <section
-          className="agent-gpt-result-block agent-natural-cards"
-          onFocus={onConfirmFocus}
-          onMouseEnter={onConfirmFocus}
-        >
-          <div className="agent-result-heading">
-            <span>待确认</span>
-            <h2>我正在等你决定</h2>
-            <p>你确认之前，这些动作只会停留在草稿或待办状态。</p>
-          </div>
-          <div>
-            {result.pendingConfirmations.slice(0, 4).map((confirmation) => (
-              <AgentNaturalConfirmationCard
-                key={`${confirmation.type}-${confirmation.id ?? confirmation.summary}`}
-                confirmation={confirmationViewModelFromPending(confirmation, taskId, onAction)}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {safetyNotes.length || result.safeStatus.blocked ? (
-        <AgentSafetyPanel
-          pendingActions={result.pendingConfirmations.length}
-          notes={safetyNotes}
-          onSafetyFocus={onSafetyFocus}
-        />
-      ) : null}
-
-      {!result.cards.length && !result.pendingConfirmations.length ? (
-        <section className="agent-gpt-result-block">
-          <h2>我先理解到这里</h2>
-          <p>你可以继续补充时间、地点、社交压力、运动强度或安全边界，我会接着往下筛。</p>
-        </section>
-      ) : null}
-    </div>
-  );
-}
-
-function UserFacingGenericCard({
-  card,
-  privacy,
-  onAction,
-}: {
-  card: FitMeetAlphaCard;
-  privacy: AgentPrivacySettings;
-  onAction: (card: FitMeetAlphaCard, action: FitMeetAlphaCardAction) => void;
-}) {
-  if (card.type === 'profile_proposal') {
-    return <AgentLifeGraphProposalCard card={card} onAction={onAction} />;
-  }
-  const body = card.body
-    ? privacyText(publicText(card.body, '确认前我不会继续执行。'), privacy)
-    : '';
-  return (
-    <article>
-      <strong>{publicText(card.title, '需要你确认')}</strong>
-      {body ? <p>{body}</p> : null}
-      {cardDataText(card, 'lifeGraphUpdatePreview') ? (
-        <p>{cardDataText(card, 'lifeGraphUpdatePreview')}</p>
-      ) : null}
-      {card.actions.length ? (
-        <div className="agent-card-actions">
-          {card.actions.slice(0, 5).map((action) => (
-            <button key={action.id} type="button" onClick={() => onAction(card, action)}>
-              {publicText(action.label, '继续')}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </article>
-  );
-}
-
-function UserFacingCandidateCard({
-  card,
-  privacy,
-  onAction,
-}: {
-  card: FitMeetAlphaCard;
-  privacy: AgentPrivacySettings;
-  onAction: (card: FitMeetAlphaCard, action: FitMeetAlphaCardAction) => void;
-}) {
-  const fitReasons = cardDataList(card, 'fitReasons');
-  const suggestedOpener = cardDataText(card, 'suggestedOpener');
-  const matchScore =
-    cardDataTextAny(card, ['matchScore', 'score', 'matchingScore']) ||
-    cardDataNumberText(card, ['score']);
-  const candidateMeta = [
-    ['区域', cardDataTextAny(card, ['area', 'region', 'city', 'locationPreference'])],
-    ['时间', cardDataTextAny(card, ['timePreference', 'availableTime', 'timeWindow'])],
-    ['运动', cardDataTextAny(card, ['sportType', 'activityType', 'activity'])],
-    ['社交偏好', cardDataTextAny(card, ['socialPreference', 'socialStyle'])],
-    [
-      '下一步',
-      cardDataTextAny(card, ['nextActionSuggestion', 'nextStep']) || nextActionLabel(card),
-    ],
-  ].filter(([, value]) => Boolean(value));
-  const sensitiveMeta = [
-    [
-      '身体信息',
-      privacy.showBodyInfo
-        ? cardDataTextAny(card, ['bodyInfo', 'healthStats', 'fitnessProfile'])
-        : '默认隐藏',
-    ],
-    [
-      '精确位置',
-      privacy.showExactLocation
-        ? cardDataTextAny(card, ['preciseLocation', 'exactLocation', 'latLng']) ||
-          coordinateText(card)
-        : '默认隐藏',
-    ],
-  ].filter(([, value]) => Boolean(value));
-  return (
-    <article className="agent-gpt-candidate">
-      <div className="agent-gpt-candidate__avatar">{publicText(card.title, 'F').slice(0, 1)}</div>
-      <div>
-        <h3>{publicText(card.title, '推荐候选人')}</h3>
-        <p>{matchScore || '匹配度已结合你的需求估算'}</p>
-      </div>
-      {candidateMeta.length || sensitiveMeta.length ? (
-        <div className="agent-candidate-meta">
-          {[...candidateMeta, ...sensitiveMeta].map(([label, value]) => (
-            <span
-              key={label}
-              className={label === '身体信息' || label === '精确位置' ? 'is-sensitive' : undefined}
-            >
-              <small>{label}</small>
-              <strong>{value}</strong>
-            </span>
-          ))}
-        </div>
-      ) : null}
-      <div className="agent-candidate-recommendation">
-        <strong>一句话推荐</strong>
-        <p>
-          {cardDataText(card, 'recommendationLine') ||
-            publicText(card.body, '你们在时间、地点、活动偏好和第一次见面边界上比较接近。')}
-        </p>
-      </div>
-      {fitReasons.length ? (
-        <div className="agent-candidate-reasons">
-          <strong>具体适合原因</strong>
-          <ul>
-            {fitReasons.slice(0, 5).map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      {cardDataText(card, 'whyNow') ? (
-        <div className="agent-safe-step">
-          <strong>为什么现在适合</strong>
-          <p>{cardDataText(card, 'whyNow')}</p>
-        </div>
-      ) : null}
-      <div className="agent-candidate-warning">
-        <strong>安全边界</strong>
-        <p>
-          {cardDataText(card, 'safetyBoundary') ||
-            '第一次建议选择公共场所，先站内沟通，不共享精确位置。'}
-        </p>
-      </div>
-      {suggestedOpener ? (
-        <blockquote>
-          <span>建议开场方式</span>
-          {suggestedOpener}
-        </blockquote>
-      ) : null}
-      {card.actions.length ? (
-        <div className="agent-card-actions">
-          {card.actions.slice(0, 6).map((action) => (
-            <button key={action.id} type="button" onClick={() => onAction(card, action)}>
-              {publicText(action.label, '下一步')}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </article>
-  );
-}
-
-function AgentPrivacyControls({
-  privacy,
-  onChange,
-}: {
-  privacy: AgentPrivacySettings;
-  onChange: (settings: AgentPrivacySettings) => void;
-}) {
-  return (
-    <section className="agent-privacy-controls" aria-label="隐私显示控制">
-      <div>
-        <strong>隐私显示</strong>
-        <span>身体信息和精确位置默认隐藏，仅本人可在当前页面临时查看。</span>
-      </div>
-      <button
-        type="button"
-        className={clsx(privacy.showBodyInfo && 'is-active')}
-        onClick={() => onChange({ ...privacy, showBodyInfo: !privacy.showBodyInfo })}
-      >
-        身体信息
-      </button>
-      <button
-        type="button"
-        className={clsx(privacy.showExactLocation && 'is-active')}
-        onClick={() => onChange({ ...privacy, showExactLocation: !privacy.showExactLocation })}
-      >
-        精确位置
-      </button>
-    </section>
-  );
-}
-
-function AgentInlineStatus({ text }: { text: string }) {
-  return (
-    <div className="agent-inline-status" aria-live="polite">
-      <span className="agent-gpt-pulse" />
-      <strong>{text}</strong>
-    </div>
-  );
-}
-
-function AgentLifeGraphProposalCard({
-  card,
-  onAction,
-}: {
-  card: FitMeetAlphaCard;
-  onAction: (card: FitMeetAlphaCard, action: FitMeetAlphaCardAction) => void;
-}) {
-  const updates =
-    cardDataListAny(card, ['proposedFields', 'lifeGraphUpdates', 'updates', 'fields']) ||
-    cardDataRecords(card, ['proposedUpdates', 'patches'])
-      .map((item) => recordText(item, ['label', 'field', 'key', 'summary']))
-      .filter(Boolean);
-  const acceptAction = findCardAction(
-    card,
-    ['life_graph.accept_update'],
-    ['confirm_profile_update'],
-  );
-  const rejectAction = findCardAction(card, ['life_graph.reject_update']);
-
-  return (
-    <article className="agent-lifegraph-proposal">
-      <div>
-        <strong>{publicText(card.title, 'Life Graph 更新建议')}</strong>
-        <p>
-          {publicText(
-            card.body,
-            'Agent 发现了可能需要写入用户画像的信息。确认之前，这些内容不会写入数据库。',
-          )}
-        </p>
-      </div>
-      {updates.length ? (
-        <ul>
-          {updates.slice(0, 6).map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-      ) : null}
-      <AgentNaturalConfirmationCard
-        confirmation={{
-          id: `life-graph-${card.id}`,
-          title: '确认后才会更新 Life Graph',
-          body: '你可以接受这次画像更新，也可以拒绝或继续调整。未确认时只保留在当前建议卡片中。',
-          primaryLabel: acceptAction ? publicText(acceptAction.label, '确认更新') : '确认更新',
-          secondaryLabels: [rejectAction ? publicText(rejectAction.label, '拒绝更新') : '拒绝更新'],
-          onPrimary: acceptAction ? () => onAction(card, acceptAction) : undefined,
-          onSecondary: rejectAction ? () => onAction(card, rejectAction) : undefined,
-        }}
-      />
-    </article>
-  );
-}
-
-function AgentActivityCard({
-  card,
-  privacy,
-  onAction,
-}: {
-  card: FitMeetAlphaCard;
-  privacy: AgentPrivacySettings;
-  onAction: (card: FitMeetAlphaCard, action: FitMeetAlphaCardAction) => void;
-}) {
-  const activityId = numberFromUnknown(card.data.activityId ?? card.data.id);
-  const status = cardDataTextAny(card, ['status', 'activityStatus']) || card.status || 'draft';
-  const location = privacy.showExactLocation
-    ? cardDataTextAny(card, ['locationName', 'location', 'exactLocation']) || '位置待确认'
-    : cardDataTextAny(card, ['city', 'area', 'region']) || '精确位置默认隐藏';
-  const timeline = activityTimelineRows(status);
-  const detailAction = activityId
-    ? ({
-        id: `view-activity-${activityId}`,
-        label: '查看详情',
-        action: 'view_activity',
-        schemaAction: 'activity.view_detail',
-        requiresConfirmation: false,
-        payload: { activityId },
-      } satisfies FitMeetAlphaCardAction)
-    : null;
-
-  return (
-    <article className="agent-activity-card">
-      <div className="agent-activity-card__top">
-        <span>{activityStatusLabel(status)}</span>
-        <strong>{publicText(card.title, '约练活动')}</strong>
-        <p>{publicText(card.body, '活动进度会在这里持续更新。')}</p>
-      </div>
-      <div className="agent-activity-meta">
-        <span>
-          <small>地点</small>
-          <strong>{location}</strong>
-        </span>
-        <span>
-          <small>证明</small>
-          <strong>
-            {cardDataTextAny(card, ['proofStatus', 'proofPolicy']) || '可上传 / 待确认'}
-          </strong>
-        </span>
-      </div>
-      <ol className="agent-activity-timeline">
-        {timeline.map((step) => (
-          <li
-            key={step.label}
-            className={clsx(step.done && 'is-done', step.current && 'is-current')}
-          >
-            {step.label}
-          </li>
-        ))}
-      </ol>
-      <div className="agent-card-actions">
-        {detailAction ? (
-          <button type="button" onClick={() => onAction(card, detailAction)}>
-            查看详情
-          </button>
-        ) : null}
-        {card.actions.slice(0, 5).map((action) => (
-          <button key={action.id} type="button" onClick={() => onAction(card, action)}>
-            {publicText(action.label, '继续')}
-          </button>
-        ))}
-      </div>
-    </article>
-  );
-}
-
-function AgentActivityDetailPanel({
-  detail,
-  privacy,
-  onClose,
-}: {
-  detail: ActivityDetailState;
-  privacy: AgentPrivacySettings;
-  onClose: () => void;
-}) {
-  const { activity, proofs } = detail;
-  const location = privacy.showExactLocation
-    ? [activity.locationName, activity.city].filter(Boolean).join(' · ')
-    : activity.city || '精确位置默认隐藏';
-
-  return (
-    <section className="agent-activity-detail" aria-label="活动详情">
-      <header>
-        <div>
-          <span>{activityStatusLabel(activity.status)}</span>
-          <h3>{activity.title}</h3>
-          <p>{activity.description}</p>
-        </div>
-        <button type="button" onClick={onClose}>
-          关闭
-        </button>
-      </header>
-      <div className="agent-activity-meta">
-        <span>
-          <small>地点</small>
-          <strong>{location}</strong>
-        </span>
-        <span>
-          <small>时间</small>
-          <strong>{formatDateTime(activity.startTime) || '待确认'}</strong>
-        </span>
-        <span>
-          <small>证明策略</small>
-          <strong>{activity.proofRequired ? activity.proofPolicy : '无需证明'}</strong>
-        </span>
-      </div>
-      <ol className="agent-activity-timeline">
-        {activityTimelineRows(activity.status).map((step) => (
-          <li
-            key={step.label}
-            className={clsx(step.done && 'is-done', step.current && 'is-current')}
-          >
-            {step.label}
-          </li>
-        ))}
-      </ol>
-      <div className="agent-proof-list">
-        <strong>签到 / 证明 / 评价</strong>
-        {proofs.length ? (
-          proofs.slice(0, 5).map((proof) => (
-            <p key={proof.id}>
-              {proof.proofType} · {proof.status} · {formatDateTime(proof.createdAt)}
-            </p>
-          ))
-        ) : (
-          <p>还没有上传证明或签到记录。</p>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function AgentDebugPanel({
-  open,
-  loading,
-  events,
-  steps,
-  result,
-  onToggle,
-}: {
-  open: boolean;
-  loading: boolean;
-  events: AgentTaskDebugEvent[];
-  steps: Step[];
-  result: UserFacingAgentResponse;
-  onToggle: () => void;
-}) {
-  const [auditCode, setAuditCode] = useState('');
-  const [auditPrompt, setAuditPrompt] = useState(
-    'Activity 状态显示；推理折叠块小型化；Life Graph 用户确认；权限下拉框联动；隐私开关行为；前端调试日志；推荐卡片完整信息',
-  );
-  const [auditResult, setAuditResult] = useState<AgentPageModuleAuditResult | null>(null);
-
-  const runModuleAudit = () => {
-    setAuditResult(auditAgentPageModules({ pageCode: auditCode, featurePrompt: auditPrompt }));
-  };
-
-  return (
-    <section className="agent-debug-panel">
-      <button type="button" onClick={onToggle}>
-        {open ? '收起调试日志' : '查看调试日志'}
-      </button>
-      {open ? (
-        <div>
-          <div className="agent-debug-grid">
-            <article>
-              <strong>状态</strong>
-              {steps
-                .filter((step) => step.status !== 'pending')
-                .map((step) => (
-                  <p key={step.id}>
-                    {stepKindLabel(step.kind ?? 'status')} · {step.label} · {step.status}
-                  </p>
-                ))}
-            </article>
-            <article>
-              <strong>API 返回</strong>
-              <pre>{debugResultText(result)}</pre>
-            </article>
-          </div>
-          <article>
-            <strong>工具 / 事件</strong>
-            {loading ? <p>正在读取调试事件...</p> : null}
-            {!loading && !events.length ? <p>当前结果没有关联到可读取的 taskId。</p> : null}
-            {events.slice(0, 12).map((event) => (
-              <details key={event.id}>
-                <summary>
-                  {event.eventType} · {event.actor} · {formatDateTime(event.createdAt)}
-                </summary>
-                <p>{publicText(event.summary, '事件已记录')}</p>
-                <pre>{safeJson(event.payload)}</pre>
-              </details>
-            ))}
-          </article>
-          <article className="agent-module-audit">
-            <strong>模块缺失扫描</strong>
-            <p>粘贴 /agent 页面代码和功能提示词，输出缺失模块列表。</p>
-            <textarea
-              aria-label="页面代码"
-              value={auditCode}
-              onChange={(event) => setAuditCode(event.target.value)}
-              placeholder="粘贴 AgentWorkspace.tsx 或相关页面代码"
-              rows={5}
-            />
-            <textarea
-              aria-label="功能提示词"
-              value={auditPrompt}
-              onChange={(event) => setAuditPrompt(event.target.value)}
-              rows={3}
-            />
-            <button type="button" onClick={runModuleAudit}>
-              输出缺失模块列表
-            </button>
-            {auditResult ? (
-              <div className="agent-module-audit__result">
-                <span>
-                  已检查 {auditResult.checked} 项，缺失 {auditResult.missing} 项
-                </span>
-                {auditResult.missingModules.length ? (
-                  <ul>
-                    {auditResult.missingModules.map((module) => (
-                      <li key={module}>{module}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p>未发现缺失模块。</p>
-                )}
-              </div>
-            ) : null}
-          </article>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function AgentSafetyPanel({
-  pendingActions,
-  notes,
-  onSafetyFocus,
-}: {
-  pendingActions: number;
-  notes: string[];
-  onSafetyFocus?: () => void;
-}) {
-  const hasPendingActions = pendingActions > 0;
-  return (
-    <section
-      className={clsx('agent-gpt-approval agent-safety-panel', !hasPendingActions && 'is-idle')}
-      tabIndex={0}
-      onClick={onSafetyFocus}
-      onFocus={onSafetyFocus}
-      onMouseEnter={onSafetyFocus}
-    >
-      <div className="agent-result-heading">
-        <span>{hasPendingActions ? '待你确认' : '安全边界'}</span>
-        <h2>{hasPendingActions ? '等待你确认' : '开始一个低压力任务'}</h2>
-        {hasPendingActions ? (
-          <p>
-            当前有 {pendingActions}{' '}
-            个关键动作等待确认。确认前，我不会自动交换联系方式、共享位置或发起线下见面。
-          </p>
-        ) : (
-          <p>
-            当前没有待确认动作。你可以继续补充想认识的人、见面的时间地点或舒适边界，我会先帮你整理，不会突然弹出约练流程。
-          </p>
-        )}
-      </div>
-      <div>
-        {(notes.length
-          ? notes
-          : ['联系前需要你确认', '见面建议选择公共场所', '不会自动共享手机号、微信或实时位置']
-        )
-          .slice(0, 5)
-          .map((note) => (
-            <span key={note}>{note}</span>
-          ))}
-      </div>
-    </section>
-  );
-}
-
-function AgentNaturalConfirmationCard({
-  confirmation,
-}: {
-  confirmation: AgentConfirmationViewModel;
-}) {
-  return (
-    <Confirmation
-      approval={{ id: confirmation.id }}
-      className="agent-natural-confirmation"
-      state="approval-requested"
-    >
-      <ConfirmationRequest>
-        <ConfirmationTitle className="agent-natural-confirmation__title">
-          {confirmation.title}
-        </ConfirmationTitle>
-        <p>{confirmation.body}</p>
-        <ConfirmationActions className="agent-natural-confirmation__actions">
-          <ConfirmationAction onClick={confirmation.onPrimary}>
-            {confirmation.primaryLabel ?? '确认'}
-          </ConfirmationAction>
-          {(confirmation.secondaryLabels ?? ['修改一下', '取消']).map((label) => (
-            <ConfirmationAction
-              key={label}
-              variant="outline"
-              onClick={() => confirmation.onSecondary?.(label)}
-            >
-              {label}
-            </ConfirmationAction>
-          ))}
-        </ConfirmationActions>
-      </ConfirmationRequest>
-    </Confirmation>
-  );
-}
-
-function confirmationViewModelFromPending(
-  confirmation: UserFacingAgentResponse['pendingConfirmations'][number],
-  taskId: number | null,
-  onAction: (card: FitMeetAlphaCard, action: FitMeetAlphaCardAction) => void,
-): AgentConfirmationViewModel {
-  const id = `${confirmation.type}-${confirmation.id ?? confirmation.summary}`;
-  const action = taskId ? actionFromPendingConfirmation(confirmation, taskId) : null;
-  const card = action && taskId ? cardFromPendingConfirmation(confirmation, taskId, action) : null;
-
-  return {
-    id,
-    title: publicText(confirmation.summary, '有一个动作正在等待你确认'),
-    body: confirmationLabel(confirmation.actionType, confirmation.riskLevel),
-    primaryLabel: confirmationPrimaryLabel(confirmation.actionType),
-    secondaryLabels: confirmationSecondaryLabels(confirmation.actionType),
-    onPrimary: card && action ? () => onAction(card, action) : undefined,
-  };
-}
-
-function actionFromPendingConfirmation(
-  confirmation: UserFacingAgentResponse['pendingConfirmations'][number],
-  taskId: number,
-): FitMeetAlphaCardAction | null {
-  const actionType = confirmation.actionType.toLowerCase();
-  const summary = publicText(confirmation.summary, '确认继续');
-
-  if (actionType.includes('publish') || actionType.includes('activity')) {
-    return {
-      id: `pending-${confirmation.type}-confirm`,
-      label: confirmationPrimaryLabel(confirmation.actionType),
-      action: 'create_activity',
-      schemaAction: 'activity.confirm_create',
-      requiresConfirmation: true,
-      payload: {
-        taskId,
-        pendingConfirmationType: confirmation.type,
-        pendingConfirmationId: confirmation.id,
-        summary,
-      },
-    };
-  }
-
-  if (actionType.includes('message')) {
-    return {
-      id: `pending-${confirmation.type}-confirm`,
-      label: confirmationPrimaryLabel(confirmation.actionType),
-      action: 'send_message',
-      schemaAction: 'opener.confirm_send',
-      requiresConfirmation: true,
-      payload: {
-        taskId,
-        pendingConfirmationType: confirmation.type,
-        pendingConfirmationId: confirmation.id,
-        summary,
-      },
-    };
-  }
-
+function isSocialActionIntent(text: string) {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return false;
   if (
-    actionType.includes('friend') ||
-    actionType.includes('connect') ||
-    actionType.includes('candidate') ||
-    actionType.includes('save')
+    /(不想|不用|不要|不需要|不是|先不|暂时不).{0,8}(交友|找人|约练|搭子|匹配|推荐人|活动|加好友|邀请)/.test(
+      normalized,
+    )
   ) {
-    return {
-      id: `pending-${confirmation.type}-confirm`,
-      label: confirmationPrimaryLabel(confirmation.actionType),
-      action: 'save_candidate',
-      schemaAction: 'candidate.like',
-      requiresConfirmation: true,
-      payload: {
-        taskId,
-        pendingConfirmationType: confirmation.type,
-        pendingConfirmationId: confirmation.id,
-        summary,
-      },
-    };
+    return false;
   }
+  if (
+    /(怎么|如何|流程|是什么|为什么|能不能|可以吗|应该).{0,18}(找人|搭子|约练|匹配|推荐|活动|交友|发消息|邀请|加好友|报名|参加|发起|创建|认识.{0,6}(新朋友|朋友|人))/.test(
+      normalized,
+    ) ||
+    /(活动.*(怎么参加|如何参加|报名流程|参与流程)|邀请.*流程|加好友.*流程|新用户.*怎么.*(找人|找搭子|约练)|创建活动.*(先|需要).*画像)/.test(
+      normalized,
+    )
+  ) {
+    return false;
+  }
+  return /(帮我找|给我找|想找|我要找|我想认识|想认识|低压力社交|找一个|找个|找人|找.{0,48}(人|搭子|伙伴|朋友|用户|候选|活动|局|约练)|约练|约跑|约球|认识.{0,16}(朋友|人|搭子)|推荐.{0,16}(用户|朋友|人|搭子|候选|活动|局|约练)|搜索.{0,16}(用户|朋友|人|搭子|候选|活动|局|约练)|匹配.{0,16}(用户|朋友|人|搭子|候选)|附近.{0,16}(用户|朋友|人|搭子|活动)|同城.{0,16}(用户|朋友|人|搭子|活动)|真实用户|约练用户|户外搭子|篮球搭子|约练搭子|一起.{0,16}(咖啡|拍照|跑步|健身|羽毛球|网球|篮球|徒步|户外|骑行|运动|训练)|周末.{0,16}(咖啡|拍照|跑步|健身|羽毛球|网球|篮球|徒步|户外|骑行|运动|训练)|参加.{0,8}(活动|约练)|发起.{0,8}(活动|约练)|加好友|发邀请|线下见面|线下活动)/.test(
+    normalized,
+  );
+}
 
+function stepsForPrompt(prompt: string) {
+  return isSocialActionIntent(prompt) ? socialSteps : conversationSteps;
+}
+
+function intentForPrompt(prompt: string): AgentConversationIntent {
+  return isSocialActionIntent(prompt) ? 'social' : 'conversation';
+}
+
+function cancelsOpportunityClarification(prompt: string) {
+  return /(取消|先不找|不找了|不用找|暂停|算了)/i.test(prompt.trim());
+}
+
+function responseAwaitsOpportunityClarification(response: UserFacingAgentResponse) {
+  return (
+    response.cards.length === 0 &&
+    /为了只推荐安全、合适的机会|还差.{0,24}(城市|时间|运动强度|社交边界)/.test(
+      response.assistantMessage,
+    )
+  );
+}
+
+function responseRequiresApproval(response: UserFacingAgentResponse) {
+  return (
+    response.safeStatus.blocked ||
+    response.pendingConfirmations.length > 0 ||
+    response.cards.some(isApprovalCard)
+  );
+}
+
+function intentForResponse(
+  response: UserFacingAgentResponse,
+  fallback: AgentConversationIntent,
+): AgentConversationIntent {
+  if (responseRequiresApproval(response)) return 'approval';
+  return fallback;
+}
+
+function intentForRestoredResponse(
+  response: UserFacingAgentResponse,
+  fallback: AgentConversationIntent,
+): AgentConversationIntent {
+  if (responseRequiresApproval(response)) return 'approval';
+  const hasSocialSurface = response.cards.some(isSocialSurfaceCard);
+  return hasSocialSurface ? 'social' : fallback;
+}
+
+function isApprovalCard(card: { type?: string }) {
+  return card.type === 'opener_approval' || card.type === 'safety_boundary';
+}
+
+function isSocialSurfaceCard(card: { type?: string }) {
+  return (
+    card.type === 'candidate_card' ||
+    card.type === 'activity_plan' ||
+    card.type === 'activity_status' ||
+    card.type === 'checkin_card' ||
+    card.type === 'review_card' ||
+    isApprovalCard(card)
+  );
+}
+
+function resolveIntentFromStreamEvent(event: AgentStreamEvent) {
+  if (event.type === 'approval_required') return 'approval';
+  if (event.type === 'status' && typeof event.lightStatus === 'string') {
+    if (event.lightStatus.includes('等待')) return 'approval';
+  }
   return null;
-}
-
-function cardFromPendingConfirmation(
-  confirmation: UserFacingAgentResponse['pendingConfirmations'][number],
-  taskId: number,
-  action: FitMeetAlphaCardAction,
-): FitMeetAlphaCard {
-  return {
-    id: `pending-confirmation:${confirmation.type}:${confirmation.id ?? taskId}`,
-    type: 'audit_update',
-    title: publicText(confirmation.summary, '待确认动作'),
-    body: confirmationLabel(confirmation.actionType, confirmation.riskLevel),
-    status: 'waiting_confirmation',
-    data: {
-      taskId,
-      pendingConfirmationType: confirmation.type,
-      pendingConfirmationId: confirmation.id,
-      actionType: confirmation.actionType,
-      riskLevel: confirmation.riskLevel,
-    },
-    actions: [action],
-  };
-}
-
-function AgentSettings({
-  mode,
-  onModeChange,
-}: {
-  mode: SocialAgentPermissionMode;
-  onModeChange: (mode: SocialAgentPermissionMode) => void;
-}) {
-  return (
-    <div className="agent-gpt-stage">
-      <section className="agent-gpt-results">
-        <div className="agent-gpt-result-block">
-          <div className="agent-result-heading">
-            <span>权限设置</span>
-            <h2>权限模式</h2>
-            <p>
-              默认采用确认优先策略。发消息、加好友、创建活动、交换联系方式和敏感画像更新都需要你确认。
-            </p>
-          </div>
-          <AgentPermissionSelect mode={mode} onModeChange={onModeChange} />
-          <div className="agent-gpt-tags">
-            {(['assist', 'limited_auto', 'open'] as SocialAgentPermissionMode[]).map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => onModeChange(item)}
-                className={clsx(mode === item && 'is-active')}
-              >
-                {modeLabel(item)}
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function AgentPermissionSelect({
-  mode,
-  onModeChange,
-  compact,
-}: {
-  mode: SocialAgentPermissionMode;
-  onModeChange: (mode: SocialAgentPermissionMode) => void;
-  compact?: boolean;
-}) {
-  return (
-    <label
-      className={clsx('agent-permission-select', compact && 'agent-permission-select--compact')}
-    >
-      <ShieldCheck aria-hidden="true" />
-      <span>权限</span>
-      <select
-        aria-label="权限模式"
-        value={normalizePermissionMode(mode)}
-        onChange={(event) => onModeChange(event.target.value as SocialAgentPermissionMode)}
-      >
-        <option value="assist">基础权限</option>
-        <option value="limited_auto">正常权限</option>
-        <option value="open">开放权限</option>
-      </select>
-    </label>
-  );
-}
-
-function AgentReservedView({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="agent-gpt-stage">
-      <section className="agent-gpt-results">
-        <div className="agent-gpt-result-block">
-          <div className="agent-result-heading">
-            <span>FitMeet Agent</span>
-            <h2>{title}</h2>
-            <p>{body}</p>
-          </div>
-          <Link to="/agent" className="agent-link-button">
-            发起新需求
-          </Link>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function cardDataText(card: FitMeetAlphaCard, key: string): string {
-  const value = card.data[key];
-  if (typeof value === 'number') return String(Math.round(value));
-  return publicText(value, '');
-}
-
-function cardDataList(card: FitMeetAlphaCard, key: string): string[] {
-  const value = card.data[key];
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => publicText(item, ''))
-    .filter(Boolean)
-    .slice(0, 8);
-}
-
-function cardDataTextAny(card: FitMeetAlphaCard, keys: string[]): string {
-  for (const key of keys) {
-    const value = cardDataText(card, key);
-    if (value) return value;
-  }
-  return '';
-}
-
-function cardDataNumberText(card: FitMeetAlphaCard, keys: string[]): string {
-  for (const key of keys) {
-    const value = card.data[key];
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value <= 1 ? `${Math.round(value * 100)}%` : `${Math.round(value)}`;
-    }
-  }
-  return '';
-}
-
-function cardDataListAny(card: FitMeetAlphaCard, keys: string[]): string[] {
-  for (const key of keys) {
-    const values = cardDataList(card, key);
-    if (values.length) return values;
-  }
-  return [];
-}
-
-function cardDataRecords(card: FitMeetAlphaCard, keys: string[]): Record<string, unknown>[] {
-  for (const key of keys) {
-    const value = card.data[key];
-    if (!Array.isArray(value)) continue;
-    const records = value.filter(isRecord);
-    if (records.length) return records;
-  }
-  return [];
-}
-
-function recordText(record: Record<string, unknown>, keys: string[]): string {
-  for (const key of keys) {
-    const value = publicText(record[key], '');
-    if (value) return value;
-  }
-  return '';
-}
-
-function findCardAction(
-  card: FitMeetAlphaCard,
-  schemaActions: FitMeetAgentSchemaAction[],
-  legacyActions: FitMeetAlphaCardAction['action'][] = [],
-): FitMeetAlphaCardAction | undefined {
-  return card.actions.find(
-    (action) =>
-      (action.schemaAction && schemaActions.includes(action.schemaAction)) ||
-      legacyActions.includes(action.action),
-  );
-}
-
-function nextActionLabel(card: FitMeetAlphaCard): string {
-  const primary = card.actions.find((action) =>
-    ['send_message', 'connect_candidate', 'create_activity', 'view_activity'].includes(
-      action.action,
-    ),
-  );
-  return primary ? publicText(primary.label, '') : '';
-}
-
-function coordinateText(card: FitMeetAlphaCard): string {
-  const lat = card.data.lat ?? card.data.latitude;
-  const lng = card.data.lng ?? card.data.longitude;
-  if (typeof lat === 'number' && typeof lng === 'number') {
-    return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-  }
-  return '';
-}
-
-function privacyText(text: string, privacy: AgentPrivacySettings): string {
-  if (!text) return '';
-  if (!privacy.showExactLocation) {
-    return text.replace(/(-?\d{1,3}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})/g, '精确位置已隐藏');
-  }
-  return text;
-}
-
-function activityStatusLabel(status: string): string {
-  switch (status) {
-    case 'draft':
-      return '草稿';
-    case 'pending_confirm':
-      return '待确认';
-    case 'confirmed':
-      return '已确认';
-    case 'in_progress':
-      return '进行中';
-    case 'completed':
-      return '已完成';
-    case 'cancelled':
-      return '已取消';
-    default:
-      return status || '待更新';
-  }
-}
-
-function activityTimelineRows(status: string) {
-  const order = ['draft', 'pending_confirm', 'confirmed', 'in_progress', 'completed'];
-  const labels = ['创建', '确认', '签到', '上传证明', '评价'];
-  const normalized = status === 'cancelled' ? 'completed' : status;
-  const index = Math.max(0, order.indexOf(normalized));
-  return labels.map((label, itemIndex) => ({
-    label,
-    done: itemIndex < index || normalized === 'completed',
-    current: itemIndex === index && normalized !== 'completed',
-  }));
-}
-
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return publicText(value, '');
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }
 
 function findTaskId(result: UserFacingAgentResponse | null): number | null {
   if (!result) return null;
   for (const card of result.cards) {
-    const fromCard = numberFromUnknown(card.data.taskId ?? card.data.agentTaskId);
-    if (fromCard) return fromCard;
+    const fromData = numberFromUnknown(card.data.taskId);
+    if (fromData) return fromData;
     for (const action of card.actions) {
-      const fromAction = numberFromUnknown(action.payload?.taskId ?? action.payload?.agentTaskId);
-      if (fromAction) return fromAction;
+      const fromPayload = numberFromUnknown(action.payload?.taskId);
+      if (fromPayload) return fromPayload;
     }
   }
   return null;
 }
 
-function debugResultText(result: UserFacingAgentResponse): string {
-  return safeJson({
-    lightStatus: result.lightStatus,
-    permissionMode: result.permissionMode,
-    cardTypes: result.cards.map((card) => card.type),
-    pendingConfirmations: result.pendingConfirmations.length,
-    safeStatus: result.safeStatus,
+function schemaActionFromToolInput(
+  value: string | null | undefined,
+): FitMeetAgentCardExecutableAction | null {
+  const normalized = toolUISchemaActionFromUnknown(value);
+  if (!normalized) return null;
+  if (isExecutableToolUISchemaAction(normalized)) return normalized;
+  return null;
+}
+
+function isExecutableToolUISchemaAction(
+  value: ToolUISchemaAction,
+): value is Extract<FitMeetAgentSchemaAction, ToolUISchemaAction> {
+  return (
+    value === 'candidate.like' ||
+    value === 'candidate.skip' ||
+    value === 'candidate.more_like_this' ||
+    value === 'candidate.view_detail' ||
+    value === 'candidate.connect' ||
+    value === 'candidate.generate_opener' ||
+    value === 'opener.confirm_send' ||
+    value === 'opener.regenerate' ||
+    value === 'opener.reject' ||
+    value === 'activity.confirm_create' ||
+    value === 'activity.modify_time' ||
+    value === 'activity.modify_location' ||
+    value === 'activity.check_in' ||
+    value === 'activity.complete' ||
+    value === 'activity.upload_proof' ||
+    value === 'activity.view_detail' ||
+    value === 'review.submit' ||
+    value === 'life_graph.accept_update' ||
+    value === 'life_graph.reject_update' ||
+    value === 'meet_loop.resume' ||
+    value === 'meet_loop.reschedule'
+  );
+}
+
+function shouldAppendActionResultMessage(action: FitMeetAgentCardExecutableAction) {
+  return (
+    action === 'candidate.connect' ||
+    action === 'opener.confirm_send' ||
+    action === 'opener.reject' ||
+    action === 'activity.confirm_create'
+  );
+}
+
+function shouldAppendCardActionResultMessage(
+  action: FitMeetAgentCardExecutableAction,
+  response: UserFacingAgentResponse,
+) {
+  if (shouldAppendActionResultMessage(action)) return true;
+  if (action === 'candidate.view_detail' || action === 'activity.view_detail') {
+    return response.cards.length > 0 || Boolean(response.assistantMessage.trim());
+  }
+  if (action !== 'candidate.generate_opener' && action !== 'opener.regenerate') {
+    return false;
+  }
+  if (response.cards.length > 0 || response.assistantMessage.trim()) return true;
+  return response.cards.some(
+    (card) => card.type === 'opener_approval' || card.schemaType === 'safety.approval',
+  );
+}
+
+function idempotencyKeyForCardAction(
+  taskId: number,
+  action: FitMeetAgentCardExecutableAction,
+  payload: Record<string, unknown> | undefined,
+) {
+  const explicit = publicText(payload?.idempotencyKey, '');
+  if (explicit) return explicit;
+  const stableTarget =
+    publicText(payload?.approvalId, '') ||
+    publicText(payload?.candidateId, '') ||
+    publicText(payload?.candidateRecordId, '') ||
+    publicText(payload?.targetUserId, '') ||
+    publicText(payload?.activityId, '') ||
+    publicText(payload?.cardId, '') ||
+    publicText(payload?.message, '').slice(0, 48) ||
+    'card';
+  return `agent-card-action:${taskId}:${action}:${stableIdempotencyFragment(stableTarget)}`;
+}
+
+function stableIdempotencyFragment(value: string) {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9:_-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  return normalized || 'card';
+}
+
+const CARD_ACTION_ASSISTANT_MESSAGES: Partial<Record<FitMeetAgentCardExecutableAction, string>> = {
+  'candidate.connect': '已准备邀请请求，真正触达前仍会经过确认。',
+  'opener.confirm_send': '已进入发送确认流程，发送结果会继续回到这段对话。',
+  'opener.reject': '已取消这次发送，未联系对方。',
+  'activity.confirm_create': '已准备活动发起流程，发布前仍会保留确认边界。',
+  'activity.modify_time': '已准备时间调整方案，真正改动前仍会等你确认。',
+  'activity.modify_location': '已准备地点调整方案，真正改动前仍会等你确认。',
+  'activity.check_in': '已记录到达状态，后续会继续跟进活动完成情况。',
+  'activity.complete': '已记录活动完成，下一步可以留下简短评价。',
+  'activity.upload_proof': '已进入证明上传流程，上传内容会按隐私规则处理。',
+  'review.submit': '已提交这次评价，后续会用于改进推荐和约练闭环。',
+  'meet_loop.resume': '已从约练进展继续推进，新的状态会回到消息流。',
+  'meet_loop.reschedule': '已准备改期流程，改动前会继续征得确认。',
+};
+
+function assistantMessageForCardAction(
+  action: FitMeetAgentCardExecutableAction,
+  response: UserFacingAgentResponse,
+) {
+  return CARD_ACTION_ASSISTANT_MESSAGES[action] ?? response.assistantMessage;
+}
+
+function cardActionStreamEvent(
+  action: FitMeetAgentCardExecutableAction,
+  event: AgentStreamEvent,
+): AgentStreamEvent {
+  if (event.type !== 'result') return event;
+  return {
+    ...event,
+    result: {
+      ...event.result,
+      assistantMessage: assistantMessageForCardAction(action, event.result),
+    },
+  };
+}
+
+function traceIdFromResult(result: UserFacingAgentResponse | null): string | null {
+  if (!result) return null;
+  for (const card of result.cards) {
+    const traceId = stringFromUnknown(card.data.traceId);
+    if (traceId) return traceId;
+  }
+  return null;
+}
+
+function responseFromSessionSnapshot(
+  snapshot: UserFacingAgentSessionSnapshot | null | undefined,
+): UserFacingAgentResponse | null {
+  if (!snapshot) return null;
+  if (isUserFacingAgentResponse(snapshot.result)) return snapshot.result;
+  const latestRunResult =
+    snapshot.latestRun && typeof snapshot.latestRun === 'object'
+      ? (snapshot.latestRun as { result?: unknown }).result
+      : null;
+  if (isUserFacingAgentResponse(latestRunResult)) return latestRunResult;
+  const eventResult = snapshot.events
+    ?.map((event) => (event.type === 'result' ? event.result : null))
+    .find(isUserFacingAgentResponse);
+  return eventResult ?? null;
+}
+
+function messagesFromSessionSnapshot(
+  snapshot: UserFacingAgentSessionSnapshot,
+  restored: UserFacingAgentResponse | null,
+  taskId: number | null,
+): AgentThreadMessage[] {
+  const restoredMessages = snapshot.messages
+    .map((item, index) => sessionMessageToThreadMessage(item, index, taskId))
+    .filter((message): message is AgentThreadMessage => Boolean(message));
+  if (!restored) return restoredMessages;
+  const lastIntent =
+    [...restoredMessages].reverse().find((message) => message.conversationIntent)
+      ?.conversationIntent ?? 'conversation';
+  const hasResultMessage = restoredMessages.some(
+    (message) =>
+      message.role === 'assistant' && message.content.trim() === restored.assistantMessage.trim(),
+  );
+  const resultIntent = intentForRestoredResponse(restored, lastIntent);
+  const showSocialResult = resultIntent === 'social' || resultIntent === 'approval';
+  if (hasResultMessage) {
+    return restoredMessages.map((message, index) =>
+      index === restoredMessages.length - 1 && message.role === 'assistant'
+        ? {
+            ...message,
+            result: restored,
+            taskId,
+            traceId: traceIdFromResult(restored),
+            conversationIntent: resultIntent,
+            showSocialResult,
+          }
+        : message,
+    );
+  }
+  return [
+    ...restoredMessages,
+    {
+      id: `task-${taskId ?? 'latest'}-result`,
+      role: 'assistant',
+      content: publicText(restored.assistantMessage, '我已经恢复了这段对话。'),
+      status: 'done',
+      result: restored,
+      taskId,
+      traceId: traceIdFromResult(restored),
+      conversationIntent: resultIntent,
+      showSocialResult,
+    },
+  ];
+}
+
+function sessionMessageToThreadMessage(
+  item: Record<string, unknown>,
+  index: number,
+  taskId: number | null,
+): AgentThreadMessage | null {
+  const roleCandidate = stringFromUnknown(item.role || item.sender || item.author);
+  const role =
+    roleCandidate === 'assistant' ? 'assistant' : roleCandidate === 'user' ? 'user' : null;
+  if (!role) return null;
+  const content = publicText(item.content ?? item.message ?? item.text ?? item.body, '');
+  if (!content) return null;
+  return {
+    id: stringFromUnknown(item.id) || `task-${taskId ?? 'latest'}-${index}`,
+    role,
+    content,
+    status: 'done',
+    taskId,
+    conversationIntent: role === 'user' ? intentForPrompt(content) : 'conversation',
+  };
+}
+
+function branchForAssistant(
+  messages: AgentThreadMessage[],
+  messageId: string,
+): AgentMessageBranchState | undefined {
+  const messageIndex = messages.findIndex((message) => message.id === messageId);
+  const previousUser = [...messages.slice(0, Math.max(0, messageIndex))]
+    .reverse()
+    .find((message) => message.role === 'user');
+  if (!previousUser) return undefined;
+  const groupId = `branch-${previousUser.id}`;
+  const variants = messages.filter(
+    (message) => message.role === 'assistant' && message.branch?.groupId === groupId,
+  );
+  if (variants.length === 0) return { groupId, index: 1, count: 1 };
+  return { groupId, index: variants.length + 1, count: variants.length + 1 };
+}
+
+function decorateAssistantBranches(
+  messages: AgentThreadMessage[],
+  selections: Record<string, number>,
+  syncStatus: Record<string, AgentMessageBranchState['syncStatus']> = {},
+): AgentThreadMessage[] {
+  const groups = new Map<string, AgentThreadMessage[]>();
+  let currentUserId: string | null = null;
+  for (const message of messages) {
+    if (message.role === 'user') {
+      currentUserId = message.id;
+      continue;
+    }
+    if (message.role !== 'assistant' || !currentUserId) continue;
+    const groupId = `branch-${currentUserId}`;
+    groups.set(groupId, [...(groups.get(groupId) ?? []), message]);
+  }
+  return messages.map((message) => {
+    if (message.role !== 'assistant') return message;
+    const groupEntry = Array.from(groups.entries()).find(([, items]) =>
+      items.some((item) => item.id === message.id),
+    );
+    if (!groupEntry || groupEntry[1].length < 2) return message;
+    const [groupId, variants] = groupEntry;
+    const index = variants.findIndex((item) => item.id === message.id) + 1;
+    const activeIndex = selections[groupId] ?? variants.length;
+    return {
+      ...message,
+      branch: {
+        groupId,
+        index,
+        count: variants.length,
+        activeIndex,
+        syncStatus: syncStatus[groupId] ?? message.branch?.syncStatus ?? 'idle',
+      },
+    };
   });
 }
 
-function safeJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2).slice(0, 3000);
-  } catch {
-    return '无法序列化调试数据';
-  }
+function buildBranchSnapshot(
+  messages: AgentThreadMessage[],
+  selections: Record<string, number>,
+): FitMeetAgentThreadBranchSnapshot | null {
+  const decorated = decorateAssistantBranches(messages, selections);
+  const branchMessages = decorated.filter(
+    (message) => message.role === 'assistant' && message.branch && message.branch.count > 1,
+  );
+  if (branchMessages.length === 0 && Object.keys(selections).length === 0) return null;
+  const branchCount = branchMessages.reduce(
+    (count, message) => Math.max(count, message.branch?.count ?? 0),
+    0,
+  );
+  const activeMessage =
+    branchMessages.find((message) => {
+      const branch = message.branch;
+      return branch ? branch.index === (branch.activeIndex ?? branch.count) : false;
+    }) ?? branchMessages.at(-1);
+  return {
+    activeBranchId: activeMessage?.id ?? null,
+    branchSelections: selections,
+    branchCount,
+    parentMessageId: activeMessage?.branch?.groupId ?? null,
+    updatedAt: new Date().toISOString(),
+    metadata: buildThreadMetadata(messages, null),
+  };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+function buildThreadMetadata(
+  messages: AgentThreadMessage[],
+  result: UserFacingAgentResponse | null,
+): Record<string, unknown> {
+  if (messages.length === 0 && !result) return {};
+  const latest = messages.at(-1);
+  return {
+    schemaVersion: 1,
+    client: 'fitmeet-web',
+    messageCount: messages.length,
+    latestMessageId: latest?.id ?? null,
+    latestRole: latest?.role ?? null,
+    latestStatus: latest?.status ?? null,
+    latestPreview: latest?.content ? latest.content.slice(0, 140) : null,
+    lastSyncedAt: new Date().toISOString(),
+    resultStatus: result?.runtime?.checkpointType ?? null,
+  };
 }
 
-function confirmationLabel(actionType: string, riskLevel: string): string {
-  const action = actionType.includes('activity')
-    ? '创建线下活动'
-    : actionType.includes('location')
-      ? '共享位置'
-      : actionType.includes('friend') || actionType.includes('connect')
-        ? '加好友'
-        : actionType.includes('message')
-          ? '发送消息'
-          : '继续执行';
-  const risk = riskLevel === 'high' ? '高风险' : riskLevel === 'medium' ? '中等风险' : '低风险';
-  return `${action}需要你确认；当前为${risk}动作。`;
-}
-
-function confirmationPrimaryLabel(actionType: string): string {
-  if (actionType.includes('activity')) return '确认创建';
-  if (actionType.includes('location')) return '确认共享';
-  if (actionType.includes('friend') || actionType.includes('connect')) return '确认加好友';
-  if (actionType.includes('message')) return '确认发送';
-  return '确认继续';
-}
-
-function confirmationSecondaryLabels(actionType: string): string[] {
-  if (actionType.includes('activity')) return ['修改时间', '修改地点', '取消'];
-  if (actionType.includes('message')) return ['语气更自然', '更简短', '取消'];
-  if (actionType.includes('location')) return ['改成大致区域', '取消'];
-  return ['再调整一下', '取消'];
-}
-
-function schemaActionFromLegacy(
-  action: FitMeetAlphaCardAction['action'],
-): FitMeetAgentSchemaAction {
-  switch (action) {
-    case 'send_message':
-      return 'opener.confirm_send';
-    case 'connect_candidate':
-    case 'save_candidate':
-      return 'candidate.like';
-    case 'create_activity':
-      return 'activity.confirm_create';
-    case 'generate_opener':
-      return 'candidate.generate_opener';
-    case 'see_more':
-    case 'filter_school':
-    case 'filter_gender_female':
-    case 'refine_request':
-      return 'candidate.more_like_this';
-    case 'dislike_candidate':
-      return 'candidate.skip';
-    case 'check_in':
-      return 'activity.check_in';
-    case 'view_activity':
-      return 'activity.view_detail';
-    case 'upload_proof':
-      return 'activity.upload_proof';
-    case 'submit_review':
-      return 'review.submit';
-    case 'confirm_profile_update':
-      return 'life_graph.accept_update';
-    default:
-      return 'candidate.more_like_this';
-  }
-}
-
-function stepIdFromSchemaAction(action: FitMeetAgentSchemaAction): string {
-  if (action.startsWith('candidate.')) return 'search';
-  if (action.startsWith('opener.')) return 'icebreaker';
-  if (action.startsWith('activity.')) return 'activity_plan';
-  if (action.startsWith('review.')) return 'life_graph_update';
-  if (action.startsWith('life_graph.')) return 'life_graph_update';
-  return 'understand';
-}
-
-function lightStatusFromSchemaAction(action: FitMeetAgentSchemaAction): UserFacingAgentLightStatus {
-  if (action === 'candidate.generate_opener' || action === 'opener.regenerate') {
-    return '正在生成开场白';
-  }
-  if (action === 'opener.confirm_send') return '正在等待你确认';
-  if (action.startsWith('candidate.')) return '正在筛选合适的人';
-  if (action.startsWith('activity.')) return '正在创建约练计划';
-  if (action.startsWith('review.') || action.startsWith('life_graph.')) {
-    return '正在更新你的 Life Graph';
-  }
-  return '正在理解你的需求';
-}
-
-function lifecycleFromSchemaAction(action: FitMeetAgentSchemaAction): AgentLifecycle {
-  if (action === 'candidate.generate_opener' || action === 'opener.regenerate') {
-    return 'drafting_opener';
-  }
-  if (action === 'opener.confirm_send') return 'waiting_confirmation';
-  if (action.startsWith('candidate.')) return 'searching_candidates';
-  if (action.startsWith('activity.')) return 'waiting_confirmation';
-  if (action.startsWith('review.') || action.startsWith('life_graph.')) {
-    return 'reading_life_graph';
-  }
-  return 'analyzing_intent';
+function threadBranchSnapshot(thread: FitMeetAgentThreadSummary) {
+  const direct = thread.branch;
+  if (direct?.branchSelections) return direct;
+  const custom = thread.custom?.assistantThread;
+  if (!custom || typeof custom !== 'object' || Array.isArray(custom)) return null;
+  const record = custom as FitMeetAgentThreadBranchSnapshot;
+  return record.branchSelections ? record : null;
 }
 
 function numberFromUnknown(value: unknown): number | null {
@@ -2873,19 +2068,23 @@ function numberFromUnknown(value: unknown): number | null {
   return null;
 }
 
-function stepIdFromLightStatus(status: UserFacingAgentLightStatus): string {
+function stepIdFromLightStatus(status: string): string {
+  if (/确认关键信息|补充信息|补齐/i.test(status)) return 'clarify';
   if (status.includes('Life Graph')) return 'profile';
   if (status.includes('筛选')) return 'search';
   if (status.includes('排除')) return 'rank';
   if (status.includes('安全')) return 'safety_filter';
-  if (status.includes('开场白')) return 'icebreaker';
   if (status.includes('确认')) return 'approval';
   if (status.includes('约练')) return 'activity_plan';
   if (status.includes('更新')) return 'life_graph_update';
   return 'understand';
 }
 
-function mergeProgressStep(steps: Step[], event: UserFacingAgentProgressEvent): Step[] {
+function mergeProgressStep(
+  steps: Step[],
+  event: UserFacingAgentProgressEvent,
+  intent: AgentConversationIntent,
+): Step[] {
   const nextStatus: StepState =
     event.state === 'done'
       ? 'success'
@@ -2894,15 +2093,22 @@ function mergeProgressStep(steps: Step[], event: UserFacingAgentProgressEvent): 
         : event.state === 'waiting'
           ? 'waiting'
           : 'running';
-  const label = publicText(event.title, event.kind === 'tool' ? '正在调用工具' : '分析中');
-  const detail = event.detail ? publicStepLabel(event.id, event.detail) : undefined;
+  const rawLabel = publicText(event.title, event.kind === 'tool' ? '正在处理这一步' : '分析中');
+  const label = publicStepLabel(event.id, rawLabel, intent);
+  const detail = event.detail ? publicStepLabel(event.id, event.detail, intent) : undefined;
+  const agentName =
+    typeof event.metadata?.agentName === 'string' && event.metadata.agentName.trim()
+      ? event.metadata.agentName.trim()
+      : undefined;
   const index = steps.findIndex((step) => step.id === event.id);
   const nextStep: Step = {
     id: event.id,
     label,
     status: nextStatus,
     kind: event.kind,
+    agentName,
     detail,
+    snapshot: event.snapshot,
   };
 
   if (index >= 0) {
@@ -2928,10 +2134,11 @@ function mergeStep(
   id: string,
   label: string,
   status: 'pending' | 'running' | 'waiting' | 'done' | 'failed',
+  intent: AgentConversationIntent = 'conversation',
 ): Step[] {
   const nextStatus: StepState =
     status === 'done' ? 'success' : status === 'failed' ? 'error' : status;
-  const publicLabel = publicStepLabel(id, label);
+  const publicLabel = publicStepLabel(id, label, intent);
   const index = steps.findIndex((step) => step.id === id);
   if (index >= 0) {
     return steps.map((step, itemIndex) =>
@@ -2958,48 +2165,34 @@ function publicText(value: unknown, fallback: string) {
   return text;
 }
 
-function publicStepLabel(id: string, label: string) {
+function publicStepLabel(
+  id: string,
+  label: string,
+  intent: AgentConversationIntent = 'conversation',
+) {
   const key = `${id} ${label}`.toLowerCase();
-  if (/approval|confirm|human/.test(key)) return '正在等待你确认';
-  if (/update|trust|review/.test(key)) return '正在更新你的 Life Graph';
-  if (/activity|plan|meet|offline/.test(key)) return '正在创建约练计划';
-  if (/opener|icebreaker|message/.test(key)) return '正在生成开场白';
-  if (/safe|guard|risk|boundary/.test(key)) return '正在检查安全边界';
-  if (/rank|time|schedule/.test(key)) return '正在排除时间不合适的人';
-  if (/match|search|candidate|social/.test(key)) return '正在筛选合适的人';
-  if (/life|profile|graph|memory/.test(key)) return '正在结合你的 Life Graph';
-  if (/understand|intent|think|route/.test(key)) return '正在理解你的需求';
-
-  const allowed = baseSteps.map((step) => step.label);
-  return allowed.includes(label) ? label : '正在理解你的需求';
-}
-
-function stepKindLabel(kind: UserFacingAgentProgressKind) {
-  if (kind === 'tool') return '工具';
-  if (kind === 'analysis') return '分析';
-  return '状态';
-}
-
-function modeLabel(mode: SocialAgentPermissionMode) {
-  if (mode === 'assist') return '基础权限';
-  if (mode === 'confirm' || mode === 'manual_confirm') return '每步确认';
-  if (mode === 'limited_auto') return '正常权限';
-  if (mode === 'open' || mode === 'lab') return '开放权限';
-  return mode;
-}
-
-function normalizePermissionMode(mode: SocialAgentPermissionMode): SocialAgentPermissionMode {
-  if (mode === 'confirm' || mode === 'manual_confirm') return 'limited_auto';
-  if (mode === 'lab') return 'open';
-  return mode;
+  if (/clarify|补充|关键信息/.test(key)) return '正在确认需要补充的信息';
+  if (intent === 'conversation') {
+    if (/safe|guard|risk|boundary|安全|边界/.test(key)) return '正在检查必要边界';
+    if (/approval|confirm|human|确认/.test(key)) return '需要你确认这一步';
+    return '正在组织自然回复';
+  }
+  if (/approval|confirm|human|确认/.test(key)) return '需要你确认这一步';
+  if (/safe|guard|risk|boundary|安全/.test(key)) return '正在检查必要边界';
+  if (/rank|time|schedule|排除/.test(key)) return '正在整理可行选项';
+  if (/match|search|candidate|social|筛选/.test(key)) return '正在查找合适的信息';
+  if (/life|profile|graph|memory|画像/.test(key)) return '正在结合上下文';
+  if (/understand|intent|think|route|理解/.test(key)) return '正在理解你的需求';
+  const allowed = [...conversationSteps, ...socialSteps].map((step) => step.label);
+  return allowed.includes(label) ? label : '正在组织自然回复';
 }
 
 function createAgentRecoveryFromError(
   error: AgentError,
   prompt: string,
-  fallbackKind: AgentRecoveryState['kind'] = 'failed',
-): AgentRecoveryState {
-  const kindByCode: Partial<Record<AgentError['code'], AgentRecoveryState['kind']>> = {
+  fallbackKind: FitMeetAssistantRecovery['kind'] = 'failed',
+): FitMeetAssistantRecovery {
+  const kindByCode: Partial<Record<AgentError['code'], FitMeetAssistantRecovery['kind']>> = {
     ABORTED: 'stopped',
     MISSING_INFO: 'missing_info',
     UNAUTHORIZED: 'unauthorized',
@@ -3014,10 +2207,212 @@ function createAgentRecoveryFromError(
   };
 }
 
+function createInlineAuthRecovery(prompt: string): FitMeetAssistantRecovery {
+  return {
+    kind: 'unauthorized',
+    title: '登录后继续',
+    message: '登录后我才能保存这段对话、恢复上下文，并在你需要时继续处理任务。',
+    prompt,
+    retryable: false,
+  };
+}
+
+function createCheckpointAvailableRecovery(
+  checkpoint: AgentCheckpointSummary | null | undefined,
+): FitMeetAssistantRecovery | null {
+  if (!checkpoint) return null;
+  const waitingStep = checkpoint.steps.find((step) => step.status === 'waiting');
+  const failedStep = checkpoint.steps.find(
+    (step) => step.status === 'error' || step.status === 'failed',
+  );
+  const hasUserActionRequired = checkpoint.resumable || Boolean(waitingStep);
+  const hasUsefulRetry = checkpoint.canRetry && Boolean(failedStep);
+  if (!hasUserActionRequired && !hasUsefulRetry) return null;
+  const action = checkpoint.resumable
+    ? 'resume'
+    : checkpoint.canRetry
+      ? 'retry'
+      : checkpoint.canReplay
+        ? 'replay'
+        : checkpoint.canFork
+          ? 'fork'
+          : null;
+  if (!action) return null;
+  const sourceLabel =
+    publicText(checkpoint.sourceStep?.label ?? '', '').trim() ||
+    waitingStep?.label ||
+    checkpoint.steps.at(-1)?.label ||
+    '上一次处理步骤';
+  if (isGenericCheckpointLabel(sourceLabel)) return null;
+  const visibleSteps = checkpoint.steps
+    .filter(
+      (step) =>
+        step.stepId &&
+        step.label &&
+        (step.status === 'waiting' ||
+          step.status === 'error' ||
+          step.status === 'failed' ||
+          step.retryable),
+    )
+    .slice(-4)
+    .map((step) => ({
+      stepId: step.stepId,
+      label: publicText(step.label, '已保存步骤'),
+      status: step.status,
+      retryable: step.retryable,
+      replayable: step.replayable,
+      forkable: step.forkable,
+    }));
+  return {
+    kind: 'checkpoint_available',
+    title: hasUserActionRequired ? '有一步需要你确认' : '这一步可以重试',
+    message: `我可以继续「${sourceLabel}」，也可以忽略它，直接开始新的对话。`,
+    prompt: hasUserActionRequired ? '继续处理刚才需要确认的步骤。' : '重试刚才失败的步骤。',
+    retryable: true,
+    checkpoint: {
+      checkpointId: checkpoint.id,
+      stepId: checkpoint.sourceStep?.stepId ?? null,
+      action,
+      steps: visibleSteps,
+    },
+  };
+}
+
+function isGenericCheckpointLabel(label: string) {
+  const normalized = label.trim().toLowerCase();
+  if (!normalized) return true;
+  return /^(你有什么功能|有什么功能|上一次处理步骤|已整理回复|正在整理回复|整理结果|agent 状态已更新)$/i.test(
+    normalized,
+  );
+}
+
+function responseFromRunNextResult(result: SocialAgentRunNextResponse): UserFacingAgentResponse {
+  const hasCards = Array.isArray(result.cards) && result.cards.length > 0;
+  return {
+    assistantMessage: hasCards
+      ? '我看到对方有新的回复，已经把下一步整理到这段对话里。真实发送、连接或创建活动前仍会等你确认。'
+      : '我检查了当前任务，还没有需要展示的新进展。',
+    lightStatus: hasCards ? '正在等待你确认' : '已整理回复',
+    cards: result.cards ?? [],
+    safeStatus: {
+      blocked: false,
+      level: 'low',
+      boundaryNotes: ['真实发送、连接、创建活动或写入长期画像前仍会确认。'],
+      requiredConfirmations: [],
+    },
+    pendingConfirmations: [],
+    permissionMode: 'confirm',
+  };
+}
+
+function isRunNextRestorableTaskStatus(status: string | null | undefined): boolean {
+  return status === 'waiting_reply' || status === 'waiting_result' || status === 'awaiting_feedback';
+}
+
+function responseFromApprovalDispatchResult(input: {
+  approvalId: number;
+  dispatchResult?: AgentApprovalDispatchResult;
+  taskId?: number | null;
+}): UserFacingAgentResponse | null {
+  const result = input.dispatchResult;
+  if (!result) return null;
+  const targetUserId = numberFromUnknown(result.targetUserId);
+  const conversationId = stringIdFromUnknown(result.conversationId);
+  const friendRequestId = stringIdFromUnknown(result.friendRequestId);
+  if (!targetUserId && !conversationId && !friendRequestId) return null;
+  const candidateRecordId = numberFromUnknown(result.candidateRecordId);
+  const socialRequestId = numberFromUnknown(result.socialRequestId);
+  const openedConversation = result.openedConversation === true || Boolean(conversationId);
+  const assistantMessage = openedConversation
+    ? '已按你的确认建立站内沟通入口。接下来先等对方回复；如果需要，我也可以继续帮你调整节奏或准备后续话术。'
+    : '已按你的确认完成连接请求。接下来先等对方回复，我会把后续进展继续放在这段对话里。';
+
+  return {
+    assistantMessage,
+    lightStatus: '已整理回复',
+    cards: [
+      {
+        id: `approval-${input.approvalId}-meet-loop`,
+        type: 'review_card',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'meet_loop.timeline',
+        title: '邀约进展',
+        body: openedConversation
+          ? '确认已完成，站内沟通入口已经准备好。'
+          : '确认已完成，连接请求已经进入后续等待状态。',
+        status: 'completed',
+        data: {
+          schemaName: 'MeetLoopTimelineCard',
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'meet_loop.timeline',
+          approvalId: input.approvalId,
+          taskId: input.taskId ?? null,
+          candidateUserId: targetUserId,
+          targetUserId,
+          candidateRecordId,
+          socialRequestId,
+          conversationId: conversationId || null,
+          friendRequestId: friendRequestId || null,
+          loopStage: 'waiting_reply',
+          nextAction: '等待对方回复；你也可以让我继续准备更自然的后续沟通。',
+          timeline: {
+            title: '邀约进展',
+            description: openedConversation
+              ? '已通过你的确认建立站内沟通入口，后续回复、改期、确认和评价会继续保存在同一条进展里。'
+              : '已通过你的确认发起连接请求，后续状态会继续保存在同一条进展里。',
+            nextAction: '等待对方回复；如果时间不合适，可以继续改期或换一个机会。',
+            stage: 'waiting_reply',
+            steps: [
+              {
+                key: 'draft',
+                label: '发起',
+                state: 'done',
+                description: '邀请动作已由你确认。',
+                actionLabel: '已确认',
+                checkpointReady: false,
+                resumeMode: 'resume',
+              },
+              {
+                key: 'sent',
+                label: '等待回复',
+                state: 'current',
+                description: openedConversation
+                  ? '站内沟通入口已准备好，等待对方回应。'
+                  : '连接请求已发起，等待对方回应。',
+                actionLabel: '等待回复',
+                checkpointReady: true,
+                resumeMode: 'resume',
+              },
+            ],
+          },
+        },
+        actions: [],
+      },
+    ],
+    safeStatus: {
+      blocked: false,
+      level: 'medium',
+      boundaryNotes: ['确认前没有执行真实连接动作', '后续沟通仍建议先站内、公共场景、低压力推进'],
+      requiredConfirmations: [],
+    },
+    pendingConfirmations: [],
+    permissionMode: 'limited_auto',
+  };
+}
+
+function stringIdFromUnknown(value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return stringFromUnknown(value);
+}
+
 function isAbortError(error: unknown): boolean {
   if (error instanceof DOMException) return error.name === 'AbortError';
   if (error instanceof Error) return error.name === 'AbortError';
   return false;
+}
+
+function stringFromUnknown(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function nextId(prefix: string) {

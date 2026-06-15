@@ -119,8 +119,8 @@ const AGENT_ERROR_COPY: Record<
   { title: string; message: string; retryable: boolean; lifecycle: AgentLifecycle }
 > = {
   MISSING_INFO: {
-    title: '还差一点信息',
-    message: '告诉我你的兴趣、城市或想认识什么样的人，我才能继续。',
+    title: '先输入一句话',
+    message: '可以直接提问；如果要找人或约练，再告诉我你的需求。',
     retryable: false,
     lifecycle: 'failed',
   },

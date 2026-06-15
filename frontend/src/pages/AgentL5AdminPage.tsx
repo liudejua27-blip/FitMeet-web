@@ -27,6 +27,7 @@ import {
   type AgentSkillPatchDto,
   type AgentSkillPatchEffectDto,
   type AgentSubagentMemoryDto,
+  type SocialAgentMessageFeedbackDto,
   type SubagentWorkerJobDto,
 } from '../api/agentL5RuntimeApi';
 import { WebsiteLayout } from '../components/website/WebsitePlatform';
@@ -37,6 +38,7 @@ type AdminTab =
   | 'meetLoop'
   | 'canary'
   | 'auto'
+  | 'feedback'
   | 'observability'
   | 'workers'
   | 'rbac';
@@ -47,6 +49,7 @@ const tabs: Array<{ key: AdminTab; label: string; description: string }> = [
   { key: 'meetLoop', label: 'Meet-loop State', description: '邀请到评价的事件状态机' },
   { key: 'canary', label: 'Canary Decision', description: '补丁灰度效果和发布决策' },
   { key: 'auto', label: 'Auto Runner', description: '自动 patch、eval、灰度和回滚' },
+  { key: 'feedback', label: 'Message Feedback', description: '用户点赞点踩与自进化信号' },
   { key: 'observability', label: 'Observability', description: 'trace、延迟、失败和报警' },
   { key: 'workers', label: 'Worker Queue', description: 'DB 队列、心跳和失败重试' },
   { key: 'rbac', label: 'RBAC', description: '角色、授权和审计日志' },
@@ -58,6 +61,7 @@ export const AgentL5AdminPage = memo(function AgentL5AdminPage() {
   const [agentFilter, setAgentFilter] = useState('');
   const [stageFilter, setStageFilter] = useState('');
   const [patchFilter, setPatchFilter] = useState('');
+  const [feedbackFilter, setFeedbackFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [runnerBusy, setRunnerBusy] = useState(false);
@@ -178,6 +182,14 @@ export const AgentL5AdminPage = memo(function AgentL5AdminPage() {
     return items.filter((item) => item.patchId === patchId);
   }, [dashboard?.patchEffects, patchFilter]);
 
+  const filteredMessageFeedback = useMemo(() => {
+    const items = dashboard?.messageFeedback ?? [];
+    if (feedbackFilter === 'positive' || feedbackFilter === 'negative') {
+      return items.filter((item) => item.value === feedbackFilter);
+    }
+    return items;
+  }, [dashboard?.messageFeedback, feedbackFilter]);
+
   const agentNames = useMemo(
     () => unique((dashboard?.subagentMemory ?? []).map((item) => item.agentName)),
     [dashboard?.subagentMemory],
@@ -257,10 +269,16 @@ export const AgentL5AdminPage = memo(function AgentL5AdminPage() {
               value={dashboard?.summary.activeAlerts ?? dashboard?.observability?.alerts?.length ?? 0}
               detail={`${dashboard?.summary.rollbackSignals ?? 0} rollback signals`}
             />
+            <Metric
+              icon={<Activity className="h-5 w-5" />}
+              label="Message Feedback"
+              value={dashboard?.summary.messageFeedback ?? dashboard?.messageFeedback?.length ?? 0}
+              detail={`${dashboard?.summary.negativeMessageFeedback ?? 0} negative signals`}
+            />
           </section>
 
           <section className="mt-6 rounded-xl border border-white/10 bg-white/[0.035]">
-            <div className="grid gap-2 border-b border-white/10 p-3 md:grid-cols-8">
+            <div className="grid gap-2 border-b border-white/10 p-3 md:grid-cols-3 xl:grid-cols-9">
               {tabs.map((tab) => (
                 <button
                   key={tab.key}
@@ -308,6 +326,12 @@ export const AgentL5AdminPage = memo(function AgentL5AdminPage() {
                   items={dashboard?.autoRuns ?? []}
                   onRunOnce={runAutoRunnerOnce}
                   runnerBusy={runnerBusy}
+                />
+              ) : activeTab === 'feedback' ? (
+                <MessageFeedbackPanel
+                  feedbackFilter={feedbackFilter}
+                  items={filteredMessageFeedback}
+                  onFeedbackFilterChange={setFeedbackFilter}
                 />
               ) : activeTab === 'observability' ? (
                 <ObservabilityPanel
@@ -777,6 +801,53 @@ function CanaryPanel({
           </StatusPill>,
           item.note || jsonPreview(item.context),
           formatDate(item.createdAt),
+        ])}
+      />
+    </PanelShell>
+  );
+}
+
+function MessageFeedbackPanel({
+  feedbackFilter,
+  items,
+  onFeedbackFilterChange,
+}: {
+  feedbackFilter: string;
+  items: SocialAgentMessageFeedbackDto[];
+  onFeedbackFilterChange: (value: string) => void;
+}) {
+  const negative = items.filter((item) => item.value === 'negative').length;
+  return (
+    <PanelShell
+      action={
+        <select
+          className="rounded-lg border border-white/10 bg-[#0b0c0d] px-3 py-2 text-sm font-bold text-white outline-none"
+          value={feedbackFilter}
+          onChange={(event) => onFeedbackFilterChange(event.target.value)}
+        >
+          <option value="">全部评价</option>
+          <option value="positive">Positive</option>
+          <option value="negative">Negative</option>
+        </select>
+      }
+      count={items.length}
+      description={`用户对单条 assistant 消息的点赞/点踩。负反馈会进入 replay/self-improve 的候选信号池，当前列表负反馈 ${negative} 条。`}
+      title="Message Feedback"
+    >
+      <DataTable
+        emptyText="暂无 message feedback"
+        headers={['ID', 'Value', 'Task', 'Message', 'Trace', 'Source', 'Reason / Metadata', 'Updated']}
+        rows={items.map((item) => [
+          `#${item.id}`,
+          <StatusPill key="value" tone={item.value === 'negative' ? 'danger' : 'good'}>
+            {item.value}
+          </StatusPill>,
+          item.agentTaskId ? `Task ${item.agentTaskId}` : '-',
+          item.messageId,
+          item.traceId ?? item.runId ?? '-',
+          item.source,
+          item.reason || jsonPreview(item.metadata),
+          formatDate(item.updatedAt),
         ])}
       />
     </PanelShell>

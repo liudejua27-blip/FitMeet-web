@@ -186,7 +186,9 @@ export type FitMeetAgentSchemaAction =
   | 'activity.view_detail'
   | 'review.submit'
   | 'life_graph.accept_update'
-  | 'life_graph.reject_update';
+  | 'life_graph.reject_update'
+  | 'meet_loop.resume'
+  | 'meet_loop.reschedule';
 
 export interface UserFacingAgentResponse {
   assistantMessage: string;
@@ -212,6 +214,7 @@ export interface FitMeetAlphaCardAction {
   id: string;
   label: string;
   action:
+    | FitMeetAgentSchemaAction
     | 'confirm_profile_update'
     | 'send_message'
     | 'connect_candidate'

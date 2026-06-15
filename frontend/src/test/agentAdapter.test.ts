@@ -38,7 +38,7 @@ describe('Agent adapter layer', () => {
     const events: AgentStreamEvent[] = [];
     const run = adapter.run(
       {
-        goal: '今晚想找人一起喝咖啡，不想太尴尬',
+        goal: '青岛今晚想找人一起轻松喝咖啡，公共场所先站内聊',
         permissionMode: 'limited_auto',
         idempotencyKey: 'run-1',
       },
@@ -55,6 +55,97 @@ describe('Agent adapter layer', () => {
       'searching_candidates',
     );
     expect(events.at(-1)?.type).toBe('result');
+  });
+
+  it('asks clarifying questions before mock social discovery when required context is missing', async () => {
+    vi.useFakeTimers();
+    const adapter = createMockAgentAdapter();
+    const events: AgentStreamEvent[] = [];
+    const run = adapter.run(
+      {
+        goal: '我想找人一起跑步',
+        permissionMode: 'limited_auto',
+        idempotencyKey: 'run-clarify-1',
+      },
+      { onEvent: (event) => events.push(event) },
+    );
+
+    await vi.runAllTimersAsync();
+    const response = await run;
+
+    expect(response.response.cards).toHaveLength(0);
+    expect(response.response.assistantMessage).toContain('为了只推荐安全、合适的机会');
+    expect(response.response.assistantMessage).toContain('城市/大致区域');
+    expect(response.response.assistantMessage).toContain('时间');
+    expect(response.response.assistantMessage).toContain('运动强度');
+    expect(response.response.assistantMessage).toContain('社交边界');
+    expect(events.map((event) => ('lifecycle' in event ? event.lifecycle : null))).not.toContain(
+      'searching_candidates',
+    );
+  });
+
+  it('continues mock social discovery after the user answers the clarification', async () => {
+    vi.useFakeTimers();
+    const adapter = createMockAgentAdapter();
+    const firstEvents: AgentStreamEvent[] = [];
+    const firstRun = adapter.run(
+      {
+        goal: '我想找人一起跑步',
+        permissionMode: 'limited_auto',
+        idempotencyKey: 'run-clarify-2',
+      },
+      { onEvent: (event) => firstEvents.push(event) },
+    );
+
+    await vi.runAllTimersAsync();
+    const firstResponse = await firstRun;
+    expect(firstResponse.response.cards).toHaveLength(0);
+    expect(firstResponse.response.assistantMessage).toContain('为了只推荐安全、合适的机会');
+
+    const followupEvents: AgentStreamEvent[] = [];
+    const followupRun = adapter.run(
+      {
+        goal: '青岛周末下午，轻松跑步，只在公共场所，先站内聊',
+        permissionMode: 'limited_auto',
+        idempotencyKey: 'run-clarify-followup-1',
+      },
+      { onEvent: (event) => followupEvents.push(event) },
+    );
+
+    await vi.runAllTimersAsync();
+    const followupResponse = await followupRun;
+
+    expect(followupResponse.response.cards[0]?.type).toBe('candidate_card');
+    expect(followupResponse.response.cards[0]?.data.recommendationLine).toContain('咖啡');
+    expect(
+      followupEvents.map((event) => ('lifecycle' in event ? event.lifecycle : null)),
+    ).toContain('searching_candidates');
+  });
+
+  it('keeps ordinary mock chat out of the social discovery flow', async () => {
+    vi.useFakeTimers();
+    const adapter = createMockAgentAdapter();
+    const events: AgentStreamEvent[] = [];
+    const run = adapter.run(
+      {
+        goal: '帮我解释一下什么是渐进式超负荷',
+        permissionMode: 'limited_auto',
+        idempotencyKey: 'run-conversation-1',
+      },
+      { onEvent: (event) => events.push(event) },
+    );
+
+    await vi.runAllTimersAsync();
+    const response = await run;
+
+    expect(response.response.cards).toHaveLength(0);
+    expect(response.response.assistantMessage).toContain('按普通对话');
+    expect(events.map((event) => ('lifecycle' in event ? event.lifecycle : null))).not.toContain(
+      'searching_candidates',
+    );
+    expect(
+      events.some((event) => 'lightStatus' in event && event.lightStatus === '正在筛选合适的人'),
+    ).toBe(false);
   });
 
   it('maps lifecycle values to AntGuide state and target', () => {
@@ -267,6 +358,76 @@ describe('Agent adapter layer', () => {
       type: 'assistant_done',
       lifecycle: 'completed',
     });
+  });
+
+  it('preserves step-level tool identities from real stream events', async () => {
+    const streamed = mockResponse();
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockImplementation(async (_request, onEvent) => {
+        onEvent({
+          type: 'agent_loop_step',
+          lifecycle: 'searching_candidates',
+          stepId: 'rank.candidates:2',
+          phase: 'tool',
+          agentName: 'Social Match Agent',
+          toolName: 'social_match_search_turn',
+          status: 'running',
+          title: '正在筛选合适的人',
+          detail: '正在筛选合适的人',
+        });
+        onEvent({
+          type: 'tool_call',
+          lifecycle: 'searching_candidates',
+          stepId: 'rank.candidates:2',
+          agentName: 'Social Match Agent',
+          toolName: 'social_match_search_turn',
+          title: '正在处理这一步',
+          detail: '正在筛选合适的人',
+        });
+        onEvent({
+          type: 'tool_result',
+          lifecycle: 'searching_candidates',
+          stepId: 'rank.candidates:2',
+          agentName: 'Social Match Agent',
+          toolName: 'social_match_search_turn',
+          title: '已整理结果',
+          detail: '正在筛选合适的人',
+          status: 'done',
+        });
+        return streamed;
+      }),
+      handleMessage: vi.fn().mockResolvedValue(streamed),
+      performAction: vi.fn().mockResolvedValue(streamed),
+      restoreSession: vi.fn().mockResolvedValue(null),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+    const events: AgentStreamEvent[] = [];
+
+    await adapter.run(
+      {
+        goal: '帮我找一个周末跑步搭子',
+        permissionMode: 'limited_auto',
+        idempotencyKey: 'run-real-step-id',
+      },
+      { onEvent: (event) => events.push(event) },
+    );
+
+    const progressEvents = events.filter((event) => event.type === 'progress');
+    expect(progressEvents).toHaveLength(3);
+    expect(progressEvents.map((event) => event.id)).toEqual([
+      'rank.candidates:2',
+      'rank.candidates:2',
+      'rank.candidates:2',
+    ]);
+    expect(progressEvents.every((event) => event.metadata?.stepId === 'rank.candidates:2')).toBe(
+      true,
+    );
+    expect(
+      progressEvents.every((event) => event.metadata?.agentName === 'Social Match Agent'),
+    ).toBe(true);
+    expect(
+      progressEvents.every((event) => event.metadata?.toolName === 'social_match_search_turn'),
+    ).toBe(true);
   });
 
   it('restores a real Agent session from the session endpoint', async () => {

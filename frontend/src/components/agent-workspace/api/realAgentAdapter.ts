@@ -99,6 +99,7 @@ export function createRealAgentAdapter(
           return {
             ...response,
             taskId: snapshot.activeTaskId ?? response.taskId ?? null,
+            taskStatus: typeof snapshot.task?.status === 'string' ? snapshot.task.status : null,
           };
         }
       } catch {
@@ -151,15 +152,17 @@ function withLifecycle(event: UserFacingAgentStreamEvent): AgentStreamEvent {
       : { ...event, lifecycle: undefined };
   }
   if (event.type === 'agent_loop_step') {
+    const stepId = safeProgressId(event.stepId, `${event.phase}-${event.title}`);
     return {
       type: 'progress',
-      id: `loop-${event.phase}`,
+      id: stepId,
       kind: event.toolName ? 'tool' : 'analysis',
       title: event.title,
       detail: event.detail,
       state: progressStateFromStatus(event.status),
       lifecycle: explicitLifecycle ?? undefined,
       metadata: {
+        stepId,
         phase: event.phase,
         agentName: event.agentName,
         toolName: event.toolName,
@@ -167,15 +170,20 @@ function withLifecycle(event: UserFacingAgentStreamEvent): AgentStreamEvent {
     };
   }
   if (event.type === 'tool_call' || event.type === 'tool_result') {
+    const stepId = safeProgressId(event.stepId, event.toolName);
     return {
       type: 'progress',
-      id: `tool-${event.toolName}`,
+      id: stepId,
       kind: 'tool',
       title: event.title,
       detail: event.detail,
       state: event.type === 'tool_call' ? 'running' : progressStateFromStatus(event.status),
       lifecycle: explicitLifecycle ?? undefined,
-      metadata: { toolName: event.toolName },
+      metadata: {
+        stepId,
+        agentName: event.agentName,
+        toolName: event.toolName,
+      },
     };
   }
   if (event.type === 'approval_required') {
@@ -201,6 +209,8 @@ function withLifecycle(event: UserFacingAgentStreamEvent): AgentStreamEvent {
     title: event.title,
     detail: event.detail,
     state: event.state,
+    metadata: event.metadata,
+    snapshot: event.snapshot,
   };
   return explicitLifecycle ? { ...safeEvent, lifecycle: explicitLifecycle } : safeEvent;
 }
@@ -220,11 +230,25 @@ function readPositiveNumber(value: unknown): number | null {
   return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : null;
 }
 
-function progressStateFromStatus(status?: string | null): 'running' | 'done' | 'failed' | 'waiting' {
+function progressStateFromStatus(
+  status?: string | null,
+): 'running' | 'done' | 'failed' | 'waiting' {
   if (status === 'done' || status === 'succeeded' || status === 'success') return 'done';
   if (status === 'failed' || status === 'error') return 'failed';
   if (status === 'waiting' || status === 'blocked') return 'waiting';
   return 'running';
+}
+
+function safeProgressId(value: unknown, fallback: string): string {
+  const raw = typeof value === 'string' && value.trim() ? value : fallback;
+  return (
+    raw
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._:-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80) || 'step-unknown'
+  );
 }
 
 function toRunResponse(
@@ -293,6 +317,12 @@ function responseFromSessionSnapshot(
       ? (raw.pendingConfirmations as UserFacingAgentResponse['pendingConfirmations'])
       : [],
     permissionMode,
+    lifeGraphWritebackProposal: isRecord(raw.lifeGraphWritebackProposal)
+      ? raw.lifeGraphWritebackProposal
+      : undefined,
+    runtime: isRecord(raw.runtime)
+      ? (raw.runtime as UserFacingAgentResponse['runtime'])
+      : undefined,
   };
 }
 

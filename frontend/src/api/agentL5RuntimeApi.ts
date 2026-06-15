@@ -27,6 +27,8 @@ export type AgentL5DashboardSummary = {
   subagentWorkerJobs?: number;
   failedSubagentWorkerJobs?: number;
   activeAlerts?: number;
+  messageFeedback?: number;
+  negativeMessageFeedback?: number;
 };
 
 export type AgentOnlineReplaySampleDto = {
@@ -129,6 +131,21 @@ export type AgentObservabilityDto = {
   alerts: AgentObservabilityAlertDto[];
 };
 
+export type SocialAgentMessageFeedbackDto = {
+  id: number;
+  ownerUserId: number;
+  agentTaskId: number | null;
+  messageId: string;
+  value: 'positive' | 'negative';
+  reason: string | null;
+  runId: string | null;
+  traceId: string | null;
+  source: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AgentL5DashboardDto = {
   summary: AgentL5DashboardSummary;
   replaySamples: AgentOnlineReplaySampleDto[];
@@ -136,6 +153,7 @@ export type AgentL5DashboardDto = {
   meetLoopStates: AgentMeetLoopStateDto[];
   patchEffects: AgentSkillPatchEffectDto[];
   autoRuns: AgentSkillPatchDto[];
+  messageFeedback?: SocialAgentMessageFeedbackDto[];
   observability?: AgentObservabilityDto;
   workerJobs?: SubagentWorkerJobDto[];
   workerHeartbeats?: SubagentWorkerHeartbeatDto[];

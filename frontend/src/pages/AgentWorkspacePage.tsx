@@ -7,15 +7,15 @@ export function AgentWorkspacePage({
   view?: 'home' | 'chat' | 'settings' | 'projects' | 'history';
 }) {
   useEffect(() => {
-    const title = 'FitMeet Agent - 低压力线下社交 AI 助手';
+    const title = 'FitMeet Agent - 全球社交 AI 助手';
     const description =
-      'FitMeet Agent 帮你用自然对话发起低压力社交任务，整理 Life Graph、权限边界、候选匹配和线下见面确认。';
+      'FitMeet Agent 帮你用自然对话开启全球社交，整理 Life Graph、权限边界、候选匹配和线下见面确认。';
     const canonical = 'https://www.ourfitmeet.cn/agent';
     document.title = title;
     setMetaTag('description', description);
     setMetaTag(
       'keywords',
-      'FitMeet Agent,AI社交助手,低压力社交,找搭子,Life Graph,线下见面确认',
+      'FitMeet Agent,AI社交助手,全球社交,找搭子,Life Graph,线下见面确认',
     );
     setMetaProperty('og:title', title);
     setMetaProperty('og:description', description);

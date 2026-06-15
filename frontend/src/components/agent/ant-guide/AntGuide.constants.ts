@@ -2,8 +2,8 @@ import type { AntGuideCopy, AntGuideState } from './AntGuide.types';
 
 export const ANT_GUIDE_COPY: Record<AntGuideState, AntGuideCopy> = {
   idle: {
-    title: '今天想认识什么样的人？',
-    description: '从一个兴趣开始，我来帮你发现合适的人。',
+    title: '我在这里',
+    description: '可以直接提问；需要找人或约练时再告诉我。',
   },
   thinking: {
     title: '我正在理解你的想法',

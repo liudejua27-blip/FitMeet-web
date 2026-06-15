@@ -49,13 +49,13 @@ describe('Agent flow phase config', () => {
     expect(AGENT_FLOW_PHASE_CONFIG.failed.antState).toBe('error');
   });
 
-  it('matches the requested mock discovery labels and missing-info copy', () => {
+  it('keeps mock discovery labels but uses neutral missing-info copy', () => {
     expect([...AGENT_FLOW_INTERESTS]).toEqual(['咖啡', 'Citywalk', '散步', '轻聊天']);
     expect(AGENT_FLOW_PHASE_CONFIG.missingInfo).toMatchObject({
       antState: 'error',
       antTarget: 'input',
-      title: '还差一点信息',
-      description: '告诉我你的兴趣、城市或想认识什么样的人，我才能继续。',
+      title: '先输入一句话',
+      description: '可以直接问我一个问题，或描述你现在想完成的事。',
     });
   });
 
