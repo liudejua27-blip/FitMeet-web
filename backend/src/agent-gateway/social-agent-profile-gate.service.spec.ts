@@ -106,7 +106,8 @@ describe('SocialAgentProfileGateService', () => {
       'boundary',
       'publicAuthorization',
     ]);
-    expect(result.assistantMessage).toContain('授权');
+    expect(result.assistantMessage).toContain('是否允许公开发起活动');
+    expect(result.assistantMessage).toContain('不公开发起活动');
     expect(task.memory).toMatchObject({
       taskMemory: {
         currentTask: expect.objectContaining({
@@ -139,5 +140,36 @@ describe('SocialAgentProfileGateService', () => {
 
     expect(result.passed).toBe(true);
     expect(result.missing).toEqual([]);
+  });
+
+  it('passes social execution when the user explicitly chooses not to publish publicly', async () => {
+    const service = new SocialAgentProfileGateService();
+    const task = makeTask();
+
+    const result = await service.evaluateForSocialExecution({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        entities: {
+          city: '青岛',
+          activityType: '跑步',
+          targetGender: '',
+          timePreference: '周末下午',
+          locationPreference: '',
+        },
+      }),
+      message:
+        '青岛市南区，周末下午，轻松跑步，公共场所先站内聊，接受陌生人，不公开发起活动，先推荐真实用户，不要自动发消息',
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.missing).toEqual([]);
+    expect(task.memory).toMatchObject({
+      taskMemory: {
+        boundaries: expect.objectContaining({
+          publicActivityAllowed: false,
+        }),
+      },
+    });
   });
 });

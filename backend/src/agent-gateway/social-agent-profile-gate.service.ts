@@ -224,7 +224,7 @@ export class SocialAgentProfileGateService {
     ) {
       missing.push('boundary');
     }
-    if (memory.boundaries.publicActivityAllowed !== true) {
+    if (memory.boundaries.publicActivityAllowed === null) {
       missing.push('publicAuthorization');
     }
 
@@ -307,7 +307,7 @@ export class SocialAgentProfileGateService {
 
   private buildQuestion(missing: SocialAgentProfileGateMissingField[]) {
     const missingText = missing.map((field) => this.missingFieldLabel(field)).join('、');
-    return `为了让推荐更准，也避免误公开你的需求，我还需要补齐 ${missingText}。你可以直接按一句话回答，例如：“青岛市南区，周末下午，轻松跑步，公共场所先站内聊，接受陌生人，并授权你把安全约练卡公开到发现页”。`;
+    return `为了让推荐更准，也避免误公开你的需求，我还需要补齐 ${missingText}。你可以直接按一句话回答，例如：“青岛市南区，周末下午，轻松跑步，公共场所先站内聊，接受陌生人，不公开发起活动”。如果你愿意公开到发现页，也可以说“可以公开发起活动”。`;
   }
 
   private missingFieldLabel(field: SocialAgentProfileGateMissingField) {
@@ -316,7 +316,7 @@ export class SocialAgentProfileGateService {
       activity: '想参与的运动或社交场景',
       availability: '可约时间',
       boundary: '社交边界（公共场所、站内沟通、发送前确认）',
-      publicAuthorization: '是否授权我把安全约练卡自动公开到发现页',
+      publicAuthorization: '是否允许公开发起活动（也可以选择不公开）',
     };
     return labels[field];
   }
