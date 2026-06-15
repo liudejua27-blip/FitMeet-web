@@ -25,6 +25,28 @@ describe('SocialAgentIntentRouterService', () => {
     });
   });
 
+  it.each([
+    '你有什么功能',
+    '介绍一下你的功能',
+    'FitMeet Agent 有什么能力',
+  ])(
+    'routes generic Agent capability question "%s" as product help without social tools',
+    async (message) => {
+      const router = makeRouter();
+
+      const result = await router.route({ message });
+
+      expect(result).toMatchObject({
+        intent: 'product_help',
+        shouldSearch: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'conversational_answer',
+        source: 'rules',
+      });
+    },
+  );
+
   it('routes profile-building help as profile enrichment request without writing preferences', async () => {
     const router = makeRouter();
 
