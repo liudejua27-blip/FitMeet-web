@@ -38,6 +38,7 @@ export function buildCandidatePoolCandidate(input: {
   scoreBreakdown: Record<string, number>;
   commonTags: string[];
   matchReasons: string[];
+  recentPublicActivity?: string[];
   publicIntentId: string | null;
   socialRequestId: number | null;
   activityId: number | null;
@@ -195,6 +196,7 @@ function buildCandidatePoolCandidateCard(input: {
     boundaryNotes: input.dynamicExplanation.boundaryNotes,
     openerStrategy: input.dynamicExplanation.openerStrategy,
     dynamicSignalReasons: input.dynamicExplanation.dynamicSignalReasons,
+    recentPublicActivity: input.input.recentPublicActivity ?? [],
     preferenceHistorySignals: input.dynamicExplanation.preferenceHistoryReasons,
     continuousFilterHints: input.dynamicExplanation.continuousFilterHints,
     candidateExplanation: input.explanation,

@@ -254,30 +254,31 @@ describe('tool-ui-schema', () => {
         schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
         schemaType: 'social_match.candidate',
         opportunityCard: true,
-          opportunity: {
-            title: '和小林低压力认识',
-            summary: '时间和边界更接近。',
-            discoverySafetySignals: [
-              '公开可发现',
-              '已开启 Agent 匹配',
-              '资料已脱敏',
-              '无拉黑/投诉风险信号',
-            ],
-            recommendationProtocol: [
-              {
-                key: 'discoverability',
-                label: '可发现来源',
-                detail: '公开可发现且已允许 Agent 推荐',
-              },
-              {
-                key: 'approval',
-                label: '触达边界',
-                detail: '发送邀请前必须由你确认',
-              },
-            ],
-            preferenceHistorySignals: [
-              '我会优先参考你最近确认的可约时间变化：从「工作日晚上」调整为「周末下午」。',
-            ],
+        opportunity: {
+          title: '和小林低压力认识',
+          summary: '时间和边界更接近。',
+          discoverySafetySignals: [
+            '公开可发现',
+            '已开启 Agent 匹配',
+            '资料已脱敏',
+            '无拉黑/投诉风险信号',
+          ],
+          recommendationProtocol: [
+            {
+              key: 'discoverability',
+              label: '可发现来源',
+              detail: '公开可发现且已允许 Agent 推荐',
+            },
+            {
+              key: 'approval',
+              label: '触达边界',
+              detail: '发送邀请前必须由你确认',
+            },
+          ],
+          preferenceHistorySignals: [
+            '我会优先参考你最近确认的可约时间变化：从「工作日晚上」调整为「周末下午」。',
+          ],
+          recentPublicActivity: ['公开约练：周末慢跑', '最近公开更新：2026-06-15'],
         },
       },
       actions: [],
@@ -303,6 +304,10 @@ describe('tool-ui-schema', () => {
     ]);
     expect(normalizeCandidateOpportunityView(card).preferenceHistorySignals).toEqual([
       '我会优先参考你最近确认的可约时间变化：从「工作日晚上」调整为「周末下午」。',
+    ]);
+    expect(normalizeCandidateOpportunityView(card).recentPublicActivity).toEqual([
+      '公开约练：周末慢跑',
+      '最近公开更新：2026-06-15',
     ]);
   });
 
@@ -968,6 +973,7 @@ describe('tool-ui-schema', () => {
           detail: '你可以跳过、重试生成开场白，或从确认点继续。',
         },
       ],
+      recentPublicActivity: [],
       preferenceHistorySignals: [],
       whyNow: '这次推荐和你最近的周末节奏、低压力边界有重合。',
       openerStrategy: '先确认时间和强度，不要一上来就给对方压力。',

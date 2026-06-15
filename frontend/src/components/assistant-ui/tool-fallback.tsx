@@ -590,6 +590,23 @@ function CandidateResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
               </div>
             </div>
           ) : null}
+          {opportunity.recentPublicActivity.length > 0 ? (
+            <div
+              className="mt-3 rounded-xl bg-white px-3 py-2 ring-1 ring-black/5"
+              data-testid="assistant-ui-candidate-recent-public-activity"
+              aria-label="最近公开动态"
+            >
+              <p className="flex items-center gap-1.5 text-xs font-medium leading-5 text-[#3f3f46]">
+                <History className="h-3.5 w-3.5" aria-hidden="true" />
+                最近公开动态
+              </p>
+              <ul className="mt-1 space-y-1 text-xs leading-5 text-[#71717a]">
+                {opportunity.recentPublicActivity.map((signal) => (
+                  <li key={signal}>• {signal}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {opportunity.preferenceHistorySignals.length > 0 ? (
             <div
               className="mt-3 rounded-xl bg-[#f7f7f8] px-3 py-2 ring-1 ring-black/5"

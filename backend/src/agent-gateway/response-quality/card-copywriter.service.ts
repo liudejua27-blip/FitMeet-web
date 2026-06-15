@@ -223,6 +223,7 @@ export class CardCopywriterService {
     const preferenceHistorySignals = this.stringList(
       candidate.preferenceHistorySignals,
     );
+    const recentPublicActivity = this.stringList(candidate.recentPublicActivity);
     const interestTags = this.candidateInterests(candidate, input.draft).slice(
       0,
       5,
@@ -385,6 +386,7 @@ export class CardCopywriterService {
           discoverySafetySignals,
           recommendationProtocol,
           preferenceHistorySignals,
+          recentPublicActivity,
           frictionLevel: this.frictionLevel(score, candidate),
           whyNow,
           openerStrategy: cleanDisplayText(candidate.openerStrategy, ''),
@@ -412,6 +414,7 @@ export class CardCopywriterService {
         discoverySafetySignals,
         recommendationProtocol,
         preferenceHistorySignals,
+        recentPublicActivity,
         sharedInterests: interestTags,
         explanationSteps,
         rankingBreakdown,

@@ -75,6 +75,7 @@ export type CandidateOpportunityView = {
   coldStartSignals: string[];
   discoverySafetySignals: string[];
   recommendationProtocol: CandidateRecommendationProtocolItemView[];
+  recentPublicActivity: string[];
   preferenceHistorySignals: string[];
   whyNow: string | null;
   openerStrategy: string | null;
@@ -499,6 +500,14 @@ export function normalizeCandidateOpportunityView(
     ).slice(0, 4),
     discoverySafetySignals: candidateDiscoverySafetySignals(opportunity, card.data, card.actions),
     recommendationProtocol: candidateRecommendationProtocol(opportunity, card.data, card.actions),
+    recentPublicActivity: publicStringArray(
+      opportunity.recentPublicActivity ??
+        opportunity.publicActivity ??
+        opportunity.publicSignals ??
+        card.data.recentPublicActivity ??
+        card.data.publicActivity ??
+        card.data.publicSignals,
+    ).slice(0, 4),
     preferenceHistorySignals: publicStringArray(
       opportunity.preferenceHistorySignals ?? card.data.preferenceHistorySignals,
     ).slice(0, 3),

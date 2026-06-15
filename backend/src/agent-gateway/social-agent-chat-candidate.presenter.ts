@@ -123,6 +123,7 @@ export function toSocialAgentChatCandidate(
     matchScore,
     matchReasons,
     riskWarnings,
+    recentPublicActivity: stringList(record.recentPublicActivity),
     risk: {
       level: String(candidate.risk?.level ?? 'low'),
       warnings: riskWarnings,

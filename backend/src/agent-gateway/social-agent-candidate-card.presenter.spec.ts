@@ -94,6 +94,7 @@ describe('buildCandidatePoolCandidate', () => {
       },
       commonTags: ['跑步'],
       matchReasons: ['同城', '都喜欢跑步'],
+      recentPublicActivity: ['公开资料已允许 Agent 推荐', '共同公开兴趣：跑步'],
       publicIntentId: null,
       socialRequestId: 100,
       activityId: null,
@@ -230,6 +231,10 @@ describe('buildCandidatePoolCandidate', () => {
         expect.stringContaining('周末下午'),
       ]),
     );
+    expect(candidate.recentPublicActivity).toEqual([
+      '公开资料已允许 Agent 推荐',
+      '共同公开兴趣：跑步',
+    ]);
     expect(candidate.recommendationConsent.privacyLabel).toContain('不展示手机号');
     expect(candidate.recommendationConsent.privacyLabel).toContain('精确位置');
     expect(candidate.recommendationConsent.privacyLabel).toContain('私聊内容');

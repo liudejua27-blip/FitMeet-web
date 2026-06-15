@@ -54,6 +54,7 @@ describe('CardCopywriterService', () => {
         preferenceHistorySignals: [
           '我会优先参考你最近确认的可约时间变化：从「工作日晚上」调整为「周末下午」。',
         ],
+        recentPublicActivity: ['公开约练：周末慢跑', '最近公开更新：2026-06-15'],
         suggestedOpener: '周末下午如果方便，可以先在公共路线轻松跑一圈。',
         whyNow: '你最近更适合从低压力的跑步开始。',
         openerStrategy: '先确认时间和强度，不要一上来就给对方压力。',
@@ -94,6 +95,7 @@ describe('CardCopywriterService', () => {
         preferenceHistorySignals: [
           '我会优先参考你最近确认的可约时间变化：从「工作日晚上」调整为「周末下午」。',
         ],
+        recentPublicActivity: ['公开约练：周末慢跑', '最近公开更新：2026-06-15'],
         explanationSteps: [
           '来源：周末跑步偏好',
           '匹配：时间和强度更接近',
@@ -155,6 +157,7 @@ describe('CardCopywriterService', () => {
           preferenceHistorySignals: [
             '我会优先参考你最近确认的可约时间变化：从「工作日晚上」调整为「周末下午」。',
           ],
+          recentPublicActivity: ['公开约练：周末慢跑', '最近公开更新：2026-06-15'],
           whyNow: '你最近更适合从低压力的跑步开始。',
           openerStrategy: '先确认时间和强度，不要一上来就给对方压力。',
           reasons: ['你们都偏好公共场所', '你们的运动强度接近'],

@@ -74,6 +74,7 @@ export interface SocialAgentChatCandidate {
   matchScore?: number;
   matchReasons?: string[];
   riskWarnings?: string[];
+  recentPublicActivity?: string[];
   risk: { level: string; warnings: string[] };
   suggestedOpener?: string;
   suggestedMessage: string;

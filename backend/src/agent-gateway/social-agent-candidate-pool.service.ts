@@ -167,6 +167,7 @@ export type CandidatePoolCandidate = {
   boundaryNotes: string[];
   openerStrategy: string;
   dynamicSignalReasons: string[];
+  recentPublicActivity?: string[];
   preferenceHistorySignals: string[];
   continuousFilterHints: string[];
   candidateExplanation: CandidateExplanation;
@@ -729,6 +730,11 @@ export class SocialAgentCandidatePoolService {
       scoreBreakdown,
       commonTags,
       matchReasons,
+      recentPublicActivity: this.profileCandidatePublicActivitySignals({
+        city,
+        commonTags,
+        updatedAt: profile?.updatedAt ?? user.updatedAt,
+      }),
       publicIntentId: null,
       socialRequestId: query.socialRequestId,
       activityId: null,
@@ -790,6 +796,12 @@ export class SocialAgentCandidatePoolService {
       scoreBreakdown,
       commonTags,
       matchReasons,
+      recentPublicActivity: this.publicIntentCandidatePublicActivitySignals({
+        title: intent.title,
+        requestType: intent.requestType,
+        timePreference: intent.timePreference,
+        updatedAt: intent.updatedAt,
+      }),
       publicIntentId: intent.id,
       socialRequestId: intent.linkedSocialRequestId ?? query.socialRequestId,
       activityId: null,
@@ -854,6 +866,12 @@ export class SocialAgentCandidatePoolService {
       scoreBreakdown,
       commonTags,
       matchReasons,
+      recentPublicActivity: this.publicIntentCandidatePublicActivitySignals({
+        title: request.title,
+        requestType: request.requestType,
+        timePreference: request.timePreference,
+        updatedAt: request.updatedAt,
+      }),
       publicIntentId: null,
       socialRequestId: request.id,
       activityId: null,
@@ -862,6 +880,42 @@ export class SocialAgentCandidatePoolService {
       sceneRisk: this.sceneRisk,
       candidateExplanation: this.candidateExplanation,
     });
+  }
+
+  private profileCandidatePublicActivitySignals(input: {
+    city: string;
+    commonTags: string[];
+    updatedAt: Date | string | null | undefined;
+  }): string[] {
+    return this.uniqueStrings([
+      '公开资料已允许 Agent 推荐',
+      input.city ? `公开城市：${input.city}` : '',
+      input.commonTags.length
+        ? `共同公开兴趣：${input.commonTags.slice(0, 2).join('、')}`
+        : '',
+      this.updatedAtSignal(input.updatedAt),
+    ]).slice(0, 4);
+  }
+
+  private publicIntentCandidatePublicActivitySignals(input: {
+    title: string;
+    requestType: string;
+    timePreference?: string | null;
+    updatedAt: Date | string | null | undefined;
+  }): string[] {
+    return this.uniqueStrings([
+      cleanDisplayText(input.title, '') ? `公开约练：${cleanDisplayText(input.title, '')}` : '',
+      cleanDisplayText(input.requestType, '') ? `公开类型：${cleanDisplayText(input.requestType, '')}` : '',
+      cleanDisplayText(input.timePreference, '') ? `公开时间：${cleanDisplayText(input.timePreference, '')}` : '',
+      this.updatedAtSignal(input.updatedAt),
+    ]).slice(0, 4);
+  }
+
+  private updatedAtSignal(value: Date | string | null | undefined): string {
+    if (!value) return '';
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return `最近公开更新：${date.toISOString().slice(0, 10)}`;
   }
 
   private toActivityResult(
