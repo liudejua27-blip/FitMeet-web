@@ -1,6 +1,6 @@
 import { AuiIf, SelectionToolbarPrimitive, ThreadPrimitive } from '@assistant-ui/react';
-import { ArrowDown, LogIn, Quote, RefreshCcw, ShieldAlert } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { ArrowDown, LogIn, Quote, RefreshCcw, ShieldAlert, X } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
 
 import { cn } from '../../lib/utils';
 import type { SocialAgentProfileGateStatus } from '../../api/socialAgentApi';
@@ -30,6 +30,7 @@ type ChatGPTThreadProps = {
 };
 
 const ASSISTANT_STREAMING_PLACEHOLDER = '\u200b';
+const PROFILE_GATE_HINT_DISMISSED_KEY = 'fitmeet.agent.profileGateHintDismissed.v1';
 
 export function ChatGPTThread({
   messages,
@@ -190,7 +191,20 @@ function AssistantEmptyState({
   requiresAuth?: boolean;
   onLogin?: () => void;
 }) {
-  const shouldShowProfileGate = Boolean(profileGate && !profileGate.passed && !requiresAuth);
+  const [profileGateHintDismissed, setProfileGateHintDismissed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(PROFILE_GATE_HINT_DISMISSED_KEY) === '1';
+  });
+  const shouldShowProfileGate = Boolean(
+    profileGate && !profileGate.passed && !requiresAuth && !profileGateHintDismissed,
+  );
+
+  const dismissProfileGateHint = () => {
+    setProfileGateHintDismissed(true);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(PROFILE_GATE_HINT_DISMISSED_KEY, '1');
+    }
+  };
 
   return (
     <section
@@ -230,7 +244,10 @@ function AssistantEmptyState({
           </p>
         </div>
         {shouldShowProfileGate ? (
-          <AssistantProfileGateHint profileGate={profileGate as SocialAgentProfileGateStatus} />
+          <AssistantProfileGateHint
+            profileGate={profileGate as SocialAgentProfileGateStatus}
+            onDismiss={dismissProfileGateHint}
+          />
         ) : null}
         <div
           className="w-full [padding-bottom:calc(env(safe-area-inset-bottom)+env(keyboard-inset-height,0px))]"
@@ -248,35 +265,52 @@ function AssistantEmptyState({
 
 function AssistantProfileGateHint({
   profileGate,
+  onDismiss,
 }: {
   profileGate: SocialAgentProfileGateStatus;
+  onDismiss: () => void;
 }) {
   const nextActions = profileGate.nextActions.filter(Boolean).slice(0, 3);
 
   return (
     <div
-      className="mx-auto w-full max-w-2xl rounded-2xl border border-black/10 bg-[#fafafa] px-4 py-3 text-left text-sm text-[#18181b] shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
+      className="mx-auto w-full max-w-2xl rounded-2xl border border-black/[0.06] bg-[#fafafa] px-3 py-2.5 text-left text-sm text-[#18181b] shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
       data-testid="assistant-ui-profile-gate-hint"
       data-profile-gate-state={profileGate.passed ? 'passed' : 'missing'}
       role="note"
     >
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-        <p className="font-medium">匹配前还差一点人物画像</p>
-        {typeof profileGate.profileCompleteness === 'number' ? (
-          <span className="text-xs text-[#71717a]">
-            完整度 {Math.round(profileGate.profileCompleteness)}%
-          </span>
-        ) : null}
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-[#71717a] ring-1 ring-black/[0.06]">
+          <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <p className="font-medium">匹配前还差一点人物画像</p>
+            {typeof profileGate.profileCompleteness === 'number' ? (
+              <span className="text-xs text-[#71717a]">
+                完整度 {Math.round(profileGate.profileCompleteness)}%
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-0.5 leading-6 text-[#52525b]">
+            普通聊天可以直接开始；等你要找搭子、发约练或邀请别人时，我会再帮你补齐安全信息。
+          </p>
+        </div>
+        <button
+          type="button"
+          className="-mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[#8a8f98] transition-colors hover:bg-black/[0.04] hover:text-[#18181b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10"
+          aria-label="关闭人物画像提示"
+          onClick={onDismiss}
+        >
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
       </div>
-      <p className="mt-1 leading-6 text-[#52525b]">
-        普通聊天可以直接开始。等你要找搭子、发约练或邀请别人时，我会先帮你补齐这些安全信息。
-      </p>
       {nextActions.length > 0 ? (
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-wrap gap-1.5 pl-8">
           {nextActions.map((action) => (
             <span
               key={action}
-              className="rounded-full bg-white px-2.5 py-1 text-xs text-[#52525b] ring-1 ring-black/5"
+              className="rounded-full bg-white px-2 py-0.5 text-xs text-[#71717a] ring-1 ring-black/[0.04]"
             >
               {action}
             </span>

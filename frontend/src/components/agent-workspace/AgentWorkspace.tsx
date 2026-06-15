@@ -380,7 +380,16 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
     const metadata = buildThreadMetadata(messages, userResult);
     if (!snapshot && Object.keys(metadata).length === 0) return;
     const timeout = window.setTimeout(() => {
-      void socialAgentApi.updateThread(activeThreadId, undefined, snapshot, metadata);
+      try {
+        void socialAgentApi
+          .updateThread(activeThreadId, undefined, snapshot, metadata)
+          .catch(() => {
+            // Thread metadata sync is best-effort. Auth expiry or transient network
+            // failures must not interrupt the active chat surface.
+          });
+      } catch {
+        // requestProtected can fail synchronously when auth has expired.
+      }
     }, 450);
     return () => window.clearTimeout(timeout);
   }, [activeThreadId, branchSelections, isLoggedIn, isRealAgent, isRunning, messages, userResult]);
