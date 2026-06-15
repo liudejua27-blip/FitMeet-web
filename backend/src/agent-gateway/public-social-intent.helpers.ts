@@ -169,7 +169,7 @@ export function previewPublicIntentText(text: string, max = 160): string {
 }
 
 export function hasPublicIntentSensitiveContent(text: string) {
-  return /(微信|wechat|手机号|phone|电话|email|邮箱|转账|打钱|付款|裸照|私密照片|身份证|酒店房间|住址|home address|payment|bank|crypto|usdt)/i.test(
+  return /(微信|wechat|手机号|phone|电话|email|邮箱|转账|打钱|付款|裸照|私密照片|身份证|酒店房间|住址|home address|payment|bank|crypto|usdt|-?\d{1,3}\.\d{4,}\s*[,，]\s*-?\d{1,3}\.\d{4,}|(?:小区|公寓|宿舍|号楼|楼|栋|单元|室|门牌)\d*)/i.test(
     text,
   );
 }

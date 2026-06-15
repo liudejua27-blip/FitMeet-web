@@ -70,6 +70,12 @@ describe('public social intent helpers', () => {
     expect(signal.reasons).toContain('城市信号：青岛');
     expect(hasPublicIntentSensitiveContent('请加微信转账')).toBe(true);
     expect(
+      hasPublicIntentSensitiveContent('集合点坐标 36.123456,120.123456'),
+    ).toBe(true);
+    expect(
+      hasPublicIntentSensitiveContent('青岛某小区3号楼2单元门口见'),
+    ).toBe(true);
+    expect(
       scorePublicIntentSuspicion(
         request({ description: '短', city: undefined, limit: 20 }),
         { ip: '127.0.0.1', deviceId: '', userAgent: 'Safari', origin: '' },
