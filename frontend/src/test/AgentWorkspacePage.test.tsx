@@ -3052,12 +3052,61 @@ describe('AgentWorkspacePage', () => {
     await renderAgentPage('/agent/chat/42');
 
     await waitFor(() => expect(socialAgentApi.restoreSession).toHaveBeenCalledWith(undefined));
-    expect(screen.getByText('我已经恢复了上一次对话。')).toBeInTheDocument();
+    expect(screen.getByText('我可以继续上次的话题，也可以重新开始。')).toBeInTheDocument();
     expect(screen.queryByText(/原始目标/)).not.toBeInTheDocument();
     expect(screen.queryByText(/从已保存的步骤继续/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
     expect(runTaskNextSpy).not.toHaveBeenCalled();
     expect(document.querySelector('.agent-gpt-result-block')).toBeNull();
     expect(document.querySelector('.codex-ant-pet')).toBeNull();
+  });
+
+  it('sanitizes legacy local checkpoint snapshots before rendering the assistant-ui thread', async () => {
+    useRealAgentAdapter();
+    useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
+    const staleResponse: UserFacingAgentResponse = {
+      ...mockResponse(),
+      assistantMessage: '从已保存的步骤继续：正在等待你确认。原始目标：你有什么功能',
+      lightStatus: '正在等待你确认',
+      pendingConfirmations: [
+        {
+          id: 99,
+          title: '需要确认',
+          description: '继续处理刚才需要确认的步骤。',
+        },
+      ] as unknown as UserFacingAgentResponse['pendingConfirmations'],
+    };
+    window.localStorage.setItem(
+      'fitmeet-agent-thread:current',
+      JSON.stringify({
+        activeTaskId: 42,
+        messages: [
+          {
+            id: 'assistant-stale-checkpoint',
+            role: 'assistant',
+            content: staleResponse.assistantMessage,
+            status: 'done',
+            result: staleResponse,
+            taskId: 42,
+            conversationIntent: 'approval',
+            showSocialResult: true,
+          },
+        ],
+        userResult: staleResponse,
+        mode: 'limited_auto',
+        branchSelections: {},
+        savedAt: Date.now(),
+      }),
+    );
+    vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue(emptySession());
+
+    await renderAgentPage();
+
+    expect(screen.getByText('我可以继续上次的话题，也可以重新开始。')).toBeInTheDocument();
+    expect(screen.queryByText(/原始目标/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/从已保存的步骤继续/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
+    expect(document.body.textContent ?? '').not.toMatch(forbiddenUserArtifacts);
   });
 
   it('shows a latest checkpoint recovery prompt after restoring a resumable thread', async () => {

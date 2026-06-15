@@ -189,6 +189,36 @@ async function assertSocialIntent(page) {
     });
 }
 
+async function assertAccountMenu(page, viewportName) {
+  const accountButton = page.locator('[data-testid="assistant-ui-sidebar-account"]').first();
+  await accountButton.waitFor({ state: 'visible', timeout: 10_000 });
+  await accountButton.click();
+
+  const menu = page.locator('[data-testid="assistant-ui-sidebar-account-menu"]').first();
+  await menu.waitFor({ state: 'visible', timeout: 5_000 });
+
+  const requiredItems = ['人物画像', 'Life Graph', '匹配确认', 'Agent Inbox', '个人资料'];
+  for (const item of requiredItems) {
+    await page.getByRole('menuitem', { name: new RegExp(item) }).waitFor({
+      state: 'visible',
+      timeout: 5_000,
+    });
+  }
+
+  const reminderVisible = await page
+    .locator('[data-testid="assistant-ui-reminder-toggle"]')
+    .isVisible()
+    .catch(() => false);
+  if (reminderVisible) {
+    throw new Error('account menu is open but reminder toggle is still visible and may cover account actions.');
+  }
+
+  const shot = await screenshot(page, `${viewportName}-account-menu`);
+  await page.keyboard.press('Escape');
+  await menu.waitFor({ state: 'hidden', timeout: 5_000 });
+  return shot;
+}
+
 async function screenshot(page, name) {
   const file = path.join(evidenceDir, `${name}.png`);
   await page.screenshot({ path: file, fullPage: true });
@@ -231,6 +261,8 @@ async function main() {
       lines.push(`- ${viewport.name} shell: \`${path.relative(rootDir, shot)}\``);
 
       if (runConversation && viewport.name === 'desktop-1440') {
+        const accountMenuShot = await assertAccountMenu(page, viewport.name);
+        lines.push(`- account menu proof: \`${path.relative(rootDir, accountMenuShot)}\``);
         await assertOrdinaryChat(page);
         const ordinaryShot = await screenshot(page, `${viewport.name}-ordinary-chat`);
         lines.push(`- ordinary chat proof: \`${path.relative(rootDir, ordinaryShot)}\``);

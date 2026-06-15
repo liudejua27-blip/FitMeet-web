@@ -413,13 +413,14 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
       .restoreSession(routeTaskId ?? undefined)
       .then((restored) => {
         if (cancelled || !restored) return;
+        const restoredResponse = sanitizeRestoredResponse(restored.response);
         setActiveTaskId(restored.taskId ?? null);
         setActiveThreadId(restored.taskId ? String(restored.taskId) : null);
         setActiveTaskStatus(restored.taskStatus ?? null);
-        setUserResult(restored.response);
+        setUserResult(restoredResponse);
         setRecovery(null);
         void refreshLatestCheckpointRecovery(restored.taskId ?? null);
-        const restoredIntent = intentForRestoredResponse(restored.response, 'conversation');
+        const restoredIntent = intentForRestoredResponse(restoredResponse, 'conversation');
         setMessages((current) =>
           current.length > 0
             ? current
@@ -429,13 +430,15 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
                   role: 'assistant',
                   status: 'done',
                   content: publicText(
-                    restored.response.assistantMessage,
+                    restoredResponse.assistantMessage,
                     '我已经恢复了上一次对话。',
                   ),
-                  result: restored.response,
+                  result: restoredResponseHasUsefulSurface(restoredResponse)
+                    ? restoredResponse
+                    : null,
                   taskId: restored.taskId ?? null,
                   conversationIntent: restoredIntent,
-                  showSocialResult: false,
+                  showSocialResult: restoredIntent !== 'conversation',
                 },
               ],
         );
@@ -1512,10 +1515,17 @@ function readStoredAgentThread(userId?: number | string | null): AgentThreadSnap
     const parsed = JSON.parse(raw) as Partial<AgentThreadSnapshot>;
     if (!Array.isArray(parsed.messages) || typeof parsed.savedAt !== 'number') return null;
     if (Date.now() - parsed.savedAt > AGENT_THREAD_MAX_AGE_MS) return null;
+    const messages = parsed.messages
+      .filter(isAgentThreadMessage)
+      .map(sanitizeStoredThreadMessage)
+      .filter((message): message is AgentThreadMessage => Boolean(message));
+    const userResult = isUserFacingAgentResponse(parsed.userResult)
+      ? sanitizeRestoredResponse(parsed.userResult)
+      : null;
     return {
       activeTaskId: numberFromUnknown(parsed.activeTaskId),
-      messages: parsed.messages.filter(isAgentThreadMessage),
-      userResult: isUserFacingAgentResponse(parsed.userResult) ? parsed.userResult : null,
+      messages,
+      userResult,
       mode: isPermissionMode(parsed.mode) ? parsed.mode : 'limited_auto',
       branchSelections: sanitizeBranchSelections(parsed.branchSelections),
       savedAt: parsed.savedAt,
@@ -1591,6 +1601,28 @@ function isAgentThreadMessage(value: unknown): value is AgentThreadMessage {
     typeof message.content === 'string' &&
     (!message.result || isUserFacingAgentResponse(message.result))
   );
+}
+
+function sanitizeStoredThreadMessage(message: AgentThreadMessage): AgentThreadMessage | null {
+  if (message.role === 'user') {
+    const content = publicText(message.content, '');
+    return content ? { ...message, content, result: null } : null;
+  }
+  const result = message.result ? sanitizeRestoredResponse(message.result) : null;
+  const content = publicText(message.content, result?.assistantMessage ?? '');
+  const hasUsefulResult = Boolean(result && restoredResponseHasUsefulSurface(result));
+  if (!content && !hasUsefulResult) return null;
+  return {
+    ...message,
+    content: content || '我可以继续上次的话题，也可以重新开始。',
+    result: hasUsefulResult ? result : null,
+    conversationIntent: hasUsefulResult
+      ? intentForRestoredResponse(result as UserFacingAgentResponse, 'conversation')
+      : 'conversation',
+    showSocialResult: hasUsefulResult
+      ? intentForRestoredResponse(result as UserFacingAgentResponse, 'conversation') !== 'conversation'
+      : false,
+  };
 }
 
 function isUserFacingAgentResponse(value: unknown): value is UserFacingAgentResponse {
@@ -1685,6 +1717,42 @@ function intentForRestoredResponse(
   if (responseRequiresApproval(response)) return 'approval';
   const hasSocialSurface = response.cards.some(isSocialSurfaceCard);
   return hasSocialSurface ? 'social' : fallback;
+}
+
+function sanitizeRestoredResponse(response: UserFacingAgentResponse): UserFacingAgentResponse {
+  if (!isGenericCheckpointResponse(response)) return response;
+  return {
+    ...response,
+    assistantMessage: '我可以继续上次的话题，也可以重新开始。',
+    lightStatus: '已整理回复',
+    cards: [],
+    pendingConfirmations: [],
+    safeStatus: {
+      ...response.safeStatus,
+      blocked: false,
+      requiredConfirmations: [],
+    },
+  };
+}
+
+function restoredResponseHasUsefulSurface(response: UserFacingAgentResponse) {
+  return (
+    Boolean(publicText(response.assistantMessage, '').trim()) ||
+    response.cards.some(isSocialSurfaceCard) ||
+    response.pendingConfirmations.length > 0 ||
+    response.safeStatus.blocked
+  );
+}
+
+function isGenericCheckpointResponse(response: UserFacingAgentResponse) {
+  const assistantMessage = String(response.assistantMessage ?? '');
+  const technical = technicalPublicTextPattern.test(assistantMessage);
+  const genericGoal = /原始目标[：:]\s*(你有什么功能|有什么功能|功能咨询|普通聊天)/i.test(
+    assistantMessage,
+  );
+  const hasUsefulCards = response.cards.some(isSocialSurfaceCard);
+  if (hasUsefulCards) return false;
+  return technical || genericGoal;
 }
 
 function isApprovalCard(card: { type?: string }) {
@@ -1892,27 +1960,31 @@ function messagesFromSessionSnapshot(
   restored: UserFacingAgentResponse | null,
   taskId: number | null,
 ): AgentThreadMessage[] {
+  const sanitizedRestored = restored ? sanitizeRestoredResponse(restored) : null;
   const restoredMessages = snapshot.messages
     .map((item, index) => sessionMessageToThreadMessage(item, index, taskId))
     .filter((message): message is AgentThreadMessage => Boolean(message));
-  if (!restored) return restoredMessages;
+  if (!sanitizedRestored) return restoredMessages;
   const lastIntent =
     [...restoredMessages].reverse().find((message) => message.conversationIntent)
       ?.conversationIntent ?? 'conversation';
   const hasResultMessage = restoredMessages.some(
     (message) =>
-      message.role === 'assistant' && message.content.trim() === restored.assistantMessage.trim(),
+      message.role === 'assistant' &&
+      message.content.trim() === sanitizedRestored.assistantMessage.trim(),
   );
-  const resultIntent = intentForRestoredResponse(restored, lastIntent);
+  const resultIntent = intentForRestoredResponse(sanitizedRestored, lastIntent);
   const showSocialResult = resultIntent === 'social' || resultIntent === 'approval';
   if (hasResultMessage) {
     return restoredMessages.map((message, index) =>
       index === restoredMessages.length - 1 && message.role === 'assistant'
         ? {
             ...message,
-            result: restored,
+            result: restoredResponseHasUsefulSurface(sanitizedRestored)
+              ? sanitizedRestored
+              : null,
             taskId,
-            traceId: traceIdFromResult(restored),
+            traceId: traceIdFromResult(sanitizedRestored),
             conversationIntent: resultIntent,
             showSocialResult,
           }
@@ -1924,11 +1996,11 @@ function messagesFromSessionSnapshot(
     {
       id: `task-${taskId ?? 'latest'}-result`,
       role: 'assistant',
-      content: publicText(restored.assistantMessage, '我已经恢复了这段对话。'),
+      content: publicText(sanitizedRestored.assistantMessage, '我已经恢复了这段对话。'),
       status: 'done',
-      result: restored,
+      result: restoredResponseHasUsefulSurface(sanitizedRestored) ? sanitizedRestored : null,
       taskId,
-      traceId: traceIdFromResult(restored),
+      traceId: traceIdFromResult(sanitizedRestored),
       conversationIntent: resultIntent,
       showSocialResult,
     },
