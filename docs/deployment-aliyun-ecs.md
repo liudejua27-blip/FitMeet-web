@@ -218,6 +218,130 @@ docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --
 The Agent smoke seed refuses to write in `NODE_ENV=production` unless
 `AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true` or `--allow-production` is present.
 
+For the product-grade Agent launch gate, prefer the combined post-deploy
+entrypoint so the dedicated Agent smoke users, opportunity journey, SSE abort
+check, and backend/worker log scan run in one controlled flow:
+
+Readiness pass, stopped after OpportunityCards and before high-risk actions:
+
+```bash
+AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
+FITMEET_LAUNCH_TOPOLOGY=ecs \
+SCAN_COMPOSE_LOGS=true \
+./scripts/ecs-post-deploy-smoke.sh \
+  --prepare-agent-smoke-seed \
+  --run-agent-opportunity-readiness-smoke \
+  --scan-compose-logs
+```
+
+Full pass, using the same dedicated smoke account shape and allowing only smoke
+mutations:
+
+```bash
+AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
+FITMEET_LAUNCH_TOPOLOGY=ecs \
+SCAN_COMPOSE_LOGS=true \
+./scripts/ecs-post-deploy-smoke.sh \
+  --prepare-agent-smoke-seed \
+  --run-agent-opportunity-smoke \
+  --run-agent-sse-abort-smoke \
+  --scan-compose-logs
+```
+
+This creates/updates only dedicated smoke users and automatically sets the
+`AGENT_SMOKE_ALLOW_MUTATIONS=true` guard for that invocation. It validates the
+product-grade Agent launch gate:
+
+- ordinary chat does not trigger social cards.
+- ambiguous social intent clarifies before search.
+- explicit social intent returns OpportunityCards.
+- high-risk send/create confirmation paths require approval.
+- it aborts one real SSE run after the first delta.
+- recent `backend` / `subagent-worker` logs do not show known production
+  failure patterns.
+
+Proactive Agent reminders are worker-only background jobs. Keep
+`FITMEET_PROCESS_ROLE=api` and `ENABLE_SCHEDULER=false` for the backend API
+container; the `subagent-worker` service sets `FITMEET_PROCESS_ROLE=worker` and
+`ENABLE_SCHEDULER=true`. The reminder runner is controlled by
+`SOCIAL_AGENT_REMINDER_RUNNER_ENABLED` and
+`SOCIAL_AGENT_REMINDER_RUNNER_LIMIT`. Even when the runner is enabled, reminders
+are created only for users who explicitly enabled Agent reminders, and they are
+sent only as in-app notifications / Agent chat prompts. They never auto-send
+messages, add friends, create activities, or publish content.
+
+Both post-deploy Agent smoke modes automatically run
+`scripts/agent-remote-smoke-preflight.sh` first. The preflight checks
+`AGENT_SMOKE_ALLOW_REMOTE`, dedicated smoke-account naming, JWT override safety,
+and the mutation guard before any real remote Agent smoke can run. To inspect
+the guard directly without touching the API, first create a local smoke env from
+the checked-in template:
+
+```bash
+cp deploy/agent-smoke.remote.env.example deploy/agent-smoke.remote.env
+$EDITOR deploy/agent-smoke.remote.env
+```
+
+Use only a dedicated smoke/test account in that file. The filled
+`deploy/agent-smoke.remote.env` is gitignored and must not be copied into a
+release zip, ticket, chat message, or screenshot. The required guards and
+credentials are `AGENT_SMOKE_ALLOW_REMOTE=true`,
+`AGENT_SMOKE_ALLOW_MUTATIONS=true`, `AGENT_SMOKE_EMAIL`, and
+`AGENT_SMOKE_PASSWORD`. The preflight rejects the template's
+`replace-with-dedicated-smoke-password` placeholder, so fill a real dedicated
+smoke password before running:
+
+```bash
+set -a
+source deploy/agent-smoke.remote.env
+set +a
+./scripts/agent-remote-smoke-preflight.sh \
+  --readiness \
+  --api-base-url "$API_BASE_URL"
+```
+
+For release evidence, prefer the wrapper below. It runs the same post-deploy
+smoke commands, redacts passwords, JWTs, bearer tokens, and email addresses, and
+writes a markdown proof file under `artifacts/agent-smoke-evidence/`. With
+`--all --prepare-agent-smoke-seed`, the wrapper prepares the dedicated Agent
+smoke seed once in the parent process, exports the printed `AGENT_SMOKE_*`
+values, and reuses that same smoke account across readiness, full opportunity,
+and SSE abort checks:
+
+```bash
+set -a
+source deploy/agent-smoke.remote.env
+set +a
+AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
+FITMEET_LAUNCH_TOPOLOGY=ecs \
+./scripts/agent-remote-smoke-evidence.sh \
+  --all \
+  --prepare-agent-smoke-seed
+```
+
+Attach the generated `FitMeet Agent Remote Smoke Evidence` markdown to the
+release checklist after confirming it contains no real credentials or personal
+email addresses.
+
+Before final Agent cutover, run launch status with the evidence file as a hard
+gate:
+
+```bash
+FITMEET_LAUNCH_TOPOLOGY=ecs \
+WEB_ORIGIN=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
+RUN_IOS_TESTFLIGHT_CHECK=false \
+REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true \
+AGENT_REMOTE_SMOKE_EVIDENCE_FILE=/opt/FitMeet-web/artifacts/agent-smoke-evidence/agent-remote-smoke-all-YYYYMMDDTHHMMSSZ.md \
+./scripts/launch-status.sh --topology ecs --skip-ios-testflight-check
+```
+
 Run migrations explicitly before app startup if you are not using the deploy
 script:
 
