@@ -120,6 +120,7 @@ describe('SocialAgentRouteEntranceService', () => {
       101,
       '帮我找青岛周末跑步搭子',
       null,
+      null,
     );
     expect(messageLog.recordUserMessage).toHaveBeenCalledWith(
       task,
@@ -132,6 +133,27 @@ describe('SocialAgentRouteEntranceService', () => {
       hasCandidates: true,
       startedAt: result.startedAt,
     });
+  });
+
+  it('passes client thread id through so follow-up messages append to the active thread', async () => {
+    const { service, taskLifecycle } = makeHarness();
+
+    await service.enter({
+      ownerUserId: 7,
+      body: {
+        message: '可以，继续刚才的约练',
+        clientContext: { threadId: 'agent-task:101' },
+        idempotencyKey: 'follow-up-1',
+      },
+    });
+
+    expect(taskLifecycle.ensureConversationTask).toHaveBeenCalledWith(
+      7,
+      null,
+      '可以，继续刚才的约练',
+      'follow-up-1',
+      'agent-task:101',
+    );
   });
 
   it('returns Main Agent early results so downstream route handlers are skipped', async () => {

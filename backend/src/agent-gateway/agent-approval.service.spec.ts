@@ -356,6 +356,99 @@ describe('AgentApprovalService classify', () => {
   });
 });
 
+describe('AgentApprovalService Social Codex approval payload', () => {
+  it('adds dry-run preview, policy metadata, and idempotency key when creating approvals', async () => {
+    const savedRows: Array<Record<string, unknown>> = [];
+    const repo = {
+      create: jest.fn((input) => input),
+      save: jest.fn((input) => {
+        const saved = {
+          id: 77,
+          status: ApprovalStatus.Pending,
+          expiresAt: input.expiresAt,
+          ...input,
+        };
+        savedRows.push(saved);
+        return Promise.resolve(saved);
+      }),
+    };
+    const realtime = { emitToUser: jest.fn() };
+    const service = new AgentApprovalService(
+      repo as never,
+      {} as never,
+      { emitToConnection: jest.fn() } as never,
+      realtime as never,
+    );
+
+    const approval = await service.create({
+      userId: 1,
+      agentConnectionId: null,
+      agentTaskId: 101,
+      type: ApprovalType.SendMessage,
+      actionType: 'send_candidate_message',
+      skillName: 'send_candidate_message',
+      payload: {
+        targetUserId: 22,
+        message: '周末下午一起在青岛大学附近散步吗？',
+      },
+      summary: '向候选人发送约练邀请',
+      riskLevel: ApprovalRiskLevel.Medium,
+      reason: 'message_send_requires_explicit_approval',
+    });
+
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          agentTaskId: 101,
+          idempotencyKey: 'approval:101:send_candidate_message:22',
+          dryRunPreview: expect.objectContaining({
+            schemaVersion: 'fitmeet.social_codex.approval_preview.v1',
+            title: '发送前预览',
+            summary: '向候选人发送约练邀请',
+            actionType: 'send_candidate_message',
+            visibleToOtherUser: '确认后对方会看到这次联系或邀请。',
+            sideEffectBoundary: '确认前不会执行、不会触达对方、不会公开内容。',
+            contentPreview: '周末下午一起在青岛大学附近散步吗？',
+          }),
+          socialCodex: expect.objectContaining({
+            approvalPolicy: expect.objectContaining({
+              required: true,
+              lifecycleNode: 'approval',
+              sideEffectsBeforeApproval: 'none',
+              resumeAfterDecision: true,
+              auditRequired: true,
+            }),
+            dryRunPreview: expect.objectContaining({
+              title: '发送前预览',
+            }),
+            safetyBoundary: expect.objectContaining({
+              noContactBeforeApproval: true,
+              noPreciseLocationRevealBeforeApproval: true,
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(approval.payload).toMatchObject({
+      dryRunPreview: expect.objectContaining({ title: '发送前预览' }),
+      socialCodex: expect.objectContaining({
+        approvalPolicy: expect.objectContaining({ required: true }),
+      }),
+    });
+    expect(savedRows).toHaveLength(1);
+    expect(realtime.emitToUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'agent:approval_required',
+        payload: expect.objectContaining({
+          approvalId: 77,
+          agentTaskId: 101,
+          actionType: 'send_candidate_message',
+        }),
+      }),
+    );
+  });
+});
+
 describe('AgentApprovalService pending approval realtime idempotency', () => {
   it('does not dispatch an already approved pending approval again', async () => {
     const approval = {

@@ -163,6 +163,12 @@ describe('fitMeetCoreEndpoints', () => {
     expect(fitMeetCoreEndpoints.socialAgentTasks.events(101)).toBe(
       '/social-agent/tasks/101/events',
     );
+    expect(fitMeetCoreEndpoints.socialAgentTasks.eventsEval(101)).toBe(
+      '/social-agent/tasks/101/events/eval',
+    );
+    expect(fitMeetCoreEndpoints.socialAgentTasks.eventsReplay(101)).toBe(
+      '/social-agent/tasks/101/events/replay',
+    );
     expect(fitMeetCoreEndpoints.socialAgentTasks.replan(101)).toBe(
       '/social-agent/tasks/101/replan',
     );
@@ -280,6 +286,8 @@ describe('fitMeetCoreEndpoints', () => {
         '/social-agent/tasks/current',
         '/social-agent/tasks/{taskId}/timeline',
         '/social-agent/tasks/{taskId}/events',
+        '/social-agent/tasks/{taskId}/events/eval',
+        '/social-agent/tasks/{taskId}/events/replay',
         '/social-agent/tasks/{taskId}/replan',
         '/social-agent/tasks/{taskId}/run-next',
         '/social-agent/reminders',
@@ -434,6 +442,14 @@ describe('fitMeetCoreEndpoints', () => {
       {
         built: fitMeetCoreEndpoints.socialAgentTasks.events(101),
         template: fitMeetCoreEndpointTemplates.socialAgentTasks.events,
+      },
+      {
+        built: fitMeetCoreEndpoints.socialAgentTasks.eventsEval(101),
+        template: fitMeetCoreEndpointTemplates.socialAgentTasks.eventsEval,
+      },
+      {
+        built: fitMeetCoreEndpoints.socialAgentTasks.eventsReplay(101),
+        template: fitMeetCoreEndpointTemplates.socialAgentTasks.eventsReplay,
       },
       {
         built: fitMeetCoreEndpoints.socialAgentTasks.replan(101),

@@ -152,6 +152,11 @@ async function main() {
   assertNoPendingApproval('clarified search', clarified);
   pass('clarified social request returns 3+ candidate/activity opportunities');
   if (STOP_AFTER_OPPORTUNITIES) {
+    await assertTraceEvalPass(
+      token,
+      'readiness opportunity trace',
+      clarified.taskId,
+    );
     pass('readiness-only smoke stopped before high-risk card actions');
     return;
   }
@@ -446,6 +451,12 @@ async function main() {
   );
   pass('life_graph.accept_update keeps the Meet Loop recommendation influence');
 
+  await assertTraceEvalPass(
+    token,
+    'full opportunity journey trace',
+    keptInfluence.taskId ?? reviewedAgain.taskId ?? completed.taskId,
+  );
+
   console.log(`\n[agent-opportunity-smoke] PASS (${passCount} checks)`);
 }
 
@@ -553,6 +564,42 @@ async function requestJson(
     );
   }
   return asRecord(data);
+}
+
+async function assertTraceEvalPass(
+  token: string,
+  label: string,
+  taskId: unknown,
+) {
+  const normalizedTaskId = readNumber(taskId);
+  if (!normalizedTaskId) {
+    throw new Error(`${label} cannot run without a valid taskId.`);
+  }
+  const evalResult = await requestJson(
+    `/social-agent/tasks/${normalizedTaskId}/events/eval`,
+    {
+      method: 'GET',
+      token,
+    },
+  );
+  if (evalResult.pass !== true) {
+    throw new Error(
+      `${label} Social Codex trace eval failed: ${JSON.stringify(
+        evalResult.issues ?? [],
+      ).slice(0, 1000)}`,
+    );
+  }
+  const socialCodexEventCount = readNumber(evalResult.socialCodexEventCount);
+  if (!socialCodexEventCount || socialCodexEventCount <= 0) {
+    throw new Error(`${label} did not persist SocialAgentEventV2 rows.`);
+  }
+  const runs = Array.isArray(evalResult.runs) ? evalResult.runs : [];
+  if (runs.length === 0) {
+    throw new Error(`${label} did not expose run-level trace eval results.`);
+  }
+  pass(
+    `${label} Social Codex trace eval passed (${socialCodexEventCount} events, ${runs.length} runs)`,
+  );
 }
 
 function normalizeSmokeResponse(

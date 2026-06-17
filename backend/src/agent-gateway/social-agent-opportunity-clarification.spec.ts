@@ -255,4 +255,152 @@ describe('social opportunity clarification', () => {
       ],
     });
   });
+
+  it('uses completed task slots so follow-up messages do not repeat answered fields', () => {
+    const currentTask = task({
+      memory: {
+        taskSlots: {
+          activity: {
+            key: 'activity',
+            value: '散步',
+            state: 'completed',
+            source: 'user_message',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+            completedAt: '2026-06-17T00:00:00.000Z',
+          },
+          time_window: {
+            key: 'time_window',
+            value: '周末下午',
+            state: 'completed',
+            source: 'user_message',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+            completedAt: '2026-06-17T00:00:00.000Z',
+          },
+          location_text: {
+            key: 'location_text',
+            value: '青岛大学附近',
+            state: 'completed',
+            source: 'user_message',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+            completedAt: '2026-06-17T00:00:00.000Z',
+          },
+          geo_area: {
+            key: 'geo_area',
+            value: '崂山区',
+            state: 'inferred',
+            source: 'inferred',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+          },
+          intensity: {
+            key: 'intensity',
+            value: '低强度',
+            state: 'answered',
+            source: 'user_message',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+          },
+          safety_boundary: {
+            key: 'safety_boundary',
+            value: '首次见面优先公共场所，先在平台内沟通',
+            state: 'answered',
+            source: 'user_message',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+          },
+          visibility: {
+            key: 'visibility',
+            value: '可公开到发现',
+            state: 'answered',
+            source: 'user_message',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+          },
+        },
+        taskMemory: {
+          currentGoal: '周末下午，散步，崂山区青岛大学',
+          currentTask: {
+            awaitingSearchConfirmation: true,
+            waitingFor: 'opportunity_clarification',
+            clarificationTurns: 1,
+            clarificationAskedFields: ['city', 'time', 'activity', 'intensity'],
+          },
+        },
+      },
+    });
+
+    const clarification = evaluateSocialOpportunityClarification({
+      task: currentTask,
+      route: route(),
+      message: '可以，帮我找人',
+    });
+
+    expect(clarification.complete).toBe(false);
+    expect(clarification.missing).not.toEqual(
+      expect.arrayContaining(['city', 'time', 'activity', 'intensity', 'boundary', 'publicActivity']),
+    );
+    expect(clarification.assistantMessage).not.toContain('城市/大致区域');
+    expect(clarification.assistantMessage).not.toContain('运动或见面场景');
+    expect(clarification.assistantMessage).not.toContain('运动强度');
+    expect(clarification.assistantMessage).not.toMatch(/还差[^。]*时间/);
+    expect(clarification.assistantMessage).not.toMatch(/只差[^。]*时间/);
+    expect(clarification.searchGoal).toContain('周末下午');
+    expect(clarification.searchGoal).toContain('散步');
+    expect(clarification.searchGoal).toContain('青岛大学附近');
+  });
+
+  it('does not treat inferred required slots as user-confirmed answers', () => {
+    const currentTask = task({
+      memory: {
+        taskSlots: {
+          activity: {
+            key: 'activity',
+            value: '散步',
+            state: 'inferred',
+            source: 'inferred',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+          },
+          time_window: {
+            key: 'time_window',
+            value: '周末下午',
+            state: 'inferred',
+            source: 'inferred',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+          },
+          location_text: {
+            key: 'location_text',
+            value: '青岛大学附近',
+            state: 'inferred',
+            source: 'inferred',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+          },
+          geo_area: {
+            key: 'geo_area',
+            value: '崂山区',
+            state: 'inferred',
+            source: 'inferred',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+          },
+        },
+        taskMemory: {
+          currentGoal: '想找搭子',
+          currentTask: {
+            awaitingSearchConfirmation: true,
+            waitingFor: 'opportunity_clarification',
+          },
+        },
+      },
+    });
+
+    const clarification = evaluateSocialOpportunityClarification({
+      task: currentTask,
+      route: route(),
+      message: '可以，继续',
+    });
+
+    expect(clarification.complete).toBe(false);
+    expect(clarification.missing).toEqual(
+      expect.arrayContaining(['time', 'activity']),
+    );
+    expect(clarification.missing).not.toContain('city');
+    expect(clarification.assistantMessage).toContain('时间');
+    expect(clarification.assistantMessage).toContain('运动或见面场景');
+    expect(clarification.assistantMessage).not.toContain('城市/大致区域');
+  });
 });

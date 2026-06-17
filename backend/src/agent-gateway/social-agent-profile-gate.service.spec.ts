@@ -172,4 +172,127 @@ describe('SocialAgentProfileGateService', () => {
       },
     });
   });
+
+  it('uses completed task slots so follow-up turns do not repeat profile gate questions', async () => {
+    const service = new SocialAgentProfileGateService();
+    const task = makeTask({
+      goal: '周末下午，散步，崂山区青岛大学，公共场所，先站内聊，可以公开到发现',
+      memory: {
+        taskSlots: {
+          activity: {
+            key: 'activity',
+            value: '散步',
+            state: 'completed',
+            source: 'user_message',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+            completedAt: '2026-06-17T00:00:00.000Z',
+          },
+          time_window: {
+            key: 'time_window',
+            value: '周末下午',
+            state: 'completed',
+            source: 'user_message',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+            completedAt: '2026-06-17T00:00:00.000Z',
+          },
+          location_text: {
+            key: 'location_text',
+            value: '崂山区青岛大学',
+            state: 'completed',
+            source: 'user_message',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+            completedAt: '2026-06-17T00:00:00.000Z',
+          },
+          safety_boundary: {
+            key: 'safety_boundary',
+            value: '首次见面优先公共场所，先在平台内沟通',
+            state: 'answered',
+            source: 'user_message',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+          },
+          visibility: {
+            key: 'visibility',
+            value: '可公开到发现',
+            state: 'answered',
+            source: 'user_message',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+          },
+        },
+      },
+    });
+
+    const result = await service.evaluateForSocialExecution({
+      ownerUserId: 7,
+      task,
+      route: makeRoute(),
+      message: '可以，帮我找人',
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.missing).toEqual([]);
+    expect(result.assistantMessage).toBe('');
+    expect(task.memory).not.toMatchObject({
+      taskMemory: {
+        currentTask: expect.objectContaining({
+          waitingFor: 'minimum_profile_gate',
+        }),
+      },
+    });
+  });
+
+  it('uses current task slots in the minimum gate so the Agent page does not repeat answered fields', async () => {
+    const service = new SocialAgentProfileGateService(
+      {
+        getLifeGraph: jest.fn().mockResolvedValue({
+          completeness: { completenessScore: 20 },
+          fields: {},
+        }),
+      } as never,
+      {
+        get: jest.fn().mockResolvedValue({
+          completion: {
+            percent: 20,
+            readinessLevel: 'profile_missing',
+            canEnterMatchPool: false,
+            nextActions: ['补齐画像'],
+          },
+        }),
+      } as never,
+    );
+
+    const result = await service.getMinimumProfileStatusWithTaskSlots(7, {
+      activity: {
+        key: 'activity',
+        value: '散步',
+        state: 'completed',
+      },
+      time_window: {
+        key: 'time_window',
+        value: '周末下午',
+        state: 'completed',
+      },
+      location_text: {
+        key: 'location_text',
+        value: '崂山区青岛大学',
+        state: 'completed',
+      },
+      safety_boundary: {
+        key: 'safety_boundary',
+        value: '首次见面优先公共场所，先站内聊',
+        state: 'answered',
+      },
+      visibility: {
+        key: 'visibility',
+        value: '可公开到发现',
+        state: 'answered',
+      },
+    });
+
+    expect(result).toMatchObject({
+      passed: true,
+      missing: [],
+      assistantMessage: '',
+      canEnterMatchPool: true,
+    });
+  });
 });

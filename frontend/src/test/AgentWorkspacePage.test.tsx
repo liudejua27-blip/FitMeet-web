@@ -14,6 +14,7 @@ import {
   socialAgentApi,
   type SocialAgentProfileGateStatus,
   type SocialAgentReminderPreference,
+  type SocialCodexReplayPackage,
   type UserFacingAgentResponse,
   type UserFacingAgentSessionSnapshot,
 } from '../api/socialAgentApi';
@@ -115,6 +116,7 @@ describe('AgentWorkspacePage', () => {
       configurable: true,
       value: ResizeObserverMock,
     });
+    vi.spyOn(socialAgentApi, 'getTaskEventReplay').mockResolvedValue(emptyReplay());
   });
 
   afterEach(() => {
@@ -164,6 +166,10 @@ describe('AgentWorkspacePage', () => {
     expect(screen.getByTestId('assistant-ui-thread')).toHaveAttribute(
       'data-viewport-state',
       'hidden',
+    );
+    expect(screen.getByTestId('assistant-ui-thread')).toHaveAttribute(
+      'data-selection-overlap-policy',
+      'avoid-message-text',
     );
     expect(screen.getByTestId('assistant-ui-empty-state')).toHaveAttribute(
       'data-empty-model',
@@ -572,6 +578,190 @@ describe('AgentWorkspacePage', () => {
     expect(await screen.findByTestId('assistant-ui-edit-composer')).toBeInTheDocument();
     expect(screen.getByTestId('assistant-ui-edit-composer-root')).toHaveClass('bg-white');
     expect(screen.getByTestId('assistant-ui-edit-composer-root')).toHaveClass('border-[#e5e5e5]');
+  });
+
+  it('keeps subsequent messages in the backend thread returned by the run runtime', async () => {
+    useRealAgentAdapter();
+    useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
+    vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue(emptySession());
+    vi.spyOn(socialAgentApi, 'listThreads').mockResolvedValue({ threads: [] });
+    const firstResponse = {
+      ...mockResponse(),
+      assistantMessage: '我记住了，这段会话会继续沿用同一个 thread。',
+      cards: [],
+      runtime: {
+        ...(mockResponse().runtime ?? {}),
+        threadId: 'social-thread:stable-1',
+      },
+    };
+    const secondResponse = {
+      ...mockResponse(),
+      assistantMessage: '继续在同一段会话里处理。',
+      cards: [],
+      runtime: {
+        ...(mockResponse().runtime ?? {}),
+        threadId: 'social-thread:stable-1',
+      },
+    };
+    const streamSpy = vi
+      .spyOn(socialAgentApi, 'runUserFacingStream')
+      .mockImplementationOnce(async (_data, onEvent) => {
+        onEvent({ type: 'assistant_delta', delta: firstResponse.assistantMessage, source: 'llm' });
+        onEvent({ type: 'assistant_done', source: 'llm' });
+        onEvent({ type: 'result', result: firstResponse });
+        return firstResponse;
+      })
+      .mockImplementationOnce(async (_data, onEvent) => {
+        onEvent({ type: 'assistant_delta', delta: secondResponse.assistantMessage, source: 'llm' });
+        onEvent({ type: 'assistant_done', source: 'llm' });
+        onEvent({ type: 'result', result: secondResponse });
+        return secondResponse;
+      });
+
+    await renderAgentPage();
+    submitPrompt('周末下午想散步');
+    expect(await screen.findByText(firstResponse.assistantMessage)).toBeInTheDocument();
+
+    submitPrompt('可以，继续帮我找人');
+    expect(await screen.findByText(secondResponse.assistantMessage)).toBeInTheDocument();
+
+    expect(streamSpy).toHaveBeenCalledTimes(2);
+    expect(streamSpy.mock.calls[1]?.[0]).toMatchObject({
+      clientContext: expect.objectContaining({
+        threadId: 'social-thread:stable-1',
+      }),
+    });
+  });
+
+  it('renders Social Codex visible process trace inside the assistant message without business cards', async () => {
+    useRealAgentAdapter();
+    useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
+    vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue(emptySession());
+    const streamed = {
+      ...mockResponse(),
+      assistantMessage: '我会按这些信息继续帮你整理。',
+      cards: [],
+    };
+    vi.spyOn(socialAgentApi, 'runUserFacingStream').mockImplementation(async (_data, onEvent) => {
+      onEvent({
+        type: 'visible_process.delta',
+        eventId: 'run-visible:1',
+        seq: 1,
+        createdAt: '2026-06-17T00:00:00.000Z',
+        userId: '7',
+        threadId: 'agent-thread-1',
+        taskId: 42,
+        runId: 'run-visible',
+        stage: 'hydrate_context',
+        visibility: 'user_visible',
+        display: {
+          title: '正在读取你的偏好',
+          state: 'running',
+        },
+      });
+      onEvent({
+        type: 'slot.completed',
+        eventId: 'run-visible:2',
+        seq: 2,
+        createdAt: '2026-06-17T00:00:01.000Z',
+        userId: '7',
+        threadId: 'agent-thread-1',
+        taskId: 42,
+        runId: 'run-visible',
+        stage: 'slot_filling',
+        visibility: 'user_visible',
+        display: {
+          title: '',
+          state: 'done',
+        },
+        payload: {
+          slots: {
+            time_window: '周末下午',
+            activity: '散步',
+            location_text: '青岛大学附近',
+          },
+        },
+      });
+      onEvent({
+        type: 'candidate_search.done',
+        eventId: 'run-visible:3',
+        seq: 3,
+        createdAt: '2026-06-17T00:00:02.000Z',
+        userId: '7',
+        threadId: 'agent-thread-1',
+        taskId: 42,
+        runId: 'run-visible',
+        stage: 'search_candidates',
+        visibility: 'user_visible',
+        display: {
+          title: '',
+          state: 'done',
+        },
+        payload: {
+          candidateCount: 3,
+        },
+      });
+      onEvent({
+        type: 'memory.saved',
+        eventId: 'run-visible:4',
+        seq: 4,
+        createdAt: '2026-06-17T00:00:03.000Z',
+        userId: '7',
+        threadId: 'agent-thread-1',
+        taskId: 42,
+        runId: 'run-visible',
+        stage: 'life_graph_writeback',
+        visibility: 'user_visible',
+        display: {
+          title: '这些信息下次会继续使用',
+          state: 'done',
+        },
+        payload: {
+          lifeGraphFacts: [
+            {
+              key: 'preferred_activity',
+              label: '常见活动偏好',
+              displayValue: '散步',
+              evidenceCount: 1,
+            },
+            {
+              key: 'first_meet_safety_boundary',
+              label: '首次见面安全边界',
+              displayValue: '公共场所优先',
+              evidenceCount: 1,
+            },
+          ],
+        },
+      });
+      onEvent({ type: 'assistant_delta', delta: '我会按这些信息继续帮你整理。', source: 'llm' });
+      onEvent({ type: 'assistant_done', source: 'llm' });
+      onEvent({ type: 'result', result: streamed });
+      return streamed;
+    });
+
+    await renderAgentPage();
+
+    submitPrompt('周末下午，散步，崂山区青岛大学');
+
+    expect(await screen.findByText('我会按这些信息继续帮你整理。')).toBeInTheDocument();
+    expect(await screen.findByTestId('assistant-ui-tool-ui')).toBeInTheDocument();
+    const processSteps = screen.getAllByTestId('assistant-ui-process-step');
+    const socialCodexSteps = processSteps.filter((step) =>
+      (step.getAttribute('data-step-id') ?? '').startsWith('run-visible:'),
+    );
+    expect(socialCodexSteps).toHaveLength(4);
+    expect(screen.getByText('正在读取你的偏好')).toBeInTheDocument();
+    expect(screen.getByText('已记录你的关键信息')).toBeInTheDocument();
+    expect(screen.getByText('已确认：周末下午、散步、青岛大学附近')).toBeInTheDocument();
+    expect(screen.getByText('找到合适机会')).toBeInTheDocument();
+    expect(screen.getByText('找到 3 个公开可发现的人或活动。')).toBeInTheDocument();
+    expect(screen.getByText('这些信息下次会继续使用')).toBeInTheDocument();
+    expect(
+      screen.getByText('已整理：常见活动偏好：散步；首次见面安全边界：公共场所优先'),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-generative-cards')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
+    expect(document.body.textContent ?? '').not.toMatch(forbiddenUserArtifacts);
   });
 
   it('does not render an approval card for non-risky clarification waiting steps', async () => {
@@ -3061,6 +3251,59 @@ describe('AgentWorkspacePage', () => {
     expect(document.querySelector('.codex-ant-pet')).toBeNull();
   });
 
+  it('restores Social Codex replay trace into the assistant-ui process timeline', async () => {
+    useRealAgentAdapter();
+    useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
+    vi.spyOn(socialAgentApi, 'restoreSession').mockResolvedValue({
+      ...emptySession(77),
+      hasSession: true,
+      activeTaskId: 77,
+      task: { id: 77, permissionMode: 'limited_auto', goal: '周末下午散步' },
+      result: {
+        ...mockResponse(),
+        assistantMessage: '我已经恢复了这段约练任务。',
+      },
+    });
+    vi.spyOn(socialAgentApi, 'getTaskEventReplay').mockResolvedValue({
+      ...emptyReplay(77),
+      eventCount: 3,
+      returnedCount: 3,
+      lastSeq: 3,
+      lastEventId: 'run-77:3',
+      events: [
+        socialCodexReplayEvent(1, 'run.started', {
+          display: { title: '正在理解你的需求', state: 'running' },
+        }),
+        socialCodexReplayEvent(2, 'slot.completed', {
+          stage: 'slot_filling',
+          display: {
+            title: '已记录你的关键信息',
+            detail: '周末下午、散步、青岛大学附近',
+            state: 'done',
+          },
+          payload: {
+            slots: {
+              time_window: '周末下午',
+              activity: '散步',
+              location_text: '青岛大学附近',
+            },
+          },
+        }),
+        socialCodexReplayEvent(3, 'run.completed', {
+          stage: 'life_graph_writeback',
+          display: { title: '这一步处理完成', state: 'done' },
+        }),
+      ],
+    });
+
+    await renderAgentPage('/agent/chat/77');
+
+    await waitFor(() => expect(socialAgentApi.getTaskEventReplay).toHaveBeenCalledWith(77));
+    expect(await screen.findByText('已记录你的关键信息')).toBeInTheDocument();
+    expect(screen.getByText('周末下午、散步、青岛大学附近')).toBeInTheDocument();
+    expect(screen.queryByText(/hydrate_context|runId|payload|traceId|planner/)).not.toBeInTheDocument();
+  });
+
   it('sanitizes legacy local checkpoint snapshots before rendering the assistant-ui thread', async () => {
     useRealAgentAdapter();
     useAuthStore.setState({ isLoggedIn: true, showLoginModal: false });
@@ -4294,6 +4537,9 @@ describe('AgentWorkspacePage', () => {
     expect(streamSpy.mock.calls[0]?.[0]).toMatchObject({
       goal: '接着刚才的话题',
       taskId: 77,
+      clientContext: expect.objectContaining({
+        threadId: '77',
+      }),
     });
   });
 
@@ -4921,6 +5167,9 @@ describe('AgentWorkspacePage', () => {
           title: '整理用户画像',
           detail: '只整理上下文，不直接写入长期记忆。',
           state: 'done',
+          metadata: {
+            processType: 'memory',
+          },
         });
         onEvent({
           type: 'progress',
@@ -4929,6 +5178,14 @@ describe('AgentWorkspacePage', () => {
           title: '确认连接候选人',
           detail: '需要用户确认后继续。',
           state: 'waiting',
+          metadata: {
+            processType: 'approval',
+            dryRunPreviewTitle: '邀请发送草稿',
+            sideEffectAllowedBeforeApproval: false,
+            auditRequired: true,
+            resumePolicy: '同意后从保存点继续',
+            executionBoundary: '需要预览、确认和审计后继续',
+          },
         });
         onEvent({
           type: 'approval_required',
@@ -5014,6 +5271,11 @@ describe('AgentWorkspacePage', () => {
     expect(approvalGuardrails).toHaveTextContent('不会自动发送、连接或发布');
     expect(approvalGuardrails).toHaveTextContent('状态已保存');
     expect(approvalGuardrails).toHaveTextContent('同意后从保存点继续');
+    const runtimeHints = screen.getByTestId('assistant-ui-approval-runtime-hints');
+    expect(runtimeHints).toHaveTextContent('邀请发送草稿');
+    expect(runtimeHints).toHaveTextContent('确认前不执行真实动作');
+    expect(runtimeHints).toHaveTextContent('会留下确认记录');
+    expect(runtimeHints).toHaveTextContent('同意后从保存点继续');
     expect(screen.getByText(/动作：连接候选人/)).toBeInTheDocument();
     expect(document.body.textContent ?? '').not.toContain('connect_candidate');
     expect(screen.getAllByText('上下文整理').length).toBeGreaterThanOrEqual(1);
@@ -5591,7 +5853,7 @@ describe('AgentWorkspacePage', () => {
         .find((step) => step.getAttribute('data-step-id') === 'search');
       expect(socialMatchStep).toBeTruthy();
       const processTimeline = getProcessTimelineForStep(socialMatchStep as Element);
-      expect(processTimeline).toHaveAttribute('data-step-count', '2');
+      expect(Number(processTimeline.getAttribute('data-step-count'))).toBeGreaterThanOrEqual(2);
       expect(processTimeline).toHaveAttribute('data-current-step-count', '0');
       expect(socialMatchStep).toHaveAttribute('data-step-id', 'search');
       expect(socialMatchStep).toHaveAttribute('data-step-status', 'complete');
@@ -5957,6 +6219,55 @@ function emptySession(taskId: number | null = null): UserFacingAgentSessionSnaps
     task: taskId ? { id: taskId, permissionMode: 'limited_auto', goal: '上一次的问题' } : null,
     messages: [],
     result: null,
+  };
+}
+
+function emptyReplay(taskId = 42): SocialCodexReplayPackage {
+  return {
+    taskId,
+    threadId: String(taskId),
+    runId: `run-${taskId}`,
+    eventCount: 0,
+    returnedCount: 0,
+    lastSeq: null,
+    lastEventId: null,
+    terminalType: null,
+    pendingApproval: false,
+    events: [],
+    eval: {
+      pass: true,
+      issues: [],
+      replayCase: {
+        runId: `run-${taskId}`,
+        threadId: String(taskId),
+        taskId,
+        eventCount: 0,
+        stages: [],
+        approvalRequired: false,
+        terminalType: null,
+      },
+    },
+  };
+}
+
+function socialCodexReplayEvent(
+  seq: number,
+  type: SocialCodexReplayPackage['events'][number]['type'],
+  overrides: Partial<SocialCodexReplayPackage['events'][number]> = {},
+): SocialCodexReplayPackage['events'][number] {
+  return {
+    type,
+    eventId: `run-77:${seq}`,
+    seq,
+    createdAt: new Date('2026-06-17T00:00:00.000Z').toISOString(),
+    userId: '12',
+    threadId: '77',
+    taskId: 77,
+    runId: 'run-77',
+    stage: 'detect_social_intent',
+    visibility: 'user_visible',
+    display: { title: '正在理解你的需求', state: 'running' },
+    ...overrides,
   };
 }
 

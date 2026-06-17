@@ -46,7 +46,24 @@ describe('AgentL5AdminPage', () => {
           input: { message: '今晚想找跑步搭子' },
           expectedBehavior: { shouldCallTool: true },
           replayContext: { route: 'match' },
-          lastReplay: { pass: true, score: 0.91 },
+          lastReplay: {
+            pass: false,
+            score: 0.91,
+            regressionChecks: [
+              {
+                id: 'visible_process_trace',
+                label: '可见过程时间线',
+                pass: false,
+                message: '缺少用户可见过程。',
+              },
+              {
+                id: 'thread_task_run_binding',
+                label: 'Thread / task / run 绑定',
+                pass: true,
+                message: '绑定稳定。',
+              },
+            ],
+          },
           createdAt: '2026-06-09T12:00:00.000Z',
           updatedAt: '2026-06-09T12:00:00.000Z',
         },
@@ -136,6 +153,9 @@ describe('AgentL5AdminPage', () => {
     expect(screen.getByText('Replay Cases')).toBeInTheDocument();
     expect(screen.getByText('used_for_eval')).toBeInTheDocument();
     expect(screen.getByText(/今晚想找跑步搭子/)).toBeInTheDocument();
+    expect(screen.getByTestId('social-codex-regression-summary')).toBeInTheDocument();
+    expect(screen.getByText('1 failed')).toBeInTheDocument();
+    expect(screen.getByText(/可见过程时间线/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Subagent Memory/ }));
     expect(screen.getAllByText('Social Match Agent').length).toBeGreaterThan(0);

@@ -181,4 +181,74 @@ describe('SocialAgentTaskLifecycleService', () => {
       service.ensureConversationTask(8, 101, '你好'),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  it('reuses the active thread id instead of creating a new task for each message', async () => {
+    const existing = makeTask({
+      id: 202,
+      ownerUserId: 7,
+      title: '周末青岛大学散步搭子',
+      goal: '周末下午，散步，青岛大学',
+      status: AgentTaskStatus.AwaitingFeedback,
+    });
+    const { service, taskRepo, eventRepo } = makeHarness(existing);
+
+    const task = await service.ensureConversationTask(
+      7,
+      null,
+      '可以，帮我找人',
+      'new-message-idempotency',
+      '202',
+    );
+
+    expect(task).toBe(existing);
+    expect(taskRepo.save).not.toHaveBeenCalled();
+    expect(eventRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('reuses the latest active conversation when the client omits thread id', async () => {
+    const existing = makeTask({
+      id: 202,
+      ownerUserId: 7,
+      title: '周末青岛大学散步搭子',
+      goal: '周末下午，散步，青岛大学',
+      status: AgentTaskStatus.AwaitingFeedback,
+      idempotencyKey: 'original-thread',
+    });
+    const { service, taskRepo, eventRepo } = makeHarness(existing);
+
+    const task = await service.ensureConversationTask(
+      7,
+      null,
+      '可以，帮我找人',
+      'new-message-idempotency',
+      null,
+    );
+
+    expect(task).toBe(existing);
+    expect(taskRepo.save).not.toHaveBeenCalled();
+    expect(eventRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('reuses checkpoint-style thread ids instead of creating a duplicate thread', async () => {
+    const existing = makeTask({
+      id: 202,
+      ownerUserId: 7,
+      title: '周末青岛大学散步搭子',
+      goal: '周末下午，散步，青岛大学',
+      status: AgentTaskStatus.AwaitingFeedback,
+    });
+    const { service, taskRepo, eventRepo } = makeHarness(existing);
+
+    const task = await service.ensureConversationTask(
+      7,
+      null,
+      '可以，继续刚才的约练',
+      'follow-up-idempotency',
+      'agent-task:202',
+    );
+
+    expect(task).toBe(existing);
+    expect(taskRepo.save).not.toHaveBeenCalled();
+    expect(eventRepo.save).not.toHaveBeenCalled();
+  });
 });

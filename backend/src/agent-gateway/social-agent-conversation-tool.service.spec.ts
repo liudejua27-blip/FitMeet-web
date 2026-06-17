@@ -31,6 +31,7 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
 function makeService() {
   const messages = {
     getAgentInboxMessages: jest.fn(),
+    getTaskConversationMessages: jest.fn(),
   };
   const toolJsonModel = {
     callJson: jest.fn(),
@@ -257,21 +258,62 @@ describe('SocialAgentConversationToolService', () => {
     );
   });
 
-  it('requires an agent connection and bound conversation before reading', async () => {
-    const { service } = makeService();
+  it('reads task conversation messages by taskId when agent connection is missing', async () => {
+    const { service, messages, l5Runtime } = makeService();
+    messages.getTaskConversationMessages.mockResolvedValue([
+      {
+        id: 'msg_1',
+        conversationId: 'conv_1',
+        text: 'Agent opener',
+        senderType: 'agent',
+        senderId: 1,
+        metadata: { agentTaskId: 100 },
+      },
+      {
+        id: 'msg_2',
+        conversationId: 'conv_1',
+        text: '可以，几点？',
+        senderType: 'user',
+        senderId: 2,
+        metadata: { agentTaskId: 100 },
+      },
+    ]);
 
-    await expect(
-      service.readTaskConversationMessages(
-        makeTask({ agentConnectionId: null }),
-        {},
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    await expect(
-      service.readTaskConversationMessages(
-        makeTask({ memory: { socialLoop: {} } }),
-        {},
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    const result = await service.readTaskConversationMessages(
+      makeTask({ agentConnectionId: null }),
+      {},
+    );
+
+    expect(messages.getAgentInboxMessages).not.toHaveBeenCalled();
+    expect(messages.getTaskConversationMessages).toHaveBeenCalledWith(100, {
+      conversationId: 'conv_1',
+      limit: 50,
+    });
+    expect(result.output).toMatchObject({
+      conversationId: 'conv_1',
+      newMessageCount: 1,
+      latestMessage: { id: 'msg_2' },
+    });
+    expect(l5Runtime.transitionMeetLoop).toHaveBeenCalled();
+  });
+
+  it('returns a non-retryable skipped result for unbound old tasks', async () => {
+    const { service, messages, l5Runtime } = makeService();
+    messages.getTaskConversationMessages.mockResolvedValue([]);
+
+    const result = await service.readTaskConversationMessages(
+      makeTask({ agentConnectionId: null, memory: { socialLoop: {} } }),
+      {},
+    );
+
+    expect(result.output).toMatchObject({
+      status: 'skipped',
+      code: 'task_conversation_unbound',
+      retryable: false,
+      newMessageCount: 0,
+    });
+    expect(result.receivedMessages).toEqual([]);
+    expect(l5Runtime.transitionMeetLoop).not.toHaveBeenCalled();
   });
 
   it('requires messages before summarizing replies', async () => {

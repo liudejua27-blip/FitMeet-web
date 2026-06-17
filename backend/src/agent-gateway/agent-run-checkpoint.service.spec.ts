@@ -9,11 +9,13 @@ import type { SocialAgentChatRunResult } from './social-agent-chat.types';
 
 describe('AgentRunCheckpointService', () => {
   let rows: Array<Record<string, unknown>>;
+  let taskEvents: Array<Record<string, unknown>>;
   let nextId: number;
   let service: AgentRunCheckpointService;
 
   beforeEach(() => {
     rows = [];
+    taskEvents = [];
     nextId = 1;
     const repo = {
       create: jest.fn((input) => ({ ...input })),
@@ -47,7 +49,12 @@ describe('AgentRunCheckpointService', () => {
       find: jest.fn(),
     };
     const eventRepo = {
-      find: jest.fn().mockResolvedValue([]),
+      create: jest.fn((input) => ({ ...input })),
+      save: jest.fn((input) => {
+        taskEvents.push(input);
+        return Promise.resolve(input);
+      }),
+      find: jest.fn().mockImplementation(() => Promise.resolve(taskEvents)),
     };
     service = new AgentRunCheckpointService(repo as never, eventRepo as never);
   });
@@ -260,6 +267,31 @@ describe('AgentRunCheckpointService', () => {
       status: AgentRunCheckpointStatus.Resumed,
       resumeCount: 1,
     });
+    expect(taskEvents).toContainEqual(
+      expect.objectContaining({
+        eventType: 'confirmation.received',
+        actor: 'user',
+        stepId: 'approval-88',
+        payload: expect.objectContaining({
+          socialAgentEventV2: expect.objectContaining({
+            type: 'approval.resolved',
+            threadId: 'agent-task:42',
+            taskId: 42,
+            runId: 'run-1',
+            stage: 'approval',
+            display: expect.objectContaining({
+              title: '已确认这一步',
+              state: 'done',
+            }),
+            payload: expect.objectContaining({
+              approvalId: 88,
+              decision: 'approved',
+              checkpointId: 1,
+            }),
+          }),
+        }),
+      }),
+    );
   });
 
   it('does not double-count an already resumed approval checkpoint', async () => {

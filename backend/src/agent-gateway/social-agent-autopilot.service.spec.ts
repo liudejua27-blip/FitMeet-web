@@ -210,6 +210,27 @@ describe('SocialAgentAutopilotService', () => {
     expect(summary.processedTasks).toBe(0);
   });
 
+  it('does not execute terminal tasks returned from a stale scan', async () => {
+    const { service, taskRepo, requestRepo, messages, executor } =
+      makeService();
+    const failedTask = makeTask({
+      status: AgentTaskStatus.Failed,
+      agentConnectionId: null,
+      statusReason: 'task_conversation_unbound',
+    });
+    taskRepo.find.mockResolvedValue([failedTask]);
+    taskRepo.findOne.mockResolvedValue(failedTask);
+    requestRepo.find.mockResolvedValue([]);
+    messages.getRecentAgentConversationSignals.mockResolvedValue([]);
+
+    const summary = await service.runOnce('manual', 1);
+
+    expect(executor.runNext).not.toHaveBeenCalled();
+    expect(summary.errors).toBe(0);
+    expect(summary.processedTasks).toBe(0);
+    expect(summary.taskResults).toEqual([]);
+  });
+
   it('creates and plans a task for a recent social request', async () => {
     const {
       service,

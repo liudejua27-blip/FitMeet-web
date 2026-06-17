@@ -27,6 +27,7 @@ import { SocialAgentInboxToolService } from './social-agent-inbox-tool.service';
 import { SocialAgentConversationToolService } from './social-agent-conversation-tool.service';
 import { SocialAgentDecisionToolService } from './social-agent-decision-tool.service';
 import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
+import { SocialCodexRuntimePolicyService } from './social-codex-runtime-policy.service';
 
 type MockRepository<T extends object = Record<string, unknown>> = {
   findOne: jest.Mock<Promise<T | null>, [unknown?]>;
@@ -157,6 +158,7 @@ function makeService() {
     sendMessage: jest.fn(),
     createAgentInboxEvent: jest.fn(),
     getAgentInboxMessages: jest.fn(),
+    getTaskConversationMessages: jest.fn(),
     getAgentInboxConversations: jest.fn(),
     getAgentInboxEvents: jest.fn(),
     getAgentInboxEventsForOwner: jest.fn(),
@@ -217,6 +219,8 @@ function makeService() {
     permissions,
     toolRegistry,
     sceneRisk,
+    undefined,
+    new SocialCodexRuntimePolicyService(),
   );
   const confirmationPolicy = new SocialAgentConfirmationPolicyService(
     new ConfirmationGuardService(),
@@ -500,6 +504,58 @@ describe('SocialAgentToolExecutorService', () => {
     );
     expect(task.plan[0]).toMatchObject({ status: 'succeeded' });
     expect(task.status).toBe(AgentTaskStatus.Succeeded);
+  });
+
+  it('blocks contact exchange content at the Social Codex sandbox before approval creation', async () => {
+    const { service, taskRepo, messages, actionLogs, approvals } =
+      makeService();
+    const task = makeTask({
+      permissionMode: AgentTaskPermissionMode.Assist,
+      plan: [
+        {
+          id: 'step_1',
+          toolName: SocialAgentToolName.SendMessage,
+          action: 'send_message',
+          status: 'planned',
+          input: {
+            targetUserId: 2,
+            text: '我的微信是 fitmeet-test，电话 15253005312',
+          },
+        },
+      ],
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+
+    const result = await service.executeTask(100);
+
+    expect(result).toMatchObject({
+      executedSteps: 1,
+      succeededSteps: 0,
+      failedSteps: 0,
+      blockedSteps: 1,
+    });
+    expect(messages.startConversation).not.toHaveBeenCalled();
+    expect(messages.sendMessage).not.toHaveBeenCalled();
+    expect(approvals.create).not.toHaveBeenCalled();
+    expect(result.toolCalls[0]).toMatchObject({
+      status: 'blocked',
+      error: expect.objectContaining({
+        code: 'SOCIAL_CODEX_SANDBOX_BLOCKED',
+        retryable: false,
+      }),
+    });
+    const auditInput = actionLogs.logAgentAction.mock.calls[0][0];
+    expect(auditInput).toMatchObject({
+      actionStatus: 'failed',
+      status: 'blocked',
+      payload: expect.objectContaining({
+        input: expect.objectContaining({
+          text: '[redacted]',
+        }),
+      }),
+    });
+    expect(JSON.stringify(auditInput)).not.toContain('15253005312');
+    expect(JSON.stringify(auditInput)).not.toContain('fitmeet-test');
   });
 
   it('records required audit fields for every registered tool call', async () => {
@@ -1149,6 +1205,37 @@ describe('SocialAgentToolExecutorService', () => {
         }),
       },
     });
+  });
+
+  it('marks old waiting-reply tasks without readable conversation as non-retryable failed', async () => {
+    const { service, taskRepo, messages } = makeService();
+    const task = makeTask({
+      agentConnectionId: null,
+      status: AgentTaskStatus.WaitingReply,
+      memory: { socialLoop: {} },
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    messages.getTaskConversationMessages.mockResolvedValue([]);
+
+    const result = await service.runNext(100, 1);
+
+    expect(messages.getAgentInboxMessages).not.toHaveBeenCalled();
+    expect(messages.getTaskConversationMessages).toHaveBeenCalledWith(100, {
+      conversationId: undefined,
+      limit: 50,
+    });
+    expect(result).toMatchObject({
+      status: AgentTaskStatus.Failed,
+      handledReply: false,
+      executedSteps: 1,
+      failedSteps: 0,
+    });
+    expect(task.statusReason).toBe('task_conversation_unbound');
+    expect(task.error).toMatchObject({
+      code: 'task_conversation_unbound',
+      retryable: false,
+    });
+    expect(task.completedAt).toBeInstanceOf(Date);
   });
 
   it('falls back when DeepSeek reply-loop JSON calls time out', async () => {

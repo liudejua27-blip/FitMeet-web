@@ -339,6 +339,85 @@ describe('production deploy readiness', () => {
     }
   });
 
+  it('keeps Social Codex trace eval wired into Agent release verification', () => {
+    const agentRelease = readRepoFile('scripts/verify-agent-release.sh');
+    const buildDeployZip = readRepoFile('scripts/build-deploy-zip.sh');
+    const buildDeployZipPs1 = readRepoFile('scripts/build-deploy-zip.ps1');
+    const releaseMatrix = readRepoFile('docs/agent-release-e2e-matrix.md');
+    const launchStatus = readRepoFile('scripts/launch-status.sh');
+    const opportunitySmoke = readRepoFile(
+      'backend/src/scripts/smoke-agent-opportunity-journey.ts',
+    );
+
+    const socialCodexSpecs = [
+      'social-agent-context-hydrator.service.spec.ts',
+      'social-agent-event-store.service.spec.ts',
+      'social-agent-event-v2.service.spec.ts',
+      'social-agent-task-memory-state-machine.service.spec.ts',
+      'social-agent-tasks.controller.spec.ts',
+      'social-agent-thread-session-manager.service.spec.ts',
+      'social-codex-life-graph-governance.service.spec.ts',
+      'social-codex-trace-eval.service.spec.ts',
+      'social-codex-runtime-policy.service.spec.ts',
+      'social-agent-tool-execution-policy.service.spec.ts',
+    ];
+    for (const spec of socialCodexSpecs) {
+      expect(agentRelease).toContain(spec);
+    }
+
+    for (const deployPath of [
+      'docs/social-codex-runtime.md',
+      'backend/src/agent-gateway/social-agent-context-hydrator.service.ts',
+      'backend/src/agent-gateway/social-agent-context-hydrator.service.spec.ts',
+      'backend/src/agent-gateway/social-agent-event-store.service.ts',
+      'backend/src/agent-gateway/social-agent-event-store.service.spec.ts',
+      'backend/src/agent-gateway/social-agent-event-v2.service.ts',
+      'backend/src/agent-gateway/social-agent-event-v2.service.spec.ts',
+      'backend/src/agent-gateway/social-agent-event-v2.types.ts',
+      'backend/src/agent-gateway/social-agent-task-memory-state-machine.service.ts',
+      'backend/src/agent-gateway/social-agent-task-memory-state-machine.service.spec.ts',
+      'backend/src/agent-gateway/social-agent-thread-id.util.ts',
+      'backend/src/agent-gateway/social-agent-thread-session-manager.service.ts',
+      'backend/src/agent-gateway/social-agent-thread-session-manager.service.spec.ts',
+      'backend/src/agent-gateway/social-codex-life-graph-governance.service.ts',
+      'backend/src/agent-gateway/social-codex-life-graph-governance.service.spec.ts',
+      'backend/src/agent-gateway/social-codex-runtime-policy.service.ts',
+      'backend/src/agent-gateway/social-codex-runtime-policy.service.spec.ts',
+      'backend/src/agent-gateway/social-codex-trace-eval.service.ts',
+      'backend/src/agent-gateway/social-codex-trace-eval.service.spec.ts',
+      'frontend/src/test/socialAgentApiReplay.test.ts',
+    ]) {
+      expect(buildDeployZip).toContain(deployPath);
+      expect(buildDeployZipPs1).toContain(deployPath);
+    }
+
+    for (const spec of socialCodexSpecs.filter(
+      (specName) => specName !== 'social-agent-tasks.controller.spec.ts',
+    )) {
+      expect(buildDeployZip).toContain(spec);
+      expect(buildDeployZipPs1).toContain(spec);
+    }
+    expect(agentRelease).toContain('socialAgentApiReplay.test.ts');
+    expect(buildDeployZip).toContain('socialAgentApiReplay.test.ts');
+    expect(buildDeployZipPs1).toContain('socialAgentApiReplay.test.ts');
+
+    expect(releaseMatrix).toContain('Trace replay regression');
+    expect(releaseMatrix).toContain('Social Codex Runtime');
+    expect(releaseMatrix).toContain('events/eval');
+    expect(releaseMatrix).toContain('dry-run preview');
+    const socialCodexDocs = readRepoFile('docs/social-codex-runtime.md');
+    expect(socialCodexDocs).toContain('SocialAgentEventV2');
+    expect(socialCodexDocs).toContain('readOnlyAccessAllowed');
+    expect(socialCodexDocs).toContain('externalSideEffectAllowed');
+    expect(opportunitySmoke).toContain('/events/eval');
+    expect(opportunitySmoke).toContain('socialCodexEventCount');
+    expect(opportunitySmoke).toContain('SocialAgentEventV2 rows');
+    expect(launchStatus).toContain('Social Codex trace eval passed');
+    expect(launchStatus).toContain(
+      'readiness and full opportunity smoke',
+    );
+  });
+
   it('keeps Vercel and Railway platform deploy config explicit', () => {
     const vercel = readRepoFile('vercel.json');
     const vercelIgnore = readRepoFile('.vercelignore');
