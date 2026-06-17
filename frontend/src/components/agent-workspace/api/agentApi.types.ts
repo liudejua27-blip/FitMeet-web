@@ -36,6 +36,7 @@ export interface AgentRunRequest {
     timezone?: string;
     locale?: string;
     source: 'web' | 'ios';
+    threadId?: string | null;
   };
 }
 

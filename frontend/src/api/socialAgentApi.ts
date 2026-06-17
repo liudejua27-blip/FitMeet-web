@@ -348,6 +348,7 @@ export interface FitMeetAlphaCard {
 }
 
 export type UserFacingAgentStreamEvent =
+  | SocialAgentEventV2
   | {
       type: 'status';
       lifecycle?: string;
@@ -409,6 +410,104 @@ export type UserFacingAgentStreamEvent =
   | { type: 'result'; lifecycle?: string; result: UserFacingAgentResponse }
   | { type: 'error'; lifecycle?: string; code?: string; message: string; retryable?: boolean };
 
+export type SocialAgentEventV2Type =
+  | 'run.started'
+  | 'visible_process.delta'
+  | 'assistant.delta'
+  | 'tool.started'
+  | 'tool.progress'
+  | 'tool.done'
+  | 'slot.filled'
+  | 'slot.completed'
+  | 'memory.saved'
+  | 'opportunity_card.created'
+  | 'candidate_search.started'
+  | 'candidate_search.done'
+  | 'safety_check.done'
+  | 'approval.required'
+  | 'approval.resolved'
+  | 'run.completed'
+  | 'run.failed';
+
+export type SocialAgentEventV2Stage =
+  | 'detect_social_intent'
+  | 'hydrate_context'
+  | 'profile_gate'
+  | 'slot_filling'
+  | 'create_opportunity_card'
+  | 'publish_to_discover'
+  | 'search_candidates'
+  | 'safety_filter'
+  | 'rank_candidates'
+  | 'generate_opener'
+  | 'approval'
+  | 'send_invite'
+  | 'life_graph_writeback';
+
+export type SocialAgentEventV2 = {
+  type: SocialAgentEventV2Type;
+  eventId: string;
+  seq: number;
+  createdAt: string;
+  userId: string;
+  threadId: string;
+  taskId: number | null;
+  runId: string;
+  messageId?: string;
+  stage: SocialAgentEventV2Stage;
+  visibility: 'user_visible' | 'debug_only' | 'internal';
+  display?: {
+    title: string;
+    detail?: string;
+    state: 'running' | 'done' | 'waiting' | 'failed';
+  };
+  payload?: Record<string, unknown>;
+};
+
+export type SocialCodexTraceEvalResult = {
+  pass: boolean;
+  issues: Array<{
+    code: string;
+    message: string;
+    eventId?: string;
+  }>;
+  regressionChecks?: Array<{
+    id:
+      | 'visible_process_trace'
+      | 'thread_task_run_binding'
+      | 'memory_slot_state_machine'
+      | 'approval_lifecycle'
+      | 'social_sandbox'
+      | 'replay_terminal';
+    label: string;
+    pass: boolean;
+    message: string;
+  }>;
+  replayCase: {
+    runId: string | null;
+    threadId: string | null;
+    taskId: number | null;
+    eventCount: number;
+    stages: string[];
+    approvalRequired: boolean;
+    terminalType: 'run.completed' | 'run.failed' | null;
+  };
+};
+
+export type SocialCodexReplayPackage = {
+  taskId: number;
+  threadId: string | null;
+  runId: string | null;
+  eventCount: number;
+  returnedCount: number;
+  lastSeq: number | null;
+  lastEventId: string | null;
+  terminalType: 'run.completed' | 'run.failed' | null;
+  pendingApproval: boolean;
+  events: SocialAgentEventV2[];
+  eval?: SocialCodexTraceEvalResult;
+};
+
 type RunChatInput = {
   goal: string;
   permissionMode: SocialAgentPermissionMode;
@@ -419,6 +518,7 @@ type RunChatInput = {
     timezone?: string;
     locale?: string;
     source: 'web' | 'ios';
+    threadId?: string | null;
     checkpointId?: number | null;
     parentCheckpointId?: number | null;
     checkpointAction?: 'resume' | 'retry' | 'replay' | 'fork' | null;
@@ -435,6 +535,7 @@ type RouteMessageInput = {
     timezone?: string;
     locale?: string;
     source: 'web' | 'ios';
+    threadId?: string | null;
   };
 };
 
@@ -698,6 +799,27 @@ export const socialAgentApi = {
       )
       .then(sanitizeSocialAgentResponse),
 
+  getTaskEventReplay: (
+    taskId: number,
+    input: {
+      afterSeq?: number | null;
+      afterEventId?: string | null;
+      includeDebug?: boolean;
+    } = {},
+  ) =>
+    api
+      .requestProtected<SocialCodexReplayPackage>(
+        socialAgentTaskReplayPath(taskId, input),
+      )
+      .then(sanitizeSocialAgentResponse),
+
+  getTaskEventEval: (taskId: number) =>
+    api
+      .requestProtected<SocialCodexTraceEvalResult>(
+        fitMeetCoreEndpoints.socialAgentTasks.eventsEval(taskId),
+      )
+      .then(sanitizeSocialAgentResponse),
+
   runUserFacingStream: (
     data: RunChatInput,
     onEvent: (event: UserFacingAgentStreamEvent) => void,
@@ -748,6 +870,25 @@ function checkpointStreamEndpoint(data: CheckpointStreamInput): string {
 
 function sanitizeSocialAgentResponse<T>(value: T): T {
   return sanitizeDisplayValue(value) as T;
+}
+
+function socialAgentTaskReplayPath(
+  taskId: number,
+  input: {
+    afterSeq?: number | null;
+    afterEventId?: string | null;
+    includeDebug?: boolean;
+  },
+) {
+  const query = new URLSearchParams();
+  if (typeof input.afterSeq === 'number' && Number.isFinite(input.afterSeq)) {
+    query.set('afterSeq', String(input.afterSeq));
+  }
+  if (input.afterEventId) query.set('afterEventId', input.afterEventId);
+  if (input.includeDebug) query.set('includeDebug', 'true');
+  const qs = query.toString();
+  const path = fitMeetCoreEndpoints.socialAgentTasks.eventsReplay(taskId);
+  return qs ? `${path}?${qs}` : path;
 }
 
 async function runUserFacingAgentStream(

@@ -84,8 +84,10 @@ export type FitMeetAssistantStep = {
   label: string;
   status: 'pending' | 'running' | 'success' | 'waiting' | 'error';
   kind?: UserFacingAgentProgressKind;
+  processType?: string;
   agentName?: string | null;
   detail?: string;
+  metadata?: Record<string, unknown>;
   snapshot?: {
     schemaVersion: 'fitmeet.step-snapshot.v1';
     observation?: string[];
@@ -622,7 +624,9 @@ function convertFitMeetMessage(
             status: step.status,
             detail: step.detail,
             kind: step.kind,
+            processType: step.processType,
             agentName: step.agentName ?? undefined,
+            metadata: step.metadata,
             snapshot: step.snapshot,
           })),
       },
@@ -716,8 +720,17 @@ function shouldRenderProcessPart(
   if (index !== messages.length - 1) return false;
   if (isInitialConversationThinking(message, steps)) return false;
   if (!steps.some((step) => step.status !== 'pending')) return false;
+  if (hasUserVisibleSocialCodexTrace(steps)) return true;
   if (message.conversationIntent !== 'conversation') return true;
   return hasResumableRuntime(message.result?.runtime);
+}
+
+function hasUserVisibleSocialCodexTrace(steps: FitMeetAssistantStep[]) {
+  return steps.some((step) => {
+    if (step.status === 'pending') return false;
+    if (!step.processType) return false;
+    return step.processType !== 'run';
+  });
 }
 
 function hasResumableRuntime(runtime: UserFacingAgentResponse['runtime'] | undefined | null) {

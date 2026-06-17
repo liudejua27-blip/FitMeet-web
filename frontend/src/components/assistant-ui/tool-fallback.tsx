@@ -53,7 +53,9 @@ type ProcessStep = {
   detail?: string;
   status: ProcessStatus;
   kind?: string;
+  processType?: string;
   agentName?: string | null;
+  metadata?: Record<string, unknown>;
   snapshot?: ProcessStepSnapshot;
 };
 
@@ -2096,7 +2098,7 @@ function AgentProcessBlock({ summary }: { summary: ProcessSummary }) {
       data-checkpoint-state={checkpointState}
       data-has-checkpoint={summary.resumeContext.hasCheckpoint ? 'true' : 'false'}
       data-step-id={summary.stepId ?? ''}
-      open={summary.status === 'waiting' || summary.status === 'error'}
+      open={hasDetails || summary.status === 'waiting' || summary.status === 'error'}
     >
       <summary className="flex cursor-pointer list-none items-center gap-3 text-[#27272a] marker:hidden">
         <StatusBadge status={summary.status}>{icon}</StatusBadge>
@@ -2233,12 +2235,43 @@ function ProcessTimeline({ steps }: { steps: ProcessStep[] }) {
               {step.detail ? (
                 <p className="mt-1 max-w-[56ch] leading-6 text-[#71717a]">{step.detail}</p>
               ) : null}
+              <ApprovalRuntimeHints metadata={step.metadata} />
               {step.snapshot ? <StepSnapshotSummary snapshot={step.snapshot} /> : null}
             </li>
           </Fragment>
         );
       })}
     </ol>
+  );
+}
+
+function ApprovalRuntimeHints({ metadata }: { metadata?: Record<string, unknown> }) {
+  if (!metadata || metadata.processType !== 'approval') return null;
+  const items = [
+    publicDetail(metadata.dryRunPreviewTitle) ??
+      (metadata.dryRunAvailable === true ? '发送前预览已准备' : null),
+    metadata.sideEffectAllowedBeforeApproval === false ? '确认前不执行真实动作' : null,
+    metadata.auditRequired === true ? '会留下确认记录' : null,
+    publicDetail(metadata.resumePolicy),
+    publicDetail(metadata.executionBoundary),
+  ]
+    .filter((item): item is string => Boolean(item))
+    .slice(0, 4);
+  if (items.length === 0) return null;
+  return (
+    <div
+      className="mt-2 flex flex-wrap gap-1.5"
+      data-testid="assistant-ui-approval-runtime-hints"
+    >
+      {items.map((item) => (
+        <span
+          key={item}
+          className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] leading-5 text-amber-800 ring-1 ring-amber-100"
+        >
+          {item}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -3866,7 +3899,13 @@ function groupStepsByTool(steps: ProcessStep[]): ToolGroup[] {
 }
 
 function classifyStepCategory(step: ProcessStep): ToolCategory {
+  const processType = (step.processType ?? '').toLowerCase();
+  if (/candidate|social_match|rank/.test(processType)) return 'social_match';
+  if (/opportunity|meet_loop/.test(processType)) return 'meet_loop';
+  if (/memory|slot|life_graph/.test(processType)) return 'life_graph';
+  if (/approval|safety/.test(processType)) return 'safety';
   const text = `${step.id} ${step.kind ?? ''} ${step.label} ${step.detail ?? ''}`.toLowerCase();
+  if (/clarify|补充|关键信息|确认需要补充|等待用户补充/.test(text)) return 'generic';
   if (/life|graph|profile|memory|画像|记忆|偏好|上下文/.test(text)) return 'life_graph';
   if (/match|candidate|social|search|rank|recommend|筛选|查找|候选|推荐|匹配/.test(text)) {
     return 'social_match';
@@ -3912,15 +3951,16 @@ function categoryCopy(category: ToolCategory): Pick<ToolGroup, 'title' | 'descri
 }
 
 function naturalProcessTitle(summary: ProcessSummary) {
-  if (summary.status === 'waiting') return '需要你确认后继续';
-  if (summary.status === 'error') return '这一步没有完成';
   if (
     summary.steps.some((step) =>
       /clarify|补充|关键信息|确认需要补充/i.test(`${step.id} ${step.label} ${step.detail ?? ''}`),
     )
   ) {
+    if (summary.status === 'waiting') return '等待你补充信息';
     return summary.status === 'running' ? '正在确认需要补充的信息' : '已确认需要补充的信息';
   }
+  if (summary.status === 'waiting') return '需要你确认后继续';
+  if (summary.status === 'error') return '这一步没有完成';
   if (summary.steps.some((step) => classifyStepCategory(step) === 'social_match')) {
     return summary.status === 'running' ? '正在整理合适选项' : '已整理相关选项';
   }
@@ -4028,7 +4068,9 @@ function normalizeStep(step: Record<string, unknown>, index: number): ProcessSte
     detail: publicDetail(step.detail) ?? undefined,
     status,
     kind: publicString(step.kind) ?? undefined,
+    processType: publicString(step.processType) ?? undefined,
     agentName: publicString(step.agentName) ?? undefined,
+    metadata: isRecord(step.metadata) ? step.metadata : undefined,
     snapshot: normalizeStepSnapshot(step.snapshot),
   };
 }

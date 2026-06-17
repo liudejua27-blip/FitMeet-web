@@ -12,6 +12,7 @@ import {
   type SocialAgentReminderScene,
   type SocialAgentRunNextResponse,
   type SocialAgentPermissionMode,
+  type SocialCodexReplayPackage,
   type UserFacingAgentProgressEvent,
   type UserFacingAgentResponse,
   type UserFacingAgentSessionSnapshot,
@@ -36,6 +37,7 @@ import {
 } from '../assistant-ui/tool-ui-schema';
 import {
   createAgentAdapter,
+  mapUserFacingAgentStreamEvent,
   mapAgentError,
   resolveAgentAdapterMode,
   type AgentError,
@@ -51,6 +53,7 @@ type StepState = Step['status'];
 
 type AgentThreadSnapshot = {
   activeTaskId: number | null;
+  activeThreadId: string | null;
   messages: AgentThreadMessage[];
   userResult: UserFacingAgentResponse | null;
   mode: SocialAgentPermissionMode;
@@ -123,6 +126,12 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
   const agentAdapter = useMemo(() => createAgentAdapter(agentAdapterMode), [agentAdapterMode]);
   const routeTaskId = numberFromUnknown(params.taskId);
   const currentUserId = user?.id ?? null;
+  const canonicalActiveThreadId =
+    activeThreadId && activeThreadId.trim()
+      ? activeThreadId
+      : activeTaskId
+        ? String(activeTaskId)
+        : null;
   const shellView = view === 'chat' || params.taskId ? 'chat' : view;
   const focusReminderSettings =
     new URLSearchParams(location.search).get('settings') === 'reminders';
@@ -142,6 +151,9 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
     const stored = readStoredAgentThread(currentUserId);
     if (!stored || (stored.messages.length === 0 && !stored.userResult)) return;
     setActiveTaskId((current) => current ?? stored.activeTaskId);
+    setActiveThreadId(
+      (current) => current ?? stored.activeThreadId ?? (stored.activeTaskId ? String(stored.activeTaskId) : null),
+    );
     setUserResult((current) => current ?? stored.userResult);
     setBranchSelections((current) =>
       Object.keys(current).length > 0 ? current : stored.branchSelections,
@@ -183,6 +195,7 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
     if (messages.length === 0 && !userResult && !activeTaskId) return;
     writeStoredAgentThread(currentUserId, {
       activeTaskId,
+      activeThreadId: canonicalActiveThreadId,
       messages,
       userResult,
       mode,
@@ -191,6 +204,7 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
   }, [
     activeTaskId,
     branchSelections,
+    canonicalActiveThreadId,
     currentUserId,
     isLoggedIn,
     isRealAgent,
@@ -375,14 +389,14 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
   ]);
 
   useEffect(() => {
-    if (!isRealAgent || !isLoggedIn || isRunning || !activeThreadId) return;
+    if (!isRealAgent || !isLoggedIn || isRunning || !canonicalActiveThreadId) return;
     const snapshot = buildBranchSnapshot(messages, branchSelections);
     const metadata = buildThreadMetadata(messages, userResult);
     if (!snapshot && Object.keys(metadata).length === 0) return;
     const timeout = window.setTimeout(() => {
       try {
         void socialAgentApi
-          .updateThread(activeThreadId, undefined, snapshot, metadata)
+          .updateThread(canonicalActiveThreadId, undefined, snapshot, metadata)
           .catch(() => {
             // Thread metadata sync is best-effort. Auth expiry or transient network
             // failures must not interrupt the active chat surface.
@@ -392,7 +406,16 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
       }
     }, 450);
     return () => window.clearTimeout(timeout);
-  }, [activeThreadId, branchSelections, isLoggedIn, isRealAgent, isRunning, messages, userResult]);
+  }, [
+    activeThreadId,
+    branchSelections,
+    canonicalActiveThreadId,
+    isLoggedIn,
+    isRealAgent,
+    isRunning,
+    messages,
+    userResult,
+  ]);
 
   const refreshLatestCheckpointRecovery = useCallback(
     async (taskId: number | string | null | undefined) => {
@@ -452,6 +475,62 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
               ],
         );
         if (shellView !== 'chat') navigate('/agent/chat', { replace: true });
+        if (restored.taskId) {
+          void socialAgentApi
+            .getTaskEventReplay(restored.taskId)
+            .then((replay) => {
+              if (cancelled || !shouldRestoreReplayTrace(replay, restoredIntent)) return;
+              const replayIntent = intentForReplayTrace(replay, restoredIntent);
+              if (replayIntent !== restoredIntent) {
+                setMessages((current) =>
+                  current.length === 0
+                    ? [
+                        {
+                          id: nextId('assistant'),
+                          role: 'assistant',
+                          status: 'done',
+                          content: publicText(
+                            restoredResponse.assistantMessage,
+                            '我已经恢复了这段对话。',
+                          ),
+                          result: restoredResponseHasUsefulSurface(restoredResponse)
+                            ? restoredResponse
+                            : null,
+                          taskId: restored.taskId ?? null,
+                          conversationIntent: replayIntent,
+                          showSocialResult: replayIntent === 'approval',
+                        },
+                      ]
+                    : current.map((message, index) =>
+                        index === current.length - 1 && message.role === 'assistant'
+                          ? {
+                              ...message,
+                              conversationIntent: replayIntent,
+                              showSocialResult:
+                                message.showSocialResult || replayIntent === 'approval',
+                            }
+                          : message,
+                      ),
+                );
+              }
+              const replaySteps = replay.events
+                .map(mapUserFacingAgentStreamEvent)
+                .filter((event): event is Extract<AgentStreamEvent, { type: 'progress' }> =>
+                  event?.type === 'progress',
+                );
+              if (replaySteps.length === 0) return;
+              setSteps((current) =>
+                replaySteps.reduce(
+                  (nextSteps, event) => mergeProgressStep(nextSteps, event, replayIntent),
+                  current,
+                ),
+              );
+            })
+            .catch(() => {
+              // Replay is best-effort. Session restore and current chat must remain usable
+              // if older deployments or transient auth issues do not return event replay.
+            });
+        }
       })
       .catch(() => undefined)
       .finally(() => {
@@ -544,6 +623,12 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
           permissionMode: mode,
           taskId: activeTaskId,
           idempotencyKey: `agent-run-${Date.now()}`,
+          clientContext: {
+            source: 'web',
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            locale: navigator.language,
+            threadId: canonicalActiveThreadId,
+          },
         },
         {
           onEvent: handleAgentStreamEvent,
@@ -551,8 +636,11 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
         },
       );
       setActiveTaskId(finalResult.taskId ?? activeTaskId);
-      if (finalResult.taskId) {
-        setActiveThreadId(String(finalResult.taskId));
+      const nextThreadId =
+        threadIdFromResponse(finalResult.response) ??
+        (finalResult.taskId ? String(finalResult.taskId) : null);
+      if (nextThreadId) {
+        setActiveThreadId(nextThreadId);
         void refreshThreads();
       }
       if (!finishedRef.current) finishUserFacing(finalResult.response);
@@ -605,6 +693,14 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
     }
     if (event.type === 'progress') {
       if (isApprovalProgressEvent(event)) runConversationIntentRef.current = 'approval';
+      const eventTaskId = numberFromUnknown(event.metadata?.taskId);
+      if (eventTaskId) {
+        setActiveTaskId((current) => current ?? eventTaskId);
+        setActiveThreadId((current) => current ?? String(eventTaskId));
+      }
+      if (shouldAttachVisibleProcessToMessage(event)) {
+        appendStreamingAssistant(eventTaskId ?? activeTaskId, runConversationIntentRef.current);
+      }
       setSteps((current) => mergeProgressStep(current, event, runConversationIntentRef.current));
       return;
     }
@@ -782,13 +878,18 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
       }
       return [...current, assistantMessage];
     });
+    const awaitingApproval = responseRequiresApproval(displayResult);
+    const lightStatusStepId = stepIdFromLightStatus(displayResult.lightStatus);
     setSteps((current) =>
       current.map((step) => ({
         ...step,
         status:
-          step.id === stepIdFromLightStatus(displayResult.lightStatus)
+          awaitingApproval && isApprovalProgressStepId(step.id)
+            ? 'waiting'
+            : step.id === lightStatusStepId && !(awaitingApproval && isApprovalProgressStepId(step.id))
             ? 'success'
-            : step.status === 'pending' || step.status === 'running'
+            : step.status === 'running' ||
+                (step.status === 'pending' && !isApprovalProgressStepId(step.id))
               ? 'success'
               : step.status,
       })),
@@ -1246,7 +1347,7 @@ export function AgentWorkspace({ view }: { view: AgentView }) {
     const nextSelections = { ...branchSelections, [groupId]: nextIndex };
     setBranchSelections(nextSelections);
     setBranchSyncStatus((current) => ({ ...current, [groupId]: 'syncing' }));
-    const branchThreadId = activeThreadId ?? (activeTaskId ? String(activeTaskId) : null);
+    const branchThreadId = canonicalActiveThreadId;
     if (!isRealAgent || !isLoggedIn || !branchThreadId) {
       setBranchSyncStatus((current) => ({ ...current, [groupId]: 'idle' }));
       return;
@@ -1533,6 +1634,9 @@ function readStoredAgentThread(userId?: number | string | null): AgentThreadSnap
       : null;
     return {
       activeTaskId: numberFromUnknown(parsed.activeTaskId),
+      activeThreadId:
+        stringFromUnknown(parsed.activeThreadId) ??
+        (numberFromUnknown(parsed.activeTaskId) ? String(numberFromUnknown(parsed.activeTaskId)) : null),
       messages,
       userResult,
       mode: isPermissionMode(parsed.mode) ? parsed.mode : 'limited_auto',
@@ -1703,6 +1807,38 @@ function responseAwaitsOpportunityClarification(response: UserFacingAgentRespons
   );
 }
 
+function shouldRestoreReplayTrace(
+  replay: SocialCodexReplayPackage,
+  intent: AgentConversationIntent,
+) {
+  if (intent !== 'conversation') return replay.events.length > 0;
+  if (replay.pendingApproval) return true;
+  return replay.events.some((event) =>
+    /^(slot\.|approval\.|candidate_search\.|opportunity_card\.created|safety_check\.done|memory\.saved)/.test(
+      event.type,
+    ),
+  );
+}
+
+function intentForReplayTrace(
+  replay: SocialCodexReplayPackage,
+  fallback: AgentConversationIntent,
+): AgentConversationIntent {
+  if (replay.pendingApproval || replay.events.some((event) => event.type.startsWith('approval.'))) {
+    return 'approval';
+  }
+  if (
+    replay.events.some((event) =>
+      /^(slot\.|candidate_search\.|opportunity_card\.created|safety_check\.done|memory\.saved)/.test(
+        event.type,
+      ),
+    )
+  ) {
+    return 'social';
+  }
+  return fallback;
+}
+
 function responseRequiresApproval(response: UserFacingAgentResponse) {
   return (
     response.safeStatus.blocked ||
@@ -1782,7 +1918,16 @@ function isSocialSurfaceCard(card: { type?: string }) {
 function resolveIntentFromStreamEvent(event: AgentStreamEvent) {
   if (event.type === 'approval_required') return 'approval';
   if (event.type === 'progress' && isApprovalProgressEvent(event)) return 'approval';
+  if (event.type === 'progress' && shouldAttachVisibleProcessToMessage(event)) return 'social';
   return null;
+}
+
+function shouldAttachVisibleProcessToMessage(event: AgentStreamEvent) {
+  if (event.type !== 'progress') return false;
+  const processType =
+    typeof event.metadata?.processType === 'string' ? event.metadata.processType : null;
+  if (!processType || processType === 'run') return false;
+  return true;
 }
 
 function isApprovalProgressEvent(event: AgentStreamEvent) {
@@ -1804,6 +1949,21 @@ function findTaskId(result: UserFacingAgentResponse | null): number | null {
     if (fromData) return fromData;
     for (const action of card.actions) {
       const fromPayload = numberFromUnknown(action.payload?.taskId);
+      if (fromPayload) return fromPayload;
+    }
+  }
+  return null;
+}
+
+function threadIdFromResponse(response: UserFacingAgentResponse | null): string | null {
+  if (!response) return null;
+  const fromRuntime = stringFromUnknown(response.runtime?.threadId);
+  if (fromRuntime) return fromRuntime;
+  for (const card of response.cards) {
+    const fromData = stringFromUnknown(card.data.threadId);
+    if (fromData) return fromData;
+    for (const action of card.actions) {
+      const fromPayload = stringFromUnknown(action.payload?.threadId);
       if (fromPayload) return fromPayload;
     }
   }
@@ -2171,6 +2331,10 @@ function stepIdFromLightStatus(status: string): string {
   return 'understand';
 }
 
+function isApprovalProgressStepId(stepId: string) {
+  return stepId === 'approval' || stepId === 'confirm';
+}
+
 function mergeProgressStep(
   steps: Step[],
   event: UserFacingAgentProgressEvent,
@@ -2185,25 +2349,34 @@ function mergeProgressStep(
           ? 'waiting'
           : 'running';
   const rawLabel = publicText(event.title, event.kind === 'tool' ? '正在处理这一步' : '分析中');
-  const label = publicStepLabel(event.id, rawLabel, intent);
-  const detail = event.detail ? publicStepLabel(event.id, event.detail, intent) : undefined;
+  const processType =
+    typeof event.metadata?.processType === 'string' && event.metadata.processType.trim()
+      ? event.metadata.processType.trim()
+      : undefined;
+  const currentSteps = processType ? steps.filter((step) => step.processType) : steps;
+  const label = processType
+    ? rawLabel
+    : publicStepLabel(event.id, rawLabel, intent);
+  const detail = event.detail ? publicText(event.detail, '') || undefined : undefined;
   const agentName =
     typeof event.metadata?.agentName === 'string' && event.metadata.agentName.trim()
       ? event.metadata.agentName.trim()
       : undefined;
-  const index = steps.findIndex((step) => step.id === event.id);
+  const index = currentSteps.findIndex((step) => step.id === event.id);
   const nextStep: Step = {
     id: event.id,
     label,
     status: nextStatus,
     kind: event.kind,
+    processType,
     agentName,
     detail,
+    metadata: event.metadata,
     snapshot: event.snapshot,
   };
 
   if (index >= 0) {
-    return steps.map((step, itemIndex) =>
+    return currentSteps.map((step, itemIndex) =>
       itemIndex === index
         ? nextStep
         : step.status === 'running' && nextStatus === 'running'
@@ -2213,7 +2386,7 @@ function mergeProgressStep(
   }
 
   return [
-    ...steps.map((step) =>
+    ...currentSteps.map((step) =>
       step.status === 'running' ? { ...step, status: 'success' as const } : step,
     ),
     nextStep,
@@ -2262,6 +2435,7 @@ function publicStepLabel(
   intent: AgentConversationIntent = 'conversation',
 ) {
   const key = `${id} ${label}`.toLowerCase();
+  if (/已(记录|记住|保存|补齐|确认)|已把/.test(label)) return label;
   if (/clarify|补充|关键信息/.test(key)) return '正在确认需要补充的信息';
   if (intent === 'conversation') {
     if (/safe|guard|risk|boundary|安全|边界/.test(key)) return '正在检查必要边界';

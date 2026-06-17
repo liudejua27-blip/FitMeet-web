@@ -66,6 +66,7 @@ export function ChatGPTThread({
       data-density={density}
       data-empty-state={isEmpty ? 'visible' : 'hidden'}
       data-viewport-state={shouldShowViewport ? 'visible' : 'hidden'}
+      data-selection-overlap-policy="avoid-message-text"
     >
       <AssistantSelectionToolbar />
       <AuiIf condition={(state) => state.thread.isEmpty && isEmpty}>
@@ -153,12 +154,16 @@ export function ChatGPTThread({
 function AssistantSelectionToolbar() {
   return (
     <SelectionToolbarPrimitive.Root
-      className="flex items-center gap-1 rounded-xl border border-black/10 bg-white p-1 text-sm text-[#18181b] shadow-lg"
+      className="flex items-center gap-1 rounded-xl border border-black/10 bg-white/95 p-1 text-sm text-[#18181b] shadow-[0_8px_28px_rgba(0,0,0,0.12)] backdrop-blur"
+      style={{ transform: 'translate(-50%, calc(-100% - 14px))' }}
       data-testid="assistant-ui-selection-toolbar"
       role="toolbar"
       aria-label="文本选择操作"
       data-action-count="1"
       data-selection-action="quote"
+      data-overlap-policy="avoid-message-text"
+      data-placement="above-selection"
+      data-offset-y="14"
     >
       <SelectionToolbarPrimitive.Quote
         className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-black/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/15"

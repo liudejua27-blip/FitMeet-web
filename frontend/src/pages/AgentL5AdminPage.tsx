@@ -627,11 +627,54 @@ function ReplayCasePanel({ items }: { items: AgentOnlineReplaySampleDto[] }) {
           </StatusPill>,
           jsonPreview(item.input),
           jsonPreview(item.expectedBehavior),
-          item.lastReplay ? jsonPreview(item.lastReplay) : '未回放',
+          <ReplayRegressionSummary key="regression" lastReplay={item.lastReplay} />,
           formatDate(item.createdAt),
         ])}
       />
     </PanelShell>
+  );
+}
+
+function ReplayRegressionSummary({
+  lastReplay,
+}: {
+  lastReplay: AgentOnlineReplaySampleDto['lastReplay'];
+}) {
+  if (!lastReplay) return <span className="text-[#8f8174]">未回放</span>;
+  const replay = readRecord(lastReplay);
+  const checks = Array.isArray(replay.regressionChecks)
+    ? replay.regressionChecks
+        .map((item) => readReplayRegressionCheck(item))
+        .filter((item): item is ReplayRegressionCheck => Boolean(item))
+    : [];
+  if (!checks.length) return <span>{jsonPreview(lastReplay)}</span>;
+
+  const failed = checks.filter((item) => !item.pass);
+  const visibleChecks = failed.length ? failed.slice(0, 3) : checks.slice(0, 3);
+  return (
+    <div className="grid gap-2" data-testid="social-codex-regression-summary">
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusPill tone={failed.length ? 'danger' : 'good'}>
+          {failed.length ? `${failed.length} failed` : 'all passed'}
+        </StatusPill>
+        <span className="text-xs font-bold text-[#8f8174]">{checks.length} checks</span>
+      </div>
+      <div className="grid gap-1">
+        {visibleChecks.map((item) => (
+          <div className="flex items-start gap-2 text-xs leading-5" key={item.id}>
+            <span
+              className={clsx(
+                'mt-1 h-2 w-2 shrink-0 rounded-full',
+                item.pass ? 'bg-[#c8ff80]' : 'bg-[#ef4444]',
+              )}
+            />
+            <span className="min-w-0 break-words text-[#c9b9a7]">
+              {item.label || item.id}: {item.message || (item.pass ? '通过' : '失败')}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1215,6 +1258,24 @@ function readRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+type ReplayRegressionCheck = {
+  id: string;
+  label: string;
+  pass: boolean;
+  message: string;
+};
+
+function readReplayRegressionCheck(value: unknown): ReplayRegressionCheck | null {
+  const record = readRecord(value);
+  if (!record.id) return null;
+  return {
+    id: String(record.id),
+    label: typeof record.label === 'string' ? record.label : String(record.id),
+    pass: record.pass === true,
+    message: typeof record.message === 'string' ? record.message : '',
+  };
 }
 
 function jsonPreview(value: unknown) {
