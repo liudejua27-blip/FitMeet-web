@@ -13,7 +13,9 @@ import {
   normalizeLifeGraphDiffView,
   normalizeMeetLoopTimelineView,
   normalizeSafetyApprovalView,
+  productComponentForSchemaType,
   schemaTypeFromLegacyCardType,
+  summarizeToolUICardCollection,
   toolUISchemaActionFromUnknown,
   toolUISchemaTypeFromUnknown,
 } from '../components/assistant-ui/tool-ui-schema';
@@ -26,6 +28,66 @@ describe('tool-ui-schema', () => {
     expect(schemaTypeFromLegacyCardType('review_card')).toBe('meet_loop.timeline');
     expect(schemaTypeFromLegacyCardType('safety_boundary')).toBe('safety.approval');
     expect(schemaTypeFromLegacyCardType('unknown')).toBe('generic.card');
+  });
+
+  it('maps stable schemas to product Tool UI components and collection copy', () => {
+    expect(productComponentForSchemaType('social_match.candidate')).toBe('CandidateCards');
+    expect(productComponentForSchemaType('social_match.activity')).toBe('OpportunityCard');
+    expect(productComponentForSchemaType('life_graph.diff')).toBe('LifeGraphDiffCard');
+    expect(productComponentForSchemaType('meet_loop.timeline')).toBe('MeetLoopTimeline');
+    expect(productComponentForSchemaType('safety.approval')).toBe('ApprovalPanel');
+
+    const cards = [
+      normalizeAssistantCard({
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'social_match.candidate',
+        title: '候选机会',
+        data: {
+          schemaName: 'OpportunityCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'social_match.candidate',
+        },
+      }),
+      normalizeAssistantCard({
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'social_match.candidate',
+        title: '候选机会',
+        data: {
+          schemaName: 'OpportunityCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'social_match.candidate',
+        },
+      }),
+      normalizeAssistantCard({
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'social_match.activity',
+        title: '约练卡',
+        data: {
+          schemaName: 'OpportunityCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'social_match.activity',
+        },
+      }),
+      normalizeAssistantCard({
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'safety.approval',
+        title: '安全确认',
+        data: {
+          schemaName: 'SafetyApprovalCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'safety.approval',
+        },
+      }),
+    ];
+
+    expect(summarizeToolUICardCollection(cards)).toMatchObject({
+      title: '2 个候选 · 1 张约练卡 · 1 个确认',
+      candidateCount: 2,
+      opportunityCount: 3,
+      approvalCount: 1,
+      components: ['CandidateCards', 'OpportunityCard', 'ApprovalPanel'],
+    });
+    expect(summarizeToolUICardCollection(cards).detail).toContain('结构化卡片');
   });
 
   it('provides safe default opportunity action paths when backend cards omit actions', () => {

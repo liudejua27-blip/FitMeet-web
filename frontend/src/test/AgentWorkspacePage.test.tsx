@@ -1145,7 +1145,11 @@ describe('AgentWorkspacePage', () => {
     submitPrompt('帮我找青岛周末下午能轻松跑步、先站内聊、接受陌生人的搭子');
 
     expect(await screen.findByTestId('assistant-ui-generative-cards')).toBeInTheDocument();
-    expect(screen.getByText('我找到这些选项')).toBeInTheDocument();
+    expect(screen.getByTestId('assistant-ui-generative-cards')).toHaveAttribute(
+      'data-product-components',
+      expect.stringContaining('CandidateCards'),
+    );
+    expect(screen.getByTestId('assistant-ui-generative-cards')).toHaveTextContent('候选');
     const touchConfirmationNotes = screen.getAllByTestId('assistant-ui-touch-confirmation-note');
     expect(touchConfirmationNotes.length).toBeGreaterThan(1);
     touchConfirmationNotes.forEach((note) => {
@@ -1561,6 +1565,16 @@ describe('AgentWorkspacePage', () => {
     submitPrompt('我想找青岛周末下午一起轻松跑步的新朋友');
 
     expect(await screen.findByTestId('assistant-ui-generative-cards')).toBeInTheDocument();
+    expect(screen.getByTestId('assistant-ui-generative-cards')).toHaveAttribute(
+      'data-product-components',
+      expect.stringContaining('CandidateCards'),
+    );
+    expect(screen.getByTestId('assistant-ui-generative-cards')).toHaveAttribute(
+      'data-product-components',
+      expect.stringContaining('OpportunityCard'),
+    );
+    expect(screen.getByTestId('assistant-ui-generative-cards')).toHaveTextContent('2 个候选');
+    expect(screen.getByTestId('assistant-ui-generative-cards')).toHaveTextContent('1 张约练卡');
     const candidatePath = document.querySelector(
       '[data-testid="assistant-ui-opportunity-path"][data-schema-type="social_match.candidate"]',
     );
@@ -1632,6 +1646,15 @@ describe('AgentWorkspacePage', () => {
     submitPrompt('我想找一个周末一起跑步的人');
 
     expect(await screen.findByTestId('assistant-ui-generative-cards')).toBeInTheDocument();
+    expect(screen.getByTestId('assistant-ui-generative-cards')).toHaveAttribute(
+      'data-product-components',
+      'CandidateCards',
+    );
+    expect(screen.getByTestId('assistant-ui-generative-cards')).toHaveTextContent('3 个候选');
+    expect(screen.getByTestId('assistant-ui-generative-cards')).toHaveAttribute(
+      'data-candidate-count',
+      '3',
+    );
     const schemaCards = screen.getAllByTestId('assistant-ui-schema-card');
     expect(schemaCards).toHaveLength(3);
     expect(schemaCards.map((node) => node.getAttribute('data-schema-type'))).toEqual([
@@ -1640,6 +1663,9 @@ describe('AgentWorkspacePage', () => {
       'social_match.candidate',
     ]);
     expect(screen.getAllByText('推荐对象')).toHaveLength(3);
+    expect(
+      document.querySelectorAll('[data-product-component="CandidateCards"]'),
+    ).toHaveLength(6);
     expect(screen.getByText('和小林低压力认识')).toBeInTheDocument();
     expect(screen.getByText('和阿哲先从公开路线开始')).toBeInTheDocument();
     expect(screen.getByText('和小周先从周末慢跑开始')).toBeInTheDocument();

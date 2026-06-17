@@ -39,6 +39,8 @@ import {
   normalizeLifeGraphDiffView,
   normalizeMeetLoopTimelineView,
   normalizeSafetyApprovalView,
+  productComponentForSchemaType,
+  summarizeToolUICardCollection,
   type SchemaDrivenAssistantCard,
   type ToolUISchemaAction,
   type ToolUISchemaType,
@@ -372,6 +374,7 @@ export function AssistantDataFallback(part: DataMessagePartProps) {
 function FitMeetCardsToolUI({ data, summary }: { data: unknown; summary: ProcessSummary }) {
   const cards = extractCanonicalAssistantCards(data);
   if (cards.length === 0) return <AgentProcessBlock summary={summary} />;
+  const collection = summarizeToolUICardCollection(cards);
 
   return (
     <section
@@ -379,15 +382,21 @@ function FitMeetCardsToolUI({ data, summary }: { data: unknown; summary: Process
       data-testid="assistant-ui-generative-cards"
       aria-label="整理结果"
       data-schema-version="fitmeet.tool-ui.v1"
+      data-product-components={collection.components.join(',')}
+      data-candidate-count={collection.candidateCount}
+      data-opportunity-count={collection.opportunityCount}
+      data-approval-count={collection.approvalCount}
+      data-life-graph-diff-count={collection.lifeGraphDiffCount}
+      data-meet-loop-count={collection.meetLoopCount}
     >
       <div className="flex items-center gap-2 px-1">
         <StatusBadge status={summary.status}>
           <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
         </StatusBadge>
         <div className="min-w-0">
-          <p className="font-medium leading-5 text-[#27272a]">我找到这些选项</p>
+          <p className="font-medium leading-5 text-[#27272a]">{collection.title}</p>
           <p className="text-xs leading-5 text-[#71717a]">
-            涉及真实发送、连接或发布时，我会先等你确认。
+            {collection.detail}
           </p>
         </div>
       </div>
@@ -410,7 +419,10 @@ function FitMeetCardsToolUI({ data, summary }: { data: unknown; summary: Process
 function AssistantCardRenderer({ card }: { card: SchemaDrivenAssistantCard }) {
   const Renderer = ASSISTANT_CARD_RENDERERS[card.schemaType] ?? GenericResultCard;
   return (
-    <div data-renderer={card.schemaType}>
+    <div
+      data-renderer={card.schemaType}
+      data-product-component={productComponentForSchemaType(card.schemaType)}
+    >
       <Renderer card={card} />
     </div>
   );
@@ -431,6 +443,7 @@ function CandidateResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
       className="rounded-2xl bg-white p-3 ring-1 ring-black/5 transition hover:-translate-y-px hover:shadow-sm hover:ring-black/10"
       data-testid="opportunity-card"
       data-card-model="assistant-ui-opportunity-card"
+      data-product-component="CandidateCards"
       data-opportunity-type="person"
       data-has-avatar={String(Boolean(avatarUrl || initials))}
       data-has-distance={String(hasDistance)}
@@ -974,6 +987,7 @@ function ActivityOpportunityCard({ card }: { card: SchemaDrivenAssistantCard }) 
       className="overflow-hidden rounded-2xl bg-white ring-1 ring-black/5 transition hover:-translate-y-px hover:shadow-sm hover:ring-black/10"
       data-testid="activity-opportunity-card"
       data-card-model="assistant-ui-opportunity-card"
+      data-product-component="OpportunityCard"
       data-opportunity-type="activity"
       data-has-image={String(Boolean(imageUrl))}
       data-has-detail={String(hasDetail)}
@@ -1295,6 +1309,8 @@ function LifeGraphDiffCard({ card }: { card: SchemaDrivenAssistantCard }) {
   return (
     <article
       className="rounded-2xl bg-white p-3 ring-1 ring-black/5"
+      data-testid="assistant-ui-life-graph-diff-card"
+      data-product-component="LifeGraphDiffCard"
       data-life-graph-source={diff.source ?? 'unknown'}
     >
       <div className="flex items-start gap-3">
@@ -1476,6 +1492,7 @@ function MeetLoopResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
       className="rounded-2xl bg-white p-3 ring-1 ring-black/5"
       data-testid="assistant-ui-meet-loop-card"
       data-card-model="assistant-ui-meet-loop-timeline"
+      data-product-component="MeetLoopTimeline"
       data-connection-state={timeline.connectionState ?? 'unknown'}
       data-step-count={String(timeline.steps.length)}
       data-current-step-count={String(currentSteps)}
@@ -1719,6 +1736,7 @@ function SafetyResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
       className="rounded-2xl bg-white p-3 ring-1 ring-black/5"
       data-testid="assistant-ui-approval-tool"
       data-card-model="assistant-ui-approval-card"
+      data-product-component="ApprovalPanel"
       data-risk-level={approval.riskLevel ?? 'unknown'}
       data-has-checkpoint={String(Boolean(approval.checkpointLabel))}
     >
@@ -1819,7 +1837,10 @@ function ApprovalGuardrailList({
 function GenericResultCard({ card }: { card: SchemaDrivenAssistantCard }) {
   const view = normalizeGenericCardView(card);
   return (
-    <article className="rounded-2xl bg-white p-3 ring-1 ring-black/5">
+    <article
+      className="rounded-2xl bg-white p-3 ring-1 ring-black/5"
+      data-product-component="GenericCard"
+    >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="font-medium leading-5 text-[#27272a]">{view.title}</p>
         {view.statusLabel ? (

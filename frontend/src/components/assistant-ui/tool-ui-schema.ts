@@ -6,6 +6,14 @@ export type ToolUISchemaType =
   | 'safety.approval'
   | 'generic.card';
 
+export type ToolUIProductComponent =
+  | 'CandidateCards'
+  | 'OpportunityCard'
+  | 'LifeGraphDiffCard'
+  | 'MeetLoopTimeline'
+  | 'ApprovalPanel'
+  | 'GenericCard';
+
 export type ToolUISchemaAction =
   | 'candidate.view_detail'
   | 'candidate.like'
@@ -50,6 +58,18 @@ export type SchemaDrivenAssistantCard = {
   status?: string;
   data: Record<string, unknown>;
   actions: AssistantCardAction[];
+};
+
+export type ToolUICardCollectionSummary = {
+  title: string;
+  detail: string;
+  candidateCount: number;
+  opportunityCount: number;
+  approvalCount: number;
+  lifeGraphDiffCount: number;
+  meetLoopCount: number;
+  genericCount: number;
+  components: ToolUIProductComponent[];
 };
 
 export type CandidateOpportunityView = {
@@ -256,6 +276,68 @@ export function normalizeAssistantCard(
     status: publicString(card.status) ?? undefined,
     data: isRecord(card.data) ? card.data : {},
     actions: normalizeCardActions(card.actions),
+  };
+}
+
+export function productComponentForSchemaType(
+  schemaType: ToolUISchemaType,
+): ToolUIProductComponent {
+  if (schemaType === 'social_match.candidate') return 'CandidateCards';
+  if (schemaType === 'social_match.activity') return 'OpportunityCard';
+  if (schemaType === 'life_graph.diff') return 'LifeGraphDiffCard';
+  if (schemaType === 'meet_loop.timeline') return 'MeetLoopTimeline';
+  if (schemaType === 'safety.approval') return 'ApprovalPanel';
+  return 'GenericCard';
+}
+
+export function summarizeToolUICardCollection(
+  cards: SchemaDrivenAssistantCard[],
+): ToolUICardCollectionSummary {
+  const candidateCount = cards.filter(
+    (card) => card.schemaType === 'social_match.candidate',
+  ).length;
+  const activityCount = cards.filter(
+    (card) => card.schemaType === 'social_match.activity',
+  ).length;
+  const approvalCount = cards.filter((card) => card.schemaType === 'safety.approval').length;
+  const lifeGraphDiffCount = cards.filter(
+    (card) => card.schemaType === 'life_graph.diff',
+  ).length;
+  const meetLoopCount = cards.filter((card) => card.schemaType === 'meet_loop.timeline').length;
+  const genericCount = cards.filter((card) => card.schemaType === 'generic.card').length;
+  const opportunityCount = candidateCount + activityCount;
+  const components = Array.from(
+    new Set(cards.map((card) => productComponentForSchemaType(card.schemaType))),
+  );
+  const titleParts = [
+    candidateCount > 0 ? `${candidateCount} 个候选` : null,
+    activityCount > 0 ? `${activityCount} 张约练卡` : null,
+    meetLoopCount > 0 ? `${meetLoopCount} 个约练进展` : null,
+    lifeGraphDiffCount > 0 ? `${lifeGraphDiffCount} 条画像建议` : null,
+    approvalCount > 0 ? `${approvalCount} 个确认` : null,
+  ].filter(Boolean);
+  const title = titleParts.length > 0 ? titleParts.join(' · ') : '整理结果';
+  const detail =
+    opportunityCount > 0
+      ? '候选、约练和真实动作都按结构化卡片展示；涉及连接、发送或公开时会先确认。'
+      : approvalCount > 0
+        ? '这一步涉及真实动作或隐私边界，确认前不会自动执行。'
+        : lifeGraphDiffCount > 0
+          ? '画像变化会展示依据、冲突和撤回边界，确认后才写入长期记忆。'
+          : meetLoopCount > 0
+            ? '约练进展按发起、等待、改期、确认、评价和画像回写展示。'
+            : '结果已按安全的消息卡片展示。';
+
+  return {
+    title,
+    detail,
+    candidateCount,
+    opportunityCount,
+    approvalCount,
+    lifeGraphDiffCount,
+    meetLoopCount,
+    genericCount,
+    components,
   };
 }
 
