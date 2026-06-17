@@ -63,28 +63,45 @@ export class SocialAgentConversationToolService {
     task: AgentTask,
     input: Record<string, unknown>,
   ): Promise<SocialAgentConversationToolResult> {
-    const agentConnectionId =
-      task.agentConnectionId ?? this.toolInput.number(input.agentConnectionId);
-    if (!agentConnectionId) {
-      throw new BadRequestException('agentConnectionId is required');
-    }
-
     const loop = this.taskMemory.socialLoopMemory(task);
+    const limit = this.toolInput.number(input.limit) ?? 50;
     const conversationId =
       this.toolInput.string(input.conversationId) ?? loop.conversationId;
-    if (!conversationId) {
-      throw new BadRequestException('task memory has no bound conversationId');
+    const agentConnectionId =
+      task.agentConnectionId ?? this.toolInput.number(input.agentConnectionId);
+    const rawMessages =
+      agentConnectionId && conversationId
+        ? await this.messages.getAgentInboxMessages(
+            conversationId,
+            agentConnectionId,
+            { limit },
+          )
+        : task.id
+          ? await this.messages.getTaskConversationMessages(task.id, {
+              conversationId,
+              limit,
+            })
+          : [];
+    const messages = toSocialAgentMessageArray(rawMessages);
+    const effectiveConversationId =
+      conversationId ?? messages.find((message) => message.conversationId)
+        ?.conversationId;
+    if (!effectiveConversationId) {
+      return this.skippedReadResult(
+        task,
+        loop,
+        'task_conversation_unbound',
+        'Task has no agent connection or bound conversation messages.',
+      );
     }
-
-    const messages = toSocialAgentMessageArray(
-      await this.messages.getAgentInboxMessages(
-        conversationId,
-        agentConnectionId,
-        {
-          limit: this.toolInput.number(input.limit) ?? 50,
-        },
-      ),
-    );
+    if (!agentConnectionId && messages.length === 0) {
+      return this.skippedReadResult(
+        task,
+        loop,
+        'task_conversation_not_found',
+        'No task-bound conversation messages were found.',
+      );
+    }
     const cursor =
       this.toolInput.string(input.afterMessageId) ??
       loop.lastReadMessageId ??
@@ -99,13 +116,13 @@ export class SocialAgentConversationToolService {
     if (latest) {
       await this.persistReplyReceivedState({
         task,
-        conversationId,
+        conversationId: effectiveConversationId,
         latest,
         newMessageCount: newMessages.length,
       });
     }
     const output = {
-      conversationId,
+      conversationId: effectiveConversationId,
       cursor,
       newMessageCount: newMessages.length,
       newMessages,
@@ -115,7 +132,7 @@ export class SocialAgentConversationToolService {
     return {
       output,
       loopUpdates: {
-        conversationId,
+        conversationId: effectiveConversationId,
         targetUserId:
           this.toolInput.number(latest?.senderId) ??
           this.toolInput.number(input.targetUserId) ??
@@ -139,7 +156,7 @@ export class SocialAgentConversationToolService {
             input: {
               summary: 'Received counterpart reply for social agent task',
               payload: {
-                conversationId,
+                conversationId: effectiveConversationId,
                 messageId: latest.id,
                 newMessageCount: newMessages.length,
               },
@@ -150,7 +167,7 @@ export class SocialAgentConversationToolService {
         ? {
             eventType: 'social_agent.message.received',
             input: {
-              conversationId,
+              conversationId: effectiveConversationId,
               messageId: latest.id ?? null,
               fromUserId:
                 this.toolInput.number(latest.senderId) ??
@@ -159,7 +176,7 @@ export class SocialAgentConversationToolService {
               contentPreview: this.taskMemory.preview(latest.text),
               metadata: {
                 agentTaskId: task.id,
-                conversationId,
+                conversationId: effectiveConversationId,
                 latestMessage: latest,
                 newMessages,
                 newMessageCount: newMessages.length,
@@ -167,6 +184,34 @@ export class SocialAgentConversationToolService {
             },
           }
         : undefined,
+    };
+  }
+
+  private skippedReadResult(
+    task: AgentTask,
+    loop: SocialAgentLoopMemory,
+    code: string,
+    reason: string,
+  ): SocialAgentConversationToolResult {
+    return {
+      output: {
+        status: 'skipped',
+        code,
+        reason,
+        retryable: false,
+        taskId: task.id,
+        conversationId: loop.conversationId ?? null,
+        cursor: loop.lastReadMessageId ?? loop.lastMessageId ?? null,
+        newMessageCount: 0,
+        newMessages: [],
+        latestMessage: null,
+      },
+      loopUpdates: {
+        latestReceivedMessage: null,
+        latestReceivedMessages: [],
+        sourceTool: SocialAgentToolName.ReadTaskConversationMessages,
+      },
+      receivedMessages: [],
     };
   }
 

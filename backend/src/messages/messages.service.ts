@@ -790,6 +790,55 @@ export class MessagesService {
     }));
   }
 
+  async getTaskConversationMessages(
+    taskId: number,
+    options: { conversationId?: string | null; limit?: number } = {},
+  ) {
+    const limit = this.normalizeLimit(options.limit, 50, 200);
+    const query: Record<string, unknown> = {
+      'metadata.agentTaskId': { $in: [taskId, String(taskId)] },
+    };
+    let conversationId: string | null = null;
+    if (
+      options.conversationId &&
+      Types.ObjectId.isValid(options.conversationId)
+    ) {
+      const oid = this.toConversationObjectId(options.conversationId);
+      query.conversationId = oid;
+      conversationId = options.conversationId;
+    }
+
+    const messages = await this.msgModel
+      .find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean()
+      .exec();
+
+    return messages.reverse().map((message) => ({
+      id: String(message._id),
+      conversationId: conversationId ?? String(message.conversationId),
+      text: this.messageTextForDisplay(message.text),
+      source: message.source ?? 'user',
+      card: message.card ?? null,
+      metadata: message.metadata ?? null,
+      agentConnectionId: message.agentConnectionId ?? null,
+      ownerUserId: message.ownerUserId ?? null,
+      actorUserId: message.actorUserId ?? null,
+      senderType: message.senderType ?? 'user',
+      receiverType: message.receiverType ?? 'user',
+      senderId: message.senderId,
+      senderAgentId: message.senderAgentId ?? null,
+      receiverAgentId: message.receiverAgentId ?? null,
+      isMine: message.senderType === 'agent',
+      createdAt: message.createdAt,
+      time: new Date(message.createdAt as Date | string).toLocaleTimeString(
+        'zh-CN',
+        { hour: '2-digit', minute: '2-digit' },
+      ),
+    }));
+  }
+
   async sendAgentReply(
     conversationId: string,
     agentId: number,

@@ -36,9 +36,23 @@ export function buildSocialAgentRiskGatePayload(input: {
   toolName: SocialAgentToolName;
   policy: SceneRiskPolicyResult;
   mandatoryApproval: boolean;
+  runtimePolicy?: Record<string, unknown> | null;
 }): Record<string, unknown> {
-  const { mandatoryApproval, policy, stepId, task, toolInput, toolName } =
-    input;
+  const {
+    mandatoryApproval,
+    policy,
+    runtimePolicy,
+    stepId,
+    task,
+    toolInput,
+    toolName,
+  } = input;
+  const runtimeSocialCodex = isRecord(runtimePolicy?.socialCodex)
+    ? runtimePolicy.socialCodex
+    : null;
+  const runtimeAudit = isRecord(runtimePolicy?.socialCodexAudit)
+    ? runtimePolicy.socialCodexAudit
+    : null;
   return {
     ...toolInput,
     agentTaskId: task.id,
@@ -49,5 +63,27 @@ export function buildSocialAgentRiskGatePayload(input: {
     requiresDoubleConfirmation: policy.requiresDoubleConfirmation,
     blockedActions: policy.blockedActions,
     mandatoryApproval,
+    ...(runtimeSocialCodex
+      ? {
+          socialCodex: {
+            ...runtimeSocialCodex,
+            executionContract:
+              typeof runtimePolicy?.executionContract === 'string'
+                ? runtimePolicy.executionContract
+                : null,
+          },
+        }
+      : {}),
+    ...(runtimeAudit ? { socialCodexAudit: runtimeAudit } : {}),
+    ...(typeof runtimePolicy?.dryRunRequired === 'boolean'
+      ? { dryRunRequired: runtimePolicy.dryRunRequired }
+      : {}),
+    ...(typeof runtimePolicy?.auditRequired === 'boolean'
+      ? { auditRequired: runtimePolicy.auditRequired }
+      : {}),
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }

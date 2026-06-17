@@ -1,3 +1,5 @@
+import { createHash } from 'crypto';
+
 import { ForbiddenException, Injectable, Optional } from '@nestjs/common';
 
 import { AgentSelfImproveService } from './agent-self-improve.service';
@@ -19,6 +21,7 @@ import {
   SocialAgentToolCallRecord,
   SocialAgentToolName,
 } from './social-agent-tool.types';
+import { SocialCodexRuntimePolicyService } from './social-codex-runtime-policy.service';
 
 @Injectable()
 export class SocialAgentToolExecutionPolicyService {
@@ -28,6 +31,8 @@ export class SocialAgentToolExecutionPolicyService {
     private readonly sceneRisk: SceneRiskPolicyService,
     @Optional()
     private readonly selfImprove?: AgentSelfImproveService,
+    @Optional()
+    private readonly socialCodex?: SocialCodexRuntimePolicyService,
   ) {}
 
   assertToolAllowed(input: {
@@ -120,8 +125,15 @@ export class SocialAgentToolExecutionPolicyService {
       toolName,
       input,
     );
+    const socialCodexDecision = this.socialCodex?.evaluate({
+      toolName,
+      payload: input,
+      userConfirmed: this.hasApprovalCredential(input),
+    });
     const highRisk =
       mandatoryApproval ||
+      socialCodexDecision?.riskLevel === 'high' ||
+      socialCodexDecision?.riskLevel === 'blocked' ||
       toolName === SocialAgentToolName.OfflineMeeting ||
       toolName === SocialAgentToolName.CreateActivity ||
       toolName === SocialAgentToolName.JoinActivity ||
@@ -130,6 +142,13 @@ export class SocialAgentToolExecutionPolicyService {
       toolName === SocialAgentToolName.Payment ||
       sceneRisk.riskLevel === 'high' ||
       sceneRisk.riskLevel === 'critical';
+    const idempotencyKey = this.buildSocialCodexIdempotencyKey({
+      task,
+      toolName,
+      input,
+      scope: socialCodexDecision?.idempotencyKeyScope ?? null,
+      highRisk,
+    });
     return {
       permissionMode: task.permissionMode,
       canonicalPermissionMode: sceneRisk.permissionMode,
@@ -137,15 +156,45 @@ export class SocialAgentToolExecutionPolicyService {
       category: registeredTool?.category ?? null,
       requiresApproval:
         mandatoryApproval ||
+        socialCodexDecision?.requiresApproval === true ||
         sceneRisk.requiresConfirmation ||
         registeredTool?.requiresApproval ||
         false,
+      dryRunRequired: socialCodexDecision?.dryRunRequired === true,
+      auditRequired:
+        socialCodexDecision?.auditRequired === true ||
+        mandatoryApproval ||
+        highRisk,
       mandatoryApproval,
       requiresDoubleConfirmation: sceneRisk.requiresDoubleConfirmation,
       riskLevel: getSocialAgentToolRiskLevelForPolicy(sceneRisk.riskLevel),
       sceneRisk,
       highRisk,
+      socialCodex: socialCodexDecision
+        ? {
+            actionType: socialCodexDecision.actionType,
+            mode: socialCodexDecision.mode,
+            riskLevel: socialCodexDecision.riskLevel,
+            reasons: socialCodexDecision.reasons,
+            requiresApproval: socialCodexDecision.requiresApproval,
+            dryRunRequired: socialCodexDecision.dryRunRequired,
+            auditRequired: socialCodexDecision.auditRequired,
+            sandbox: socialCodexDecision.sandbox,
+            dryRunPreview: socialCodexDecision.dryRunPreview,
+            idempotencyKeyScope: socialCodexDecision.idempotencyKeyScope,
+            idempotencyKey,
+          }
+        : null,
+      socialCodexAudit: socialCodexDecision?.auditRequired
+        ? this.socialCodex?.buildAuditPayload({
+            userId: task.ownerUserId,
+            taskId: task.id,
+            decision: socialCodexDecision,
+            payload: input,
+          }) ?? null
+        : null,
       dailyLimit: limit,
+      idempotencyKey,
       idempotency:
         toolName === SocialAgentToolName.Payment
           ? 'paymentIntentKeys'
@@ -160,12 +209,51 @@ export class SocialAgentToolExecutionPolicyService {
               ? 'sentMessageKeys'
               : null,
       executionContract:
-        toolName === SocialAgentToolName.Payment
-          ? 'create_payment_intent_only'
-          : highRisk
-            ? 'audit_required'
-            : 'mode_gated',
+        socialCodexDecision?.mode === 'blocked'
+          ? 'blocked_by_social_codex_sandbox'
+          : toolName === SocialAgentToolName.Payment
+            ? 'create_payment_intent_only'
+            : socialCodexDecision?.mode === 'approval_required'
+              ? 'approval_required_dry_run_audit'
+              : socialCodexDecision?.mode === 'dry_run'
+                ? 'dry_run_required'
+                : highRisk
+                  ? 'audit_required'
+                  : 'mode_gated',
     };
+  }
+
+  private buildSocialCodexIdempotencyKey(input: {
+    task: AgentTask;
+    toolName: SocialAgentToolName;
+    input: Record<string, unknown>;
+    scope: string | null;
+    highRisk: boolean;
+  }): string | null {
+    if (!input.scope && !input.highRisk) return null;
+    const payloadHash = createHash('sha256')
+      .update(this.stableJson(input.input))
+      .digest('hex')
+      .slice(0, 18);
+    return [
+      input.scope ?? 'social_codex:high_risk',
+      `task:${input.task.id}`,
+      `tool:${input.toolName}`,
+      payloadHash,
+    ].join(':');
+  }
+
+  private stableJson(value: unknown): string {
+    if (Array.isArray(value)) {
+      return `[${value.map((item) => this.stableJson(item)).join(',')}]`;
+    }
+    if (value && typeof value === 'object') {
+      return `{${Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => `${JSON.stringify(key)}:${this.stableJson(item)}`)
+        .join(',')}}`;
+    }
+    return JSON.stringify(value);
   }
 
   async buildPolicyMetadataWithPatches(
@@ -298,6 +386,27 @@ export class SocialAgentToolExecutionPolicyService {
       if (['false', '0', 'no', 'n'].includes(normalized)) return false;
     }
     return undefined;
+  }
+
+  private hasApprovalCredential(input: Record<string, unknown>): boolean {
+    return (
+      this.bool(
+        input.userConfirmed ??
+          input.confirmed ??
+          input.approved ??
+          input.approvalConfirmed,
+      ) === true ||
+      this.hasFiniteNumber(input.approvalId) ||
+      this.hasFiniteNumber(input.approvalRequestId)
+    );
+  }
+
+  private hasFiniteNumber(value: unknown): boolean {
+    if (typeof value === 'number') return Number.isFinite(value);
+    if (typeof value === 'string' && value.trim()) {
+      return Number.isFinite(Number(value));
+    }
+    return false;
   }
 
   private safeUnknownText(value: unknown): string {

@@ -130,6 +130,14 @@ import { SocialAgentChatSessionFacadeService } from './social-agent-chat-session
 import { SocialAgentMessageFeedbackService } from './social-agent-message-feedback.service';
 import { SocialAgentReminderService } from './social-agent-reminder.service';
 import { SocialAgentThreadService } from './social-agent-thread.service';
+import { SocialAgentThreadSessionManager } from './social-agent-thread-session-manager.service';
+import { SocialAgentContextHydratorService } from './social-agent-context-hydrator.service';
+import { SocialAgentTaskMemoryStateMachineService } from './social-agent-task-memory-state-machine.service';
+import { SocialAgentEventV2Service } from './social-agent-event-v2.service';
+import { SocialAgentEventStore } from './social-agent-event-store.service';
+import { SocialCodexRuntimePolicyService } from './social-codex-runtime-policy.service';
+import { SocialCodexLifeGraphGovernanceService } from './social-codex-life-graph-governance.service';
+import { SocialCodexTraceEvalService } from './social-codex-trace-eval.service';
 import { AgentRunCheckpointService } from './agent-run-checkpoint.service';
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
@@ -350,6 +358,14 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentMessageFeedbackService,
     SocialAgentReminderService,
     SocialAgentThreadService,
+    SocialAgentThreadSessionManager,
+    SocialAgentContextHydratorService,
+    SocialAgentTaskMemoryStateMachineService,
+    SocialAgentEventV2Service,
+    SocialAgentEventStore,
+    SocialCodexRuntimePolicyService,
+    SocialCodexLifeGraphGovernanceService,
+    SocialCodexTraceEvalService,
     AgentRunCheckpointService,
     SocialAgentChatService,
     FitMeetAgentRuntimeService,
@@ -458,6 +474,11 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentMessageFeedbackService,
     SocialAgentThreadService,
     AgentRunCheckpointService,
+    SocialAgentEventV2Service,
+    SocialAgentEventStore,
+    SocialCodexRuntimePolicyService,
+    SocialCodexLifeGraphGovernanceService,
+    SocialCodexTraceEvalService,
     SocialAgentTaskLifecycleService,
     SocialAgentMainAgentTurnEventsService,
     SocialAgentMainAgentTurnResultService,

@@ -35,6 +35,7 @@ export interface UserFacingAgentPendingConfirmation {
   actionType: string;
   summary: string;
   riskLevel: string;
+  payload?: Record<string, unknown>;
   expiresAt: string | null;
 }
 

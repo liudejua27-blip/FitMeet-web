@@ -35,9 +35,18 @@ export function buildSocialAgentRiskGateDecision(input: {
   toolInput: Record<string, unknown>;
   stepId: string;
   policy: SceneRiskPolicyResult;
+  runtimePolicy?: Record<string, unknown> | null;
   hasUserApproval: boolean;
 }): SocialAgentRiskGateDecision {
-  const { hasUserApproval, policy, stepId, task, toolInput, toolName } = input;
+  const {
+    hasUserApproval,
+    policy,
+    runtimePolicy,
+    stepId,
+    task,
+    toolInput,
+    toolName,
+  } = input;
   const mandatoryApproval = requiresMandatorySocialAgentApproval(
     toolName,
     toolInput,
@@ -103,6 +112,7 @@ export function buildSocialAgentRiskGateDecision(input: {
         toolName,
         policy: effectivePolicy,
         mandatoryApproval,
+        runtimePolicy,
       }),
       summary: buildSocialAgentToolApprovalSummary(toolName, effectivePolicy),
       riskLevel: getSocialAgentToolApprovalRiskLevel(effectivePolicy.riskLevel),

@@ -143,6 +143,24 @@ export class SocialAgentProfileGateService {
     };
   }
 
+  async getMinimumProfileStatusWithTaskSlots(
+    ownerUserId: number,
+    taskSlots: Record<string, unknown> | null | undefined,
+  ): Promise<SocialAgentMinimumProfileGateStatus> {
+    const status = await this.getMinimumProfileStatus(ownerUserId);
+    const slots = this.readTaskSlotValues(taskSlots);
+    const missing = status.missing.filter((field) => !this.taskSlotsSatisfy(field, slots));
+    const passed = missing.length === 0;
+    return {
+      ...status,
+      passed,
+      missing,
+      assistantMessage: passed ? '' : this.buildQuestion(missing),
+      canEnterMatchPool: passed,
+      nextActions: missing.map((field) => this.missingFieldLabel(field)),
+    };
+  }
+
   async evaluateForSocialExecution(input: {
     ownerUserId: number;
     task: AgentTask;
@@ -154,6 +172,7 @@ export class SocialAgentProfileGateService {
 
     const lifeGraph = await this.readLifeGraph(input.ownerUserId);
     const memory = readSocialAgentTaskMemory(input.task);
+    const taskSlots = this.readTaskSlots(input.task);
     const text = [
       input.task.goal,
       ...memory.lastUserMessages.map((item) => item.text),
@@ -168,6 +187,8 @@ export class SocialAgentProfileGateService {
       !this.hasAny([
         routeEntities.city,
         memory.activeEntities.city,
+        taskSlots.geo_area,
+        taskSlots.location_text,
         this.lifeGraphValue(lifeGraph.fields, 'identity', 'city'),
         this.lifeGraphValue(lifeGraph.fields, 'identity', 'region'),
         this.extractCity(text),
@@ -179,6 +200,7 @@ export class SocialAgentProfileGateService {
       !this.hasAny([
         routeEntities.activityType,
         memory.activeEntities.activityType,
+        taskSlots.activity,
         ...memory.preferences.interests,
         this.lifeGraphValue(
           lifeGraph.fields,
@@ -194,6 +216,7 @@ export class SocialAgentProfileGateService {
       !this.hasAny([
         routeEntities.timePreference,
         memory.activeEntities.timePreference,
+        taskSlots.time_window,
         this.lifeGraphValue(lifeGraph.fields, 'lifestyle', 'availableTimes'),
         this.lifeGraphValue(lifeGraph.fields, 'lifestyle', 'weekendAvailability'),
         this.extractTime(text),
@@ -207,6 +230,7 @@ export class SocialAgentProfileGateService {
         memory.boundaries.noAutoMessage ||
         memory.boundaries.noContactExchange ||
         memory.boundaries.noNightMeet ||
+        this.hasAny([taskSlots.safety_boundary]) ||
         this.hasAny([
           this.lifeGraphValue(
             lifeGraph.fields,
@@ -224,7 +248,10 @@ export class SocialAgentProfileGateService {
     ) {
       missing.push('boundary');
     }
-    if (memory.boundaries.publicActivityAllowed === null) {
+    if (
+      memory.boundaries.publicActivityAllowed === null &&
+      !this.hasPublicAuthorizationSlot(taskSlots.visibility)
+    ) {
       missing.push('publicAuthorization');
     }
 
@@ -326,6 +353,49 @@ export class SocialAgentProfileGateService {
       if (Array.isArray(value)) return value.length > 0;
       return cleanDisplayText(value, '') !== '';
     });
+  }
+
+  private readTaskSlots(task: AgentTask): Record<string, string> {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const rawSlots = this.isRecord(memory.taskSlots) ? memory.taskSlots : {};
+    return this.readTaskSlotValues(rawSlots);
+  }
+
+  private readTaskSlotValues(taskSlots: unknown): Record<string, string> {
+    const rawSlots = this.isRecord(taskSlots) ? taskSlots : {};
+    const out: Record<string, string> = {};
+    for (const [key, raw] of Object.entries(rawSlots)) {
+      if (!this.isRecord(raw)) continue;
+      const value = cleanDisplayText(raw.value, '').trim();
+      if (!value) continue;
+      out[key] = value;
+    }
+    return out;
+  }
+
+  private taskSlotsSatisfy(
+    field: SocialAgentProfileGateMissingField,
+    taskSlots: Record<string, string>,
+  ) {
+    if (field === 'city') {
+      return this.hasAny([taskSlots.geo_area, taskSlots.location_text]);
+    }
+    if (field === 'activity') return this.hasAny([taskSlots.activity]);
+    if (field === 'availability') return this.hasAny([taskSlots.time_window]);
+    if (field === 'boundary') return this.hasAny([taskSlots.safety_boundary]);
+    if (field === 'publicAuthorization') {
+      return this.hasPublicAuthorizationSlot(taskSlots.visibility);
+    }
+    return false;
+  }
+
+  private hasPublicAuthorizationSlot(value: unknown) {
+    const text = cleanDisplayText(value, '');
+    return /(公开|不公开|暂不公开|发现)/.test(text);
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
   }
 
   private extractCity(text: string) {

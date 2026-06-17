@@ -1,6 +1,7 @@
 import { AgentTaskPermissionMode } from './entities/agent-task.entity';
 import { cleanDisplayText } from '../common/display-text.util';
 import type { UserFacingResponseSanitizerService } from './response-quality/user-facing-response-sanitizer.service';
+import type { SocialAgentEventV2 } from './social-agent-event-v2.types';
 
 const DEFAULT_STREAM_ERROR_MESSAGE =
   'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。';
@@ -10,6 +11,7 @@ const TECHNICAL_ERROR_PATTERN =
   /\b(traceId|agentTrace|structuredIntent|planner|tool\s*call|toolCall|toolCalls|DeepSeek|OpenAI|SDK|database|QueryFailedError|TypeError|ReferenceError|stack|stack trace|UnhandledPromiseRejection)\b|工具调用|数据库字段|错误堆栈/i;
 
 export type UserFacingStreamEvent =
+  | SocialAgentEventV2
   | {
       type: 'status';
       lightStatus: string;

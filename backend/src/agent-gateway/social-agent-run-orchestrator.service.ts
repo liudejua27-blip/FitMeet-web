@@ -15,6 +15,7 @@ import {
 import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
 import { SocialAgentRunRecommendationService } from './social-agent-run-recommendation.service';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
+import { parseSocialAgentThreadTaskId } from './social-agent-thread-id.util';
 import type {
   SocialAgentChatRunBody,
   SocialAgentChatRunResult,
@@ -63,12 +64,15 @@ export class SocialAgentRunOrchestratorService {
       permissionMode,
     });
 
-    let task = await this.taskLifecycle.createOrReuseTask({
+    let task = await this.taskLifecycle.ensureConversationTask(
       ownerUserId,
+      body.taskId ?? this.number(body.clientContext?.threadId),
       goal,
-      permissionMode,
-      idempotencyKey: idempotencyKey || null,
-    });
+      idempotencyKey || null,
+      body.clientContext?.threadId ?? null,
+    );
+    task.permissionMode = permissionMode;
+    if (!cleanDisplayText(task.goal, '').trim()) task.goal = goal;
     await this.fitMeetRuntime?.attachTask(runtimeRun?.id, task.id);
     this.realtime?.emitAgentEvent(ownerUserId, 'agent:thinking', {
       taskId: task.id,
@@ -220,5 +224,9 @@ export class SocialAgentRunOrchestratorService {
     return mode && Object.values(AgentTaskPermissionMode).includes(mode)
       ? mode
       : AgentTaskPermissionMode.Confirm;
+  }
+
+  private number(value: unknown): number | null {
+    return parseSocialAgentThreadTaskId(value);
   }
 }

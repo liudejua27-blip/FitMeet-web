@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 
 import {
   cleanDisplayText,
@@ -19,6 +19,7 @@ import {
   AgentTaskRiskLevel,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
+import { parseSocialAgentThreadTaskId } from './social-agent-thread-id.util';
 import { inferSocialAgentThreadTitle } from './social-agent-thread-title.util';
 
 @Injectable()
@@ -39,7 +40,11 @@ export class SocialAgentTaskLifecycleService {
     goal: string;
     permissionMode: AgentTaskPermissionMode;
     idempotencyKey: string | null;
+    taskId?: number | null;
   }): Promise<AgentTask> {
+    if (input.taskId) {
+      return this.assertTaskOwner(input.taskId, input.ownerUserId);
+    }
     if (input.idempotencyKey) {
       const existing = await this.taskRepo.findOne({
         where: {
@@ -88,8 +93,11 @@ export class SocialAgentTaskLifecycleService {
     taskId: number | null,
     message: string,
     idempotencyKeyInput?: string | null,
+    threadIdInput?: string | number | null,
   ): Promise<AgentTask> {
     if (taskId) return this.assertTaskOwner(taskId, ownerUserId);
+    const threadId = this.positiveInt(threadIdInput);
+    if (threadId) return this.assertTaskOwner(threadId, ownerUserId);
     const agent = await this.resolveAgentConnection(ownerUserId, null);
     const idempotencyKey =
       cleanDisplayText(idempotencyKeyInput, '').trim() ||
@@ -100,6 +108,23 @@ export class SocialAgentTaskLifecycleService {
       where: { ownerUserId, idempotencyKey },
     });
     if (existing) return existing;
+    const activeThread = await this.taskRepo.findOne({
+      where: {
+        ownerUserId,
+        taskType: 'social_agent_chat',
+        status: In([
+          AgentTaskStatus.Pending,
+          AgentTaskStatus.Planning,
+          AgentTaskStatus.AwaitingConfirmation,
+          AgentTaskStatus.Executing,
+          AgentTaskStatus.WaitingResult,
+          AgentTaskStatus.WaitingReply,
+          AgentTaskStatus.AwaitingFeedback,
+        ]),
+      },
+      order: { updatedAt: 'DESC' },
+    });
+    if (activeThread) return activeThread;
     const task = await this.taskRepo.save(
       this.taskRepo.create({
         ownerUserId,
@@ -202,5 +227,9 @@ export class SocialAgentTaskLifecycleService {
     const text = cleanDisplayText(value, '');
     if (text.length <= max) return text;
     return `${text.slice(0, Math.max(0, max - 1))}…`;
+  }
+
+  private positiveInt(value: unknown): number | null {
+    return parseSocialAgentThreadTaskId(value);
   }
 }

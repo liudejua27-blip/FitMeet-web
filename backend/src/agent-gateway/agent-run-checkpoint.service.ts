@@ -2,18 +2,27 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { cleanDisplayText } from '../common/display-text.util';
+import {
+  cleanDisplayText,
+  sanitizeForDisplay,
+} from '../common/display-text.util';
 import { AgentApprovalRequest } from './entities/agent-approval-request.entity';
 import {
   AgentRunCheckpoint,
   AgentRunCheckpointStatus,
   AgentRunCheckpointType,
 } from './entities/agent-run-checkpoint.entity';
-import { AgentTask, AgentTaskEvent } from './entities/agent-task.entity';
+import {
+  AgentTask,
+  AgentTaskEvent,
+  AgentTaskEventActor,
+  AgentTaskEventType,
+} from './entities/agent-task.entity';
 import type {
   SocialAgentChatRunResult,
   SocialAgentVisibleStep,
 } from './social-agent-chat.types';
+import type { SocialAgentEventV2 } from './social-agent-event-v2.types';
 
 export type AgentRunCheckpointAction = 'resume' | 'retry' | 'replay' | 'fork';
 
@@ -283,6 +292,7 @@ export class AgentRunCheckpointService {
       },
     };
     const saved = await this.repo.save(checkpoint);
+    await this.appendApprovalResolvedEvent(saved, approval, decision);
     return this.toResumePlan(saved, 'resume');
   }
 
@@ -521,6 +531,81 @@ export class AgentRunCheckpointService {
       toolCallId: event.toolCallId,
       createdAt: event.createdAt.toISOString(),
     }));
+  }
+
+  private async appendApprovalResolvedEvent(
+    checkpoint: AgentRunCheckpoint,
+    approval: AgentApprovalRequest,
+    decision: 'approved' | 'rejected',
+  ): Promise<void> {
+    const runId = checkpoint.runId || `approval:${approval.id}`;
+    const latest = await this.latestEvents(checkpoint.agentTaskId);
+    const latestSeq = latest
+      .map((event) => this.socialCodexEventFromEventPayload(event.payload))
+      .filter((event): event is SocialAgentEventV2 =>
+        Boolean(event && event.runId === runId),
+      )
+      .reduce((max, event) => Math.max(max, event.seq), 0);
+    const seq = latestSeq + 1;
+    const resolved: SocialAgentEventV2 = {
+      type: 'approval.resolved',
+      eventId: `${runId}:${seq}`,
+      seq,
+      createdAt: new Date().toISOString(),
+      userId: String(approval.userId),
+      threadId: this.threadIdForTask(checkpoint.agentTaskId),
+      taskId: checkpoint.agentTaskId,
+      runId,
+      stage: 'approval',
+      visibility: 'user_visible',
+      display: {
+        title: decision === 'approved' ? '已确认这一步' : '已取消这一步',
+        detail:
+          decision === 'approved'
+            ? '我会从同一个任务继续处理，不会重新询问已确认的信息。'
+            : '已取消这次高风险动作，我不会执行发送、连接或发布。',
+        state: 'done',
+      },
+      payload: {
+        approvalId: approval.id,
+        decision,
+        actionType: approval.actionType ?? null,
+        riskLevel: approval.riskLevel ?? null,
+        checkpointId: checkpoint.id,
+        resumeCursor: {
+          threadId: this.threadIdForTask(checkpoint.agentTaskId),
+          checkpointId: checkpoint.id,
+          action: 'resume',
+          stepId: checkpoint.stepId ?? null,
+        },
+      },
+    };
+    await this.eventRepo.save(
+      this.eventRepo.create({
+        taskId: checkpoint.agentTaskId,
+        ownerUserId: approval.userId,
+        eventType: AgentTaskEventType.ConfirmationReceived,
+        actor: AgentTaskEventActor.User,
+        summary: resolved.display?.title ?? '审批已处理',
+        payload: sanitizeForDisplay({
+          socialAgentEventV2: resolved,
+        }) as Record<string, unknown>,
+        stepId: checkpoint.stepId ?? null,
+      }),
+    );
+  }
+
+  private socialCodexEventFromEventPayload(
+    payload: unknown,
+  ): SocialAgentEventV2 | null {
+    const root = this.recordOrEmpty(payload);
+    const event = root.socialAgentEventV2;
+    const record = this.recordOrEmpty(event);
+    return typeof record.type === 'string' &&
+      typeof record.runId === 'string' &&
+      typeof record.seq === 'number'
+      ? (record as unknown as SocialAgentEventV2)
+      : null;
   }
 
   private approvalIdsFromResult(result: SocialAgentChatRunResult): number[] {

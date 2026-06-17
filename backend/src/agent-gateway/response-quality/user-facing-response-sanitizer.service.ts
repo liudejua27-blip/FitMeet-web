@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
+import { sanitizeForDisplay } from '../../common/display-text.util';
 import { AgentTaskPermissionMode } from '../entities/agent-task.entity';
 import type { LifeGraphProposalDto } from '../../life-graph/dto/life-graph.dto';
 import type {
@@ -20,6 +21,7 @@ type PendingApprovalLike = {
   actionType: string;
   summary: string;
   riskLevel: string;
+  payload?: Record<string, unknown>;
   expiresAt: string | null;
 };
 
@@ -377,6 +379,14 @@ export class UserFacingResponseSanitizerService {
       actionType: approval.actionType,
       summary: approval.summary,
       riskLevel: approval.riskLevel,
+      ...(this.isRecord(approval.payload)
+        ? {
+            payload: sanitizeForDisplay(approval.payload) as Record<
+              string,
+              unknown
+            >,
+          }
+        : {}),
       expiresAt: approval.expiresAt,
     };
   }
@@ -402,6 +412,14 @@ export class UserFacingResponseSanitizerService {
         action.riskLevel,
         this.readText(action.risk, 'medium'),
       ),
+      ...(this.isRecord(action.payload)
+        ? {
+            payload: sanitizeForDisplay(action.payload) as Record<
+              string,
+              unknown
+            >,
+          }
+        : {}),
       expiresAt: typeof action.expiresAt === 'string' ? action.expiresAt : null,
     };
   }

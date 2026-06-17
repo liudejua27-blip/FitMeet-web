@@ -34,7 +34,10 @@ import {
 import { AgentWebhookService } from './agent-webhook.service';
 import { RealtimeEventService } from '../realtime/realtime-event.service';
 import { clearSocialAgentPendingAction } from './social-agent-memory.util';
-import { sanitizeForDisplay } from '../common/display-text.util';
+import {
+  cleanDisplayText,
+  sanitizeForDisplay,
+} from '../common/display-text.util';
 
 /**
  * Approval lifecycle helpers + risk classifier.
@@ -580,6 +583,7 @@ export class AgentApprovalService {
     const ttl = input.ttlMs ?? 24 * 60 * 60 * 1000;
     const payloadAgentTaskId = numberOrNull(input.payload.agentTaskId);
     const agentTaskId = input.agentTaskId ?? payloadAgentTaskId;
+    const payload = this.withSocialCodexApprovalPayload(input, agentTaskId);
     const saved = await this.repo.save(
       this.repo.create({
         userId: input.userId,
@@ -588,9 +592,7 @@ export class AgentApprovalService {
         type: input.type,
         actionType: input.actionType ?? input.type,
         skillName: input.skillName ?? input.type,
-        payload: agentTaskId
-          ? { ...input.payload, agentTaskId }
-          : input.payload,
+        payload,
         summary: input.summary,
         reason: input.reason ?? input.rationale ?? '',
         createdBy: input.createdBy ?? 'agent',
@@ -631,6 +633,165 @@ export class AgentApprovalService {
       },
     });
     return saved;
+  }
+
+  private withSocialCodexApprovalPayload(
+    input: {
+      type: ApprovalType;
+      actionType?: string;
+      skillName?: string;
+      payload: Record<string, unknown>;
+      summary: string;
+      riskLevel: ApprovalRiskLevel;
+      reason?: string;
+      rationale?: string;
+    },
+    agentTaskId: number | null | undefined,
+  ): Record<string, unknown> {
+    const actionType = input.actionType ?? input.type;
+    const idempotencyKey =
+      stringOrNull(input.payload.idempotencyKey) ??
+      stringOrNull(input.payload.resumeIdempotencyKey) ??
+      this.approvalIdempotencyKey(input, agentTaskId);
+    const dryRunPreview = this.buildDryRunPreview({
+      type: input.type,
+      actionType,
+      skillName: input.skillName ?? actionType,
+      payload: input.payload,
+      summary: input.summary,
+      riskLevel: input.riskLevel,
+      idempotencyKey,
+    });
+    return sanitizeForDisplay({
+      ...input.payload,
+      ...(agentTaskId ? { agentTaskId } : {}),
+      idempotencyKey,
+      dryRunPreview,
+      socialCodex: {
+        ...(isRecord(input.payload.socialCodex)
+          ? input.payload.socialCodex
+          : {}),
+        approvalPolicy: {
+          required: true,
+          lifecycleNode: 'approval',
+          sideEffectsBeforeApproval: 'none',
+          resumeAfterDecision: true,
+          auditRequired: true,
+        },
+        dryRunPreview,
+        safetyBoundary: {
+          noContactBeforeApproval: true,
+          noPreciseLocationRevealBeforeApproval: true,
+          noExternalContactExchangeBeforeApproval: true,
+        },
+        reason: input.reason ?? input.rationale ?? null,
+      },
+    }) as Record<string, unknown>;
+  }
+
+  private buildDryRunPreview(input: {
+    type: ApprovalType;
+    actionType: string;
+    skillName: string;
+    payload: Record<string, unknown>;
+    summary: string;
+    riskLevel: ApprovalRiskLevel;
+    idempotencyKey: string;
+  }) {
+    const visibleContent =
+      stringOrNull(input.payload.message) ??
+      stringOrNull(input.payload.text) ??
+      stringOrNull(input.payload.title) ??
+      stringOrNull(input.payload.summary) ??
+      null;
+    return {
+      schemaVersion: 'fitmeet.social_codex.approval_preview.v1',
+      title: this.previewTitle(input.type, input.actionType),
+      summary: input.summary,
+      actionType: input.actionType,
+      skillName: input.skillName,
+      riskLevel: input.riskLevel,
+      visibleToOtherUser: this.otherUserVisibility(input.type),
+      sideEffectBoundary: '确认前不会执行、不会触达对方、不会公开内容。',
+      dataBoundary: this.dataBoundary(input.type, input.actionType),
+      idempotencyKey: input.idempotencyKey,
+      ...(visibleContent ? { contentPreview: visibleContent.slice(0, 300) } : {}),
+    };
+  }
+
+  private previewTitle(type: ApprovalType, actionType: string): string {
+    if (type === ApprovalType.PostPublish || /publish/i.test(actionType)) {
+      return '发布到发现前预览';
+    }
+    if (
+      type === ApprovalType.SendMessage ||
+      type === ApprovalType.FirstMessage ||
+      /message|invite/i.test(actionType)
+    ) {
+      return '发送前预览';
+    }
+    if (type === ApprovalType.ContactRequest || /connect|friend/i.test(actionType)) {
+      return '连接候选人前预览';
+    }
+    if (type === ApprovalType.ShareLocation) return '公开位置前预览';
+    if (type === ApprovalType.Payment) return '支付前预览';
+    return '执行前预览';
+  }
+
+  private otherUserVisibility(type: ApprovalType): string {
+    switch (type) {
+      case ApprovalType.SendMessage:
+      case ApprovalType.FirstMessage:
+      case ApprovalType.ContactRequest:
+      case ApprovalType.ContactExchange:
+      case ApprovalType.JoinActivity:
+        return '确认后对方会看到这次联系或邀请。';
+      case ApprovalType.PostPublish:
+      case ApprovalType.CreateActivity:
+        return '确认后公开可发现用户可能看到这张卡片。';
+      case ApprovalType.ShareLocation:
+        return '确认后会公开你允许展示的位置范围。';
+      default:
+        return '确认后才会执行这一步。';
+    }
+  }
+
+  private dataBoundary(type: ApprovalType, actionType: string): string {
+    if (type === ApprovalType.ShareLocation || /location/i.test(actionType)) {
+      return '默认只使用地点范围；精确位置必须再次确认。';
+    }
+    if (
+      type === ApprovalType.ContactExchange ||
+      /contact|wechat|phone/i.test(actionType)
+    ) {
+      return '不会在确认前交换手机号、微信或外部联系方式。';
+    }
+    if (type === ApprovalType.PostPublish || /publish/i.test(actionType)) {
+      return '会过滤联系方式、精确住址和敏感画像字段。';
+    }
+    return '只使用当前任务必要信息，并写入审计日志。';
+  }
+
+  private approvalIdempotencyKey(
+    input: {
+      type: ApprovalType;
+      actionType?: string;
+      payload: Record<string, unknown>;
+    },
+    agentTaskId: number | null | undefined,
+  ): string {
+    const target =
+      stringOrNull(input.payload.targetUserId) ??
+      stringOrNull(input.payload.candidateUserId) ??
+      stringOrNull(input.payload.activityId) ??
+      stringOrNull(input.payload.socialRequestId) ??
+      'target';
+    return [
+      'approval',
+      agentTaskId ?? 'task',
+      input.actionType ?? input.type,
+      target,
+    ].join(':');
   }
 
   async getPending(userId: number) {
@@ -1015,6 +1176,15 @@ function numberOrNull(value: unknown): number | null {
     if (Number.isFinite(parsed)) return parsed;
   }
   return null;
+}
+
+function stringOrNull(value: unknown): string | null {
+  const text = cleanDisplayText(value, '').trim();
+  return text || null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 interface AgentConnectionLike {

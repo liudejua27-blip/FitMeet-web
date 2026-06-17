@@ -110,8 +110,8 @@ export class SocialAgentActionSideEffectService {
         permissionMode: input.task.permissionMode,
         policy: input.policy,
         userId: input.task.ownerUserId,
-        input: input.input,
-        output: input.call.output,
+        input: this.redactForAudit(input.input),
+        output: this.redactForAudit(input.call.output),
         error: input.call.error,
       },
       reason: this.string(input.call.error?.message) ?? null,
@@ -153,10 +153,11 @@ export class SocialAgentActionSideEffectService {
       userId: input.task.ownerUserId,
       agentTaskId: input.task.id,
       toolName: input.toolName,
-      inputSummary: getSocialAgentToolInputSummary(input.toolName, input.input),
-      outputSummary: getSocialAgentToolOutputSummary(
-        input.toolName,
-        input.call,
+      inputSummary: this.redactSummaryForAudit(
+        getSocialAgentToolInputSummary(input.toolName, input.input),
+      ),
+      outputSummary: this.redactSummaryForAudit(
+        getSocialAgentToolOutputSummary(input.toolName, input.call),
       ),
       riskLevel: scenePolicy
         ? input.policy.mandatoryApproval === true
@@ -233,7 +234,7 @@ export class SocialAgentActionSideEffectService {
         permissionMode: input.task.permissionMode,
         policy: input.policy,
         status: input.call.status,
-        output: input.call.output,
+        output: this.redactForAudit(input.call.output),
         error: input.call.error,
       },
     });
@@ -344,5 +345,50 @@ export class SocialAgentActionSideEffectService {
 
   private isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  private redactForAudit(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.redactForAudit(item));
+    }
+    if (!this.isRecord(value)) {
+      return this.redactPrimitiveForAudit('', value);
+    }
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      out[key] = this.redactPrimitiveForAudit(key, this.redactForAudit(item));
+    }
+    return out;
+  }
+
+  private redactPrimitiveForAudit(key: string, value: unknown): unknown {
+    const normalizedKey = key.toLowerCase();
+    if (
+      normalizedKey === 'lat' ||
+      normalizedKey === 'lng' ||
+      normalizedKey === 'longitude' ||
+      normalizedKey === 'latitude' ||
+      /phone|mobile|wechat|weixin|contact|email|address|exactlocation|preciselocation/.test(
+        normalizedKey,
+      )
+    ) {
+      return '[redacted]';
+    }
+    if (typeof value !== 'string') return value;
+    if (
+      /1[3-9]\d{9}/.test(value) ||
+      /微信|wechat|weixin|手机号|电话|联系方式|精确定位|实时定位|宿舍|门牌|房间|楼栋/i.test(
+        value,
+      ) ||
+      /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(value)
+    ) {
+      return '[redacted]';
+    }
+    return value;
+  }
+
+  private redactSummaryForAudit(value: string): string {
+    const redacted = this.redactPrimitiveForAudit('', value);
+    return typeof redacted === 'string' ? redacted : '[redacted]';
   }
 }

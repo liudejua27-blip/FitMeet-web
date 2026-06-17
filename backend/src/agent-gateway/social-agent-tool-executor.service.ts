@@ -369,14 +369,34 @@ export class SocialAgentToolExecutorService {
     calls.push(readCall);
 
     const newMessages = toSocialAgentMessageArray(readCall.output?.newMessages);
+    const readOutput = this.toolInput.isRecord(readCall.output)
+      ? readCall.output
+      : {};
+    const readSkippedCode =
+      this.toolInput.string(readOutput.code) ??
+      this.toolInput.string(readOutput.status);
+    const readRetryable =
+      typeof readOutput.retryable === 'boolean'
+        ? readOutput.retryable
+        : null;
     if (readCall.status !== 'succeeded' || newMessages.length === 0) {
-      this.applyRunNextTaskState(
-        task,
-        socialAgentRunNextReadReplyState({
-          readCallStatus: readCall.status,
-          newMessageCount: newMessages.length,
-        }),
-      );
+      const nextState = socialAgentRunNextReadReplyState({
+        readCallStatus: readCall.status,
+        newMessageCount: newMessages.length,
+        skippedCode: readSkippedCode,
+        retryable: readRetryable,
+      });
+      this.applyRunNextTaskState(task, nextState);
+      if (nextState.status === AgentTaskStatus.Failed) {
+        task.error = {
+          code: readSkippedCode ?? 'read_reply_skipped',
+          message:
+            this.toolInput.string(readOutput.reason) ??
+            'Reply read step was skipped safely and will not be retried.',
+          retryable: false,
+        };
+        task.completedAt = new Date();
+      }
       rememberSocialAgentShortTerm(task, {});
       await this.taskRepo.save(task);
       return this.runNextResult(task, calls, false, null);
@@ -1241,6 +1261,35 @@ export class SocialAgentToolExecutorService {
       this.toolInput.safeUnknownText(executionInput),
       240,
     );
+    const socialCodexBlocked = this.buildSocialCodexBlockedCall({
+      callId,
+      executionInput,
+      policy,
+      reliability,
+      startedAt,
+      stepId,
+      toolName,
+    });
+    if (socialCodexBlocked) {
+      await this.recordActionSideEffects(
+        task,
+        toolName,
+        executionInput,
+        socialCodexBlocked,
+      );
+      await this.createTaskEvent(
+        task,
+        AgentTaskEventType.ToolFailed,
+        buildSocialAgentToolFailedEvent({
+          toolName,
+          stepId,
+          toolCallId: callId,
+          inputSummary,
+          call: socialCodexBlocked,
+        }),
+      );
+      return socialCodexBlocked;
+    }
 
     try {
       await this.confirmationPolicy.validateDangerousAdhocActionTarget(
@@ -1255,6 +1304,7 @@ export class SocialAgentToolExecutorService {
         executionInput,
         stepId,
         policy.sceneRisk as SceneRiskPolicyResult,
+        policy,
       );
       if (gatedOutput) {
         const call = this.toolCallFactory.buildToolCall({
@@ -1393,6 +1443,55 @@ export class SocialAgentToolExecutorService {
     }
   }
 
+  private buildSocialCodexBlockedCall(input: {
+    callId: string;
+    executionInput: Record<string, unknown>;
+    policy: Record<string, unknown>;
+    reliability: ToolReliabilityContract;
+    startedAt: Date;
+    stepId: string;
+    toolName: SocialAgentToolName;
+  }): SocialAgentToolCallRecord | null {
+    const socialCodex = this.toolInput.asRecord(input.policy.socialCodex);
+    const mode = this.toolInput.string(socialCodex.mode);
+    const executionContract = this.toolInput.string(
+      input.policy.executionContract,
+    );
+    if (
+      mode !== 'blocked' &&
+      executionContract !== 'blocked_by_social_codex_sandbox'
+    ) {
+      return null;
+    }
+
+    const reasons = this.toolInput.stringArray(socialCodex.reasons);
+    const message =
+      reasons[0] ??
+      'Social Codex sandbox blocked this action before any real side effect.';
+    return this.toolCallFactory.buildToolCall({
+      id: input.callId,
+      stepId: input.stepId,
+      toolName: input.toolName,
+      status: 'blocked',
+      input: input.executionInput,
+      output: null,
+      error: {
+        code: 'SOCIAL_CODEX_SANDBOX_BLOCKED',
+        message,
+        retryable: false,
+        userMessage:
+          '这一步涉及联系方式、精确位置或社交安全边界，我没有执行。请先修改内容或通过安全确认流程继续。',
+        reasons,
+        executionContract,
+        socialCodexMode: mode,
+        idempotencyKey: input.reliability.idempotencyKey,
+        highRisk: true,
+        compensationStatus: 'not_needed',
+      },
+      startedAt: input.startedAt,
+    });
+  }
+
   private async dispatchTool(
     task: AgentTask,
     toolName: SocialAgentToolName,
@@ -1503,6 +1602,7 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     stepId: string,
     policy: SceneRiskPolicyResult,
+    runtimePolicy?: Record<string, unknown> | null,
   ): Promise<Record<string, unknown> | null> {
     if (this.isDraftOnlySocialRequestTool(toolName, input)) return null;
 
@@ -1512,6 +1612,7 @@ export class SocialAgentToolExecutorService {
       toolInput: input,
       stepId,
       policy,
+      runtimePolicy,
       hasUserApproval:
         this.confirmationPolicy.hasExplicitApprovalCredential(input),
     });

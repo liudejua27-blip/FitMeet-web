@@ -154,6 +154,7 @@ function resolveFields(input: {
   const entities = input.route.entities;
   const text = cleanDisplayText(input.message, '');
   const currentGoal = cleanDisplayText(memory.currentGoal, '');
+  const taskSlots = readTaskSlotValues(input.task);
   const historyText = [
     currentGoal,
     ...memory.lastUserMessages.map((turn) => turn.text),
@@ -168,20 +169,24 @@ function resolveFields(input: {
     city:
       cleanDisplayText(entities.city, '') ||
       cleanDisplayText(memory.activeEntities.city, '') ||
+      taskSlots.geo_area ||
       extractCity(combined),
     time:
       cleanDisplayText(entities.timePreference, '') ||
       cleanDisplayText(memory.activeEntities.timePreference, '') ||
+      taskSlots.time_window ||
       extractTime(combined),
     location:
       cleanDisplayText(entities.locationPreference, '') ||
       cleanDisplayText(memory.activeEntities.locationPreference, '') ||
+      taskSlots.location_text ||
       extractLocation(combined),
     activity:
       cleanDisplayText(entities.activityType, '') ||
       cleanDisplayText(memory.activeEntities.activityType, '') ||
+      taskSlots.activity ||
       extractActivity(combined),
-    intensity: extractIntensity(combined),
+    intensity: taskSlots.intensity || extractIntensity(combined),
     relationshipGoal,
     candidatePreference: candidatePreferenceSummary(
       combined,
@@ -191,10 +196,57 @@ function resolveFields(input: {
     boundary:
       hasCommunicationBoundary(boundaries, combined) || boundaries.noAutoMessage
         ? boundarySummary(boundaries, combined)
-        : '',
+        : taskSlots.safety_boundary
+          ? taskSlots.safety_boundary
+          : '',
     strangerPolicy: strangerPolicySummary(boundaries, combined),
-    publicActivity: publicActivitySummary(boundaries, combined),
+    publicActivity:
+      publicActivityFromSlot(taskSlots.visibility) ||
+      publicActivitySummary(boundaries, combined),
   };
+}
+
+function readTaskSlotValues(task: AgentTask): Record<string, string> {
+  const memory = isRecord(task.memory) ? task.memory : {};
+  const taskSlots = isRecord(memory.taskSlots) ? memory.taskSlots : {};
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(taskSlots)) {
+    if (!isRecord(value)) continue;
+    if (!isTaskSlotUsableForClarification(key, value)) continue;
+    const text = cleanDisplayText(value.value, '');
+    if (text) out[key] = text;
+  }
+  return out;
+}
+
+function isTaskSlotUsableForClarification(
+  key: string,
+  slot: Record<string, unknown>,
+): boolean {
+  const state = cleanDisplayText(slot.state, '');
+  const source = cleanDisplayText(slot.source, '');
+  if (state === 'missing') return false;
+  if (key === 'geo_area') return Boolean(slot.value);
+  if (
+    key === 'activity' ||
+    key === 'time_window' ||
+    key === 'location_text'
+  ) {
+    if (source === 'inferred' || state === 'inferred') return false;
+  }
+  return Boolean(slot.value);
+}
+
+function publicActivityFromSlot(value: string | undefined): string {
+  const text = cleanDisplayText(value, '');
+  if (!text) return '';
+  if (/(可公开|公开到发现|发布到发现|公开发起)/.test(text)) {
+    return '可公开发起活动';
+  }
+  if (/(暂不公开|不公开|不发发现)/.test(text)) {
+    return '不公开发起活动';
+  }
+  return '';
 }
 
 function buildSearchGoal(input: {

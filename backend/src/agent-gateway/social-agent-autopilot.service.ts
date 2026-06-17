@@ -402,6 +402,7 @@ export class SocialAgentAutopilotService {
     try {
       const fresh = await this.taskRepo.findOne({ where: { id: task.id } });
       if (!fresh) return;
+      if (this.isTerminalTaskStatus(fresh.status)) return;
 
       if (
         fresh.status !== AgentTaskStatus.WaitingReply &&
@@ -438,6 +439,14 @@ export class SocialAgentAutopilotService {
         reason: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  private isTerminalTaskStatus(status: AgentTaskStatus): boolean {
+    return [
+      AgentTaskStatus.Succeeded,
+      AgentTaskStatus.Failed,
+      AgentTaskStatus.Cancelled,
+    ].includes(status);
   }
 
   private async findTaskFromSignal(
