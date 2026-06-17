@@ -22,7 +22,7 @@ import type { FitMeetAssistantMessage } from '../agent-workspace/FitMeetAssistan
 import { TooltipIconButton } from './tooltip-icon-button';
 
 const assistantActionClassName =
-  'flex size-8 items-center justify-center rounded-md text-[#5d5d5d] transition-colors hover:bg-[#0d0d0d]/5 hover:text-[#0d0d0d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/15';
+  'flex size-[30px] items-center justify-center rounded-lg text-[#6b6b6b] transition-[background-color,color,opacity] hover:bg-black/[0.045] hover:text-[#0d0d0d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/15';
 
 const ASSISTANT_ACTION_COUNT = 7;
 const USER_ACTION_COUNT = 1;
@@ -65,7 +65,7 @@ export function AssistantActionBar({
         'flex translate-y-0 items-center gap-0.5 opacity-100 transition-[opacity,transform] duration-150',
         !pinned &&
           'data-[floating]:opacity-100 md:data-[floating]:opacity-0 md:data-[floating]:group-hover:opacity-100 md:data-[floating]:group-focus-within:opacity-100',
-        !feedback && !feedbackBusy && !feedbackFailed && 'text-[#5d5d5d]',
+        !feedback && !feedbackBusy && !feedbackFailed && 'text-[#6b6b6b]',
       )}
       data-testid="assistant-ui-action-bar"
       role="toolbar"
@@ -299,7 +299,7 @@ function MoreActionMenu() {
         align="end"
         side="top"
         sideOffset={6}
-        className="z-50 w-36 rounded-xl border border-black/10 bg-white p-1 text-sm text-[#18181b] shadow-lg outline-none"
+        className="z-50 w-36 rounded-xl border border-black/[0.08] bg-white p-1 text-sm text-[#18181b] shadow-[0_12px_32px_rgba(0,0,0,0.12)] outline-none"
         data-testid="assistant-ui-action-more-menu"
         data-menu-model="compact-message-actions"
       >
@@ -337,7 +337,7 @@ export function UserMessageActionBar() {
       <ActionBarPrimitive.Edit asChild>
         <TooltipIconButton
           tooltip="编辑"
-          className="size-8 text-[#b4b4b4]"
+          className="size-[30px] rounded-lg text-[#a1a1aa] hover:bg-black/[0.045] hover:text-[#52525b]"
           data-action-id="edit"
         >
           <Pencil className="h-3.5 w-3.5" aria-hidden="true" />

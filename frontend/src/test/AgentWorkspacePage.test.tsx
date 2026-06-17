@@ -211,7 +211,7 @@ describe('AgentWorkspacePage', () => {
     );
     expect(screen.queryByRole('log', { name: '对话消息' })).not.toBeInTheDocument();
     expect(screen.getByTestId('assistant-ui-composer')).toHaveClass(
-      'shadow-[0_1px_3px_rgba(0,0,0,0.04)]',
+      'shadow-[0_1px_2px_rgba(0,0,0,0.035)]',
     );
     expect(screen.getByTestId('assistant-ui-composer')).toHaveAttribute(
       'data-ui-model',
@@ -4876,7 +4876,7 @@ describe('AgentWorkspacePage', () => {
       '[scrollbar-gutter:stable]',
     );
     expect(screen.getByTestId('assistant-ui-thread-viewport')).toHaveClass(
-      '[scroll-padding-bottom:calc(9rem+env(safe-area-inset-bottom)+env(keyboard-inset-height,0px))]',
+      '[scroll-padding-bottom:calc(8rem+env(safe-area-inset-bottom)+env(keyboard-inset-height,0px))]',
     );
     expect(screen.getByTestId('assistant-ui-messages')).toHaveAttribute(
       'data-messages-model',

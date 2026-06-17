@@ -59,7 +59,7 @@ export function ChatGPTThread({
 
   return (
     <ThreadPrimitive.Root
-      className="flex h-full min-w-0 flex-col items-stretch bg-white px-4 text-[#0d0d0d]"
+      className="flex h-full min-w-0 flex-col items-stretch bg-white px-3 text-[#0d0d0d] sm:px-4"
       data-testid="assistant-ui-thread"
       data-thread-model="assistant-ui-thread"
       data-thread-shell="chatgpt-clone"
@@ -79,7 +79,7 @@ export function ChatGPTThread({
 
       <AuiIf condition={(state) => !state.thread.isEmpty || shouldShowViewport}>
         <ThreadPrimitive.Viewport
-          className="flex grow flex-col gap-8 overflow-y-auto overscroll-contain scroll-smooth pt-14 [scrollbar-gutter:stable] [scroll-padding-bottom:calc(9rem+env(safe-area-inset-bottom)+env(keyboard-inset-height,0px))] sm:pt-16"
+          className="flex grow flex-col gap-6 overflow-y-auto overscroll-contain scroll-smooth pt-12 [scrollbar-gutter:stable] [scroll-padding-bottom:calc(8rem+env(safe-area-inset-bottom)+env(keyboard-inset-height,0px))] sm:pt-14"
           turnAnchor="top"
           data-testid="assistant-ui-thread-viewport"
           data-viewport-model="assistant-ui-thread-viewport"
@@ -87,7 +87,7 @@ export function ChatGPTThread({
           data-footer-behavior="sticky-composer"
         >
           <div
-            className="flex flex-1 flex-col pb-32 sm:pb-28"
+            className="flex flex-1 flex-col pb-28 sm:pb-24"
             data-testid="assistant-ui-messages"
             role="log"
             aria-label="对话消息"
@@ -128,7 +128,7 @@ export function ChatGPTThread({
             ) : null}
           </div>
           <ThreadPrimitive.ViewportFooter
-            className="sticky bottom-0 mx-auto mt-auto flex w-full max-w-3xl flex-col gap-2 overflow-visible rounded-t-3xl bg-white pb-2 [padding-bottom:calc(0.5rem+env(safe-area-inset-bottom)+env(keyboard-inset-height,0px))]"
+            className="sticky bottom-0 mx-auto mt-auto flex w-full max-w-3xl flex-col gap-1.5 overflow-visible bg-white pb-2 [padding-bottom:calc(0.5rem+env(safe-area-inset-bottom)+env(keyboard-inset-height,0px))]"
             data-testid="assistant-ui-viewport-footer"
             data-footer-model="assistant-ui-viewport-footer"
             data-composer-placement="sticky-bottom"
@@ -154,8 +154,8 @@ export function ChatGPTThread({
 function AssistantSelectionToolbar() {
   return (
     <SelectionToolbarPrimitive.Root
-      className="flex items-center gap-1 rounded-xl border border-black/10 bg-white/95 p-1 text-sm text-[#18181b] shadow-[0_8px_28px_rgba(0,0,0,0.12)] backdrop-blur"
-      style={{ transform: 'translate(-50%, calc(-100% - 14px))' }}
+      className="flex items-center gap-1 rounded-xl border border-black/[0.08] bg-white/95 p-1 text-sm text-[#18181b] shadow-[0_10px_30px_rgba(0,0,0,0.10)] backdrop-blur"
+      style={{ transform: 'translate(-50%, calc(-100% - 22px))' }}
       data-testid="assistant-ui-selection-toolbar"
       role="toolbar"
       aria-label="文本选择操作"
@@ -163,7 +163,7 @@ function AssistantSelectionToolbar() {
       data-selection-action="quote"
       data-overlap-policy="avoid-message-text"
       data-placement="above-selection"
-      data-offset-y="14"
+      data-offset-y="22"
     >
       <SelectionToolbarPrimitive.Quote
         className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-black/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/15"
@@ -180,7 +180,7 @@ function AssistantSelectionToolbar() {
 function AssistantInlineThinking() {
   return (
     <div
-      className="mx-auto flex w-full max-w-3xl px-0 py-3 text-sm text-[#8a8f98]"
+      className="mx-auto flex w-full max-w-3xl px-0 py-2 text-sm text-[#8a8f98]"
     >
       <AssistantThinkingDots />
     </div>
@@ -329,7 +329,7 @@ function AssistantProfileGateHint({
 function AssistantDisclaimer() {
   return (
     <p
-      className="pt-2 text-center text-xs leading-5 text-[#5d5d5d]"
+      className="pt-1.5 text-center text-[11px] leading-5 text-[#7a7a7a]"
       data-testid="assistant-ui-disclaimer"
     >
       FitMeet Agent 可能会出错。重要操作请以你确认后的内容为准。
@@ -398,23 +398,23 @@ function AssistantRecoveryMessage({
           ) : null}
           {isAuth || recovery.retryable ? (
             <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="mt-3 inline-flex items-center gap-2 rounded-xl border border-black/10 bg-white px-3 py-1.5 text-sm transition-colors hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
-              onClick={isAuth ? onLogin : onRetry}
-            >
-              {actionIcon}
-              {actionLabel}
-            </button>
-            {!isAuth ? (
               <button
                 type="button"
-                className="mt-3 inline-flex items-center gap-2 rounded-xl border border-transparent px-3 py-1.5 text-sm text-[#71717a] transition-colors hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
-                onClick={onDismiss}
+                className="inline-flex items-center gap-2 rounded-xl border border-black/10 bg-white px-3 py-1.5 text-sm transition-colors hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
+                onClick={isAuth ? onLogin : onRetry}
               >
-                忽略，重新开始
+                {actionIcon}
+                {actionLabel}
               </button>
-            ) : null}
+              {!isAuth ? (
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 rounded-xl border border-transparent px-3 py-1.5 text-sm text-[#71717a] transition-colors hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
+                  onClick={onDismiss}
+                >
+                  忽略，重新开始
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>

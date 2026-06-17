@@ -140,7 +140,7 @@ export function ChatGPTMessage({
     <MessagePrimitive.Root
       className={cn(
         'group relative mx-auto flex w-full max-w-3xl flex-col px-0',
-        isCompact ? 'py-1' : 'py-3',
+        isCompact ? 'py-0.5' : 'py-2.5',
         role === 'user' ? 'items-end gap-1' : 'items-stretch',
         '[content-visibility:auto] [contain-intrinsic-size:0_160px]',
       )}
@@ -179,7 +179,7 @@ export function ChatGPTMessage({
         </div>
       ) : null}
       <div
-        className={cn(role === 'user' ? 'flex max-w-[88%] items-start gap-2 sm:max-w-[78%]' : 'min-w-0')}
+        className={cn(role === 'user' ? 'flex max-w-[88%] items-start gap-2 sm:max-w-[72%]' : 'min-w-0')}
         data-testid="assistant-ui-message-row"
         data-row-role={role}
       >
@@ -188,12 +188,12 @@ export function ChatGPTMessage({
           className={cn(
             role === 'user'
               ? cn(
-                  'rounded-3xl bg-[#f4f4f4] text-[15px] text-[#0d0d0d]',
-                  isCompact ? 'px-4 py-1.5 leading-6' : 'px-5 py-2 leading-7',
+                  'rounded-[22px] bg-[#f4f4f4] text-[15px] text-[#0d0d0d]',
+                  isCompact ? 'px-3.5 py-1.5 leading-6' : 'px-4 py-2 leading-6',
                 )
               : cn(
                   'prose prose-sm max-w-none text-[15px] text-[#0d0d0d] prose-p:my-0 prose-li:my-0 prose-strong:text-[#0d0d0d]',
-                  isCompact ? 'leading-6' : 'leading-7',
+                  isCompact ? 'leading-6' : 'leading-[1.7]',
                 ),
           )}
           data-testid="assistant-ui-message-content"
@@ -236,7 +236,7 @@ export function ChatGPTMessage({
       </div>
       {role === 'assistant' ? (
         <div
-          className="-ml-2 flex min-h-8 items-center pt-0.5"
+          className="-ml-1 flex min-h-7 items-center pt-0"
           data-testid="assistant-ui-message-actions-row"
           data-actionbar-placement="below-message"
         >

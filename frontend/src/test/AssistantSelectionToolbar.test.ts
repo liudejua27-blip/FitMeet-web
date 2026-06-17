@@ -14,8 +14,8 @@ describe('assistant-ui selection toolbar', () => {
 
     expect(threadSource).toContain("data-overlap-policy=\"avoid-message-text\"");
     expect(threadSource).toContain("data-placement=\"above-selection\"");
-    expect(threadSource).toContain("data-offset-y=\"14\"");
-    expect(threadSource).toContain("translate(-50%, calc(-100% - 14px))");
+    expect(threadSource).toContain("data-offset-y=\"22\"");
+    expect(threadSource).toContain("translate(-50%, calc(-100% - 22px))");
   });
 
   it('keeps selected assistant text readable while the toolbar is visible', () => {

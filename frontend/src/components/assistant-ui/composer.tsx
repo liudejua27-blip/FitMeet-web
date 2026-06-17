@@ -79,7 +79,7 @@ export function ChatGPTComposer({ requiresAuth, onLogin }: ChatGPTComposerProps)
 
   return (
     <ComposerPrimitive.Root
-      className="group/composer mx-auto flex w-full max-w-3xl flex-col rounded-[28px] border border-[#e5e5e5] bg-white px-2 py-2 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-[border-color,box-shadow] duration-150 hover:border-[#dcdcdc] focus-within:border-[#d0d0d0] focus-within:shadow-[0_2px_6px_rgba(0,0,0,0.06)]"
+      className="group/composer mx-auto flex w-full max-w-3xl flex-col rounded-[26px] border border-[#d9d9e3] bg-white px-2 py-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.035)] transition-[border-color,box-shadow] duration-150 hover:border-[#cfcfd8] focus-within:border-[#c8c8d0] focus-within:shadow-[0_2px_8px_rgba(0,0,0,0.055)]"
       data-testid="assistant-ui-composer"
       data-ui-model="assistant-ui-chatgpt-composer"
       data-visual-density="compact"
@@ -120,11 +120,11 @@ export function ChatGPTComposer({ requiresAuth, onLogin }: ChatGPTComposerProps)
           aria-describedby={uploadStatusId}
           data-testid="assistant-ui-composer-input"
           data-input-model="single-composer"
-          className="max-h-40 min-h-9 w-full resize-none bg-transparent px-3 pt-2 text-base leading-6 text-[#0d0d0d] outline-none placeholder:text-[#8e8e8e]"
+          className="max-h-40 min-h-8 w-full resize-none bg-transparent px-3 pt-1.5 text-[16px] leading-6 text-[#0d0d0d] outline-none placeholder:text-[#8e8e8e]"
         />
         <ComposerDictationPreview />
         <div
-          className="flex items-center justify-between gap-2 px-1 pt-1"
+          className="flex items-center justify-between gap-2 px-1 pt-0.5"
           data-testid="assistant-ui-composer-toolbar"
           data-toolbar-model="minimal"
           data-permission-entry="none"
@@ -137,7 +137,7 @@ export function ChatGPTComposer({ requiresAuth, onLogin }: ChatGPTComposerProps)
             <ComposerPrimitive.AddAttachment asChild>
               <TooltipIconButton
                 tooltip={requiresAuth ? '登录后添加图片或视频' : '添加图片或视频'}
-                className="size-9 rounded-full text-[#5d5d5d] hover:bg-black/[0.05]"
+                className="size-8 rounded-full text-[#5d5d5d] hover:bg-black/[0.05]"
                 disabled={requiresAuth}
               >
                 <Plus className="h-4 w-4" aria-hidden="true" />
@@ -295,7 +295,7 @@ function ComposerLoginButton({ onLogin }: { onLogin?: () => void }) {
   return (
     <button
       type="button"
-      className="inline-flex size-9 items-center justify-center rounded-full bg-[#0d0d0d] text-white transition-[opacity,transform] hover:bg-[#0d0d0d] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 disabled:opacity-40"
+      className="inline-flex size-8 items-center justify-center rounded-full bg-[#0d0d0d] text-white transition-[opacity,transform] hover:bg-[#0d0d0d] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 disabled:opacity-40"
       aria-label="登录后继续"
       title="登录后继续"
       onClick={onLogin}
@@ -322,12 +322,12 @@ function ComposerSendButton({
     <ComposerPrimitive.Send asChild>
       <button
         type="submit"
-        className="inline-flex size-9 items-center justify-center rounded-full bg-[#0d0d0d] text-white transition-[opacity,transform] hover:bg-[#0d0d0d] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 disabled:opacity-30"
+        className="inline-flex size-8 items-center justify-center rounded-full bg-[#0d0d0d] text-white transition-[opacity,transform] hover:bg-[#0d0d0d] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 disabled:opacity-30"
         aria-label={disabled ? disabledReason : '发送'}
         title={disabled ? disabledReason : '发送'}
         disabled={disabled}
       >
-        <ArrowUp className="size-5" aria-hidden="true" />
+        <ArrowUp className="h-4 w-4" aria-hidden="true" />
       </button>
     </ComposerPrimitive.Send>
   );
@@ -338,7 +338,7 @@ function ComposerCancelButton() {
     <ComposerPrimitive.Cancel asChild>
       <button
         type="button"
-        className="inline-flex size-9 items-center justify-center rounded-full bg-[#0d0d0d] text-white transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
+        className="inline-flex size-8 items-center justify-center rounded-full bg-[#0d0d0d] text-white transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
         aria-label="停止生成"
       >
         <Square className="h-2 w-2 fill-current" aria-hidden="true" />
@@ -352,7 +352,7 @@ function ComposerStopDictationButton() {
     <ComposerPrimitive.StopDictation asChild>
       <button
         type="button"
-        className="inline-flex size-9 items-center justify-center rounded-full bg-[#0d0d0d] text-white transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
+        className="inline-flex size-8 items-center justify-center rounded-full bg-[#0d0d0d] text-white transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
         aria-label="停止听写"
       >
         <Square className="h-2 w-2 animate-pulse fill-current" aria-hidden="true" />
@@ -366,7 +366,7 @@ function ComposerDictateButton() {
     <ComposerPrimitive.Dictate asChild>
       <TooltipIconButton
         tooltip="开始语音输入"
-        className="size-9 rounded-full bg-transparent text-[#5d5d5d] shadow-none transition-[background-color,color,transform] hover:bg-black/[0.05] hover:text-[#0d0d0d] active:scale-95 focus-visible:ring-black/15 disabled:bg-transparent disabled:text-[#b5b5b5]"
+        className="size-8 rounded-full bg-transparent text-[#5d5d5d] shadow-none transition-[background-color,color,transform] hover:bg-black/[0.05] hover:text-[#0d0d0d] active:scale-95 focus-visible:ring-black/15 disabled:bg-transparent disabled:text-[#b5b5b5]"
         data-testid="assistant-ui-dictate-button"
       >
         <Mic className="size-4" aria-hidden="true" />

@@ -136,7 +136,7 @@ export function ChatGPTThreadList({
         <div className="flex h-14 items-center gap-2 px-2">
           <a
             href="/"
-            className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-medium text-[#0d0d0d] transition-colors hover:bg-[#0d0d0d]/5"
+            className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-medium text-[#0d0d0d] transition-colors hover:bg-black/[0.045]"
           >
             <img src="/favicon-192.png" alt="FitMeet" className="h-6 w-6 rounded-md" />
             <span>FitMeet Agent</span>
@@ -144,7 +144,7 @@ export function ChatGPTThreadList({
           {onToggleDesktop ? (
             <TooltipIconButton
               tooltip="关闭会话列表"
-              className="ml-auto hidden bg-transparent text-[#5d5d5d] shadow-none hover:bg-black/[0.05] hover:text-[#0d0d0d] lg:inline-flex"
+              className="ml-auto hidden bg-transparent text-[#5d5d5d] shadow-none hover:bg-black/[0.045] hover:text-[#0d0d0d] lg:inline-flex"
               onClick={onToggleDesktop}
               data-testid="assistant-ui-desktop-sidebar-close"
               aria-label="关闭会话列表"
@@ -157,7 +157,7 @@ export function ChatGPTThreadList({
           <ThreadListPrimitive.New asChild>
             <button
               type="button"
-              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-[#0d0d0d] transition-colors hover:bg-[#0d0d0d]/5"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-[#0d0d0d] transition-colors hover:bg-black/[0.045]"
               onClick={() => {
                 onCloseMobile();
               }}
@@ -351,7 +351,7 @@ function SidebarAccountStatus({
         <>
           <button
             type="button"
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-[#0d0d0d]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/15"
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-black/[0.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/15"
             aria-label={title}
             data-testid="assistant-ui-sidebar-account"
             data-auth-state="signed-out"
@@ -370,7 +370,7 @@ function SidebarAccountStatus({
           {menuOpen ? <SidebarAccountMenu onClose={() => setMenuOpen(false)} /> : null}
           <button
             type="button"
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-[#0d0d0d]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/15"
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-black/[0.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/15"
             aria-label="打开账户菜单"
             aria-expanded={menuOpen}
             aria-haspopup="menu"
@@ -784,7 +784,7 @@ function EmptyThreadHistory({ onNewConversation }: { onNewConversation: () => vo
       <p className="text-sm text-[#8a8f98]">暂无历史对话</p>
       <button
         type="button"
-        className="mt-1 -ml-2 rounded-lg px-2 py-1.5 text-sm text-[#0d0d0d] transition-colors hover:bg-[#0d0d0d]/5"
+        className="mt-1 -ml-2 rounded-lg px-2 py-1.5 text-sm text-[#0d0d0d] transition-colors hover:bg-black/[0.045]"
         onClick={onNewConversation}
       >
         开始新对话
@@ -873,7 +873,7 @@ function ThreadRow({
     <ThreadListItemPrimitive.Root
       className={cn(
         'group relative rounded-lg transition-[background-color,transform,opacity] duration-150',
-        active ? 'bg-[#0d0d0d]/5' : 'hover:bg-[#0d0d0d]/5',
+        active ? 'bg-black/[0.045]' : 'hover:bg-black/[0.045]',
         pending === 'delete' && 'opacity-60',
       )}
       role="listitem"
