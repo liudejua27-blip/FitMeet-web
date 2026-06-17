@@ -103,6 +103,7 @@ Assert-RequiredPath "frontend/src/components/assistant-ui/attachment.tsx"
 Assert-RequiredPath "frontend/src/components/assistant-ui/upload-progress-store.ts"
 Assert-RequiredPath "frontend/src/components/assistant-ui/markdown-text.tsx"
 Assert-RequiredPath "frontend/src/components/assistant-ui/thinking-dots.tsx"
+Assert-RequiredPath "frontend/src/test/socialAgentApiReplay.test.ts"
 
 Invoke-Step "Install backend dependencies" {
   Push-Location (Join-Path $root "backend")
@@ -138,6 +139,7 @@ if ($runAgentReleaseVerify -eq "true") {
         src/test/AgentWorkspacePage.test.tsx `
         src/test/assistantUploadProgress.test.tsx `
         src/test/socialAgentApiCheckpointStream.test.ts `
+        src/test/socialAgentApiReplay.test.ts `
         src/test/toolUiSchema.test.ts `
         --testTimeout=20000 `
         --reporter=default
@@ -196,6 +198,26 @@ Assert-RequiredPath "scripts/agent-release-matrix.sh"
 Assert-RequiredPath "scripts/agent-remote-smoke-preflight.sh"
 Assert-RequiredPath "scripts/agent-remote-smoke-evidence.sh"
 Assert-RequiredPath "docs/agent-release-e2e-matrix.md"
+Assert-RequiredPath "docs/social-codex-runtime.md"
+
+Assert-RequiredPath "backend/src/agent-gateway/social-agent-context-hydrator.service.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-agent-context-hydrator.service.spec.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-agent-event-store.service.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-agent-event-store.service.spec.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-agent-event-v2.service.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-agent-event-v2.service.spec.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-agent-event-v2.types.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-agent-task-memory-state-machine.service.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-agent-task-memory-state-machine.service.spec.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-agent-thread-id.util.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-agent-thread-session-manager.service.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-agent-thread-session-manager.service.spec.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-codex-life-graph-governance.service.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-codex-life-graph-governance.service.spec.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-codex-runtime-policy.service.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-codex-runtime-policy.service.spec.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-codex-trace-eval.service.ts"
+Assert-RequiredPath "backend/src/agent-gateway/social-codex-trace-eval.service.spec.ts"
 
 Assert-FileContains "docs/agent-release-e2e-matrix.md" @(
   "FitMeet Agent Release E2E Matrix",
@@ -259,7 +281,9 @@ Assert-FileContains "scripts/launch-status.sh" @(
   "redacted_assignment_pattern",
   "redacted_bearer_pattern",
   "unredacted bearer token",
-  "unredacted email address"
+  "unredacted email address",
+  "Social Codex trace eval passed",
+  "readiness and full opportunity smoke"
 )
 Assert-FileContains "deploy/agent-smoke.remote.env.example" @(
   "FitMeet Agent remote smoke environment template",
@@ -312,7 +336,17 @@ Assert-FileContains "scripts/verify-agent-release.sh" @(
   "RUN_AGENT_OPPORTUNITY_SMOKE accepts",
   "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true",
   "run_agent_smoke_preflight",
-  "scripts/agent-remote-smoke-preflight.sh"
+  "scripts/agent-remote-smoke-preflight.sh",
+  "social-agent-context-hydrator.service.spec.ts",
+  "social-agent-event-store.service.spec.ts",
+  "social-agent-event-v2.service.spec.ts",
+  "social-agent-task-memory-state-machine.service.spec.ts",
+  "social-agent-thread-session-manager.service.spec.ts",
+  "social-codex-life-graph-governance.service.spec.ts",
+  "social-codex-trace-eval.service.spec.ts",
+  "social-codex-runtime-policy.service.spec.ts",
+  "social-agent-tool-execution-policy.service.spec.ts",
+  "socialAgentApiReplay.test.ts"
 )
 
 Invoke-Step "Create deploy zip" {

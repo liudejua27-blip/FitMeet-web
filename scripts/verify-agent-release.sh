@@ -66,6 +66,15 @@ step "Run backend Agent route, stream, and acceptance checks"
 pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/agent-control.controller.spec.ts \
   src/agent-gateway/agent-run-checkpoint.service.spec.ts \
+  src/agent-gateway/social-agent-context-hydrator.service.spec.ts \
+  src/agent-gateway/social-agent-event-store.service.spec.ts \
+  src/agent-gateway/social-agent-event-v2.service.spec.ts \
+  src/agent-gateway/social-agent-task-memory-state-machine.service.spec.ts \
+  src/agent-gateway/social-agent-tasks.controller.spec.ts \
+  src/agent-gateway/social-agent-thread-session-manager.service.spec.ts \
+  src/agent-gateway/social-codex-life-graph-governance.service.spec.ts \
+  src/agent-gateway/social-codex-trace-eval.service.spec.ts \
+  src/agent-gateway/social-codex-runtime-policy.service.spec.ts \
   src/agent-gateway/social-agent-chat.acceptance.spec.ts \
   src/agent-gateway/social-agent-intent-router.service.spec.ts \
   src/agent-gateway/social-agent-chat.controller.spec.ts \
@@ -74,6 +83,7 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-long-term-memory.service.spec.ts \
   src/agent-gateway/social-agent-candidate-pool.service.spec.ts \
   src/agent-gateway/social-agent-tool-policy.spec.ts \
+  src/agent-gateway/social-agent-tool-execution-policy.service.spec.ts \
   --runInBand
 
 step "Typecheck frontend assistant-ui Agent shell"
@@ -85,6 +95,7 @@ pnpm --dir "${ROOT_DIR}/frontend" exec vitest run \
   src/test/AgentWorkspacePage.test.tsx \
   src/test/assistantUploadProgress.test.tsx \
   src/test/socialAgentApiCheckpointStream.test.ts \
+  src/test/socialAgentApiReplay.test.ts \
   src/test/toolUiSchema.test.ts \
   --testTimeout=20000 \
   --reporter=default

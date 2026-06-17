@@ -141,7 +141,28 @@ require_path "scripts/agent-release-matrix.sh"
 require_path "scripts/agent-remote-smoke-preflight.sh"
 require_path "scripts/agent-remote-smoke-evidence.sh"
 require_path "frontend/scripts/qa-agent-chat-production.mjs"
+require_path "frontend/src/test/socialAgentApiReplay.test.ts"
 require_path "docs/agent-release-e2e-matrix.md"
+require_path "docs/social-codex-runtime.md"
+
+require_path "backend/src/agent-gateway/social-agent-context-hydrator.service.ts"
+require_path "backend/src/agent-gateway/social-agent-context-hydrator.service.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-event-store.service.ts"
+require_path "backend/src/agent-gateway/social-agent-event-store.service.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-event-v2.service.ts"
+require_path "backend/src/agent-gateway/social-agent-event-v2.service.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-event-v2.types.ts"
+require_path "backend/src/agent-gateway/social-agent-task-memory-state-machine.service.ts"
+require_path "backend/src/agent-gateway/social-agent-task-memory-state-machine.service.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-thread-id.util.ts"
+require_path "backend/src/agent-gateway/social-agent-thread-session-manager.service.ts"
+require_path "backend/src/agent-gateway/social-agent-thread-session-manager.service.spec.ts"
+require_path "backend/src/agent-gateway/social-codex-life-graph-governance.service.ts"
+require_path "backend/src/agent-gateway/social-codex-life-graph-governance.service.spec.ts"
+require_path "backend/src/agent-gateway/social-codex-runtime-policy.service.ts"
+require_path "backend/src/agent-gateway/social-codex-runtime-policy.service.spec.ts"
+require_path "backend/src/agent-gateway/social-codex-trace-eval.service.ts"
+require_path "backend/src/agent-gateway/social-codex-trace-eval.service.spec.ts"
 
 require_path "frontend/src/components/agent-workspace/FitMeetAssistantUI.tsx"
 require_path "frontend/src/components/assistant-ui/action-bar.tsx"
@@ -211,6 +232,8 @@ require_file_contains "scripts/launch-status.sh" "redacted_assignment_pattern"
 require_file_contains "scripts/launch-status.sh" "redacted_bearer_pattern"
 require_file_contains "scripts/launch-status.sh" "unredacted bearer token"
 require_file_contains "scripts/launch-status.sh" "unredacted email address"
+require_file_contains "scripts/launch-status.sh" "Social Codex trace eval passed"
+require_file_contains "scripts/launch-status.sh" "readiness and full opportunity smoke"
 require_file_contains "deploy/agent-smoke.remote.env.example" "FitMeet Agent remote smoke environment template"
 require_file_contains "deploy/agent-smoke.remote.env.example" "Never use a real user account for mutating Agent smoke"
 require_file_contains "deploy/agent-smoke.remote.env.example" "AGENT_SMOKE_ALLOW_REMOTE=true"
@@ -228,6 +251,16 @@ require_file_contains "scripts/verify-agent-release.sh" "RUN_AGENT_OPPORTUNITY_S
 require_file_contains "scripts/verify-agent-release.sh" "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true"
 require_file_contains "scripts/verify-agent-release.sh" "run_agent_smoke_preflight"
 require_file_contains "scripts/verify-agent-release.sh" "scripts/agent-remote-smoke-preflight.sh"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-context-hydrator.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-event-store.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-event-v2.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-task-memory-state-machine.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-thread-session-manager.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-codex-life-graph-governance.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-codex-trace-eval.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-codex-runtime-policy.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-tool-execution-policy.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "socialAgentApiReplay.test.ts"
 require_file_contains "scripts/ecs-post-deploy-smoke.sh" "--run-agent-opportunity-readiness-smoke"
 require_file_contains "scripts/ecs-post-deploy-smoke.sh" "RUN_AGENT_OPPORTUNITY_SMOKE=readiness"
 require_file_contains "scripts/ecs-post-deploy-smoke.sh" "run_agent_remote_preflight"
@@ -368,12 +401,33 @@ require_entry "scripts/launch-status.sh" '^FitMeet-web/scripts/launch-status\.sh
 require_entry "scripts/vercel-prebuilt-deploy.sh" '^FitMeet-web/scripts/vercel-prebuilt-deploy\.sh$'
 require_entry "scripts/lib/toolchain.sh" '^FitMeet-web/scripts/lib/toolchain\.sh$'
 require_entry "docs/agent-release-e2e-matrix.md" '^FitMeet-web/docs/agent-release-e2e-matrix\.md$'
+require_entry "Social Codex runtime docs" '^FitMeet-web/docs/social-codex-runtime\.md$'
 require_entry "docs/deployment-vercel-railway.md" '^FitMeet-web/docs/deployment-vercel-railway\.md$'
 require_entry "release metadata" '^FitMeet-web/release\.json$'
+
+require_entry "Social Codex context hydrator" '^FitMeet-web/backend/src/agent-gateway/social-agent-context-hydrator\.service\.ts$'
+require_entry "Social Codex context hydrator spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-context-hydrator\.service\.spec\.ts$'
+require_entry "Social Codex event store" '^FitMeet-web/backend/src/agent-gateway/social-agent-event-store\.service\.ts$'
+require_entry "Social Codex event store spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-event-store\.service\.spec\.ts$'
+require_entry "Social Codex event V2 service" '^FitMeet-web/backend/src/agent-gateway/social-agent-event-v2\.service\.ts$'
+require_entry "Social Codex event V2 spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-event-v2\.service\.spec\.ts$'
+require_entry "Social Codex event V2 types" '^FitMeet-web/backend/src/agent-gateway/social-agent-event-v2\.types\.ts$'
+require_entry "Social Codex slot state machine" '^FitMeet-web/backend/src/agent-gateway/social-agent-task-memory-state-machine\.service\.ts$'
+require_entry "Social Codex slot state machine spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-task-memory-state-machine\.service\.spec\.ts$'
+require_entry "Social Codex thread id util" '^FitMeet-web/backend/src/agent-gateway/social-agent-thread-id\.util\.ts$'
+require_entry "Social Codex thread session manager" '^FitMeet-web/backend/src/agent-gateway/social-agent-thread-session-manager\.service\.ts$'
+require_entry "Social Codex thread session manager spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-thread-session-manager\.service\.spec\.ts$'
+require_entry "Social Codex Life Graph governance" '^FitMeet-web/backend/src/agent-gateway/social-codex-life-graph-governance\.service\.ts$'
+require_entry "Social Codex Life Graph governance spec" '^FitMeet-web/backend/src/agent-gateway/social-codex-life-graph-governance\.service\.spec\.ts$'
+require_entry "Social Codex runtime policy" '^FitMeet-web/backend/src/agent-gateway/social-codex-runtime-policy\.service\.ts$'
+require_entry "Social Codex runtime policy spec" '^FitMeet-web/backend/src/agent-gateway/social-codex-runtime-policy\.service\.spec\.ts$'
+require_entry "Social Codex trace eval" '^FitMeet-web/backend/src/agent-gateway/social-codex-trace-eval\.service\.ts$'
+require_entry "Social Codex trace eval spec" '^FitMeet-web/backend/src/agent-gateway/social-codex-trace-eval\.service\.spec\.ts$'
 
 require_entry "Agent assistant-ui release audit" '^FitMeet-web/frontend/scripts/audit-agent-chat-release\.mjs$'
 require_entry "Agent assistant-ui browser QA" '^FitMeet-web/frontend/scripts/qa-agent-chat-shell\.mjs$'
 require_entry "Agent production browser QA" '^FitMeet-web/frontend/scripts/qa-agent-chat-production\.mjs$'
+require_entry "Social Codex replay API test" '^FitMeet-web/frontend/src/test/socialAgentApiReplay\.test\.ts$'
 require_entry "FitMeet assistant-ui transport adapter" '^FitMeet-web/frontend/src/components/agent-workspace/FitMeetAssistantUI\.tsx$'
 require_entry "assistant-ui shell component" '^FitMeet-web/frontend/src/components/assistant-ui/assistant-shell\.tsx$'
 require_entry "assistant-ui thread component" '^FitMeet-web/frontend/src/components/assistant-ui/thread\.tsx$'

@@ -165,6 +165,13 @@ validate_agent_remote_smoke_evidence() {
     return 1
   fi
 
+  local trace_eval_count
+  trace_eval_count="$(grep -Fc -- 'Social Codex trace eval passed' "${evidence_file}")"
+  if [[ "${trace_eval_count}" -lt 2 ]]; then
+    echo "[FAIL] Agent remote smoke evidence must prove Social Codex trace eval for readiness and full opportunity smoke; found ${trace_eval_count}." >&2
+    return 1
+  fi
+
   local secret_assignment_pattern='(AGENT_SMOKE_PASSWORD|USER_JWT|FITMEET_USER_JWT|AGENT_SMOKE_JWT|AUTHORIZATION|Authorization)=["'\'']?[^"'\'']?[^\\"'\'']*[[:alnum:]_.~+/=-]+'
   local redacted_assignment_pattern='(AGENT_SMOKE_PASSWORD|USER_JWT|FITMEET_USER_JWT|AGENT_SMOKE_JWT|AUTHORIZATION|Authorization)=["'\'']?\[redacted\]["'\'']?'
   if grep -Eiq "${secret_assignment_pattern}" "${evidence_file}" &&
