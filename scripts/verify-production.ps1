@@ -1,6 +1,6 @@
 param(
-  [string]$BaseUrl = "https://socialworld.world",
-  [string]$ApiBaseUrl = "https://api.socialworld.world/api",
+  [string]$BaseUrl = "https://www.ourfitmeet.cn",
+  [string]$ApiBaseUrl = "https://www.ourfitmeet.cn/api",
   [string]$AgentToken = ""
 )
 

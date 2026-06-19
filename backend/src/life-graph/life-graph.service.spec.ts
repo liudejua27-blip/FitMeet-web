@@ -86,6 +86,21 @@ function repo<T extends Record<string, unknown>>(initialRows: T[] = []) {
         return { affected };
       },
     ),
+    delete: jest.fn(
+      async (where: Record<string, unknown>): Promise<{ affected: number }> => {
+        let affected = 0;
+        for (let index = rows.length - 1; index >= 0; index -= 1) {
+          const row = rows[index];
+          const matches = Object.entries(where).every(
+            ([key, value]) => (row as Record<string, unknown>)[key] === value,
+          );
+          if (!matches) continue;
+          rows.splice(index, 1);
+          affected += 1;
+        }
+        return { affected };
+      },
+    ),
   };
 }
 
@@ -433,6 +448,59 @@ describe('LifeGraphService', () => {
         }),
       ]),
     );
+    const conflictFieldId = proposal.proposedFields.find(
+      (field) => field.fieldKey === 'availableTimes',
+    )!.proposalFieldId;
+    await expect(
+      service.confirmUpdate(1, {
+        proposalId: proposal.proposalId,
+        fieldIds: [conflictFieldId],
+      }),
+    ).rejects.toThrow('没有可确认的 Life Graph 字段');
+    await service.confirmUpdate(1, {
+      proposalId: proposal.proposalId,
+      fieldIds: [conflictFieldId],
+      allowConflicts: true,
+    });
+    const unifiedAfterConfirm = await service.getUnifiedMatchSignals(1);
+    expect(fields.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fieldKey: 'availableTimes',
+          source: LifeGraphFieldSource.AiInferred,
+          confirmedByUser: true,
+        }),
+      ]),
+    );
+    expect(unifiedAfterConfirm.lifestyleSignals.availableTimes).toEqual([
+      '周末下午',
+    ]);
+    expect(
+      unifiedAfterConfirm.preferenceHistory[
+        `${LifeGraphFieldCategory.Lifestyle}.availableTimes`
+      ],
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: LifeGraphFieldCategory.Lifestyle,
+          fieldKey: 'availableTimes',
+          oldValue: ['工作日晚上'],
+          newValue: ['周末下午'],
+          source: LifeGraphFieldSource.AiInferred,
+          action: LifeGraphAuditAction.Confirmed,
+          confirmedByUser: true,
+          reason: expect.any(String),
+          createdAt: expect.any(String),
+        }),
+        expect.objectContaining({
+          category: LifeGraphFieldCategory.Lifestyle,
+          fieldKey: 'availableTimes',
+          newValue: ['工作日晚上'],
+          source: LifeGraphFieldSource.Manual,
+          confirmedByUser: true,
+        }),
+      ]),
+    );
 
     await service.revokeField(1, {
       category: LifeGraphFieldCategory.Lifestyle,
@@ -451,6 +519,57 @@ describe('LifeGraphService', () => {
     );
     const signals = await service.getMatchSignals(1);
     expect(signals.lifestyle.availableTimes).toBeUndefined();
+  });
+
+  it('preserves preference change history for ordinary confirmed updates', async () => {
+    const { service } = makeService(null);
+
+    await service.updateLifeGraph(1, {
+      fields: [
+        {
+          category: LifeGraphFieldCategory.Lifestyle,
+          fieldKey: 'availableTimes',
+          fieldValue: ['工作日晚上'],
+          reason: '用户第一次确认可约时间',
+        },
+      ],
+    });
+    await service.updateLifeGraph(1, {
+      fields: [
+        {
+          category: LifeGraphFieldCategory.Lifestyle,
+          fieldKey: 'availableTimes',
+          fieldValue: ['周末下午'],
+          reason: '用户更新当前可约时间',
+        },
+      ],
+    });
+
+    const signals = await service.getUnifiedMatchSignals(1);
+    const history =
+      signals.preferenceHistory[
+        `${LifeGraphFieldCategory.Lifestyle}.availableTimes`
+      ];
+
+    expect(signals.lifestyleSignals.availableTimes).toEqual(['周末下午']);
+    expect(history).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          oldValue: ['工作日晚上'],
+          newValue: ['周末下午'],
+          source: LifeGraphFieldSource.Manual,
+          confirmedByUser: true,
+          reason: '用户更新当前可约时间',
+        }),
+        expect.objectContaining({
+          oldValue: null,
+          newValue: ['工作日晚上'],
+          source: LifeGraphFieldSource.Manual,
+          confirmedByUser: true,
+          reason: '用户第一次确认可约时间',
+        }),
+      ]),
+    );
   });
 
   it('does not create Trust Safety fields from ordinary chat extraction', async () => {
@@ -873,5 +992,65 @@ describe('LifeGraphService', () => {
         }),
       ]),
     );
+  });
+
+  it('exports Life Graph with data tiers and redacted sensitive values', async () => {
+    const { service } = makeService(null);
+    await service.updateLifeGraph(1, {
+      city: '青岛',
+      fields: [
+        {
+          category: LifeGraphFieldCategory.PrivacyBoundary,
+          fieldKey: 'privacyBoundary',
+          fieldValue: '不要公开手机号 15253005312 和微信 wx_fitmeet_2026',
+        },
+        {
+          category: LifeGraphFieldCategory.Identity,
+          fieldKey: 'nearbyArea',
+          fieldValue: '青岛大学1号楼302',
+        },
+      ],
+    });
+
+    const exported = await service.exportLifeGraph(1);
+    const text = JSON.stringify(exported);
+
+    expect(text).not.toContain('15253005312');
+    expect(text).not.toContain('wx_fitmeet_2026');
+    expect(text).not.toContain('青岛大学1号楼302');
+    expect(exported.privacy.redacted).toBe(true);
+    expect(exported.privacy.tiers.user_secret).toBeGreaterThan(0);
+    expect(exported.fields.privacy_boundary[0]).toMatchObject({
+      dataTier: 'user_secret',
+      redacted: true,
+      fieldValue: '[REDACTED]',
+    });
+  });
+
+  it('lets users delete and revoke Life Graph memory', async () => {
+    const { service, fields, behaviorEvents, signalScores } = makeService(null);
+    await service.updateLifeGraph(1, {
+      fields: [
+        {
+          category: LifeGraphFieldCategory.SocialIntent,
+          fieldKey: 'currentSocialGoal',
+          fieldValue: '找跑步搭子',
+        },
+      ],
+    });
+    await service.recordBehaviorEvent(1, {
+      eventType: LifeGraphBehaviorEventType.CandidateLiked,
+      naturalSummary: '喜欢跑步搭子',
+    });
+
+    const result = await service.deleteLifeGraphMemory(1);
+
+    expect(result).toEqual({
+      deleted: true,
+      revokedFields: expect.any(Number),
+    });
+    expect(fields.rows.every((field) => field.revoked === true)).toBe(true);
+    expect(behaviorEvents.rows).toHaveLength(0);
+    expect(signalScores.rows).toHaveLength(0);
   });
 });

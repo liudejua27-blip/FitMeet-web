@@ -16,6 +16,7 @@ import { ClubMember } from '../clubs/club-member.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ActivitiesService } from '../activities/activities.service';
 import { ActivityType } from '../activities/entities/activity-template.entity';
+import { shouldRunBackgroundJobs } from '../common/process-role.util';
 import { Meet } from './meet.entity';
 import { MeetParticipant } from './meet-participant.entity';
 import { CreateMeetDto } from './dto/create-meet.dto';
@@ -409,6 +410,7 @@ export class MeetsService {
 
   @Cron('*/10 * * * *')
   async cancelExpiredEmptyMeets() {
+    if (!shouldRunBackgroundJobs()) return;
     const candidates = await this.meetRepo.find({
       where: {
         status: 'active',

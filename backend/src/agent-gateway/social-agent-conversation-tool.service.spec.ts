@@ -31,24 +31,29 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
 function makeService() {
   const messages = {
     getAgentInboxMessages: jest.fn(),
+    getTaskConversationMessages: jest.fn(),
   };
   const toolJsonModel = {
     callJson: jest.fn(),
   };
   const toolInput = new SocialAgentToolInputParserService();
+  const l5Runtime = {
+    transitionMeetLoop: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new SocialAgentConversationToolService(
     messages as never,
     toolJsonModel as never,
     toolInput,
     new SocialAgentTaskMemoryService(toolInput),
+    l5Runtime as never,
   );
 
-  return { service, messages, toolJsonModel };
+  return { service, messages, toolJsonModel, l5Runtime };
 }
 
 describe('SocialAgentConversationToolService', () => {
   it('returns memory and event patches for unread counterpart messages', async () => {
-    const { service, messages } = makeService();
+    const { service, messages, l5Runtime } = makeService();
     messages.getAgentInboxMessages.mockResolvedValue([
       {
         id: 'msg_1',
@@ -108,10 +113,27 @@ describe('SocialAgentConversationToolService', () => {
         contentPreview: 'Sure, where should we meet?',
       },
     });
+    expect(l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 1,
+        agentTaskId: 100,
+        candidateUserId: 2,
+        stage: 'reply_received',
+        waitingFor: 'reply_summary',
+        state: expect.objectContaining({
+          conversationId: 'conv_1',
+          targetUserId: 2,
+          latestMessageId: 'msg_2',
+          latestMessagePreview: 'Sure, where should we meet?',
+          newMessageCount: 1,
+          loopStage: 'reply_received',
+        }),
+      }),
+    );
   });
 
   it('does not emit task or inbox events when there are no new messages', async () => {
-    const { service, messages } = makeService();
+    const { service, messages, l5Runtime } = makeService();
     messages.getAgentInboxMessages.mockResolvedValue([
       {
         id: 'msg_1',
@@ -133,13 +155,16 @@ describe('SocialAgentConversationToolService', () => {
       latestReceivedMessages: [],
       processedMessageIds: [],
     });
+    expect(l5Runtime.transitionMeetLoop).not.toHaveBeenCalled();
   });
 
   it('summarizes replies with model fallback wiring and inbox event patches', async () => {
-    const { service, toolJsonModel } = makeService();
+    const { service, toolJsonModel, l5Runtime } = makeService();
     toolJsonModel.callJson.mockResolvedValue({
       summary: 'Counterpart wants a meeting point.',
       sentiment: 'positive',
+      intent: 'ask_question',
+      needsReply: true,
     });
 
     const result = await service.summarizeReply(
@@ -174,11 +199,15 @@ describe('SocialAgentConversationToolService', () => {
     expect(result.output).toEqual({
       summary: 'Counterpart wants a meeting point.',
       sentiment: 'positive',
+      intent: 'ask_question',
+      needsReply: true,
     });
     expect(result.loopUpdates).toMatchObject({
       replySummary: {
         summary: 'Counterpart wants a meeting point.',
         sentiment: 'positive',
+        intent: 'ask_question',
+        needsReply: true,
       },
       sourceTool: SocialAgentToolName.SummarizeReply,
     });
@@ -186,6 +215,8 @@ describe('SocialAgentConversationToolService', () => {
       replySummary: {
         summary: 'Counterpart wants a meeting point.',
         sentiment: 'positive',
+        intent: 'ask_question',
+        needsReply: true,
       },
       currentStep: {
         id: 'summarize_reply',
@@ -202,23 +233,87 @@ describe('SocialAgentConversationToolService', () => {
         contentPreview: 'Counterpart wants a meeting point.',
       },
     });
+    expect(l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 1,
+        agentTaskId: 100,
+        candidateUserId: 2,
+        stage: 'reply_received',
+        waitingFor: 'next_action_decision',
+        state: expect.objectContaining({
+          conversationId: 'conv_1',
+          targetUserId: 2,
+          latestMessageId: 'msg_2',
+          replySummary: expect.objectContaining({
+            summary: 'Counterpart wants a meeting point.',
+            intent: 'ask_question',
+          }),
+          replyIntent: 'ask_question',
+          replySentiment: 'positive',
+          needsReply: true,
+          messageCount: 1,
+          loopStage: 'reply_received',
+        }),
+      }),
+    );
   });
 
-  it('requires an agent connection and bound conversation before reading', async () => {
-    const { service } = makeService();
+  it('reads task conversation messages by taskId when agent connection is missing', async () => {
+    const { service, messages, l5Runtime } = makeService();
+    messages.getTaskConversationMessages.mockResolvedValue([
+      {
+        id: 'msg_1',
+        conversationId: 'conv_1',
+        text: 'Agent opener',
+        senderType: 'agent',
+        senderId: 1,
+        metadata: { agentTaskId: 100 },
+      },
+      {
+        id: 'msg_2',
+        conversationId: 'conv_1',
+        text: '可以，几点？',
+        senderType: 'user',
+        senderId: 2,
+        metadata: { agentTaskId: 100 },
+      },
+    ]);
 
-    await expect(
-      service.readTaskConversationMessages(
-        makeTask({ agentConnectionId: null }),
-        {},
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    await expect(
-      service.readTaskConversationMessages(
-        makeTask({ memory: { socialLoop: {} } }),
-        {},
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    const result = await service.readTaskConversationMessages(
+      makeTask({ agentConnectionId: null }),
+      {},
+    );
+
+    expect(messages.getAgentInboxMessages).not.toHaveBeenCalled();
+    expect(messages.getTaskConversationMessages).toHaveBeenCalledWith(100, {
+      conversationId: 'conv_1',
+      limit: 50,
+    });
+    expect(result.output).toMatchObject({
+      conversationId: 'conv_1',
+      newMessageCount: 1,
+      latestMessage: { id: 'msg_2' },
+    });
+    expect(l5Runtime.transitionMeetLoop).toHaveBeenCalled();
+  });
+
+  it('returns a non-retryable skipped result for unbound old tasks', async () => {
+    const { service, messages, l5Runtime } = makeService();
+    messages.getTaskConversationMessages.mockResolvedValue([]);
+
+    const result = await service.readTaskConversationMessages(
+      makeTask({ agentConnectionId: null, memory: { socialLoop: {} } }),
+      {},
+    );
+
+    expect(result.output).toMatchObject({
+      status: 'skipped',
+      code: 'task_conversation_unbound',
+      retryable: false,
+      newMessageCount: 0,
+    });
+    expect(result.receivedMessages).toEqual([]);
+    expect(l5Runtime.transitionMeetLoop).not.toHaveBeenCalled();
   });
 
   it('requires messages before summarizing replies', async () => {

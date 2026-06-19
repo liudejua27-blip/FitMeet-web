@@ -23,6 +23,11 @@ import { AiDraftSocialRequestDto } from './dto/ai-draft-social-request.dto';
 import { SocialRequestsService } from './social-requests.service';
 import { MatchService } from '../match/match.service';
 import { MessagesService } from '../messages/messages.service';
+import { AgentApprovalService } from '../agent-gateway/agent-approval.service';
+import {
+  ApprovalRiskLevel,
+  ApprovalType,
+} from '../agent-gateway/entities/agent-approval-request.entity';
 
 type AgentRequest = Request & { [AGENT_CONNECTION_KEY]?: AgentConnection };
 
@@ -46,6 +51,7 @@ export class AgentOwnerSocialActionsController {
     private readonly socialRequests: SocialRequestsService,
     private readonly matchService: MatchService,
     private readonly messages: MessagesService,
+    private readonly approvals: AgentApprovalService,
   ) {}
 
   /** POST /api/agent/social-requests/ai-draft */
@@ -59,9 +65,32 @@ export class AgentOwnerSocialActionsController {
   /** POST /api/agent/social-requests/:id/publish */
   @Post(':id/publish')
   @RequirePermission(AgentAction.CreateSocialRequest)
-  publish(@Req() req: AgentRequest, @Param('id', ParseIntPipe) id: number) {
+  async publish(@Req() req: AgentRequest, @Param('id', ParseIntPipe) id: number) {
     const agent = req[AGENT_CONNECTION_KEY]!;
-    return this.socialRequests.syncPublicIntentById(id, agent.userId);
+    const approval = await this.approvals.create({
+      userId: agent.userId,
+      agentConnectionId: agent.id,
+      type: ApprovalType.PostPublish,
+      actionType: 'publish_social_request',
+      skillName: 'agent.social_request.publish',
+      payload: {
+        socialRequestId: id,
+        source: 'agent_token_social_request_publish',
+        checkpointRequired: true,
+        resumeMode: 'resume_after_approval',
+      },
+      summary: `公开发布社交需求 #${id}`,
+      riskLevel: ApprovalRiskLevel.High,
+      reason: '公开发布会让需求进入发现/大厅，必须由用户确认。',
+      createdBy: 'agent',
+      relatedSocialRequestId: id,
+    });
+    return {
+      ok: true,
+      status: 'pending_approval' as const,
+      approvalId: approval.id,
+      reason: 'public_publish_requires_user_confirmation',
+    };
   }
 
   /** POST /api/agent/social-requests/:id/match */
@@ -112,55 +141,77 @@ export class AgentOwnerSocialActionsController {
       return { ok: false, error: 'text required' };
     }
 
-    const conv = await this.messages.startConversation(userId, targetUserId);
-    const message = await this.messages.sendMessage(
-      conv.conversationId,
+    const approval = await this.approvals.create({
       userId,
-      text,
-      {
-        source: 'ai_delegate',
-        senderType: 'agent',
-        senderAgentId: agent.id,
+      agentConnectionId: agent.id,
+      type: ApprovalType.SendMessage,
+      actionType: 'send_message',
+      skillName: 'agent.social_request.send_invite',
+      payload: {
+        toUserId: targetUserId,
+        content: text,
+        socialRequestId: id,
+        candidateRecordId: candidateId,
         metadata: {
           actorType: 'agent',
           actorUserId: userId,
           agentConnectionId: agent.id,
           socialRequestId: id,
           candidateRecordId: candidateId,
+          source: 'agent_token_send_invite',
         },
+        checkpointRequired: true,
+        resumeMode: 'resume_after_approval',
       },
-    );
-    let candidate: { id: number; status: string } | null = null;
-    try {
-      candidate = await this.matchService.markCandidateMessaged(
-        id,
-        candidateId,
-        userId,
-      );
-    } catch {
-      // best-effort: invite is sent even if mark-messaged fails.
-    }
+      summary: `向候选人 #${targetUserId} 发送邀请`,
+      riskLevel: ApprovalRiskLevel.Medium,
+      reason: 'Agent 发送邀约消息属于外联动作，必须由用户确认。',
+      createdBy: 'agent',
+      relatedSocialRequestId: id,
+      relatedCandidateId: candidateId,
+    });
     return {
       ok: true,
-      conversationId: conv.conversationId,
-      messageId: message.id,
-      candidate,
+      status: 'pending_approval' as const,
+      approvalId: approval.id,
+      reason: 'send_invite_requires_user_confirmation',
     };
   }
 
   /** POST /api/agent/social-requests/:id/candidates/:candidateId/mark-messaged */
   @Post(':id/candidates/:candidateId/mark-messaged')
   @RequirePermission(AgentAction.SendMessage)
-  markMessaged(
+  async markMessaged(
     @Req() req: AgentRequest,
     @Param('id', ParseIntPipe) id: number,
     @Param('candidateId', ParseIntPipe) candidateId: number,
   ) {
     const agent = req[AGENT_CONNECTION_KEY]!;
-    return this.matchService.markCandidateMessaged(
-      id,
-      candidateId,
-      agent.userId,
-    );
+    const approval = await this.approvals.create({
+      userId: agent.userId,
+      agentConnectionId: agent.id,
+      type: ApprovalType.Custom,
+      actionType: 'mark_candidate_messaged',
+      skillName: 'agent.social_request.mark_messaged',
+      payload: {
+        socialRequestId: id,
+        candidateRecordId: candidateId,
+        source: 'agent_token_mark_messaged',
+        checkpointRequired: true,
+        resumeMode: 'resume_after_approval',
+      },
+      summary: `将候选 #${candidateId} 标记为已触达`,
+      riskLevel: ApprovalRiskLevel.Medium,
+      reason: '候选触达状态会影响后续推荐和邀约闭环，必须由用户确认。',
+      createdBy: 'agent',
+      relatedSocialRequestId: id,
+      relatedCandidateId: candidateId,
+    });
+    return {
+      ok: true,
+      status: 'pending_approval' as const,
+      approvalId: approval.id,
+      reason: 'mark_candidate_messaged_requires_user_confirmation',
+    };
   }
 }

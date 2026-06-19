@@ -4,6 +4,7 @@ import type {
   SocialAgentAsyncRunSnapshot,
   SocialAgentIntentRouteResult,
 } from './social-agent-chat.types';
+import type { AgentLoopRun, SubagentHandoffResult } from './agent-loop.types';
 
 export type SocialAgentRouteTurnState = {
   savedContext: boolean;
@@ -13,6 +14,9 @@ export type SocialAgentRouteTurnState = {
   assistantMessage: string;
   activityResults: SocialAgentActivityResult[];
   profileUpdateProposal: LifeGraphProposalDto | null;
+  assistantStreamed: boolean;
+  agentLoop: AgentLoopRun | null;
+  subagentHandoffs: SubagentHandoffResult[];
 };
 
 type ConversationTurnPatch = {
@@ -20,6 +24,7 @@ type ConversationTurnPatch = {
   savedContext: boolean;
   profileUpdated: boolean;
   profileUpdateProposal: LifeGraphProposalDto | null;
+  assistantStreamed?: boolean;
 };
 
 type SearchTurnPatch = {
@@ -41,6 +46,9 @@ export function createSocialAgentRouteTurnState(
     assistantMessage,
     activityResults: [],
     profileUpdateProposal: null,
+    assistantStreamed: false,
+    agentLoop: null,
+    subagentHandoffs: [],
   };
 }
 
@@ -54,6 +62,7 @@ export function applyConversationTurnState(
     savedContext: patch.savedContext,
     profileUpdated: patch.profileUpdated,
     profileUpdateProposal: patch.profileUpdateProposal,
+    assistantStreamed: patch.assistantStreamed ?? state.assistantStreamed,
   };
 }
 

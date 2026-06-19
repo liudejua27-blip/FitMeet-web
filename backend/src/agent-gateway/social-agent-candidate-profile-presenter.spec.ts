@@ -144,6 +144,7 @@ describe('candidate profile presenter', () => {
     const partial = candidateProfileCompleteness(
       user({ city: '', interestTags: [], name: '', avatar: '' }),
       null,
+      null,
     );
     expect(partial).toBe(0);
     expect(candidateDataQuality(0.84)).toBe('partial');

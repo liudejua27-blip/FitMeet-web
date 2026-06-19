@@ -36,6 +36,8 @@ import { LifeGraphModule } from './life-graph/life-graph.module';
 import { WaitlistModule } from './waitlist/waitlist.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { FutureSkillsGatewayModule } from './future-skills-gateway/future-skills-gateway.module';
+import { AgentObservabilityTypeOrmLogger } from './agent-gateway/agent-observability-typeorm.logger';
+import { AdminRbacModule } from './admin-rbac/admin-rbac.module';
 
 @Module({
   imports: [
@@ -88,7 +90,11 @@ import { FutureSkillsGatewayModule } from './future-skills-gateway/future-skills
             idleTimeoutMillis: 30000,
             connectionTimeoutMillis: 5000,
           },
+          logger: new AgentObservabilityTypeOrmLogger(nodeEnv !== 'production'),
           logging: nodeEnv !== 'production',
+          maxQueryExecutionTime: Number(
+            configService.get<string>('DB_SLOW_QUERY_MS') ?? 500,
+          ),
           retryAttempts: nodeEnv === 'test' ? 1 : 9,
           retryDelay: nodeEnv === 'test' ? 500 : 3000,
         };
@@ -131,6 +137,7 @@ import { FutureSkillsGatewayModule } from './future-skills-gateway/future-skills
     ]),
     ScheduleModule.forRoot(),
     RedisModule,
+    AdminRbacModule,
     KafkaModule.forRoot(),
     UploadsModule,
     UsersModule,

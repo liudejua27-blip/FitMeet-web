@@ -1,10 +1,10 @@
-import type { AgentTask } from './entities/agent-task.entity';
 import type { AgentApprovalRequest } from './entities/agent-approval-request.entity';
-import {
-  ApprovalRiskLevel,
-  ApprovalType,
-} from './entities/agent-approval-request.entity';
 import type { SceneRiskPolicyResult } from './scene-risk-policy.service';
+import {
+  buildSocialAgentRiskGatePayload,
+  type SocialAgentRiskGateApprovalInput,
+  type SocialAgentRiskGateTask,
+} from './social-agent-risk-gate-approval.presenter';
 import {
   getSocialAgentRelatedActivityId,
   getSocialAgentRelatedCandidateId,
@@ -16,31 +16,9 @@ import {
   getSocialAgentToolApprovalRiskLevel,
   getSocialAgentToolApprovalType,
   isConfirmableSocialAgentTool,
+  requiresMandatorySocialAgentApproval,
 } from './social-agent-tool-policy';
 import { SocialAgentToolName } from './social-agent-tool.types';
-
-type SocialAgentRiskGateTask = Pick<
-  AgentTask,
-  'id' | 'ownerUserId' | 'agentConnectionId'
->;
-
-export type SocialAgentRiskGateApprovalInput = {
-  userId: number;
-  agentConnectionId: number | null;
-  agentTaskId: number;
-  type: ApprovalType;
-  actionType: string;
-  skillName: SocialAgentToolName;
-  payload: Record<string, unknown>;
-  summary: string;
-  riskLevel: ApprovalRiskLevel;
-  reason: string;
-  createdBy: 'agent';
-  relatedSocialRequestId: number | null;
-  relatedCandidateId: number | null;
-  relatedActivityId: number | null;
-  rationale: string;
-};
 
 export type SocialAgentRiskGateDecision =
   | { kind: 'none' }
@@ -48,6 +26,7 @@ export type SocialAgentRiskGateDecision =
   | {
       kind: 'pending_approval';
       approvalInput: SocialAgentRiskGateApprovalInput;
+      policy: SceneRiskPolicyResult;
     };
 
 export function buildSocialAgentRiskGateDecision(input: {
@@ -56,9 +35,39 @@ export function buildSocialAgentRiskGateDecision(input: {
   toolInput: Record<string, unknown>;
   stepId: string;
   policy: SceneRiskPolicyResult;
+  runtimePolicy?: Record<string, unknown> | null;
   hasUserApproval: boolean;
 }): SocialAgentRiskGateDecision {
-  const { hasUserApproval, policy, stepId, task, toolInput, toolName } = input;
+  const {
+    hasUserApproval,
+    policy,
+    runtimePolicy,
+    stepId,
+    task,
+    toolInput,
+    toolName,
+  } = input;
+  const mandatoryApproval = requiresMandatorySocialAgentApproval(
+    toolName,
+    toolInput,
+  );
+  const effectivePolicy =
+    mandatoryApproval && !hasUserApproval
+      ? ({
+          ...policy,
+          riskLevel:
+            policy.riskLevel === 'critical' ? policy.riskLevel : 'high',
+          requiresConfirmation: true,
+          requiresDoubleConfirmation:
+            policy.requiresDoubleConfirmation ||
+            toolName === SocialAgentToolName.Payment ||
+            toolName === SocialAgentToolName.ShareLocation,
+          safetyPrompts: [
+            ...policy.safetyPrompts,
+            'mandatory_high_risk_approval',
+          ],
+        } satisfies SceneRiskPolicyResult)
+      : policy;
   if (policy.blockedActions.includes('execute_real_action')) {
     return {
       kind: 'simulated',
@@ -69,44 +78,47 @@ export function buildSocialAgentRiskGateDecision(input: {
         message: '实验室模式只模拟，不会真实执行这个社交动作。',
         toolName,
         stepId,
-        riskPolicy: policy,
+        riskPolicy: effectivePolicy,
       },
     };
   }
 
   if (
-    !policy.requiresConfirmation ||
+    !effectivePolicy.requiresConfirmation ||
     hasUserApproval ||
-    !isConfirmableSocialAgentTool(toolName)
+    (!mandatoryApproval && !isConfirmableSocialAgentTool(toolName))
   ) {
     return { kind: 'none' };
   }
 
   const rationale =
-    policy.safetyPrompts.join('；') || 'Agent 已按场景风险策略暂停执行。';
+    effectivePolicy.safetyPrompts.join('；') ||
+    'Agent 已按场景风险策略暂停执行。';
 
   return {
     kind: 'pending_approval',
+    policy: effectivePolicy,
     approvalInput: {
       userId: task.ownerUserId,
       agentConnectionId: task.agentConnectionId ?? null,
       agentTaskId: task.id,
-      type: getSocialAgentToolApprovalType(toolName, policy),
+      type: getSocialAgentToolApprovalType(toolName, effectivePolicy),
       actionType: getSocialAgentToolActionType(toolName),
       skillName: toolName,
-      payload: {
-        ...toolInput,
-        agentTaskId: task.id,
+      payload: buildSocialAgentRiskGatePayload({
+        toolInput,
+        task,
         stepId,
         toolName,
-        sceneType: policy.sceneType,
-        riskLevel: policy.riskLevel,
-        requiresDoubleConfirmation: policy.requiresDoubleConfirmation,
-        blockedActions: policy.blockedActions,
-      },
-      summary: buildSocialAgentToolApprovalSummary(toolName, policy),
-      riskLevel: getSocialAgentToolApprovalRiskLevel(policy.riskLevel),
-      reason: policy.safetyPrompts.join('；') || '该动作需要用户确认后再执行。',
+        policy: effectivePolicy,
+        mandatoryApproval,
+        runtimePolicy,
+      }),
+      summary: buildSocialAgentToolApprovalSummary(toolName, effectivePolicy),
+      riskLevel: getSocialAgentToolApprovalRiskLevel(effectivePolicy.riskLevel),
+      reason:
+        effectivePolicy.safetyPrompts.join('；') ||
+        '该动作需要用户确认后再执行。',
       createdBy: 'agent',
       relatedSocialRequestId: getSocialAgentRelatedSocialRequestId(
         toolInput,

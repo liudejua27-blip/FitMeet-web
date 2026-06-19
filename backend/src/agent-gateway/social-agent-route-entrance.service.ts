@@ -9,10 +9,12 @@ import type {
 import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
 import { SocialAgentMessageLogService } from './social-agent-message-log.service';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
+import { parseSocialAgentThreadTaskId } from './social-agent-thread-id.util';
 
 type EnterRouteTurnInput = {
   ownerUserId: number;
   body: SocialAgentRouteMessageBody;
+  signal?: AbortSignal | null;
 };
 
 type EnterRouteTurnResult = {
@@ -39,6 +41,8 @@ export class SocialAgentRouteEntranceService {
       input.ownerUserId,
       this.number(input.body.taskId),
       message,
+      input.body.idempotencyKey ?? null,
+      input.body.clientContext?.threadId ?? null,
     );
     await this.messageLog.recordUserMessage(task, message);
 
@@ -48,6 +52,7 @@ export class SocialAgentRouteEntranceService {
       message,
       hasCandidates: input.body.hasCandidates === true,
       startedAt,
+      signal: input.signal,
     });
 
     task = mainAgentTurn.task;
@@ -60,7 +65,6 @@ export class SocialAgentRouteEntranceService {
   }
 
   private number(value: unknown): number | null {
-    const num = Number(value);
-    return Number.isFinite(num) && num > 0 ? num : null;
+    return parseSocialAgentThreadTaskId(value);
   }
 }

@@ -32,10 +32,21 @@ const validEnv = {
   ALIYUN_OSS_ENDPOINT: 'https://oss-cn-qingdao.aliyuncs.com',
   ALIYUN_OSS_PUBLIC_BASE_URL:
     'https://fitmeet-uploads.oss-cn-qingdao.aliyuncs.com',
+  UPLOAD_TEMP_DIR: '/tmp/fitmeet/uploads/temp',
   DEEPSEEK_API_KEY: 'deepseek-key',
   DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
   DEEPSEEK_CHAT_MODEL: 'deepseek-v4-pro',
   DEEPSEEK_FAST_MODEL: 'deepseek-v4-flash',
+  FITMEET_SUBAGENT_WORKER_MODE: 'db_queue',
+  FITMEET_SUBAGENT_WORKER_CONCURRENCY: '2',
+  FITMEET_SUBAGENT_WORKER_POLL_MS: '1000',
+  FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: '15000',
+  FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS: '10000',
+  FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS: '90000',
+  AGENT_OBSERVABILITY_ALERTS_ENABLED: 'false',
+  AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL: '',
+  AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN: '',
+  AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS: '300000',
   KAFKA_BROKERS: 'kafka:29092',
   ENABLE_KAFKA: 'true',
 };
@@ -276,6 +287,101 @@ describe('production-env-readiness', () => {
         expect.objectContaining({ key: 'DEEPSEEK_FAST_MODEL' }),
         expect.objectContaining({ key: 'AGENT_FINAL_RESPONSE_MODEL' }),
         expect.objectContaining({ key: 'AGENT_CASUAL_CHAT_MODEL' }),
+      ]),
+    );
+  });
+
+  it('requires release-ready independent subagent worker settings', () => {
+    const missingWorker = buildProductionEnvReport({
+      ...validEnv,
+      FITMEET_SUBAGENT_WORKER_MODE: '',
+      FITMEET_SUBAGENT_WORKER_CONCURRENCY: '',
+      FITMEET_SUBAGENT_WORKER_POLL_MS: '',
+      FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: '',
+      FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS: '',
+      FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS: '',
+    });
+    const residentWorker = buildProductionEnvReport({
+      ...validEnv,
+      FITMEET_SUBAGENT_WORKER_MODE: 'resident_in_process',
+      FITMEET_SUBAGENT_WORKER_CONCURRENCY: '0',
+      FITMEET_SUBAGENT_WORKER_POLL_MS: '1000.5',
+      FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: '-1',
+      FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS: '0',
+      FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS: '0',
+    });
+
+    expect(missingWorker.ok).toBe(false);
+    expect(residentWorker.ok).toBe(false);
+    expect(missingWorker.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_MODE' }),
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_CONCURRENCY' }),
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_POLL_MS' }),
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_TIMEOUT_MS' }),
+        expect.objectContaining({
+          key: 'FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS',
+        }),
+        expect.objectContaining({
+          key: 'FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS',
+        }),
+      ]),
+    );
+    expect(residentWorker.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_MODE' }),
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_CONCURRENCY' }),
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_POLL_MS' }),
+        expect.objectContaining({ key: 'FITMEET_SUBAGENT_WORKER_TIMEOUT_MS' }),
+        expect.objectContaining({
+          key: 'FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS',
+        }),
+        expect.objectContaining({
+          key: 'FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS',
+        }),
+      ]),
+    );
+  });
+
+  it('allows external observability alert delivery to be disabled for first launch', () => {
+    const report = buildProductionEnvReport({
+      ...validEnv,
+      AGENT_OBSERVABILITY_ALERTS_ENABLED: 'false',
+      AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL: '',
+      AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN: '',
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'AGENT_OBSERVABILITY_ALERTS_ENABLED',
+        }),
+      ]),
+    );
+  });
+
+  it('requires real observability alert delivery when alerts are enabled', () => {
+    const report = buildProductionEnvReport({
+      ...validEnv,
+      AGENT_OBSERVABILITY_ALERTS_ENABLED: 'true',
+      AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL: 'http://localhost:9000/alerts',
+      AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN: '',
+      AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS: '-1',
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL',
+        }),
+        expect.objectContaining({
+          key: 'AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN',
+        }),
+        expect.objectContaining({
+          key: 'AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS',
+        }),
       ]),
     );
   });

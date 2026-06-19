@@ -2,9 +2,17 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgentGatewayService } from './agent-gateway.service';
 import { AgentProfileService } from './agent-profile.service';
+import { AgentL5RuntimeService } from './agent-l5-runtime.service';
+import { AgentLoopService } from './agent-loop.service';
+import { AgentObservabilityService } from './agent-observability.service';
+import { AgentObservabilityAlertSinkService } from './agent-observability-alert-sink.service';
 import { AgentApprovalDispatcherService } from './agent-approval-dispatcher.service';
+import { AgentSelfImproveService } from './agent-self-improve.service';
 import { ActivitiesModule } from '../activities/activities.module';
 import { SocialAgentAutopilotController } from './social-agent-autopilot.controller';
+import { SocialAgentReminderController } from './social-agent-reminder.controller';
+import { AgentSelfImproveController } from './agent-self-improve.controller';
+import { AgentL5RuntimeController } from './agent-l5-runtime.controller';
 import { SocialAgentChatController } from './social-agent-chat.controller';
 import { SocialAgentDebugController } from './social-agent-debug.controller';
 import { SocialAgentTasksController } from './social-agent-tasks.controller';
@@ -33,6 +41,21 @@ import { AgentActivityLog } from './entities/agent-activity-log.entity';
 import { AgentActionLog } from './entities/agent-action-log.entity';
 import { PaymentIntent } from './entities/payment-intent.entity';
 import { AgentTask, AgentTaskEvent } from './entities/agent-task.entity';
+import { AgentRunCheckpoint } from './entities/agent-run-checkpoint.entity';
+import {
+  AgentEvalCase,
+  AgentReflectionRun,
+  AgentSkillPatch,
+} from './entities/agent-self-improve.entity';
+import {
+  AgentMeetLoopState,
+  AgentOnlineReplaySample,
+  AgentSkillPatchEffect,
+  AgentSubagentMemory,
+  SubagentWorkerFailure,
+  SubagentWorkerHeartbeat,
+  SubagentWorkerJob,
+} from './entities/agent-l5-runtime.entity';
 import {
   FitMeetAgentMessage,
   FitMeetAgentMemoryUpdate,
@@ -46,6 +69,11 @@ import { SocialAgentPlannerService } from './social-agent-planner.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
 import { SocialAgentBrainService } from './social-agent-brain.service';
 import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
+import { FitMeetSubagentRuntimeService } from './fitmeet-subagent-runtime.service';
+import { FitMeetSubagentWorkerDispatcherService } from './fitmeet-subagent-worker-dispatcher.service';
+import { FitMeetSubagentWorkerService } from './fitmeet-subagent-worker.service';
+import { FitMeetSubagentWorkerRuntimeService } from './fitmeet-subagent-worker-runtime.service';
+import { SubagentWorkerQueueService } from './subagent-worker-queue.service';
 import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
 import { SocialAgentModelRouterService } from './social-agent-model-router.service';
 import { SocialAgentMemoryContextService } from './social-agent-memory-context.service';
@@ -74,6 +102,7 @@ import { SocialAgentReplanProgressService } from './social-agent-replan-progress
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
 import { SocialAgentCardActionRouterService } from './social-agent-card-action-router.service';
+import { SocialAgentLifeGraphCardActionService } from './social-agent-life-graph-card-action.service';
 import { SocialAgentCandidateCommandService } from './social-agent-candidate-command.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
 import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
@@ -95,14 +124,32 @@ import { SocialAgentSessionQueryService } from './social-agent-session-query.ser
 import { SocialAgentReplanFacadeService } from './social-agent-replan-facade.service';
 import { SocialAgentInitialSearchQueueService } from './social-agent-initial-search-queue.service';
 import { SocialAgentChatTurnFacadeService } from './social-agent-chat-turn-facade.service';
+import { SocialAgentChatTurnCallbacksService } from './social-agent-chat-turn-callbacks.service';
 import { SocialAgentChatRunFacadeService } from './social-agent-chat-run-facade.service';
 import { SocialAgentChatSessionFacadeService } from './social-agent-chat-session-facade.service';
+import { SocialAgentMessageFeedbackService } from './social-agent-message-feedback.service';
+import { SocialAgentReminderService } from './social-agent-reminder.service';
+import { SocialAgentThreadService } from './social-agent-thread.service';
+import { SocialAgentThreadSessionManager } from './social-agent-thread-session-manager.service';
+import { SocialAgentContextHydratorService } from './social-agent-context-hydrator.service';
+import { SocialAgentTaskMemoryStateMachineService } from './social-agent-task-memory-state-machine.service';
+import { SocialAgentEventV2Service } from './social-agent-event-v2.service';
+import { SocialAgentEventStore } from './social-agent-event-store.service';
+import { SocialCodexRuntimePolicyService } from './social-codex-runtime-policy.service';
+import { SocialCodexLifeGraphGovernanceService } from './social-codex-life-graph-governance.service';
+import { SocialCodexTraceEvalService } from './social-codex-trace-eval.service';
+import { AgentRunCheckpointService } from './agent-run-checkpoint.service';
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentMetricsController } from './social-agent-metrics.controller';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import { SocialAgentLongTermMemory } from './entities/social-agent-long-term-memory.entity';
+import { SocialAgentMessageFeedback } from './entities/social-agent-message-feedback.entity';
+import {
+  SocialAgentReminder,
+  SocialAgentReminderPreference,
+} from './entities/social-agent-reminder.entity';
 import { SocialAgentRagService } from './social-agent-rag.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { SocialAgentRouteCandidateConfirmationService } from './social-agent-route-candidate-confirmation.service';
@@ -113,6 +160,9 @@ import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile
 import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
 import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
 import { SocialAgentRouteDecisionService } from './social-agent-route-decision.service';
+import { SocialAgentRouteAgentLoopRunnerService } from './social-agent-route-agent-loop-runner.service';
+import { SocialAgentProfileGateService } from './social-agent-profile-gate.service';
+import { SocialAgentStreamingResponseService } from './social-agent-streaming-response.service';
 import { SocialAgentTargetResolverService } from './social-agent-target-resolver.service';
 import { AgentWebhookService } from './agent-webhook.service';
 import { AiSocialAutopilotService } from './ai-social-autopilot.service';
@@ -162,6 +212,7 @@ import { AiMatchSession } from '../ai-match/ai-match-session.entity';
 import { UserSocialProfile } from '../users/user-social-profile.entity';
 import { SocialActivity } from '../activities/entities/activity.entity';
 import { RealtimeModule } from '../realtime/realtime.module';
+import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
 
 @Module({
   imports: [
@@ -169,6 +220,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     MeetsModule,
     SafetyModule,
     NotificationsModule,
+    AdminRbacModule,
     FriendsModule,
     RealtimeModule,
     UsersModule,
@@ -187,6 +239,17 @@ import { RealtimeModule } from '../realtime/realtime.module';
       PaymentIntent,
       AgentTask,
       AgentTaskEvent,
+      AgentRunCheckpoint,
+      AgentReflectionRun,
+      AgentSkillPatch,
+      AgentEvalCase,
+      AgentMeetLoopState,
+      AgentOnlineReplaySample,
+      AgentSkillPatchEffect,
+      AgentSubagentMemory,
+      SubagentWorkerJob,
+      SubagentWorkerHeartbeat,
+      SubagentWorkerFailure,
       FitMeetAgentRun,
       FitMeetAgentRunStep,
       FitMeetAgentToolCall,
@@ -205,6 +268,9 @@ import { RealtimeModule } from '../realtime/realtime.module';
       AiMatchSession,
       UserSocialProfile,
       SocialAgentLongTermMemory,
+      SocialAgentMessageFeedback,
+      SocialAgentReminderPreference,
+      SocialAgentReminder,
       User,
       SocialActivity,
     ]),
@@ -212,6 +278,11 @@ import { RealtimeModule } from '../realtime/realtime.module';
   providers: [
     AgentGatewayService,
     AgentProfileService,
+    AgentL5RuntimeService,
+    AgentLoopService,
+    AgentObservabilityService,
+    AgentObservabilityAlertSinkService,
+    AgentSelfImproveService,
     AgentApprovalService,
     AgentApprovalDispatcherService,
     AgentSettingsService,
@@ -236,6 +307,12 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentIntentRouterService,
     SocialAgentBrainService,
     FitMeetAlphaAgentSdkService,
+    FitMeetSubagentRuntimeService,
+    FitMeetSubagentWorkerDispatcherService,
+    FitMeetSubagentWorkerService,
+    FitMeetSubagentWorkerRuntimeService,
+    SubagentWorkerQueueService,
+    SocialAgentStreamingResponseService,
     SocialAgentFinalResponseService,
     SocialAgentModelRouterService,
     SocialAgentMemoryContextService,
@@ -253,6 +330,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentProfileEnrichmentService,
     SocialAgentMeetLoopService,
     SocialAgentCardActionRouterService,
+    SocialAgentLifeGraphCardActionService,
     SocialAgentCandidateCommandService,
     SocialAgentCandidateActionService,
     SocialAgentDraftPublicationService,
@@ -273,9 +351,22 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentSessionQueryService,
     SocialAgentReplanFacadeService,
     SocialAgentInitialSearchQueueService,
+    SocialAgentChatTurnCallbacksService,
     SocialAgentChatTurnFacadeService,
     SocialAgentChatRunFacadeService,
     SocialAgentChatSessionFacadeService,
+    SocialAgentMessageFeedbackService,
+    SocialAgentReminderService,
+    SocialAgentThreadService,
+    SocialAgentThreadSessionManager,
+    SocialAgentContextHydratorService,
+    SocialAgentTaskMemoryStateMachineService,
+    SocialAgentEventV2Service,
+    SocialAgentEventStore,
+    SocialCodexRuntimePolicyService,
+    SocialCodexLifeGraphGovernanceService,
+    SocialCodexTraceEvalService,
+    AgentRunCheckpointService,
     SocialAgentChatService,
     FitMeetAgentRuntimeService,
     SocialAgentCandidatePoolService,
@@ -289,8 +380,10 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentRouteEntranceService,
     SocialAgentRouteProfileTurnService,
     SocialAgentRouteSearchTurnService,
+    SocialAgentProfileGateService,
     SocialAgentRouteActionTurnService,
     SocialAgentRouteDecisionService,
+    SocialAgentRouteAgentLoopRunnerService,
     SocialAgentTargetResolverService,
     SocialAgentToolExecutorService,
     SocialAgentToolInputParserService,
@@ -322,6 +415,9 @@ import { RealtimeModule } from '../realtime/realtime.module';
     PublicSocialIntentController,
     PublicSocialSkillsController,
     SocialAgentAutopilotController,
+    SocialAgentReminderController,
+    AgentSelfImproveController,
+    AgentL5RuntimeController,
     SocialAgentChatController,
     SocialAgentDebugController,
     FitMeetAgentToolRegistryAgentController,
@@ -332,6 +428,11 @@ import { RealtimeModule } from '../realtime/realtime.module';
   exports: [
     AgentGatewayService,
     AgentProfileService,
+    AgentL5RuntimeService,
+    AgentLoopService,
+    AgentObservabilityService,
+    AgentObservabilityAlertSinkService,
+    AgentSelfImproveService,
     AgentApprovalService,
     AgentApprovalDispatcherService,
     AgentSettingsService,
@@ -351,6 +452,12 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentIntentRouterService,
     SocialAgentBrainService,
     FitMeetAlphaAgentSdkService,
+    FitMeetSubagentRuntimeService,
+    FitMeetSubagentWorkerDispatcherService,
+    FitMeetSubagentWorkerService,
+    FitMeetSubagentWorkerRuntimeService,
+    SubagentWorkerQueueService,
+    SocialAgentStreamingResponseService,
     SocialAgentFinalResponseService,
     SocialAgentModelRouterService,
     SocialAgentMemoryContextService,
@@ -364,6 +471,14 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentRunStateService,
     SocialAgentSessionRestoreService,
     SocialAgentMessageLogService,
+    SocialAgentMessageFeedbackService,
+    SocialAgentThreadService,
+    AgentRunCheckpointService,
+    SocialAgentEventV2Service,
+    SocialAgentEventStore,
+    SocialCodexRuntimePolicyService,
+    SocialCodexLifeGraphGovernanceService,
+    SocialCodexTraceEvalService,
     SocialAgentTaskLifecycleService,
     SocialAgentMainAgentTurnEventsService,
     SocialAgentMainAgentTurnResultService,
@@ -373,6 +488,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     SocialAgentReplanFacadeService,
     SocialAgentCandidateCommandService,
     SocialAgentInitialSearchQueueService,
+    SocialAgentChatTurnCallbacksService,
     SocialAgentQueuedRunService,
     SocialAgentFollowUpContextService,
     SocialAgentReplanProgressService,

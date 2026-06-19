@@ -36,8 +36,8 @@ interface MessageProbe {
 }
 
 interface RouteMessageResponse {
-  intent: string;
-  action: string;
+  intent?: string;
+  action?: string;
   assistantMessage?: string;
   taskId?: number;
   source?: string;
@@ -51,12 +51,19 @@ interface MetricsSnapshot {
   actionTotal: Record<string, number>;
   errorTotal: Record<string, number>;
   fallbackTotal: Record<string, number>;
-  stageLatencyMs: Record<string, { count: number; avgMs: number; maxMs: number }>;
+  stageLatencyMs: Record<
+    string,
+    { count: number; avgMs: number; maxMs: number }
+  >;
   routeLatencyMs: { count: number; avgMs: number; sumMs: number };
 }
 
 const probes: MessageProbe[] = [
-  { label: 'casual_chat', message: '你好，能帮我聊聊吗？', expectIntent: 'casual_chat' },
+  {
+    label: 'casual_chat',
+    message: '你好，能帮我聊聊吗？',
+    expectIntent: 'casual_chat',
+  },
   {
     label: 'profile_update',
     message: '我比较内向，平时喜欢周末跑步和拍照',
@@ -91,9 +98,12 @@ let fail = 0;
 
 async function main(): Promise<void> {
   const before = await fetchMetrics();
-  console.log(`metrics.routeLatencyMs.count(before) = ${before.routeLatencyMs.count}`);
+  console.log(
+    `metrics.routeLatencyMs.count(before) = ${before.routeLatencyMs.count}`,
+  );
 
-  const perProbeLatency: Array<{ label: string; ms: number; intent: string }> = [];
+  const perProbeLatency: Array<{ label: string; ms: number; intent: string }> =
+    [];
 
   for (const probe of probes) {
     const startedAt = Date.now();
@@ -106,24 +116,34 @@ async function main(): Promise<void> {
       continue;
     }
     const elapsed = Date.now() - startedAt;
-    perProbeLatency.push({ label: probe.label, ms: elapsed, intent: response.intent });
-    if (response.taskId) lastTaskId = response.taskId;
+    const intent = readResponseIntent(response);
+    const action = readResponseAction(response);
+    perProbeLatency.push({ label: probe.label, ms: elapsed, intent });
+    const taskId = readResponseTaskId(response);
+    if (taskId) lastTaskId = taskId;
 
-    if (response.intent === probe.expectIntent) {
+    if (intent === probe.expectIntent) {
       pass++;
       console.log(
-        `[PASS] ${probe.label} -> intent=${response.intent} action=${response.action} (${elapsed}ms)`,
+        `[PASS] ${probe.label} -> intent=${intent} action=${action} (${elapsed}ms)`,
+      );
+    } else if (intent === 'user_facing_response') {
+      warn++;
+      console.warn(
+        `[WARN] ${probe.label} -> product response hides internal intent (expected ${probe.expectIntent}, ${elapsed}ms)`,
       );
     } else {
       warn++;
       console.warn(
-        `[WARN] ${probe.label} -> intent=${response.intent} (expected ${probe.expectIntent}, ${elapsed}ms)`,
+        `[WARN] ${probe.label} -> intent=${intent} (expected ${probe.expectIntent}, ${elapsed}ms)`,
       );
     }
 
     if (elapsed > softTimeoutMs) {
       warn++;
-      console.warn(`[WARN] ${probe.label} exceeded soft timeout ${softTimeoutMs}ms`);
+      console.warn(
+        `[WARN] ${probe.label} exceeded soft timeout ${softTimeoutMs}ms`,
+      );
     }
   }
 
@@ -145,14 +165,21 @@ async function main(): Promise<void> {
 
   console.log('--- per-probe latency ---');
   for (const entry of perProbeLatency) {
-    console.log(`  ${entry.label.padEnd(18)} intent=${entry.intent.padEnd(20)} ${entry.ms}ms`);
+    console.log(
+      `  ${entry.label.padEnd(18)} intent=${entry.intent.padEnd(20)} ${entry.ms}ms`,
+    );
   }
+
+  await smokeStreamingMessage(lastTaskId);
 
   console.log(`\nresult: pass=${pass} warn=${warn} fail=${fail}`);
   if (fail > 0) process.exit(1);
 }
 
-async function postMessage(message: string, taskId?: number): Promise<RouteMessageResponse> {
+async function postMessage(
+  message: string,
+  taskId?: number,
+): Promise<RouteMessageResponse> {
   const url = `${baseUrl}/social-agent/chat/messages`;
   const body: Record<string, unknown> = { message };
   if (taskId) body.taskId = taskId;
@@ -169,6 +196,50 @@ async function postMessage(message: string, taskId?: number): Promise<RouteMessa
     throw new Error(`HTTP ${res.status} ${text.slice(0, 200)}`);
   }
   return (await res.json()) as RouteMessageResponse;
+}
+
+async function smokeStreamingMessage(taskId?: number): Promise<void> {
+  const url = `${baseUrl}/social-agent/chat/messages/stream`;
+  const body: Record<string, unknown> = {
+    message: '继续用一句自然的话总结我刚才的需求',
+  };
+  if (taskId) body.taskId = taskId;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${userJwt}`,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => '');
+    fail++;
+    console.error(`[FAIL] stream HTTP ${res.status} ${text.slice(0, 200)}`);
+    return;
+  }
+
+  const text = await res.text();
+  const eventNames = Array.from(text.matchAll(/^event:\s*(.+)$/gm)).map(
+    (match) => match[1]?.trim() ?? '',
+  );
+  const deltaCount = eventNames.filter(
+    (event) => event === 'assistant_delta',
+  ).length;
+  const hasDone =
+    eventNames.includes('assistant_done') || eventNames.includes('result');
+  if (deltaCount > 0 && hasDone) {
+    pass++;
+    console.log(
+      `[PASS] messages/stream -> assistant_delta=${deltaCount}, done=${hasDone}`,
+    );
+    return;
+  }
+
+  fail++;
+  console.error(
+    `[FAIL] messages/stream expected assistant_delta and assistant_done/result, got events=${eventNames.join(',')}`,
+  );
 }
 
 async function fetchMetrics(): Promise<MetricsSnapshot> {
@@ -191,12 +262,75 @@ function assertCounterIncreased(
     console.log(`[PASS] ${name} delta=${delta} (>= ${expectedAtLeast})`);
     pass++;
   } else {
-    console.error(`[FAIL] ${name} delta=${delta} (expected >= ${expectedAtLeast})`);
+    console.error(
+      `[FAIL] ${name} delta=${delta} (expected >= ${expectedAtLeast})`,
+    );
     fail++;
   }
 }
 
+function readResponseIntent(response: RouteMessageResponse): string {
+  const direct = readString(response.intent);
+  if (direct) return direct;
+  const nested = readRecordPath(response, [
+    ['route', 'intent'],
+    ['result', 'intent'],
+    ['result', 'route', 'intent'],
+    ['structuredIntent', 'intent'],
+    ['alphaTurn', 'structuredIntent', 'intent'],
+  ]);
+  if (nested) return nested;
+  if (readString(response.assistantMessage)) return 'user_facing_response';
+  return 'unknown';
+}
+
+function readResponseAction(response: RouteMessageResponse): string {
+  return (
+    readString(response.action) ??
+    readRecordPath(response, [
+      ['route', 'action'],
+      ['result', 'action'],
+      ['result', 'route', 'action'],
+    ]) ??
+    'user_facing'
+  );
+}
+
+function readResponseTaskId(
+  response: RouteMessageResponse,
+): number | undefined {
+  if (typeof response.taskId === 'number') return response.taskId;
+  const value =
+    readRecordValue(response, ['taskId']) ??
+    readRecordValue(response, ['result', 'taskId']);
+  return typeof value === 'number' ? value : undefined;
+}
+
+function readRecordPath(value: unknown, paths: string[][]): string | undefined {
+  for (const path of paths) {
+    const text = readString(readRecordValue(value, path));
+    if (text) return text;
+  }
+  return undefined;
+}
+
+function readRecordValue(value: unknown, path: string[]): unknown {
+  let current = value;
+  for (const key of path) {
+    if (!current || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
 main().catch((error) => {
-  console.error('fatal:', error instanceof Error ? error.stack ?? error.message : error);
+  console.error(
+    'fatal:',
+    error instanceof Error ? (error.stack ?? error.message) : error,
+  );
   process.exit(1);
 });

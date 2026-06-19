@@ -11,6 +11,7 @@ import * as sharp from 'sharp';
 import OSS from 'ali-oss';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { ModerationService } from '../moderation/moderation.service';
+import { ensureUploadBaseDir, ensureUploadTempDir } from './upload-paths';
 
 const PLACEHOLDER_PATTERN =
   /^(|change_me.*|your-.*|replace-.*|.*_here|secret_key|password)$/i;
@@ -20,7 +21,7 @@ const VIDEO_MIME_PATTERN = /^video\/(mp4|quicktime|webm|x-m4v)$/;
 @Injectable()
 export class UploadsService implements OnModuleInit {
   private readonly logger = new Logger(UploadsService.name);
-  private readonly uploadDir = 'public/uploads';
+  private readonly uploadDir = ensureUploadBaseDir();
   private ossClient?: OSS;
   private s3Client?: S3Client;
   private bucketName = '';
@@ -31,6 +32,7 @@ export class UploadsService implements OnModuleInit {
     private readonly moderationService: ModerationService,
   ) {
     this.ensureUploadDir();
+    ensureUploadTempDir();
   }
 
   private get isProduction() {

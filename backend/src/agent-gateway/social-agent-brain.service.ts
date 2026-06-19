@@ -3,10 +3,16 @@ import { ConfigService } from '@nestjs/config';
 
 import { cleanDisplayText } from '../common/display-text.util';
 import {
+  normalizeSocialAgentBrainLlmPlan,
+  normalizeSocialAgentBrainPlannedTools,
+  type SocialAgentLlmPlan,
+} from './social-agent-brain-planner-normalization';
+import {
   SocialAgentIntentRouterResult,
   SocialAgentIntentType,
   SocialAgentReplyStrategy,
 } from './social-agent-intent-router.service';
+import { hasSocialAgentImmediateSearchRequest } from './social-agent-profile-search-boundary';
 import { AgentTaskPermissionMode } from './entities/agent-task.entity';
 import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
 import { SocialAgentModelRouterService } from './social-agent-model-router.service';
@@ -53,16 +59,6 @@ export interface SocialAgentBrainAvailableTool {
   whenToUse: string;
   requiresConfirmation: boolean;
   returns: string[];
-}
-
-interface SocialAgentLlmPlan {
-  userIntent: SocialAgentIntentType;
-  reason: string;
-  state: string;
-  shouldCallTool: boolean;
-  tools: SocialAgentBrainPlannedTool[];
-  needUserConfirmation: boolean;
-  responseGoal: string;
 }
 
 @Injectable()
@@ -151,7 +147,10 @@ export class SocialAgentBrainService {
       );
     }
 
-    if (this.hasRichProfileFacts(message)) {
+    if (
+      this.hasRichProfileFacts(message) &&
+      !hasSocialAgentImmediateSearchRequest(message)
+    ) {
       notes.push('rich_profile_facts_detected');
       if (route.intent === 'social_search') {
         notes.push('search_downgraded_until_user_confirms');
@@ -324,7 +323,7 @@ export class SocialAgentBrainService {
       }
       const payload = (await response.json()) as Record<string, unknown>;
       const content = this.readDeepSeekContent(payload);
-      const plan = this.normalizeLlmPlan(
+      const plan = normalizeSocialAgentBrainLlmPlan(
         JSON.parse(content) as Record<string, unknown>,
       );
       this.logModelCall({
@@ -363,7 +362,7 @@ export class SocialAgentBrainService {
       '你是 FitMeet Social Agent 的 LLM Planner，只输出 JSON，不输出自然语言。',
       '你的任务是基于用户当前消息、最近上下文和 router 初判，决定下一步做什么。',
       '你会收到 availableTools。只能从 availableTools.name 中选择工具；如果已有上下文足够回答，就不要调用工具。',
-      '允许的 userIntent: product_help, workflow_help, casual_chat, profile_enrichment, profile_enrichment_request, correction_or_clarification, social_search, activity_search, candidate_followup, action_request, safety_or_boundary, unknown。',
+      '允许的 userIntent: product_help, workflow_help, casual_chat, profile_enrichment, profile_enrichment_request, correction_or_clarification, social_search, activity_search, candidate_followup, action_request, safety_or_boundary, fitness_math, unknown。',
       '如果用户主要提供个人画像，即使包含“想找同校女生/想认识某类人”，也优先 profile_enrichment；不要立即 social_search，除非用户明确说“现在帮我找/搜索/推荐”。',
       '如果用户说“不是不是/我的意思是/上面是画像”，必须 correction_or_clarification。',
       '如果用户说“调用工具/保存/写入/完善 AI 画像”，可以计划 update_profile_from_agent_context。',
@@ -498,7 +497,11 @@ export class SocialAgentBrainService {
       plan.userIntent,
       ruleSafety.route.intent,
     );
-    const tools = this.normalizePlannedTools(plan.tools, userIntent);
+    const tools = normalizeSocialAgentBrainPlannedTools({
+      tools: plan.tools,
+      intent: userIntent,
+      availableTools: this.availableTools(),
+    });
     const shouldExecuteTool = tools.length > 0 && plan.shouldCallTool;
     const route = this.overrideRoute(input.route, userIntent, {
       confidence: Math.max(input.route.confidence, 0.89),
@@ -561,6 +564,7 @@ export class SocialAgentBrainService {
       return 'profile_update_tool';
     }
     if (intent === 'workflow_help') return 'workflow_help';
+    if (intent === 'fitness_math') return 'answer';
     if (intent === 'profile_enrichment') return 'profile_enrichment';
     if (intent === 'profile_enrichment_request') return 'profile_enrichment';
     if (intent === 'correction_or_clarification') return 'profile_correction';
@@ -568,134 +572,6 @@ export class SocialAgentBrainService {
       return 'search';
     if (intent === 'action_request') return 'action';
     return 'answer';
-  }
-
-  private normalizeLlmPlan(
-    parsed: Record<string, unknown>,
-  ): SocialAgentLlmPlan {
-    const rawIntent = parsed.intent ?? parsed.userIntent;
-    const rawTools = Array.isArray(parsed.toolCalls)
-      ? parsed.toolCalls
-      : Array.isArray(parsed.tools)
-        ? parsed.tools
-        : [];
-    const userIntent = this.allowedIntent(rawIntent) ? rawIntent : 'unknown';
-    return {
-      userIntent,
-      reason: cleanDisplayText(parsed.reason, ''),
-      state: cleanDisplayText(parsed.state, ''),
-      shouldCallTool:
-        parsed.shouldCallTools === true || parsed.shouldCallTool === true,
-      tools: rawTools.flatMap((tool) => {
-        if (!this.isRecord(tool)) return [];
-        const name = cleanDisplayText(tool.name, '');
-        const args = this.isRecord(tool.arguments) ? tool.arguments : {};
-        return [{ name, arguments: args }];
-      }),
-      needUserConfirmation: parsed.needUserConfirmation === true,
-      responseGoal: cleanDisplayText(parsed.responseGoal, ''),
-    };
-  }
-
-  private normalizePlannedTools(
-    tools: SocialAgentBrainPlannedTool[],
-    intent: SocialAgentIntentType,
-  ): SocialAgentBrainPlannedTool[] {
-    const allowed = new Set(this.availableTools().map((tool) => tool.name));
-    const executableInChat = new Set([
-      'get_user_profile',
-      'get_conversation_messages',
-      'get_candidate_detail',
-      'update_profile_from_agent_context',
-      'append_profile_memory',
-      'search_real_candidates',
-      'search_public_intents',
-      'create_social_request',
-      'send_message_to_candidate',
-      'connect_candidate',
-      'create_activity',
-    ]);
-    return tools
-      .map((tool) => ({
-        ...tool,
-        name: this.canonicalToolName(tool.name),
-      }))
-      .filter((tool) => allowed.has(tool.name))
-      .filter((tool) => executableInChat.has(tool.name))
-      .filter((tool) => {
-        if (tool.name === 'update_profile_from_agent_context') {
-          return (
-            intent === 'profile_enrichment' ||
-            intent === 'profile_enrichment_request' ||
-            intent === 'correction_or_clarification'
-          );
-        }
-        if (tool.name === 'append_profile_memory') {
-          return (
-            intent === 'profile_enrichment' ||
-            intent === 'profile_enrichment_request' ||
-            intent === 'correction_or_clarification' ||
-            intent === 'profile_update'
-          );
-        }
-        if (
-          tool.name === 'get_user_profile' ||
-          tool.name === 'get_conversation_messages' ||
-          tool.name === 'get_candidate_detail'
-        ) {
-          return true;
-        }
-        if (tool.name === 'search_real_candidates')
-          return intent === 'social_search';
-        if (tool.name === 'search_public_intents')
-          return intent === 'activity_search';
-        if (tool.name === 'create_social_request')
-          return intent === 'social_search';
-        if (
-          tool.name === 'send_message_to_candidate' ||
-          tool.name === 'connect_candidate' ||
-          tool.name === 'create_activity'
-        ) {
-          return intent === 'action_request';
-        }
-        return false;
-      });
-  }
-
-  private canonicalToolName(name: string): string {
-    const normalized = cleanDisplayText(name, '');
-    const aliases: Record<string, string> = {
-      search_candidates: 'search_real_candidates',
-      search_matches: 'search_real_candidates',
-      search_real_users: 'search_real_candidates',
-      search_activities: 'create_social_request',
-      request_action_confirmation: 'send_message_to_candidate',
-      update_social_profile: 'update_profile_from_agent_context',
-      update_ai_profile: 'update_profile_from_agent_context',
-      save_profile_memory: 'update_profile_from_agent_context',
-    };
-    return aliases[normalized] ?? normalized;
-  }
-
-  private allowedIntent(value: unknown): value is SocialAgentIntentType {
-    return (
-      typeof value === 'string' &&
-      [
-        'casual_chat',
-        'product_help',
-        'workflow_help',
-        'profile_enrichment',
-        'profile_enrichment_request',
-        'correction_or_clarification',
-        'profile_update',
-        'social_search',
-        'activity_search',
-        'candidate_followup',
-        'action_request',
-        'safety_or_boundary',
-        'unknown',
-      ].includes(value)
-    );
   }
 
   private readDeepSeekContent(payload: Record<string, unknown>): string {
@@ -786,6 +662,7 @@ export class SocialAgentBrainService {
     if (
       intent === 'product_help' ||
       intent === 'workflow_help' ||
+      intent === 'fitness_math' ||
       intent === 'profile_enrichment' ||
       intent === 'profile_enrichment_request' ||
       intent === 'correction_or_clarification' ||

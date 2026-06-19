@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -21,6 +21,7 @@ import {
   recordSocialAgentShortTermAction,
   transitionSocialAgentState,
 } from './social-agent-memory.util';
+import { SocialAgentTaskMemoryStateMachineService } from './social-agent-task-memory-state-machine.service';
 
 @Injectable()
 export class SocialAgentMessageLogService {
@@ -31,6 +32,8 @@ export class SocialAgentMessageLogService {
     private readonly taskRepo: Repository<AgentTask>,
     @InjectRepository(AgentTaskEvent)
     private readonly eventRepo: Repository<AgentTaskEvent>,
+    @Optional()
+    private readonly slotStateMachine?: SocialAgentTaskMemoryStateMachineService,
   ) {}
 
   async recordUserMessage(task: AgentTask, message: string): Promise<void> {
@@ -46,6 +49,9 @@ export class SocialAgentMessageLogService {
       at: now,
     });
     transitionSocialAgentState(task, 'user_message');
+    const slots =
+      this.slotStateMachine ?? new SocialAgentTaskMemoryStateMachineService();
+    slots.applyUserMessage(task, message);
     task.status =
       task.status === AgentTaskStatus.Pending
         ? AgentTaskStatus.AwaitingFeedback

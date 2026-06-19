@@ -1,4 +1,6 @@
-import type { FitMeetAgentSchemaAction } from './fitmeet-alpha-agent.types';
+export type SocialAgentCardExecutableAction =
+  | import('./fitmeet-alpha-agent.types').FitMeetAgentSchemaAction
+  | 'connect_candidate';
 
 export type CandidateTargetBody = {
   targetUserId?: unknown;
@@ -16,6 +18,7 @@ export type CandidateTargetBody = {
 };
 
 export type SocialAgentCardActionBody = {
-  action?: FitMeetAgentSchemaAction | null;
+  action?: SocialAgentCardExecutableAction | null;
   payload?: Record<string, unknown> | null;
+  idempotencyKey?: string | null;
 };

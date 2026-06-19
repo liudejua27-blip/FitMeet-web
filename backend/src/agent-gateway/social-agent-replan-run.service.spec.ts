@@ -193,6 +193,10 @@ describe('SocialAgentReplanRunService', () => {
     expect(result).toMatchObject({
       taskId: 101,
       replan: { replanAttempt: 2 },
+      agentLoop: {
+        status: 'completed',
+        toolBudget: expect.objectContaining({ usedToolCalls: 5 }),
+      },
       socialRequestDraft: expect.objectContaining({ socialRequestId: 301 }),
       candidates: [expect.objectContaining({ userId: 22 })],
     });

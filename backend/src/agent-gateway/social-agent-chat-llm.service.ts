@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 
 import { cleanDisplayText } from '../common/display-text.util';
+import { AgentSelfImproveService } from './agent-self-improve.service';
 import { conversationalFallbackReply } from './social-agent-chat-replies';
 import {
   buildSocialAgentAgentBrainMessages,
@@ -40,6 +41,8 @@ export class SocialAgentChatLlmService {
     private readonly deepSeek: SocialAgentChatDeepSeekClientService,
     @Optional()
     private readonly finalResponses?: SocialAgentFinalResponseService,
+    @Optional()
+    private readonly selfImprove?: AgentSelfImproveService,
   ) {}
 
   async generateConversationalAnswer(input: {
@@ -50,6 +53,8 @@ export class SocialAgentChatLlmService {
     longTermSnapshot: LongTermMemorySnapshot | null;
     memoryContext: SocialAgentMemoryContext | null;
     toolResults?: Array<Record<string, unknown>>;
+    onDelta?: (delta: string) => void | Promise<void>;
+    signal?: AbortSignal | null;
   }): Promise<string> {
     const fallbackReply = conversationalFallbackReply(
       input.message,
@@ -61,6 +66,10 @@ export class SocialAgentChatLlmService {
           ...input,
           fallbackReply,
         }),
+        {
+          ...(input.onDelta ? { onDelta: input.onDelta } : {}),
+          signal: input.signal,
+        },
       );
     }
     try {
@@ -88,10 +97,16 @@ export class SocialAgentChatLlmService {
     toolOutput?: Record<string, unknown>;
     fallbackReply: string;
     memoryContext: SocialAgentMemoryContext | null;
+    onDelta?: (delta: string) => void | Promise<void>;
+    signal?: AbortSignal | null;
   }): Promise<string> {
     if (this.finalResponses) {
       return this.finalResponses.generate(
         buildSocialAgentAgentBrainFinalResponseInput(input),
+        {
+          ...(input.onDelta ? { onDelta: input.onDelta } : {}),
+          signal: input.signal,
+        },
       );
     }
     try {
@@ -126,6 +141,7 @@ export class SocialAgentChatLlmService {
         messages: buildSocialAgentProfileExtractionMessages(
           task,
           sourceMessage,
+          await this.publishedLifeGraphExtractionRules(),
         ),
       });
       if (!content) return {};
@@ -141,6 +157,17 @@ export class SocialAgentChatLlmService {
     return profileFieldsFromRecord(value);
   }
 
+  private async publishedLifeGraphExtractionRules(): Promise<string[]> {
+    if (!this.selfImprove) return [];
+    try {
+      return await this.selfImprove.publishedLifeGraphExtractionRules(
+        'profile_extraction.system_prompt',
+      );
+    } catch {
+      return [];
+    }
+  }
+
   private async callDeepSeekForDirectReply(input: {
     message: string;
     route: SocialAgentIntentRouterResult;
@@ -148,6 +175,8 @@ export class SocialAgentChatLlmService {
     task: AgentTask;
     longTermSnapshot: LongTermMemorySnapshot | null;
     memoryContext: SocialAgentMemoryContext | null;
+    onDelta?: (delta: string) => void | Promise<void>;
+    signal?: AbortSignal | null;
   }): Promise<string | null> {
     const useCase =
       input.route.intent === 'casual_chat' ? 'casual_chat' : 'final_response';
@@ -157,6 +186,8 @@ export class SocialAgentChatLlmService {
       intent: input.route.intent,
       fallbackTemperature: 0.6,
       maxTokens: 700,
+      onDelta: input.onDelta,
+      signal: input.signal,
       messages: buildSocialAgentDirectReplyMessages(input),
     });
   }
@@ -169,6 +200,8 @@ export class SocialAgentChatLlmService {
     extractedProfile: ExtractedProfileFields;
     sourceMessage: string;
     toolOutput?: Record<string, unknown>;
+    onDelta?: (delta: string) => void | Promise<void>;
+    signal?: AbortSignal | null;
   }): Promise<string | null> {
     const useCase = 'final_response' as const;
     return this.deepSeek.complete({
@@ -177,6 +210,8 @@ export class SocialAgentChatLlmService {
       intent: input.intent,
       fallbackTemperature: 0.6,
       maxTokens: 650,
+      onDelta: input.onDelta,
+      signal: input.signal,
       messages: buildSocialAgentAgentBrainMessages(input),
     });
   }

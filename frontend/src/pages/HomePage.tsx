@@ -8,6 +8,7 @@ import { EcosystemGateways } from '@/components/sections/EcosystemGateways';
 import { FinalCTA } from '@/components/sections/FinalCTA';
 import { SymbiosisNetwork } from '@/components/sections/SymbiosisNetwork';
 import { VisionSection } from '@/components/sections/VisionSection';
+import { ProductMotionShowcase } from '@/components/showcase';
 
 const EarthScene = lazy(() =>
   import('@/components/three/EarthScene').then((module) => ({ default: module.EarthScene })),
@@ -56,6 +57,7 @@ export const HomePage = memo(function HomePage() {
       <main className="relative z-10">
         <FitMeetHero />
         <AiSocialRequestCta variant="hero" />
+        <ProductMotionShowcase />
         <PlatformRoleStrip />
         <BrandPhilosophy />
         <EcosystemGateways />
@@ -133,7 +135,7 @@ function PlatformRoleStrip() {
                 进入 Agent
               </Link>
               <Link
-                to="/app"
+                to="/download"
                 className="rounded-lg border border-[#C8FF80]/35 px-4 py-2 text-sm font-black text-[#DFFF9F]"
               >
                 App 内测

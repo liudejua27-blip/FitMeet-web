@@ -1,12 +1,12 @@
 # FitMeet Aliyun ECS Deployment Runbook
 
-Last updated: 2026-06-07
+Last updated: 2026-06-10
 
 Use this path when Railway/Vercel deployment is blocked by account authorization, billing, or GitHub import. It packages the current Web/backend stack for a Docker Compose deployment on an Aliyun ECS host.
 
 ## Topology
 
-- Public Web origin: `https://socialworld.world`
+- Public Web origin: `https://www.ourfitmeet.cn`
 - Nginx serves `frontend/dist`
 - Nginx proxies `/api/*` and `/socket.io/*` to the NestJS backend container
 - PostgreSQL, MongoDB, Redis, Kafka, backend, and Nginx run through `docker-compose.prod.yml`
@@ -28,7 +28,8 @@ VITE_API_BASE_URL=/api
 VITE_WS_BASE_URL=
 ```
 
-It then builds the backend and creates:
+It then builds the backend, runs a production `backend/Dockerfile.prod` build
+with `pnpm --frozen-lockfile`, and creates:
 
 ```text
 fitmeet-ecs-deploy.zip
@@ -70,6 +71,12 @@ Workbench's file-upload channel to place the same three files in
 `~/fitmeet-release`. `--upload` creates the remote release directory, uploads
 the zip, checksum, and installer, then prints the remote dry-run/install command.
 
+For the Workbench path, generate the paste-ready terminal command block locally:
+
+```bash
+./scripts/ecs-workbench-install-plan.sh
+```
+
 The exported `fitmeet-ecs-install-release.sh` verifies the checksum and zip
 shape, backs up an existing `/opt/FitMeet-web`, preserves `.env.production` and
 `nginx/ssl/`, then syncs the new release. Run it first without `--install` to
@@ -101,15 +108,16 @@ cp deploy/env.production.ecs.example .env.production
 
 Required values include:
 
-- `BASE_URL=https://socialworld.world`
-- `FRONTEND_BASE_URL=https://socialworld.world`
-- `ALLOWED_ORIGINS=https://socialworld.world,https://www.socialworld.world`
+- `BASE_URL=https://www.ourfitmeet.cn`
+- `FRONTEND_BASE_URL=https://www.ourfitmeet.cn`
+- `ALLOWED_ORIGINS=https://www.ourfitmeet.cn,https://ourfitmeet.cn`
 - PostgreSQL split vars: `DB_HOST=postgres`, `DB_PORT=5432`, `DB_USERNAME`, `DB_PASSWORD`, `DB_DATABASE`
 - Mongo split vars and `MONGO_URI=mongodb://<user>:<password>@mongo:27017/fitness_app?authSource=admin`
 - `REDIS_PASSWORD`
 - `JWT_SECRET`
 - object storage credentials for uploads; avatar upload and feed image E2E require a real OSS/S3 bucket. If S3/R2 uses a custom endpoint, set `S3_PUBLIC_BASE_URL` to the HTTPS public media domain.
 - `DEEPSEEK_API_KEY`, `DEEPSEEK_CHAT_MODEL=deepseek-v4-pro`, `DEEPSEEK_FAST_MODEL=deepseek-v4-flash`
+- First launch can keep `AGENT_OBSERVABILITY_ALERTS_ENABLED=false`. When traffic grows, set it to `true` and configure `AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL`, `AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN`, and `AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS=300000`.
 
 Copy SSL files:
 
@@ -121,9 +129,10 @@ chmod 600 nginx/ssl/privkey.pem
 ```
 
 Run the host preflight before starting containers. It checks Docker, Compose,
-required files, `.env.production`, SSL material, disk/memory, port 80/443
-availability, Docker Compose interpolation, and production env readiness when
-`pnpm` is already available:
+required files, `.env.production`, domain/origin settings, SSL material and SAN,
+upload temp directory config, subagent worker healthcheck config, disk/memory,
+port 80/443 availability, Docker Compose interpolation, and production env
+readiness when `pnpm` is already available:
 
 ```bash
 APP_DIR=/opt/FitMeet-web ./scripts/ecs-host-preflight.sh
@@ -140,7 +149,12 @@ corepack enable
 corepack prepare pnpm@10.30.3 --activate
 pnpm -C backend install --frozen-lockfile
 pnpm -C backend run check:prod-env -- ../.env.production
-docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d postgres redis mongo zookeeper kafka
+docker compose -f docker-compose.prod.yml --env-file .env.production build backend subagent-worker
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm uploads:check:prod
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm migration:run:prod
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm db:check-critical-tables:prod
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --no-build backend subagent-worker nginx
 docker compose -f docker-compose.prod.yml --env-file .env.production ps
 ```
 
@@ -150,16 +164,18 @@ Or use the packaged deploy script:
 APP_DIR=/opt/FitMeet-web \
 RUN_RELEASE_PREFLIGHT=false \
 BUILD_FRONTEND=false \
-PUBLIC_BASE_URL=https://socialworld.world \
-PUBLIC_API_BASE_URL=https://socialworld.world/api \
+PUBLIC_BASE_URL=https://www.ourfitmeet.cn \
+PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api \
 ./scripts/deploy-production.sh
 ```
 
-The deploy script runs the same host preflight by default, then runs TypeORM
-migrations after the containers are rebuilt. Set `RUN_ECS_HOST_PREFLIGHT=false`
-only after you have already run the preflight manually. Set
-`RUN_MIGRATIONS=false` only when you are deliberately doing a no-migration
-restart.
+The deploy script runs the same host preflight by default, starts only data
+services first, builds the backend/worker images, runs upload-dir preflight,
+runs TypeORM migrations, verifies critical tables, and only then starts
+backend, subagent-worker, and nginx. Set `RUN_ECS_HOST_PREFLIGHT=false` only
+after you have already run the preflight manually. `RUN_DB_MIGRATIONS=true` is
+the production default; if you deliberately set it false, the script still
+checks that critical tables already exist before starting the app.
 
 Prepare two release smoke users for Web production smoke and iOS staging E2E:
 
@@ -180,8 +196,8 @@ process:
 ```bash
 APP_SMOKE_SEED_PASSWORD='use-a-long-random-password' \
 APP_SMOKE_SEED_ALLOW_PRODUCTION=true \
-BASE_URL=https://socialworld.world \
-API_BASE_URL=https://socialworld.world/api \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_LAUNCH_TOPOLOGY=ecs \
 ./scripts/ecs-post-deploy-smoke.sh --prepare-app-smoke-users --run-app-smoke
 ```
@@ -189,11 +205,149 @@ FITMEET_LAUNCH_TOPOLOGY=ecs \
 The script does not write smoke credentials to the repository. It keeps them in
 the current process only, then runs `verify-production.sh`.
 
-Run migrations explicitly after services are healthy if you did not use the deploy script or set `RUN_MIGRATIONS=false`:
+Prepare Agent smoke data inside the production Docker network without
+`ts-node`:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.production exec backend pnpm migration:run:prod
-docker compose -f docker-compose.prod.yml --env-file .env.production exec backend pnpm migration:status
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm seed:agent-smoke:prod:dry-run
+
+AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true \
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm seed:agent-smoke:prod -- --allow-production
+```
+
+The Agent smoke seed refuses to write in `NODE_ENV=production` unless
+`AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true` or `--allow-production` is present.
+
+For the product-grade Agent launch gate, prefer the combined post-deploy
+entrypoint so the dedicated Agent smoke users, opportunity journey, SSE abort
+check, and backend/worker log scan run in one controlled flow:
+
+Readiness pass, stopped after OpportunityCards and before high-risk actions:
+
+```bash
+AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
+FITMEET_LAUNCH_TOPOLOGY=ecs \
+SCAN_COMPOSE_LOGS=true \
+./scripts/ecs-post-deploy-smoke.sh \
+  --prepare-agent-smoke-seed \
+  --run-agent-opportunity-readiness-smoke \
+  --scan-compose-logs
+```
+
+Full pass, using the same dedicated smoke account shape and allowing only smoke
+mutations:
+
+```bash
+AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
+FITMEET_LAUNCH_TOPOLOGY=ecs \
+SCAN_COMPOSE_LOGS=true \
+./scripts/ecs-post-deploy-smoke.sh \
+  --prepare-agent-smoke-seed \
+  --run-agent-opportunity-smoke \
+  --run-agent-sse-abort-smoke \
+  --scan-compose-logs
+```
+
+This creates/updates only dedicated smoke users and automatically sets the
+`AGENT_SMOKE_ALLOW_MUTATIONS=true` guard for that invocation. It validates the
+product-grade Agent launch gate:
+
+- ordinary chat does not trigger social cards.
+- ambiguous social intent clarifies before search.
+- explicit social intent returns OpportunityCards.
+- high-risk send/create confirmation paths require approval.
+- it aborts one real SSE run after the first delta.
+- recent `backend` / `subagent-worker` logs do not show known production
+  failure patterns.
+
+Proactive Agent reminders are worker-only background jobs. Keep
+`FITMEET_PROCESS_ROLE=api` and `ENABLE_SCHEDULER=false` for the backend API
+container; the `subagent-worker` service sets `FITMEET_PROCESS_ROLE=worker` and
+`ENABLE_SCHEDULER=true`. The reminder runner is controlled by
+`SOCIAL_AGENT_REMINDER_RUNNER_ENABLED` and
+`SOCIAL_AGENT_REMINDER_RUNNER_LIMIT`. Even when the runner is enabled, reminders
+are created only for users who explicitly enabled Agent reminders, and they are
+sent only as in-app notifications / Agent chat prompts. They never auto-send
+messages, add friends, create activities, or publish content.
+
+Both post-deploy Agent smoke modes automatically run
+`scripts/agent-remote-smoke-preflight.sh` first. The preflight checks
+`AGENT_SMOKE_ALLOW_REMOTE`, dedicated smoke-account naming, JWT override safety,
+and the mutation guard before any real remote Agent smoke can run. To inspect
+the guard directly without touching the API, first create a local smoke env from
+the checked-in template:
+
+```bash
+cp deploy/agent-smoke.remote.env.example deploy/agent-smoke.remote.env
+$EDITOR deploy/agent-smoke.remote.env
+```
+
+Use only a dedicated smoke/test account in that file. The filled
+`deploy/agent-smoke.remote.env` is gitignored and must not be copied into a
+release zip, ticket, chat message, or screenshot. The required guards and
+credentials are `AGENT_SMOKE_ALLOW_REMOTE=true`,
+`AGENT_SMOKE_ALLOW_MUTATIONS=true`, `AGENT_SMOKE_EMAIL`, and
+`AGENT_SMOKE_PASSWORD`. The preflight rejects the template's
+`replace-with-dedicated-smoke-password` placeholder, so fill a real dedicated
+smoke password before running:
+
+```bash
+set -a
+source deploy/agent-smoke.remote.env
+set +a
+./scripts/agent-remote-smoke-preflight.sh \
+  --readiness \
+  --api-base-url "$API_BASE_URL"
+```
+
+For release evidence, prefer the wrapper below. It runs the same post-deploy
+smoke commands, redacts passwords, JWTs, bearer tokens, and email addresses, and
+writes a markdown proof file under `artifacts/agent-smoke-evidence/`. With
+`--all --prepare-agent-smoke-seed`, the wrapper prepares the dedicated Agent
+smoke seed once in the parent process, exports the printed `AGENT_SMOKE_*`
+values, and reuses that same smoke account across readiness, full opportunity,
+and SSE abort checks:
+
+```bash
+set -a
+source deploy/agent-smoke.remote.env
+set +a
+AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
+FITMEET_LAUNCH_TOPOLOGY=ecs \
+./scripts/agent-remote-smoke-evidence.sh \
+  --all \
+  --prepare-agent-smoke-seed
+```
+
+Attach the generated `FitMeet Agent Remote Smoke Evidence` markdown to the
+release checklist after confirming it contains no real credentials or personal
+email addresses.
+
+Before final Agent cutover, run launch status with the evidence file as a hard
+gate:
+
+```bash
+FITMEET_LAUNCH_TOPOLOGY=ecs \
+WEB_ORIGIN=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
+RUN_IOS_TESTFLIGHT_CHECK=false \
+REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true \
+AGENT_REMOTE_SMOKE_EVIDENCE_FILE=/opt/FitMeet-web/artifacts/agent-smoke-evidence/agent-remote-smoke-all-YYYYMMDDTHHMMSSZ.md \
+./scripts/launch-status.sh --topology ecs --skip-ios-testflight-check
+```
+
+Run migrations explicitly before app startup if you are not using the deploy
+script:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm migration:run:prod
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm db:check-critical-tables:prod
 ```
 
 ## Verification
@@ -207,8 +361,8 @@ TIMEOUT_SECONDS=8 ./scripts/launch-status.sh --topology ecs --skip-ios-testfligh
 ```
 
 ```bash
-BASE_URL=https://socialworld.world \
-API_BASE_URL=https://socialworld.world/api \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_LAUNCH_TOPOLOGY=ecs \
 ./scripts/verify-production.sh
 ```
@@ -216,8 +370,8 @@ FITMEET_LAUNCH_TOPOLOGY=ecs \
 With prepared staging users:
 
 ```bash
-BASE_URL=https://socialworld.world \
-API_BASE_URL=https://socialworld.world/api \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_LAUNCH_TOPOLOGY=ecs \
 APP_SMOKE_EMAIL=test@example.com \
 APP_SMOKE_PASSWORD='***' \
@@ -229,8 +383,8 @@ APP_SMOKE_RUN_MUTATIONS=true \
 Or run the combined ECS smoke entrypoint:
 
 ```bash
-BASE_URL=https://socialworld.world \
-API_BASE_URL=https://socialworld.world/api \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_LAUNCH_TOPOLOGY=ecs \
 APP_SMOKE_EMAIL=test@example.com \
 APP_SMOKE_PASSWORD='***' \
@@ -241,14 +395,14 @@ APP_SMOKE_TARGET_USER_ID=123 \
 iOS needs a matching Release API base if ECS is the final backend:
 
 ```text
-https://socialworld.world/api
+https://www.ourfitmeet.cn/api
 ```
 
-The current iOS Release default is `https://api.socialworld.world/api` for the Railway/Vercel topology. If ECS becomes the production backend, keep the app pointed at the same deployed API by using the ECS wrapper:
+The current iOS Release default is `https://www.ourfitmeet.cn/api` for the Railway/Vercel topology. If ECS becomes the production backend, keep the app pointed at the same deployed API by using the ECS wrapper:
 
 ```bash
 cd "/Users/liuchongjiang/Documents/FitMeet app"
-FITMEET_ALPHA_STAGING_BASE_URL=https://socialworld.world/api \
+FITMEET_ALPHA_STAGING_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_ALPHA_STAGING_EMAIL=test@example.com \
 FITMEET_ALPHA_STAGING_PASSWORD='***' \
 FITMEET_ALPHA_STAGING_MESSAGE_TARGET_USER_ID=123 \
@@ -256,7 +410,7 @@ Scripts/ecs-release-preflight-ios.sh --require-staging
 ```
 
 `Scripts/ecs-release-preflight-ios.sh` sets both `FITMEET_ALPHA_RELEASE_API_BASE_URL`
-and `FITMEET_ALPHA_EXPECTED_API_BASE_URL` to `https://socialworld.world/api`.
+and `FITMEET_ALPHA_EXPECTED_API_BASE_URL` to `https://www.ourfitmeet.cn/api`.
 If the ECS API host changes, set `FITMEET_ALPHA_ECS_API_BASE_URL` and make
 `FITMEET_ALPHA_STAGING_BASE_URL` match it.
 
@@ -267,5 +421,5 @@ xcodebuild archive \
   -project FitMeetAlpha.xcodeproj \
   -scheme FitMeetAlpha \
   -configuration Release \
-  FITMEET_API_BASE_URL=https://socialworld.world/api
+  FITMEET_API_BASE_URL=https://www.ourfitmeet.cn/api
 ```

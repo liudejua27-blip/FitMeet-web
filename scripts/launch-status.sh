@@ -2,14 +2,17 @@
 set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WEB_ORIGIN="${WEB_ORIGIN:-https://socialworld.world}"
+WEB_ORIGIN="${WEB_ORIGIN:-https://www.ourfitmeet.cn}"
 API_BASE_URL_WAS_SET="${API_BASE_URL:-}"
-API_BASE_URL="${API_BASE_URL:-https://api.socialworld.world/api}"
+API_BASE_URL="${API_BASE_URL:-https://www.ourfitmeet.cn/api}"
 FITMEET_LAUNCH_TOPOLOGY="${FITMEET_LAUNCH_TOPOLOGY:-vercel-railway}"
 RUN_READINESS_TESTS="${RUN_READINESS_TESTS:-true}"
 RUN_DOMAIN_CHECK="${RUN_DOMAIN_CHECK:-true}"
 RUN_IOS_TESTFLIGHT_CHECK="${RUN_IOS_TESTFLIGHT_CHECK:-true}"
 RUN_RAILWAY_DOCKER_BUILD="${RUN_RAILWAY_DOCKER_BUILD:-false}"
+REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE="${REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE:-false}"
+AGENT_REMOTE_SMOKE_EVIDENCE_FILE="${AGENT_REMOTE_SMOKE_EVIDENCE_FILE:-}"
+VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY="${VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY:-false}"
 FITMEET_APP_DIR="${FITMEET_APP_DIR:-/Users/liuchongjiang/Documents/FitMeet app}"
 
 # shellcheck source=scripts/lib/toolchain.sh
@@ -21,7 +24,7 @@ warnings=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/launch-status.sh [--topology vercel-railway|ecs] [--include-railway-docker-build] [--skip-readiness-tests] [--skip-domain-check] [--skip-ios-testflight-check]
+Usage: scripts/launch-status.sh [--topology vercel-railway|ecs] [--include-railway-docker-build] [--skip-readiness-tests] [--skip-domain-check] [--skip-ios-testflight-check] [--validate-agent-remote-smoke-evidence-only]
 
 Aggregates the non-mutating FitMeet launch gates:
   - local deploy readiness Jest guard
@@ -35,8 +38,8 @@ mutate cloud resources, create users, write production data, or submit GitHub.
 
 Environment:
   FITMEET_LAUNCH_TOPOLOGY      Launch topology: vercel-railway or ecs. Default: vercel-railway.
-  WEB_ORIGIN                  Public Web origin. Default: https://socialworld.world.
-  API_BASE_URL                Public API base. Default: https://api.socialworld.world/api,
+  WEB_ORIGIN                  Public Web origin. Default: https://www.ourfitmeet.cn.
+  API_BASE_URL                Public API base. Default: https://www.ourfitmeet.cn/api,
                               or <WEB_ORIGIN>/api when topology is ecs and API_BASE_URL is not set.
   FITMEET_APP_DIR             iOS app repo path. Default: /Users/liuchongjiang/Documents/FitMeet app.
   FITMEET_PNPM_BIN_DIR        Optional pnpm bin directory to prepend to PATH.
@@ -47,6 +50,12 @@ Environment:
                               Skip strict iOS TestFlight readiness.
   RUN_RAILWAY_DOCKER_BUILD=true
                               Also run scripts/railway-docker-build-check.sh.
+  REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true
+                              Require redacted Agent remote smoke evidence file.
+  AGENT_REMOTE_SMOKE_EVIDENCE_FILE
+                              Evidence markdown from scripts/agent-remote-smoke-evidence.sh.
+  VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY=true
+                              Validate only the redacted Agent remote smoke evidence file.
 EOF
 }
 
@@ -67,6 +76,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-ios-testflight-check)
       RUN_IOS_TESTFLIGHT_CHECK=false
+      ;;
+    --validate-agent-remote-smoke-evidence-only)
+      VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY=true
+      REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true
       ;;
     -h|--help)
       usage
@@ -117,7 +130,78 @@ run_gate() {
   fi
 }
 
+validate_agent_remote_smoke_evidence() {
+  local evidence_file="${AGENT_REMOTE_SMOKE_EVIDENCE_FILE}"
+
+  if [[ -z "${evidence_file}" ]]; then
+    echo "[FAIL] AGENT_REMOTE_SMOKE_EVIDENCE_FILE is required when REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true." >&2
+    return 1
+  fi
+  if [[ ! -f "${evidence_file}" ]]; then
+    echo "[FAIL] Agent remote smoke evidence file does not exist: ${evidence_file}" >&2
+    return 1
+  fi
+
+  local required_patterns=(
+    '# FitMeet Agent Remote Smoke Evidence'
+    'ECS post-deploy Agent readiness smoke'
+    'ECS post-deploy Agent full smoke'
+    'ECS post-deploy Agent sse-abort smoke'
+    'Post-deploy smoke completed.'
+  )
+
+  local pattern
+  for pattern in "${required_patterns[@]}"; do
+    if ! grep -Fq -- "${pattern}" "${evidence_file}"; then
+      echo "[FAIL] Agent remote smoke evidence is missing: ${pattern}" >&2
+      return 1
+    fi
+  done
+
+  local zero_exit_count
+  zero_exit_count="$(grep -Fc -- '- Exit code: `0`' "${evidence_file}")"
+  if [[ "${zero_exit_count}" -lt 3 ]]; then
+    echo "[FAIL] Agent remote smoke evidence must contain at least 3 successful smoke exit codes; found ${zero_exit_count}." >&2
+    return 1
+  fi
+
+  local trace_eval_count
+  trace_eval_count="$(grep -Fc -- 'Social Codex trace eval passed' "${evidence_file}")"
+  if [[ "${trace_eval_count}" -lt 2 ]]; then
+    echo "[FAIL] Agent remote smoke evidence must prove Social Codex trace eval for readiness and full opportunity smoke; found ${trace_eval_count}." >&2
+    return 1
+  fi
+
+  local secret_assignment_pattern='(AGENT_SMOKE_PASSWORD|USER_JWT|FITMEET_USER_JWT|AGENT_SMOKE_JWT|AUTHORIZATION|Authorization)=["'\'']?[^"'\'']?[^\\"'\'']*[[:alnum:]_.~+/=-]+'
+  local redacted_assignment_pattern='(AGENT_SMOKE_PASSWORD|USER_JWT|FITMEET_USER_JWT|AGENT_SMOKE_JWT|AUTHORIZATION|Authorization)=["'\'']?\[redacted\]["'\'']?'
+  if grep -Eiq "${secret_assignment_pattern}" "${evidence_file}" &&
+    grep -Ei "${secret_assignment_pattern}" "${evidence_file}" | grep -Eivq "${redacted_assignment_pattern}"; then
+    echo "[FAIL] Agent remote smoke evidence appears to contain unredacted secrets or email addresses." >&2
+    return 1
+  fi
+
+  local bearer_pattern='Bearer[[:space:]]+[A-Za-z0-9._~+/=-]+'
+  local redacted_bearer_pattern='Bearer[[:space:]]+\[redacted\]'
+  if grep -Eiq "${bearer_pattern}" "${evidence_file}" &&
+    grep -Ei "${bearer_pattern}" "${evidence_file}" | grep -Eivq "${redacted_bearer_pattern}"; then
+    echo "[FAIL] Agent remote smoke evidence appears to contain an unredacted bearer token." >&2
+    return 1
+  fi
+
+  if grep -Eiq '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' "${evidence_file}"; then
+    echo "[FAIL] Agent remote smoke evidence appears to contain an unredacted email address." >&2
+    return 1
+  fi
+
+  echo "[PASS] Agent remote smoke evidence is present and redacted: ${evidence_file}"
+}
+
 cd "${ROOT_DIR}" || exit 1
+
+if [[ "${VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY}" == "true" ]]; then
+  validate_agent_remote_smoke_evidence
+  exit $?
+fi
 
 if [[ "${FITMEET_LAUNCH_TOPOLOGY}" != "vercel-railway" && "${FITMEET_LAUNCH_TOPOLOGY}" != "ecs" ]]; then
   fail "FITMEET_LAUNCH_TOPOLOGY must be vercel-railway or ecs."
@@ -125,6 +209,7 @@ fi
 
 run_gate "Shell syntax for production scripts" \
   bash -n \
+  scripts/deploy-production.sh \
   scripts/cloud-platform-preflight.sh \
   scripts/domain-readiness-check.sh \
   scripts/vercel-prebuilt-deploy.sh \
@@ -132,7 +217,12 @@ run_gate "Shell syntax for production scripts" \
   scripts/railway-docker-build-check.sh \
   scripts/ecs-install-release.sh \
   scripts/ecs-upload-release.sh \
+  scripts/ecs-workbench-install-plan.sh \
   scripts/ecs-post-deploy-smoke.sh \
+  scripts/verify-agent-release.sh \
+  scripts/agent-release-matrix.sh \
+  scripts/agent-remote-smoke-preflight.sh \
+  scripts/agent-remote-smoke-evidence.sh \
   scripts/launch-status.sh
 
 if [[ -d "${FITMEET_APP_DIR}" ]]; then
@@ -201,6 +291,12 @@ elif [[ "${FITMEET_LAUNCH_TOPOLOGY}" == "ecs" ]]; then
   warn "Skipped Railway production Docker image build; not required for ECS topology."
 else
   warn "Skipped Railway production Docker image build. Re-run with --include-railway-docker-build before Railway deploy."
+fi
+
+if [[ "${REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE}" == "true" ]]; then
+  run_gate "Agent remote smoke evidence" validate_agent_remote_smoke_evidence
+else
+  warn "Skipped Agent remote smoke evidence gate. Set REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true before final Agent cutover."
 fi
 
 printf '\nLaunch status: %s failure(s), %s warning(s).\n' "${failures}" "${warnings}"

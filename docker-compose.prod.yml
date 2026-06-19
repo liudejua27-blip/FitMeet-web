@@ -160,6 +160,10 @@ services:
     restart: always
     environment:
       NODE_ENV: production
+      FITMEET_PROCESS_ROLE: api
+      FITMEET_RELEASE_COMMIT: ${FITMEET_RELEASE_COMMIT:-unknown}
+      FITMEET_RELEASE_SOURCE: ${FITMEET_RELEASE_SOURCE:-compose}
+      FITMEET_RELEASE_BUILT_AT: ${FITMEET_RELEASE_BUILT_AT:-}
       PORT: 3000
       DB_HOST: postgres
       DB_PORT: 5432
@@ -168,7 +172,13 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       KAFKA_BROKERS: kafka:29092
-      ENABLE_SUBCONSCIOUS_LOOP: "true"
+      ENABLE_SCHEDULER: "false"
+      ENABLE_PROFILE_MATCH_AUTOPILOT: "false"
+      ENABLE_SOCIAL_AGENT_AUTOPILOT: "false"
+      ENABLE_AI_SOCIAL_AUTOPILOT: "false"
+      ENABLE_SUBCONSCIOUS_LOOP: "false"
+      UPLOAD_DIR: ${UPLOAD_DIR:-/tmp/fitmeet/uploads}
+      UPLOAD_TEMP_DIR: ${UPLOAD_TEMP_DIR:-/tmp/fitmeet/uploads/temp}
     env_file:
       - ./.env.production
     depends_on:
@@ -190,8 +200,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 60s
-    volumes:
-      - ./backend/public/uploads:/app/public/uploads
     networks:
       - fitness-network
     deploy:
@@ -202,6 +210,79 @@ services:
         reservations:
           cpus: '1'
           memory: 1G
+
+  # 独立 Subagent Worker - DB 队列消费，隔离 Agent 子任务崩溃与扩缩容
+  subagent-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:20-alpine}
+    container_name: fitness-subagent-worker
+    restart: always
+    command: ["node", "dist/agent-gateway/subagent-worker.cli.js"]
+    environment:
+      NODE_ENV: production
+      FITMEET_PROCESS_ROLE: worker
+      FITMEET_RELEASE_COMMIT: ${FITMEET_RELEASE_COMMIT:-unknown}
+      FITMEET_RELEASE_SOURCE: ${FITMEET_RELEASE_SOURCE:-compose}
+      FITMEET_RELEASE_BUILT_AT: ${FITMEET_RELEASE_BUILT_AT:-}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_MIGRATIONS_RUN: "false"
+      DB_SYNCHRONIZE: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:29092
+      ENABLE_SCHEDULER: "true"
+      ENABLE_PROFILE_MATCH_AUTOPILOT: ${ENABLE_PROFILE_MATCH_AUTOPILOT:-true}
+      ENABLE_SOCIAL_AGENT_AUTOPILOT: ${ENABLE_SOCIAL_AGENT_AUTOPILOT:-true}
+      ENABLE_AI_SOCIAL_AUTOPILOT: ${ENABLE_AI_SOCIAL_AUTOPILOT:-true}
+      ENABLE_SUBCONSCIOUS_LOOP: ${ENABLE_SUBCONSCIOUS_LOOP:-false}
+      SOCIAL_AGENT_REMINDER_RUNNER_ENABLED: ${SOCIAL_AGENT_REMINDER_RUNNER_ENABLED:-true}
+      SOCIAL_AGENT_REMINDER_RUNNER_LIMIT: ${SOCIAL_AGENT_REMINDER_RUNNER_LIMIT:-50}
+      FITMEET_SUBAGENT_WORKER_ID: ${FITMEET_SUBAGENT_WORKER_ID:-compose-subagent-worker}
+      FITMEET_SUBAGENT_WORKER_MODE: ${FITMEET_SUBAGENT_WORKER_MODE:-db_queue}
+      FITMEET_SUBAGENT_WORKER_CONCURRENCY: ${FITMEET_SUBAGENT_WORKER_CONCURRENCY:-2}
+      FITMEET_SUBAGENT_WORKER_POLL_MS: ${FITMEET_SUBAGENT_WORKER_POLL_MS:-1000}
+      FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: ${FITMEET_SUBAGENT_WORKER_TIMEOUT_MS:-15000}
+      FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS: ${FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS:-10000}
+      FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS: ${FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS:-90000}
+      FITMEET_SUBAGENT_WORKER_QUEUE: ${FITMEET_SUBAGENT_WORKER_QUEUE:-fitmeet.subagent.life-graph-agent,fitmeet.subagent.social-match-agent,fitmeet.subagent.meet-loop-agent,fitmeet.subagent.math-agent}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/tmp/fitmeet/uploads}
+      UPLOAD_TEMP_DIR: ${UPLOAD_TEMP_DIR:-/tmp/fitmeet/uploads/temp}
+    env_file:
+      - ./.env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "dist/agent-gateway/subagent-worker-healthcheck.js",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 80s
+    networks:
+      - fitness-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
 volumes:
   postgres_data:

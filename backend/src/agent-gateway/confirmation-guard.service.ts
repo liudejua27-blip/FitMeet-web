@@ -1,28 +1,33 @@
 import { Injectable } from '@nestjs/common';
 
 const DANGEROUS_ADHOC_ACTIONS = new Set([
+  'send_message',
+  'send_message_to_candidate',
+  'reply_message',
   'add_friend',
   'connect_candidate',
   'create_activity',
+  'join_activity',
   'invite_activity',
   'offline_meeting',
   'share_location',
+  'payment',
+  'publish_social_request',
 ]);
 
 const EXPLICIT_APPROVAL_TOOLS = new Set([
   'send_message',
   'send_message_to_candidate',
+  'reply_message',
   'add_friend',
   'connect_candidate',
   'create_activity',
+  'join_activity',
   'invite_activity',
   'offline_meeting',
   'share_location',
-]);
-
-const CHAT_CONFIRMATION_COMPATIBLE_TOOLS = new Set([
-  'send_message',
-  'send_message_to_candidate',
+  'payment',
+  'publish_social_request',
 ]);
 
 @Injectable()
@@ -44,15 +49,7 @@ export class ConfirmationGuardService {
     if (this.hasExplicitApprovalCredential(input)) {
       return EXPLICIT_APPROVAL_TOOLS.has(toolName);
     }
-
-    const metadata =
-      input.metadata && typeof input.metadata === 'object'
-        ? (input.metadata as Record<string, unknown>)
-        : {};
-    return (
-      CHAT_CONFIRMATION_COMPATIBLE_TOOLS.has(toolName) &&
-      this.string(metadata.confirmationSource) === 'social_agent_chat'
-    );
+    return false;
   }
 
   private number(value: unknown): number | null {
@@ -62,9 +59,5 @@ export class ConfirmationGuardService {
       return Number.isFinite(parsed) ? parsed : null;
     }
     return null;
-  }
-
-  private string(value: unknown): string | null {
-    return typeof value === 'string' && value.trim() ? value : null;
   }
 }

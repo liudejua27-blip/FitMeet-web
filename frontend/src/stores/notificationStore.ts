@@ -16,7 +16,11 @@ export interface AppNotification {
   time: string;
   read: boolean;
   targetId?: number;
-  targetType?: 'post' | 'user' | 'meet';
+  targetType?: 'post' | 'user' | 'meet' | 'agent_reminder';
+  route?: string;
+  reminderId?: number;
+  taskId?: number;
+  reminderContext?: Record<string, unknown> | null;
 }
 
 interface NotificationState {
@@ -37,18 +41,9 @@ export const useNotificationStore = create<NotificationState>()(
       loadNotifications: async () => {
         try {
           const apiNotifs = await dataService.getNotifications();
-          const mapped: AppNotification[] = apiNotifs.map((n, i) => ({
-            id: i + 1,
-            backendId: n.id,
-            type: n.type,
-            username: n.username || '系统',
-            avatar: n.avatar || 'S',
-            color: n.color || '#38BDF8',
-            text: n.text,
-            time: n.time || '刚刚',
-            read: n.read,
-            targetId: n.targetId,
-          }));
+          const mapped: AppNotification[] = apiNotifs.map((n, i) =>
+            mapApiNotification(n, i),
+          );
           set({
             notifications: mapped,
             unreadCount: mapped.filter((n) => !n.read).length,
@@ -95,3 +90,53 @@ export const useNotificationStore = create<NotificationState>()(
     },
   ),
 );
+
+function mapApiNotification(
+  notification: Awaited<ReturnType<typeof dataService.getNotifications>>[number],
+  index: number,
+): AppNotification {
+  const pushPayload =
+    notification.pushPayload && typeof notification.pushPayload === 'object'
+      ? notification.pushPayload
+      : {};
+  const isAgentReminder =
+    notification.type === 'social_agent.reminder' ||
+    pushPayload.targetType === 'agent_reminder';
+  return {
+    id: index + 1,
+    backendId: notification.id,
+    type: normalizeNotificationType(notification.type, isAgentReminder),
+    username: notification.username || '系统',
+    avatar: notification.avatar || 'S',
+    color: notification.color || '#38BDF8',
+    text: notification.text,
+    time: notification.time || '刚刚',
+    read: notification.read,
+    targetId: notification.targetId,
+    targetType: isAgentReminder ? 'agent_reminder' : undefined,
+    route: typeof pushPayload.route === 'string' ? pushPayload.route : undefined,
+    reminderId: numberFromUnknown(pushPayload.reminderId ?? notification.targetId),
+    taskId: numberFromUnknown(pushPayload.taskId),
+    reminderContext: recordFromUnknown(pushPayload.reminderContext),
+  };
+}
+
+function normalizeNotificationType(
+  type: Awaited<ReturnType<typeof dataService.getNotifications>>[number]['type'],
+  isAgentReminder: boolean,
+): AppNotification['type'] {
+  if (isAgentReminder || type === 'social_agent.reminder') return 'system';
+  return type;
+}
+
+function numberFromUnknown(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
+}
+
+function recordFromUnknown(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}

@@ -2,7 +2,7 @@ import { request } from './baseClient';
 
 export interface ApiNotification {
   id: string;
-  type: 'like' | 'comment' | 'follow' | 'meet' | 'system';
+  type: 'like' | 'comment' | 'follow' | 'meet' | 'system' | 'social_agent.reminder';
   username: string;
   avatar: string;
   color: string;
@@ -10,6 +10,7 @@ export interface ApiNotification {
   time: string;
   read: boolean;
   targetId?: number;
+  pushPayload?: Record<string, unknown> | null;
 }
 
 export function getNotifications(): Promise<ApiNotification[]> {

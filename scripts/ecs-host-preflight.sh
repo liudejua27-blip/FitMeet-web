@@ -7,6 +7,7 @@ ENV_FILE="${ENV_FILE:-.env.production}"
 MIN_DISK_MB="${MIN_DISK_MB:-8192}"
 MIN_MEMORY_MB="${MIN_MEMORY_MB:-3072}"
 RUN_PROD_ENV_CHECK="${RUN_PROD_ENV_CHECK:-true}"
+RUN_BACKEND_DOCKER_BUILD_CHECK="${RUN_BACKEND_DOCKER_BUILD_CHECK:-false}"
 
 failures=0
 warnings=0
@@ -120,6 +121,93 @@ check_env_placeholders() {
   fi
 }
 
+env_value() {
+  local key="$1"
+  if [ ! -f "$ENV_FILE" ]; then
+    return
+  fi
+  awk -F= -v key="$key" '
+    $0 !~ /^[[:space:]]*#/ && $1 == key {
+      sub(/^[^=]*=/, "")
+      gsub(/^["'\'']|["'\'']$/, "")
+      print
+      exit
+    }
+  ' "$ENV_FILE"
+}
+
+check_domain_env() {
+  local base_url frontend_base_url public_base_url public_api_base_url allowed_origins wechat_redirect alerts upload_temp
+  base_url="$(env_value BASE_URL)"
+  frontend_base_url="$(env_value FRONTEND_BASE_URL)"
+  public_base_url="$(env_value PUBLIC_BASE_URL)"
+  public_api_base_url="$(env_value PUBLIC_API_BASE_URL)"
+  allowed_origins="$(env_value ALLOWED_ORIGINS)"
+  wechat_redirect="$(env_value WECHAT_REDIRECT_URI)"
+  alerts="$(env_value AGENT_OBSERVABILITY_ALERTS_ENABLED)"
+  upload_temp="$(env_value UPLOAD_TEMP_DIR)"
+
+  [ "$base_url" = "https://www.ourfitmeet.cn" ] && pass "BASE_URL targets www.ourfitmeet.cn" || fail "BASE_URL must be https://www.ourfitmeet.cn"
+  [ "$frontend_base_url" = "https://www.ourfitmeet.cn" ] && pass "FRONTEND_BASE_URL targets www.ourfitmeet.cn" || fail "FRONTEND_BASE_URL must be https://www.ourfitmeet.cn"
+  [ "$public_base_url" = "https://www.ourfitmeet.cn" ] && pass "PUBLIC_BASE_URL targets www.ourfitmeet.cn" || fail "PUBLIC_BASE_URL must be https://www.ourfitmeet.cn"
+  [ "$public_api_base_url" = "https://www.ourfitmeet.cn/api" ] && pass "PUBLIC_API_BASE_URL targets production API" || fail "PUBLIC_API_BASE_URL must be https://www.ourfitmeet.cn/api"
+  [[ "$allowed_origins" == *"https://www.ourfitmeet.cn"* && "$allowed_origins" == *"https://ourfitmeet.cn"* ]] && pass "ALLOWED_ORIGINS includes www and apex domains" || fail "ALLOWED_ORIGINS must include https://www.ourfitmeet.cn and https://ourfitmeet.cn"
+  [ "$wechat_redirect" = "https://www.ourfitmeet.cn/api/auth/wechat/callback" ] && pass "WECHAT_REDIRECT_URI targets production callback" || warn "WECHAT_REDIRECT_URI is not the production callback"
+  [ "${alerts:-false}" = "false" ] && pass "Agent alert delivery disabled for first launch" || warn "Agent alert delivery is enabled; verify webhook/token before launch."
+  check_deepseek_models
+  check_worker_env
+  [[ "$upload_temp" = /* ]] && pass "UPLOAD_TEMP_DIR is absolute: $upload_temp" || fail "UPLOAD_TEMP_DIR must be an absolute writable path."
+}
+
+check_deepseek_models() {
+  local key model checked=0 invalid=0
+  for key in DEEPSEEK_CHAT_MODEL DEEPSEEK_FAST_MODEL DEEPSEEK_MODEL AGENT_CASUAL_CHAT_MODEL AGENT_FINAL_RESPONSE_MODEL AGENT_PLANNER_MODEL AGENT_EXTRACTOR_MODEL AGENT_CARD_MODEL; do
+    model="$(env_value "$key")"
+    [ -z "$model" ] && continue
+    checked=$((checked + 1))
+    case "$model" in
+      deepseek-chat|deepseek-reasoner|deepseek-v4)
+        invalid=$((invalid + 1))
+        fail "$key must be an explicit V4 model id, not $model"
+        ;;
+    esac
+  done
+  if [ "$checked" -gt 0 ] && [ "$invalid" -eq 0 ]; then
+    pass "DeepSeek configured models are explicit model IDs"
+  elif [ "$checked" -eq 0 ]; then
+    fail "At least one DeepSeek model must be configured."
+  fi
+}
+
+check_positive_integer_env() {
+  local key="$1"
+  local value
+  value="$(env_value "$key")"
+  if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+    pass "$key is configured"
+  else
+    fail "$key must be a positive integer."
+  fi
+}
+
+check_worker_env() {
+  local worker_mode
+  worker_mode="$(env_value FITMEET_SUBAGENT_WORKER_MODE)"
+  case "$worker_mode" in
+    db_queue|queue_worker_ready)
+      pass "FITMEET_SUBAGENT_WORKER_MODE enables queue worker runtime"
+      ;;
+    *)
+      fail "FITMEET_SUBAGENT_WORKER_MODE must be db_queue or queue_worker_ready for ECS production."
+      ;;
+  esac
+  check_positive_integer_env FITMEET_SUBAGENT_WORKER_CONCURRENCY
+  check_positive_integer_env FITMEET_SUBAGENT_WORKER_POLL_MS
+  check_positive_integer_env FITMEET_SUBAGENT_WORKER_TIMEOUT_MS
+  check_positive_integer_env FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS
+  check_positive_integer_env FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS
+}
+
 check_ssl() {
   require_file "nginx/ssl/fullchain.pem"
   require_file "nginx/ssl/privkey.pem"
@@ -138,6 +226,13 @@ check_ssl() {
     if openssl x509 -in nginx/ssl/fullchain.pem -noout -subject -dates >/dev/null 2>&1; then
       pass "SSL certificate parses with openssl"
       openssl x509 -in nginx/ssl/fullchain.pem -noout -subject -dates
+      local san
+      san="$(openssl x509 -in nginx/ssl/fullchain.pem -noout -ext subjectAltName 2>/dev/null || true)"
+      if [[ "$san" == *"DNS:www.ourfitmeet.cn"* && "$san" == *"DNS:ourfitmeet.cn"* ]]; then
+        pass "SSL SAN covers www.ourfitmeet.cn and ourfitmeet.cn"
+      else
+        fail "SSL certificate SAN must include www.ourfitmeet.cn and ourfitmeet.cn."
+      fi
     else
       fail "nginx/ssl/fullchain.pem is not a valid X.509 certificate."
     fi
@@ -152,8 +247,53 @@ check_compose_config() {
   fi
   if docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config -q; then
     pass "Docker Compose config validates with $ENV_FILE"
+    local compose_rendered
+    compose_rendered="$(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config)"
+    if grep -q 'subagent-worker-healthcheck.js' <<<"$compose_rendered"; then
+      pass "subagent-worker uses dedicated healthcheck"
+    else
+      fail "subagent-worker healthcheck must use dist/agent-gateway/subagent-worker-healthcheck.js"
+    fi
+    if grep -A40 '^  nginx:' <<<"$compose_rendered" | grep -q 'subagent-worker'; then
+      fail "nginx must not depend on subagent-worker health."
+    else
+      pass "nginx does not depend on subagent-worker"
+    fi
+    if grep -A80 '^  backend:' <<<"$compose_rendered" | grep -q 'FITMEET_PROCESS_ROLE: api' &&
+      grep -A80 '^  backend:' <<<"$compose_rendered" | grep -q 'ENABLE_SCHEDULER: "false"'; then
+      pass "backend process role is API-only"
+    else
+      fail "backend must run as FITMEET_PROCESS_ROLE=api with ENABLE_SCHEDULER=false"
+    fi
+    if grep -A100 '^  subagent-worker:' <<<"$compose_rendered" | grep -q 'FITMEET_PROCESS_ROLE: worker' &&
+      grep -A100 '^  subagent-worker:' <<<"$compose_rendered" | grep -q 'ENABLE_SCHEDULER: "true"'; then
+      pass "subagent-worker process role owns scheduler jobs"
+    else
+      fail "subagent-worker must run as FITMEET_PROCESS_ROLE=worker with ENABLE_SCHEDULER=true"
+    fi
+    if grep -q 'user: "0:0"' <<<"$compose_rendered" || grep -q "user: 0:0" <<<"$compose_rendered"; then
+      fail "backend/subagent-worker must not run as root user 0:0"
+    else
+      pass "Compose does not force root user 0:0"
+    fi
   else
     fail "Docker Compose config validation failed."
+  fi
+}
+
+check_backend_docker_build() {
+  if [ "$RUN_BACKEND_DOCKER_BUILD_CHECK" != "true" ]; then
+    warn "Skipping backend Dockerfile.prod build check because RUN_BACKEND_DOCKER_BUILD_CHECK=$RUN_BACKEND_DOCKER_BUILD_CHECK."
+    return
+  fi
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    fail "Cannot run backend Dockerfile.prod build check without a reachable Docker daemon."
+    return
+  fi
+  if docker build -f backend/Dockerfile.prod backend -t fitmeet-backend-prod-preflight:local >/dev/null; then
+    pass "backend/Dockerfile.prod builds with frozen lockfile"
+  else
+    fail "backend/Dockerfile.prod build failed."
   fi
 }
 
@@ -205,6 +345,7 @@ require_file "nginx/nginx.conf"
 require_file "scripts/deploy-production.sh"
 
 check_env_placeholders
+check_domain_env
 check_ssl
 check_disk
 check_memory
@@ -212,6 +353,7 @@ check_port 80
 check_port 443
 check_compose_config
 check_prod_env
+check_backend_docker_build
 
 if [ "$failures" -gt 0 ]; then
   printf '\n[DONE] ECS host preflight failed with %s failure(s) and %s warning(s).\n' "$failures" "$warnings" >&2

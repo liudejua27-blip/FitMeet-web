@@ -155,4 +155,60 @@ describe('SocialAgentActionSideEffectService', () => {
       }),
     );
   });
+
+  it('redacts contact and precise-location details from audit payload and inbox metadata', async () => {
+    const { service, actionLogs, messages } = makeService();
+    const call = makeCall({
+      input: {
+        targetUserId: 2,
+        text: '我的微信是 fitmeet-test，手机号 15253005312',
+        exactLocation: '青岛大学 3 号宿舍 401',
+      },
+      output: {
+        conversationId: 'conv_1',
+        messageId: 'msg_1',
+        reply: '电话 15253005312',
+        preciseLocation: '青岛大学 3 号宿舍 401',
+      },
+    });
+
+    await service.record({
+      task: makeTask() as never,
+      toolName: SocialAgentToolName.SendMessage,
+      input: call.input,
+      call,
+      policy: {
+        permissionMode: AgentTaskPermissionMode.LimitedAuto,
+        requiresApproval: false,
+        sceneRisk: { sceneType: 'walking', riskLevel: 'medium' },
+      },
+    });
+
+    const auditPayload =
+      actionLogs.logAgentAction.mock.calls[0][0].payload as Record<
+        string,
+        unknown
+      >;
+    const inboxMetadata =
+      messages.createAgentInboxEvent.mock.calls[0][0].metadata as Record<
+        string,
+        unknown
+      >;
+
+    expect(auditPayload.input).toMatchObject({
+      text: '[redacted]',
+      exactLocation: '[redacted]',
+    });
+    expect(auditPayload.output).toMatchObject({
+      reply: '[redacted]',
+      preciseLocation: '[redacted]',
+    });
+    expect(inboxMetadata.output).toMatchObject({
+      reply: '[redacted]',
+      preciseLocation: '[redacted]',
+    });
+    expect(JSON.stringify(auditPayload)).not.toContain('15253005312');
+    expect(JSON.stringify(auditPayload)).not.toContain('fitmeet-test');
+    expect(JSON.stringify(inboxMetadata)).not.toContain('青岛大学 3 号宿舍');
+  });
 });

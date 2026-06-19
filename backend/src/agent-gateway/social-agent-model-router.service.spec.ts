@@ -10,7 +10,7 @@ function makeConfig(
 }
 
 describe('SocialAgentModelRouterService', () => {
-  it('routes natural conversation use cases to deepseek-v4-pro', () => {
+  it('routes natural conversation use cases to explicit chat model env', () => {
     const service = new SocialAgentModelRouterService(
       makeConfig({
         DEEPSEEK_CHAT_MODEL: 'deepseek-v4-pro',
@@ -39,8 +39,8 @@ describe('SocialAgentModelRouterService', () => {
   it('falls back when env vars are missing', () => {
     const service = new SocialAgentModelRouterService(makeConfig());
 
-    expect(service.getModel('casual_chat')).toBe('deepseek-v4-pro');
-    expect(service.getModel('final_response')).toBe('deepseek-v4-pro');
+    expect(service.getModel('casual_chat')).toBe('deepseek-v4-flash');
+    expect(service.getModel('final_response')).toBe('deepseek-v4-flash');
     expect(service.getModel('planner')).toBe('deepseek-v4-flash');
     expect(service.getModel('profile_extraction')).toBe('deepseek-v4-flash');
     expect(service.getModel('card_generation')).toBe('deepseek-v4-flash');
@@ -70,21 +70,34 @@ describe('SocialAgentModelRouterService', () => {
     expect(service.getModel('candidate_summary')).toBe('card-specific');
   });
 
-  it('does not route legacy flash model into chat use cases', () => {
+  it('keeps chat use cases on fast flash fallback when only legacy flash is set', () => {
     const service = new SocialAgentModelRouterService(
       makeConfig({ DEEPSEEK_MODEL: 'deepseek-v4-flash' }),
     );
 
-    expect(service.getModel('casual_chat')).toBe('deepseek-v4-pro');
-    expect(service.getModel('final_response')).toBe('deepseek-v4-pro');
+    expect(service.getModel('casual_chat')).toBe('deepseek-v4-flash');
+    expect(service.getModel('final_response')).toBe('deepseek-v4-flash');
   });
 
-  it('keeps DEEPSEEK_MODEL as a compatible fallback for explicit V4 pro envs', () => {
+  it('does not let shared DEEPSEEK_MODEL silently upgrade chat lanes to pro', () => {
     const service = new SocialAgentModelRouterService(
       makeConfig({ DEEPSEEK_MODEL: 'deepseek-v4-pro' }),
     );
 
-    expect(service.getModel('casual_chat')).toBe('deepseek-v4-pro');
-    expect(service.getModel('final_response')).toBe('deepseek-v4-pro');
+    expect(service.getModel('casual_chat')).toBe('deepseek-v4-flash');
+    expect(service.getModel('final_response')).toBe('deepseek-v4-flash');
+  });
+
+  it('defaults thinking off and applies first chunk budgets', () => {
+    const service = new SocialAgentModelRouterService(
+      makeConfig({
+        SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS: '4200',
+        SOCIAL_AGENT_PLANNER_THINKING: 'enabled',
+      }),
+    );
+
+    expect(service.getThinkingMode('casual_chat')).toBe('disabled');
+    expect(service.getThinkingMode('planner')).toBe('enabled');
+    expect(service.getFirstChunkTimeout('casual_chat')).toBe(4200);
   });
 });

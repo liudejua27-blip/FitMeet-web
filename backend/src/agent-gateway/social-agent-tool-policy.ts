@@ -18,6 +18,92 @@ export const SOCIAL_AGENT_HIGH_RISK_TOOL_DAILY_LIMITS: Partial<
   [SocialAgentToolName.Payment]: 3,
 };
 
+const MANDATORY_APPROVAL_TOOLS = new Set<SocialAgentToolName>([
+  SocialAgentToolName.SendMessage,
+  SocialAgentToolName.SendMessageToCandidate,
+  SocialAgentToolName.ReplyMessage,
+  SocialAgentToolName.ConnectCandidate,
+  SocialAgentToolName.AddFriend,
+  SocialAgentToolName.CreateActivity,
+  SocialAgentToolName.InviteActivity,
+  SocialAgentToolName.JoinActivity,
+  SocialAgentToolName.OfflineMeeting,
+  SocialAgentToolName.ShareLocation,
+  SocialAgentToolName.Payment,
+  SocialAgentToolName.PublishSocialRequest,
+]);
+
+const PRIVACY_SENSITIVE_PROFILE_FIELDS = [
+  'privacyBoundary',
+  'rejectRules',
+  'contactSharingRequiresApproval',
+  'paymentBoundary',
+  'paymentAutoExecution',
+  'preciseLocation',
+  'sharePreciseLocation',
+  'contactInfo',
+  'phone',
+  'wechat',
+  'email',
+  'visibility',
+  'profileVisibility',
+  'profileDiscoverable',
+  'discoverable',
+  'discoverability',
+  'publicProfile',
+  'public_profile',
+  'agentCanRecommendMe',
+  'agentMatchingEnabled',
+  'matchingEnabled',
+  'allowAgentMatching',
+  'recommendationOptIn',
+  'strangerRecommendationOptIn',
+  'publicIntentEnabled',
+];
+
+export function requiresMandatorySocialAgentApproval(
+  toolName: SocialAgentToolName,
+  input: Record<string, unknown> = {},
+): boolean {
+  if (MANDATORY_APPROVAL_TOOLS.has(toolName)) return true;
+  if (toolName === SocialAgentToolName.CreateSocialRequest) {
+    const mode = string(
+      input.mode ??
+        input.intent ??
+        input.visibility ??
+        input.audience ??
+        input.discoverability,
+    );
+    return (
+      truthy(input.publish) ||
+      truthy(input.isPublic) ||
+      truthy(input.public) ||
+      truthy(input.publiclyVisible) ||
+      truthy(input.syncPublicIntent) ||
+      truthy(input.discoverable) ||
+      truthy(input.profileDiscoverable) ||
+      truthy(input.agentCanRecommendMe) ||
+      truthy(input.agentMatchingEnabled) ||
+      truthy(input.recommendationOptIn) ||
+      truthy(input.strangerRecommendationOptIn) ||
+      truthy(input.publicIntentEnabled) ||
+      mode === 'publish' ||
+      mode === 'public' ||
+      mode === 'everyone' ||
+      mode === 'discoverable' ||
+      mode === 'public_discoverable' ||
+      mode === 'recommendable'
+    );
+  }
+  if (
+    toolName === SocialAgentToolName.UpdateAiProfileFromAnswers ||
+    toolName === SocialAgentToolName.UpdateProfileFromAgentContext
+  ) {
+    return containsPrivacySensitiveProfileField(input);
+  }
+  return false;
+}
+
 export function isConfirmableSocialAgentTool(
   toolName: SocialAgentToolName,
 ): boolean {
@@ -56,6 +142,10 @@ export function getSocialAgentToolApprovalType(
   }
   if (policy.sceneType === 'drinking') return ApprovalType.AlcoholActivity;
   switch (toolName) {
+    case SocialAgentToolName.PublishSocialRequest:
+      return ApprovalType.PostPublish;
+    case SocialAgentToolName.CreateSocialRequest:
+      return ApprovalType.PostPublish;
     case SocialAgentToolName.SendMessage:
     case SocialAgentToolName.SendMessageToCandidate:
     case SocialAgentToolName.ReplyMessage:
@@ -281,6 +371,82 @@ export function getSocialAgentToolSceneActionType(
     default:
       return 'chat';
   }
+}
+
+function containsPrivacySensitiveProfileField(
+  input: Record<string, unknown>,
+): boolean {
+  const sensitiveFields = new Set(
+    PRIVACY_SENSITIVE_PROFILE_FIELDS.map(normalizeSensitiveFieldName),
+  );
+  return (
+    containsAnyKey(input, sensitiveFields) ||
+    containsAnySensitiveFieldReference(input, sensitiveFields)
+  );
+}
+
+function containsAnyKey(value: unknown, keys: Set<string>): boolean {
+  if (!value || typeof value !== 'object') return false;
+  if (Array.isArray(value)) {
+    return value.some((item) => containsAnyKey(item, keys));
+  }
+  for (const [key, nested] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
+    if (keys.has(normalizeSensitiveFieldName(key))) return true;
+    if (containsAnyKey(nested, keys)) return true;
+  }
+  return false;
+}
+
+function containsAnySensitiveFieldReference(
+  value: unknown,
+  keys: Set<string>,
+): boolean {
+  if (!value || typeof value !== 'object') return false;
+  if (Array.isArray(value)) {
+    return value.some((item) => containsAnySensitiveFieldReference(item, keys));
+  }
+  const record = value as Record<string, unknown>;
+  for (const referenceKey of ['field', 'fieldName', 'name', 'key', 'path']) {
+    const referenced = record[referenceKey];
+    if (
+      typeof referenced === 'string' &&
+      keys.has(normalizeSensitiveFieldName(referenced))
+    ) {
+      return true;
+    }
+    if (Array.isArray(referenced)) {
+      if (
+        referenced.some(
+          (item) =>
+            typeof item === 'string' &&
+            keys.has(normalizeSensitiveFieldName(item)),
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+  return Object.values(record).some((nested) =>
+    containsAnySensitiveFieldReference(nested, keys),
+  );
+}
+
+function string(value: unknown): string | null {
+  return typeof value === 'string' && value.trim()
+    ? value.trim().toLowerCase()
+    : null;
+}
+
+function truthy(value: unknown): boolean {
+  if (value === true) return true;
+  const text = string(value);
+  return text === 'true' || text === '1' || text === 'yes' || text === 'public';
+}
+
+function normalizeSensitiveFieldName(value: string): string {
+  return value.replace(/[^a-z0-9]/gi, '').toLowerCase();
 }
 
 export function getSocialAgentPermissionActionForTool(

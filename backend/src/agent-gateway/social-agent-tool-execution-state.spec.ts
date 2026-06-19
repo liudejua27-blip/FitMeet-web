@@ -51,6 +51,7 @@ function call(
     error: null,
     startedAt: '2026-06-07T00:00:00.000Z',
     completedAt: '2026-06-07T00:00:01.000Z',
+    durationMs: 1000,
     ...overrides,
   };
 }

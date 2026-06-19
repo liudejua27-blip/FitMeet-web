@@ -15,6 +15,9 @@ describe('social agent route turn state', () => {
       assistantMessage: 'fallback',
       activityResults: [],
       profileUpdateProposal: null,
+      assistantStreamed: false,
+      agentLoop: null,
+      subagentHandoffs: [],
     });
   });
 

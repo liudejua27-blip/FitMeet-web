@@ -129,6 +129,10 @@ export function getMeets(params?: {
   return api.getMeets(params);
 }
 
+export function getMeetDetail(id: number): Promise<Meet> {
+  return api.getMeetDetail(id);
+}
+
 export function createMeet(data: Partial<Meet>) {
   return api.createMeet(data);
 }

@@ -35,6 +35,7 @@ export interface UserFacingAgentPendingConfirmation {
   actionType: string;
   summary: string;
   riskLevel: string;
+  payload?: Record<string, unknown>;
   expiresAt: string | null;
 }
 
@@ -44,7 +45,41 @@ export interface UserFacingAgentResponse {
   cards: FitMeetAlphaCard[];
   safeStatus: UserFacingAgentSafeStatus;
   pendingConfirmations: UserFacingAgentPendingConfirmation[];
+  lifeGraphWritebackProposal?: Record<string, unknown>;
   permissionMode: AgentTaskPermissionMode;
+  runtime?: {
+    checkpointId?: number | null;
+    checkpointType?: string | null;
+    canResume?: boolean;
+    canReplay?: boolean;
+    canFork?: boolean;
+    parentCheckpointId?: number | null;
+    threadId?: string | null;
+    idempotencyKey?: string | null;
+    checkpointAction?: 'resume' | 'retry' | 'replay' | 'fork' | null;
+    resumeCursor?: {
+      threadId?: string | null;
+      checkpointId?: number | string | null;
+      parentCheckpointId?: number | string | null;
+      action?: 'resume' | 'retry' | 'replay' | 'fork' | null;
+      stepId?: string | null;
+    } | null;
+    sourceStep?: {
+      stepId: string;
+      label: string | null;
+      toolName: string | null;
+    } | null;
+    stepScope?: {
+      mode: 'full_checkpoint' | 'through_step';
+      stepCount: number;
+      sourceCheckpointId: number | null;
+    } | null;
+    sideEffectPolicy?: {
+      idempotencyKey: string;
+      sideEffectsBeforeResume: 'idempotent_only';
+      duplicatePolicy: 'reuse_idempotency_key';
+    } | null;
+  };
 }
 
 export type SanitizableAgentResult =

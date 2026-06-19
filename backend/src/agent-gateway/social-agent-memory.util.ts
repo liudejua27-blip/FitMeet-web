@@ -199,6 +199,8 @@ export type SocialAgentPreferences = {
 
 export type SocialAgentBoundaries = {
   excludedGenders: string[];
+  acceptsStrangers: boolean | null;
+  publicActivityAllowed: boolean | null;
   noNightMeet: boolean;
   publicPlaceOnly: boolean;
   noAutoMessage: boolean;
@@ -225,6 +227,7 @@ export type SocialAgentPendingActionMemo = {
   summary: string;
   riskLevel: string;
   at: string;
+  payload?: Record<string, unknown>;
 };
 
 export type SocialAgentUserMessageMemo = {
@@ -287,6 +290,10 @@ export type SocialAgentTaskMemory = {
     awaitingSearchConfirmation: boolean;
     waitingFor: string;
     lastCompletedStep: string;
+    clarificationAskedFields: string[];
+    clarificationMissingFields: string[];
+    clarificationTurns: number;
+    clarificationAskedAt: string;
   };
   stableProfileFacts: Record<string, string | string[]>;
   updatedAt: string;
@@ -313,6 +320,8 @@ function defaultTaskMemory(): SocialAgentTaskMemory {
     },
     boundaries: {
       excludedGenders: [],
+      acceptsStrangers: null,
+      publicActivityAllowed: null,
       noNightMeet: false,
       publicPlaceOnly: false,
       noAutoMessage: false,
@@ -339,6 +348,10 @@ function defaultTaskMemory(): SocialAgentTaskMemory {
       awaitingSearchConfirmation: false,
       waitingFor: '',
       lastCompletedStep: '',
+      clarificationAskedFields: [],
+      clarificationMissingFields: [],
+      clarificationTurns: 0,
+      clarificationAskedAt: '',
     },
     stableProfileFacts: {},
     updatedAt: new Date(0).toISOString(),
@@ -397,6 +410,7 @@ export function readSocialAgentTaskMemory(
             typeof entry.riskLevel === 'string' ? entry.riskLevel : 'low',
           at:
             typeof entry.at === 'string' ? entry.at : new Date(0).toISOString(),
+          payload: isRecord(entry.payload) ? entry.payload : undefined,
         }))
       : base.pendingActions,
     lastUserMessages: Array.isArray(stored.lastUserMessages)
@@ -446,6 +460,29 @@ export function readSocialAgentTaskMemory(
               typeof stored.currentTask.lastCompletedStep === 'string'
                 ? stored.currentTask.lastCompletedStep
                 : base.currentTask.lastCompletedStep,
+            clarificationAskedFields: Array.isArray(
+              stored.currentTask.clarificationAskedFields,
+            )
+              ? stored.currentTask.clarificationAskedFields
+                  .filter((item): item is string => typeof item === 'string')
+                  .slice(0, 20)
+              : base.currentTask.clarificationAskedFields,
+            clarificationMissingFields: Array.isArray(
+              stored.currentTask.clarificationMissingFields,
+            )
+              ? stored.currentTask.clarificationMissingFields
+                  .filter((item): item is string => typeof item === 'string')
+                  .slice(0, 20)
+              : base.currentTask.clarificationMissingFields,
+            clarificationTurns:
+              typeof stored.currentTask.clarificationTurns === 'number' &&
+              Number.isFinite(stored.currentTask.clarificationTurns)
+                ? Math.max(0, Math.floor(stored.currentTask.clarificationTurns))
+                : base.currentTask.clarificationTurns,
+            clarificationAskedAt:
+              typeof stored.currentTask.clarificationAskedAt === 'string'
+                ? stored.currentTask.clarificationAskedAt
+                : base.currentTask.clarificationAskedAt,
           }
         : {}),
     },
@@ -565,6 +602,22 @@ export function mergeSocialAgentBoundaries(
     memory.boundaries.noNightMeet = true;
   if (/(公开场所|公共场合|公开地点)/.test(text))
     memory.boundaries.publicPlaceOnly = true;
+  if (/(接受陌生人|可以接受陌生人|愿意认识陌生人|可以认识陌生人)/.test(text))
+    memory.boundaries.acceptsStrangers = true;
+  if (
+    /(不接受陌生人|不要陌生人|别推荐陌生人|不要推荐陌生人|只推荐熟人)/.test(
+      text,
+    )
+  )
+    memory.boundaries.acceptsStrangers = false;
+  if (/(可以公开发起活动|愿意公开发起活动|可以公开活动|公开发起)/.test(text))
+    memory.boundaries.publicActivityAllowed = true;
+  if (
+    /(不公开发起活动|不要公开发起活动|别公开发起活动|不公开活动|不公开发起)/.test(
+      text,
+    )
+  )
+    memory.boundaries.publicActivityAllowed = false;
   if (/(不要自动发消息|不要自动私信|别自动发)/.test(text))
     memory.boundaries.noAutoMessage = true;
   if (/(不要联系方式|不交换联系方式|不留电话|不留微信)/.test(text)) {
@@ -592,6 +645,18 @@ export function recordSocialAgentPendingAction(
   const dedup = memory.pendingActions.filter((item) => item.id !== action.id);
   memory.pendingActions = [...dedup, action].slice(
     -TASK_MEMORY_PENDING_ACTION_LIMIT,
+  );
+  writeSocialAgentTaskMemory(task, memory);
+  return memory;
+}
+
+export function clearSocialAgentPendingAction(
+  task: AgentTask,
+  actionId: number,
+): SocialAgentTaskMemory {
+  const memory = readSocialAgentTaskMemory(task);
+  memory.pendingActions = memory.pendingActions.filter(
+    (item) => item.id !== actionId,
   );
   writeSocialAgentTaskMemory(task, memory);
   return memory;
@@ -802,6 +867,10 @@ function coerceBoundaries(
     out.noNightMeet = input.noNightMeet;
   if (typeof input.publicPlaceOnly === 'boolean')
     out.publicPlaceOnly = input.publicPlaceOnly;
+  if (typeof input.acceptsStrangers === 'boolean')
+    out.acceptsStrangers = input.acceptsStrangers;
+  if (typeof input.publicActivityAllowed === 'boolean')
+    out.publicActivityAllowed = input.publicActivityAllowed;
   if (typeof input.noAutoMessage === 'boolean')
     out.noAutoMessage = input.noAutoMessage;
   if (typeof input.noContactExchange === 'boolean')

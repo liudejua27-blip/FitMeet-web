@@ -27,7 +27,9 @@ describe('production deploy readiness', () => {
 
   it('keeps the production deploy script behind release and env readiness gates', () => {
     const deployScript = readRepoFile('scripts/deploy-production.sh');
-    const prodEnvCheck = readRepoFile('backend/scripts/check-production-env.ts');
+    const prodEnvCheck = readRepoFile(
+      'backend/scripts/check-production-env.ts',
+    );
 
     expect(deployScript).toContain(
       'RUN_RELEASE_PREFLIGHT="${RUN_RELEASE_PREFLIGHT:-true}"',
@@ -37,13 +39,62 @@ describe('production deploy readiness', () => {
       'pnpm -C backend run check:prod-env -- "../$ENV_FILE"',
     );
     expect(deployScript.indexOf('check:prod-env')).toBeLessThan(
-      deployScript.indexOf(
-        'docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build',
-      ),
+      deployScript.indexOf('Start production dependencies'),
     );
+    expect(deployScript.indexOf('migration:run:prod')).toBeLessThan(
+      deployScript.indexOf('Start API, worker, and nginx after migrations'),
+    );
+    expect(deployScript).toContain('PNPM_VERSION="${PNPM_VERSION:-10.30.3}"');
+    expect(deployScript).toContain('run_backend_pnpm()');
+    expect(deployScript).toContain(
+      'COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare pnpm@${PNPM_VERSION} --activate',
+    );
+    expect(deployScript).toContain(
+      'COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare pnpm@"$PNPM_VERSION" --activate',
+    );
+    expect(deployScript).toContain('run_backend_pnpm uploads:check:prod');
+    expect(deployScript).toContain('run_backend_pnpm migration:run:prod');
+    expect(deployScript).toContain(
+      'run_backend_pnpm db:check-critical-tables:prod',
+    );
+    expect(deployScript).toContain('pnpm \\"\\$@\\"');
+    expect(deployScript).not.toContain(
+      'run --rm --no-deps backend pnpm uploads:check:prod',
+    );
+    expect(deployScript).not.toContain(
+      'run --rm --no-deps backend pnpm migration:run:prod',
+    );
+    expect(deployScript).not.toContain(
+      'run --rm --no-deps backend pnpm db:check-critical-tables:prod',
+    );
+    expect(deployScript).toContain(
+      'subagent-worker dedicated healthcheck failed after startup',
+    );
+    expect(deployScript).toContain(
+      'node dist/agent-gateway/subagent-worker-healthcheck.js',
+    );
+    expect(deployScript).toContain('backend release metadata');
+    expect(deployScript).toContain('release mismatch');
+    expect(deployScript).toContain(
+      'backend /api/health does not expose the expected release metadata',
+    );
+    expect(deployScript).toContain('DEPLOY_LOG_TAIL="${DEPLOY_LOG_TAIL:-600}"');
+    expect(deployScript).toContain('scan_deploy_logs');
+    expect(deployScript).toContain('fk_agent_activity_logs_connection');
+    expect(deployScript).toContain('ERR_PNPM_LOCKFILE_CONFIG_MISMATCH');
+    expect(deployScript).toContain('relation "[^"]+" does not exist');
+    expect(deployScript).toContain('Scan backend and worker logs');
+    expect(deployScript).not.toContain(' up -d --build');
     expect(deployScript).toContain('./scripts/verify-production.sh');
 
     const releasePreflight = readRepoFile('scripts/release-preflight.sh');
+    const buildDeployZip = readRepoFile('scripts/build-deploy-zip.sh');
+    const toolchain = readRepoFile('scripts/lib/toolchain.sh');
+    expect(releasePreflight).toContain(
+      'corepack prepare "pnpm@${FITMEET_PNPM_VERSION:-10.30.3}" --activate',
+    );
+    expect(buildDeployZip).toContain('fitmeet_activate_pnpm');
+    expect(toolchain).toContain('FITMEET_PNPM_VERSION:-10.30.3');
     expect(releasePreflight).toContain('backend database contract tests');
     expect(releasePreflight).toContain('migration-integrity.spec.ts');
     expect(releasePreflight).toContain(
@@ -60,7 +111,9 @@ describe('production deploy readiness', () => {
     const buildZipScript = readRepoFile('scripts/build-deploy-zip.sh');
     const cloudPreflight = readRepoFile('scripts/cloud-platform-preflight.sh');
     const launchStatus = readRepoFile('scripts/launch-status.sh');
-    const vercelPrebuiltDeploy = readRepoFile('scripts/vercel-prebuilt-deploy.sh');
+    const vercelPrebuiltDeploy = readRepoFile(
+      'scripts/vercel-prebuilt-deploy.sh',
+    );
     const railwayDockerBuildCheck = readRepoFile(
       'scripts/railway-docker-build-check.sh',
     );
@@ -70,12 +123,27 @@ describe('production deploy readiness', () => {
     const ecsPreflight = readRepoFile('scripts/ecs-host-preflight.sh');
     const ecsPostDeploySmoke = readRepoFile('scripts/ecs-post-deploy-smoke.sh');
     const packageJson = readRepoFile('backend/package.json');
-    const smokeSeed = readRepoFile('backend/scripts/prepare-app-smoke-users.ts');
+    const frontendPackageJson = readRepoFile('frontend/package.json');
+    const smokeSeed = readRepoFile(
+      'backend/scripts/prepare-app-smoke-users.ts',
+    );
     const gitignore = readRepoFile('.gitignore');
 
-    expect(ecsTemplate).toContain('BASE_URL=https://socialworld.world');
+    expect(ecsTemplate).toContain('BASE_URL=https://www.ourfitmeet.cn');
+    expect(ecsTemplate).toContain(
+      'FRONTEND_BASE_URL=https://www.ourfitmeet.cn',
+    );
+    expect(ecsTemplate).toContain('PUBLIC_BASE_URL=https://www.ourfitmeet.cn');
+    expect(ecsTemplate).toContain(
+      'PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api',
+    );
+    expect(ecsTemplate).toContain('FITMEET_PROCESS_ROLE=api');
+    expect(ecsTemplate).toContain('ENABLE_SCHEDULER=false');
+    expect(ecsTemplate).toContain('FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS=10000');
     expect(ecsTemplate).toContain('VITE_API_BASE_URL=/api');
-    expect(ecsTemplate).toContain('JWT_SECRET=CHANGE_ME_RANDOM_32_BYTE_HEX_SECRET');
+    expect(ecsTemplate).toContain(
+      'JWT_SECRET=CHANGE_ME_RANDOM_32_BYTE_HEX_SECRET',
+    );
     expect(ecsTemplate).toContain('DEEPSEEK_CHAT_MODEL=deepseek-v4-pro');
     expect(buildZipScript).toContain('deploy/env.production.ecs.example');
     expect(buildZipScript).toContain('docs/deployment-vercel-railway.md');
@@ -88,16 +156,24 @@ describe('production deploy readiness', () => {
     expect(buildZipScript).toContain('scripts/ecs-upload-release.sh');
     expect(buildZipScript).toContain('scripts/ecs-host-preflight.sh');
     expect(buildZipScript).toContain('scripts/ecs-post-deploy-smoke.sh');
+    expect(buildZipScript).toContain('Dry-run production Agent smoke seed');
+    expect(buildZipScript).toContain('seed:agent-smoke:prod:dry-run');
     expect(buildZipScript).toContain("--exclude '.vercel/'");
     expect(buildZipScript).toContain("--exclude '.railway/'");
     expect(buildZipScript).toContain('CHECKSUM_OUTPUT="${OUTPUT}.sha256"');
-    expect(buildZipScript).toContain('INSTALLER_OUTPUT="${OUTPUT_DIR}/fitmeet-ecs-install-release.sh"');
+    expect(buildZipScript).toContain(
+      'INSTALLER_OUTPUT="${OUTPUT_DIR}/fitmeet-ecs-install-release.sh"',
+    );
     expect(buildZipScript).toContain('sha256sum');
     expect(buildZipScript).toContain('shasum -a 256');
-    expect(buildZipScript).toContain('cp "${ROOT_DIR}/scripts/ecs-install-release.sh"');
-    expect(buildZipScript).toContain("fail_if_entry \"env files\"");
+    expect(buildZipScript).toContain(
+      'cp "${ROOT_DIR}/scripts/ecs-install-release.sh"',
+    );
+    expect(buildZipScript).toContain('fail_if_entry "env files"');
     expect(buildZipScript).toContain('fail_if_entry "Vercel project metadata"');
-    expect(buildZipScript).toContain('fail_if_entry "Railway project metadata"');
+    expect(buildZipScript).toContain(
+      'fail_if_entry "Railway project metadata"',
+    );
     expect(gitignore).toContain('.vercel/');
     expect(gitignore).toContain('.railway/');
     expect(gitignore).toContain('.env.vercel*.local');
@@ -119,6 +195,7 @@ describe('production deploy readiness', () => {
     expect(cloudPreflight).toContain('--check-domain');
     expect(cloudPreflight).toContain('--strict');
     expect(launchStatus).toContain('production-deploy-readiness.spec.ts');
+    expect(launchStatus).toContain('scripts/deploy-production.sh');
     expect(launchStatus).toContain('scripts/cloud-platform-preflight.sh');
     expect(launchStatus).toContain('scripts/domain-readiness-check.sh');
     expect(launchStatus).toContain('scripts/vercel-prebuilt-deploy.sh');
@@ -141,16 +218,33 @@ describe('production deploy readiness', () => {
     expect(vercelPrebuiltDeploy).toContain('VERCEL_ORG_ID');
     expect(vercelPrebuiltDeploy).toContain('VERCEL_PROJECT_ID');
     expect(vercelPrebuiltDeploy).toContain('.vercel/project.json');
-    expect(vercelPrebuiltDeploy).toContain('run_with_timeout pnpm dlx vercel whoami');
-    expect(vercelPrebuiltDeploy).toContain('VITE_API_BASE_URL="${VITE_API_BASE_URL}"');
+    expect(vercelPrebuiltDeploy).toContain(
+      'run_with_timeout pnpm dlx vercel whoami',
+    );
+    expect(vercelPrebuiltDeploy).toContain(
+      'VITE_API_BASE_URL="${VITE_API_BASE_URL}"',
+    );
     expect(railwayDockerBuildCheck).toContain('backend/Dockerfile.prod');
-    expect(railwayDockerBuildCheck).toContain('NODE_IMAGE="${NODE_IMAGE:-node:20-alpine}"');
+    expect(railwayDockerBuildCheck).toContain(
+      'NODE_IMAGE="${NODE_IMAGE:-node:20-alpine}"',
+    );
     expect(railwayDockerBuildCheck).toContain('docker build');
     expect(railwayDockerBuildCheck).toContain('auth\\.docker\\.io');
-    expect(railwayDockerBuildCheck).toContain('Railway production Docker image builds locally');
+    expect(railwayDockerBuildCheck).toContain(
+      'Railway production Docker image builds locally',
+    );
     expect(ecsPreflight).toContain('Docker Compose config validates');
     expect(ecsPreflight).toContain('pnpm -C backend run check:prod-env');
     expect(ecsPreflight).toContain('RUN_PROD_ENV_CHECK');
+    expect(ecsPreflight).toContain('FRONTEND_BASE_URL targets');
+    expect(ecsPreflight).toContain('PUBLIC_API_BASE_URL targets');
+    expect(ecsPreflight).toContain('check_deepseek_models');
+    expect(ecsPreflight).toContain('check_worker_env');
+    expect(ecsPreflight).toContain('nginx does not depend on subagent-worker');
+    expect(ecsPreflight).toContain('backend process role is API-only');
+    expect(ecsPreflight).toContain(
+      'subagent-worker process role owns scheduler jobs',
+    );
     expect(ecsPreflight).toContain('nginx/ssl/fullchain.pem');
     expect(ecsPreflight).toContain('check_port 443');
     expect(ecsInstallRelease).toContain('Checksum verified');
@@ -160,27 +254,168 @@ describe('production deploy readiness', () => {
     expect(ecsInstallRelease).toContain("--exclude 'nginx/ssl/'");
     expect(ecsInstallRelease).toContain('Backed up existing target');
     expect(ecsInstallRelease).toContain('while [[ -e "$backup_dir" ]]');
-    expect(ecsInstallRelease).toContain('APP_DIR=%s ./scripts/ecs-host-preflight.sh');
+    expect(ecsInstallRelease).toContain(
+      'APP_DIR=%s ./scripts/ecs-host-preflight.sh',
+    );
     expect(ecsUploadRelease).toContain('ECS_SSH_TARGET');
     expect(ecsUploadRelease).toContain('fitmeet-ecs-deploy.zip.sha256');
     expect(ecsUploadRelease).toContain('fitmeet-ecs-install-release.sh');
     expect(ecsUploadRelease).toContain('Dry run complete');
-    expect(ecsUploadRelease).toContain('scp "$ARCHIVE" "$CHECKSUM_FILE" "$INSTALLER"');
+    expect(ecsUploadRelease).toContain(
+      'scp "$ARCHIVE" "$CHECKSUM_FILE" "$INSTALLER"',
+    );
     expect(ecsUploadRelease).toContain('--upload');
+    expect(packageJson).toContain('"packageManager": "pnpm@10.30.3"');
+    expect(frontendPackageJson).toContain('"packageManager": "pnpm@10.30.3"');
     expect(packageJson).toContain('seed:app-smoke-users');
     expect(smokeSeed).toContain('APP_SMOKE_SEED_ALLOW_PRODUCTION');
     expect(smokeSeed).toContain('APP_SMOKE_TARGET_USER_ID');
     expect(smokeSeed).toContain('FITMEET_ALPHA_STAGING_MESSAGE_TARGET_USER_ID');
     expect(ecsPostDeploySmoke).toContain('--prepare-app-smoke-users');
-    expect(ecsPostDeploySmoke).toContain('pnpm -C backend run seed:app-smoke-users');
+    expect(ecsPostDeploySmoke).toContain('--prepare-agent-smoke-seed');
+    expect(ecsPostDeploySmoke).toContain('--run-agent-opportunity-smoke');
+    expect(ecsPostDeploySmoke).toContain('--run-agent-sse-abort-smoke');
+    expect(ecsPostDeploySmoke).toContain(
+      'pnpm -C backend run seed:app-smoke-users',
+    );
+    expect(ecsPostDeploySmoke).toContain(
+      'pnpm -C backend run seed:agent-smoke',
+    );
     expect(ecsPostDeploySmoke).toContain('./scripts/verify-production.sh');
     expect(ecsPostDeploySmoke).toContain('APP_SMOKE_RUN_MUTATIONS');
+    expect(ecsPostDeploySmoke).toContain('AGENT_SMOKE_ALLOW_MUTATIONS=true');
+    expect(ecsPostDeploySmoke).toContain(
+      'AGENT_SMOKE_ACTIVITY="${AGENT_SMOKE_ACTIVITY:-咖啡轻聊天}"',
+    );
+    expect(ecsPostDeploySmoke).toContain(
+      'AGENT_SMOKE_TIME="${AGENT_SMOKE_TIME:-周末下午}"',
+    );
+    expect(ecsPostDeploySmoke).toContain(
+      'AGENT_SMOKE_INTENSITY="${AGENT_SMOKE_INTENSITY:-轻松}"',
+    );
+    expect(ecsPostDeploySmoke).toContain('SCAN_COMPOSE_LOGS');
+    expect(ecsPostDeploySmoke).toContain('scan_compose_logs');
+    expect(ecsPostDeploySmoke).toContain('COMPOSE_LOG_TAIL');
+    expect(ecsPostDeploySmoke).toContain('fk_agent_activity_logs_connection');
+    expect(ecsPostDeploySmoke).toContain('ERR_PNPM_LOCKFILE_CONFIG_MISMATCH');
+    expect(ecsPostDeploySmoke).toContain('relation "[^"]+" does not exist');
     expect(ecsPostDeploySmoke).toContain('source "${export_file}"');
+    expect(ecsPostDeploySmoke).toContain('source "${agent_export_file}"');
     expect(ecsRunbook).toContain(
       'cp deploy/env.production.ecs.example .env.production',
     );
-    expect(ecsRunbook).toContain('APP_DIR=/opt/FitMeet-web ./scripts/ecs-host-preflight.sh');
-    expect(ecsRunbook).toContain('./scripts/ecs-post-deploy-smoke.sh --run-app-smoke');
+    expect(ecsRunbook).toContain(
+      'APP_DIR=/opt/FitMeet-web ./scripts/ecs-host-preflight.sh',
+    );
+    expect(ecsRunbook).toContain(
+      './scripts/ecs-post-deploy-smoke.sh --run-app-smoke',
+    );
+    expect(ecsRunbook).toContain('--prepare-agent-smoke-seed');
+    expect(ecsRunbook).toContain('--run-agent-opportunity-smoke');
+    expect(ecsRunbook).toContain('--run-agent-sse-abort-smoke');
+    expect(ecsRunbook).toContain('--scan-compose-logs');
+    expect(ecsRunbook).toContain('AGENT_SMOKE_ALLOW_MUTATIONS=true');
+    expect(ecsRunbook).toContain('ordinary chat does not trigger social cards');
+  });
+
+  it('keeps the ECS critical table check aligned with worker migrations', () => {
+    const criticalTableCheck = readRepoFile(
+      'backend/src/scripts/check-production-tables.ts',
+    );
+
+    for (const table of [
+      'users',
+      'agent_profiles',
+      'user_social_profiles',
+      'activity_templates',
+      'subagent_worker_jobs',
+      'subagent_worker_heartbeats',
+      'subagent_worker_failures',
+      'agent_activity_logs',
+      'social_request_candidates',
+      'life_graph_profiles',
+    ]) {
+      expect(criticalTableCheck).toContain(`'${table}'`);
+    }
+  });
+
+  it('keeps Social Codex trace eval wired into Agent release verification', () => {
+    const agentRelease = readRepoFile('scripts/verify-agent-release.sh');
+    const buildDeployZip = readRepoFile('scripts/build-deploy-zip.sh');
+    const buildDeployZipPs1 = readRepoFile('scripts/build-deploy-zip.ps1');
+    const releaseMatrix = readRepoFile('docs/agent-release-e2e-matrix.md');
+    const launchStatus = readRepoFile('scripts/launch-status.sh');
+    const opportunitySmoke = readRepoFile(
+      'backend/src/scripts/smoke-agent-opportunity-journey.ts',
+    );
+
+    const socialCodexSpecs = [
+      'social-agent-context-hydrator.service.spec.ts',
+      'social-agent-event-store.service.spec.ts',
+      'social-agent-event-v2.service.spec.ts',
+      'social-agent-task-memory-state-machine.service.spec.ts',
+      'social-agent-tasks.controller.spec.ts',
+      'social-agent-thread-session-manager.service.spec.ts',
+      'social-codex-life-graph-governance.service.spec.ts',
+      'social-codex-trace-eval.service.spec.ts',
+      'social-codex-runtime-policy.service.spec.ts',
+      'social-agent-tool-execution-policy.service.spec.ts',
+    ];
+    for (const spec of socialCodexSpecs) {
+      expect(agentRelease).toContain(spec);
+    }
+
+    for (const deployPath of [
+      'docs/social-codex-runtime.md',
+      'backend/src/agent-gateway/social-agent-context-hydrator.service.ts',
+      'backend/src/agent-gateway/social-agent-context-hydrator.service.spec.ts',
+      'backend/src/agent-gateway/social-agent-event-store.service.ts',
+      'backend/src/agent-gateway/social-agent-event-store.service.spec.ts',
+      'backend/src/agent-gateway/social-agent-event-v2.service.ts',
+      'backend/src/agent-gateway/social-agent-event-v2.service.spec.ts',
+      'backend/src/agent-gateway/social-agent-event-v2.types.ts',
+      'backend/src/agent-gateway/social-agent-task-memory-state-machine.service.ts',
+      'backend/src/agent-gateway/social-agent-task-memory-state-machine.service.spec.ts',
+      'backend/src/agent-gateway/social-agent-thread-id.util.ts',
+      'backend/src/agent-gateway/social-agent-thread-session-manager.service.ts',
+      'backend/src/agent-gateway/social-agent-thread-session-manager.service.spec.ts',
+      'backend/src/agent-gateway/social-codex-life-graph-governance.service.ts',
+      'backend/src/agent-gateway/social-codex-life-graph-governance.service.spec.ts',
+      'backend/src/agent-gateway/social-codex-runtime-policy.service.ts',
+      'backend/src/agent-gateway/social-codex-runtime-policy.service.spec.ts',
+      'backend/src/agent-gateway/social-codex-trace-eval.service.ts',
+      'backend/src/agent-gateway/social-codex-trace-eval.service.spec.ts',
+      'frontend/src/test/socialAgentApiReplay.test.ts',
+    ]) {
+      expect(buildDeployZip).toContain(deployPath);
+      expect(buildDeployZipPs1).toContain(deployPath);
+    }
+
+    for (const spec of socialCodexSpecs.filter(
+      (specName) => specName !== 'social-agent-tasks.controller.spec.ts',
+    )) {
+      expect(buildDeployZip).toContain(spec);
+      expect(buildDeployZipPs1).toContain(spec);
+    }
+    expect(agentRelease).toContain('socialAgentApiReplay.test.ts');
+    expect(buildDeployZip).toContain('socialAgentApiReplay.test.ts');
+    expect(buildDeployZipPs1).toContain('socialAgentApiReplay.test.ts');
+
+    expect(releaseMatrix).toContain('Trace replay regression');
+    expect(releaseMatrix).toContain('Social Codex Runtime');
+    expect(releaseMatrix).toContain('events/eval');
+    expect(releaseMatrix).toContain('dry-run preview');
+    const socialCodexDocs = readRepoFile('docs/social-codex-runtime.md');
+    expect(socialCodexDocs).toContain('SocialAgentEventV2');
+    expect(socialCodexDocs).toContain('readOnlyAccessAllowed');
+    expect(socialCodexDocs).toContain('externalSideEffectAllowed');
+    expect(opportunitySmoke).toContain('/events/eval');
+    expect(opportunitySmoke).toContain('socialCodexEventCount');
+    expect(opportunitySmoke).toContain('SocialAgentEventV2 rows');
+    expect(launchStatus).toContain('Social Codex trace eval passed');
+    expect(launchStatus).toContain(
+      'readiness and full opportunity smoke',
+    );
   });
 
   it('keeps Vercel and Railway platform deploy config explicit', () => {
@@ -229,7 +464,9 @@ describe('production deploy readiness', () => {
     expect(railwayEnv).toContain('REDIS_URL=redis://CHANGE_ME');
     expect(railwayEnv).toContain('ENABLE_KAFKA=false');
     expect(vercelEnv).toContain('VITE_API_BASE_URL=/api');
-    expect(vercelEnv).toContain('VITE_WS_BASE_URL=https://api.socialworld.world');
+    expect(vercelEnv).toContain(
+      'VITE_WS_BASE_URL=https://api.socialworld.world',
+    );
     expect(cloudRunbook).toContain('backend/railway.json');
     expect(cloudRunbook).toContain('backend/railway.toml');
     expect(cloudRunbook).toContain('deploy/env.production.railway.example');
@@ -242,20 +479,26 @@ describe('production deploy readiness', () => {
     expect(cloudRunbook).toContain('LiuChong27/FitMeetweb');
     expect(cloudRunbook).toContain('LiuChong27/FitMeet-Web');
     expect(cutoverChecklist).toContain('Vercel project `fit-meetweb`');
-    expect(cutoverChecklist).toContain('`api.socialworld.world` has no DNS answer');
+    expect(cutoverChecklist).toContain('`www.ourfitmeet.cn` has no DNS answer');
     expect(cutoverChecklist).toContain('./scripts/launch-status.sh');
     expect(cutoverChecklist).toContain('--print-required-records');
     expect(cutoverChecklist).toContain('Do not buy Spacemail');
     expect(cutoverChecklist).toContain('pnpm migration:run:prod');
-    expect(cutoverChecklist).toContain('Scripts/testflight-readiness-check.sh --strict --require-staging');
+    expect(cutoverChecklist).toContain(
+      'Scripts/testflight-readiness-check.sh --strict --require-staging',
+    );
     expect(cutoverChecklist).toContain('docs/deployment-aliyun-ecs.md');
     expect(cutoverChecklist).toContain('docs/production-secrets-checklist.md');
     expect(secretsChecklist).toContain('Railway Backend');
     expect(secretsChecklist).toContain('Vercel Frontend');
     expect(secretsChecklist).toContain('iOS And TestFlight');
-    expect(secretsChecklist).toContain('Never put these in Vercel frontend env');
+    expect(secretsChecklist).toContain(
+      'Never put these in Vercel frontend env',
+    );
     expect(secretsChecklist).toContain('S3_PUBLIC_BASE_URL');
-    expect(secretsChecklist).toContain('FITMEET_ALPHA_STAGING_MESSAGE_TARGET_USER_ID');
+    expect(secretsChecklist).toContain(
+      'FITMEET_ALPHA_STAGING_MESSAGE_TARGET_USER_ID',
+    );
     expect(readme).toContain('deployment-vercel-railway.md');
     expect(readme).toContain('production-cutover-checklist.md');
     expect(readme).toContain('production-secrets-checklist.md');
@@ -273,6 +516,15 @@ describe('production deploy readiness', () => {
     const domainReadiness = readRepoFile('scripts/domain-readiness-check.sh');
 
     expect(verifier).toContain('/openapi/fitmeet-core.json');
+    expect(verifier).toContain('CHECK_LOCAL_COMPOSE_HEALTH');
+    expect(verifier).toContain('CHECK_LOCAL_COMPOSE_LOGS');
+    expect(verifier).toContain('scan_local_compose_logs');
+    expect(verifier).toContain('COMPOSE_LOG_TAIL');
+    expect(verifier).toContain('fk_agent_activity_logs_connection');
+    expect(verifier).toContain('ERR_PNPM_LOCKFILE_CONFIG_MISMATCH');
+    expect(verifier).toContain('relation "[^"]+" does not exist');
+    expect(verifier).toContain('--check-local-compose-health');
+    expect(verifier).toContain('subagent-worker-healthcheck.js');
     expect(verifier).toContain('/ready');
     for (const webPath of [
       '/public/social-intents',
@@ -331,15 +583,25 @@ describe('production deploy readiness', () => {
     expect(verifier).toContain('APP_SMOKE_API_BASE_URL="${API_BASE_URL}"');
     expect(verifier).toContain('APP_SMOKE_ALLOW_REMOTE=true');
     expect(verifier).toContain('RUN_PUBLIC_INTENT_WRITE');
-    expect(domainReadiness).toContain('WEB_ORIGIN="${WEB_ORIGIN:-https://socialworld.world}"');
-    expect(domainReadiness).toContain('API_BASE_URL="${API_BASE_URL:-https://api.socialworld.world/api}"');
+    expect(domainReadiness).toContain(
+      'WEB_ORIGIN="${WEB_ORIGIN:-https://www.ourfitmeet.cn}"',
+    );
+    expect(domainReadiness).toContain(
+      'API_BASE_URL="${API_BASE_URL:-https://www.ourfitmeet.cn/api}"',
+    );
     expect(domainReadiness).toContain('FITMEET_LAUNCH_TOPOLOGY');
     expect(domainReadiness).toContain('CHECK_VERCEL_WEB_DNS');
-    expect(domainReadiness).toContain('EXPECTED_VERCEL_APEX_A="${EXPECTED_VERCEL_APEX_A:-76.76.21.21}"');
+    expect(domainReadiness).toContain(
+      'EXPECTED_VERCEL_APEX_A="${EXPECTED_VERCEL_APEX_A:-76.76.21.21}"',
+    );
     expect(domainReadiness).toContain('RAILWAY_API_DNS_TARGET');
-    expect(domainReadiness).toContain('Required DNS records for the Aliyun ECS same-origin launch path');
+    expect(domainReadiness).toContain(
+      'Required DNS records for the Aliyun ECS same-origin launch path',
+    );
     expect(domainReadiness).toContain('--print-required-records');
-    expect(domainReadiness).toContain('Required DNS records for the Vercel + Railway launch path');
+    expect(domainReadiness).toContain(
+      'Required DNS records for the Vercel + Railway launch path',
+    );
     expect(domainReadiness).toContain('Do not buy Namecheap hosting');
     expect(domainReadiness).toContain('resolve_host "${web_host}"');
     expect(domainReadiness).toContain('resolve_host "${api_host}"');

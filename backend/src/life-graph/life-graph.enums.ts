@@ -24,6 +24,13 @@ export enum LifeGraphSignalType {
   Sensitive = 'sensitive_signal',
 }
 
+export enum LifeGraphDataTier {
+  PublicProfile = 'public_profile',
+  PrivateMatching = 'private_matching',
+  Sensitive = 'sensitive',
+  UserSecret = 'user_secret',
+}
+
 export enum LifeGraphAuditAction {
   Created = 'created',
   Updated = 'updated',

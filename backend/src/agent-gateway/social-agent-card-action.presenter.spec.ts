@@ -2,11 +2,15 @@ import { AgentTaskPermissionMode } from './entities/agent-task.entity';
 import type { AgentTask } from './entities/agent-task.entity';
 import {
   buildSocialAgentActivityCompletionCard,
+  buildSocialAgentActivityDetailCard,
   buildSocialAgentActivityPlanCard,
   buildSocialAgentCardActionRouteResult,
   buildSocialAgentCheckinCard,
   buildSocialAgentLifeGraphUpdateCard,
+  buildSocialAgentMeetLoopTimelineCard,
   buildSocialAgentOpenerApprovalCard,
+  buildSocialAgentProofSubmittedCard,
+  buildSocialAgentProofUploadPromptCard,
   buildSocialAgentReviewCard,
   createSocialAgentActivityDtoFromPayload,
   mergeSocialAgentActivityPayload,
@@ -146,40 +150,382 @@ describe('social agent card action presenter', () => {
       positive: true,
       trustScoreDelta: 2,
     });
+    const timeline = buildSocialAgentMeetLoopTimelineCard({
+      taskId: 101,
+      activityId: 700,
+      candidateUserId: 22,
+      stage: 'message_sent',
+      nextAction: '确认后继续推进',
+      payload: { city: '青岛' },
+    });
 
     expect(opener.actions?.map((action) => action.schemaAction)).toEqual([
       'opener.confirm_send',
       'opener.regenerate',
+      'opener.reject',
     ]);
+    expect(
+      opener.actions?.find(
+        (action) => action.schemaAction === 'opener.regenerate',
+      ),
+    ).toMatchObject({
+      payload: expect.objectContaining({
+        taskId: 101,
+        targetUserId: 22,
+        approvalId: 9001,
+        message: '你好，周末要不要轻松慢跑一圈？',
+      }),
+    });
+    expect(opener).toMatchObject({
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'safety.approval',
+      data: expect.objectContaining({
+        schemaName: 'SafetyApprovalCard',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'safety.approval',
+        riskLevel: 'medium',
+        confirmationLabel: '确认后发送',
+        checkpointLabel: '开场白已保存，可重新生成或取消',
+        approval: expect.objectContaining({
+          riskLevel: 'medium',
+          boundary: expect.stringContaining('确认前不会发送'),
+          reasons: expect.arrayContaining([
+            '这一步会向真实用户发送消息',
+            '发送前需要你确认语气和内容',
+          ]),
+        }),
+      }),
+    });
     expect(plan).toMatchObject({
       type: 'activity_plan',
-      data: expect.objectContaining({ loopStage: 'activity_draft_created' }),
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'social_match.activity',
+      data: expect.objectContaining({
+        schemaName: 'OpportunityCard',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'social_match.activity',
+        opportunityCard: true,
+        loopStage: 'activity_draft_created',
+        opportunity: expect.objectContaining({
+          type: 'activity',
+          title: '约练计划',
+          safetyBadges: ['公共场所', '不共享精确位置', '确认后创建'],
+          safetyBoundary: expect.stringContaining('公共场所'),
+          checkinReminder: expect.stringContaining('确认是否到达'),
+          reviewPrompt: expect.stringContaining('简短评价'),
+          confirmedContext: ['公共场所', '不共享精确位置', '确认后创建'],
+        }),
+        reviewPrompt: expect.stringContaining('简短评价'),
+        lifeGraphUpdatePreview: expect.stringContaining('Life Graph'),
+        trustScoreUpdatePreview: expect.stringContaining('trust score'),
+      }),
       actions: [
         expect.objectContaining({ schemaAction: 'activity.confirm_create' }),
+        expect.objectContaining({ schemaAction: 'activity.modify_time' }),
+        expect.objectContaining({ schemaAction: 'activity.modify_location' }),
       ],
     });
     expect(checkin.actions?.[0]).toMatchObject({
       schemaAction: 'activity.check_in',
       loopStage: 'activity_confirmed',
     });
+    expect(checkin).toMatchObject({
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'meet_loop.timeline',
+      data: expect.objectContaining({
+        schemaName: 'MeetLoopTimelineCard',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'meet_loop.timeline',
+        timeline: expect.objectContaining({
+          steps: expect.arrayContaining([
+            expect.objectContaining({ key: 'confirmed', state: 'current' }),
+          ]),
+        }),
+      }),
+    });
     expect(completion.actions?.[0]).toMatchObject({
       schemaAction: 'activity.complete',
       loopStage: 'activity_checked_in',
     });
+    expect(completion).toMatchObject({
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'meet_loop.timeline',
+      data: expect.objectContaining({
+        schemaName: 'MeetLoopTimelineCard',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'meet_loop.timeline',
+        timeline: expect.objectContaining({
+          steps: expect.arrayContaining([
+            expect.objectContaining({ key: 'met', state: 'current' }),
+          ]),
+        }),
+      }),
+    });
     expect(review.actions?.[0]).toMatchObject({
       schemaAction: 'review.submit',
       loopStage: 'activity_completed',
+    });
+    expect(review).toMatchObject({
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'meet_loop.timeline',
+      data: expect.objectContaining({
+        schemaName: 'MeetLoopTimelineCard',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'meet_loop.timeline',
+        timeline: expect.objectContaining({
+          steps: expect.arrayContaining([
+            expect.objectContaining({ key: 'completed', state: 'current' }),
+          ]),
+        }),
+      }),
     });
     expect(lifeGraph.actions?.map((action) => action.schemaAction)).toEqual([
       'life_graph.accept_update',
       'life_graph.reject_update',
     ]);
     expect(lifeGraph.data).toMatchObject({
+      schemaName: 'LifeGraphDiffCard',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'life_graph.diff',
       loopStage: 'trust_score_updated',
+      diff: expect.objectContaining({
+        fields: ['运动社交偏好', '约练节奏', '履约可信度'],
+        confirmationBoundary: expect.stringContaining('画像更新建议'),
+        privacyBoundary: expect.stringContaining('不会写入精确位置'),
+        revokeHint: expect.stringContaining('撤回'),
+      }),
       trustScoreUpdatePreview: expect.stringContaining('+2'),
       canView: true,
       canCorrect: true,
       canRevoke: true,
+    });
+    expect(timeline).toMatchObject({
+      type: 'review_card',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'meet_loop.timeline',
+      data: expect.objectContaining({
+        schemaName: 'MeetLoopTimelineCard',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'meet_loop.timeline',
+        taskId: 101,
+        activityId: 700,
+        candidateUserId: 22,
+        loopStage: 'message_sent',
+        timeline: expect.objectContaining({
+          nextAction: '确认后继续推进',
+          recoveryProtocol: expect.arrayContaining([
+            expect.objectContaining({
+              key: 'checkpoint',
+              label: '进度保存',
+              detail: expect.stringContaining('刷新或断线后可以回到这一步'),
+            }),
+            expect.objectContaining({
+              key: 'waiting_for',
+              label: '等待对象',
+              detail: '正在等待对方回复',
+            }),
+            expect.objectContaining({
+              key: 'side_effect',
+              label: '触达边界',
+              detail: expect.stringContaining('不会自动追发'),
+            }),
+          ]),
+          steps: expect.arrayContaining([
+            expect.objectContaining({
+              key: 'sent',
+              state: 'current',
+              checkpointReady: true,
+              resumeMode: 'resume',
+            }),
+          ]),
+        }),
+        recoveryProtocol: expect.arrayContaining([
+          expect.objectContaining({ key: 'resume', label: '恢复方式' }),
+        ]),
+      }),
+      actions: expect.arrayContaining([
+        expect.objectContaining({
+          action: 'resume_meet_loop',
+          schemaAction: 'meet_loop.resume',
+          requiresConfirmation: true,
+        }),
+        expect.objectContaining({
+          action: 'reschedule_meet_loop',
+          schemaAction: 'meet_loop.reschedule',
+          requiresConfirmation: true,
+        }),
+      ]),
+    });
+    expect(
+      (
+        timeline.data.timeline as {
+          steps: Array<Record<string, unknown>>;
+        }
+      ).steps.map((step) => [step.key, step.label, step.state]),
+    ).toEqual([
+      ['draft', '发起', 'done'],
+      ['sent', '等待回复', 'current'],
+      ['reschedule', '改期', 'next'],
+      ['confirmed', '确认', 'next'],
+      ['met', '见面', 'next'],
+      ['completed', '评价', 'next'],
+      ['life_graph', '回写画像', 'next'],
+    ]);
+    expect(
+      buildSocialAgentMeetLoopTimelineCard({
+        taskId: 101,
+        activityId: 700,
+        candidateUserId: 22,
+        stage: 'met',
+      }).data,
+    ).toMatchObject({
+      timeline: expect.objectContaining({
+        steps: expect.arrayContaining([
+          expect.objectContaining({
+            key: 'met',
+            label: '见面',
+            state: 'current',
+            actionLabel: '安全见面',
+            checkpointReady: true,
+            resumeMode: 'resume',
+          }),
+          expect.objectContaining({
+            key: 'completed',
+            state: 'next',
+            resumeMode: 'review',
+          }),
+        ]),
+      }),
+    });
+    expect(
+      buildSocialAgentMeetLoopTimelineCard({
+        taskId: 101,
+        activityId: 700,
+        candidateUserId: 22,
+        stage: 'activity_checked_in',
+      }).data,
+    ).toMatchObject({
+      timeline: expect.objectContaining({
+        steps: expect.arrayContaining([
+          expect.objectContaining({
+            key: 'met',
+            label: '见面',
+            state: 'current',
+            actionLabel: '安全见面',
+            checkpointReady: true,
+            resumeMode: 'resume',
+          }),
+          expect.objectContaining({
+            key: 'completed',
+            label: '评价',
+            state: 'next',
+            resumeMode: 'review',
+          }),
+        ]),
+      }),
+    });
+    expect(
+      buildSocialAgentMeetLoopTimelineCard({
+        taskId: 101,
+        activityId: 700,
+        candidateUserId: 22,
+        stage: 'trust_score_updated',
+      }).data,
+    ).toMatchObject({
+      timeline: expect.objectContaining({
+        steps: expect.arrayContaining([
+          expect.objectContaining({
+            key: 'life_graph',
+            label: '回写画像',
+            state: 'current',
+            actionLabel: '确认后回写',
+            checkpointReady: true,
+            resumeMode: 'memory',
+          }),
+        ]),
+      }),
+    });
+    expect(
+      buildSocialAgentProofUploadPromptCard({
+        taskId: 101,
+        activityId: 700,
+      }),
+    ).toMatchObject({
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'social_match.activity',
+      data: expect.objectContaining({
+        schemaName: 'OpportunityCard',
+        schemaType: 'social_match.activity',
+        opportunity: expect.objectContaining({
+          title: '补充活动证明',
+          safetyBadges: expect.arrayContaining(['不强制露脸']),
+        }),
+      }),
+      actions: [
+        expect.objectContaining({
+          schemaAction: 'activity.view_detail',
+          action: 'view_activity',
+        }),
+      ],
+    });
+    expect(
+      buildSocialAgentProofSubmittedCard({
+        taskId: 101,
+        activityId: 700,
+        proofId: 800,
+        proofType: 'scene_photo',
+      }),
+    ).toMatchObject({
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'social_match.activity',
+      data: expect.objectContaining({
+        schemaName: 'OpportunityCard',
+        schemaType: 'social_match.activity',
+        status: 'proof_submitted',
+        proofStatus: '证明待对方确认',
+        opportunity: expect.objectContaining({
+          title: '活动证明已提交',
+          meetLoopNextStep: expect.stringContaining('评价与画像更新'),
+        }),
+      }),
+    });
+    expect(
+      buildSocialAgentActivityDetailCard({
+        taskId: 101,
+        activityId: 700,
+        activity: {
+          title: '周末慢跑',
+          status: 'completed',
+          city: '青岛',
+          locationName: '青岛大学操场',
+          proofRequired: true,
+          proofPolicy: 'mutual_or_proof',
+        },
+        proofs: [{ id: 800, status: 'pending', proofType: 'scene_photo' }],
+      }),
+    ).toMatchObject({
+      type: 'activity_status',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'social_match.activity',
+      title: '周末慢跑',
+      data: expect.objectContaining({
+        schemaName: 'OpportunityCard',
+        schemaType: 'social_match.activity',
+        status: 'completed',
+        proofCount: 1,
+        proofStatus: '1 条证明待确认',
+        opportunity: expect.objectContaining({
+          title: '周末慢跑',
+          safetyBoundary: expect.stringContaining('精确位置'),
+          meetLoopNextStep: expect.stringContaining('评价和画像更新'),
+        }),
+      }),
+      actions: [
+        expect.objectContaining({
+          schemaAction: 'activity.upload_proof',
+          action: 'upload_proof',
+        }),
+      ],
     });
   });
 
@@ -228,6 +574,18 @@ describe('social agent card action presenter', () => {
     );
     expect(messageForSocialAgentSchemaAction('opener.regenerate')).toBe(
       '重新生成开场白',
+    );
+    expect(messageForSocialAgentSchemaAction('opener.reject')).toBe(
+      '取消发送开场白',
+    );
+    expect(messageForSocialAgentSchemaAction('activity.upload_proof')).toBe(
+      '上传活动证明',
+    );
+    expect(messageForSocialAgentSchemaAction('meet_loop.resume')).toBe(
+      '继续推进邀约',
+    );
+    expect(messageForSocialAgentSchemaAction('meet_loop.reschedule')).toBe(
+      '调整约练时间',
     );
   });
 });

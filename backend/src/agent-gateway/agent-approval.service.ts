@@ -7,7 +7,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { MoreThan, Repository } from 'typeorm';
 import {
   AgentApprovalRequest,
   ApprovalRiskLevel,
@@ -25,8 +25,19 @@ import {
   ActionResult,
   LoggedAction,
 } from './entities/agent-activity-log.entity';
+import {
+  AgentTask,
+  AgentTaskEvent,
+  AgentTaskEventActor,
+  AgentTaskEventType,
+} from './entities/agent-task.entity';
 import { AgentWebhookService } from './agent-webhook.service';
 import { RealtimeEventService } from '../realtime/realtime-event.service';
+import { clearSocialAgentPendingAction } from './social-agent-memory.util';
+import {
+  cleanDisplayText,
+  sanitizeForDisplay,
+} from '../common/display-text.util';
 
 /**
  * Approval lifecycle helpers + risk classifier.
@@ -50,6 +61,12 @@ export class AgentApprovalService {
     private readonly webhooks: AgentWebhookService,
     @Optional()
     private readonly realtime?: RealtimeEventService,
+    @Optional()
+    @InjectRepository(AgentTask)
+    private readonly taskRepo?: Repository<AgentTask>,
+    @Optional()
+    @InjectRepository(AgentTaskEvent)
+    private readonly eventRepo?: Repository<AgentTaskEvent>,
   ) {}
 
   // ───────────────────────────────────────────────
@@ -61,9 +78,10 @@ export class AgentApprovalService {
    * what risk band. Pure function over (actionType, payload, settings,
    * ctx).
    *
-   * Hard rules from spec:
-   *  - first message to stranger → required
-   *  - create / join offline activity → required
+   * Hard rules from product safety spec:
+   *  - sending a message / first message → required
+   *  - add friend / connect candidate → required
+   *  - create / join / publish offline activity → required
    *  - contact exchange / location share / photo upload → required
    *  - night activity / alcohol / payment → required (high)
    *  - target user has unknown risk profile → required (high)
@@ -152,19 +170,14 @@ export class AgentApprovalService {
     let needs = false;
     switch (type) {
       case ApprovalType.SendMessage:
-        bumpRisk(ApprovalRiskLevel.Low);
-        if (settings.requireApprovalForFirstMessage && ctx.isFirstContact) {
-          needs = true;
-          bumpRisk(ApprovalRiskLevel.Medium);
-          reasons.push('first_contact_with_stranger');
-        }
-        if (
-          settings.mode === AgentSettingsMode.Basic ||
-          settings.mode === AgentSettingsMode.Assisted
-        ) {
-          needs = true;
-          reasons.push('basic_mode_blocks_auto_send');
-        }
+        needs = true;
+        bumpRisk(
+          settings.requireApprovalForFirstMessage || ctx.isFirstContact
+            ? ApprovalRiskLevel.Medium
+            : ApprovalRiskLevel.Low,
+        );
+        reasons.push('message_send_requires_explicit_approval');
+        if (ctx.isFirstContact) reasons.push('first_contact_with_stranger');
         break;
       case ApprovalType.FirstMessage:
         needs = true;
@@ -172,13 +185,9 @@ export class AgentApprovalService {
         reasons.push('first_contact_with_stranger');
         break;
       case ApprovalType.ContactRequest:
+        needs = true;
         bumpRisk(ApprovalRiskLevel.Medium);
-        if (
-          !canAutoExecute(actionType, settings.mode, ApprovalRiskLevel.Medium)
-        ) {
-          needs = true;
-          reasons.push('contact_request_requires_mode_approval');
-        }
+        reasons.push('contact_request_requires_explicit_approval');
         break;
       case ApprovalType.ContactExchange:
         needs = true;
@@ -186,16 +195,9 @@ export class AgentApprovalService {
         reasons.push('contact_exchange_requires_explicit_approval');
         break;
       case ApprovalType.CreateActivity:
+        needs = true;
         bumpRisk(ApprovalRiskLevel.Medium);
-        if (
-          settings.requireApprovalForOfflineMeeting ||
-          !canAutoExecute(actionType, settings.mode, ApprovalRiskLevel.Medium)
-        ) {
-          needs = true;
-          reasons.push(
-            'activity_invite_requires_approval_or_permission_source',
-          );
-        }
+        reasons.push('activity_create_requires_explicit_approval');
         break;
       case ApprovalType.OfflineMeeting:
         needs = true;
@@ -241,6 +243,10 @@ export class AgentApprovalService {
         reasons.push('target_risk_profile_unknown');
         break;
       case ApprovalType.PostPublish:
+        needs = true;
+        bumpRisk(ApprovalRiskLevel.Medium);
+        reasons.push('public_publish_requires_explicit_approval');
+        break;
       case ApprovalType.Custom:
       default:
         bumpRisk(ApprovalRiskLevel.Low);
@@ -268,6 +274,24 @@ export class AgentApprovalService {
       bumpRisk(ApprovalRiskLevel.High);
       reasons.push('target_risk_profile_unknown');
     }
+    const sensitiveWrite = this.classifySensitiveWrite(
+      actionType,
+      input.payload,
+    );
+    if (sensitiveWrite) {
+      needs = true;
+      bumpRisk(sensitiveWrite.riskLevel);
+      reasons.push(sensitiveWrite.reason);
+    }
+    const schemaActionWrite =
+      type === ApprovalType.Custom
+        ? this.classifySchemaActionWrite(actionType, input.payload)
+        : null;
+    if (schemaActionWrite) {
+      needs = true;
+      bumpRisk(schemaActionWrite.riskLevel);
+      reasons.push(schemaActionWrite.reason);
+    }
 
     // Master switch.
     if (settings.requireApprovalForAll) {
@@ -286,8 +310,8 @@ export class AgentApprovalService {
       riskLevel: risk,
       summary: this.buildSummary(type, input.payload),
       reasons: needs
-        ? ['approval_required_by_permission_engine', ...reasons]
-        : [`auto_execute_allowed_by_${settings.mode}`, ...reasons],
+        ? [...new Set(['approval_required_by_permission_engine', ...reasons])]
+        : [...new Set([`auto_execute_allowed_by_${settings.mode}`, ...reasons])],
     };
   }
 
@@ -338,6 +362,127 @@ export class AgentApprovalService {
         if (!s.allowContactExchange)
           return 'Agent is not allowed to exchange contact info.';
         break;
+    }
+    return null;
+  }
+
+  private classifySensitiveWrite(
+    actionType: AgentAutoActionType,
+    payload: Record<string, unknown>,
+  ): { riskLevel: ApprovalRiskLevel; reason: string } | null {
+    const raw = [
+      actionType,
+      payload.actionType,
+      payload.schemaAction,
+      payload.action,
+      payload.type,
+      payload.intent,
+      payload.fieldKey,
+      payload.category,
+    ]
+      .map((value) => (typeof value === 'string' ? value : ''))
+      .join(' ')
+      .toLowerCase();
+    if (!raw.trim()) return null;
+    if (
+      /\b(privacy|profile_visibility|visibility|discoverable|public_profile|modify_public_profile)\b/.test(
+        raw,
+      )
+    ) {
+      return {
+        riskLevel: ApprovalRiskLevel.High,
+        reason: 'privacy_change_requires_explicit_approval',
+      };
+    }
+    if (/\b(update_sensitive_profile|sensitive_profile|sensitive_tag)\b/.test(raw)) {
+      return {
+        riskLevel: ApprovalRiskLevel.High,
+        reason: 'sensitive_profile_write_requires_explicit_approval',
+      };
+    }
+    if (
+      raw.includes('life_graph.accept_update') ||
+      /\b(confirm_profile_update|memory_write|write_memory|long_term_memory|profile_update)\b/.test(
+        raw,
+      )
+    ) {
+      return {
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason: 'life_graph_memory_write_requires_explicit_approval',
+      };
+    }
+    return null;
+  }
+
+  private classifySchemaActionWrite(
+    actionType: AgentAutoActionType,
+    payload: Record<string, unknown>,
+  ): { riskLevel: ApprovalRiskLevel; reason: string } | null {
+    const raw = [
+      actionType,
+      payload.actionType,
+      payload.schemaAction,
+      payload.action,
+      payload.type,
+      payload.intent,
+      payload.toolName,
+      payload.resumeMode,
+    ]
+      .map((value) => (typeof value === 'string' ? value : ''))
+      .join(' ')
+      .toLowerCase();
+    if (!raw.trim()) return null;
+    if (
+      raw.includes('candidate.connect') ||
+      /\b(connect_candidate|add_friend)\b/.test(raw)
+    ) {
+      return {
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason: 'contact_request_requires_explicit_approval',
+      };
+    }
+    if (
+      raw.includes('opener.confirm_send') ||
+      /\b(send_message|send_candidate_message|reply_message)\b/.test(raw)
+    ) {
+      return {
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason: 'message_send_requires_explicit_approval',
+      };
+    }
+    if (
+      raw.includes('activity.confirm_create') ||
+      /\b(create_activity|invite_activity|join_activity)\b/.test(raw)
+    ) {
+      return {
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason: 'activity_create_requires_explicit_approval',
+      };
+    }
+    if (
+      raw.includes('meet_loop.resume') ||
+      raw.includes('resume_after_approval')
+    ) {
+      return {
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason: 'meet_loop_resume_requires_checkpoint_confirmation',
+      };
+    }
+    if (/\b(payment|wallet|pay)\b/.test(raw)) {
+      return {
+        riskLevel: ApprovalRiskLevel.High,
+        reason: 'payment_requires_payment_intent_and_audit',
+      };
+    }
+    if (
+      /\b(publish_social_request|public_publish|publish_activity|public_post)\b/.test(
+        raw,
+      )
+    ) {
+      return {
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason: 'public_publish_requires_explicit_approval',
+      };
     }
     return null;
   }
@@ -438,6 +583,7 @@ export class AgentApprovalService {
     const ttl = input.ttlMs ?? 24 * 60 * 60 * 1000;
     const payloadAgentTaskId = numberOrNull(input.payload.agentTaskId);
     const agentTaskId = input.agentTaskId ?? payloadAgentTaskId;
+    const payload = this.withSocialCodexApprovalPayload(input, agentTaskId);
     const saved = await this.repo.save(
       this.repo.create({
         userId: input.userId,
@@ -446,9 +592,7 @@ export class AgentApprovalService {
         type: input.type,
         actionType: input.actionType ?? input.type,
         skillName: input.skillName ?? input.type,
-        payload: agentTaskId
-          ? { ...input.payload, agentTaskId }
-          : input.payload,
+        payload,
         summary: input.summary,
         reason: input.reason ?? input.rationale ?? '',
         createdBy: input.createdBy ?? 'agent',
@@ -491,17 +635,187 @@ export class AgentApprovalService {
     return saved;
   }
 
+  private withSocialCodexApprovalPayload(
+    input: {
+      type: ApprovalType;
+      actionType?: string;
+      skillName?: string;
+      payload: Record<string, unknown>;
+      summary: string;
+      riskLevel: ApprovalRiskLevel;
+      reason?: string;
+      rationale?: string;
+    },
+    agentTaskId: number | null | undefined,
+  ): Record<string, unknown> {
+    const actionType = input.actionType ?? input.type;
+    const idempotencyKey =
+      stringOrNull(input.payload.idempotencyKey) ??
+      stringOrNull(input.payload.resumeIdempotencyKey) ??
+      this.approvalIdempotencyKey(input, agentTaskId);
+    const dryRunPreview = this.buildDryRunPreview({
+      type: input.type,
+      actionType,
+      skillName: input.skillName ?? actionType,
+      payload: input.payload,
+      summary: input.summary,
+      riskLevel: input.riskLevel,
+      idempotencyKey,
+    });
+    return sanitizeForDisplay({
+      ...input.payload,
+      ...(agentTaskId ? { agentTaskId } : {}),
+      idempotencyKey,
+      dryRunPreview,
+      socialCodex: {
+        ...(isRecord(input.payload.socialCodex)
+          ? input.payload.socialCodex
+          : {}),
+        approvalPolicy: {
+          required: true,
+          lifecycleNode: 'approval',
+          sideEffectsBeforeApproval: 'none',
+          resumeAfterDecision: true,
+          auditRequired: true,
+        },
+        dryRunPreview,
+        safetyBoundary: {
+          noContactBeforeApproval: true,
+          noPreciseLocationRevealBeforeApproval: true,
+          noExternalContactExchangeBeforeApproval: true,
+        },
+        reason: input.reason ?? input.rationale ?? null,
+      },
+    }) as Record<string, unknown>;
+  }
+
+  private buildDryRunPreview(input: {
+    type: ApprovalType;
+    actionType: string;
+    skillName: string;
+    payload: Record<string, unknown>;
+    summary: string;
+    riskLevel: ApprovalRiskLevel;
+    idempotencyKey: string;
+  }) {
+    const visibleContent =
+      stringOrNull(input.payload.message) ??
+      stringOrNull(input.payload.text) ??
+      stringOrNull(input.payload.title) ??
+      stringOrNull(input.payload.summary) ??
+      null;
+    return {
+      schemaVersion: 'fitmeet.social_codex.approval_preview.v1',
+      title: this.previewTitle(input.type, input.actionType),
+      summary: input.summary,
+      actionType: input.actionType,
+      skillName: input.skillName,
+      riskLevel: input.riskLevel,
+      visibleToOtherUser: this.otherUserVisibility(input.type),
+      sideEffectBoundary: '确认前不会执行、不会触达对方、不会公开内容。',
+      dataBoundary: this.dataBoundary(input.type, input.actionType),
+      idempotencyKey: input.idempotencyKey,
+      ...(visibleContent ? { contentPreview: visibleContent.slice(0, 300) } : {}),
+    };
+  }
+
+  private previewTitle(type: ApprovalType, actionType: string): string {
+    if (type === ApprovalType.PostPublish || /publish/i.test(actionType)) {
+      return '发布到发现前预览';
+    }
+    if (
+      type === ApprovalType.SendMessage ||
+      type === ApprovalType.FirstMessage ||
+      /message|invite/i.test(actionType)
+    ) {
+      return '发送前预览';
+    }
+    if (type === ApprovalType.ContactRequest || /connect|friend/i.test(actionType)) {
+      return '连接候选人前预览';
+    }
+    if (type === ApprovalType.ShareLocation) return '公开位置前预览';
+    if (type === ApprovalType.Payment) return '支付前预览';
+    return '执行前预览';
+  }
+
+  private otherUserVisibility(type: ApprovalType): string {
+    switch (type) {
+      case ApprovalType.SendMessage:
+      case ApprovalType.FirstMessage:
+      case ApprovalType.ContactRequest:
+      case ApprovalType.ContactExchange:
+      case ApprovalType.JoinActivity:
+        return '确认后对方会看到这次联系或邀请。';
+      case ApprovalType.PostPublish:
+      case ApprovalType.CreateActivity:
+        return '确认后公开可发现用户可能看到这张卡片。';
+      case ApprovalType.ShareLocation:
+        return '确认后会公开你允许展示的位置范围。';
+      default:
+        return '确认后才会执行这一步。';
+    }
+  }
+
+  private dataBoundary(type: ApprovalType, actionType: string): string {
+    if (type === ApprovalType.ShareLocation || /location/i.test(actionType)) {
+      return '默认只使用地点范围；精确位置必须再次确认。';
+    }
+    if (
+      type === ApprovalType.ContactExchange ||
+      /contact|wechat|phone/i.test(actionType)
+    ) {
+      return '不会在确认前交换手机号、微信或外部联系方式。';
+    }
+    if (type === ApprovalType.PostPublish || /publish/i.test(actionType)) {
+      return '会过滤联系方式、精确住址和敏感画像字段。';
+    }
+    return '只使用当前任务必要信息，并写入审计日志。';
+  }
+
+  private approvalIdempotencyKey(
+    input: {
+      type: ApprovalType;
+      actionType?: string;
+      payload: Record<string, unknown>;
+    },
+    agentTaskId: number | null | undefined,
+  ): string {
+    const target =
+      stringOrNull(input.payload.targetUserId) ??
+      stringOrNull(input.payload.candidateUserId) ??
+      stringOrNull(input.payload.activityId) ??
+      stringOrNull(input.payload.socialRequestId) ??
+      'target';
+    return [
+      'approval',
+      agentTaskId ?? 'task',
+      input.actionType ?? input.type,
+      target,
+    ].join(':');
+  }
+
   async getPending(userId: number) {
+    await this.expireStalePendingApprovals({ userId });
     return this.repo.find({
-      where: { userId, status: ApprovalStatus.Pending },
+      where: {
+        userId,
+        status: ApprovalStatus.Pending,
+        expiresAt: MoreThan(new Date()),
+      },
       order: { createdAt: 'DESC' },
       take: 100,
     });
   }
 
   async getPendingForTask(userId: number, agentTaskId: number) {
+    await this.expireStalePendingApprovals({ userId, agentTaskId });
     return this.repo.find({
-      where: { userId, agentTaskId, status: ApprovalStatus.Pending },
+      where: {
+        userId,
+        agentTaskId,
+        status: ApprovalStatus.Pending,
+        expiresAt: MoreThan(new Date()),
+      },
       order: { createdAt: 'DESC' },
       take: 50,
     });
@@ -539,7 +853,9 @@ export class AgentApprovalService {
     }
     if (row.expiresAt < new Date()) {
       row.status = ApprovalStatus.Expired;
-      await this.repo.save(row);
+      const expired = await this.repo.save(row);
+      await this.clearResolvedTaskPendingAction(expired);
+      await this.writeApprovalTaskEvent(expired, 'expired');
       throw new BadRequestException('Approval has expired');
     }
     row.status = ApprovalStatus.Approved;
@@ -560,6 +876,13 @@ export class AgentApprovalService {
         );
       }
     }
+    if (!dispatchError && !this.isDispatchFailureResult(dispatchResult)) {
+      await this.clearResolvedTaskPendingAction(saved);
+    }
+    await this.writeApprovalTaskEvent(saved, 'approved', {
+      dispatched,
+      dispatchError,
+    });
     void this.emitApprovalWebhook(saved, 'approval.approved', {
       dispatched,
       dispatchResult,
@@ -581,6 +904,14 @@ export class AgentApprovalService {
     return { approval: saved, dispatched, dispatchResult, dispatchError };
   }
 
+  private isDispatchFailureResult(result: unknown): boolean {
+    if (!result || typeof result !== 'object' || Array.isArray(result)) {
+      return false;
+    }
+    const record = result as Record<string, unknown>;
+    return record.ok === false || typeof record.errorMessage === 'string';
+  }
+
   async reject(id: number, userId: number) {
     const row = await this.repo.findOne({ where: { id, userId } });
     if (!row) throw new NotFoundException('Approval not found');
@@ -592,6 +923,8 @@ export class AgentApprovalService {
     row.status = ApprovalStatus.Rejected;
     row.respondedAt = new Date();
     const saved = await this.repo.save(row);
+    await this.clearResolvedTaskPendingAction(saved);
+    await this.writeApprovalTaskEvent(saved, 'rejected');
     await this.writeDecisionLog(saved, ActionResult.Blocked);
     void this.emitApprovalWebhook(saved, 'approval.rejected');
     this.realtime?.emitToUser({
@@ -666,6 +999,104 @@ export class AgentApprovalService {
         `Failed to write approval decision log ${approval.id}: ${(err as Error).message}`,
       );
     }
+  }
+
+  private async clearResolvedTaskPendingAction(
+    approval: AgentApprovalRequest,
+  ): Promise<void> {
+    if (!this.taskRepo || !approval.agentTaskId) return;
+    try {
+      const task = await this.taskRepo.findOne({
+        where: {
+          id: approval.agentTaskId,
+          ownerUserId: approval.userId,
+        },
+      });
+      if (!task) return;
+      clearSocialAgentPendingAction(task, approval.id);
+      await this.taskRepo.save(task);
+    } catch (err) {
+      this.logger.warn(
+        `Failed to clear pending task action for approval ${approval.id}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  private async expireStalePendingApprovals(input: {
+    userId: number;
+    agentTaskId?: number;
+  }): Promise<void> {
+    const rows = await this.repo.find({
+      where: {
+        userId: input.userId,
+        ...(input.agentTaskId ? { agentTaskId: input.agentTaskId } : {}),
+        status: ApprovalStatus.Pending,
+      },
+      take: input.agentTaskId ? 50 : 100,
+    });
+    const now = new Date();
+    const expiredRows = rows.filter((row) => row.expiresAt < now);
+    for (const row of expiredRows) {
+      row.status = ApprovalStatus.Expired;
+      const saved = await this.repo.save(row);
+      await this.clearResolvedTaskPendingAction(saved);
+      await this.writeApprovalTaskEvent(saved, 'expired');
+    }
+  }
+
+  private async writeApprovalTaskEvent(
+    approval: AgentApprovalRequest,
+    decision: 'approved' | 'rejected' | 'expired',
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
+    if (!this.eventRepo || !approval.agentTaskId) return;
+    const summary = this.approvalDecisionSummary(approval, decision);
+    try {
+      await this.eventRepo.save(
+        this.eventRepo.create({
+          taskId: approval.agentTaskId,
+          ownerUserId: approval.userId,
+          eventType: AgentTaskEventType.ConfirmationReceived,
+          actor:
+            decision === 'expired'
+              ? AgentTaskEventActor.System
+              : AgentTaskEventActor.User,
+          summary,
+          payload: sanitizeForDisplay({
+            approvalId: approval.id,
+            approvalType: approval.type,
+            actionType: approval.actionType,
+            status: approval.status,
+            decision,
+            riskLevel: approval.riskLevel,
+            summary: approval.summary,
+            relatedSocialRequestId: approval.relatedSocialRequestId,
+            relatedCandidateId: approval.relatedCandidateId,
+            relatedActivityId: approval.relatedActivityId,
+            respondedAt: approval.respondedAt,
+            expiresAt: approval.expiresAt,
+            ...extra,
+          }) as Record<string, unknown>,
+        }),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Failed to write approval task event ${approval.id}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  private approvalDecisionSummary(
+    approval: AgentApprovalRequest,
+    decision: 'approved' | 'rejected' | 'expired',
+  ): string {
+    const label =
+      decision === 'approved'
+        ? '用户已批准'
+        : decision === 'rejected'
+          ? '用户已拒绝'
+          : '确认请求已过期';
+    return `${label}：${approval.summary || approval.actionType || approval.type}`;
   }
 
   private toLoggedAction(approval: AgentApprovalRequest): LoggedAction {
@@ -745,6 +1176,15 @@ function numberOrNull(value: unknown): number | null {
     if (Number.isFinite(parsed)) return parsed;
   }
   return null;
+}
+
+function stringOrNull(value: unknown): string | null {
+  const text = cleanDisplayText(value, '').trim();
+  return text || null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 interface AgentConnectionLike {

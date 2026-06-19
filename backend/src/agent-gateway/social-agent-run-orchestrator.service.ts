@@ -15,14 +15,18 @@ import {
 import { SocialAgentMainAgentTurnService } from './social-agent-main-agent-turn.service';
 import { SocialAgentRunRecommendationService } from './social-agent-run-recommendation.service';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
+import { parseSocialAgentThreadTaskId } from './social-agent-thread-id.util';
 import type {
   SocialAgentChatRunBody,
   SocialAgentChatRunResult,
+  SocialAgentStreamOptions,
   SocialAgentVisibleStep,
   StreamEmit,
 } from './social-agent-chat.types';
 import { buildSocialAgentRunCompletionSnapshot } from './social-agent-run-completion.presenter';
 import { TonePolicyService } from './response-quality/tone-policy.service';
+import { AgentSelfImproveService } from './agent-self-improve.service';
+import { AgentRunCheckpointService } from './agent-run-checkpoint.service';
 
 @Injectable()
 export class SocialAgentRunOrchestratorService {
@@ -36,12 +40,17 @@ export class SocialAgentRunOrchestratorService {
     private readonly fitMeetRuntime?: FitMeetAgentRuntimeService,
     @Optional()
     private readonly tonePolicy?: TonePolicyService,
+    @Optional()
+    private readonly selfImprove?: AgentSelfImproveService,
+    @Optional()
+    private readonly checkpoints?: AgentRunCheckpointService,
   ) {}
 
   async run(
     ownerUserId: number,
     body: SocialAgentChatRunBody,
     emit?: StreamEmit,
+    options: SocialAgentStreamOptions = {},
   ): Promise<SocialAgentChatRunResult> {
     const goal = cleanDisplayText(body.goal, '').trim();
     if (!goal) throw new BadRequestException('请输入你的社交需求');
@@ -55,12 +64,15 @@ export class SocialAgentRunOrchestratorService {
       permissionMode,
     });
 
-    let task = await this.taskLifecycle.createOrReuseTask({
+    let task = await this.taskLifecycle.ensureConversationTask(
       ownerUserId,
+      body.taskId ?? this.number(body.clientContext?.threadId),
       goal,
-      permissionMode,
-      idempotencyKey: idempotencyKey || null,
-    });
+      idempotencyKey || null,
+      body.clientContext?.threadId ?? null,
+    );
+    task.permissionMode = permissionMode;
+    if (!cleanDisplayText(task.goal, '').trim()) task.goal = goal;
     await this.fitMeetRuntime?.attachTask(runtimeRun?.id, task.id);
     this.realtime?.emitAgentEvent(ownerUserId, 'agent:thinking', {
       taskId: task.id,
@@ -74,6 +86,20 @@ export class SocialAgentRunOrchestratorService {
       'done',
     );
     await emit?.({ type: 'task', taskId: task.id, status: task.status });
+    const checkpointingEmit: StreamEmit = async (event) => {
+      if (event.type === 'step') {
+        await this.checkpoints?.saveStep({
+          ownerUserId,
+          task,
+          goal,
+          step: event.step,
+          steps: visibleSteps,
+          traceId: null,
+          runId: runtimeRun?.id ? String(runtimeRun.id) : null,
+        });
+      }
+      await emit?.(event);
+    };
 
     const mainAgentRun = await this.mainAgentTurn.handleRunTurn({
       ownerUserId,
@@ -81,7 +107,8 @@ export class SocialAgentRunOrchestratorService {
       message: goal,
       permissionMode,
       visibleSteps,
-      emit,
+      emit: checkpointingEmit,
+      signal: options.signal,
       visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
       completeRuntimeClarification: async (result) => {
         await this.fitMeetRuntime?.completeRun({
@@ -103,8 +130,9 @@ export class SocialAgentRunOrchestratorService {
       goal,
       permissionMode,
       visibleSteps,
-      emit,
+      emit: checkpointingEmit,
       alphaTurn,
+      signal: options.signal,
       visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
       recordRuntimeStep: async (input) => {
         await this.fitMeetRuntime?.recordStep({
@@ -124,6 +152,23 @@ export class SocialAgentRunOrchestratorService {
     task = recommendation.task;
     const result = recommendation.result;
     const completion = buildSocialAgentRunCompletionSnapshot(result, task.id);
+    const checkpoint = await this.checkpoints?.saveResult({
+      ownerUserId,
+      task,
+      goal,
+      result,
+      steps: visibleSteps,
+    });
+    if (checkpoint) {
+      result.runtime = {
+        ...(result.runtime ?? {}),
+        checkpointId: checkpoint.id,
+        checkpointType: checkpoint.type,
+        canResume: completion.resultPayload.approvalRequiredCount > 0,
+        canReplay: true,
+        canFork: true,
+      };
+    }
     this.realtime?.emitAgentEvent(ownerUserId, 'agent:completed', {
       taskId: task.id,
       status: result.status,
@@ -136,6 +181,17 @@ export class SocialAgentRunOrchestratorService {
       status: completion.status,
       assistantMessage: result.assistantMessage,
       resultPayload: completion.resultPayload,
+    });
+    await this.selfImprove?.recordOnlineReplayFromRoute({
+      ownerUserId,
+      taskId: task.id,
+      userMessage: goal,
+      assistantMessage: result.assistantMessage,
+      route: {
+        intent: result.structuredIntent?.intent ?? 'social_search',
+        source: 'run_orchestrator',
+      },
+      result: result as unknown as Record<string, unknown>,
     });
     return result;
   }
@@ -168,5 +224,9 @@ export class SocialAgentRunOrchestratorService {
     return mode && Object.values(AgentTaskPermissionMode).includes(mode)
       ? mode
       : AgentTaskPermissionMode.Confirm;
+  }
+
+  private number(value: unknown): number | null {
+    return parseSocialAgentThreadTaskId(value);
   }
 }

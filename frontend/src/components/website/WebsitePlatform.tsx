@@ -2,21 +2,24 @@ import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 're
 import clsx from 'clsx';
 import { Link, useLocation } from 'react-router-dom';
 import { waitlistApi, type WaitlistDeviceType } from '../../api/waitlistApi';
+import { SiteLink } from '../navigation/SiteLink';
+import { SocialWorldHeroVisual } from './SocialWorldHeroVisual';
 
-const EARTH_ASSET = '/images/fitmeet/concept-earth-asia.png';
-const EARTH_WEBP_SRCSET =
-  '/images/fitmeet/concept-earth-asia-960.webp 960w, /images/fitmeet/concept-earth-asia-1400.webp 1400w';
 const SITE_URL = 'https://ourfitmeet.cn';
 const ICP_TEXT = import.meta.env.VITE_ICP_TEXT || '鲁ICP备2026015946号-2';
 const ICP_URL = import.meta.env.VITE_ICP_URL || 'http://beian.miit.gov.cn/';
+const CONTACT_EMAIL = '15253005312@163.com';
 
 export type WebsitePage =
   | 'home'
+  | 'features'
   | 'ecosystem'
+  | 'download'
   | 'app'
   | 'developers'
   | 'safety'
   | 'about'
+  | 'contact'
   | 'lifeGraph'
   | 'demo';
 
@@ -39,10 +42,12 @@ type InfoPage = {
 
 const navItems = [
   { to: '/', label: '首页' },
-  { to: '/demo', label: '30 秒 Demo' },
-  { to: '/app', label: 'App' },
-  { to: '/safety', label: 'Safety Center' },
+  { to: '/discover', label: '发现' },
+  { to: '/features', label: '产品功能' },
   { to: '/agent', label: 'Agent' },
+  { to: '/safety', label: '安全' },
+  { to: '/download', label: '下载 App' },
+  { to: '/about', label: '关于我们' },
 ];
 
 const seo: Record<WebsitePage, { title: string; description: string; path: string }> = {
@@ -58,11 +63,23 @@ const seo: Record<WebsitePage, { title: string; description: string; path: strin
       '了解 FitMeet 如何把同城社交、约练和找搭子的真实需求变成可解释、可确认、可执行的连接流程。',
     path: '/ecosystem',
   },
+  features: {
+    title: 'FitMeet 产品功能 | Social World 怎么帮助用户社交',
+    description:
+      '了解 FitMeet Social World 如何用兴趣场景、附近机会、站内聊天、Agent 推荐和确认机制帮助用户自然认识真正聊得来的人。',
+    path: '/features',
+  },
   app: {
     title: 'FitMeet App | Beta 预约',
     description:
       '预约 FitMeet App Beta，体验移动端 5 Tab、附近机会、Agent 发起需求、安全确认和活动闭环。',
     path: '/app',
+  },
+  download: {
+    title: '下载 FitMeet App | Social World Beta',
+    description:
+      '下载或预约 FitMeet App Beta。iOS 与 Android 入口、二维码占位、Beta 预约和 Agent 体验入口。',
+    path: '/download',
   },
   developers: {
     title: 'FitMeet Developers | Agent 接入预告',
@@ -80,6 +97,12 @@ const seo: Record<WebsitePage, { title: string; description: string; path: strin
     description: 'FitMeet 希望让社交回到真实生活，从刷信息流转向由用户需求驱动的真实连接。',
     path: '/about',
   },
+  contact: {
+    title: '联系 FitMeet | 商务合作、媒体与安全反馈',
+    description:
+      '联系 FitMeet 团队，了解 Social World、商务合作、媒体采访、安全反馈和 App Beta 体验。',
+    path: '/contact',
+  },
   lifeGraph: {
     title: 'FitMeet Life Graph | 用户可控画像',
     description:
@@ -93,23 +116,11 @@ const seo: Record<WebsitePage, { title: string; description: string; path: strin
   },
 };
 
-const scenes = [
-  {
-    scene: '今晚想慢跑，但不想尬聊',
-    agent: 'Agent 询问距离、强度和社交边界，推荐 2 位低压力跑步搭子。',
-    safe: '只展示模糊区域；发送邀请前必须确认。',
-  },
-  {
-    scene: '周末想找自然一点的活动',
-    agent: 'Agent 按时间、地点和社交偏好筛选可加入活动。',
-    safe: '活动详情包含地点风险、报名状态和举报入口。',
-  },
-  {
-    scene: '最近想认识更同频的人',
-    agent: 'Agent 解释匹配理由：运动类型、生活节奏、聊天方式和边界。',
-    safe: '身体信息、精确位置和联系方式默认隐藏。',
-  },
-];
+const homeSeo = {
+  title: 'FitMeet | Social World 让社交更简单',
+  description:
+    'FitMeet 是面向真实生活连接的 Social World。用户从发现附近的人、活动和场景开始，在安全边界内自然认识彼此。',
+};
 
 const safetyItems = [
   ['隐私', '精确位置、身体信息、联系方式默认隐藏，只在用户本人界面可见。'],
@@ -118,6 +129,33 @@ const safetyItems = [
   ['撤回', '授权、画像信号、活动申请和推荐偏好都可以撤回或关闭。'],
   ['举报', '用户、活动、消息和推荐卡片都提供举报与拉黑入口。'],
   ['数据删除', '账号数据、画像记录、敏感字段和历史活动支持删除请求。'],
+];
+
+const enterpriseLoopCopy = [
+  '先从跑步、健身、咖啡、Citywalk 这类真实场景进入。',
+  '用附近、时间、兴趣和边界，把可认识的人组织清楚。',
+  '推荐前展示理由，连接前保留确认，不让用户被动暴露。',
+  '把发现、动态、消息和我的合在一个移动端闭环里。',
+  '线下前保留安全提示，异常时可以撤回、举报或停止。',
+];
+
+const featurePillars = [
+  ['兴趣场景', '从跑步、健身、咖啡、Citywalk 等场景进入，让认识一个人有自然理由。'],
+  ['附近机会', '把附近的人、活动和地点按时间、距离、兴趣和边界组织，而不是堆列表。'],
+  ['站内先聊', '第一次连接先保留在站内，用户可以低压力确认节奏、地点和目的。'],
+  ['Agent 推荐', '一句话说出目标，Agent 帮你筛人、找场景、准备话题，但关键动作由你确认。'],
+];
+
+const agentCapabilities = [
+  ['发现人', '结合兴趣、距离、时间和 Life Graph，给出更合适的人选。'],
+  ['发现场景', '把“想出门走走”拆成散步、咖啡、Citywalk 或轻运动等可执行场景。'],
+  ['发现话题', '根据对方公开资料和你的边界，生成轻松、不冒犯的开场方式。'],
+];
+
+const downloadOptions = [
+  ['iOS TestFlight', '内测开放后提供邀请链接，适合第一批体验用户。'],
+  ['Android Beta', '预留 Android 测试包入口，部署后接入真实下载地址。'],
+  ['Web 发现页', '不安装 App 也可以先进入发现，查看 Social World 的核心体验。'],
 ];
 
 const appTabs = [
@@ -159,7 +197,7 @@ const infoPages: Partial<Record<WebsitePage, InfoPage>> = {
     body: '我们不想做一个让人停留更久的信息流，而是做一个让合适的人更自然见面的 Social World。',
     actions: [
       { label: '了解 Safety Center', to: '/safety', variant: 'primary' },
-      { label: '预约 App Beta', to: '/app#waitlist' },
+      { label: '预约 App Beta', to: '/download#waitlist' },
     ],
     sections: [
       {
@@ -235,13 +273,15 @@ export function WebsitePlatform({ page }: { page: WebsitePage }) {
   const location = useLocation();
 
   useEffect(() => {
-    const pageSeo = seo[page];
+    const pageSeo = page === 'home' ? { ...seo.home, ...homeSeo } : seo[page];
     const canonicalUrl = `${SITE_URL}${pageSeo.path}`;
     document.title = pageSeo.title;
     setMetaTag('description', pageSeo.description);
     setMetaProperty('og:title', pageSeo.title);
     setMetaProperty('og:description', pageSeo.description);
     setMetaProperty('og:url', canonicalUrl);
+    setMetaTag('twitter:title', pageSeo.title);
+    setMetaTag('twitter:description', pageSeo.description);
     setCanonical(canonicalUrl);
   }, [page]);
 
@@ -251,14 +291,24 @@ export function WebsitePlatform({ page }: { page: WebsitePage }) {
   }, [location.hash, location.pathname]);
 
   return (
-    <div className="fitmeet-website fm-site">
+    <div className="fitmeet-website fm-site fm-enterprise-site">
       <WebsiteNavbar />
       <main>
         {page === 'home' ? <HomePage /> : null}
+        {page === 'features' || page === 'ecosystem' ? <FeaturesPage /> : null}
         {page === 'safety' ? <SafetyCenterPage /> : null}
-        {page === 'app' ? <AppPreviewPage /> : null}
+        {page === 'download' || page === 'app' ? <DownloadPage /> : null}
+        {page === 'about' || page === 'contact' ? <AboutContactPage /> : null}
         {page === 'demo' ? <PublicDemoPage /> : null}
-        {page !== 'home' && page !== 'safety' && page !== 'app' && page !== 'demo' ? (
+        {page !== 'home' &&
+        page !== 'features' &&
+        page !== 'ecosystem' &&
+        page !== 'safety' &&
+        page !== 'download' &&
+        page !== 'app' &&
+        page !== 'about' &&
+        page !== 'contact' &&
+        page !== 'demo' ? (
           <InfoPageView page={page} />
         ) : null}
       </main>
@@ -269,7 +319,7 @@ export function WebsitePlatform({ page }: { page: WebsitePage }) {
 
 export function WebsiteLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="fitmeet-website fm-site">
+    <div className="fitmeet-website fm-site fm-enterprise-site">
       <WebsiteNavbar />
       <main>{children}</main>
       <WebsiteFooter />
@@ -279,30 +329,47 @@ export function WebsiteLayout({ children }: { children: ReactNode }) {
 
 function WebsiteNavbar() {
   const location = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <header className="fm-nav">
+    <header className={clsx('fm-nav', menuOpen && 'is-menu-open')}>
       <Link to="/" className="fm-brand" aria-label="FitMeet 首页">
-        <span>F</span>
+        <span>
+          <img src="/favicon-192.png" alt="FitMeet" width="38" height="38" />
+        </span>
         <strong>FitMeet</strong>
       </Link>
-      <nav aria-label="FitMeet 官网导航">
+      <button
+        type="button"
+        className="fm-nav__menu"
+        aria-expanded={menuOpen}
+        aria-controls="fitmeet-website-nav"
+        onClick={() => setMenuOpen((open) => !open)}
+      >
+        {menuOpen ? '关闭菜单' : '打开菜单'}
+      </button>
+      <nav id="fitmeet-website-nav" aria-label="FitMeet 官网导航">
         {navItems.map((item) => {
           const active =
             item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to);
           return (
-            <Link key={item.to} to={item.to} aria-current={active ? 'page' : undefined}>
+            <SiteLink
+              key={item.to}
+              to={item.to}
+              aria-current={active ? 'page' : undefined}
+              onClick={() => setMenuOpen(false)}
+            >
               {item.label}
-            </Link>
+            </SiteLink>
           );
         })}
       </nav>
       <div className="fm-nav__actions">
-        <Link to="/app#waitlist" className="fm-button fm-button--ghost">
-          Beta 预约
-        </Link>
-        <Link to="/demo" className="fm-button fm-button--primary">
-          30 秒 Demo
+        <SiteLink to="/discover" className="fm-button fm-button--ghost">
+          进入发现
+        </SiteLink>
+        <Link to="/download" className="fm-button fm-button--primary">
+          打开 App
         </Link>
       </div>
     </header>
@@ -312,68 +379,192 @@ function WebsiteNavbar() {
 function HomePage() {
   return (
     <>
-      <section className="fm-hero">
-        <div className="fm-hero__media" aria-hidden="true">
-          <picture>
-            <source
-              type="image/webp"
-              srcSet={EARTH_WEBP_SRCSET}
-              sizes="(max-width: 900px) 100vw, 70vw"
-            />
-            <img src={EARTH_ASSET} alt="" decoding="async" />
-          </picture>
-        </div>
+      <section className="fm-hero fm-enterprise-hero">
         <div className="fm-hero__copy">
-          <h1>说出你想完成的连接。</h1>
-          <p>
-            FitMeet 不是让你研究一堆功能。你只需要说出真实生活里的场景，Agent
-            会帮你理解需求、筛选合适的人或活动，并在关键动作前等待你确认。
-          </p>
+          <span className="fm-eyebrow">Social World</span>
+          <h1>让社交更简单</h1>
+          <p>从兴趣出发，遇见真正聊得来的人</p>
           <div className="fm-actions">
-            <Link to="/demo" className="fm-button fm-button--primary">
-              30 秒看懂 FitMeet
+            <SiteLink to="/discover" className="fm-button fm-button--primary">
+              进入发现
+            </SiteLink>
+            <Link to="/agent" className="fm-button fm-button--ghost">
+              体验 Agent
             </Link>
-            <Link to="/safety" className="fm-button fm-button--ghost">
-              为什么安全
+            <Link to="/download" className="fm-button fm-button--ghost">
+              打开 App
             </Link>
           </div>
+          <div className="fm-hero__trust" aria-label="FitMeet 安全原则">
+            <span>公共场所优先</span>
+            <span>先站内聊</span>
+            <span>确认后执行</span>
+          </div>
+        </div>
+        <div className="fm-hero__visual" aria-label="FitMeet Social World App 互动主视觉">
+          <SocialWorldHeroVisual />
         </div>
       </section>
 
       <Section
-        label="新的信息架构"
-        title="用户场景 -> Agent 怎么完成 -> 为什么安全"
-        body="官网只讲一件事：用户在真实生活里想完成什么，FitMeet Agent 如何帮他走到下一步，以及平台为什么不会越过用户边界。"
+        label="Context"
+        title="从兴趣场景出发，让认识一个人有自然理由。"
+        body="FitMeet 不把人简单堆成列表，而是把健身、咖啡、散步、Citywalk 这类场景变成更轻、更真实的连接入口。"
       >
-        <div className="fm-flow-grid">
-          {scenes.map((item) => (
-            <article key={item.scene} className="fm-card fm-flow-card">
-              <span>用户场景</span>
-              <h3>{item.scene}</h3>
-              <p>{item.agent}</p>
-              <small>{item.safe}</small>
+        <figure className="fm-world-story">
+          <picture>
+            <source
+              srcSet="/images/fitmeet/generated/social-world-abstract-720.jpg 720w, /images/fitmeet/generated/social-world-abstract-1200.jpg 1200w"
+              sizes="(max-width: 820px) 92vw, 1180px"
+            />
+            <img
+              src="/images/fitmeet/generated/social-world-abstract-1200.jpg"
+              alt="FitMeet Social World 抽象连接网络"
+              width="1200"
+              height="675"
+              loading="lazy"
+              decoding="async"
+            />
+          </picture>
+          <figcaption>
+            每一次连接都从一个具体场景开始：一起做什么、在哪里见、是否先聊清楚。
+          </figcaption>
+        </figure>
+        <div className="fm-context-grid">
+          <article className="fm-context-panel">
+            <span>Scene</span>
+            <h3>先有兴趣，再有认识的理由。</h3>
+            <p>用户可以从约练、喝咖啡、城市散步、轻社交活动进入，不需要尴尬地从陌生人列表开始。</p>
+          </article>
+          <article className="fm-context-panel fm-context-panel--strong">
+            <span>App</span>
+            <h3>发现页就是 Social World 的入口。</h3>
+            <p>用户进入发现后直接看到附近动态、活动卡片和同频推荐，不需要再跳转到另一个页面。</p>
+          </article>
+        </div>
+      </Section>
+
+      <AgentConversionBand />
+
+      <Section label="App Flow" title="移动端核心流程，只保留真正会发生的下一步。" tone="deep">
+        <div className="fm-enterprise-loop">
+          {['选择场景', '发现同频', '先聊清楚', '确认见面', '安全收束'].map((step, index) => (
+            <article key={step}>
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              <strong>{step}</strong>
+              <p>{enterpriseLoopCopy[index]}</p>
             </article>
           ))}
         </div>
       </Section>
 
-      <Section label="Agent 工作闭环" title="Agent 不替你社交，只把下一步准备好。" tone="deep">
-        <div className="fm-step-line">
-          {['说出场景', '补全边界', '推荐候选', '解释理由', '用户确认', '开始连接'].map(
-            (step, index) => (
-              <article key={step}>
-                <span>{String(index + 1).padStart(2, '0')}</span>
-                <strong>{step}</strong>
-              </article>
-            ),
-          )}
+      <Section label="Proof" title="安全感不靠长说明，而是出现在每个关键动作旁边。">
+        <div className="fm-proof-strip">
+          {safetyItems.slice(0, 4).map(([title, body]) => (
+            <article key={title}>
+              <span>{title}</span>
+              <p>{body}</p>
+            </article>
+          ))}
         </div>
       </Section>
 
-      <SafetySummary />
-      <AppPreviewCompact />
-      <DemoStrip />
+      <section className="fm-final-cta">
+        <span>FitMeet App</span>
+        <h2>从发现开始，认识真正聊得来的人。</h2>
+        <p>先进入发现页，看附近的兴趣场景和同频动态，再决定是否发起一次真实连接。</p>
+        <div className="fm-actions">
+          <SiteLink to="/discover" className="fm-button fm-button--primary">
+            进入发现
+          </SiteLink>
+          <Link to="/download" className="fm-button fm-button--ghost">
+            打开 App
+          </Link>
+        </div>
+      </section>
     </>
+  );
+}
+
+function FeaturesPage() {
+  return (
+    <>
+      <PageHero
+        title="Social World 怎么帮你更自然地社交。"
+        body="不是把人堆成列表，而是围绕兴趣、附近、站内聊和确认机制，把真实连接变成可理解的下一步。"
+        actions={[
+          { label: '进入发现', to: '/discover', variant: 'primary' },
+          { label: '体验 Agent', to: '/agent' },
+        ]}
+        visual={
+          <VisualFigure
+            src="/images/fitmeet/generated/social-world-features-visual-1200.jpg"
+            srcSet="/images/fitmeet/generated/social-world-features-visual-720.jpg 720w, /images/fitmeet/generated/social-world-features-visual-1200.jpg 1200w"
+            alt="FitMeet Social World 产品功能抽象视觉"
+            caption="兴趣、附近机会、推荐理由和站内聊天，被组织成一条轻量连接路径。"
+          />
+        }
+      />
+      <Section
+        label="Product"
+        title="从“我想认识谁”，变成“我可以怎么开始”。"
+        body="FitMeet 的产品功能围绕真实 To C 场景组织：用户先有目标，再由产品和 Agent 帮他找到人、场景和话题。"
+      >
+        <div className="fm-feature-pillars">
+          {featurePillars.map(([title, body]) => (
+            <article key={title} className="fm-card">
+              <span>Feature</span>
+              <h3>{title}</h3>
+              <p>{body}</p>
+            </article>
+          ))}
+        </div>
+      </Section>
+      <Section label="Agent" title="Agent 负责发现人、场景和话题，但不替用户越界。" tone="deep">
+        <div className="fm-agent-capabilities">
+          {agentCapabilities.map(([title, body]) => (
+            <article key={title} className="fm-card">
+              <span>FitMeet Agent</span>
+              <h3>{title}</h3>
+              <p>{body}</p>
+            </article>
+          ))}
+        </div>
+      </Section>
+      <section className="fm-final-cta">
+        <span>Try FitMeet</span>
+        <h2>先体验一次 Agent，再进入真实发现页。</h2>
+        <p>你可以直接告诉小蚁：今晚想认识什么样的人、在哪里、希望多轻松。</p>
+        <div className="fm-actions">
+          <Link to="/agent" className="fm-button fm-button--primary">
+            体验 Agent
+          </Link>
+          <SiteLink to="/discover" className="fm-button fm-button--ghost">
+            进入发现
+          </SiteLink>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function AgentConversionBand() {
+  return (
+    <section className="fm-agent-band" aria-label="FitMeet Agent 转化入口">
+      <div>
+        <span>FitMeet Agent</span>
+        <h2>让小蚁先帮你发现合适的人、场景和话题。</h2>
+        <p>说一句目标，Agent 会整理边界、推荐理由和下一步。确认之前，不会替你联系任何人。</p>
+      </div>
+      <div className="fm-agent-band__actions">
+        <Link to="/agent" className="fm-button fm-button--primary">
+          体验 Agent
+        </Link>
+        <Link to="/features" className="fm-button fm-button--ghost">
+          看产品功能
+        </Link>
+      </div>
+    </section>
   );
 }
 
@@ -385,8 +576,9 @@ function SafetyCenterPage() {
         body="真实世界社交的安全，不是一个设置页，而是一整套默认机制：隐私、确认、审计、撤回、举报和数据删除。"
         actions={[
           { label: '体验免登录 Demo', to: '/demo', variant: 'primary' },
-          { label: '预约 App Beta', to: '/app#waitlist' },
+      { label: '预约 App Beta', to: '/download#waitlist' },
         ]}
+        visual={<SafetySystemVisual />}
       />
       <Section label="安全机制" title="每个关键动作都要可解释、可确认、可追溯。">
         <div className="fm-safety-grid">
@@ -420,32 +612,155 @@ function SafetyCenterPage() {
   );
 }
 
-function AppPreviewPage() {
+function DownloadPage() {
   return (
     <>
       <PageHero
-        title="FitMeet App Beta"
-        body="移动端承载真实生活场景：5 Tab、附近机会、Agent 发起需求、消息确认、个人隐私与 Life Graph 管理。"
+        title="下载 Social World App。"
+        body="移动端承载真实生活场景：附近机会、Agent 发起需求、消息确认、个人隐私与 Life Graph 管理。"
         actions={[
           { label: '预约 Beta', to: '#waitlist', variant: 'primary' },
-          { label: '先看 Demo', to: '/demo' },
+          { label: '先体验 Agent', to: '/agent' },
         ]}
+        visual={<DownloadSystemVisual />}
       />
-      <Section label="移动端 5 Tab" title="用户每天只需要看懂这五个入口。">
-        <PhonePreview />
-      </Section>
-      <Section label="核心截图" title="把复杂能力压缩成三个真实场景。" tone="deep">
-        <div className="fm-screenshot-grid">
-          {['一句话发起需求', '查看附近机会', '确认后再连接'].map((title) => (
-            <article key={title} className="fm-app-shot">
-              <span>{title}</span>
-              <div />
+      <Section label="Download" title="iOS、Android 和 Web 发现页先放在同一个下载入口。">
+        <div className="fm-download-options">
+          {downloadOptions.map(([title, body]) => (
+            <article key={title} className="fm-store-card">
+              <span>Coming Soon</span>
+              <h3>{title}</h3>
+              <p>{body}</p>
             </article>
           ))}
         </div>
       </Section>
+      <Section label="App Flow" title="用户每天只需要看懂这五个入口。" tone="deep">
+        <PhonePreview />
+      </Section>
+      <Section label="核心截图" title="把复杂能力压缩成三个真实场景。">
+        <AppScenesVisual />
+      </Section>
       <WaitlistSection />
     </>
+  );
+}
+
+function AboutContactPage() {
+  return (
+    <>
+      <PageHero
+        title="我们在做一个更真实的 Social World。"
+        body="FitMeet 希望让社交从刷信息流回到真实生活：从兴趣出发，遇见真正聊得来的人。"
+        actions={[
+          { label: '联系合作', to: '#contact', variant: 'primary' },
+          { label: '下载 App', to: '/download' },
+        ]}
+      />
+      <Section label="Vision" title="不是让用户停留更久，而是让合适的人更自然见面。">
+        <div className="fm-about-values">
+          {[
+            ['真实有趣', '兴趣和场景先于陌生人曝光，让连接从具体生活开始。'],
+            ['安全可信', '公共场所优先、站内先聊、确认后执行是默认原则。'],
+            ['Agent 可控', 'AI 可以帮用户发现和整理，但不替用户越过关键边界。'],
+          ].map(([title, body]) => (
+            <article key={title} className="fm-card">
+              <span>Value</span>
+              <h3>{title}</h3>
+              <p>{body}</p>
+            </article>
+          ))}
+        </div>
+      </Section>
+      <Section id="contact" label="Contact" title="商务合作、媒体沟通和安全反馈。">
+        <div className="fm-contact-grid">
+          {[
+            ['商务合作', CONTACT_EMAIL, '品牌合作、城市活动、线下场景合作。'],
+            ['媒体沟通', CONTACT_EMAIL, '采访、报道、产品资料和品牌素材。'],
+            ['安全反馈', CONTACT_EMAIL, '漏洞、滥用、举报机制和安全建议。'],
+          ].map(([title, email, body]) => (
+            <article key={title} className="fm-contact-card">
+              <span>{title}</span>
+              <a href={`mailto:${email}`}>{email}</a>
+              <p>{body}</p>
+            </article>
+          ))}
+        </div>
+      </Section>
+      <section className="fm-final-cta">
+        <span>Social World</span>
+        <h2>准备好从真实场景开始认识人。</h2>
+        <p>先体验 Agent，或者进入发现页看附近正在发生的兴趣场景。</p>
+        <div className="fm-actions">
+          <Link to="/agent" className="fm-button fm-button--primary">
+            体验 Agent
+          </Link>
+          <SiteLink to="/discover" className="fm-button fm-button--ghost">
+            进入发现
+          </SiteLink>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function SafetySystemVisual() {
+  return (
+    <VisualFigure
+      className="fm-system-visual fm-system-visual--safety"
+      src="/images/fitmeet/generated/social-world-safety-visual-v2-1200.jpg"
+      srcSet="/images/fitmeet/generated/social-world-safety-visual-v2-720.jpg 720w, /images/fitmeet/generated/social-world-safety-visual-v2-1200.jpg 1200w"
+      alt="FitMeet Safety Center 深色玻璃拟态安全控制台视觉"
+      caption="隐私、确认、审计、撤回和举报，是 FitMeet 默认的产品边界。"
+    />
+  );
+}
+
+function DownloadSystemVisual() {
+  return (
+    <VisualFigure
+      className="fm-system-visual fm-system-visual--download"
+      src="/images/fitmeet/generated/social-world-download-visual-v2-1200.jpg"
+      srcSet="/images/fitmeet/generated/social-world-download-visual-v2-720.jpg 720w, /images/fitmeet/generated/social-world-download-visual-v2-1200.jpg 1200w"
+      alt="FitMeet App 深色手机与多端入口产品视觉"
+      caption="下载入口围绕移动端五个真实场景组织，风格与首页主视觉保持一致。"
+    />
+  );
+}
+
+function AppScenesVisual() {
+  return (
+    <VisualFigure
+      className="fm-app-scenes-visual"
+      src="/images/fitmeet/generated/social-world-app-scenes-v2-1200.jpg"
+      srcSet="/images/fitmeet/generated/social-world-app-scenes-v2-720.jpg 720w, /images/fitmeet/generated/social-world-app-scenes-v2-1200.jpg 1200w"
+      alt="FitMeet App 三个核心场景：一句话发起需求、查看附近机会、确认后再连接"
+      caption="一句话发起需求、查看附近机会、确认后再连接，三个核心场景被统一成同一套深色产品界面。"
+    />
+  );
+}
+
+function VisualFigure({
+  alt,
+  caption,
+  className,
+  src,
+  srcSet,
+}: {
+  alt: string;
+  caption: string;
+  className?: string;
+  src: string;
+  srcSet: string;
+}) {
+  return (
+    <figure className={clsx('fm-visual-figure', className)}>
+      <picture>
+        <source srcSet={srcSet} sizes="(max-width: 820px) 92vw, 1180px" />
+        <img src={src} alt={alt} width="1200" height="760" loading="lazy" decoding="async" />
+      </picture>
+      <figcaption>{caption}</figcaption>
+    </figure>
   );
 }
 
@@ -530,52 +845,6 @@ function InfoPageView({ page }: { page: WebsitePage }) {
         </div>
       </Section>
     </>
-  );
-}
-
-function SafetySummary() {
-  return (
-    <Section label="为什么安全" title="所有真实世界动作，都先解释再确认。">
-      <div className="fm-safety-grid">
-        {safetyItems.slice(0, 4).map(([title, body]) => (
-          <article key={title} className="fm-card">
-            <span className="fm-status">Protected</span>
-            <h3>{title}</h3>
-            <p>{body}</p>
-          </article>
-        ))}
-      </div>
-      <div className="fm-section__after">
-        <Link to="/safety" className="fm-button fm-button--ghost">
-          查看 Safety Center
-        </Link>
-      </div>
-    </Section>
-  );
-}
-
-function AppPreviewCompact() {
-  return (
-    <Section label="App 预告" title="移动端会把复杂能力压进 5 个清晰入口。" tone="deep">
-      <PhonePreview />
-      <div className="fm-section__after">
-        <Link to="/app" className="fm-button fm-button--primary">
-          查看 App 预告页
-        </Link>
-      </div>
-    </Section>
-  );
-}
-
-function DemoStrip() {
-  return (
-    <section className="fm-demo-strip">
-      <h2>让新用户 30 秒理解 FitMeet。</h2>
-      <p>不注册、不填资料，先看一次完整闭环：说出需求、Agent 推荐、解释理由、确认后行动。</p>
-      <Link to="/demo" className="fm-button fm-button--primary">
-        打开免登录 Demo
-      </Link>
-    </section>
   );
 }
 
@@ -689,26 +958,54 @@ function WaitlistSection() {
   );
 }
 
-function PageHero({ actions, body, title }: { actions: Action[]; body: string; title: string }) {
+function PageHero({
+  actions,
+  body,
+  title,
+  visual,
+}: {
+  actions: Action[];
+  body: string;
+  title: string;
+  visual?: ReactNode;
+}) {
   return (
-    <section className="fm-page-hero">
-      <h1>{title}</h1>
-      <p>{body}</p>
-      <div className="fm-actions">
-        {actions.map((action) => (
-          <Link
-            key={action.label}
-            to={action.to}
-            className={clsx(
-              'fm-button',
-              action.variant === 'primary' ? 'fm-button--primary' : 'fm-button--ghost',
-            )}
-          >
-            {action.label}
-          </Link>
-        ))}
+    <section className={clsx('fm-page-hero', visual && 'fm-page-hero--visual')}>
+      <div className="fm-page-hero__copy">
+        <h1>{title}</h1>
+        <p>{body}</p>
+        <div className="fm-actions">
+          {actions.map((action) => (
+            <ActionLink
+              key={action.label}
+              to={action.to}
+              className={clsx(
+                'fm-button',
+                action.variant === 'primary' ? 'fm-button--primary' : 'fm-button--ghost',
+              )}
+              label={action.label}
+            />
+          ))}
+        </div>
       </div>
+      {visual ? <div className="fm-page-hero__visual">{visual}</div> : null}
     </section>
+  );
+}
+
+function ActionLink({
+  className,
+  label,
+  to,
+}: {
+  className: string;
+  label: string;
+  to: string;
+}) {
+  return (
+    <SiteLink to={to} className={className}>
+      {label}
+    </SiteLink>
   );
 }
 
@@ -742,13 +1039,18 @@ function Section({
 function WebsiteFooter() {
   return (
     <footer className="fm-footer">
-      <strong>FitMeet</strong>
-      <p>用 Agent 完成真实生活里的连接。关键动作先解释，再确认。</p>
+      <strong>
+        <img src="/favicon-192.png" alt="FitMeet" width="28" height="28" />
+        FitMeet
+      </strong>
+      <p>Social World，从兴趣出发，遇见真正聊得来的人。</p>
       <nav aria-label="FitMeet 页脚导航">
-        <Link to="/demo">30 秒 Demo</Link>
-        <Link to="/app">App Beta</Link>
-        <Link to="/safety">Safety Center</Link>
-        <Link to="/about">关于</Link>
+        <Link to="/features">产品功能</Link>
+        <SiteLink to="/discover">发现</SiteLink>
+        <Link to="/agent">Agent</Link>
+        <Link to="/safety">安全</Link>
+        <Link to="/download">下载 App</Link>
+        <Link to="/about">关于我们</Link>
         <Link to="/privacy">隐私政策</Link>
         <Link to="/terms">用户协议</Link>
         <a href={ICP_URL} target="_blank" rel="noreferrer">

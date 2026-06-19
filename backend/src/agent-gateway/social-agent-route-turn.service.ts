@@ -1,29 +1,22 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 
+import { AgentLoopService } from './agent-loop.service';
 import { AgentTask } from './entities/agent-task.entity';
 import type {
   SocialAgentAsyncRunSnapshot,
   SocialAgentChatReplanRunBody,
   SocialAgentIntentRouteResult,
+  SocialAgentRuntimeResumeMetadata,
   SocialAgentRouteMessageBody,
+  StreamEmit,
 } from './social-agent-chat.types';
-import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { socialAgentAssistantMessageForRoute } from './social-agent-route-response.presenter';
-import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
 import { SocialAgentRouteCandidateConfirmationService } from './social-agent-route-candidate-confirmation.service';
 import { SocialAgentRouteCompletionService } from './social-agent-route-completion.service';
-import { SocialAgentRouteConversationTurnService } from './social-agent-route-conversation-turn.service';
 import { SocialAgentRouteEntranceService } from './social-agent-route-entrance.service';
-import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile-turn.service';
-import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
-import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
 import { SocialAgentRouteDecisionService } from './social-agent-route-decision.service';
-import {
-  applyConversationTurnState,
-  applyProfileTurnState,
-  applySearchTurnState,
-  createSocialAgentRouteTurnState,
-} from './social-agent-route-turn-state';
+import { createSocialAgentRouteTurnState } from './social-agent-route-turn-state';
+import { SocialAgentRouteAgentLoopRunnerService } from './social-agent-route-agent-loop-runner.service';
 
 type QueueInitialSearchForTask = (
   ownerUserId: number,
@@ -36,25 +29,26 @@ type ReplanAndRefresh = (
   taskId: number,
   body: SocialAgentChatReplanRunBody,
 ) => Promise<SocialAgentAsyncRunSnapshot>;
+type CandidateConfirmationResult = Awaited<
+  ReturnType<SocialAgentRouteCandidateConfirmationService['handle']>
+>;
 
 @Injectable()
 export class SocialAgentRouteTurnService {
   constructor(
-    private readonly taskLifecycle: SocialAgentTaskLifecycleService,
-    private readonly routeContext: SocialAgentRouteContextService,
     private readonly candidateConfirmations: SocialAgentRouteCandidateConfirmationService,
     private readonly completions: SocialAgentRouteCompletionService,
-    private readonly conversationTurns: SocialAgentRouteConversationTurnService,
     private readonly entrance: SocialAgentRouteEntranceService,
-    private readonly profileTurns: SocialAgentRouteProfileTurnService,
-    private readonly searchTurns: SocialAgentRouteSearchTurnService,
-    private readonly actionTurns: SocialAgentRouteActionTurnService,
     private readonly routeDecisions: SocialAgentRouteDecisionService,
+    private readonly routeLoopRunner: SocialAgentRouteAgentLoopRunnerService,
+    @Optional() private readonly agentLoop?: AgentLoopService,
   ) {}
 
   async handleMessage(input: {
     ownerUserId: number;
     body: SocialAgentRouteMessageBody;
+    emit?: StreamEmit;
+    signal?: AbortSignal | null;
     replanAndRefresh: ReplanAndRefresh;
     queueInitialSearchForTask: QueueInitialSearchForTask;
   }): Promise<SocialAgentIntentRouteResult> {
@@ -62,12 +56,12 @@ export class SocialAgentRouteTurnService {
     const entered = await this.entrance.enter({
       ownerUserId,
       body,
+      signal: input.signal,
     });
     if (entered.earlyResult) return entered.earlyResult;
 
     const { message, startedAt } = entered;
     let task = entered.task;
-
     const decision = await this.routeDecisions.prepare({
       ownerUserId,
       task,
@@ -75,92 +69,152 @@ export class SocialAgentRouteTurnService {
       message,
     });
     task = decision.task;
-    const { profile, longTermSnapshot, route, brainToolResults } = decision;
+    const { route } = decision;
 
-    let state = createSocialAgentRouteTurnState(
+    const candidateConfirmation = await this.handleCandidateConfirmationInLoop({
+      ownerUserId,
+      task,
+      message,
+      route,
+      startedAt,
+      signal: input.signal,
+    });
+    if (candidateConfirmation.handled) return candidateConfirmation.result;
+
+    const state = createSocialAgentRouteTurnState(
       socialAgentAssistantMessageForRoute({
         route,
-        task,
+        task: candidateConfirmation.task,
         message,
       }),
     );
-
-    const candidateConfirmation = await this.candidateConfirmations.handle({
+    const branchRun = await this.routeLoopRunner.run({
       ownerUserId,
-      task,
+      task: candidateConfirmation.task,
+      state,
       message,
-      route,
-      startedAt,
-    });
-    if (candidateConfirmation.handled) return candidateConfirmation.result;
-    task = candidateConfirmation.task;
-
-    const conversationTurn = await this.conversationTurns.handle({
-      ownerUserId,
-      task,
-      message,
-      route,
-      profile,
-      longTermSnapshot,
-      brainToolResults,
-    });
-    if (conversationTurn.handled) {
-      task = conversationTurn.task;
-      state = applyConversationTurnState(state, conversationTurn);
-    }
-
-    const profileTurn = await this.profileTurns.handle({
-      ownerUserId,
-      task,
-      message,
-      route,
-    });
-    if (profileTurn.handled) {
-      task = profileTurn.task;
-      state = applyProfileTurnState(state, profileTurn);
-      if (!state.profileUpdateProposal) {
-        task = await this.taskLifecycle.assertTaskOwner(task.id, ownerUserId);
-      }
-    }
-
-    const searchTurn = await this.searchTurns.handle({
-      ownerUserId,
-      task,
-      route,
-      message,
+      decision,
+      clientContext: body.clientContext ?? null,
+      emit: input.emit,
+      signal: input.signal,
       replanAndRefresh: input.replanAndRefresh,
       queueInitialSearchForTask: input.queueInitialSearchForTask,
-      buildMemoryContext: (currentTask) =>
-        this.routeContext.buildMemoryContext(currentTask, null),
-    });
-    if (searchTurn.handled) {
-      state = applySearchTurnState(state, searchTurn);
-    }
-
-    if (state.queuedRun) {
-      task = await this.taskLifecycle.assertTaskOwner(task.id, ownerUserId);
-    }
-
-    const actionTurn = await this.actionTurns.handle({
-      ownerUserId,
-      task,
-      route,
-      message,
-      assistantMessage: state.assistantMessage,
     });
 
     return this.completions.complete({
-      task,
+      task: branchRun.task,
       route,
-      assistantMessage: actionTurn.assistantMessage,
-      savedContext: state.savedContext,
-      profileUpdated: state.profileUpdated,
-      queuedRun: state.queuedRun,
-      runMode: state.runMode,
-      pendingApproval: actionTurn.pendingApproval,
-      activityResults: state.activityResults,
-      profileUpdateProposal: state.profileUpdateProposal,
+      assistantMessage: branchRun.actionTurn.assistantMessage,
+      savedContext: branchRun.state.savedContext,
+      profileUpdated: branchRun.state.profileUpdated,
+      queuedRun: branchRun.state.queuedRun,
+      runMode: branchRun.state.runMode,
+      pendingApproval: branchRun.actionTurn.pendingApproval,
+      activityResults: branchRun.state.activityResults,
+      profileUpdateProposal: branchRun.state.profileUpdateProposal,
+      assistantStreamed: branchRun.state.assistantStreamed,
+      agentLoop: branchRun.loop,
+      subagentHandoffs: branchRun.subagentHandoffs,
+      runtime: this.runtimeFromResumeContext(branchRun.resumeContext),
       startedAt,
     });
+  }
+
+  private runtimeFromResumeContext(
+    resumeContext: Awaited<
+      ReturnType<SocialAgentRouteAgentLoopRunnerService['run']>
+    >['resumeContext'],
+  ): SocialAgentRuntimeResumeMetadata | null {
+    if (!resumeContext?.checkpointId) return null;
+    return {
+      checkpointId: resumeContext.checkpointId,
+      checkpointType:
+        resumeContext.stepScope?.mode === 'through_step'
+          ? 'step'
+          : 'checkpoint',
+      canResume: resumeContext.checkpointAction === 'resume',
+      canReplay: true,
+      canFork: true,
+      parentCheckpointId:
+        typeof resumeContext.parentCheckpointId === 'number'
+          ? resumeContext.parentCheckpointId
+          : null,
+      threadId: resumeContext.threadId,
+      idempotencyKey: resumeContext.idempotencyKey,
+      checkpointAction:
+        resumeContext.checkpointAction === 'resume' ||
+        resumeContext.checkpointAction === 'retry' ||
+        resumeContext.checkpointAction === 'replay' ||
+        resumeContext.checkpointAction === 'fork'
+          ? resumeContext.checkpointAction
+          : null,
+      resumeCursor: {
+        threadId: resumeContext.threadId,
+        checkpointId: resumeContext.checkpointId,
+        parentCheckpointId: resumeContext.parentCheckpointId,
+        action:
+          resumeContext.checkpointAction === 'resume' ||
+          resumeContext.checkpointAction === 'retry' ||
+          resumeContext.checkpointAction === 'replay' ||
+          resumeContext.checkpointAction === 'fork'
+            ? resumeContext.checkpointAction
+            : null,
+        stepId: resumeContext.sourceStepId,
+      },
+      sourceStep: resumeContext.sourceStep,
+      stepScope: resumeContext.stepScope,
+      sideEffectPolicy: resumeContext.sideEffectPolicy,
+    };
+  }
+
+  private async handleCandidateConfirmationInLoop(input: {
+    ownerUserId: number;
+    task: AgentTask;
+    message: string;
+    route: Awaited<
+      ReturnType<SocialAgentRouteDecisionService['prepare']>
+    >['route'];
+    startedAt: number;
+    signal?: AbortSignal | null;
+  }): Promise<CandidateConfirmationResult> {
+    let confirmation: CandidateConfirmationResult | null = null;
+    const loopService = this.agentLoop ?? new AgentLoopService();
+    const execution = await loopService.execute({
+      taskId: input.task.id,
+      goal: input.message,
+      agent: 'FitMeet Main Agent',
+      plan: {
+        reason: 'Candidate confirmation checks execute through AgentLoop.',
+        tools: [
+          {
+            agent: 'Social Match Agent',
+            toolName: 'candidate_confirmation_check',
+            input: {
+              taskId: input.task.id,
+              intent: input.route.intent,
+            },
+          },
+        ],
+      },
+      maxToolCalls: 1,
+      maxRetries: 0,
+      signal: input.signal,
+      runner: async () => {
+        confirmation = await this.candidateConfirmations.handle(input);
+        return {
+          handled: confirmation.handled,
+          taskId: confirmation.task.id,
+          action: confirmation.result?.action ?? null,
+        };
+      },
+    });
+    const result = confirmation as CandidateConfirmationResult | null;
+    if (!result) {
+      throw new Error('Candidate confirmation loop completed without result.');
+    }
+    if (result.handled) {
+      result.result.agentLoop = result.result.agentLoop ?? execution.loop;
+    }
+    return result;
   }
 }

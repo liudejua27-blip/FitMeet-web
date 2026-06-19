@@ -27,6 +27,7 @@ import { SocialAgentInboxToolService } from './social-agent-inbox-tool.service';
 import { SocialAgentConversationToolService } from './social-agent-conversation-tool.service';
 import { SocialAgentDecisionToolService } from './social-agent-decision-tool.service';
 import { SocialAgentTaskMemoryService } from './social-agent-task-memory.service';
+import { SocialCodexRuntimePolicyService } from './social-codex-runtime-policy.service';
 
 type MockRepository<T extends object = Record<string, unknown>> = {
   findOne: jest.Mock<Promise<T | null>, [unknown?]>;
@@ -138,6 +139,7 @@ function makeService() {
     generateAiDraft: jest.fn(),
   };
   const socialRequests = {
+    aiDraft: jest.fn(),
     create: jest.fn(),
     createFromNaturalLanguage: jest.fn(),
     syncPublicIntentById: jest.fn(),
@@ -156,6 +158,7 @@ function makeService() {
     sendMessage: jest.fn(),
     createAgentInboxEvent: jest.fn(),
     getAgentInboxMessages: jest.fn(),
+    getTaskConversationMessages: jest.fn(),
     getAgentInboxConversations: jest.fn(),
     getAgentInboxEvents: jest.fn(),
     getAgentInboxEventsForOwner: jest.fn(),
@@ -216,6 +219,8 @@ function makeService() {
     permissions,
     toolRegistry,
     sceneRisk,
+    undefined,
+    new SocialCodexRuntimePolicyService(),
   );
   const confirmationPolicy = new SocialAgentConfirmationPolicyService(
     new ConfirmationGuardService(),
@@ -227,6 +232,9 @@ function makeService() {
   );
   const toolInput = new SocialAgentToolInputParserService();
   const taskMemory = new SocialAgentTaskMemoryService(toolInput);
+  const l5Runtime = {
+    transitionMeetLoop: jest.fn().mockResolvedValue(undefined),
+  };
   const paymentIntentTools = new SocialAgentPaymentIntentToolService(
     paymentIntentRepo as never,
     toolInput,
@@ -254,6 +262,7 @@ function makeService() {
     toolJsonModel,
     toolInput,
     taskMemory,
+    l5Runtime as never,
   );
   const decisionTools = new SocialAgentDecisionToolService(
     permissions,
@@ -261,6 +270,7 @@ function makeService() {
     toolCallFactory,
     toolInput,
     taskMemory,
+    l5Runtime as never,
   );
   const service = new SocialAgentToolExecutorService(
     taskRepo as never,
@@ -293,6 +303,8 @@ function makeService() {
     conversationTools,
     decisionTools,
     taskMemory,
+    undefined,
+    l5Runtime as never,
   );
 
   return {
@@ -325,10 +337,29 @@ function makeService() {
     actionSideEffects,
     toolExecutionPolicy,
     confirmationPolicy,
+    l5Runtime,
   };
 }
 
 describe('SocialAgentToolExecutorService', () => {
+  it('does not run-next a task that does not belong to the authenticated user', async () => {
+    const { service, taskRepo, messages, l5Runtime } = makeService();
+    taskRepo.findOne.mockResolvedValue(null);
+
+    await expect(service.runNext(100, 99)).rejects.toMatchObject({
+      response: expect.objectContaining({
+        statusCode: 404,
+      }),
+    });
+
+    expect(taskRepo.findOne).toHaveBeenCalledWith({
+      where: { id: 100, ownerUserId: 99 },
+    });
+    expect(messages.getAgentInboxMessages).not.toHaveBeenCalled();
+    expect(messages.sendAgentReply).not.toHaveBeenCalled();
+    expect(l5Runtime.transitionMeetLoop).not.toHaveBeenCalled();
+  });
+
   it('updates social profile from extracted agent context', async () => {
     const { service, taskRepo, socialProfiles } = makeService();
     const task = makeTask({ permissionMode: AgentTaskPermissionMode.Assist });
@@ -435,7 +466,7 @@ describe('SocialAgentToolExecutorService', () => {
         agentTaskId: 100,
         inputSummary: expect.stringContaining(SocialAgentToolName.SendMessage),
         outputSummary: expect.stringContaining('succeeded'),
-        riskLevel: 'medium',
+        riskLevel: 'high',
         status: 'succeeded',
         targetUserId: 2,
         payload: expect.objectContaining({
@@ -445,7 +476,9 @@ describe('SocialAgentToolExecutorService', () => {
           toolName: SocialAgentToolName.SendMessage,
           inputSummary: expect.stringContaining('targetUserId'),
           outputSummary: expect.stringContaining('succeeded'),
-          riskLevel: 'medium',
+          riskLevel: 'high',
+          compensationAction: 'send_correction_or_retraction_message',
+          compensationStatus: 'not_needed',
           requiresApproval: true,
           approvalId: 501,
           executed: false,
@@ -471,6 +504,58 @@ describe('SocialAgentToolExecutorService', () => {
     );
     expect(task.plan[0]).toMatchObject({ status: 'succeeded' });
     expect(task.status).toBe(AgentTaskStatus.Succeeded);
+  });
+
+  it('blocks contact exchange content at the Social Codex sandbox before approval creation', async () => {
+    const { service, taskRepo, messages, actionLogs, approvals } =
+      makeService();
+    const task = makeTask({
+      permissionMode: AgentTaskPermissionMode.Assist,
+      plan: [
+        {
+          id: 'step_1',
+          toolName: SocialAgentToolName.SendMessage,
+          action: 'send_message',
+          status: 'planned',
+          input: {
+            targetUserId: 2,
+            text: '我的微信是 fitmeet-test，电话 15253005312',
+          },
+        },
+      ],
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+
+    const result = await service.executeTask(100);
+
+    expect(result).toMatchObject({
+      executedSteps: 1,
+      succeededSteps: 0,
+      failedSteps: 0,
+      blockedSteps: 1,
+    });
+    expect(messages.startConversation).not.toHaveBeenCalled();
+    expect(messages.sendMessage).not.toHaveBeenCalled();
+    expect(approvals.create).not.toHaveBeenCalled();
+    expect(result.toolCalls[0]).toMatchObject({
+      status: 'blocked',
+      error: expect.objectContaining({
+        code: 'SOCIAL_CODEX_SANDBOX_BLOCKED',
+        retryable: false,
+      }),
+    });
+    const auditInput = actionLogs.logAgentAction.mock.calls[0][0];
+    expect(auditInput).toMatchObject({
+      actionStatus: 'failed',
+      status: 'blocked',
+      payload: expect.objectContaining({
+        input: expect.objectContaining({
+          text: '[redacted]',
+        }),
+      }),
+    });
+    expect(JSON.stringify(auditInput)).not.toContain('15253005312');
+    expect(JSON.stringify(auditInput)).not.toContain('fitmeet-test');
   });
 
   it('records required audit fields for every registered tool call', async () => {
@@ -553,6 +638,94 @@ describe('SocialAgentToolExecutorService', () => {
         rawText: 'find running partner',
       }),
     );
+  });
+
+  it('retries retryable low-risk tools and keeps reliability metadata', async () => {
+    const { service, taskRepo, candidatePool } = makeService();
+    const task = makeTask({
+      permissionMode: AgentTaskPermissionMode.Assist,
+      plan: [
+        {
+          id: 'step_1',
+          toolName: SocialAgentToolName.SearchMatches,
+          action: 'search_profiles',
+          status: 'planned',
+          input: { city: 'Qingdao', rawText: 'find running partner' },
+        },
+      ],
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    candidatePool.searchSocial
+      .mockRejectedValueOnce(new Error('temporary network unavailable'))
+      .mockResolvedValueOnce({
+        candidates: [],
+        emptyReason: 'no_real_candidates',
+        message: 'No real candidates found.',
+        debugReasons: [],
+      });
+
+    const result = await service.executeTask(100);
+
+    expect(result.succeededSteps).toBe(1);
+    expect(candidatePool.searchSocial).toHaveBeenCalledTimes(2);
+    expect(result.toolCalls[0].output).toMatchObject({
+      reliability: expect.objectContaining({
+        highRisk: false,
+        retryable: true,
+        maxRetries: 1,
+        compensationAction: null,
+      }),
+    });
+  });
+
+  it('deduplicates repeated tool calls with the same idempotency key', async () => {
+    const { service, taskRepo, candidatePool } = makeService();
+    const task = makeTask({
+      permissionMode: AgentTaskPermissionMode.Assist,
+      plan: [
+        {
+          id: 'step_1',
+          toolName: SocialAgentToolName.SearchMatches,
+          action: 'search_profiles',
+          status: 'planned',
+          input: {
+            city: 'Qingdao',
+            rawText: 'find running partner',
+            idempotencyKey: 'search-qingdao-running-1',
+          },
+        },
+        {
+          id: 'step_2',
+          toolName: SocialAgentToolName.SearchMatches,
+          action: 'search_profiles',
+          status: 'planned',
+          input: {
+            city: 'Qingdao',
+            rawText: 'find running partner',
+            idempotencyKey: 'search-qingdao-running-1',
+          },
+        },
+      ],
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    candidatePool.searchSocial.mockResolvedValue({
+      candidates: [],
+      emptyReason: 'no_real_candidates',
+      message: 'No real candidates found.',
+      debugReasons: [],
+    });
+
+    const result = await service.executeTask(100);
+
+    expect(result.succeededSteps).toBe(2);
+    expect(candidatePool.searchSocial).toHaveBeenCalledTimes(1);
+    expect(result.toolCalls[0].id).toBe(result.toolCalls[1].id);
+    expect(result.toolCalls[0].input).toMatchObject({
+      idempotencyKey: 'search-qingdao-running-1',
+      metadata: expect.objectContaining({
+        idempotencyKey: 'search-qingdao-running-1',
+      }),
+    });
   });
 
   it('executes first-stage read and search runtime tools', async () => {
@@ -756,13 +929,33 @@ describe('SocialAgentToolExecutorService', () => {
 
     expect(result.succeededSteps).toBe(7);
     expect(actionLogs.logAgentAction).toHaveBeenCalledTimes(7);
-    expect(socialRequests.syncPublicIntentById).toHaveBeenCalledWith(21, 1);
+    expect(result.toolCalls[0]).toMatchObject({
+      toolName: SocialAgentToolName.PublishSocialRequest,
+      output: {
+        status: 'pending_approval',
+        pendingApproval: true,
+        approvalId: 501,
+        approval: expect.objectContaining({
+          type: 'post_publish',
+          riskLevel: 'high',
+        }),
+      },
+    });
+    expect(socialRequests.create).not.toHaveBeenCalled();
+    expect(socialRequests.syncPublicIntentById).not.toHaveBeenCalled();
     expect(messages.startConversation).not.toHaveBeenCalled();
     expect(messages.sendMessage).not.toHaveBeenCalled();
     expect(friends.ensureFollowing).not.toHaveBeenCalled();
     expect(activities.create).not.toHaveBeenCalled();
     expect(activities.join).not.toHaveBeenCalled();
-    expect(approvals.create).toHaveBeenCalledTimes(4);
+    expect(approvals.create).toHaveBeenCalledTimes(5);
+    expect(approvals.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillName: SocialAgentToolName.PublishSocialRequest,
+        actionType: 'create_social_request',
+        riskLevel: 'high',
+      }),
+    );
     expect(approvals.create).toHaveBeenCalledWith(
       expect.objectContaining({
         skillName: SocialAgentToolName.SendMessageToCandidate,
@@ -835,7 +1028,7 @@ describe('SocialAgentToolExecutorService', () => {
   });
 
   it('runs the waiting reply loop and sends the decided reply', async () => {
-    const { service, taskRepo, messages, approvals } = makeService();
+    const { service, taskRepo, messages, approvals, l5Runtime } = makeService();
     const task = makeTask({
       status: AgentTaskStatus.WaitingReply,
       memory: {
@@ -879,7 +1072,37 @@ describe('SocialAgentToolExecutorService', () => {
       succeededSteps: 4,
       handledReply: true,
       status: AgentTaskStatus.WaitingReply,
+      cards: expect.arrayContaining([
+        expect.objectContaining({
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'meet_loop.timeline',
+          data: expect.objectContaining({
+            schemaName: 'MeetLoopTimelineCard',
+            loopStage: 'reply_received',
+            connectionState: 'reply_received',
+            counterpartIntent: 'accepted',
+            replyIntentLabel: '对方愿意继续',
+            nextSafeStep: expect.stringContaining('回复对方的问题'),
+            sideEffectPolicy: 'no_followup_without_user_confirmation',
+          }),
+        }),
+        expect.objectContaining({
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'life_graph.diff',
+          data: expect.objectContaining({
+            schemaName: 'LifeGraphDiffCard',
+            source: 'counterpart_reply',
+            loopStage: 'reply_received',
+          }),
+        }),
+      ]),
     });
+    const runNextActions = result.cards?.[0]?.actions ?? [];
+    expect(runNextActions).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ schemaAction: 'activity.confirm_create' }),
+      ]),
+    );
     expect(messages.getAgentInboxMessages).toHaveBeenCalledWith('conv_1', 7, {
       limit: 50,
     });
@@ -899,12 +1122,57 @@ describe('SocialAgentToolExecutorService', () => {
         eventType: 'social_agent.next_action.decided',
       }),
     );
+    const nextActionInboxEvent = messages.createAgentInboxEvent.mock.calls
+      .map((call) => call[0] as Record<string, unknown>)
+      .find((event) => event.eventType === 'social_agent.next_action.decided');
+    expect(nextActionInboxEvent).toMatchObject({
+      conversationId: 'conv_1',
+      messageId: 'msg_2',
+      fromUserId: 2,
+      metadata: expect.objectContaining({
+        lifeGraphWritebackProposal: expect.objectContaining({
+          schemaVersion: 'fitmeet.life_graph.writeback.v1',
+          source: 'counterpart_reply',
+          status: 'pending_user_confirmation',
+          candidateUserId: 2,
+          conversationId: 'conv_1',
+          messageId: 'msg_2',
+          privacyBoundary: expect.stringContaining('不保存对方私聊原文'),
+        }),
+      }),
+    });
+    const proposal = (nextActionInboxEvent?.metadata as
+      | Record<string, unknown>
+      | undefined)?.lifeGraphWritebackProposal;
+    expect(JSON.stringify(proposal)).not.toContain(
+      'Sure, let us confirm the route and meeting point first.',
+    );
     expect(messages.sendAgentReply).not.toHaveBeenCalled();
     expect(approvals.create).toHaveBeenCalledWith(
       expect.objectContaining({
         skillName: SocialAgentToolName.ReplyMessage,
         actionType: 'send_message',
         agentTaskId: 100,
+      }),
+    );
+    expect(l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 1,
+        agentTaskId: 100,
+        candidateUserId: 2,
+        stage: 'reply_received',
+        waitingFor: 'action_confirmation',
+        state: expect.objectContaining({
+          conversationId: 'conv_1',
+          targetUserId: 2,
+          actionToolName: SocialAgentToolName.ReplyMessage,
+          actionStatus: 'succeeded',
+          outputSummary: expect.objectContaining({
+            pendingApproval: true,
+            status: 'pending_approval',
+          }),
+          loopStage: 'reply_received',
+        }),
       }),
     );
     expect(task.memory).toMatchObject({
@@ -929,9 +1197,45 @@ describe('SocialAgentToolExecutorService', () => {
           }),
         ],
         replySummary: expect.any(Object),
-        nextActionDecision: expect.any(Object),
+        nextActionDecision: expect.objectContaining({
+          lifeGraphWritebackProposal: expect.objectContaining({
+            status: 'pending_user_confirmation',
+            candidateUserId: 2,
+          }),
+        }),
       },
     });
+  });
+
+  it('marks old waiting-reply tasks without readable conversation as non-retryable failed', async () => {
+    const { service, taskRepo, messages } = makeService();
+    const task = makeTask({
+      agentConnectionId: null,
+      status: AgentTaskStatus.WaitingReply,
+      memory: { socialLoop: {} },
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    messages.getTaskConversationMessages.mockResolvedValue([]);
+
+    const result = await service.runNext(100, 1);
+
+    expect(messages.getAgentInboxMessages).not.toHaveBeenCalled();
+    expect(messages.getTaskConversationMessages).toHaveBeenCalledWith(100, {
+      conversationId: undefined,
+      limit: 50,
+    });
+    expect(result).toMatchObject({
+      status: AgentTaskStatus.Failed,
+      handledReply: false,
+      executedSteps: 1,
+      failedSteps: 0,
+    });
+    expect(task.statusReason).toBe('task_conversation_unbound');
+    expect(task.error).toMatchObject({
+      code: 'task_conversation_unbound',
+      retryable: false,
+    });
+    expect(task.completedAt).toBeInstanceOf(Date);
   });
 
   it('falls back when DeepSeek reply-loop JSON calls time out', async () => {
@@ -1123,8 +1427,9 @@ describe('SocialAgentToolExecutorService', () => {
     );
   });
 
-  it('sends user-confirmed candidate messages as the user when no agent connection is bound', async () => {
-    const { service, taskRepo, messages, actionLogs } = makeService();
+  it('turns chat-confirmed candidate messages into pending approvals when no agent connection is bound', async () => {
+    const { service, taskRepo, messages, actionLogs, approvals } =
+      makeService();
     const task = makeTask({
       agentConnectionId: null,
       permissionMode: AgentTaskPermissionMode.Confirm,
@@ -1150,29 +1455,24 @@ describe('SocialAgentToolExecutorService', () => {
     );
 
     expect(call.status).toBe('succeeded');
-    expect(messages.startConversation).toHaveBeenCalledWith(
-      1,
-      2,
-      expect.objectContaining({ agentConnectionId: null, ownerUserId: 1 }),
-    );
-    expect(messages.sendMessage).toHaveBeenCalledWith(
-      'conv_user',
-      1,
-      'Hi, want to grab coffee?',
+    expect(call.output).toMatchObject({
+      status: 'pending_approval',
+      pendingApproval: true,
+      approvalId: 501,
+    });
+    expect(messages.startConversation).not.toHaveBeenCalled();
+    expect(messages.sendMessage).not.toHaveBeenCalled();
+    expect(approvals.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        senderType: 'user',
-        senderAgentId: null,
-        agentConnectionId: null,
-        ownerUserId: 1,
-        actorUserId: 1,
-        source: 'user',
+        skillName: SocialAgentToolName.SendMessageToCandidate,
+        riskLevel: 'high',
       }),
     );
     expect(actionLogs.logAgentAction).toHaveBeenCalledWith(
       expect.objectContaining({
         agentId: null,
         actionType: 'send_message',
-        actionStatus: 'executed',
+        actionStatus: 'pending_approval',
         status: 'succeeded',
       }),
     );
@@ -1259,19 +1559,13 @@ describe('SocialAgentToolExecutorService', () => {
 
     expect(call.status).toBe('succeeded');
     expect(call.output).toMatchObject({
-      success: true,
-      taskId: 100,
-      targetUserId: 2,
-      candidateUserId: 2,
-      messageId: 'msg_user',
-      conversationId: 'conv_user',
-      status: 'sent',
-      messageAction: {
-        status: 'sent',
-        messageId: 'msg_user',
-        conversationId: 'conv_user',
-      },
+      success: false,
+      status: 'pending_approval',
+      pendingApproval: true,
+      approvalId: 501,
     });
+    expect(messages.startConversation).not.toHaveBeenCalled();
+    expect(messages.sendMessage).not.toHaveBeenCalled();
     expect(actionLogs.logAgentAction).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'succeeded' }),
     );
@@ -1614,8 +1908,8 @@ describe('SocialAgentToolExecutorService', () => {
     expect(friends.ensureFollowing).not.toHaveBeenCalled();
   });
 
-  it('rejects add_friend without an approved confirmation', async () => {
-    const { service, taskRepo, friends, messages } = makeService();
+  it('creates a pending approval for add_friend without an approved confirmation', async () => {
+    const { service, taskRepo, friends, messages, approvals } = makeService();
     taskRepo.findOne.mockResolvedValue(
       makeTask({
         agentConnectionId: null,
@@ -1630,17 +1924,24 @@ describe('SocialAgentToolExecutorService', () => {
       1,
     );
 
-    expect(call.status).toBe('blocked');
-    expect(call.error).toMatchObject({
-      code: 'APPROVAL_REQUIRED',
-      statusCode: 403,
+    expect(call.status).toBe('succeeded');
+    expect(call.output).toMatchObject({
+      status: 'pending_approval',
+      pendingApproval: true,
+      approvalId: 501,
     });
+    expect(approvals.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillName: SocialAgentToolName.AddFriend,
+        riskLevel: 'high',
+      }),
+    );
     expect(friends.ensureFollowing).not.toHaveBeenCalled();
     expect(messages.startConversation).not.toHaveBeenCalled();
   });
 
-  it('rejects create_activity without an approved confirmation', async () => {
-    const { service, taskRepo, activities } = makeService();
+  it('creates a pending approval for create_activity without an approved confirmation', async () => {
+    const { service, taskRepo, activities, approvals } = makeService();
     taskRepo.findOne.mockResolvedValue(
       makeTask({
         agentConnectionId: null,
@@ -1660,11 +1961,18 @@ describe('SocialAgentToolExecutorService', () => {
       1,
     );
 
-    expect(call.status).toBe('blocked');
-    expect(call.error).toMatchObject({
-      code: 'APPROVAL_REQUIRED',
-      statusCode: 403,
+    expect(call.status).toBe('succeeded');
+    expect(call.output).toMatchObject({
+      status: 'pending_approval',
+      pendingApproval: true,
+      approvalId: 501,
     });
+    expect(approvals.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillName: SocialAgentToolName.CreateActivity,
+        riskLevel: 'high',
+      }),
+    );
     expect(activities.create).not.toHaveBeenCalled();
   });
 
@@ -1716,8 +2024,8 @@ describe('SocialAgentToolExecutorService', () => {
     );
   });
 
-  it('rejects share_location without an approved confirmation', async () => {
-    const { service, taskRepo } = makeService();
+  it('creates a pending approval for share_location without an approved confirmation', async () => {
+    const { service, taskRepo, approvals } = makeService();
     taskRepo.findOne.mockResolvedValue(
       makeTask({
         agentConnectionId: null,
@@ -1736,12 +2044,18 @@ describe('SocialAgentToolExecutorService', () => {
       1,
     );
 
-    expect(call.status).toBe('blocked');
-    expect(call.error).toMatchObject({
-      code: 'APPROVAL_REQUIRED',
-      statusCode: 403,
+    expect(call.status).toBe('succeeded');
+    expect(call.output).toMatchObject({
+      status: 'pending_approval',
+      pendingApproval: true,
+      approvalId: 501,
     });
-    expect(call.output).toBeNull();
+    expect(approvals.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillName: SocialAgentToolName.ShareLocation,
+        riskLevel: 'high',
+      }),
+    );
   });
 
   it('drafts an opener as a confirmation-ready Meet Loop step only', async () => {
@@ -1779,8 +2093,9 @@ describe('SocialAgentToolExecutorService', () => {
     expect(activities.create).not.toHaveBeenCalled();
   });
 
-  it('fails real social actions explicitly when the task is not bound to an agent connection', async () => {
-    const { service, taskRepo, messages, actionLogs } = makeService();
+  it('creates approval instead of executing real social actions when the task is not bound to an agent connection', async () => {
+    const { service, taskRepo, messages, actionLogs, approvals } =
+      makeService();
     const task = makeTask({
       agentConnectionId: null,
       permissionMode: AgentTaskPermissionMode.Assist,
@@ -1798,23 +2113,24 @@ describe('SocialAgentToolExecutorService', () => {
 
     const result = await service.executeTask(100);
 
-    expect(result).toMatchObject({ failedSteps: 1, blockedSteps: 0 });
+    expect(result).toMatchObject({ succeededSteps: 1, blockedSteps: 0 });
     expect(messages.startConversation).not.toHaveBeenCalled();
+    expect(approvals.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillName: SocialAgentToolName.SendMessage,
+        riskLevel: 'high',
+      }),
+    );
     expect(actionLogs.logAgentAction).toHaveBeenCalledWith(
       expect.objectContaining({
         ownerUserId: 1,
         agentId: null,
         actionType: 'send_message',
-        actionStatus: 'failed',
-        reason: expect.stringContaining('agentConnectionId'),
+        actionStatus: 'pending_approval',
       }),
     );
     expect(task.plan[0]).toMatchObject({
-      status: 'failed',
-      error: expect.objectContaining({
-        code: 'TOOL_EXECUTION_FAILED',
-        message: expect.stringContaining('agentConnectionId'),
-      }),
+      status: 'succeeded',
     });
   });
 
@@ -1994,6 +2310,55 @@ describe('SocialAgentToolExecutorService', () => {
     );
   });
 
+  it('keeps high-risk tools approval-gated and disables automatic retries even when globally enabled', async () => {
+    const previousRetries = process.env.FITMEET_AGENT_TOOL_RETRIES;
+    process.env.FITMEET_AGENT_TOOL_RETRIES = '3';
+    try {
+      const { service, taskRepo, paymentIntentRepo, approvals } = makeService();
+      const task = makeTask({
+        permissionMode: AgentTaskPermissionMode.LimitedAuto,
+        plan: [
+          {
+            id: 'step_1',
+            toolName: SocialAgentToolName.Payment,
+            action: 'payment',
+            status: 'planned',
+            input: {
+              amount: 88.5,
+              currency: 'cny',
+              payeeUserId: 2,
+              description: 'venue deposit',
+            },
+          },
+        ],
+      });
+      taskRepo.findOne.mockResolvedValue(task);
+
+      const result = await service.executeTask(100);
+
+      expect(result.succeededSteps).toBe(1);
+      expect(paymentIntentRepo.create).not.toHaveBeenCalled();
+      expect(paymentIntentRepo.save).not.toHaveBeenCalled();
+      expect(approvals.create).toHaveBeenCalledTimes(1);
+      expect(result.toolCalls[0].output).toMatchObject({
+        pendingApproval: true,
+        reliability: expect.objectContaining({
+          highRisk: true,
+          retryable: false,
+          maxRetries: 0,
+          compensationAction:
+            'cancel_payment_intent_or_refund_via_manual_review',
+        }),
+      });
+    } finally {
+      if (previousRetries === undefined) {
+        delete process.env.FITMEET_AGENT_TOOL_RETRIES;
+      } else {
+        process.env.FITMEET_AGENT_TOOL_RETRIES = previousRetries;
+      }
+    }
+  });
+
   it('blocks high-risk tools after their daily per-task limit', async () => {
     const { service, taskRepo, paymentIntentRepo, actionLogs } = makeService();
     const existingCalls = [0, 1, 2].map((index) => ({
@@ -2104,6 +2469,53 @@ describe('SocialAgentToolExecutorService', () => {
     );
   });
 
+  it('does not gate AI social request draft generation behind approval', async () => {
+    const { service, taskRepo, socialRequests, approvals } = makeService();
+    const task = makeTask({
+      permissionMode: AgentTaskPermissionMode.Confirm,
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    socialRequests.aiDraft.mockResolvedValue({
+      ok: true,
+      draft: {
+        type: 'custom',
+        rawText: '今晚想找人一起喝咖啡，不想太尴尬',
+        title: '今晚轻松咖啡局',
+        description: '想找一位聊得来的同城朋友喝咖啡。',
+        city: '上海',
+        activityType: 'coffee',
+        interestTags: ['咖啡', '轻聊天'],
+      },
+      card: { title: '今晚轻松咖啡局' },
+      profileUsed: { completeness: 0 },
+    });
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.CreateSocialRequest,
+      {
+        mode: 'ai_draft',
+        rawText: '今晚想找人一起喝咖啡，不想太尴尬',
+        goal: '今晚想找人一起喝咖啡，不想太尴尬',
+      },
+      1,
+    );
+
+    expect(call.status).toBe('succeeded');
+    expect(call.output).toMatchObject({
+      draft: expect.objectContaining({ title: '今晚轻松咖啡局' }),
+    });
+    expect(socialRequests.aiDraft).toHaveBeenCalledWith(
+      1,
+      '今晚想找人一起喝咖啡，不想太尴尬',
+      expect.objectContaining({
+        agentTaskId: 100,
+        source: 'social_agent_tool_executor',
+      }),
+    );
+    expect(approvals.create).not.toHaveBeenCalled();
+  });
+
   it('does not fail a completed social action when its audit log is unavailable', async () => {
     const { service, taskRepo, connectionRepo, actionLogs, socialRequests } =
       makeService();
@@ -2122,7 +2534,7 @@ describe('SocialAgentToolExecutorService', () => {
     taskRepo.findOne.mockResolvedValue(task);
     connectionRepo.findOne.mockResolvedValue({ id: 7, userId: 1 });
     socialRequests.createFromNaturalLanguage.mockResolvedValue({ id: 55 });
-    actionLogs.logAgentAction.mockResolvedValue(null);
+    actionLogs.logAgentAction.mockResolvedValue({ id: 1 });
 
     const result = await service.executeTask(100);
 

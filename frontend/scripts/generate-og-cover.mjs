@@ -14,16 +14,17 @@
  * 本脚本通过写入一个最小有效 PNG 文件作为应急方案（纯色品牌背景）
  */
 
-import { createCanvas } from 'node:canvas'; // 仅在安装了 canvas 包时可用
-import { writeFileSync, existsSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const outPath = path.join(__dirname, '..', 'public', 'og-cover.png');
+const iconPath = path.join(__dirname, '..', 'public', 'favicon-512.png');
 
 // 尝试用 canvas 包生成（需要 pnpm add canvas -D）
 try {
+  const { createCanvas, loadImage } = await import('canvas');
   const canvas = createCanvas(1200, 630);
   const ctx = canvas.getContext('2d');
 
@@ -34,16 +35,13 @@ try {
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 1200, 630);
 
-  // Logo 框
-  ctx.fillStyle = '#a3e635';
-  roundRect(ctx, 80, 180, 80, 80, 18);
-  ctx.fill();
-
-  // F 字母
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 52px Arial Black';
-  ctx.textAlign = 'center';
-  ctx.fillText('F', 120, 248);
+  // Logo
+  const icon = await loadImage(iconPath);
+  ctx.save();
+  roundRect(ctx, 80, 190, 80, 80, 18);
+  ctx.clip();
+  ctx.drawImage(icon, 80, 190, 80, 80);
+  ctx.restore();
 
   // 品牌名
   ctx.textAlign = 'left';

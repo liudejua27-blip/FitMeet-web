@@ -19,6 +19,7 @@ import {
   type LifeGraphProposal,
   type LifeGraphProposedField,
   type LifeGraphResponse,
+  type LifeGraphSecurityRequest,
 } from '../api/lifeGraphApi';
 import { WebsiteLayout } from '../components/website/WebsitePlatform';
 
@@ -190,6 +191,9 @@ export function LifeGraphPage() {
   const [actionMessage, setActionMessage] = useState('');
   const [error, setError] = useState('');
   const [busyKey, setBusyKey] = useState('');
+  const [securityRequest, setSecurityRequest] =
+    useState<LifeGraphSecurityRequest | null>(null);
+  const [securityCode, setSecurityCode] = useState('');
 
   const loadLifeGraph = useCallback(async () => {
     setLoading(true);
@@ -376,6 +380,55 @@ export function LifeGraphPage() {
     auditRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
+  const createSecurityRequest = async (type: 'export' | 'delete') => {
+    setBusyKey(`security-${type}`);
+    setActionMessage('');
+    try {
+      const request =
+        type === 'export'
+          ? await lifeGraphApi.createExportRequest()
+          : await lifeGraphApi.createDeleteRequest();
+      setSecurityRequest(request);
+      setSecurityCode(request.devConfirmationCode ?? '');
+      setActionMessage(
+        type === 'export'
+          ? '已创建导出安全请求，请等待冷却期结束后输入验证码确认。'
+          : '已创建删除安全请求。删除会清空记忆，请等待冷却期结束后再确认。',
+      );
+    } catch (securityError) {
+      setActionMessage(friendlyError(securityError));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const confirmSecurityRequest = async () => {
+    if (!securityRequest) return;
+    setBusyKey(`security-confirm-${securityRequest.type}`);
+    setActionMessage('');
+    try {
+      if (securityRequest.type === 'export') {
+        await lifeGraphApi.confirmExportRequest(securityRequest.id, {
+          confirmationCode: securityCode,
+        });
+        setActionMessage('导出已完成，安全请求已写入审计。');
+      } else {
+        await lifeGraphApi.confirmDeleteRequest(securityRequest.id, {
+          confirmationCode: securityCode,
+          includeAuditLogs: true,
+        });
+        setActionMessage('Life Graph 已删除，相关记忆不会继续用于匹配。');
+        await loadLifeGraph();
+      }
+      setSecurityRequest(null);
+      setSecurityCode('');
+    } catch (securityError) {
+      setActionMessage(friendlyError(securityError));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
   if (loading) {
     return <LifeGraphSkeleton />;
   }
@@ -449,6 +502,15 @@ export function LifeGraphPage() {
           onManualEdit={(field) => beginEdit(field.category, field.fieldKey, field.label)}
         />
 
+        <LifeGraphSecurityPanel
+          busyKey={busyKey}
+          code={securityCode}
+          request={securityRequest}
+          onCodeChange={setSecurityCode}
+          onConfirm={() => void confirmSecurityRequest()}
+          onCreate={(type) => void createSecurityRequest(type)}
+        />
+
         <div className="grid gap-5 xl:grid-cols-2">
           {sectionConfigs.map((section) => (
             <LifeGraphSectionCard
@@ -481,6 +543,98 @@ export function LifeGraphPage() {
       </div>
       </main>
     </WebsiteLayout>
+  );
+}
+
+function LifeGraphSecurityPanel({
+  busyKey,
+  code,
+  request,
+  onCodeChange,
+  onConfirm,
+  onCreate,
+}: {
+  busyKey: string;
+  code: string;
+  request: LifeGraphSecurityRequest | null;
+  onCodeChange: (value: string) => void;
+  onConfirm: () => void;
+  onCreate: (type: 'export' | 'delete') => void;
+}) {
+  const cooldownActive = request?.status === 'pending_cooldown';
+
+  return (
+    <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-panel">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-humanBright">
+            Safety Request
+          </p>
+          <h2 className="mt-2 text-2xl font-black text-cream">
+            导出和删除需要二次确认
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-textMuted">
+            Life Graph 属于高敏感记忆。导出默认冷却 10 分钟，删除默认冷却 24 小时，确认和执行都会记录安全通知状态。
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="rounded-md border border-white/12 bg-black/20 px-4 py-2 text-sm font-black text-cream disabled:opacity-50"
+            disabled={Boolean(busyKey)}
+            onClick={() => onCreate('export')}
+          >
+            创建导出请求
+          </button>
+          <button
+            className="rounded-md border border-red-400/30 bg-red-500/10 px-4 py-2 text-sm font-black text-red-100 disabled:opacity-50"
+            disabled={Boolean(busyKey)}
+            onClick={() => onCreate('delete')}
+          >
+            创建删除请求
+          </button>
+        </div>
+      </div>
+
+      {request ? (
+        <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+          <div className="grid gap-3 text-sm text-textMuted md:grid-cols-4">
+            <SecurityMeta label="类型" value={request.type} />
+            <SecurityMeta label="状态" value={request.status} />
+            <SecurityMeta label="可确认时间" value={formatDateTime(request.availableAt)} />
+            <SecurityMeta label="通知" value={request.notificationStatus} />
+          </div>
+          <div className="mt-4 flex flex-col gap-3 md:flex-row">
+            <input
+              className="min-w-0 flex-1 rounded-md border border-white/12 bg-white/[0.05] px-3 py-3 text-sm font-bold text-cream outline-none"
+              onChange={(event) => onCodeChange(event.target.value)}
+              placeholder="输入安全验证码"
+              value={code}
+            />
+            <button
+              className="rounded-md bg-human px-4 py-3 text-sm font-black text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={cooldownActive || !code || Boolean(busyKey)}
+              onClick={onConfirm}
+            >
+              {cooldownActive ? '冷却期未结束' : '确认执行'}
+            </button>
+          </div>
+          {request.devConfirmationCode ? (
+            <p className="mt-3 text-xs font-bold text-textSofter">
+              测试环境验证码：{request.devConfirmationCode}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function SecurityMeta({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.035] px-3 py-2">
+      <span className="block text-xs font-bold text-textSofter">{label}</span>
+      <span className="mt-1 block break-words font-black text-cream">{value}</span>
+    </div>
   );
 }
 

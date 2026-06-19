@@ -1,4 +1,6 @@
 import { AgentTaskStatus } from './entities/agent-task.entity';
+import type { AgentLoopRun } from './agent-loop.types';
+import type { FitMeetAlphaCard } from './fitmeet-alpha-agent.types';
 
 export enum SocialAgentToolName {
   GetMyProfile = 'get_my_profile',
@@ -69,4 +71,6 @@ export interface SocialAgentRunNextResult extends SocialAgentTaskExecutionResult
   status: AgentTaskStatus;
   handledReply: boolean;
   decision: Record<string, unknown> | null;
+  cards?: FitMeetAlphaCard[];
+  agentLoop?: AgentLoopRun;
 }

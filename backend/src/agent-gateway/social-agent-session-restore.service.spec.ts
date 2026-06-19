@@ -6,6 +6,10 @@ import {
 } from './entities/agent-approval-request.entity';
 import type { AgentApprovalRequest } from './entities/agent-approval-request.entity';
 import {
+  AgentRunCheckpointStatus,
+  AgentRunCheckpointType,
+} from './entities/agent-run-checkpoint.entity';
+import {
   AgentTask,
   AgentTaskEvent,
   AgentTaskEventActor,
@@ -46,7 +50,7 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
     updatedAt: new Date('2026-06-05T00:04:00.000Z'),
     createdAt: new Date('2026-06-05T00:00:00.000Z'),
     ...overrides,
-  } as AgentTask;
+  } as unknown as AgentTask;
   task.result = withSocialAgentStoredRun(task.result, {
     taskId: task.id,
     runId: 'sar_restore_1',
@@ -68,7 +72,7 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
       visibleSteps: [{ id: 'done', label: '完成', status: 'done' }],
       assistantMessage: '我找到了一个合适候选人',
       socialRequestDraft: null,
-      candidates: [{ userId: 22, nickname: 'Alex' }],
+      candidates: [{ userId: 22, nickname: 'Alex' } as never],
       approvalRequiredActions: [],
       events: [],
     },
@@ -85,13 +89,33 @@ function makeEvent(): AgentTaskEvent {
     actor: AgentTaskEventActor.Agent,
     summary: '已返回候选卡片',
     payload: {
-      candidates: [{ userId: 22, nickname: 'Alex' }],
+      candidates: [{ userId: 22, nickname: 'Alex' } as never],
       message: '我找到了一个合适候选人',
     },
     stepId: null,
     toolCallId: null,
     createdAt: new Date('2026-06-05T00:03:00.000Z'),
-  } as AgentTaskEvent;
+  } as unknown as AgentTaskEvent;
+}
+
+function makeApprovalDecisionEvent(): AgentTaskEvent {
+  return {
+    id: 502,
+    taskId: 101,
+    ownerUserId: 7,
+    eventType: AgentTaskEventType.ConfirmationReceived,
+    actor: AgentTaskEventActor.User,
+    summary: '用户已批准：发送第一条消息',
+    payload: {
+      approvalId: 301,
+      actionType: 'send_message',
+      status: 'approved',
+      decision: 'approved',
+    },
+    stepId: null,
+    toolCallId: null,
+    createdAt: new Date('2026-06-05T00:05:00.000Z'),
+  } as unknown as AgentTaskEvent;
 }
 
 function makeApproval(): AgentApprovalRequest {
@@ -103,12 +127,28 @@ function makeApproval(): AgentApprovalRequest {
     riskLevel: ApprovalRiskLevel.Low,
     payload: { targetUserId: 22 },
     expiresAt: new Date('2026-06-05T01:00:00.000Z'),
-  } as AgentApprovalRequest;
+  } as unknown as AgentApprovalRequest;
+}
+
+function makeCheckpoint() {
+  return {
+    id: 909,
+    ownerUserId: 7,
+    agentTaskId: 101,
+    parentCheckpointId: null,
+    type: AgentRunCheckpointType.Interrupt,
+    status: AgentRunCheckpointStatus.Active,
+    resumePrompt: '继续刚才保存的 Agent 步骤。',
+    steps: [{ id: 'approval', label: '等待确认', status: 'pending' }],
+  };
 }
 
 function makeHarness(
   options: {
+    approvals?: AgentApprovalRequest[];
     approvalsReject?: boolean;
+    checkpoint?: ReturnType<typeof makeCheckpoint> | null;
+    events?: AgentTaskEvent[];
     task?: AgentTask | null;
   } = {},
 ) {
@@ -117,7 +157,9 @@ function makeHarness(
     findOne: jest.fn().mockResolvedValue(task),
   };
   const eventRepo = {
-    find: jest.fn().mockResolvedValue(task ? [makeEvent()] : []),
+    find: jest
+      .fn()
+      .mockResolvedValue(task ? (options.events ?? [makeEvent()]) : []),
   };
   const approvals = {
     getPendingForTask: jest
@@ -125,8 +167,11 @@ function makeHarness(
       .mockImplementation(() =>
         options.approvalsReject
           ? Promise.reject(new Error('approval db offline'))
-          : Promise.resolve([makeApproval()]),
+          : Promise.resolve(options.approvals ?? [makeApproval()]),
       ),
+  };
+  const checkpoints = {
+    latestForTask: jest.fn().mockResolvedValue(options.checkpoint ?? null),
   };
   const assembler = new AgentSessionAssemblerService();
   const runState = new SocialAgentRunStateService(
@@ -140,8 +185,9 @@ function makeHarness(
     approvals as unknown as AgentApprovalService,
     runState,
     assembler,
+    checkpoints as never,
   );
-  return { approvals, eventRepo, service, task, taskRepo };
+  return { approvals, checkpoints, eventRepo, service, task, taskRepo };
 }
 
 describe('SocialAgentSessionRestoreService', () => {
@@ -208,7 +254,9 @@ describe('SocialAgentSessionRestoreService', () => {
   });
 
   it('builds timeline messages and preserves candidate action state', async () => {
-    const { service } = makeHarness();
+    const { service } = makeHarness({
+      events: [makeEvent(), makeApprovalDecisionEvent()],
+    });
 
     const timeline = await service.buildTaskTimeline({
       ownerUserId: 7,
@@ -231,6 +279,11 @@ describe('SocialAgentSessionRestoreService', () => {
           kind: 'candidates',
           text: '我找到了一个合适候选人',
         }),
+        expect.objectContaining({
+          role: 'system',
+          kind: 'status',
+          text: '用户已批准：发送第一条消息',
+        }),
       ]),
     );
   });
@@ -246,6 +299,75 @@ describe('SocialAgentSessionRestoreService', () => {
 
     expect(snapshot.pendingApprovals).toEqual([]);
     expect(snapshot.hasSession).toBe(true);
+  });
+
+  it('adds the latest checkpoint runtime to restored results', async () => {
+    const { checkpoints, service } = makeHarness({
+      checkpoint: makeCheckpoint(),
+    });
+
+    const snapshot = await service.buildSessionSnapshot({
+      ownerUserId: 7,
+      task: makeTask(),
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(checkpoints.latestForTask).toHaveBeenCalledWith(7, 101);
+    expect(snapshot.result).toMatchObject({
+      runtime: {
+        checkpointId: 909,
+        checkpointType: AgentRunCheckpointType.Interrupt,
+        canResume: true,
+        canReplay: true,
+        canFork: true,
+        parentCheckpointId: null,
+      },
+    });
+  });
+
+  it('silences generic stale checkpoint sessions from latest restore', async () => {
+    const task = makeTask({
+      goal: '你有什么功能',
+      status: AgentTaskStatus.WaitingReply,
+      memory: {
+        socialAgentChat: {
+          conversation: [
+            {
+              id: 'turn_user_generic',
+              role: 'user',
+              content: '你有什么功能',
+              at: '2026-06-05T00:00:00.000Z',
+            },
+          ],
+        },
+      },
+      result: {},
+    });
+    task.result = {};
+    const { service } = makeHarness({
+      approvals: [],
+      approvalsReject: false,
+      checkpoint: {
+        ...makeCheckpoint(),
+        resumePrompt:
+          '从已保存的步骤继续：正在等待你确认。原始目标：你有什么功能',
+      },
+      events: [],
+      task,
+    });
+
+    const snapshot = await service.buildSessionSnapshot({
+      ownerUserId: 7,
+      task,
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(snapshot).toMatchObject({
+      hasSession: false,
+      activeTaskId: null,
+      result: null,
+      messages: [],
+    });
   });
 
   it('returns an empty session when no restorable task exists', async () => {

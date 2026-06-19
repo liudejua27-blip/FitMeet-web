@@ -3,19 +3,15 @@ import clsx from 'clsx';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { usesFullBleedExperience } from '../routes/routeBoundaries';
 import { useAuthStore, useMessageStore, useNotificationStore } from '../stores';
+import { navigateToDiscoverWithScrollReset } from '../lib/scrollNavigation';
+import { SiteLink } from './navigation/SiteLink';
 import { BackToTop } from './ui';
 
-const navItems = [
-  { to: '/', label: '首页' },
-  { to: '/hall', label: '附近机会' },
-  { to: '/discover', label: '发现' },
-  { to: '/meet', label: '约练' },
-  { to: '/agent', label: 'Agent' },
-];
+const navItems = [{ to: '/discover', label: '发现' }];
 
 const bottomTabs = [
   { id: 'home', to: '/', label: '首页', icon: 'home' as const },
-  { id: 'nearby', to: '/hall', label: '附近', icon: 'discover' as const },
+  { id: 'nearby', to: '/discover', label: '发现', icon: 'discover' as const },
   { id: 'agent', to: '/agent', label: 'Agent', icon: 'create' as const, isCreate: true },
   { id: 'messages', to: '/messages', label: '消息', icon: 'messages' as const, protected: true },
   { id: 'profile', to: '/profile', label: '我的', icon: 'profile' as const, protected: true },
@@ -39,7 +35,9 @@ const Navbar = () => {
     <nav aria-label="主导航" className="site-shell-nav sticky top-0 z-50">
       <div className="mx-auto flex h-[72px] max-w-7xl items-center gap-4 px-4 sm:px-6 lg:px-8">
         <Link to="/" className="group flex items-center gap-3" aria-label="FitMeet 首页">
-          <span className="site-shell-mark">F</span>
+          <span className="site-shell-mark" aria-hidden="true">
+            <img src="/favicon-192.png" alt="" width="38" height="38" aria-hidden="true" />
+          </span>
           <span className="font-display text-xl font-black tracking-tight text-cream">
             Fit<span className="text-lime">Meet</span>
           </span>
@@ -48,21 +46,21 @@ const Navbar = () => {
         <div className="hidden flex-1 items-center justify-center md:flex">
           <div className="site-shell-nav__links">
             {navItems.map((item) => (
-              <Link
+              <SiteLink
                 key={item.to}
                 to={item.to}
                 aria-current={isActive(item.to) ? 'page' : undefined}
                 className={clsx('site-shell-nav__link', isActive(item.to) && 'is-active')}
               >
                 {item.label}
-              </Link>
+              </SiteLink>
             ))}
           </div>
         </div>
 
         <button className="site-shell-search hidden lg:flex" onClick={() => navigate('/search')}>
           <SearchIcon />
-          搜索 Agent、附近机会或城市
+          搜索运动、地点或用户
         </button>
 
         <div className="hidden items-center gap-2 md:flex">
@@ -96,8 +94,11 @@ const Navbar = () => {
               <button className="site-shell-ghost" onClick={openLogin}>
                 登录
               </button>
-              <button className="site-shell-primary" onClick={() => navigate('/app')}>
-                预约 App
+              <button
+                className="site-shell-primary"
+                onClick={() => navigateToDiscoverWithScrollReset(navigate)}
+              >
+                发布约练
               </button>
             </>
           )}
@@ -120,7 +121,7 @@ const Navbar = () => {
         <div className="site-shell-mobile md:hidden">
           <div className="grid gap-2">
             {navItems.map((item) => (
-              <Link
+              <SiteLink
                 key={item.to}
                 to={item.to}
                 aria-current={isActive(item.to) ? 'page' : undefined}
@@ -128,7 +129,7 @@ const Navbar = () => {
                 onClick={() => setMobileOpen(false)}
               >
                 {item.label}
-              </Link>
+              </SiteLink>
             ))}
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2">
@@ -141,8 +142,11 @@ const Navbar = () => {
                 <button className="site-shell-mobile__button" onClick={openLogin}>
                   登录
                 </button>
-                <button className="site-shell-mobile__primary" onClick={() => navigate('/app')}>
-                  预约 App
+                <button
+                  className="site-shell-mobile__primary"
+                  onClick={() => navigateToDiscoverWithScrollReset(navigate)}
+                >
+                  发布约练
                 </button>
               </>
             )}
@@ -180,6 +184,10 @@ const BottomTabBar = () => {
       openLogin();
       return;
     }
+    if (tab.to === '/discover') {
+      navigateToDiscoverWithScrollReset(navigate);
+      return;
+    }
     navigate(tab.to);
   };
 
@@ -213,7 +221,7 @@ const Footer = () => (
   <footer className="site-shell-footer">
     <div className="mx-auto flex max-w-7xl flex-col items-center gap-3 text-center">
       <nav className="flex flex-wrap justify-center gap-5" aria-label="合规链接">
-        <Link to="/hall">附近机会</Link>
+        <SiteLink to="/discover">发现</SiteLink>
         <Link to="/agent">FitMeet Agent</Link>
         <Link to="/agent/settings">权限控制</Link>
         <Link to="/developers/social-skills">Agent API</Link>

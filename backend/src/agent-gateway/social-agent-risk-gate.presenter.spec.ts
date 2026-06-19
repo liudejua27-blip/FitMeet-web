@@ -60,7 +60,7 @@ describe('social-agent-risk-gate.presenter', () => {
     expect(
       buildSocialAgentRiskGateDecision({
         task,
-        toolName: SocialAgentToolName.SendMessage,
+        toolName: SocialAgentToolName.DraftOpener,
         toolInput: { targetUserId: 2, text: 'Hi' },
         stepId: 'step_1',
         policy: { ...basePolicy, requiresConfirmation: false },
@@ -114,6 +114,31 @@ describe('social-agent-risk-gate.presenter', () => {
         blockedActions: ['auto_execute'],
         actionType: 'payment',
       },
+      runtimePolicy: {
+        executionContract: 'approval_required_dry_run_audit',
+        dryRunRequired: true,
+        auditRequired: true,
+        socialCodex: {
+          actionType: 'payment',
+          mode: 'approval_required',
+          riskLevel: 'high',
+          dryRunRequired: true,
+          auditRequired: true,
+          dryRunPreview: {
+            required: true,
+            title: '支付执行预览',
+            summary: '确认前不会创建真实支付。',
+          },
+          sandbox: {
+            externalSideEffectAllowed: false,
+          },
+        },
+        socialCodexAudit: {
+          event: 'social_codex.policy_decision',
+          actionType: 'payment',
+          payload: { amount: 88 },
+        },
+      },
       hasUserApproval: false,
     });
 
@@ -143,6 +168,25 @@ describe('social-agent-risk-gate.presenter', () => {
           riskLevel: 'critical',
           requiresDoubleConfirmation: true,
           blockedActions: ['auto_execute'],
+          dryRunRequired: true,
+          auditRequired: true,
+          socialCodex: expect.objectContaining({
+            actionType: 'payment',
+            mode: 'approval_required',
+            dryRunRequired: true,
+            auditRequired: true,
+            executionContract: 'approval_required_dry_run_audit',
+            dryRunPreview: expect.objectContaining({
+              title: '支付执行预览',
+            }),
+            sandbox: expect.objectContaining({
+              externalSideEffectAllowed: false,
+            }),
+          }),
+          socialCodexAudit: expect.objectContaining({
+            event: 'social_codex.policy_decision',
+            actionType: 'payment',
+          }),
         },
       },
     });

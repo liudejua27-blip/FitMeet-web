@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { API_BASE_URL } from '../api/baseClient';
 import {
   getFeed,
   getFeedPage,
@@ -59,7 +60,7 @@ describe('feedClient', () => {
 
     expect(page).toEqual(feedPayload);
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/feed?category=log&page=2&limit=10&lat=36.1&lng=120.3',
+      `${API_BASE_URL}/feed?category=log&page=2&limit=10&lat=36.1&lng=120.3`,
       expect.objectContaining({ headers: { 'Content-Type': 'application/json' } }),
     );
   });
@@ -112,7 +113,7 @@ describe('feedClient', () => {
     ).resolves.toEqual(publicIntentPayload.data);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/public/social-intents?page=2&limit=10&q=%E8%B7%91%E6%AD%A5&city=%E9%9D%92%E5%B2%9B&requestType=fitness_partner&status=active',
+      `${API_BASE_URL}/public/social-intents?page=2&limit=10&q=%E8%B7%91%E6%AD%A5&city=%E9%9D%92%E5%B2%9B&requestType=fitness_partner&status=active`,
       expect.objectContaining({
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -174,14 +175,14 @@ describe('feedClient', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      '/api/public/social-intents/intent%3Acity%20run',
+      `${API_BASE_URL}/public/social-intents/intent%3Acity%20run`,
       expect.objectContaining({
         headers: { 'Content-Type': 'application/json' },
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      '/api/public/social-intents/intent%3Acity%20run/matches',
+      `${API_BASE_URL}/public/social-intents/intent%3Acity%20run/matches`,
       expect.objectContaining({
         headers: { 'Content-Type': 'application/json' },
       }),

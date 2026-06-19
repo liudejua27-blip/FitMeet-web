@@ -9,7 +9,15 @@ export type SocialAgentRunNextTaskState = {
 export function socialAgentRunNextReadReplyState(input: {
   readCallStatus: SocialAgentToolCallRecord['status'];
   newMessageCount: number;
+  skippedCode?: string | null;
+  retryable?: boolean | null;
 }): SocialAgentRunNextTaskState {
+  if (input.skippedCode && input.retryable === false) {
+    return {
+      status: AgentTaskStatus.Failed,
+      statusReason: input.skippedCode,
+    };
+  }
   return {
     status: AgentTaskStatus.WaitingReply,
     statusReason:

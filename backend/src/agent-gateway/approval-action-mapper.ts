@@ -36,6 +36,8 @@ export function mapApprovalToActionType(
       return AgentActionType.CreateActivity;
     case ApprovalType.JoinActivity:
       return AgentActionType.JoinActivity;
+    case ApprovalType.PostPublish:
+      return AgentActionType.SyncToHall;
     case ApprovalType.SubmitCompletionProof:
     case ApprovalType.PhotoUpload:
       return AgentActionType.SubmitProof;

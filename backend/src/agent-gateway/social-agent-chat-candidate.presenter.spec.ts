@@ -50,6 +50,7 @@ describe('social-agent-chat-candidate.presenter', () => {
       reasons: ['同城', '目标接近'],
       risk: { level: 'low', warnings: ['先站内沟通'] },
       suggestedMessage: '周末一起慢跑吗？',
+      recentPublicActivity: ['公开约练：周末慢跑', '最近公开更新：2026-06-15'],
       source: 'public_intent',
       isRealData: true,
       socialRequestId: 44,
@@ -97,6 +98,7 @@ describe('social-agent-chat-candidate.presenter', () => {
       profileCompleteness: 80,
       dataQuality: 'complete',
       suggestedMessage: '周末一起慢跑吗？',
+      recentPublicActivity: ['公开约练：周末慢跑', '最近公开更新：2026-06-15'],
       status: 'recommended',
       candidateExplanation: {
         fitReasons: ['距离近'],

@@ -3,6 +3,54 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { MessagesService } from './messages.service';
 
 describe('MessagesService realtime events', () => {
+  it('drops stale agentConnectionId before writing activity logs', async () => {
+    const connectionRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+    };
+    const activityLogRepo = {
+      create: jest.fn((input) => input),
+      save: jest.fn().mockResolvedValue({}),
+    };
+    const actionLogRepo = {
+      create: jest.fn((input) => input),
+      save: jest.fn().mockResolvedValue({}),
+    };
+    const service = new MessagesService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      connectionRepo as never,
+      activityLogRepo as never,
+      actionLogRepo as never,
+      {} as never,
+      {} as never,
+    );
+
+    await (
+      service as unknown as {
+        logAgentActivityEvent(input: {
+          agentConnectionId: number;
+          ownerUserId: number;
+          eventType: string;
+          status: string;
+        }): Promise<void>;
+      }
+    ).logAgentActivityEvent({
+      agentConnectionId: 999,
+      ownerUserId: 1,
+      eventType: 'agent.message.created',
+      status: 'sent',
+    });
+
+    expect(activityLogRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ agentConnectionId: null }),
+    );
+    expect(actionLogRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: null }),
+    );
+  });
+
   it('returns an explicit conversationId in conversation summaries for iOS', async () => {
     const conversationId = new Types.ObjectId();
     const exec = jest.fn().mockResolvedValue([
@@ -103,6 +151,58 @@ describe('MessagesService realtime events', () => {
         rooms: [`conversation:${conversationId.toString()}`],
       }),
     );
+  });
+
+  it('accepts test-like user text as message content instead of treating it as blank', async () => {
+    const conversationId = new Types.ObjectId();
+    const conv = {
+      _id: conversationId,
+      participantIds: [1, 2],
+      unreadCount: {},
+      unreadAgentCount: {},
+      agentConnectionId: null,
+      ownerUserId: null,
+      actorUserId: null,
+    };
+    const convModel = {
+      findById: jest.fn().mockResolvedValue(conv),
+      updateOne: jest.fn().mockResolvedValue({}),
+    };
+    const messageId = new Types.ObjectId();
+    const msgModel = {
+      create: jest.fn().mockImplementation((value) =>
+        Promise.resolve({
+          _id: messageId,
+          text: value.text,
+          source: 'user',
+          card: null,
+          senderAgentId: null,
+          receiverAgentId: null,
+        }),
+      ),
+    };
+    const service = new MessagesService(
+      convModel as never,
+      msgModel as never,
+      {} as never,
+      {} as never,
+      { findOne: jest.fn() } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const result = await service.sendMessage(
+      conversationId.toString(),
+      1,
+      '你好，E2E 消息测试',
+    );
+
+    expect(msgModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ text: '你好，E2E 消息测试' }),
+    );
+    expect(result.text).toBe('你好，E2E 消息测试');
   });
 
   it('rejects invalid conversation ids before reading messages', async () => {

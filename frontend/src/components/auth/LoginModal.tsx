@@ -97,7 +97,9 @@ export function LoginModal() {
       >
         <div className="login-modal-header">
           <div className="login-modal-brand">
-            <span>F</span>
+            <span>
+              <img src="/favicon-192.png" alt="FitMeet" width="36" height="36" />
+            </span>
             <div>
               <strong>FitMeet</strong>
               <small>Human plans, held lightly</small>
@@ -155,6 +157,7 @@ export function LoginModal() {
               autoComplete="email"
               inputMode="email"
               placeholder="you@example.com"
+              type="email"
             />
           </label>
 

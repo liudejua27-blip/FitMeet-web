@@ -43,6 +43,7 @@ function makeSnapshot(): LongTermMemorySnapshot {
       socialStyle: '低压力',
       communicationStyle: '',
       preferredTraits: [],
+      preferenceHistory: [],
     },
     boundaries: {
       excludedGenders: [],

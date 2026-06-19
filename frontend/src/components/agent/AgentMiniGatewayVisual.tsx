@@ -5,7 +5,9 @@ export function AgentMiniGatewayVisual() {
     <div className="agent-mini-gateway" aria-hidden="true">
       <div className="agent-mini-gateway__beam" />
       <div className="agent-mini-gateway__core">
-        <span>F</span>
+        <span>
+          <img src="/favicon-192.png" alt="" width="58" height="58" />
+        </span>
       </div>
       <div className="agent-mini-gateway__ring agent-mini-gateway__ring--outer" />
       <div className="agent-mini-gateway__ring agent-mini-gateway__ring--middle" />

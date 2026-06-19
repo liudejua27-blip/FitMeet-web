@@ -17,6 +17,7 @@ import {
   LifeGraphAuditAction,
   LifeGraphBehaviorEventType,
   LifeGraphCorrectionType,
+  LifeGraphDataTier,
   LifeGraphFieldCategory,
   LifeGraphFieldSource,
   LifeGraphSignalKey,
@@ -47,6 +48,8 @@ export class LifeGraphFieldDto {
   category: LifeGraphFieldCategory;
   fieldKey: string;
   fieldValue: unknown;
+  dataTier: LifeGraphDataTier;
+  redacted: boolean;
   source: LifeGraphFieldSource;
   confidence: number;
   confirmedByUser: boolean;
@@ -103,7 +106,23 @@ export class LifeGraphUnifiedMatchSignalsDto {
     overall: number;
     byField: Record<string, number>;
   };
+  preferenceHistory: Record<string, LifeGraphPreferenceHistoryItemDto[]>;
   missingCriticalFields: LifeGraphMissingFieldDto[];
+}
+
+export class LifeGraphPreferenceHistoryItemDto {
+  category: LifeGraphFieldCategory;
+  fieldKey: string;
+  oldValue: unknown;
+  newValue: unknown;
+  source: LifeGraphFieldSource;
+  confidence: number | null;
+  action: LifeGraphAuditAction;
+  reason: string;
+  taskId: number | null;
+  messageId: string | null;
+  confirmedByUser: boolean;
+  createdAt: string;
 }
 
 export class LifeGraphDynamicSignalsDto {
@@ -219,6 +238,7 @@ export class LifeGraphAuditLogDto {
   category: LifeGraphFieldCategory;
   oldValue: unknown;
   newValue: unknown;
+  redacted: boolean;
   source: LifeGraphFieldSource;
   confidence: number | null;
   action: LifeGraphAuditAction;
@@ -289,6 +309,10 @@ export class ConfirmLifeGraphUpdateDto {
   @IsArray()
   @IsString({ each: true })
   fieldIds?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  allowConflicts?: boolean;
 }
 
 export class RejectLifeGraphUpdateDto {
@@ -318,6 +342,44 @@ export class RevokeLifeGraphFieldDto {
   @IsString()
   @MaxLength(300)
   reason?: string;
+}
+
+export class DeleteLifeGraphMemoryDto {
+  @IsOptional()
+  @IsBoolean()
+  includeAuditLogs?: boolean;
+}
+
+export class CreateLifeGraphSecurityRequestDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  notificationEmail?: string;
+}
+
+export class ConfirmLifeGraphSecurityRequestDto {
+  @IsString()
+  @MaxLength(32)
+  confirmationCode: string;
+
+  @IsOptional()
+  @IsBoolean()
+  includeAuditLogs?: boolean;
+}
+
+export class LifeGraphExportDto {
+  exportedAt: string;
+  profile: LifeGraphProfileDto;
+  fields: Record<LifeGraphFieldCategory, LifeGraphFieldDto[]>;
+  auditLogs: LifeGraphAuditLogDto[];
+  behaviorEvents: LifeGraphBehaviorEventDto[];
+  signalScores: LifeGraphSignalScoreDto[];
+  updateAudits: LifeGraphUpdateAuditDto[];
+  corrections: LifeGraphCorrectionDto[];
+  privacy: {
+    redacted: boolean;
+    tiers: Record<LifeGraphDataTier, number>;
+  };
 }
 
 export class RecordLifeGraphBehaviorEventDto {

@@ -48,10 +48,25 @@ Use this checklist before merging website or Agent UI changes.
 ## Regression Guard
 
 - Website-specific CSS belongs in `src/styles/website-platform.css`.
-- Agent-specific CSS belongs in `src/styles/agent-workspace.css`.
+- Agent-specific CSS belongs in `src/styles/fitmeet-assistant-ui.css`.
 - Avoid adding new website or Agent overrides to `src/global.css`.
-- Use route-scoped selectors such as `.fitmeet-website--earth` and `.agent-workspace--gpt`.
+- Use route-scoped selectors such as `.fitmeet-website--earth` and `.fitmeet-assistant-shell`.
 - When a shared token is needed, define it once and consume it through scoped components.
+
+## Assistant Pet Phase-2 Guard
+
+- `frontend/src/test/AgentWorkspacePage.test.tsx`
+  - `drives pet state machine through success -> idle_exit -> idle_enter on normal run`
+  - `limits pet step churn with dense assistant_delta events using debounce`
+  - `drives pet into error -> idle_exit -> idle_enter on failed run`
+- `frontend/src/test/CodexAntPet.test.tsx`
+  - Accessibility metadata and run/step indices are present.
+  - Social copy overrides remain deterministic with `role=status`.
+- Required test command: `pnpm --dir frontend exec vitest run src/test/AgentWorkspacePage.test.tsx src/test/CodexAntPet.test.tsx`
+- Manual spot-check:
+  - 成功响应后宠物应快速出现 `running -> success -> idle_exit -> idle_enter`。
+  - 高频 token 输入/输出时步进需明显去抖，不应与输入 chunk 等量增加。
+  - 错误运行后走 `error -> idle_exit -> idle_enter`。
 
 ## Future Visual Regression
 

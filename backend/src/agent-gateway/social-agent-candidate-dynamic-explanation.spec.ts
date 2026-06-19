@@ -1,4 +1,9 @@
 import { buildSocialMatchDynamicExplanation } from './social-agent-candidate-dynamic-explanation';
+import {
+  LifeGraphAuditAction,
+  LifeGraphFieldCategory,
+  LifeGraphFieldSource,
+} from '../life-graph/life-graph.enums';
 
 describe('buildSocialMatchDynamicExplanation', () => {
   it('uses Life Graph behavior and safety signals in user-facing candidate reasoning', () => {
@@ -66,6 +71,24 @@ describe('buildSocialMatchDynamicExplanation', () => {
         },
         confidence: { overall: 0.9, byField: {} },
         missingCriticalFields: [],
+        preferenceHistory: {
+          'lifestyle.availableTimes': [
+            {
+              category: LifeGraphFieldCategory.Lifestyle,
+              fieldKey: 'availableTimes',
+              oldValue: ['工作日晚上'],
+              newValue: ['周末下午'],
+              source: LifeGraphFieldSource.AiInferred,
+              confidence: 0.86,
+              action: LifeGraphAuditAction.Confirmed,
+              reason: '用户确认周末下午更方便。',
+              taskId: 101,
+              messageId: 'msg-1',
+              confirmedByUser: true,
+              createdAt: '2026-06-15T00:00:00.000Z',
+            },
+          ],
+        },
       },
     });
 
@@ -89,6 +112,8 @@ describe('buildSocialMatchDynamicExplanation', () => {
       expect.arrayContaining([
         expect.stringContaining('低压力运动社交'),
         expect.stringContaining('优先同校'),
+        expect.stringContaining('最近确认的可约时间变化'),
+        expect.stringContaining('周末下午'),
       ]),
     );
     expect(explanation.continuousFilterHints).toEqual(

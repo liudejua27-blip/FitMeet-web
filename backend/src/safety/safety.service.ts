@@ -91,6 +91,34 @@ export class SafetyService {
     return new Set<number>([...iBlocked, ...blockedMe]);
   }
 
+  /**
+   * Conservative exclusion set for Agent-driven stranger recommendations.
+   * Pending/reviewing reports are treated as risk until reviewed; rejected
+   * reports are excluded from this gate so false reports do not permanently
+   * suppress a user.
+   */
+  async getAgentRecommendationExcludedUserIds(
+    userId: number,
+  ): Promise<Set<number>> {
+    const [blockedIds, reportedUsers] = await Promise.all([
+      this.getMutualBlockUserIds(userId),
+      this.reportRepo.find({
+        where: { targetType: 'user' },
+        select: ['targetId', 'status'],
+      }),
+    ]);
+    const riskStatuses = new Set(['pending', 'reviewing', 'resolved']);
+    for (const report of reportedUsers) {
+      if (
+        report.targetId !== userId &&
+        riskStatuses.has(report.status)
+      ) {
+        blockedIds.add(report.targetId);
+      }
+    }
+    return blockedIds;
+  }
+
   async createVerificationRequest(userId: number, dto: CreateVerificationDto) {
     const pending = await this.verificationRepo.findOne({
       where: { userId, type: dto.type, status: 'pending' },

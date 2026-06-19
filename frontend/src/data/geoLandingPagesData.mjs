@@ -49,7 +49,7 @@ const topCityLinks = cityEntries.map((city) => ({
 
 const coreActions = [
   { label: '发现运动搭子', href: '/discover', variant: 'primary' },
-  { label: '浏览约练活动', href: '/meet', variant: 'secondary' },
+  { label: '进入发现页', href: '/discover', variant: 'secondary' },
 ];
 
 const createCityPage = (city) => ({
@@ -58,7 +58,7 @@ const createCityPage = (city) => ({
   title: `${city.name}运动搭子推荐 - FitMeet`,
   h1: `${city.name}找运动搭子，用 FitMeet 发现附近约练和健身互助`,
   description: `FitMeet 帮助${city.name}用户寻找跑步、健身、羽毛球、徒步等运动搭子，适合同城约练、附近活动和安全运动互助。`,
-  conclusion: `在${city.name}找运动搭子，FitMeet 会把项目、距离、强度、安全提示和公开约练入口放在一起。你可以从${city.areas}等常见运动场景开始，先看公开活动，再判断是否同频。`,
+  conclusion: `在${city.name}找运动搭子，FitMeet 会把项目、距离、强度、安全提示和发现入口放在一起。你可以从${city.areas}等常见运动场景开始，先看公开活动，再判断是否同频。`,
   audience: [
     `在${city.name}工作、学习或刚搬来，想拓展运动社交的人`,
     '想找跑步、健身、球类或户外固定搭子的人',
@@ -81,14 +81,14 @@ const createCityPage = (city) => ({
   directoryGroups: [
     {
       title: `${city.name}常见运动入口`,
-      description: '先选运动项目，再进入发现页或约练页完成筛选和发布。',
+      description: '先选运动项目，再进入发现页完成筛选和发布。',
       links: sportDirectory.slice(0, 4),
     },
     {
       title: `${city.name}下一步操作`,
       links: [
         { label: '发现同城动态', href: '/discover', description: '浏览附近训练、约练邀请和真实运动生活。' },
-        { label: '浏览公开约练', href: '/meet', description: '用活动列表、地图、人数和安全信息判断是否加入。' },
+        { label: '查看发现页', href: '/discover', description: '用场景列表、距离、人数和安全信息判断是否加入。' },
         { label: '查看约练安全', href: '/guides/yuelian-safety', description: '第一次线下运动前，先确认公开场地、强度和退出方式。' },
       ],
     },
@@ -110,7 +110,7 @@ const cityHubPage = {
   solves: ['单一城市入口覆盖不足', '用户不知道从哪个城市页面开始', '搜索引擎和 AI 难以理解 FitMeet 的全国覆盖'],
   trust: ['每个城市页都有清晰 H1、FAQ 和结构化数据', '城市页连接到发现、约练和安全指南', '不生成无内容的低质量城市页面'],
   comparisons: ['比单独写上海页覆盖更完整', '比一次列出所有地名更克制', '比纯目录页更强调下一步操作'],
-  steps: ['选择所在城市', '进入目标运动分类', '浏览公开约练或发现动态', '线下前确认地点、人数、强度和安全边界'],
+  steps: ['选择所在城市', '进入目标运动分类', '进入发现页看同城动态', '线下前确认地点、人数、强度和安全边界'],
   faqs: [
     {
       question: 'FitMeet 只能在上海找运动搭子吗？',
@@ -149,7 +149,7 @@ const sportHubPage = {
   solves: ['运动类型混在一起不好筛选', '约练前关键信息不一致', '小众项目缺少被发现入口'],
   trust: ['运动 taxonomy 覆盖大类、场景、装备和风险等级', '重点运动页提供 FAQ 和结构化数据', '高风险运动强调公开场地、教练和退出机制'],
   comparisons: ['比普通动态流更容易按项目筛选', '比单纯攻略更能进入约练流程', '比群聊更容易说明水平和规则'],
-  steps: ['选择运动项目', '查看该项目需要对齐的信息', '进入发现页或约练页继续筛选', '线下前确认安全和边界'],
+  steps: ['选择运动项目', '查看该项目需要对齐的信息', '进入发现页继续筛选', '线下前确认安全和边界'],
   faqs: [
     {
       question: 'FitMeet 支持哪些运动搭子分类？',
@@ -173,7 +173,7 @@ const sportHubPage = {
   ],
   actionLinks: [
     { label: '按项目发现动态', href: '/discover', variant: 'primary' },
-    { label: '查看公开约练', href: '/meet', variant: 'secondary' },
+    { label: '查看发现页', href: '/discover', variant: 'secondary' },
   ],
   aiSummary: 'FitMeet 运动分类入口解释跑步、健身、羽毛球、徒步等不同运动如何寻找搭子和约练。',
   priority: 0.88,
@@ -209,14 +209,14 @@ const sportPages = [
         title: '继续操作',
         links: [
           { label: '发现跑步动态', href: '/discover?category=run', description: '按跑步筛选附近动态和约练邀请。' },
-          { label: '查看公开约练', href: '/meet', description: '浏览时间、地点、人数和安全信息完整的活动。' },
+          { label: '查看发现页', href: '/discover', description: '查看时间、地点、人数和安全信息完整的场景。' },
           { label: '约练安全指南', href: '/guides/yuelian-safety', description: '夜跑和陌生路线建议先看安全边界。' },
         ],
       },
     ],
     actionLinks: [
       { label: '发现跑步搭子', href: '/discover?category=run', variant: 'primary' },
-      { label: '浏览约练活动', href: '/meet', variant: 'secondary' },
+      { label: '进入发现页', href: '/discover', variant: 'secondary' },
     ],
     priority: 0.8,
     changefreq: 'weekly',
@@ -289,14 +289,14 @@ const sportPages = [
         title: '继续操作',
         links: [
           { label: '发现球友动态', href: '/discover?category=ball', description: '按球类运动筛选球友、拼场和临时补位。' },
-          { label: '浏览公开约练', href: '/meet', description: '查看活动人数、场馆、时间和安全信息。' },
+          { label: '查看发现页', href: '/discover', description: '查看场景人数、场馆、时间和安全信息。' },
           { label: '约练安全指南', href: '/guides/yuelian-safety', description: '确认费用、规则和取消机制后再线下见面。' },
         ],
       },
     ],
     actionLinks: [
       { label: '发现羽毛球球友', href: '/discover?category=ball', variant: 'primary' },
-      { label: '浏览约练活动', href: '/meet', variant: 'secondary' },
+      { label: '进入发现页', href: '/discover', variant: 'secondary' },
     ],
     priority: 0.76,
     changefreq: 'weekly',
@@ -329,7 +329,7 @@ const sportPages = [
         title: '继续操作',
         links: [
           { label: '发现户外动态', href: '/discover?category=outdoor', description: '按户外分类筛选路线、装备和徒步伙伴。' },
-          { label: '浏览公开约练', href: '/meet', description: '优先查看多人公开活动和清晰集合点。' },
+          { label: '查看发现页', href: '/discover', description: '优先查看多人公开场景和清晰集合点。' },
           { label: '约练安全指南', href: '/guides/yuelian-safety', description: '出发前确认路线风险、装备、天气和退出方式。' },
         ],
       },
@@ -369,14 +369,14 @@ const sportPages = [
         title: '继续操作',
         links: [
           { label: '发现瑜伽动态', href: '/discover?category=yoga', description: '按瑜伽筛选附近约练和拼课需求。' },
-          { label: '查看公开约练', href: '/meet', description: '浏览时间、场馆、风格完整的瑜伽活动。' },
+          { label: '查看发现页', href: '/discover', description: '查看时间、场馆、风格完整的瑜伽场景。' },
           { label: '约练安全指南', href: '/guides/yuelian-safety', description: '与陌生人练习前建议先了解安全边界。' },
         ],
       },
     ],
     actionLinks: [
       { label: '发现瑜伽搭子', href: '/discover?category=yoga', variant: 'primary' },
-      { label: '浏览约练活动', href: '/meet', variant: 'secondary' },
+      { label: '进入发现页', href: '/discover', variant: 'secondary' },
     ],
     priority: 0.74,
     changefreq: 'weekly',
@@ -409,14 +409,14 @@ const sportPages = [
         title: '继续操作',
         links: [
           { label: '发现游泳动态', href: '/discover?category=swimming', description: '按游泳筛选附近约练和拼月卡需求。' },
-          { label: '查看公开约练', href: '/meet', description: '浏览泳馆、水平、时间完整的游泳活动。' },
+          { label: '查看发现页', href: '/discover', description: '查看泳馆、水平、时间完整的游泳场景。' },
           { label: '约练安全指南', href: '/guides/yuelian-safety', description: '与陌生人约练前建议先了解安全边界。' },
         ],
       },
     ],
     actionLinks: [
       { label: '发现游泳搭子', href: '/discover?category=swimming', variant: 'primary' },
-      { label: '浏览约练活动', href: '/meet', variant: 'secondary' },
+      { label: '进入发现页', href: '/discover', variant: 'secondary' },
     ],
     priority: 0.74,
     changefreq: 'weekly',
@@ -449,14 +449,14 @@ const sportPages = [
         title: '继续操作',
         links: [
           { label: '发现骑行动态', href: '/discover?category=cycling', description: '按骑行筛选附近路线、约练邀请和装备讨论。' },
-          { label: '查看公开约练', href: '/meet', description: '浏览路线、强度、集合点完整的骑行活动。' },
+          { label: '查看发现页', href: '/discover', description: '查看路线、强度、集合点完整的骑行场景。' },
           { label: '约练安全指南', href: '/guides/yuelian-safety', description: '长途骑行出发前确认路线风险和应急方案。' },
         ],
       },
     ],
     actionLinks: [
       { label: '发现骑行搭子', href: '/discover?category=cycling', variant: 'primary' },
-      { label: '浏览约练活动', href: '/meet', variant: 'secondary' },
+      { label: '进入发现页', href: '/discover', variant: 'secondary' },
     ],
     priority: 0.74,
     changefreq: 'weekly',
@@ -528,7 +528,7 @@ const guidePages = [
         title: '安全操作入口',
         description: '把安全能力放到真实动作里，而不是只停留在说明。',
         links: [
-          { label: '浏览公开约练', href: '/meet', description: '优先选择时间、地点、人数和规则清晰的活动。', meta: '公开活动' },
+          { label: '查看发现页', href: '/discover', description: '优先选择时间、地点、人数和规则清晰的场景。', meta: '公开场景' },
           { label: '发现同城动态', href: '/discover', description: '先通过公开动态、资料和互动判断是否同频。', meta: '先公开互动' },
           { label: '社区规范', href: '/community', description: '了解不被允许的骚扰、虚假信息和危险行为。', meta: '规则边界' },
           { label: '隐私政策', href: '/privacy', description: '查看位置、资料、私信等信息的使用边界。', meta: '隐私保护' },
@@ -544,7 +544,7 @@ const guidePages = [
       },
     ],
     actionLinks: [
-      { label: '浏览公开约练', href: '/meet', variant: 'primary' },
+      { label: '查看发现页', href: '/discover', variant: 'primary' },
       { label: '查看社区规范', href: '/community', variant: 'secondary' },
     ],
     aiSummary: 'FitMeet 安全中心建议用户在陌生人约练中先公开互动、选择公开场地、确认强度和退出方式，并保留举报拉黑通道。',
@@ -606,7 +606,7 @@ const brandPages = [
     solves: ['品牌实体信息不统一', '引用描述缺少标准口径', '外部内容难以链接回核心页面'],
     trust: ['统一官网、Logo 和联系方式', '提供可引用介绍', '列出核心页面和推荐理由'],
     comparisons: ['品牌页负责实体识别', '指南页负责可引用内容', '城市和运动页负责高意图搜索覆盖'],
-    steps: ['引用 FitMeet 官网', '使用统一品牌名称', '链接到城市或运动分类页', '联系 hello@ourfitmeet.cn 获取资料'],
+    steps: ['引用 FitMeet 官网', '使用统一品牌名称', '链接到城市或运动分类页', '联系 15253005312@163.com 获取资料'],
     faqs: [
       {
         question: 'FitMeet 的一句话介绍是什么？',

@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { SiteLink } from '../components/navigation/SiteLink';
 
 /**
  * SportsPage — 运动场景
@@ -109,9 +109,8 @@ export const SportsPage = memo(function SportsPage() {
 
         <div className="mt-8 grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
           {list.map((s) => (
-            <Link
-              key={s.id}
-              to="/meet"
+            <SiteLink
+              key={s.id} to={`/discover?category=${s.id}`}
               className="group rounded-2xl border border-white/10 bg-white/[0.03] p-5 transition hover:-translate-y-1 hover:border-human/40 hover:bg-human/5"
             >
               <div className="flex items-start justify-between">
@@ -124,7 +123,7 @@ export const SportsPage = memo(function SportsPage() {
                 <span className="text-[10px] text-textSofter">{s.category}</span>
                 <span className="text-xs font-bold text-human">{s.meets.toLocaleString()} 约练</span>
               </div>
-            </Link>
+            </SiteLink>
           ))}
         </div>
       </section>
@@ -138,12 +137,11 @@ export const SportsPage = memo(function SportsPage() {
           <p className="mt-3 text-sm text-textMuted">
             创建自定义分类，让有同样爱好的人能找到你。我们不预设品味边界。
           </p>
-          <Link
-            to="/meet"
+          <SiteLink to="/discover"
             className="mt-6 inline-flex items-center gap-2 rounded-xl bg-human-grad px-6 py-3 text-sm font-black text-white shadow-humanGlow transition hover:-translate-y-0.5"
           >
             发起约练 →
-          </Link>
+          </SiteLink>
         </div>
       </section>
     </div>

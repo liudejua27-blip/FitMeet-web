@@ -26,6 +26,7 @@ import {
   rememberSocialAgentCurrentTask,
   rememberSocialAgentShortTerm,
 } from './social-agent-memory.util';
+import { buildSocialAgentProfileSavedNextStepReply } from './social-agent-profile-next-step-reply';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 
@@ -115,6 +116,23 @@ export class SocialAgentRouteProfileTurnService {
         route.intent,
         message,
       );
+      assistantMessage = buildSocialAgentProfileSavedNextStepReply({
+        intent: route.intent,
+        message,
+        profileUpdated,
+      });
+      rememberSocialAgentCurrentTask(task, {
+        objective: 'profile_enrichment',
+        nextStep: '等待用户选择继续补齐画像边界，或确认现在开始搜索',
+        shouldSearchNow: false,
+        profileSaved: profileUpdated,
+        awaitingSearchConfirmation: true,
+        waitingFor: 'availability_boundaries_or_search_confirmation',
+        lastCompletedStep: profileUpdated
+          ? 'profile_saved'
+          : 'profile_context_saved',
+      });
+      await this.taskRepo.save(task);
     }
 
     return {

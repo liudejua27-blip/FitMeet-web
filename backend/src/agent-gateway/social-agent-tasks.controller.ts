@@ -7,7 +7,9 @@ import {
   Param,
   ParseIntPipe,
   Post,
+  Query,
   Req,
+  Optional,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -37,6 +39,10 @@ import {
 } from './social-agent-tool-executor.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
 import { rememberSocialAgentShortTerm } from './social-agent-memory.util';
+import { AgentLoopService } from './agent-loop.service';
+import { SocialCodexTraceEvalService } from './social-codex-trace-eval.service';
+import type { SocialAgentEventV2 } from './social-agent-event-v2.types';
+import { SocialAgentEventStore } from './social-agent-event-store.service';
 import {
   cleanDisplayText,
   sanitizeForDisplay,
@@ -76,6 +82,12 @@ export class SocialAgentTasksController {
     private readonly planner: SocialAgentPlannerService,
     private readonly executor: SocialAgentToolExecutorService,
     private readonly chat: SocialAgentChatService,
+    @Optional()
+    private readonly agentLoop?: AgentLoopService,
+    @Optional()
+    private readonly traceEval?: SocialCodexTraceEvalService,
+    @Optional()
+    private readonly eventStore?: SocialAgentEventStore,
   ) {}
 
   /** POST /api/social-agent/tasks */
@@ -151,7 +163,46 @@ export class SocialAgentTasksController {
     @Param('id', ParseIntPipe) id: number,
   ) {
     await this.assertTaskOwner(id, req.user.id);
-    return this.planner.planTask(id);
+    let planResult: Awaited<
+      ReturnType<SocialAgentPlannerService['planTask']>
+    > | null = null;
+    const loopService = this.agentLoop ?? new AgentLoopService();
+    const execution = await loopService.execute({
+      taskId: id,
+      goal: `Plan Social Agent task ${id}`,
+      agent: 'Agent Brain',
+      maxToolCalls: 1,
+      timeoutMs: 30_000,
+      plan: {
+        reason: 'Manual task planning must pass through the unified AgentLoop.',
+        tools: [
+          {
+            agent: 'Agent Brain',
+            toolName: 'task_plan_plan_only',
+            input: {},
+          },
+        ],
+      },
+      runner: async () => {
+        planResult = await this.planner.planTask(id);
+        return {
+          taskId: planResult.taskId,
+          source: planResult.source,
+          fallbackReason: planResult.fallbackReason ?? null,
+          planStepCount: planResult.plan.length,
+        };
+      },
+    });
+    if (!planResult) {
+      throw new Error('AgentLoop did not produce a plan result');
+    }
+    const result = planResult as Awaited<
+      ReturnType<SocialAgentPlannerService['planTask']>
+    >;
+    return {
+      ...result,
+      agentLoop: execution.loop,
+    };
   }
 
   /** POST /api/social-agent/tasks/:id/replan */
@@ -163,11 +214,55 @@ export class SocialAgentTasksController {
     @Body() body: ReplanBody,
   ) {
     await this.assertTaskOwner(id, req.user.id);
-    return this.planner.replanTask(id, {
-      reason: this.normalizeReplanReason(body.reason),
-      userMessage: optionalString(body.userMessage),
-      failure: isRecord(body.failure) ? body.failure : null,
+    let replanResult: Awaited<
+      ReturnType<SocialAgentPlannerService['replanTask']>
+    > | null = null;
+    const loopService = this.agentLoop ?? new AgentLoopService();
+    const execution = await loopService.execute({
+      taskId: id,
+      goal: `Replan Social Agent task ${id}`,
+      agent: 'Agent Brain',
+      maxToolCalls: 1,
+      timeoutMs: 30_000,
+      plan: {
+        reason: 'Manual task replan must pass through the unified AgentLoop.',
+        tools: [
+          {
+            agent: 'Agent Brain',
+            toolName: 'task_replan_plan_only',
+            input: {
+              reason: this.normalizeReplanReason(body.reason),
+              userMessage: optionalString(body.userMessage),
+              failure: isRecord(body.failure) ? body.failure : null,
+            },
+          },
+        ],
+      },
+      runner: async ({ input }) => {
+        replanResult = await this.planner.replanTask(id, {
+          reason: this.normalizeReplanReason(body.reason),
+          userMessage: optionalString(input.userMessage),
+          failure: isRecord(input.failure) ? input.failure : null,
+        });
+        return {
+          taskId: replanResult.taskId,
+          source: replanResult.source,
+          fallbackReason: replanResult.fallbackReason ?? null,
+          replanAttempt: replanResult.replanAttempt,
+          planStepCount: replanResult.plan.length,
+        };
+      },
     });
+    if (!replanResult) {
+      throw new Error('AgentLoop did not produce a replan result');
+    }
+    const result = replanResult as Awaited<
+      ReturnType<SocialAgentPlannerService['replanTask']>
+    >;
+    return {
+      ...result,
+      agentLoop: execution.loop,
+    };
   }
 
   /** POST /api/social-agent/tasks/:id/run-next */
@@ -205,6 +300,60 @@ export class SocialAgentTasksController {
       take: 500,
     });
     return { taskId: id, events };
+  }
+
+  /** GET /api/social-agent/tasks/:id/events/eval */
+  @Get(':id/events/eval')
+  async evaluateEvents(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    await this.assertTaskOwner(id, req.user.id);
+    const events = await this.eventRepo.find({
+      where: { taskId: id, ownerUserId: req.user.id },
+      order: { createdAt: 'ASC', id: 'ASC' },
+      take: 1000,
+    });
+    const v2Events = events
+      .map((event) => event.payload?.socialAgentEventV2)
+      .filter((event): event is SocialAgentEventV2 =>
+        this.isSocialAgentEventV2(event),
+      );
+    const evaluator = this.traceEval ?? new SocialCodexTraceEvalService();
+    return {
+      taskId: id,
+      eventCount: events.length,
+      socialCodexEventCount: v2Events.length,
+      ...evaluator.evaluate(v2Events),
+    };
+  }
+
+  /** GET /api/social-agent/tasks/:id/events/replay */
+  @Get(':id/events/replay')
+  async replayEvents(
+    @Req() req: FitMeetRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Query('afterSeq') afterSeq?: string,
+    @Query('afterEventId') afterEventId?: string,
+    @Query('includeDebug') includeDebug?: string,
+  ) {
+    await this.assertTaskOwner(id, req.user.id);
+    const replay = this.eventStore
+      ? await this.eventStore.buildReplayPackage(id, req.user.id, {
+          afterSeq: numberOrNull(afterSeq),
+          afterEventId: optionalString(afterEventId),
+          includeDebug: includeDebug === 'true',
+        })
+      : await this.buildReplayPackageFallback(id, req.user.id, {
+          afterSeq: numberOrNull(afterSeq),
+          afterEventId: optionalString(afterEventId),
+          includeDebug: includeDebug === 'true',
+        });
+    const evaluator = this.traceEval ?? new SocialCodexTraceEvalService();
+    return {
+      ...replay,
+      eval: evaluator.evaluate(replay.events),
+    };
   }
 
   /** GET /api/social-agent/tasks/:id */
@@ -400,10 +549,133 @@ export class SocialAgentTasksController {
       completedAt: task.completedAt,
     };
   }
+
+  private isSocialAgentEventV2(value: unknown): value is SocialAgentEventV2 {
+    if (!isRecord(value)) return false;
+    return (
+      typeof value.type === 'string' &&
+      typeof value.eventId === 'string' &&
+      typeof value.seq === 'number' &&
+      typeof value.threadId === 'string' &&
+      typeof value.runId === 'string' &&
+      typeof value.stage === 'string'
+    );
+  }
+
+  private async buildReplayPackageFallback(
+    taskId: number,
+    ownerUserId: number,
+    options: {
+      afterSeq?: number | null;
+      afterEventId?: string | null;
+      includeDebug?: boolean;
+    },
+  ) {
+    const rows = await this.eventRepo.find({
+      where: { taskId, ownerUserId },
+      order: { createdAt: 'ASC', id: 'ASC' },
+      take: 1000,
+    });
+    const allEvents = rows
+      .map((event) => event.payload?.socialAgentEventV2)
+      .filter((event): event is SocialAgentEventV2 =>
+        this.isSocialAgentEventV2(event),
+      )
+      .filter(
+        (event) =>
+          event.visibility === 'user_visible' ||
+          (event.visibility === 'debug_only' && options.includeDebug === true),
+      );
+    const events = this.filterReplayCursor(allEvents, options);
+    const last = events.at(-1) ?? null;
+    const terminalType =
+      [...allEvents]
+        .reverse()
+        .find(
+          (event) => event.type === 'run.completed' || event.type === 'run.failed',
+        )?.type ?? null;
+    return {
+      taskId,
+      threadId: last?.threadId ?? allEvents.at(-1)?.threadId ?? null,
+      runId: last?.runId ?? allEvents.at(-1)?.runId ?? null,
+      eventCount: allEvents.length,
+      returnedCount: events.length,
+      lastSeq: last?.seq ?? null,
+      lastEventId: last?.eventId ?? null,
+      terminalType,
+      pendingApproval: this.hasPendingApproval(allEvents),
+      events,
+    };
+  }
+
+  private filterReplayCursor(
+    events: SocialAgentEventV2[],
+    options: { afterSeq?: number | null; afterEventId?: string | null },
+  ) {
+    if (options.afterEventId) {
+      const index = events.findIndex(
+        (event) => event.eventId === options.afterEventId,
+      );
+      if (index >= 0) return events.slice(index + 1);
+    }
+    if (typeof options.afterSeq === 'number' && Number.isFinite(options.afterSeq)) {
+      return events.filter((event) => event.seq > Number(options.afterSeq));
+    }
+    return events;
+  }
+
+  private hasPendingApproval(events: SocialAgentEventV2[]) {
+    return events.some((event, index) => {
+      if (event.type !== 'approval.required') return false;
+      return !events
+        .slice(index + 1)
+        .some(
+          (candidate) =>
+            candidate.type === 'approval.resolved' &&
+            this.sameApprovalIdentity(event, candidate),
+        );
+    });
+  }
+
+  private sameApprovalIdentity(
+    required: SocialAgentEventV2,
+    resolved: SocialAgentEventV2,
+  ): boolean {
+    const requiredKey = this.approvalIdentity(required);
+    const resolvedKey = this.approvalIdentity(resolved);
+    return Boolean(requiredKey && resolvedKey && requiredKey === resolvedKey);
+  }
+
+  private approvalIdentity(event: SocialAgentEventV2): string | null {
+    const payload = isRecord(event.payload) ? event.payload : {};
+    const approvalId = this.stringOrNumber(payload.approvalId);
+    if (approvalId) return `approval:${approvalId}`;
+    const checkpointId =
+      this.stringOrNumber(payload.checkpointId) ??
+      (isRecord(payload.resumeCursor)
+        ? this.stringOrNumber(payload.resumeCursor.checkpointId)
+        : null);
+    if (checkpointId) return `checkpoint:${checkpointId}`;
+    const actionType = this.stringOrNumber(payload.actionType);
+    if (actionType) return `action:${actionType}`;
+    return null;
+  }
+
+  private stringOrNumber(value: unknown): string | null {
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    return null;
+  }
 }
 
 function optionalString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function numberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

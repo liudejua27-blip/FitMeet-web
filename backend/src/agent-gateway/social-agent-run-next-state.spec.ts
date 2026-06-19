@@ -64,12 +64,12 @@ describe('social-agent-run-next-state', () => {
   });
 
   it('maps next action execution result to the next pollable task state', () => {
-    expect(socialAgentRunNextActionState({ actionStatus: 'succeeded' })).toEqual(
-      {
-        status: AgentTaskStatus.WaitingReply,
-        statusReason: 'next_action_executed_waiting_reply',
-      },
-    );
+    expect(
+      socialAgentRunNextActionState({ actionStatus: 'succeeded' }),
+    ).toEqual({
+      status: AgentTaskStatus.WaitingReply,
+      statusReason: 'next_action_executed_waiting_reply',
+    });
 
     expect(socialAgentRunNextActionState({ actionStatus: 'blocked' })).toEqual({
       status: AgentTaskStatus.WaitingResult,

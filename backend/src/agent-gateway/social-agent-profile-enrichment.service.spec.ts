@@ -148,6 +148,51 @@ describe('SocialAgentProfileEnrichmentService', () => {
     expect(result.assistantMessage).toContain('已帮你把刚才的信息写入 AI 画像');
   });
 
+  it('persists extracted profile state before asking the user to save it', async () => {
+    const { service, taskRepo } = makeHarness();
+    const savedSnapshots: AgentTask[] = [];
+    taskRepo.save.mockImplementation((task: AgentTask) => {
+      savedSnapshots.push(JSON.parse(JSON.stringify(task)) as AgentTask);
+      return Promise.resolve(task);
+    });
+    const task = makeTask();
+
+    const result = await service.handleTurn({
+      ownerUserId: 7,
+      task,
+      message: '我是青岛大学男生，周末下午喜欢跑步',
+      intent: 'profile_enrichment',
+      buildMemoryContext: () => null,
+    });
+
+    expect(result).toMatchObject({
+      savedContext: true,
+      profileUpdated: false,
+      profileUpdateProposal: null,
+    });
+    expect(taskRepo.save).toHaveBeenCalledTimes(2);
+    expect(savedSnapshots[1].memory).toMatchObject({
+      pendingProfileEnrichment: {
+        extractedProfile: expect.objectContaining({
+          city: '青岛',
+          gender: '男',
+          interestTags: ['跑步'],
+        }),
+      },
+      taskMemory: {
+        currentTask: {
+          objective: 'profile_enrichment',
+          waitingFor: 'profile_save_or_more_profile_facts',
+          awaitingSearchConfirmation: true,
+          lastCompletedStep: 'profile_extracted',
+          state: 'profile_building',
+          stateReason: 'profile_detected',
+        },
+      },
+    });
+    expect(result.assistantMessage).toContain('先不直接搜索候选人');
+  });
+
   it('executes conversation brain read tools and records failures without throwing', async () => {
     const { executor, metrics, service } = makeHarness();
     const task = makeTask();

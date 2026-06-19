@@ -2,7 +2,18 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { cleanDisplayText } from '../common/display-text.util';
+import { AgentSelfImproveService } from './agent-self-improve.service';
 import { SocialAgentModelRouterService } from './social-agent-model-router.service';
+import { AgentObservabilityService } from './agent-observability.service';
+import {
+  readDeepSeekStreamedContent,
+  readDeepSeekSystemFingerprint,
+  readDeepSeekUsageMetrics,
+} from './deepseek-streaming.util';
+import {
+  DeepSeekStreamResult,
+  emptyDeepSeekStreamMetrics,
+} from './deepseek-latency.types';
 
 export interface SocialAgentFinalResponseInput {
   userMessage: string;
@@ -20,6 +31,11 @@ export interface SocialAgentFinalResponseInput {
   fallbackReply: string;
 }
 
+export interface SocialAgentFinalResponseGenerateOptions {
+  onDelta?: (delta: string) => void | Promise<void>;
+  signal?: AbortSignal | null;
+}
+
 @Injectable()
 export class SocialAgentFinalResponseService {
   private readonly logger = new Logger(SocialAgentFinalResponseService.name);
@@ -27,9 +43,14 @@ export class SocialAgentFinalResponseService {
   constructor(
     @Optional() private readonly config?: ConfigService,
     @Optional() private readonly modelRouter?: SocialAgentModelRouterService,
+    @Optional() private readonly selfImprove?: AgentSelfImproveService,
+    @Optional() private readonly observability?: AgentObservabilityService,
   ) {}
 
-  async generate(input: SocialAgentFinalResponseInput): Promise<string> {
+  async generate(
+    input: SocialAgentFinalResponseInput,
+    options: SocialAgentFinalResponseGenerateOptions = {},
+  ): Promise<string> {
     const fallback = cleanDisplayText(input.fallbackReply, '').trim();
     const apiKey = this.config?.get<string>('DEEPSEEK_API_KEY');
     if (!apiKey) return fallback;
@@ -41,10 +62,16 @@ export class SocialAgentFinalResponseService {
     const model = this.modelFor(useCase);
     const startedAt = Date.now();
     const controller = new AbortController();
+    const abortFromParent = () => controller.abort();
+    if (options.signal?.aborted) controller.abort();
+    options.signal?.addEventListener('abort', abortFromParent, { once: true });
     const timeout = setTimeout(
       () => controller.abort(),
       this.timeoutMs(useCase),
     );
+    let httpHeadersLatencyMs: number | null = null;
+    let streamResult: DeepSeekStreamResult | null = null;
+    let usageMetrics = emptyDeepSeekStreamMetrics(null);
 
     try {
       const response = await fetch(
@@ -60,10 +87,15 @@ export class SocialAgentFinalResponseService {
             model,
             temperature: this.modelRouter?.getTemperature(useCase) ?? 0.6,
             max_tokens: 700,
+            ...(options.onDelta ? { stream: true } : {}),
+            ...(options.onDelta
+              ? { stream_options: { include_usage: true } }
+              : {}),
+            thinking: { type: this.thinkingMode(useCase) },
             messages: [
               {
                 role: 'system',
-                content: this.systemPrompt(),
+                content: this.systemPrompt(await this.publishedPromptRules()),
               },
               {
                 role: 'user',
@@ -73,47 +105,111 @@ export class SocialAgentFinalResponseService {
           }),
         },
       );
+      httpHeadersLatencyMs = Date.now() - startedAt;
+      usageMetrics.httpHeadersLatencyMs = httpHeadersLatencyMs;
       if (!response.ok) throw new Error(`DeepSeek HTTP ${response.status}`);
-      const payload = (await response.json()) as Record<string, unknown>;
-      const answer = this.readContent(payload) || fallback;
+      streamResult = options.onDelta
+        ? await readDeepSeekStreamedContent({
+            response,
+            onDelta: options.onDelta,
+            startedAt,
+            httpHeadersLatencyMs,
+            firstChunkTimeoutMs: this.firstChunkTimeoutMs(useCase),
+            abortController: controller,
+          })
+        : null;
+      const jsonPayload = streamResult
+        ? null
+        : ((await response.json()) as Record<string, unknown>);
+      const answer =
+        streamResult?.content ?? this.readContent(jsonPayload ?? {});
+      usageMetrics =
+        streamResult ??
+        ({
+          ...usageMetrics,
+          ...readDeepSeekUsageMetrics(jsonPayload ?? {}),
+          systemFingerprint: readDeepSeekSystemFingerprint(jsonPayload ?? {}),
+        } satisfies typeof usageMetrics);
+      const latencyMs = Date.now() - startedAt;
       this.logModelCall({
         useCase,
         model,
         intent: input.intent ?? input.route?.intent,
         taskId: this.taskIdOf(input),
-        latencyMs: Date.now() - startedAt,
+        latencyMs,
         success: true,
       });
-      return answer;
+      this.observability?.recordLlmCall({
+        useCase,
+        model,
+        taskId: this.taskIdOf(input),
+        latencyMs,
+        firstTokenLatencyMs: streamResult?.firstTokenLatencyMs ?? null,
+        tokenCount: streamResult?.tokenCount ?? null,
+        httpHeadersLatencyMs,
+        firstSseChunkLatencyMs: usageMetrics.firstSseChunkLatencyMs,
+        firstReasoningDeltaLatencyMs: usageMetrics.firstReasoningDeltaLatencyMs,
+        firstContentDeltaLatencyMs: usageMetrics.firstContentDeltaLatencyMs,
+        promptTokens: usageMetrics.promptTokens,
+        promptCacheHitTokens: usageMetrics.promptCacheHitTokens,
+        promptCacheMissTokens: usageMetrics.promptCacheMissTokens,
+        completionTokens: usageMetrics.completionTokens,
+        reasoningTokens: usageMetrics.reasoningTokens,
+        systemFingerprint: usageMetrics.systemFingerprint,
+        success: true,
+      });
+      return answer || fallback;
     } catch (error) {
+      const latencyMs = Date.now() - startedAt;
+      const reason =
+        error instanceof Error && error.name === 'AbortError'
+          ? options.signal?.aborted
+            ? 'client_aborted'
+            : 'deepseek_timeout'
+          : error instanceof Error
+            ? error.message
+            : String(error);
       this.logModelCall({
         useCase,
         model,
         intent: input.intent ?? input.route?.intent,
         taskId: this.taskIdOf(input),
-        latencyMs: Date.now() - startedAt,
+        latencyMs,
         success: false,
-        reason:
-          error instanceof Error && error.name === 'AbortError'
-            ? 'deepseek_timeout'
-            : error instanceof Error
-              ? error.message
-              : String(error),
+        reason,
+      });
+      this.observability?.recordLlmCall({
+        useCase,
+        model,
+        taskId: this.taskIdOf(input),
+        latencyMs,
+        success: false,
+        httpHeadersLatencyMs,
+        firstSseChunkLatencyMs: usageMetrics.firstSseChunkLatencyMs,
+        firstReasoningDeltaLatencyMs: usageMetrics.firstReasoningDeltaLatencyMs,
+        firstContentDeltaLatencyMs: usageMetrics.firstContentDeltaLatencyMs,
+        failureReason: reason,
       });
       this.logger.warn(
         JSON.stringify({
           event: 'social_agent.final_response.deepseek_failed',
           message:
             error instanceof Error && error.name === 'AbortError'
-              ? 'deepseek_timeout'
+              ? options.signal?.aborted
+                ? 'client_aborted'
+                : 'deepseek_timeout'
               : error instanceof Error
                 ? error.message
                 : String(error),
         }),
       );
+      if (error instanceof Error && error.name === 'AbortError') {
+        if (options.signal?.aborted) throw new Error('client_aborted');
+      }
       return fallback;
     } finally {
       clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', abortFromParent);
     }
   }
 
@@ -124,13 +220,13 @@ export class SocialAgentFinalResponseService {
       userMessage: cleanDisplayText(input.userMessage, ''),
       intent: input.intent ?? input.route?.intent ?? null,
       route: input.route ?? null,
-      agentState: input.agentState ?? null,
       conversationHistory: input.conversationHistory ?? [],
       memoryContext: input.memoryContext ?? null,
       taskContext: input.taskContext ?? null,
       plannerDecision: input.plannerDecision ?? null,
       toolResults: input.toolResults ?? [],
       searchResults: input.searchResults ?? null,
+      agentState: input.agentState ?? null,
       safetyRules:
         input.safetyRules && input.safetyRules.length > 0
           ? input.safetyRules
@@ -140,8 +236,8 @@ export class SocialAgentFinalResponseService {
     };
   }
 
-  private systemPrompt(): string {
-    return [
+  private systemPrompt(publishedRules: string[] = []): string {
+    const baseRules = [
       '你是 FitMeet Agent 的第 7 层 Final Response Generator。',
       '你只负责把用户消息、对话上下文、Planner 计划、工具结果、记忆和安全规则整合成自然中文回复。',
       '无论前面是普通聊天、画像保存、搜索结果、候选人操作还是活动规划，都要基于输入事实统一生成最终回复。',
@@ -150,8 +246,27 @@ export class SocialAgentFinalResponseService {
       '如果工具已经成功执行，可以明确说已完成；如果工具需要用户确认，只能说等待确认，不能说已经发送、连接或创建。',
       '如果搜索结果为空，要自然说明没有找到，并给出一个可执行的下一步，例如放宽条件、补充时间或发布需求。',
       '如果画像已更新，要区分已写入字段、补充记忆字段和仍缺失的信息，并用一个简短问题推进下一步。',
+      '默认使用非 thinking 快速回答；只有输入里明确有复杂推理证据时才展开步骤，但不要把推理过程输出给用户。',
       '回复要像豆包/GPT 一样自然、具体、克制，不要像模板；优先使用 1-2 段，必要时使用简短列表。',
-    ].join('\n');
+    ];
+    if (publishedRules.length > 0) {
+      baseRules.push(
+        '以下是经过人审发布的 FitMeet Agent 自我改进规则，必须遵守：',
+        ...publishedRules.map((rule) => `- ${rule}`),
+      );
+    }
+    return baseRules.join('\n');
+  }
+
+  private async publishedPromptRules(): Promise<string[]> {
+    if (!this.selfImprove) return [];
+    try {
+      return await this.selfImprove.publishedPromptRules(
+        'final_response.system_prompt',
+      );
+    } catch {
+      return [];
+    }
   }
 
   private defaultSafetyRules(): string[] {
@@ -176,7 +291,7 @@ export class SocialAgentFinalResponseService {
       this.config?.get<string>('AGENT_FINAL_RESPONSE_MODEL') ||
       this.config?.get<string>('DEEPSEEK_CHAT_MODEL') ||
       this.chatCompatibleLegacyModel() ||
-      'deepseek-v4-pro'
+      'deepseek-v4-flash'
     );
   }
 
@@ -195,6 +310,35 @@ export class SocialAgentFinalResponseService {
     );
     if (!Number.isFinite(configured) || configured <= 0) return 5000;
     return configured;
+  }
+
+  private firstChunkTimeoutMs(useCase: 'final_response'): number {
+    if (this.modelRouter) return this.modelRouter.getFirstChunkTimeout(useCase);
+    const configured = Number(
+      this.config?.get<string>(
+        'SOCIAL_AGENT_FINAL_RESPONSE_FIRST_CHUNK_TIMEOUT_MS',
+      ) ??
+        this.config?.get<string>(
+          'SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS',
+        ) ??
+        '3500',
+    );
+    if (!Number.isFinite(configured) || configured <= 0) return 3500;
+    return configured;
+  }
+
+  private thinkingMode(useCase: 'final_response'): 'disabled' | 'enabled' {
+    if (this.modelRouter) return this.modelRouter.getThinkingMode(useCase);
+    const value = `${
+      this.config?.get<string>('SOCIAL_AGENT_FINAL_RESPONSE_THINKING') ??
+      this.config?.get<string>('SOCIAL_AGENT_DEEPSEEK_THINKING') ??
+      ''
+    }`
+      .trim()
+      .toLowerCase();
+    return ['enabled', 'true', '1', 'yes'].includes(value)
+      ? 'enabled'
+      : 'disabled';
   }
 
   private taskIdOf(input: SocialAgentFinalResponseInput): number | null {

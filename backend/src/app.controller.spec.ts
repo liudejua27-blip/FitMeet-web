@@ -10,6 +10,7 @@ import {
   PublicSocialIntentController,
 } from './agent-gateway/agent-gateway.controller';
 import { SocialAgentChatController } from './agent-gateway/social-agent-chat.controller';
+import { SocialAgentReminderController } from './agent-gateway/social-agent-reminder.controller';
 import { SocialAgentTasksController } from './agent-gateway/social-agent-tasks.controller';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -30,6 +31,7 @@ const APP_CORE_CONTROLLERS = [
   AgentUserController,
   PublicSocialIntentController,
   SocialAgentChatController,
+  SocialAgentReminderController,
   SocialAgentTasksController,
   UploadsController,
 ] as const;
@@ -79,10 +81,25 @@ const WEB_APP_REQUIRED_PATHS = {
   '/social-agent/tasks/{taskId}/timeline': 'get',
   '/social-agent/tasks/{taskId}/events': 'get',
   '/social-agent/tasks/{taskId}/replan': 'post',
+  '/social-agent/reminders': 'get',
+  '/social-agent/reminders/preferences': ['get', 'patch'],
+  '/social-agent/reminders/run-once': 'post',
+  '/social-agent/reminders/{id}/open': 'post',
+  '/social-agent/reminders/{id}/dismiss': 'post',
   '/social-agent/chat/tasks/{taskId}/publish-social-request': 'post',
   '/social-agent/chat/tasks/{taskId}/replan-run': 'post',
   '/social-agent/chat/tasks/{taskId}/append-context': 'post',
   '/social-agent/chat/tasks/{taskId}/actions': 'post',
+  '/social-agent/chat/tasks/{taskId}/actions/stream': 'post',
+  '/social-agent/chat/checkpoints/{checkpointId}/resume/stream': 'post',
+  '/social-agent/chat/checkpoints/{checkpointId}/replay/stream': 'post',
+  '/social-agent/chat/checkpoints/{checkpointId}/fork/stream': 'post',
+  '/social-agent/chat/checkpoints/{checkpointId}/steps/{stepId}/retry/stream':
+    'post',
+  '/social-agent/chat/checkpoints/{checkpointId}/steps/{stepId}/replay/stream':
+    'post',
+  '/social-agent/chat/checkpoints/{checkpointId}/steps/{stepId}/fork/stream':
+    'post',
   '/agents/inbox/conversations': 'get',
   '/agents/inbox/conversations/{conversationId}/messages': 'get',
   '/agents/inbox/events': 'get',
@@ -95,6 +112,21 @@ const WEB_APP_REQUIRED_PATHS = {
   '/agents/profile-matches/{id}/confirm-contact': 'post',
   '/agents/profile-matches/{id}/request-contact-exchange': 'post',
   '/agents/profile-matches/{id}/send-intro': 'post',
+} as const;
+
+const CHECKPOINT_STREAM_OPERATION_IDS = {
+  '/social-agent/chat/checkpoints/{checkpointId}/resume/stream':
+    'socialAgentResumeCheckpointStream',
+  '/social-agent/chat/checkpoints/{checkpointId}/replay/stream':
+    'socialAgentReplayCheckpointStream',
+  '/social-agent/chat/checkpoints/{checkpointId}/fork/stream':
+    'socialAgentForkCheckpointStream',
+  '/social-agent/chat/checkpoints/{checkpointId}/steps/{stepId}/retry/stream':
+    'socialAgentRetryCheckpointStepStream',
+  '/social-agent/chat/checkpoints/{checkpointId}/steps/{stepId}/replay/stream':
+    'socialAgentReplayCheckpointStepStream',
+  '/social-agent/chat/checkpoints/{checkpointId}/steps/{stepId}/fork/stream':
+    'socialAgentForkCheckpointStepStream',
 } as const;
 
 const IOS_CORE_ENDPOINT_REGISTRY_PATH = resolve(
@@ -151,6 +183,11 @@ describe('AppController', () => {
         status: 'ok',
         uptime: expect.any(Number),
         timestamp: expect.any(String),
+        release: {
+          commit: expect.any(String),
+          source: expect.any(String),
+          builtAt: null,
+        },
       });
     });
 
@@ -159,6 +196,11 @@ describe('AppController', () => {
         status: 'ok',
         uptime: expect.any(Number),
         timestamp: expect.any(String),
+        release: {
+          commit: expect.any(String),
+          source: expect.any(String),
+          builtAt: null,
+        },
         checks: {
           postgres: { status: 'ok', latencyMs: expect.any(Number) },
           mongo: { status: 'ok', latencyMs: expect.any(Number) },
@@ -238,9 +280,16 @@ describe('AppController', () => {
           '/social-agent/chat/tasks/{taskId}/replan-run',
           '/social-agent/chat/tasks/{taskId}/append-context',
           '/social-agent/chat/tasks/{taskId}/actions',
+          '/social-agent/chat/tasks/{taskId}/actions/stream',
           '/social-agent/chat/tasks/{taskId}/save-candidate',
           '/social-agent/chat/tasks/{taskId}/send-message',
           '/social-agent/chat/tasks/{taskId}/connect-candidate',
+          '/social-agent/chat/checkpoints/{checkpointId}/resume/stream',
+          '/social-agent/chat/checkpoints/{checkpointId}/replay/stream',
+          '/social-agent/chat/checkpoints/{checkpointId}/fork/stream',
+          '/social-agent/chat/checkpoints/{checkpointId}/steps/{stepId}/retry/stream',
+          '/social-agent/chat/checkpoints/{checkpointId}/steps/{stepId}/replay/stream',
+          '/social-agent/chat/checkpoints/{checkpointId}/steps/{stepId}/fork/stream',
           '/social-agent/tasks/current',
           '/social-agent/tasks/{taskId}/timeline',
           '/social-agent/tasks/{taskId}/events',
@@ -338,13 +387,58 @@ describe('AppController', () => {
       const contract = appController.getFitMeetCoreOpenApi();
       const controllerRoutes = collectControllerRoutes(APP_CORE_CONTROLLERS);
 
-      for (const [path, method] of Object.entries(WEB_APP_REQUIRED_PATHS)) {
-        const openApiOperation = contract.paths[path][method];
-        expect(openApiOperation).toBeDefined();
-        expect(controllerRoutes).toContainEqual({
-          method,
-          path: normalizePathParams(path),
-        });
+      for (const [path, methodOrMethods] of Object.entries(
+        WEB_APP_REQUIRED_PATHS,
+      )) {
+        const methods = Array.isArray(methodOrMethods)
+          ? methodOrMethods
+          : [methodOrMethods];
+
+        for (const method of methods) {
+          const openApiOperation = contract.paths[path][method];
+          expect(openApiOperation).toBeDefined();
+          expect(controllerRoutes).toContainEqual({
+            method,
+            path: normalizePathParams(path),
+          });
+        }
+      }
+    });
+
+    it('documents checkpoint recovery endpoints as authenticated SSE operations', () => {
+      const contract = appController.getFitMeetCoreOpenApi();
+
+      for (const [path, operationId] of Object.entries(
+        CHECKPOINT_STREAM_OPERATION_IDS,
+      )) {
+        const operation = contract.paths[path].post;
+        expect(operation.operationId).toBe(operationId);
+        expect(operation.tags).toContain('social-agent-chat');
+        expect(operation.security).toEqual([{ bearerAuth: [] }]);
+        expect(operation.responses['200'].content).toHaveProperty(
+          'text/event-stream',
+        );
+        expect(operation.parameters).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              name: 'checkpointId',
+              in: 'path',
+              required: true,
+            }),
+          ]),
+        );
+
+        if (path.includes('/steps/{stepId}/')) {
+          expect(operation.parameters).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                name: 'stepId',
+                in: 'path',
+                required: true,
+              }),
+            ]),
+          );
+        }
       }
     });
 
@@ -1035,6 +1129,13 @@ describe('AppController', () => {
         $ref: '#/components/schemas/SocialAgentReplanResult',
       });
       expect(
+        contract.paths['/social-agent/tasks/{taskId}/run-next'].post.responses[
+          '200'
+        ].content['application/json'].schema,
+      ).toEqual({
+        $ref: '#/components/schemas/SocialAgentRunNextResult',
+      });
+      expect(
         contract.paths[
           '/social-agent/chat/tasks/{taskId}/publish-social-request'
         ].post.requestBody.content['application/json'].schema,
@@ -1072,6 +1173,42 @@ describe('AppController', () => {
       ).toEqual({
         $ref: '#/components/responses/UserFacingAgentResponse',
       });
+      expect(
+        contract.components.schemas.SocialAgentCardActionInput.properties
+          .action,
+      ).toMatchObject({
+        type: 'string',
+        enum: expect.arrayContaining([
+          'activity.upload_proof',
+          'activity.view_detail',
+          'life_graph.accept_update',
+          'life_graph.reject_update',
+        ]),
+      });
+      expect(
+        contract.components.schemas.UserFacingAgentResponse.properties.cards
+          .items,
+      ).toEqual({ $ref: '#/components/schemas/FitMeetAlphaCard' });
+      expect(
+        contract.components.schemas.FitMeetAlphaCard.properties.type,
+      ).toEqual({ $ref: '#/components/schemas/FitMeetAlphaCardType' });
+      expect(contract.components.schemas.FitMeetAlphaCardType.enum).toEqual(
+        expect.arrayContaining(['activity_status', 'profile_proposal']),
+      );
+      expect(
+        contract.components.schemas.FitMeetAlphaCardAction.properties.action
+          .enum,
+      ).toEqual(expect.arrayContaining(['view_activity', 'upload_proof']));
+      expect(
+        contract.components.schemas.FitMeetAlphaCardAction.properties
+          .schemaAction,
+      ).toEqual({ $ref: '#/components/schemas/FitMeetAgentSchemaAction' });
+      expect(contract.components.schemas.FitMeetAgentSchemaAction.enum).toEqual(
+        expect.arrayContaining([
+          'activity.upload_proof',
+          'activity.view_detail',
+        ]),
+      );
       expect(contract.components.schemas.SocialAgentReplanInput).toMatchObject({
         required: ['userMessage'],
         properties: {
@@ -1087,6 +1224,14 @@ describe('AppController', () => {
           },
         },
       });
+      expect(
+        contract.components.schemas.SocialAgentRunNextResult.properties.cards
+          .items,
+      ).toEqual({ $ref: '#/components/schemas/FitMeetAlphaCard' });
+      expect(
+        contract.components.schemas.SocialAgentRunNextResult.properties
+          .handledReply,
+      ).toEqual({ type: 'boolean' });
       expect(
         contract.components.schemas.SocialAgentPublishResult,
       ).toMatchObject({
@@ -1139,7 +1284,10 @@ function collectControllerRoutes(
     const controllerPaths = toPathArray(
       Reflect.getMetadata(PATH_METADATA, controller),
     );
-    const prototype = controller.prototype as Record<string, unknown>;
+    const prototype = controller.prototype as unknown as Record<
+      string,
+      unknown
+    >;
 
     return Object.getOwnPropertyNames(prototype).flatMap((propertyKey) => {
       const handler = prototype[propertyKey];

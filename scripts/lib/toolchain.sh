@@ -21,3 +21,11 @@ fitmeet_bootstrap_toolchain() {
   fitmeet_prepend_path_dir "${FITMEET_PNPM_BIN_DIR:-}"
   fitmeet_prepend_path_dir "/Users/liuchongjiang/Library/pnpm"
 }
+
+fitmeet_activate_pnpm() {
+  local pnpm_version="${FITMEET_PNPM_VERSION:-10.30.3}"
+  if command -v corepack >/dev/null 2>&1; then
+    corepack enable
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare "pnpm@${pnpm_version}" --activate
+  fi
+}

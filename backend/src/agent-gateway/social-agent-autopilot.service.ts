@@ -7,6 +7,7 @@ import {
   MessagesService,
   RecentAgentConversationSignal,
 } from '../messages/messages.service';
+import { shouldRunBackgroundJobs } from '../common/process-role.util';
 import {
   UserSocialRequest,
   UserSocialRequestStatus,
@@ -103,6 +104,7 @@ export class SocialAgentAutopilotService {
 
   @Cron('*/10 * * * * *')
   async onCron(): Promise<void> {
+    if (!shouldRunBackgroundJobs()) return;
     if (!isEnabled()) return;
     const intervalMs = configuredIntervalMs();
     if (
@@ -400,6 +402,7 @@ export class SocialAgentAutopilotService {
     try {
       const fresh = await this.taskRepo.findOne({ where: { id: task.id } });
       if (!fresh) return;
+      if (this.isTerminalTaskStatus(fresh.status)) return;
 
       if (
         fresh.status !== AgentTaskStatus.WaitingReply &&
@@ -436,6 +439,14 @@ export class SocialAgentAutopilotService {
         reason: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  private isTerminalTaskStatus(status: AgentTaskStatus): boolean {
+    return [
+      AgentTaskStatus.Succeeded,
+      AgentTaskStatus.Failed,
+      AgentTaskStatus.Cancelled,
+    ].includes(status);
   }
 
   private async findTaskFromSignal(

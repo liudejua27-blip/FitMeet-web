@@ -1,4 +1,10 @@
-import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+  forwardRef,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -27,6 +33,7 @@ import {
   UserSocialRequest,
   UserSocialRequestStatus,
 } from '../social-requests/social-request.entity';
+import { SocialRequestsService } from '../social-requests/social-requests.service';
 import {
   SocialRequestCandidate,
   SocialRequestCandidateStatus,
@@ -38,6 +45,7 @@ import {
 import { SendMessageDto } from './dto/agent-gateway.dto';
 import { User } from '../users/user.entity';
 import { Follow } from '../friends/follow.entity';
+import { AgentL5RuntimeService } from './agent-l5-runtime.service';
 
 /**
  * Replays the underlying real action of an approved AgentApprovalRequest.
@@ -103,6 +111,11 @@ export class AgentApprovalDispatcherService {
     private readonly messagesGateway: MessagesGateway,
     private readonly notifications: NotificationsService,
     private readonly actionLogs: AgentActionLogService,
+    @Optional()
+    @Inject(forwardRef(() => SocialRequestsService))
+    private readonly socialRequests?: SocialRequestsService,
+    @Optional()
+    private readonly l5Runtime?: AgentL5RuntimeService,
   ) {}
 
   /**
@@ -167,12 +180,25 @@ export class AgentApprovalDispatcherService {
         case ApprovalType.ContactRequest:
         case ApprovalType.ContactExchange: {
           const p = approval.payload;
-          if (approval.actionType === 'add_friend') {
+          if (
+            approval.actionType === 'add_friend' ||
+            approval.actionType === 'connect_candidate'
+          ) {
             const targetUserId = p.targetUserId as number | undefined;
             if (!targetUserId) {
               throw new Error('AddFriend payload missing targetUserId');
             }
-            await this.ensureFollowing(approval.userId, targetUserId);
+            const friend = await this.ensureFollowing(
+              approval.userId,
+              targetUserId,
+            );
+            const friendRequestId = this.friendRequestId(friend);
+            const conversation = await this.openApprovedCandidateConversation(
+              approval,
+              targetUserId,
+              p,
+            );
+            await this.advanceSocialRequestAfterConnection(approval);
             await this.writeLog(
               approval,
               conn,
@@ -182,6 +208,8 @@ export class AgentApprovalDispatcherService {
                 agentTaskId: approval.agentTaskId,
                 targetUserId,
                 actionType: 'add_friend',
+                friendRequestId,
+                conversationId: conversation.conversationId,
               },
               ActionResult.Success,
             );
@@ -191,10 +219,30 @@ export class AgentApprovalDispatcherService {
               AgentActionStatus.Executed,
               {
                 outputSummary: 'add_friend_dispatched',
-                payload: { targetUserId, actionType: 'add_friend' },
+                payload: {
+                  targetUserId,
+                  actionType: 'add_friend',
+                  friendRequestId,
+                  conversationId: conversation.conversationId,
+                  openedConversation: conversation.opened,
+                  idempotencyKey: this.text(p.idempotencyKey),
+                  source: this.text(p.source),
+                },
               },
             );
-            return { ok: true, result: { following: true, targetUserId } };
+            return {
+              ok: true,
+              result: {
+                following: true,
+                targetUserId,
+                friendRequestId,
+                conversationId: conversation.conversationId,
+                openedConversation: conversation.opened,
+                socialRequestId: approval.relatedSocialRequestId,
+                candidateRecordId: approval.relatedCandidateId,
+                idempotencyKey: this.text(p.idempotencyKey),
+              },
+            };
           }
           if (!conn) {
             throw new Error(
@@ -239,6 +287,7 @@ export class AgentApprovalDispatcherService {
             throw new Error('CreateActivity payload missing `type` field');
           }
           const activity = await this.activities.create(approval.userId, dto);
+          await this.transitionApprovedActivityMeetLoop(approval, activity);
           await this.writeLog(
             approval,
             conn,
@@ -295,6 +344,48 @@ export class AgentApprovalDispatcherService {
           return { ok: true, result: activity };
         }
 
+        case ApprovalType.PostPublish: {
+          if (!this.socialRequests) {
+            throw new Error('SocialRequestsService unavailable for PostPublish');
+          }
+          const p = approval.payload;
+          const socialRequestId = this.number(
+            p.socialRequestId ?? p.requestId ?? p.id,
+          );
+          if (!socialRequestId) {
+            throw new Error('PostPublish payload missing socialRequestId');
+          }
+          const intent = await this.socialRequests.syncPublicIntentById(
+            socialRequestId,
+            approval.userId,
+          );
+          await this.writeLog(
+            approval,
+            conn,
+            LoggedAction.CreateSocialRequest,
+            {
+              approvalId: approval.id,
+              agentTaskId: approval.agentTaskId,
+              socialRequestId,
+              publicIntentId: this.text(intent?.id),
+            },
+            ActionResult.Success,
+          );
+          await this.writeActionLog(
+            approval,
+            conn,
+            AgentActionStatus.Executed,
+            {
+              outputSummary: 'post_publish_dispatched',
+              payload: {
+                socialRequestId,
+                publicIntentId: this.text(intent?.id),
+              },
+            },
+          );
+          return { ok: true, result: intent };
+        }
+
         case ApprovalType.SubmitCompletionProof:
         case ApprovalType.PhotoUpload: {
           const p = approval.payload;
@@ -339,6 +430,41 @@ export class AgentApprovalDispatcherService {
         }
 
         default: {
+          if (approval.actionType === 'mark_candidate_messaged') {
+            await this.advanceSocialRequestAfterMessage(approval);
+            await this.writeLog(
+              approval,
+              conn,
+              LoggedAction.ConfirmSocialRequestCandidate,
+              {
+                approvalId: approval.id,
+                agentTaskId: approval.agentTaskId,
+                socialRequestId: approval.relatedSocialRequestId,
+                candidateRecordId: approval.relatedCandidateId,
+              },
+              ActionResult.Success,
+            );
+            await this.writeActionLog(
+              approval,
+              conn,
+              AgentActionStatus.Executed,
+              {
+                outputSummary: 'mark_candidate_messaged_dispatched',
+                payload: {
+                  socialRequestId: approval.relatedSocialRequestId,
+                  candidateRecordId: approval.relatedCandidateId,
+                },
+              },
+            );
+            return {
+              ok: true,
+              result: {
+                socialRequestId: approval.relatedSocialRequestId,
+                candidateRecordId: approval.relatedCandidateId,
+                status: SocialRequestCandidateStatus.Messaged,
+              },
+            };
+          }
           this.logger.log(
             `Approval ${approval.id} type=${approval.type} has no auto-dispatch path; treated as no-op.`,
           );
@@ -464,11 +590,57 @@ export class AgentApprovalDispatcherService {
     const existing = await this.followRepo.findOne({
       where: { followerId, followingId },
     });
-    if (!existing) {
-      await this.followRepo.save(
-        this.followRepo.create({ followerId, followingId }),
-      );
+    if (existing) return existing;
+    return this.followRepo.save(
+      this.followRepo.create({ followerId, followingId }),
+    );
+  }
+
+  private async openApprovedCandidateConversation(
+    approval: AgentApprovalRequest,
+    targetUserId: number,
+    payload: Record<string, unknown>,
+  ): Promise<{ opened: boolean; conversationId: string | null }> {
+    if (payload.openConversation !== true) {
+      return { opened: false, conversationId: null };
     }
+    const metadata = this.record(payload.metadata);
+    const conversation = await this.messages.startConversation(
+      approval.userId,
+      targetUserId,
+      {
+        agentConnectionId: approval.agentConnectionId ?? undefined,
+        ownerUserId: approval.userId,
+        actorUserId: approval.userId,
+        metadata: {
+          ...metadata,
+          source: 'approval_dispatch',
+          actorType: 'agent',
+          approvalRequestId: approval.id,
+          agentTaskId: approval.agentTaskId,
+          targetUserId,
+          candidateRecordId: approval.relatedCandidateId,
+          socialRequestId: approval.relatedSocialRequestId,
+          idempotencyKey: this.text(payload.idempotencyKey),
+          opportunityId: this.text(payload.opportunityId),
+          resumeMode: this.text(payload.resumeMode),
+          checkpointRequired: payload.checkpointRequired === true,
+        },
+      },
+    );
+    return {
+      opened: true,
+      conversationId: String(conversation.conversationId),
+    };
+  }
+
+  private friendRequestId(friend: unknown): string | null {
+    const record = this.record(friend);
+    const value = record.friendRequestId ?? record.followId ?? record.id;
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+    return this.text(value);
   }
 
   private async advanceSocialRequestAfterMessage(
@@ -486,6 +658,97 @@ export class AgentApprovalDispatcherService {
         { status: UserSocialRequestStatus.Chatting },
       );
     }
+  }
+
+  private async advanceSocialRequestAfterConnection(
+    approval: AgentApprovalRequest,
+  ) {
+    if (approval.relatedCandidateId) {
+      await this.socialCandidateRepo.update(
+        { id: approval.relatedCandidateId },
+        { status: SocialRequestCandidateStatus.Approved },
+      );
+    }
+    if (approval.relatedSocialRequestId) {
+      await this.socialRequestRepo.update(
+        { id: approval.relatedSocialRequestId, userId: approval.userId },
+        { status: UserSocialRequestStatus.Chatting },
+      );
+    }
+  }
+
+  private record(value: unknown): Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
+  private text(value: unknown): string | null {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed || null;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+    return null;
+  }
+
+  private number(value: unknown): number | null {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) && numberValue > 0
+      ? numberValue
+      : null;
+  }
+
+  private async transitionApprovedActivityMeetLoop(
+    approval: AgentApprovalRequest,
+    activity: unknown,
+  ) {
+    if (!this.l5Runtime || !approval.agentTaskId) return;
+    const payload = this.record(approval.payload);
+    const activityRecord = this.record(activity);
+    await this.l5Runtime.transitionMeetLoop({
+      ownerUserId: approval.userId,
+      agentTaskId: approval.agentTaskId,
+      activityId:
+        this.number(activityRecord.id) ??
+        this.number(payload.activityId) ??
+        approval.relatedActivityId ??
+        null,
+      candidateUserId:
+        this.number(activityRecord.invitedUserId) ??
+        this.number(payload.candidateUserId) ??
+        this.number(payload.targetUserId) ??
+        this.number(payload.invitedUserId) ??
+        null,
+      stage: 'activity_confirmed',
+      waitingFor: 'activity_check_in',
+      state: {
+        source: 'approval_dispatch',
+        approvalId: approval.id,
+        actionType: approval.actionType,
+        approvalType: approval.type,
+        activityId:
+          this.number(activityRecord.id) ??
+          this.number(payload.activityId) ??
+          approval.relatedActivityId ??
+          null,
+        candidateUserId:
+          this.number(activityRecord.invitedUserId) ??
+          this.number(payload.candidateUserId) ??
+          this.number(payload.targetUserId) ??
+          this.number(payload.invitedUserId) ??
+          null,
+        status: 'activity_confirmed',
+        loopStage: 'activity_confirmed',
+        publicPlaceOnly: payload.publicPlaceOnly === true,
+        noPreciseLocation: payload.noPreciseLocation === true,
+        idempotencyKey: this.text(payload.idempotencyKey),
+        resumeMode: this.text(payload.resumeMode) ?? 'resume_after_approval',
+      },
+      review: null,
+    });
   }
 
   private async writeLog(

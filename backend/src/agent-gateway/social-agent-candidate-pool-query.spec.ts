@@ -39,6 +39,7 @@ describe('buildCandidatePoolResolvedQuery', () => {
       locationPreference: '青岛大学',
       socialRequestId: 301,
       rawText: '青岛周末上午跑步搭子',
+      acceptsStrangers: null,
     });
   });
 
@@ -66,6 +67,7 @@ describe('buildCandidatePoolResolvedQuery', () => {
       timePreference: '周末',
       socialRequestId: 302,
       rawText: '上海周末咖啡摄影局',
+      acceptsStrangers: null,
     });
     expect(query.interestTags).toEqual(
       expect.arrayContaining(['咖啡', '摄影', '拍照']),
@@ -85,6 +87,29 @@ describe('buildCandidatePoolResolvedQuery', () => {
     expect(query.interestTags).toEqual(
       expect.arrayContaining(['跑步', '咖啡']),
     );
+    expect(query.acceptsStrangers).toBeNull();
+  });
+
+  it('carries explicit stranger policy into the resolved query', () => {
+    expect(
+      buildCandidatePoolResolvedQuery({
+        query: {
+          ownerUserId: 1,
+          rawText: '青岛周末跑步，只推荐熟人，不接受陌生人',
+        },
+        socialRequestId: null,
+      }).acceptsStrangers,
+    ).toBe(false);
+
+    expect(
+      buildCandidatePoolResolvedQuery({
+        query: {
+          ownerUserId: 1,
+          rawText: '青岛周末跑步，接受陌生人，先站内聊',
+        },
+        socialRequestId: null,
+      }).acceptsStrangers,
+    ).toBe(true);
   });
 
   it('normalizes candidate pool arrays and unique text consistently', () => {

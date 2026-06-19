@@ -25,7 +25,7 @@ export const heroCopy = {
       {
         titleZh: '进入 FitMeet',
         titleEn: 'ENTER FITMEET',
-        href: '/human',
+        href: '/discover',
         variant: 'primary',
       },
       {
@@ -80,7 +80,7 @@ export const heroCopy = {
       {
         titleZh: 'Enter',
         titleEn: 'ENTER FITMEET',
-        href: '/human',
+        href: '/discover',
         variant: 'primary',
       },
       {

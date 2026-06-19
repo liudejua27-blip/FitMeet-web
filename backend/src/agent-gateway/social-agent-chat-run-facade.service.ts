@@ -5,6 +5,7 @@ import type {
   SocialAgentAsyncRunSnapshot,
   SocialAgentChatRunBody,
   SocialAgentChatRunResult,
+  SocialAgentStreamOptions,
   StreamEmit,
 } from './social-agent-chat.types';
 import { SocialAgentQueuedRunService } from './social-agent-queued-run.service';
@@ -29,8 +30,9 @@ export class SocialAgentChatRunFacadeService {
     ownerUserId: number,
     body: SocialAgentChatRunBody,
     emit: StreamEmit,
+    options: SocialAgentStreamOptions = {},
   ): Promise<SocialAgentChatRunResult> {
-    return this.runOrchestrator.run(ownerUserId, body, emit);
+    return this.runOrchestrator.run(ownerUserId, body, emit, options);
   }
 
   runQueued(

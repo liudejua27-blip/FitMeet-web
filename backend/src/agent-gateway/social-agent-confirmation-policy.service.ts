@@ -13,15 +13,7 @@ export class SocialAgentConfirmationPolicyService {
   ) {}
 
   hasUserApproval(input: Record<string, unknown>): boolean {
-    if (this.number(input.approvalId) || this.number(input.approvalRequestId)) {
-      return true;
-    }
-    const metadata = this.isRecord(input.metadata) ? input.metadata : {};
-    return (
-      this.bool(input.userConfirmed) ||
-      this.bool(input.confirmedByUser) ||
-      this.string(metadata.confirmationSource) === 'social_agent_chat'
-    );
+    return this.hasExplicitApprovalCredential(input);
   }
 
   hasExplicitApprovalCredential(input: Record<string, unknown>): boolean {
@@ -77,6 +69,9 @@ export class SocialAgentConfirmationPolicyService {
     input: Record<string, unknown>,
   ): Promise<void> {
     if (
+      toolName !== SocialAgentToolName.SendMessage &&
+      toolName !== SocialAgentToolName.SendMessageToCandidate &&
+      toolName !== SocialAgentToolName.ReplyMessage &&
       toolName !== SocialAgentToolName.ConnectCandidate &&
       toolName !== SocialAgentToolName.AddFriend
     ) {

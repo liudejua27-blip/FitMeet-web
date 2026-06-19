@@ -1,14 +1,30 @@
 import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode } from 'react';
+import type { LinkProps } from 'react-router-dom';
 import clsx from 'clsx';
+import { SiteLink } from '../navigation/SiteLink';
 
-type PremiumButtonProps = {
+type PremiumButtonBaseProps = {
   children: ReactNode;
   variant?: 'primary' | 'secondary' | 'ghost';
   className?: string;
-} & (
-  | ({ href: string } & AnchorHTMLAttributes<HTMLAnchorElement>)
-  | ({ href?: undefined } & ButtonHTMLAttributes<HTMLButtonElement>)
-);
+};
+
+type PremiumAnchorProps = PremiumButtonBaseProps & {
+  href: string;
+  to?: undefined;
+} & AnchorHTMLAttributes<HTMLAnchorElement>;
+
+type PremiumLinkProps = PremiumButtonBaseProps & {
+  to: string;
+  href?: undefined;
+} & Omit<LinkProps, 'to'>;
+
+type PremiumButtonOnlyProps = PremiumButtonBaseProps & {
+  to?: undefined;
+  href?: undefined;
+} & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'type'>;
+
+type PremiumButtonProps = PremiumAnchorProps | PremiumLinkProps | PremiumButtonOnlyProps;
 
 export function PremiumButton({
   children,
@@ -51,10 +67,15 @@ export function PremiumButton({
     );
   }
 
+  if ('to' in props && props.to) {
+    const { to, ...linkProps } = props as PremiumLinkProps;
+    return (
+      <SiteLink to={to} className={classes} {...linkProps}>
+        {content}
+      </SiteLink>
+    );
+  }
+
   const buttonProps = props as ButtonHTMLAttributes<HTMLButtonElement>;
-  return (
-    <button className={classes} {...buttonProps} type={buttonProps.type ?? 'button'}>
-      {content}
-    </button>
-  );
+  return <button className={classes} {...buttonProps} type={buttonProps.type ?? 'button'}>{content}</button>;
 }

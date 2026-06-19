@@ -1,5 +1,6 @@
 import { heroCopy, type HeroLanguage } from '@/data/heroCopy';
 import { LanguageToggle } from './LanguageToggle';
+import { SiteLink } from '@/components/navigation/SiteLink';
 
 type HeroNavigationProps = {
   currentLang: HeroLanguage;
@@ -13,21 +14,23 @@ export function HeroNavigation({ currentLang, onLanguageChange }: HeroNavigation
     ['#gateways', nav.ecosystem],
     ['#gateways', nav.gateway],
     ['#symbiosis', nav.symbiosis],
-    ['/human', nav.enter],
+    ['/discover', nav.enter],
   ] as const;
 
   return (
     <header className="hero-nav">
       <nav className="hero-nav__inner" aria-label="FitMeet universe navigation">
         <a href="#top" className="hero-nav__brand" aria-label="FitMeet home">
-          <span className="hero-nav__mark">F</span>
+          <span className="hero-nav__mark" aria-hidden="true">
+            <img src="/favicon-192.png" alt="" width="36" height="36" />
+          </span>
           <span>FitMeet</span>
         </a>
         <div className="hero-nav__links">
           {items.map(([href, label]) => (
-            <a key={`${href}-${label}`} href={href}>
+            <SiteLink key={`${href}-${label}`} to={href}>
               {label}
-            </a>
+            </SiteLink>
           ))}
         </div>
         <LanguageToggle currentLang={currentLang} onChange={onLanguageChange} />

@@ -91,3 +91,88 @@ export async function uploadVideo(file: File): Promise<{ url: string }> {
     headers: {},
   });
 }
+
+type UploadWithProgressOptions = {
+  signal?: AbortSignal;
+  onProgress?: (progress: {
+    loaded: number;
+    total: number | null;
+    percent: number | null;
+  }) => void;
+};
+
+function requestUploadWithProgress<T>(
+  endpoint: string,
+  file: File,
+  options: UploadWithProgressOptions = {},
+): Promise<T> {
+  const url = `${API_BASE_URL}${endpoint}`;
+  const token = getToken();
+  const formData = new FormData();
+  formData.append('file', file);
+
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+    const abort = () => {
+      xhr.abort();
+      reject(new DOMException('Upload aborted', 'AbortError'));
+    };
+    if (options.signal?.aborted) {
+      abort();
+      return;
+    }
+    options.signal?.addEventListener('abort', abort, { once: true });
+
+    xhr.upload.onprogress = (event) => {
+      const total = event.lengthComputable ? event.total : null;
+      options.onProgress?.({
+        loaded: event.loaded,
+        total,
+        percent: total ? Math.round((event.loaded / total) * 100) : null,
+      });
+    };
+
+    xhr.onerror = () => reject(new ApiError(0, '网络上传失败'));
+    xhr.onabort = () => reject(new DOMException('Upload aborted', 'AbortError'));
+    xhr.onload = () => {
+      options.signal?.removeEventListener('abort', abort);
+      const body = xhr.responseText ?? '';
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const parsed = parseErrorBody(body);
+        reject(
+          new ApiError(
+            xhr.status,
+            resolveUploadErrorMessage(parsed, xhr.statusText),
+            parsed,
+            body,
+          ),
+        );
+        return;
+      }
+      try {
+        resolve(JSON.parse(body) as T);
+      } catch {
+        reject(new ApiError(xhr.status, '上传响应不可读', undefined, body));
+      }
+    };
+
+    xhr.send(formData);
+  });
+}
+
+export function uploadImageWithProgress(
+  file: File,
+  options?: UploadWithProgressOptions,
+): Promise<{ url: string; width: number; height: number }> {
+  return requestUploadWithProgress(fitMeetCoreEndpoints.uploads.image, file, options);
+}
+
+export function uploadVideoWithProgress(
+  file: File,
+  options?: UploadWithProgressOptions,
+): Promise<{ url: string }> {
+  return requestUploadWithProgress(fitMeetCoreEndpoints.uploads.video, file, options);
+}

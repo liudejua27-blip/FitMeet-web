@@ -2,12 +2,8 @@ import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ObjectLiteral, Repository } from 'typeorm';
 
-import {
-  SocialActivity,
-  SocialActivityStatus,
-} from '../activities/entities/activity.entity';
+import { SocialActivity } from '../activities/entities/activity.entity';
 import { AiDelegateProfile } from '../ai-match/ai-delegate-profile.entity';
-import { sanitizeCity } from '../common/city.util';
 import { cleanDisplayText } from '../common/display-text.util';
 import {
   CandidateMatchLevel,
@@ -21,10 +17,7 @@ import { User } from '../users/user.entity';
 import { UserSocialProfile } from '../users/user-social-profile.entity';
 import { AgentTask } from './entities/agent-task.entity';
 import { PublicSocialIntent } from './entities/public-social-intent.entity';
-import {
-  SocialRequest,
-  SocialRequestStatus,
-} from './entities/social-request.entity';
+import { SocialRequest } from './entities/social-request.entity';
 import {
   CandidateExplanation,
   CandidateExplanationService,
@@ -32,19 +25,7 @@ import {
 import { SceneRiskPolicyService } from './scene-risk-policy.service';
 import { LifeGraphService } from '../life-graph/life-graph.service';
 import { LifeGraphUnifiedMatchSignalsDto } from '../life-graph/dto/life-graph.dto';
-import { buildSocialMatchDynamicExplanation } from './social-agent-candidate-dynamic-explanation';
 import {
-  lifeGraphBehaviorFit,
-  lifeGraphBoundaryFit,
-  lifeGraphGoalBoost,
-  lifeGraphLocationBoost,
-  lifeGraphRhythmBoost,
-  lifeGraphSafetyPenalty,
-  lifeGraphSportBoost,
-  lifeGraphTimeBoost,
-} from './social-agent-candidate-life-graph-scoring';
-import {
-  candidateDataQuality,
   candidateDisplayName,
   candidateProfileCompleteness,
   candidateProfileTags,
@@ -52,10 +33,7 @@ import {
 import type { CandidateProfileDataQuality } from './social-agent-candidate-profile-presenter';
 import { extractCandidateTags } from './social-agent-candidate-query-parser';
 import {
-  candidateCityMatches,
   candidateCommonTags,
-  candidateMatchLevel,
-  candidateRecentScore,
   candidateTotalScore,
 } from './social-agent-candidate-scoring';
 import {
@@ -66,7 +44,6 @@ import {
 import {
   buildCandidatePoolDebugSnapshot,
   emptyCandidatePoolFiltered,
-  toCandidatePoolDebugReasons,
 } from './social-agent-candidate-pool-debug';
 import { mergeSocialAgentCandidatePool } from './social-agent-candidate-pool-merge';
 import type {
@@ -93,6 +70,29 @@ import {
   applySavedSocialAgentCandidateRow,
   applySocialAgentCandidateRowState,
 } from './social-agent-candidate-row-state';
+import {
+  buildCandidatePoolActivitySearchResult,
+  buildCandidatePoolSearchResult,
+} from './social-agent-candidate-pool-result.presenter';
+import type { CandidateEmotionalInsight } from './social-agent-candidate-emotional-insight';
+import {
+  buildProfileCandidateReasons,
+  buildPublicIntentCandidateReasons,
+} from './social-agent-candidate-reasons';
+import {
+  buildProfileCandidateScoreBreakdown,
+  buildPublicIntentCandidateScoreBreakdown,
+} from './social-agent-candidate-score-breakdown';
+import { buildCandidatePoolCandidate } from './social-agent-candidate-card.presenter';
+import {
+  hasSocialAgentRecommendationBoundary,
+  hasSocialAgentSafetyExclusionBoundary,
+  isSocialAgentActiveActivity,
+  isSocialAgentActiveLegacyRequest,
+  isSocialAgentActivePublicIntent,
+  isSocialAgentActivityLikePublicIntent,
+  isSocialAgentProfileCandidateOptedIn,
+} from './social-agent-candidate-pool-eligibility';
 
 export type {
   CandidatePoolIntent,
@@ -110,6 +110,7 @@ export type {
   CandidatePoolActivityResult,
   CandidatePoolSource,
 } from './social-agent-candidate-pool-activity-result';
+export type { CandidateEmotionalInsight } from './social-agent-candidate-emotional-insight';
 
 export type CandidatePoolDataQuality = CandidateProfileDataQuality;
 
@@ -149,12 +150,25 @@ export type CandidatePoolCandidate = {
   privateReason: string;
   riskWarning: string;
   nextAction: string;
+  recommendationConsent: {
+    profileDiscoverable: boolean;
+    agentCanRecommendMe: boolean;
+    sourceLabel: string;
+    privacyLabel: string;
+    strangerPolicyLabel: string;
+  };
+  relationshipGoal: string | null;
+  idealType: string | null;
+  invitePolicy: string;
+  coldStartSignals: string[];
   whyYouMayLike: string;
   whyNow: string;
   matchPoints: string[];
   boundaryNotes: string[];
   openerStrategy: string;
   dynamicSignalReasons: string[];
+  recentPublicActivity?: string[];
+  preferenceHistorySignals: string[];
   continuousFilterHints: string[];
   candidateExplanation: CandidateExplanation;
   emotionalInsight: CandidateEmotionalInsight;
@@ -165,14 +179,6 @@ export type CandidatePoolCandidate = {
     confidenceLevel: 'high' | 'medium' | 'low';
   };
   updatedAt: string | null;
-};
-
-export type CandidateEmotionalInsight = {
-  fitReason: string;
-  openerAdvice: string;
-  possibleAwkwardness: string;
-  safeFirstStep: string;
-  tone: 'gentle' | 'active' | 'careful';
 };
 
 export type CandidatePoolSearchResult = {
@@ -194,27 +200,6 @@ export type CandidatePoolActivitySearchResult = {
   debugReasons: CandidatePoolDebugReasons;
   debug: CandidatePoolDebugSnapshot;
 };
-
-const EMPTY_CANDIDATE_MESSAGE =
-  '当前没有找到符合条件的真实用户，我可以帮你发布一个约练需求，或者你可以放宽城市、时间、兴趣条件。';
-
-const EMPTY_ACTIVITY_MESSAGE =
-  '当前没有找到符合条件的真实活动或公开约练卡片，可以换个城市、时间或活动类型再试。';
-
-const ACTIVE_PUBLIC_STATUSES = [
-  SocialRequestStatus.Active,
-  SocialRequestStatus.Searching,
-  SocialRequestStatus.Matched,
-];
-
-const ACTIVE_ACTIVITY_STATUSES = [
-  SocialActivityStatus.PendingConfirm,
-  SocialActivityStatus.Confirmed,
-  SocialActivityStatus.InProgress,
-];
-
-const DISABLED_BOUNDARY_RE =
-  /(不被推荐|不参与匹配|关闭推荐|不接受推荐|不要推荐|禁止推荐|退出匹配|关闭匹配)/i;
 
 const DEFAULT_LIMIT = 10;
 
@@ -325,15 +310,12 @@ export class SocialAgentCandidatePoolService {
       activityCandidates: 0,
       finalCandidates: candidates,
     });
-    return {
+    return buildCandidatePoolSearchResult({
       ownerUserId: input.ownerUserId,
       query,
       candidates,
-      emptyReason: candidates.length === 0 ? 'no_real_candidates' : null,
-      message: candidates.length === 0 ? EMPTY_CANDIDATE_MESSAGE : '',
-      debugReasons: toCandidatePoolDebugReasons(debug),
       debug,
-    };
+    });
   }
 
   async searchActivity(
@@ -343,18 +325,29 @@ export class SocialAgentCandidatePoolService {
       ...input,
       intent: 'activity_search',
     });
-    const [counts, activities, publicIntents, blockedIds] = await Promise.all([
-      this.loadCounts(),
-      this.safeFind(this.activityRepo, { order: { updatedAt: 'DESC' } }),
-      this.safeFind(this.publicIntentRepo, { order: { updatedAt: 'DESC' } }),
-      this.loadBlockedIds(input.ownerUserId),
-    ]);
+    const [counts, activities, publicIntents, profiles, delegates, blockedIds] =
+      await Promise.all([
+        this.loadCounts(),
+        this.safeFind(this.activityRepo, { order: { updatedAt: 'DESC' } }),
+        this.safeFind(this.publicIntentRepo, { order: { updatedAt: 'DESC' } }),
+        this.safeFind(this.profileRepo, { order: { updatedAt: 'DESC' } }),
+        this.safeFind(this.aiDelegateRepo, { order: { updatedAt: 'DESC' } }),
+        this.loadBlockedIds(input.ownerUserId),
+      ]);
+    const profileMap = new Map(
+      profiles.map((profile) => [profile.userId, profile]),
+    );
+    const delegateMap = new Map(
+      delegates.map((delegate) => [delegate.userId, delegate]),
+    );
     const filtered = emptyCandidatePoolFiltered();
     const realActivities = this.buildActivityResults({
       ownerUserId: input.ownerUserId,
       query,
       activities,
       publicIntents: [],
+      profileMap,
+      delegateMap,
       blockedIds,
       filtered,
     });
@@ -366,6 +359,8 @@ export class SocialAgentCandidatePoolService {
             query,
             activities: [],
             publicIntents,
+            profileMap,
+            delegateMap,
             blockedIds,
             filtered,
           });
@@ -383,15 +378,12 @@ export class SocialAgentCandidatePoolService {
       activityCandidates: realActivities.length,
       finalCandidates: [],
     });
-    return {
+    return buildCandidatePoolActivitySearchResult({
       ownerUserId: input.ownerUserId,
       query,
       activityResults,
-      emptyReason: activityResults.length === 0 ? 'no_real_candidates' : null,
-      message: activityResults.length === 0 ? EMPTY_ACTIVITY_MESSAGE : '',
-      debugReasons: toCandidatePoolDebugReasons(debug),
       debug,
-    };
+    });
   }
 
   async debugCandidatePool(
@@ -462,10 +454,22 @@ export class SocialAgentCandidatePoolService {
         input.filtered.blocked += 1;
         continue;
       }
+      if (input.query.acceptsStrangers === false) {
+        input.filtered.boundaryMismatch += 1;
+        continue;
+      }
       const profile = input.profileMap.get(user.id) ?? null;
       const delegate = input.delegateMap.get(user.id) ?? null;
-      if (this.hasRecommendationBoundary(profile, delegate)) {
+      if (!isSocialAgentProfileCandidateOptedIn(profile)) {
         input.filtered.boundaryMismatch += 1;
+        continue;
+      }
+      if (hasSocialAgentRecommendationBoundary(profile, delegate)) {
+        input.filtered.boundaryMismatch += 1;
+        continue;
+      }
+      if (hasSocialAgentSafetyExclusionBoundary(profile, delegate)) {
+        input.filtered.blocked += 1;
         continue;
       }
       out.push(
@@ -495,7 +499,7 @@ export class SocialAgentCandidatePoolService {
   }): CandidatePoolCandidate[] {
     const out: CandidatePoolCandidate[] = [];
     for (const intent of input.publicIntents) {
-      if (!this.isActivePublicIntent(intent)) continue;
+      if (!isSocialAgentActivePublicIntent(intent)) continue;
       const ownerUserId = this.number(intent.userId);
       if (!ownerUserId) continue;
       if (ownerUserId === input.ownerUserId) {
@@ -506,12 +510,24 @@ export class SocialAgentCandidatePoolService {
         input.filtered.blocked += 1;
         continue;
       }
+      if (input.query.acceptsStrangers === false) {
+        input.filtered.boundaryMismatch += 1;
+        continue;
+      }
       const user = input.userMap.get(ownerUserId);
       if (!user) continue;
       const profile = input.profileMap.get(ownerUserId) ?? null;
       const delegate = input.delegateMap.get(ownerUserId) ?? null;
-      if (this.hasRecommendationBoundary(profile, delegate)) {
+      if (!isSocialAgentProfileCandidateOptedIn(profile)) {
         input.filtered.boundaryMismatch += 1;
+        continue;
+      }
+      if (hasSocialAgentRecommendationBoundary(profile, delegate)) {
+        input.filtered.boundaryMismatch += 1;
+        continue;
+      }
+      if (hasSocialAgentSafetyExclusionBoundary(profile, delegate)) {
+        input.filtered.blocked += 1;
         continue;
       }
       out.push(
@@ -527,7 +543,7 @@ export class SocialAgentCandidatePoolService {
     }
 
     for (const request of input.legacyRequests) {
-      if (!this.isActiveLegacySocialRequest(request)) continue;
+      if (!isSocialAgentActiveLegacyRequest(request)) continue;
       if (request.userId === input.ownerUserId) {
         input.filtered.self += 1;
         continue;
@@ -536,12 +552,24 @@ export class SocialAgentCandidatePoolService {
         input.filtered.blocked += 1;
         continue;
       }
+      if (input.query.acceptsStrangers === false) {
+        input.filtered.boundaryMismatch += 1;
+        continue;
+      }
       const user = input.userMap.get(request.userId);
       if (!user) continue;
       const profile = input.profileMap.get(request.userId) ?? null;
       const delegate = input.delegateMap.get(request.userId) ?? null;
-      if (this.hasRecommendationBoundary(profile, delegate)) {
+      if (!isSocialAgentProfileCandidateOptedIn(profile)) {
         input.filtered.boundaryMismatch += 1;
+        continue;
+      }
+      if (hasSocialAgentRecommendationBoundary(profile, delegate)) {
+        input.filtered.boundaryMismatch += 1;
+        continue;
+      }
+      if (hasSocialAgentSafetyExclusionBoundary(profile, delegate)) {
+        input.filtered.blocked += 1;
         continue;
       }
       out.push(
@@ -563,22 +591,35 @@ export class SocialAgentCandidatePoolService {
     query: CandidatePoolResolvedQuery;
     activities: SocialActivity[];
     publicIntents: PublicSocialIntent[];
+    profileMap: Map<number, UserSocialProfile>;
+    delegateMap: Map<number, AiDelegateProfile>;
     blockedIds: Set<number>;
     filtered: CandidatePoolFiltered;
   }): CandidatePoolActivityResult[] {
-    const now = Date.now();
     const activities = input.activities
-      .filter((activity) => ACTIVE_ACTIVITY_STATUSES.includes(activity.status))
-      .filter(
-        (activity) => !activity.endTime || activity.endTime.getTime() >= now,
-      )
+      .filter((activity) => isSocialAgentActiveActivity(activity))
       .filter((activity) => {
         if (activity.creatorId === input.ownerUserId) {
           input.filtered.self += 1;
           return false;
         }
+        if (input.query.acceptsStrangers === false) {
+          input.filtered.boundaryMismatch += 1;
+          return false;
+        }
         if (input.blockedIds.has(activity.creatorId)) {
           input.filtered.blocked += 1;
+          return false;
+        }
+        if (
+          this.hasUnsafeActivityOwnerBoundary(
+            activity.creatorId,
+            input.profileMap,
+            input.delegateMap,
+            true,
+          )
+        ) {
+          input.filtered.boundaryMismatch += 1;
           return false;
         }
         return true;
@@ -586,8 +627,10 @@ export class SocialAgentCandidatePoolService {
       .map((activity) => this.toActivityResult(activity, input.query));
 
     const publicIntents = input.publicIntents
-      .filter((intent) => this.isActivePublicIntent(intent))
-      .filter((intent) => this.isActivityLikePublicIntent(intent, input.query))
+      .filter((intent) => isSocialAgentActivePublicIntent(intent))
+      .filter((intent) =>
+        isSocialAgentActivityLikePublicIntent(intent, input.query),
+      )
       .filter((intent) => {
         const ownerUserId = this.number(intent.userId);
         if (!ownerUserId) return false;
@@ -595,8 +638,23 @@ export class SocialAgentCandidatePoolService {
           input.filtered.self += 1;
           return false;
         }
+        if (input.query.acceptsStrangers === false) {
+          input.filtered.boundaryMismatch += 1;
+          return false;
+        }
         if (input.blockedIds.has(ownerUserId)) {
           input.filtered.blocked += 1;
+          return false;
+        }
+        if (
+          this.hasUnsafeActivityOwnerBoundary(
+            ownerUserId,
+            input.profileMap,
+            input.delegateMap,
+            true,
+          )
+        ) {
+          input.filtered.boundaryMismatch += 1;
           return false;
         }
         return true;
@@ -605,6 +663,26 @@ export class SocialAgentCandidatePoolService {
 
     return [...activities, ...publicIntents].sort(
       (a, b) => b.matchScore - a.matchScore,
+    );
+  }
+
+  private hasUnsafeActivityOwnerBoundary(
+    ownerUserId: number,
+    profileMap: Map<number, UserSocialProfile>,
+    delegateMap: Map<number, AiDelegateProfile>,
+    requireAgentRecommendationOptIn: boolean,
+  ): boolean {
+    const profile = profileMap.get(ownerUserId) ?? null;
+    const delegate = delegateMap.get(ownerUserId) ?? null;
+    if (
+      requireAgentRecommendationOptIn &&
+      !isSocialAgentProfileCandidateOptedIn(profile)
+    ) {
+      return true;
+    }
+    return (
+      hasSocialAgentRecommendationBoundary(profile, delegate) ||
+      hasSocialAgentSafetyExclusionBoundary(profile, delegate)
     );
   }
 
@@ -619,7 +697,7 @@ export class SocialAgentCandidatePoolService {
     const tags = candidateProfileTags(user, profile, delegate);
     const completeness = candidateProfileCompleteness(user, profile, delegate);
     const commonTags = candidateCommonTags(query.interestTags, tags);
-    const scoreBreakdown = this.scoreProfile({
+    const scoreBreakdown = buildProfileCandidateScoreBreakdown({
       user,
       profile,
       delegate,
@@ -629,17 +707,18 @@ export class SocialAgentCandidatePoolService {
       completeness,
       commonTags,
       lifeGraphSignals,
+      sceneRisk: this.sceneRisk,
     });
     const matchScore = candidateTotalScore(scoreBreakdown);
     const displayName = candidateDisplayName(user, profile, city);
-    const matchReasons = this.profileReasons(
+    const matchReasons = buildProfileCandidateReasons({
       query,
       city,
       commonTags,
       completeness,
-      user,
-    );
-    return this.candidateBase({
+      verified: user.verified,
+    });
+    return buildCandidatePoolCandidate({
       source: 'profile_candidate',
       user,
       profile,
@@ -651,10 +730,18 @@ export class SocialAgentCandidatePoolService {
       scoreBreakdown,
       commonTags,
       matchReasons,
+      recentPublicActivity: this.profileCandidatePublicActivitySignals({
+        city,
+        commonTags,
+        updatedAt: profile?.updatedAt ?? user.updatedAt,
+      }),
       publicIntentId: null,
       socialRequestId: query.socialRequestId,
       activityId: null,
+      query,
       lifeGraphSignals,
+      sceneRisk: this.sceneRisk,
+      candidateExplanation: this.candidateExplanation,
     });
   }
 
@@ -679,7 +766,7 @@ export class SocialAgentCandidatePoolService {
     ]);
     const completeness = candidateProfileCompleteness(user, profile, delegate);
     const commonTags = candidateCommonTags(query.interestTags, tags);
-    const scoreBreakdown = this.scorePublicIntent({
+    const scoreBreakdown = buildPublicIntentCandidateScoreBreakdown({
       query,
       city,
       tags,
@@ -687,16 +774,17 @@ export class SocialAgentCandidatePoolService {
       completeness,
       updatedAt: intent.updatedAt,
       lifeGraphSignals,
+      sceneRisk: this.sceneRisk,
     });
     const matchScore = candidateTotalScore(scoreBreakdown);
     const displayName = candidateDisplayName(user, profile, city);
-    const matchReasons = this.publicIntentReasons(
+    const matchReasons = buildPublicIntentCandidateReasons({
       intent,
       query,
       city,
       commonTags,
-    );
-    return this.candidateBase({
+    });
+    return buildCandidatePoolCandidate({
       source: 'public_intent',
       user,
       profile,
@@ -708,10 +796,19 @@ export class SocialAgentCandidatePoolService {
       scoreBreakdown,
       commonTags,
       matchReasons,
+      recentPublicActivity: this.publicIntentCandidatePublicActivitySignals({
+        title: intent.title,
+        requestType: intent.requestType,
+        timePreference: intent.timePreference,
+        updatedAt: intent.updatedAt,
+      }),
       publicIntentId: intent.id,
       socialRequestId: intent.linkedSocialRequestId ?? query.socialRequestId,
       activityId: null,
+      query,
       lifeGraphSignals,
+      sceneRisk: this.sceneRisk,
+      candidateExplanation: this.candidateExplanation,
     });
   }
 
@@ -736,7 +833,7 @@ export class SocialAgentCandidatePoolService {
     ]);
     const completeness = candidateProfileCompleteness(user, profile, delegate);
     const commonTags = candidateCommonTags(query.interestTags, tags);
-    const scoreBreakdown = this.scorePublicIntent({
+    const scoreBreakdown = buildPublicIntentCandidateScoreBreakdown({
       query,
       city,
       tags,
@@ -744,20 +841,20 @@ export class SocialAgentCandidatePoolService {
       completeness,
       updatedAt: request.updatedAt,
       lifeGraphSignals,
+      sceneRisk: this.sceneRisk,
     });
     const displayName = candidateDisplayName(user, profile, city);
-    const matchReasons = this.publicIntentReasons(
-      {
+    const matchReasons = buildPublicIntentCandidateReasons({
+      intent: {
         title: request.title,
         requestType: request.requestType,
-        city: request.city,
         timePreference: request.timePreference,
       },
       query,
       city,
       commonTags,
-    );
-    return this.candidateBase({
+    });
+    return buildCandidatePoolCandidate({
       source: 'public_intent',
       user,
       profile,
@@ -769,138 +866,56 @@ export class SocialAgentCandidatePoolService {
       scoreBreakdown,
       commonTags,
       matchReasons,
+      recentPublicActivity: this.publicIntentCandidatePublicActivitySignals({
+        title: request.title,
+        requestType: request.requestType,
+        timePreference: request.timePreference,
+        updatedAt: request.updatedAt,
+      }),
       publicIntentId: null,
       socialRequestId: request.id,
       activityId: null,
+      query,
       lifeGraphSignals,
+      sceneRisk: this.sceneRisk,
+      candidateExplanation: this.candidateExplanation,
     });
   }
 
-  private candidateBase(input: {
-    source: Exclude<CandidatePoolSource, 'activity'>;
-    user: User;
-    profile: UserSocialProfile | null;
+  private profileCandidatePublicActivitySignals(input: {
     city: string;
-    displayName: string;
-    interestTags: string[];
-    profileCompleteness: number;
-    matchScore: number;
-    scoreBreakdown: Record<string, number>;
     commonTags: string[];
-    matchReasons: string[];
-    publicIntentId: string | null;
-    socialRequestId: number | null;
-    activityId: number | null;
-    lifeGraphSignals?: LifeGraphUnifiedMatchSignalsDto | null;
-  }): CandidatePoolCandidate {
-    const quality = candidateDataQuality(input.profileCompleteness);
-    const riskWarnings =
-      quality === 'incomplete' ? ['资料较少，建议先站内沟通确认。'] : [];
-    const sceneText = [
-      ...input.interestTags,
-      ...input.commonTags,
-      ...input.matchReasons,
-    ].join(' ');
-    const sceneType = this.sceneRisk.normalizeScene(null, sceneText);
-    const policy = this.sceneRisk.evaluate({
-      sceneType,
-      actionType: 'send_message',
-      text: sceneText,
-      permissionMode: 'limited_auto',
-      safetySignals: input.lifeGraphSignals?.safetySignals,
-    });
-    const candidateExplanation = this.candidateExplanation.explain({
-      userRequest: {
-        rawText: sceneText,
-        interestTags: input.interestTags,
-      },
-      candidate: {
-        displayName: input.displayName,
-        city: input.city,
-        commonTags: input.commonTags,
-        interestTags: input.interestTags,
-      },
-      matchScore: input.matchScore,
-      matchReasons: input.matchReasons,
-      sceneType,
-      riskWarnings: [...riskWarnings, ...policy.safetyPrompts],
-      lifeGraphSignals: input.lifeGraphSignals,
-    });
-    const suggestedOpener = candidateExplanation.suggestedOpener;
-    const emotionalInsight = this.emotionalInsightFromExplanation(
-      candidateExplanation,
-      policy.riskLevel === 'high' || policy.riskLevel === 'critical',
-    );
-    const dynamicExplanation = buildSocialMatchDynamicExplanation({
-      displayName: input.displayName,
-      city: input.city,
-      interestTags: input.interestTags,
-      commonTags: input.commonTags,
-      matchReasons: input.matchReasons,
-      scoreBreakdown: input.scoreBreakdown,
-      riskWarnings: [...riskWarnings, ...policy.safetyPrompts],
-      lifeGraphSignals: input.lifeGraphSignals,
-    });
-    return {
-      source: input.source,
-      isRealData: true,
-      targetUserId: input.user.id,
-      candidateUserId: input.user.id,
-      userId: input.user.id,
-      publicIntentId: input.publicIntentId,
-      socialRequestId: input.socialRequestId,
-      activityId: input.activityId,
-      displayName: input.displayName,
-      nickname: input.displayName,
-      avatar: cleanDisplayText(input.user.avatar, ''),
-      color: cleanDisplayText(input.user.color, '#202124'),
-      city: input.city,
-      interestTags: input.interestTags,
-      profileCompleteness: input.profileCompleteness,
-      dataQuality: quality,
-      matchScore: input.matchScore,
-      score: input.matchScore,
-      level: candidateMatchLevel(input.matchScore),
-      matchReasons: input.matchReasons,
-      reasons: input.matchReasons,
-      riskWarnings: [...riskWarnings, ...policy.safetyPrompts],
-      risk: {
-        level: this.candidateRiskLevel(policy.riskLevel),
-        warnings: [...riskWarnings, ...policy.safetyPrompts],
-      },
-      suggestedOpener,
-      suggestedMessage: suggestedOpener,
-      commonTags: input.commonTags,
-      distanceKm: null,
-      scoreBreakdown: input.scoreBreakdown,
-      candidateRecordId: null,
-      status: SocialRequestCandidateStatus.Suggested,
-      matchedSignals: this.uniqueStrings([
-        ...input.commonTags,
-        ...dynamicExplanation.dynamicSignalReasons,
-      ]),
-      publicReason: dynamicExplanation.whyYouMayLike,
-      privateReason: dynamicExplanation.whyNow,
-      riskWarning:
-        dynamicExplanation.boundaryNotes[0] ??
-        riskWarnings[0] ??
-        policy.safetyPrompts[0] ??
-        '',
-      nextAction: candidateExplanation.nextActionSuggestion,
-      whyYouMayLike: dynamicExplanation.whyYouMayLike,
-      whyNow: dynamicExplanation.whyNow,
-      matchPoints: dynamicExplanation.matchPoints,
-      boundaryNotes: dynamicExplanation.boundaryNotes,
-      openerStrategy: dynamicExplanation.openerStrategy,
-      dynamicSignalReasons: dynamicExplanation.dynamicSignalReasons,
-      continuousFilterHints: dynamicExplanation.continuousFilterHints,
-      candidateExplanation,
-      emotionalInsight,
-      lifeGraphExplanation: candidateExplanation.lifeGraphExplanation,
-      updatedAt: input.user.updatedAt
-        ? input.user.updatedAt.toISOString()
-        : null,
-    };
+    updatedAt: Date | string | null | undefined;
+  }): string[] {
+    return this.uniqueStrings([
+      '公开资料已允许 Agent 推荐',
+      input.city ? `公开城市：${input.city}` : '',
+      input.commonTags.length
+        ? `共同公开兴趣：${input.commonTags.slice(0, 2).join('、')}`
+        : '',
+      this.updatedAtSignal(input.updatedAt),
+    ]).slice(0, 4);
+  }
+
+  private publicIntentCandidatePublicActivitySignals(input: {
+    title: string;
+    requestType: string;
+    timePreference?: string | null;
+    updatedAt: Date | string | null | undefined;
+  }): string[] {
+    return this.uniqueStrings([
+      cleanDisplayText(input.title, '') ? `公开约练：${cleanDisplayText(input.title, '')}` : '',
+      cleanDisplayText(input.requestType, '') ? `公开类型：${cleanDisplayText(input.requestType, '')}` : '',
+      cleanDisplayText(input.timePreference, '') ? `公开时间：${cleanDisplayText(input.timePreference, '')}` : '',
+      this.updatedAtSignal(input.updatedAt),
+    ]).slice(0, 4);
+  }
+
+  private updatedAtSignal(value: Date | string | null | undefined): string {
+    if (!value) return '';
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return `最近公开更新：${date.toISOString().slice(0, 10)}`;
   }
 
   private toActivityResult(
@@ -973,297 +988,6 @@ export class SocialAgentCandidatePoolService {
     }
   }
 
-  private scoreProfile(input: {
-    user: User;
-    profile: UserSocialProfile | null;
-    delegate: AiDelegateProfile | null;
-    query: CandidatePoolResolvedQuery;
-    tags: string[];
-    city: string;
-    completeness: number;
-    commonTags: string[];
-    lifeGraphSignals?: LifeGraphUnifiedMatchSignalsDto | null;
-  }): Record<string, number> {
-    const sceneType = this.sceneRisk.normalizeScene(
-      null,
-      [
-        input.query.rawText,
-        input.query.activityType,
-        ...input.query.interestTags,
-        ...input.tags,
-      ].join(' '),
-    );
-    const policy = this.sceneRisk.evaluate({
-      sceneType,
-      actionType: 'send_message',
-      text: input.query.rawText,
-      permissionMode: 'limited_auto',
-      safetySignals: input.lifeGraphSignals?.safetySignals,
-    });
-    const cityMatches = candidateCityMatches;
-    return {
-      distance: Math.min(
-        18,
-        (candidateCityMatches(input.query.city, input.city) ? 14 : 6) +
-          lifeGraphLocationBoost(
-            input.city,
-            input.lifeGraphSignals,
-            cityMatches,
-          ),
-      ),
-      timeOverlap: Math.min(
-        15,
-        this.timeMatches(
-          input.query.timePreference,
-          input.profile,
-          input.delegate,
-        ) + lifeGraphTimeBoost(input.lifeGraphSignals),
-      ),
-      interestSimilarity: Math.min(
-        20,
-        input.commonTags.length * 10 +
-          lifeGraphSportBoost(input.tags, input.lifeGraphSignals),
-      ),
-      lifeRhythm: Math.min(
-        10,
-        this.lifeRhythmScore(input.profile, input.delegate) +
-          lifeGraphRhythmBoost(input.lifeGraphSignals),
-      ),
-      socialEnergy: this.socialEnergyScore(input.profile, input.delegate),
-      relationshipGoal: Math.min(
-        10,
-        this.relationshipGoalScore(input.query, input.tags) +
-          lifeGraphGoalBoost(input.query, input.tags, input.lifeGraphSignals),
-      ),
-      lifeGraphBehaviorFit: lifeGraphBehaviorFit(
-        {
-          query: input.query,
-          city: input.city,
-          tags: input.tags,
-          commonTags: input.commonTags,
-          signals: input.lifeGraphSignals,
-        },
-        cityMatches,
-      ),
-      boundaryFit: lifeGraphBoundaryFit(input.query, input.lifeGraphSignals),
-      trustworthiness: Math.min(
-        10,
-        Math.round(input.completeness * 5) + (input.user.verified ? 5 : 0),
-      ),
-      safetyRisk: Math.max(
-        0,
-        this.safetyRiskScore(policy.riskLevel) -
-          lifeGraphSafetyPenalty(input.user, input.lifeGraphSignals),
-      ),
-    };
-  }
-
-  private scorePublicIntent(input: {
-    query: CandidatePoolResolvedQuery;
-    city: string;
-    tags: string[];
-    commonTags: string[];
-    completeness: number;
-    updatedAt: Date;
-    lifeGraphSignals?: LifeGraphUnifiedMatchSignalsDto | null;
-  }): Record<string, number> {
-    const sceneType = this.sceneRisk.normalizeScene(
-      null,
-      [
-        input.query.rawText,
-        input.query.activityType,
-        ...input.query.interestTags,
-        ...input.tags,
-      ].join(' '),
-    );
-    const policy = this.sceneRisk.evaluate({
-      sceneType,
-      actionType: 'send_message',
-      text: input.query.rawText,
-      permissionMode: 'limited_auto',
-      safetySignals: input.lifeGraphSignals?.safetySignals,
-    });
-    const cityMatches = candidateCityMatches;
-    return {
-      distance: Math.min(
-        18,
-        (candidateCityMatches(input.query.city, input.city) ? 14 : 6) +
-          lifeGraphLocationBoost(
-            input.city,
-            input.lifeGraphSignals,
-            cityMatches,
-          ),
-      ),
-      timeOverlap: Math.min(
-        15,
-        (input.query.timePreference ? 10 : 6) +
-          lifeGraphTimeBoost(input.lifeGraphSignals),
-      ),
-      interestSimilarity: Math.min(
-        20,
-        input.commonTags.length * 10 +
-          lifeGraphSportBoost(input.tags, input.lifeGraphSignals),
-      ),
-      lifeRhythm: Math.min(
-        10,
-        (input.query.timePreference ? 7 : 4) +
-          lifeGraphRhythmBoost(input.lifeGraphSignals),
-      ),
-      socialEnergy: 5,
-      relationshipGoal: Math.min(
-        10,
-        this.relationshipGoalScore(input.query, input.tags) +
-          lifeGraphGoalBoost(input.query, input.tags, input.lifeGraphSignals),
-      ),
-      lifeGraphBehaviorFit: lifeGraphBehaviorFit(
-        {
-          query: input.query,
-          city: input.city,
-          tags: input.tags,
-          commonTags: input.commonTags,
-          signals: input.lifeGraphSignals,
-        },
-        cityMatches,
-      ),
-      boundaryFit: lifeGraphBoundaryFit(input.query, input.lifeGraphSignals),
-      trustworthiness: Math.min(
-        10,
-        Math.round(input.completeness * 5) +
-          candidateRecentScore(input.updatedAt, 5),
-      ),
-      safetyRisk: this.safetyRiskScore(policy.riskLevel),
-    };
-  }
-
-  private lifeRhythmScore(
-    profile: UserSocialProfile | null,
-    delegate: AiDelegateProfile | null,
-  ): number {
-    const text = [
-      ...this.normalizeArray(profile?.availableTimes),
-      profile?.weekdayAvailability ?? '',
-      profile?.weekendAvailability ?? '',
-      ...this.normalizeArray(profile?.lifestyleTags),
-      ...this.normalizeArray(profile?.socialScenes),
-      delegate?.availability ?? '',
-    ].join(' ');
-    if (!text.trim()) return 4;
-    if (/周末|白天|规律|早睡|morning|weekend|day/i.test(text)) return 10;
-    if (/晚上|夜间|night|evening/i.test(text)) return 7;
-    return 6;
-  }
-
-  private socialEnergyScore(
-    profile: UserSocialProfile | null,
-    delegate: AiDelegateProfile | null,
-  ): number {
-    const text = [
-      profile?.socialStyle,
-      profile?.openness,
-      profile?.socialPreference,
-      ...(profile?.traits ?? []),
-      delegate?.idealPartner,
-    ]
-      .filter(Boolean)
-      .join(' ');
-    if (!text.trim()) return 4;
-    if (/适中|稳定|随和|balanced|medium/i.test(text)) return 8;
-    if (/主动|外向|热情|开放|active|open|extrovert/i.test(text)) return 7;
-    if (/慢热|安静|内向|克制|quiet|introvert/i.test(text)) return 6;
-    return 5;
-  }
-
-  private relationshipGoalScore(
-    query: CandidatePoolResolvedQuery,
-    tags: string[],
-  ): number {
-    const text = [
-      query.rawText,
-      query.activityType,
-      ...query.interestTags,
-      ...tags,
-    ].join(' ');
-    if (/相亲|恋爱|对象|dating|date/i.test(text)) return 10;
-    if (/搭子|约练|跑步|健身|麻将|扑克|旅行|旅游|partner|buddy/i.test(text))
-      return 9;
-    if (/朋友|聊天|认识|friend|social/i.test(text)) return 8;
-    if (/学习|自习|study/i.test(text)) return 7;
-    return 5;
-  }
-
-  private safetyRiskScore(
-    riskLevel: ReturnType<SceneRiskPolicyService['evaluate']>['riskLevel'],
-  ): number {
-    if (riskLevel === 'critical') return 0;
-    if (riskLevel === 'high') return 3;
-    if (riskLevel === 'medium') return 6;
-    return 9;
-  }
-
-  private candidateRiskLevel(
-    riskLevel: ReturnType<SceneRiskPolicyService['evaluate']>['riskLevel'],
-  ): CandidateRiskLevel {
-    if (riskLevel === 'high' || riskLevel === 'critical') {
-      return CandidateRiskLevel.High;
-    }
-    if (riskLevel === 'medium') return CandidateRiskLevel.Medium;
-    return CandidateRiskLevel.Low;
-  }
-
-  private profileReasons(
-    query: CandidatePoolResolvedQuery,
-    city: string,
-    commonTags: string[],
-    completeness: number,
-    user: User,
-  ): string[] {
-    const reasons: string[] = ['来自真实注册用户和社交画像。'];
-    if (candidateCityMatches(query.city, city))
-      reasons.push(`城市匹配：${city}。`);
-    if (commonTags.length)
-      reasons.push(`共同兴趣：${commonTags.slice(0, 3).join('、')}。`);
-    if (completeness >= 0.7) reasons.push('画像信息较完整。');
-    if (user.verified) reasons.push('用户已认证。');
-    return reasons.slice(0, 6);
-  }
-
-  private publicIntentReasons(
-    intent: Pick<
-      PublicSocialIntent,
-      'title' | 'requestType' | 'city' | 'timePreference'
-    >,
-    query: CandidatePoolResolvedQuery,
-    city: string,
-    commonTags: string[],
-  ): string[] {
-    const title = cleanDisplayText(intent.title, '公开约练卡片');
-    const reasons = [`来自真实公开约练卡片：${title}。`];
-    if (candidateCityMatches(query.city, city))
-      reasons.push(`卡片城市匹配：${city}。`);
-    if (commonTags.length)
-      reasons.push(`卡片标签匹配：${commonTags.slice(0, 3).join('、')}。`);
-    if (intent.timePreference)
-      reasons.push(`时间偏好：${intent.timePreference}。`);
-    if (intent.requestType) reasons.push(`需求类型：${intent.requestType}。`);
-    return reasons.slice(0, 6);
-  }
-
-  private emotionalInsightFromExplanation(
-    explanation: CandidateExplanation,
-    highRisk: boolean,
-  ): CandidateEmotionalInsight {
-    return {
-      fitReason:
-        explanation.fitReasons[0] ||
-        'TA 和这次需求有可对齐的地方，适合先轻量沟通。',
-      openerAdvice: explanation.suggestedOpener,
-      possibleAwkwardness:
-        explanation.awkwardPoints[0] || '对方资料或时间偏好还需要进一步确认。',
-      safeFirstStep: explanation.safeFirstStep,
-      tone: highRisk || explanation.requiresConfirmation ? 'careful' : 'gentle',
-    };
-  }
-
   private explainActivityCandidate(
     input: CandidatePoolActivityExplanationInput,
   ): CandidateExplanation {
@@ -1298,67 +1022,6 @@ export class SocialAgentCandidatePoolService {
     });
   }
 
-  private hasRecommendationBoundary(
-    profile: UserSocialProfile | null,
-    delegate: AiDelegateProfile | null,
-  ): boolean {
-    return DISABLED_BOUNDARY_RE.test(
-      [profile?.privacyBoundary, profile?.rejectRules, delegate?.boundaries]
-        .filter(Boolean)
-        .join(' '),
-    );
-  }
-
-  private isActivePublicIntent(intent: PublicSocialIntent): boolean {
-    return (
-      intent.mode === 'public' && ACTIVE_PUBLIC_STATUSES.includes(intent.status)
-    );
-  }
-
-  private isActiveLegacySocialRequest(request: SocialRequest): boolean {
-    return (
-      request.visibility === 'public' &&
-      ACTIVE_PUBLIC_STATUSES.includes(request.status)
-    );
-  }
-
-  private isActivityLikePublicIntent(
-    intent: PublicSocialIntent,
-    query: CandidatePoolResolvedQuery,
-  ): boolean {
-    const text = [
-      intent.requestType,
-      intent.title,
-      intent.description,
-      ...this.normalizeArray(intent.interestTags),
-    ]
-      .join(' ')
-      .toLowerCase();
-    if (query.activityType && text.includes(query.activityType.toLowerCase()))
-      return true;
-    return /(活动|约练|跑步|羽毛球|健身|瑜伽|徒步|骑行|咖啡|拍照|摄影|city|walk|running|fitness|coffee|photo)/i.test(
-      text,
-    );
-  }
-
-  private timeMatches(
-    queryTime: string,
-    profile: UserSocialProfile | null,
-    delegate: AiDelegateProfile | null,
-  ): number {
-    if (!queryTime) return 8;
-    const available = [
-      ...this.normalizeArray(profile?.availableTimes),
-      profile?.weekdayAvailability ?? '',
-      profile?.weekendAvailability ?? '',
-      delegate?.availability ?? '',
-    ].join(' ');
-    if (!available.trim()) return 4;
-    return available.includes(queryTime) || queryTime.includes(available)
-      ? 15
-      : 8;
-  }
-
   private async loadCounts(): Promise<CandidatePoolCounts> {
     const [
       users,
@@ -1387,6 +1050,19 @@ export class SocialAgentCandidatePoolService {
 
   private async loadBlockedIds(ownerUserId: number): Promise<Set<number>> {
     try {
+      const safetyWithRecommendationGate = this.safety as SafetyService & {
+        getAgentRecommendationExcludedUserIds?: (
+          userId: number,
+        ) => Promise<Set<number>>;
+      };
+      if (
+        typeof safetyWithRecommendationGate.getAgentRecommendationExcludedUserIds ===
+        'function'
+      ) {
+        return await safetyWithRecommendationGate.getAgentRecommendationExcludedUserIds(
+          ownerUserId,
+        );
+      }
       return await this.safety.getMutualBlockUserIds(ownerUserId);
     } catch {
       return new Set<number>();

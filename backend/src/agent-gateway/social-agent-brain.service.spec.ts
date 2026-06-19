@@ -48,6 +48,22 @@ describe('SocialAgentBrainService', () => {
     );
   });
 
+  it('keeps explicit immediate search commands on Social Search even with profile facts', () => {
+    const decision = service.reviewTurn({
+      message: '我是青岛大学男生，周末下午喜欢跑步，现在帮我找同校跑步搭子',
+      route: route({
+        intent: 'social_search',
+        shouldSearch: true,
+        replyStrategy: 'search_candidates',
+      }),
+    });
+
+    expect(decision.route.intent).toBe('social_search');
+    expect(decision.route.shouldSearch).toBe(true);
+    expect(decision.conversationMode).toBe('search');
+    expect(decision.notes).not.toContain('rich_profile_facts_detected');
+  });
+
   it('treats user repair as correction before any previous intent', () => {
     const decision = service.reviewTurn({
       message: '不是不是，上面是我的人物画像，你帮我完善。',

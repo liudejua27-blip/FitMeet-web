@@ -1,6 +1,7 @@
 ﻿import { useState, useCallback, memo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { searchApi } from '../api/searchApi';
+import { navigateToDiscoverWithScrollReset } from '../lib/scrollNavigation';
 
 const HOT_TOPICS = ['#增肌', '#跑步打卡', '#瑜伽', '#减脂', '#深蹲', '#户外运动', '#游泳', '#HIIT'];
 const SEARCH_HISTORY_KEY = 'search_history';
@@ -94,7 +95,7 @@ export const SearchPage = () => {
           emoji: '📝',
           color: '#3B82F6',
           type: '动态',
-          onClick: () => navigate('/discover'),
+          onClick: () => navigateToDiscoverWithScrollReset(navigate),
         }));
 
         const mappedCoaches = data.coaches.map((c) => ({

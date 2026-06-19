@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-https://socialworld.world}"
-API_BASE_URL="${API_BASE_URL:-https://api.socialworld.world/api}"
+BASE_URL="${BASE_URL:-https://www.ourfitmeet.cn}"
+API_BASE_URL="${API_BASE_URL:-https://www.ourfitmeet.cn/api}"
 AGENT_TOKEN="${AGENT_TOKEN:-}"
+VERIFY_USER_EMAIL="${VERIFY_USER_EMAIL:-${FITMEET_VERIFY_EMAIL:-}}"
+VERIFY_USER_PASSWORD="${VERIFY_USER_PASSWORD:-${FITMEET_VERIFY_PASSWORD:-}}"
+EXPECTED_RELEASE_COMMIT="${EXPECTED_RELEASE_COMMIT:-}"
 RUN_APP_SMOKE="${RUN_APP_SMOKE:-false}"
 RUN_PUBLIC_INTENT_WRITE="${RUN_PUBLIC_INTENT_WRITE:-false}"
+CHECK_LOCAL_COMPOSE_HEALTH="${CHECK_LOCAL_COMPOSE_HEALTH:-false}"
+CHECK_LOCAL_COMPOSE_LOGS="${CHECK_LOCAL_COMPOSE_LOGS:-auto}"
+COMPOSE_LOG_TAIL="${COMPOSE_LOG_TAIL:-600}"
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
+ENV_FILE="${ENV_FILE:-.env.production}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-20}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/verify-production.sh [--base-url https://socialworld.world] [--api-base-url https://api.socialworld.world/api] [--agent-token token] [--run-app-smoke] [--run-public-intent-write]
+Usage: scripts/verify-production.sh [--base-url https://www.ourfitmeet.cn] [--api-base-url https://www.ourfitmeet.cn/api] [--agent-token token] [--run-app-smoke] [--run-public-intent-write]
 
 Verifies a deployed FitMeet Web/API stack from macOS or Linux:
   - frontend root, backend health, and dependency readiness
@@ -23,11 +31,17 @@ Verifies a deployed FitMeet Web/API stack from macOS or Linux:
   - optional public social intent write/read-back
 
 Environment:
-  BASE_URL                         Public Web origin. Defaults to https://socialworld.world.
-  API_BASE_URL                     Backend API base URL. Defaults to https://api.socialworld.world/api.
+  BASE_URL                         Public Web origin. Defaults to https://www.ourfitmeet.cn.
+  API_BASE_URL                     Backend API base URL. Defaults to https://www.ourfitmeet.cn/api.
   AGENT_TOKEN                      Optional X-Agent-Token for authorized agent manifest check.
+  VERIFY_USER_EMAIL/PASSWORD       Optional login credentials for authenticated Agent session UX checks.
+  EXPECTED_RELEASE_COMMIT          Optional backend release commit prefix expected from /api/health.
   RUN_APP_SMOKE=true               Run backend smoke:app-core against this remote API.
   RUN_PUBLIC_INTENT_WRITE=true     Exercise public social intent write/read-back.
+  CHECK_LOCAL_COMPOSE_HEALTH=true  Also verify local ECS docker compose backend and worker health.
+  CHECK_LOCAL_COMPOSE_LOGS=auto|true|false
+                                   Scan backend/worker logs when local compose health is checked.
+  COMPOSE_LOG_TAIL=600             Number of recent log lines to scan per service.
   APP_SMOKE_*                      Optional backend smoke credentials/options.
 EOF
 }
@@ -51,6 +65,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --run-public-intent-write)
       RUN_PUBLIC_INTENT_WRITE=true
+      ;;
+    --check-local-compose-health)
+      CHECK_LOCAL_COMPOSE_HEALTH=true
       ;;
     -h|--help)
       usage
@@ -81,6 +98,50 @@ skip() {
 fail() {
   printf '[FAIL] %s\n' "$1" >&2
   exit 1
+}
+
+fail_release_metadata() {
+  printf '[FAIL] %s\n' "Backend health release metadata did not match expected commit." >&2
+  if [[ -n "${EXPECTED_RELEASE_COMMIT}" ]]; then
+    cat >&2 <<EOF
+[hint] The public API is not serving the expected release (${EXPECTED_RELEASE_COMMIT}).
+[hint] On the ECS host, run:
+[hint]   cd /opt/FitMeet-web
+[hint]   EXPECTED_RELEASE_COMMIT=${EXPECTED_RELEASE_COMMIT} PUBLIC_API_BASE_URL=${API_BASE_URL} ./scripts/ecs-release-diagnose.sh
+[hint] If backend-container matches but public does not, check nginx/upstream or another stack serving the domain.
+[hint] If backend-container is also unknown/mismatched, rerun deploy-production.sh with the latest release zip installed.
+EOF
+  fi
+  exit 1
+}
+
+should_check_local_compose_logs() {
+  if [[ "${CHECK_LOCAL_COMPOSE_LOGS}" == "false" ]]; then
+    return 1
+  fi
+  [[ "${CHECK_LOCAL_COMPOSE_HEALTH}" == "true" ]]
+}
+
+scan_local_compose_logs() {
+  local services=(backend subagent-worker)
+  local pattern
+  pattern='EACCES|relation "[^"]+" does not exist|fk_agent_activity_logs_connection|foreign key constraint|ERR_PNPM_LOCKFILE_CONFIG_MISMATCH|ts-node: not found|yaml: did not find expected key|UnhandledPromiseRejection|\bERROR\b'
+
+  for service in "${services[@]}"; do
+    local log_file
+    log_file="$(mktemp)"
+    if ! docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" logs --tail="${COMPOSE_LOG_TAIL}" "${service}" >"${log_file}" 2>&1; then
+      rm -f "${log_file}"
+      fail "Unable to read local compose logs for ${service}."
+    fi
+    if grep -Eiq "${pattern}" "${log_file}"; then
+      echo "[FAIL] Recent ${service} logs contain production failure patterns:" >&2
+      grep -Ein "${pattern}" "${log_file}" | tail -40 >&2
+      rm -f "${log_file}"
+      exit 1
+    fi
+    rm -f "${log_file}"
+  done
 }
 
 curl_status() {
@@ -130,6 +191,25 @@ health_body="$(curl_status "Backend health" "${API_BASE_URL}/health" "200")"
 ready_body="$(curl_status "Backend readiness" "${API_BASE_URL}/ready" "200")"
 openapi_body="$(curl_status "FitMeet core OpenAPI" "${API_BASE_URL}/openapi/fitmeet-core.json" "200")"
 feed_body="$(curl_status "Public feed" "${API_BASE_URL}/feed?page=1&limit=5" "200")"
+
+remote_release="$(
+  node - "${health_body}" "${EXPECTED_RELEASE_COMMIT}" <<'NODE'
+const fs = require('fs');
+const file = process.argv[2];
+const expected = process.argv[3] || '';
+const health = JSON.parse(fs.readFileSync(file, 'utf8'));
+const release = health.release && typeof health.release === 'object' ? health.release : {};
+const commit = String(release.commit || 'unknown');
+const source = String(release.source || 'unknown');
+const builtAt = release.builtAt ? String(release.builtAt) : '';
+if (expected && !commit.startsWith(expected) && !expected.startsWith(commit)) {
+  console.error(`Backend release commit mismatch: got ${commit}, expected ${expected}`);
+  process.exit(1);
+}
+process.stdout.write(`${commit} source=${source}${builtAt ? ` builtAt=${builtAt}` : ''}`);
+NODE
+)" || fail_release_metadata
+ok "Backend release -> ${remote_release}"
 
 node - "${openapi_body}" <<'NODE'
 const fs = require('fs');
@@ -224,6 +304,56 @@ curl_status "Social Agent session without token is protected" "${API_BASE_URL}/s
 curl_status "Messages without token are protected" "${API_BASE_URL}/messages/conversations" "401" >/dev/null
 curl_status "Agent manifest without token rejects auth" "${API_BASE_URL}/agent/skills/manifest" "401" >/dev/null
 
+if [[ -n "${VERIFY_USER_EMAIL}" && -n "${VERIFY_USER_PASSWORD}" ]]; then
+  login_output="${TMP_DIR}/verify_login.json"
+  login_status="$(
+    curl -sS -m "${TIMEOUT_SECONDS}" -o "${login_output}" -w '%{http_code}' \
+      -X POST \
+      -H 'Content-Type: application/json' \
+      -H 'User-Agent: FitMeetProductionVerifier/1.0' \
+      --data "$(node -e 'process.stdout.write(JSON.stringify({email: process.env.VERIFY_USER_EMAIL, password: process.env.VERIFY_USER_PASSWORD}))')" \
+      "${API_BASE_URL}/auth/login"
+  )"
+  [[ "${login_status}" == "200" || "${login_status}" == "201" ]] || fail "Verify user login -> ${login_status}, expected 200/201"
+  verify_access_token="$(
+    node - "${login_output}" <<'NODE'
+const fs = require('fs');
+const doc = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const token = doc.access_token || doc.accessToken || doc.token || doc.data?.accessToken || doc.data?.token || '';
+if (token) process.stdout.write(token);
+NODE
+  )"
+  [[ -n "${verify_access_token}" ]] || fail "Verify user login did not return an access token."
+  session_output="${TMP_DIR}/verify_agent_session.json"
+  session_status="$(
+    curl -sS -m "${TIMEOUT_SECONDS}" -o "${session_output}" -w '%{http_code}' \
+      -H 'User-Agent: FitMeetProductionVerifier/1.0' \
+      -H "Authorization: Bearer ${verify_access_token}" \
+      "${API_BASE_URL}/social-agent/chat/session"
+  )"
+  [[ "${session_status}" == "200" ]] || fail "Authenticated Social Agent session -> ${session_status}, expected 200"
+  node - "${session_output}" <<'NODE'
+const fs = require('fs');
+const doc = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const body = JSON.stringify(doc);
+const forbidden = [
+  '原始目标',
+  '从已保存的步骤继续',
+  '从已保存的工具步骤',
+  '从已保存的 Agent 状态',
+  '继续刚才保存的 Agent 步骤',
+];
+const leaked = forbidden.find((text) => body.includes(text));
+if (leaked) {
+  console.error(`Authenticated Social Agent session leaked stale checkpoint copy: ${leaked}`);
+  process.exit(1);
+}
+NODE
+  ok "Authenticated Social Agent session does not leak stale checkpoint recovery copy"
+else
+  skip "Authenticated Agent session UX check. Set VERIFY_USER_EMAIL and VERIFY_USER_PASSWORD."
+fi
+
 if [[ -n "${AGENT_TOKEN}" ]]; then
   agent_output="${TMP_DIR}/agent_manifest.json"
   status="$(
@@ -265,6 +395,24 @@ if [[ "${RUN_APP_SMOKE}" == "true" ]]; then
     pnpm --dir "${ROOT_DIR}/backend" smoke:app-core
 else
   skip "Remote App smoke. Pass --run-app-smoke after setting APP_SMOKE_* credentials/options."
+fi
+
+if [[ "${CHECK_LOCAL_COMPOSE_HEALTH}" == "true" ]]; then
+  if [[ ! -f "${ROOT_DIR}/${COMPOSE_FILE}" || ! -f "${ROOT_DIR}/${ENV_FILE}" ]]; then
+    fail "Cannot check local compose health without ${COMPOSE_FILE} and ${ENV_FILE}"
+  fi
+  if ! command -v docker >/dev/null 2>&1; then
+    fail "docker is required for --check-local-compose-health"
+  fi
+  (
+    cd "${ROOT_DIR}"
+    docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" exec -T backend node -e "process.exit(0)" >/dev/null
+    docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" exec -T subagent-worker node dist/agent-gateway/subagent-worker-healthcheck.js >/dev/null
+    if should_check_local_compose_logs; then
+      scan_local_compose_logs
+    fi
+  )
+  ok "Local compose backend and subagent-worker healthchecks passed"
 fi
 
 printf '\nProduction verification completed successfully for %s\n' "${BASE_URL}"

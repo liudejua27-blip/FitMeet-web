@@ -83,6 +83,11 @@ for pnpm_dir in "${PNPM_BIN_DIRS[@]}"; do
 done
 export CI="${CI:-true}"
 
+if command -v corepack >/dev/null 2>&1; then
+  corepack enable
+  COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare "pnpm@${FITMEET_PNPM_VERSION:-10.30.3}" --activate
+fi
+
 run_step() {
   local label="$1"
   shift

@@ -6,6 +6,16 @@ import {
   SocialAgentModelRouterService,
   SocialAgentModelUseCase,
 } from './social-agent-model-router.service';
+import { AgentObservabilityService } from './agent-observability.service';
+import {
+  readDeepSeekStreamedContent,
+  readDeepSeekSystemFingerprint,
+  readDeepSeekUsageMetrics,
+} from './deepseek-streaming.util';
+import {
+  DeepSeekStreamResult,
+  emptyDeepSeekStreamMetrics,
+} from './deepseek-latency.types';
 
 type ChatDeepSeekMessage = {
   role: 'system' | 'user' | 'assistant';
@@ -22,6 +32,8 @@ export class SocialAgentChatDeepSeekClientService {
     private readonly config: ConfigService,
     @Optional()
     private readonly modelRouter?: SocialAgentModelRouterService,
+    @Optional()
+    private readonly observability?: AgentObservabilityService,
   ) {}
 
   async complete(input: {
@@ -32,6 +44,9 @@ export class SocialAgentChatDeepSeekClientService {
     maxTokens?: number;
     responseFormat?: { type: 'json_object' };
     messages: ChatDeepSeekMessage[];
+    onDelta?: (delta: string) => void | Promise<void>;
+    signal?: AbortSignal | null;
+    traceId?: string | null;
   }): Promise<string | null> {
     const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
     if (!apiKey) return null;
@@ -41,10 +56,16 @@ export class SocialAgentChatDeepSeekClientService {
     const model = this.modelFor(input.useCase);
     const startedAt = Date.now();
     const controller = new AbortController();
+    const abortFromParent = () => controller.abort();
+    if (input.signal?.aborted) controller.abort();
+    input.signal?.addEventListener('abort', abortFromParent, { once: true });
     const timeout = setTimeout(
       () => controller.abort(),
       this.chatDeepSeekTimeoutMs(input.useCase),
     );
+    let httpHeadersLatencyMs: number | null = null;
+    let streamResult: DeepSeekStreamResult | null = null;
+    let usageMetrics = emptyDeepSeekStreamMetrics(null);
 
     try {
       const response = await fetch(
@@ -65,10 +86,17 @@ export class SocialAgentChatDeepSeekClientService {
             ...(input.responseFormat
               ? { response_format: input.responseFormat }
               : {}),
+            ...(input.onDelta && !input.responseFormat ? { stream: true } : {}),
+            ...(input.onDelta && !input.responseFormat
+              ? { stream_options: { include_usage: true } }
+              : {}),
+            thinking: { type: this.thinkingMode(input.useCase) },
             messages: input.messages,
           }),
         },
       );
+      httpHeadersLatencyMs = Date.now() - startedAt;
+      usageMetrics.httpHeadersLatencyMs = httpHeadersLatencyMs;
       if (!response.ok) {
         this.logModelCall({
           useCase: input.useCase,
@@ -81,38 +109,101 @@ export class SocialAgentChatDeepSeekClientService {
         });
         throw new Error(`DeepSeek HTTP ${response.status}`);
       }
-      const payload = (await response.json()) as Record<string, unknown>;
-      const content = this.readChatDeepSeekContent(payload);
+      streamResult =
+        input.onDelta && !input.responseFormat
+          ? await readDeepSeekStreamedContent({
+              response,
+              onDelta: input.onDelta,
+              startedAt,
+              httpHeadersLatencyMs,
+              firstChunkTimeoutMs: this.firstChunkTimeoutMs(input.useCase),
+              abortController: controller,
+            })
+          : null;
+      const jsonPayload = streamResult
+        ? null
+        : ((await response.json()) as Record<string, unknown>);
+      const content =
+        streamResult?.content ??
+        this.readChatDeepSeekContent(jsonPayload ?? {});
+      usageMetrics =
+        streamResult ??
+        ({
+          ...usageMetrics,
+          ...readDeepSeekUsageMetrics(jsonPayload ?? {}),
+          systemFingerprint: readDeepSeekSystemFingerprint(jsonPayload ?? {}),
+        } satisfies typeof usageMetrics);
+      const latencyMs = Date.now() - startedAt;
       this.logModelCall({
         useCase: input.useCase,
         model,
         taskId: input.taskId,
         intent: input.intent,
-        latencyMs: Date.now() - startedAt,
+        latencyMs,
+        success: true,
+      });
+      this.observability?.recordLlmCall({
+        traceId: input.traceId,
+        useCase: input.useCase,
+        model,
+        taskId: input.taskId,
+        latencyMs,
+        firstTokenLatencyMs: streamResult?.firstTokenLatencyMs ?? null,
+        tokenCount: streamResult?.tokenCount ?? null,
+        httpHeadersLatencyMs,
+        firstSseChunkLatencyMs: usageMetrics.firstSseChunkLatencyMs,
+        firstReasoningDeltaLatencyMs: usageMetrics.firstReasoningDeltaLatencyMs,
+        firstContentDeltaLatencyMs: usageMetrics.firstContentDeltaLatencyMs,
+        promptTokens: usageMetrics.promptTokens,
+        promptCacheHitTokens: usageMetrics.promptCacheHitTokens,
+        promptCacheMissTokens: usageMetrics.promptCacheMissTokens,
+        completionTokens: usageMetrics.completionTokens,
+        reasoningTokens: usageMetrics.reasoningTokens,
+        systemFingerprint: usageMetrics.systemFingerprint,
         success: true,
       });
       return content || null;
     } catch (error) {
+      const latencyMs = Date.now() - startedAt;
+      const reason =
+        error instanceof Error && error.name === 'AbortError'
+          ? input.signal?.aborted
+            ? 'client_aborted'
+            : 'deepseek_timeout'
+          : error instanceof Error
+            ? error.message
+            : String(error);
       this.logModelCall({
         useCase: input.useCase,
         model,
         taskId: input.taskId,
         intent: input.intent,
-        latencyMs: Date.now() - startedAt,
+        latencyMs,
         success: false,
-        reason:
-          error instanceof Error && error.name === 'AbortError'
-            ? 'deepseek_timeout'
-            : error instanceof Error
-              ? error.message
-              : String(error),
+        reason,
+      });
+      this.observability?.recordLlmCall({
+        traceId: input.traceId,
+        useCase: input.useCase,
+        model,
+        taskId: input.taskId,
+        latencyMs,
+        success: false,
+        httpHeadersLatencyMs,
+        firstSseChunkLatencyMs: usageMetrics.firstSseChunkLatencyMs,
+        firstReasoningDeltaLatencyMs: usageMetrics.firstReasoningDeltaLatencyMs,
+        firstContentDeltaLatencyMs: usageMetrics.firstContentDeltaLatencyMs,
+        failureReason: reason,
       });
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error('deepseek_timeout');
+        throw new Error(
+          input.signal?.aborted ? 'client_aborted' : 'deepseek_timeout',
+        );
       }
       throw error;
     } finally {
       clearTimeout(timeout);
+      input.signal?.removeEventListener('abort', abortFromParent);
     }
   }
 
@@ -131,7 +222,7 @@ export class SocialAgentChatDeepSeekClientService {
         this.config.get<string>('AGENT_CASUAL_CHAT_MODEL') ||
         this.config.get<string>('DEEPSEEK_CHAT_MODEL') ||
         this.chatCompatibleLegacyModel(legacy) ||
-        'deepseek-v4-pro'
+        'deepseek-v4-flash'
       );
     }
     if (useCase === 'final_response') {
@@ -139,7 +230,7 @@ export class SocialAgentChatDeepSeekClientService {
         this.config.get<string>('AGENT_FINAL_RESPONSE_MODEL') ||
         this.config.get<string>('DEEPSEEK_CHAT_MODEL') ||
         this.chatCompatibleLegacyModel(legacy) ||
-        'deepseek-v4-pro'
+        'deepseek-v4-flash'
       );
     }
     return (
@@ -162,6 +253,30 @@ export class SocialAgentChatDeepSeekClientService {
     );
     if (!Number.isFinite(configured) || configured <= 0) return 5000;
     return Math.min(configured, 8000);
+  }
+
+  private firstChunkTimeoutMs(useCase: SocialAgentModelUseCase): number {
+    if (this.modelRouter) return this.modelRouter.getFirstChunkTimeout(useCase);
+    const configured = Number(
+      this.config.get<string>('SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS') ??
+        '3500',
+    );
+    if (!Number.isFinite(configured) || configured <= 0) return 3500;
+    return configured;
+  }
+
+  private thinkingMode(
+    useCase: SocialAgentModelUseCase,
+  ): 'disabled' | 'enabled' {
+    if (this.modelRouter) return this.modelRouter.getThinkingMode(useCase);
+    const value = `${
+      this.config.get<string>('SOCIAL_AGENT_DEEPSEEK_THINKING') ?? ''
+    }`
+      .trim()
+      .toLowerCase();
+    return ['enabled', 'true', '1', 'yes'].includes(value)
+      ? 'enabled'
+      : 'disabled';
   }
 
   private logModelCall(input: {

@@ -16,9 +16,9 @@ Required release values:
 
 - `NODE_ENV=production`
 - `PORT=3000`
-- `BASE_URL=https://api.socialworld.world`
-- `FRONTEND_BASE_URL=https://socialworld.world`
-- `ALLOWED_ORIGINS=https://socialworld.world,https://www.socialworld.world`
+- `BASE_URL=https://www.ourfitmeet.cn`
+- `FRONTEND_BASE_URL=https://www.ourfitmeet.cn`
+- `ALLOWED_ORIGINS=https://www.ourfitmeet.cn,https://ourfitmeet.cn`
 - `DATABASE_URL`
 - `DB_SSL=true` when the managed Postgres provider requires TLS.
 - `DB_MIGRATIONS_RUN=false`
@@ -32,6 +32,11 @@ Required release values:
 - `DEEPSEEK_CHAT_MODEL=deepseek-v4-pro`
 - `DEEPSEEK_FAST_MODEL=deepseek-v4-flash`
 - `DEEPSEEK_MODEL=deepseek-v4-flash`
+- `AGENT_OBSERVABILITY_ALERTS_ENABLED=false` for first launch; set to `true`
+  later when an external alert receiver is ready.
+- `AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL` when alert delivery is enabled.
+- `AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN` when alert delivery is enabled.
+- `AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS=300000`
 - One production object storage provider:
   - Aliyun OSS: `ALIYUN_ACCESS_KEY_ID`,
     `ALIYUN_ACCESS_KEY_SECRET`, `ALIYUN_OSS_REGION`,
@@ -47,7 +52,7 @@ Launch-critical but provider-dependent values:
 - `SMS_SECRET_KEY`
 - `WECHAT_APP_ID`
 - `WECHAT_APP_SECRET`
-- `WECHAT_REDIRECT_URI=https://api.socialworld.world/api/auth/wechat/callback`
+- `WECHAT_REDIRECT_URI=https://www.ourfitmeet.cn/api/auth/wechat/callback`
 - `WECHAT_MINI_APP_ID`
 - `WECHAT_MINI_APP_SECRET`
 - `AMAP_WEB_SERVICE_KEY`
@@ -66,7 +71,7 @@ bundle.
 Required:
 
 - `VITE_API_BASE_URL=/api`
-- `VITE_WS_BASE_URL=https://api.socialworld.world`
+- `VITE_WS_BASE_URL=https://www.ourfitmeet.cn`
 
 Optional public frontend values:
 
@@ -82,13 +87,14 @@ Never put these in Vercel frontend env:
 - `JWT_SECRET`, `AGENT_WEBHOOK_SIGNING_SECRET`
 - Object storage access keys
 - `DEEPSEEK_API_KEY`
+- `AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN`
 - SMS or WeChat secrets
 
 ## iOS And TestFlight
 
 Release build settings must resolve to:
 
-- `FITMEET_API_BASE_URL=https://api.socialworld.world/api`
+- `FITMEET_API_BASE_URL=https://www.ourfitmeet.cn/api`
 - `FITMEET_ALLOW_BASE_URL_OVERRIDE=NO`
 - `PRODUCT_BUNDLE_IDENTIFIER=com.fitmeet.alpha`
 - non-empty `DEVELOPMENT_TEAM`
@@ -126,8 +132,8 @@ Keep the printed exports in a local secret note or platform secret manager:
 Use them for:
 
 ```bash
-BASE_URL=https://socialworld.world \
-API_BASE_URL=https://api.socialworld.world/api \
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
 ./scripts/verify-production.sh --run-app-smoke
 ```
 
@@ -147,7 +153,7 @@ If using the ECS same-origin fallback instead of Railway/Vercel:
 - Copy `deploy/env.production.ecs.example` to `.env.production` on the server.
 - Replace every `CHANGE_ME` value.
 - Keep real `.env.production` only on the server or in a secret manager.
-- Set iOS release/staging API base to `https://socialworld.world/api`.
+- Set iOS release/staging API base to `https://www.ourfitmeet.cn/api`.
 
 Validate on the server before deploy:
 

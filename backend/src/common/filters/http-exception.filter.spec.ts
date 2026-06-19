@@ -3,6 +3,7 @@ import {
   BadRequestException,
   InternalServerErrorException,
   Logger,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { HttpExceptionFilter } from './http-exception.filter';
 
@@ -50,6 +51,38 @@ describe('HttpExceptionFilter', () => {
     expect(loggerWarn.mock.calls[0][0]).not.toContain('secret');
   });
 
+  it('redacts sensitive fields from 4xx logs', () => {
+    const filter = new HttpExceptionFilter();
+    const response = createResponse();
+    const host = createHost({
+      request: {
+        method: 'POST',
+        path: '/api/life-graph/extract-from-chat',
+        url: '/api/life-graph/extract-from-chat',
+        user: { id: 7 },
+      },
+      response,
+    });
+
+    filter.catch(
+      new BadRequestException({
+        message: '手机号 15253005312，地址 青岛大学1号楼302',
+        details: {
+          content: '私聊里说微信 wx_fitmeet_2026',
+          lat: 36.123456,
+        },
+      }),
+      host,
+    );
+
+    expect(loggerWarn).toHaveBeenCalledTimes(1);
+    const log = loggerWarn.mock.calls[0][0];
+    expect(log).not.toContain('15253005312');
+    expect(log).not.toContain('wx_fitmeet_2026');
+    expect(log).not.toContain('36.123456');
+    expect(log).toContain('[REDACTED');
+  });
+
   it('strips query strings from 5xx logs and response paths', () => {
     const filter = new HttpExceptionFilter();
     const response = createResponse();
@@ -77,6 +110,25 @@ describe('HttpExceptionFilter', () => {
     expect(loggerError.mock.calls[0][0]).toContain('/api/ready');
     expect(loggerError.mock.calls[0][0]).not.toContain('secret');
   });
+
+  it('does not warn for expected production verifier auth probes', () => {
+    const filter = new HttpExceptionFilter();
+    const response = createResponse();
+    const host = createHost({
+      request: {
+        method: 'GET',
+        path: '/api/auth/profile',
+        url: '/api/auth/profile',
+        headers: { 'user-agent': 'FitMeetProductionVerifier/1.0' },
+      },
+      response,
+    });
+
+    filter.catch(new UnauthorizedException('Unauthorized'), host);
+
+    expect(response.status).toHaveBeenCalledWith(401);
+    expect(loggerWarn).not.toHaveBeenCalled();
+  });
 });
 
 function createResponse() {
@@ -91,6 +143,7 @@ function createHost(input: {
     method: string;
     path?: string;
     url: string;
+    headers?: Record<string, string>;
     user?: { id: number };
   };
   response: ReturnType<typeof createResponse>;

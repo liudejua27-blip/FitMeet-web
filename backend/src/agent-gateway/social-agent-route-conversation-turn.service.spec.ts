@@ -107,6 +107,7 @@ describe('SocialAgentRouteConversationTurnService', () => {
     const { chatLlm, profileEnrichment, routeContext, service } = makeHarness();
     const task = makeTask({ goal: '解释 FitMeet' });
     const longTermSnapshot = {
+      userId: 7,
       taskCount: 1,
       profileFacts: {},
       preferences: {},
@@ -115,7 +116,8 @@ describe('SocialAgentRouteConversationTurnService', () => {
       availability: [],
       activityPreferences: [],
       matchSignals: [],
-    };
+      updatedAt: null,
+    } as never;
     const brainToolResults = [
       { name: 'get_user_profile', status: 'succeeded' },
     ];
@@ -135,7 +137,7 @@ describe('SocialAgentRouteConversationTurnService', () => {
       brainToolResults,
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       handled: true,
       task,
       assistantMessage: 'LLM 直接回答',
@@ -173,6 +175,37 @@ describe('SocialAgentRouteConversationTurnService', () => {
           shouldSearch: true,
           shouldUpdateProfile: false,
           replyStrategy: 'search_candidates',
+        }),
+        profile: null,
+        longTermSnapshot: null,
+        brainToolResults: [],
+      }),
+    ).resolves.toEqual({
+      handled: false,
+      task,
+      savedContext: false,
+      profileUpdated: false,
+      profileUpdateProposal: null,
+    });
+
+    expect(chatLlm.generateConversationalAnswer).not.toHaveBeenCalled();
+    expect(profileEnrichment.handleTurn).not.toHaveBeenCalled();
+  });
+
+  it('leaves fitness math routes on deterministic fallback copy instead of LLM tools', async () => {
+    const { chatLlm, profileEnrichment, service } = makeHarness();
+    const task = makeTask();
+
+    await expect(
+      service.handle({
+        ownerUserId: 7,
+        task,
+        message: '5公里30分钟配速是多少？',
+        route: makeRoute({
+          intent: 'fitness_math',
+          shouldSearch: false,
+          shouldUpdateProfile: false,
+          replyStrategy: 'conversational_answer',
         }),
         profile: null,
         longTermSnapshot: null,

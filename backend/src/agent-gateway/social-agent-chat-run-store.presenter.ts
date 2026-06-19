@@ -11,6 +11,7 @@ import type {
   SocialAgentChatRunResult,
   SocialAgentVisibleStep,
 } from './social-agent-chat.types';
+import { normalizeSocialAgentVisibleStepSnapshot } from './social-agent-visible-step-snapshot.presenter';
 
 type VisibleStepLabeler = (id: string, label: string) => string;
 
@@ -112,6 +113,7 @@ function readSocialAgentVisibleSteps(
           cleanDisplayText(step.label, '正在处理任务'),
         ),
         status: normalizeSocialAgentStepStatus(step.status),
+        snapshot: normalizeSocialAgentVisibleStepSnapshot(step.snapshot),
       };
     })
     .filter((step) => step.id);

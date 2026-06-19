@@ -10,6 +10,7 @@ function emptySnapshot(userId: number): LongTermMemorySnapshot {
       socialStyle: '',
       communicationStyle: '',
       preferredTraits: [],
+      preferenceHistory: [],
     },
     boundaries: {
       excludedGenders: [],
@@ -69,6 +70,35 @@ describe('SocialAgentRagService', () => {
     const snapshot = emptySnapshot(7);
     snapshot.taskCount = 3;
     snapshot.preferences.interests = ['跑步'];
+    snapshot.preferences.preferenceHistory = [
+      {
+        field: 'interest',
+        value: '跑步',
+        source: 'task_memory',
+        taskId: 1,
+        outcome: 'succeeded',
+        confirmed: true,
+        at: '2026-05-20T00:00:00.000Z',
+      },
+      {
+        field: 'availability',
+        value: '周末下午',
+        source: 'stable_profile_fact',
+        taskId: 2,
+        outcome: 'failed',
+        confirmed: false,
+        at: '2026-05-21T00:00:00.000Z',
+      },
+      {
+        field: 'preferredTrait',
+        value: '同城运动搭子',
+        source: 'stable_profile_fact',
+        taskId: 3,
+        outcome: 'succeeded',
+        confirmed: true,
+        at: '2026-05-22T00:00:00.000Z',
+      },
+    ];
     const service = makeService(snapshot);
     const ctx = await service.retrieve({
       intent: 'social_search',
@@ -87,6 +117,15 @@ describe('SocialAgentRagService', () => {
     expect(ctx.successfulMatchCases.length).toBeGreaterThan(0);
     expect(ctx.userMemorySummary).not.toBeNull();
     expect(ctx.userMemorySummary!.preferencesSummary).toContain('跑步');
+    expect(ctx.userMemorySummary!.preferenceHistorySummary).toContain(
+      '兴趣:跑步',
+    );
+    expect(ctx.userMemorySummary!.preferenceHistorySummary).toContain(
+      '理想特质:同城运动搭子',
+    );
+    expect(ctx.userMemorySummary!.preferenceHistorySummary).not.toContain(
+      '周末下午',
+    );
   });
 
   it('returns activity SOP for activity_search and skips user memory when none', async () => {

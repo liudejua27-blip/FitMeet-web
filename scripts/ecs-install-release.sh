@@ -179,4 +179,10 @@ ok "Installed FitMeet release into $TARGET_DIR"
 printf '\nNext server commands:\n'
 printf '  cd %s\n' "$TARGET_DIR"
 printf '  APP_DIR=%s ./scripts/ecs-host-preflight.sh\n' "$TARGET_DIR"
-printf '  APP_DIR=%s RUN_RELEASE_PREFLIGHT=false BUILD_FRONTEND=false PUBLIC_BASE_URL=https://socialworld.world PUBLIC_API_BASE_URL=https://socialworld.world/api ./scripts/deploy-production.sh\n' "$TARGET_DIR"
+printf '  APP_DIR=%s RUN_RELEASE_PREFLIGHT=false BUILD_FRONTEND=false RUN_DB_MIGRATIONS=true PUBLIC_BASE_URL=https://www.ourfitmeet.cn PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api ./scripts/deploy-production.sh\n' "$TARGET_DIR"
+printf '\nPost-deploy release verification:\n'
+printf '  EXPECTED_RELEASE_COMMIT="$(node -e '"'"'const fs=require("fs");const r=JSON.parse(fs.readFileSync("release.json","utf8"));process.stdout.write(String(r.commit||"unknown"))'"'"')"\n'
+printf '  BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT="$EXPECTED_RELEASE_COMMIT" ./scripts/verify-production.sh\n'
+printf '  EXPECTED_RELEASE_COMMIT="$EXPECTED_RELEASE_COMMIT" PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api ./scripts/ecs-release-diagnose.sh\n'
+printf '  curl -fsS https://www.ourfitmeet.cn/api/health\n'
+printf '\nIf /api/health does not show release.commit, the backend container is still running an old image.\n'
