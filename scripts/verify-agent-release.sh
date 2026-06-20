@@ -117,8 +117,12 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-event-store.service.spec.ts \
   src/agent-gateway/social-agent-event-v2.service.spec.ts \
   src/agent-gateway/social-agent-task-memory-state-machine.service.spec.ts \
+  src/agent-gateway/social-agent-task-memory.service.spec.ts \
+  src/agent-gateway/social-agent-task-slot-constraints.presenter.spec.ts \
   src/agent-gateway/social-agent-tasks.controller.spec.ts \
   src/agent-gateway/social-agent-thread-session-manager.service.spec.ts \
+  src/agent-gateway/social-agent-session-query.service.spec.ts \
+  src/agent-gateway/social-agent-session-restore.service.spec.ts \
   src/agent-gateway/social-codex-life-graph-governance.service.spec.ts \
   src/agent-gateway/social-codex-trace-eval.service.spec.ts \
   src/agent-gateway/social-codex-runtime-policy.service.spec.ts \
@@ -133,12 +137,17 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-chat.controller.spec.ts \
   src/agent-gateway/social-agent-chat-llm.service.spec.ts \
   src/agent-gateway/social-agent-chat-llm-prompts.spec.ts \
+  src/agent-gateway/social-agent-chat-brain-memory.presenter.spec.ts \
   src/agent-gateway/social-agent-chat-memory.presenter.spec.ts \
+  src/agent-gateway/social-agent-chat-session-facade.service.spec.ts \
+  src/agent-gateway/social-agent-chat-session.presenter.spec.ts \
   src/agent-gateway/social-agent-deepseek-resilience.spec.ts \
   src/agent-gateway/social-agent-deepseek-quality-boundary.spec.ts \
   src/agent-gateway/social-agent-fallback-source-boundary.spec.ts \
   src/agent-gateway/social-agent-final-response.service.spec.ts \
   src/agent-gateway/social-agent-planner.service.spec.ts \
+  src/agent-gateway/social-agent-intent-memory.presenter.spec.ts \
+  src/agent-gateway/social-agent-memory-context.service.spec.ts \
   src/agent-gateway/social-agent-route-entrance.service.spec.ts \
   src/agent-gateway/social-agent-route-search-turn.service.spec.ts \
   src/agent-gateway/social-agent-model-router.service.spec.ts \
