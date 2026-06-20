@@ -58,3 +58,12 @@ Use backend assertion mode before a serious release:
 ```bash
 node scripts/run-agent-skill-evals.mjs --backend
 ```
+
+Use API modes when a local/staging backend and dedicated smoke credentials are
+available:
+
+```bash
+node scripts/run-agent-skill-evals.mjs --api-readiness
+node scripts/run-agent-skill-evals.mjs --api-sse-abort
+RUN_AGENT_SKILL_EVAL_API=readiness bash scripts/verify-agent-release.sh
+```

@@ -7,8 +7,40 @@ import process from 'node:process';
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const evalFile = path.join(root, 'docs', 'agent-skills', 'eval-cases.jsonl');
 const args = new Set(process.argv.slice(2));
+const supportedApiFlags = [
+  '--api-readiness',
+  '--api-full',
+  '--api-sse-abort',
+  '--api-all',
+];
+if (args.has('--help') || args.has('-h')) {
+  console.log(`Usage: node scripts/run-agent-skill-evals.mjs [--backend] [--show-details] [${supportedApiFlags.join('|')}]
+
+Default mode validates FitMeet skill eval cases against project contracts and
+evidence files. --backend also runs the critical Jest assertions. API modes run
+the existing authenticated Agent smoke scripts against AGENT_SMOKE_API_BASE_URL,
+FITMEET_API_BASE_URL, API_BASE_URL, or http://localhost:3000/api.
+
+API modes require USER_JWT/FITMEET_USER_JWT or AGENT_SMOKE_EMAIL/PASSWORD.
+Remote targets also require the existing AGENT_SMOKE_ALLOW_* safety flags.`);
+  process.exit(0);
+}
 const runBackend = args.has('--backend');
 const showDetails = args.has('--show-details');
+const apiModes = new Set(
+  process.argv
+    .slice(2)
+    .filter((arg) => arg.startsWith('--api'))
+    .map((arg) => arg.replace(/^--api-?/, '') || 'readiness'),
+);
+const runApiReadiness =
+  apiModes.has('readiness') || apiModes.has('smoke') || apiModes.has('all');
+const runApiFull = apiModes.has('full') || apiModes.has('all');
+const runApiSseAbort =
+  apiModes.has('sse-abort') ||
+  apiModes.has('sse') ||
+  apiModes.has('abort') ||
+  apiModes.has('all');
 
 const sourceFiles = {
   acceptance:
@@ -350,6 +382,75 @@ function runBackendAssertions() {
   }
 }
 
+function runCommand(id, command, commandArgs, env = {}) {
+  const result = spawnSync(command, commandArgs, {
+    cwd: root,
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      ...env,
+    },
+  });
+  if (result.status !== 0) {
+    failures.push({
+      id,
+      message: `${command} ${commandArgs.join(' ')} failed with status ${result.status}`,
+    });
+  }
+}
+
+function runApiScenarioAssertions() {
+  if (runApiReadiness || runApiFull) {
+    runCommand(
+      'api-preflight-readiness',
+      path.join(root, 'scripts', 'agent-remote-smoke-preflight.sh'),
+      ['--readiness', '--api-base-url', agentSmokeApiBaseUrl()],
+    );
+    if (runApiReadiness) {
+      runCommand(
+        'api-opportunity-readiness',
+        'pnpm',
+        ['--dir', 'backend', 'run', 'smoke:agent-opportunity'],
+        { AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES: 'true' },
+      );
+    }
+  }
+  if (runApiFull) {
+    runCommand(
+      'api-preflight-full',
+      path.join(root, 'scripts', 'agent-remote-smoke-preflight.sh'),
+      ['--full', '--api-base-url', agentSmokeApiBaseUrl()],
+    );
+    runCommand(
+      'api-opportunity-full',
+      'pnpm',
+      ['--dir', 'backend', 'run', 'smoke:agent-opportunity'],
+      { AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES: 'false' },
+    );
+  }
+  if (runApiSseAbort) {
+    runCommand(
+      'api-preflight-sse-abort',
+      path.join(root, 'scripts', 'agent-remote-smoke-preflight.sh'),
+      ['--sse-abort', '--api-base-url', agentSmokeApiBaseUrl()],
+    );
+    runCommand(
+      'api-sse-abort',
+      'pnpm',
+      ['--dir', 'backend', 'run', 'smoke:agent-sse-abort'],
+    );
+  }
+}
+
+function agentSmokeApiBaseUrl() {
+  return (
+    process.env.AGENT_SMOKE_API_BASE_URL ??
+    process.env.FITMEET_API_BASE_URL ??
+    process.env.API_BASE_URL ??
+    'http://localhost:3000/api'
+  );
+}
+
 const cases = parseEvalCases();
 const seen = new Set();
 for (const caseItem of cases) {
@@ -371,6 +472,7 @@ for (const caseItem of cases) {
 }
 
 if (runBackend) runBackendAssertions();
+runApiScenarioAssertions();
 
 if (failures.length > 0) {
   console.error(
@@ -383,5 +485,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `[OK] Agent skill eval runner passed: ${passes.length}/${cases.length} case(s)${runBackend ? ' + backend assertions' : ''}`,
+  `[OK] Agent skill eval runner passed: ${passes.length}/${cases.length} case(s)${runBackend ? ' + backend assertions' : ''}${runApiReadiness || runApiFull || runApiSseAbort ? ' + API scenario smoke' : ''}`,
 );

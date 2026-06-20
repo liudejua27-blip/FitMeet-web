@@ -176,6 +176,9 @@ for (const phrase of [
   'candidate_empty_safe_fallback',
   'meet_loop_full_state_machine',
   '--backend',
+  '--api-readiness',
+  '--api-full',
+  '--api-sse-abort',
 ]) {
   if (!runnerSource.includes(phrase)) {
     fail(`run-agent-skill-evals.mjs missing ${phrase}`);

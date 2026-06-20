@@ -63,11 +63,31 @@ step "Verify FitMeet Agent skill contracts and eval cases"
 node "${ROOT_DIR}/scripts/verify-agent-skills.mjs"
 
 step "Run FitMeet Agent skill eval runner"
+agent_skill_eval_args=()
 if is_truthy "${RUN_AGENT_SKILL_EVAL_BACKEND:-}"; then
-  node "${ROOT_DIR}/scripts/run-agent-skill-evals.mjs" --backend
-else
-  node "${ROOT_DIR}/scripts/run-agent-skill-evals.mjs"
+  agent_skill_eval_args+=(--backend)
 fi
+case "${RUN_AGENT_SKILL_EVAL_API:-false}" in
+  true|readiness)
+    agent_skill_eval_args+=(--api-readiness)
+    ;;
+  full)
+    agent_skill_eval_args+=(--api-full)
+    ;;
+  sse-abort|sse|abort)
+    agent_skill_eval_args+=(--api-sse-abort)
+    ;;
+  all)
+    agent_skill_eval_args+=(--api-all)
+    ;;
+  false|'')
+    ;;
+  *)
+    echo "[FAIL] Unsupported RUN_AGENT_SKILL_EVAL_API=${RUN_AGENT_SKILL_EVAL_API}. Use false, readiness, full, sse-abort, or all." >&2
+    exit 1
+    ;;
+esac
+node "${ROOT_DIR}/scripts/run-agent-skill-evals.mjs" "${agent_skill_eval_args[@]}"
 
 step "Audit Agent assistant-ui release invariants"
 pnpm --dir "${ROOT_DIR}/frontend" run check:agent-chat-release
