@@ -84,6 +84,12 @@ Environment:
                                  Optional impossible-supply prompt used by the empty-candidate
                                  recovery smoke. Defaults to a deliberately unrealistic
                                  public-candidate request.
+  AGENT_SMOKE_REPORT_STDOUT=true
+                                 Print structured Agent opportunity smoke JSON reports into
+                                 the post-deploy log/evidence stream. Defaults to true for
+                                 Agent opportunity smoke modes.
+  AGENT_SMOKE_REPORT_FILE        Optional path inside the one-off backend container for a
+                                 structured Agent opportunity smoke report.
   AGENT_SMOKE_CITY/ACTIVITY/TIME/INTENSITY
                                  Optional scenario knobs for Agent opportunity smoke.
                                  Defaults align with seed: city from seed, 咖啡轻聊天,
@@ -319,6 +325,8 @@ if [[ "${RUN_AGENT_OPPORTUNITY_SMOKE}" == "readiness" || "${RUN_AGENT_OPPORTUNIT
     AGENT_SMOKE_ACTIVITY="${AGENT_SMOKE_ACTIVITY:-咖啡轻聊天}" \
     AGENT_SMOKE_TIME="${AGENT_SMOKE_TIME:-周末下午}" \
     AGENT_SMOKE_INTENSITY="${AGENT_SMOKE_INTENSITY:-轻松}" \
+    AGENT_SMOKE_REPORT_STDOUT="${AGENT_SMOKE_REPORT_STDOUT:-true}" \
+    AGENT_SMOKE_REPORT_FILE="${AGENT_SMOKE_REPORT_FILE:-}" \
     ./scripts/ecs-backend-pnpm.sh -- smoke:agent-opportunity:prod
 fi
 
@@ -338,6 +346,8 @@ if [[ "${RUN_AGENT_20_TURN_MEMORY_SMOKE}" == "true" ]]; then
     AGENT_SMOKE_ALLOW_MUTATIONS="${AGENT_SMOKE_ALLOW_MUTATIONS}" \
     AGENT_SMOKE_RUN_20_TURN_MEMORY=true \
     AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true \
+    AGENT_SMOKE_REPORT_STDOUT="${AGENT_SMOKE_REPORT_STDOUT:-true}" \
+    AGENT_SMOKE_REPORT_FILE="${AGENT_SMOKE_REPORT_FILE:-}" \
     ./scripts/ecs-backend-pnpm.sh -- smoke:agent-opportunity:prod
 fi
 
@@ -358,6 +368,8 @@ if [[ "${RUN_AGENT_EMPTY_CANDIDATE_SMOKE}" == "true" ]]; then
     AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK=true \
     AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true \
     AGENT_SMOKE_EMPTY_CANDIDATE_MESSAGE="${AGENT_SMOKE_EMPTY_CANDIDATE_MESSAGE:-}" \
+    AGENT_SMOKE_REPORT_STDOUT="${AGENT_SMOKE_REPORT_STDOUT:-true}" \
+    AGENT_SMOKE_REPORT_FILE="${AGENT_SMOKE_REPORT_FILE:-}" \
     ./scripts/ecs-backend-pnpm.sh -- smoke:agent-opportunity:prod
 fi
 

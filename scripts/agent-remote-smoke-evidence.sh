@@ -21,7 +21,9 @@ Usage: scripts/agent-remote-smoke-evidence.sh [--readiness|--20-turn-memory|--em
 
 Runs the remote Agent smoke gates through scripts/ecs-post-deploy-smoke.sh and
 captures a redacted evidence log. It does not store raw passwords, JWTs, bearer
-tokens, or email addresses in the evidence file.
+tokens, or email addresses in the evidence file. Agent opportunity smoke modes
+print structured `fitmeet.agent-opportunity-smoke-report.v1` JSON into the
+evidence log.
 
 Modes:
   --readiness        OpportunityCard readiness only; stops before high-risk actions.
@@ -125,6 +127,7 @@ write_header() {
     printf -- '- App dir: `%s`\n' "${APP_DIR}"
     printf -- '- Prepare Agent smoke seed: `%s`\n' "${PREPARE_AGENT_SMOKE_SEED}"
     printf -- '- Scan compose logs: `%s`\n\n' "${SCAN_COMPOSE_LOGS}"
+    printf -- '- Structured Agent smoke reports: `fitmeet.agent-opportunity-smoke-report.v1`\n\n'
     printf '> Secrets, JWTs, bearer tokens, and email addresses are redacted by this wrapper.\n\n'
   } >"${EVIDENCE_FILE}"
 }

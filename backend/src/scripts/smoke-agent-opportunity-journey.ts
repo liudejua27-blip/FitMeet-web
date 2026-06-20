@@ -40,6 +40,9 @@ import { dirname, resolve } from 'node:path';
  *     unlikely empty-supply query.
  *   AGENT_SMOKE_REPORT_FILE=<path> to write a machine-readable JSON report of
  *     the Social Codex milestones that passed during the smoke run.
+ *   AGENT_SMOKE_REPORT_STDOUT=true to print the same JSON report to stdout.
+ *     This is useful for Docker one-off runs where the container filesystem is
+ *     removed after the smoke command exits.
  *
  * Recommended staging flow:
  *   pnpm --dir backend run seed:agent-smoke
@@ -95,6 +98,7 @@ const EMPTY_CANDIDATE_MESSAGE = nonEmpty(
   '我想今天凌晨三点在火星奥林帕斯山附近找公开资料里有冰潜和舞蹈双标签的人一起散步，只用真实公开可发现候选；如果没有真实候选，请不要编造。',
 );
 const SMOKE_REPORT_FILE = nonEmpty(process.env.AGENT_SMOKE_REPORT_FILE, '');
+const SMOKE_REPORT_STDOUT = truthy(process.env.AGENT_SMOKE_REPORT_STDOUT);
 
 let passCount = 0;
 const smokeStartedAt = new Date().toISOString();
@@ -1590,10 +1594,6 @@ function inferSmokeMilestoneId(message: string) {
 }
 
 function writeSmokeReport(status: 'passed' | 'failed', error?: unknown) {
-  if (!SMOKE_REPORT_FILE) return;
-
-  const target = resolve(process.cwd(), SMOKE_REPORT_FILE);
-  mkdirSync(dirname(target), { recursive: true });
   const report = {
     schemaVersion: 'fitmeet.agent-opportunity-smoke-report.v1',
     status,
@@ -1620,8 +1620,20 @@ function writeSmokeReport(status: 'passed' | 'failed', error?: unknown) {
           : { message: String(error) }
         : undefined,
   };
-  writeFileSync(target, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-  console.log(`[agent-opportunity-smoke] report written: ${target}`);
+  const serialized = `${JSON.stringify(report, null, 2)}\n`;
+
+  if (SMOKE_REPORT_FILE) {
+    const target = resolve(process.cwd(), SMOKE_REPORT_FILE);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, serialized, 'utf8');
+    console.log(`[agent-opportunity-smoke] report written: ${target}`);
+  }
+
+  if (SMOKE_REPORT_STDOUT) {
+    console.log('[agent-opportunity-smoke] report-json-begin');
+    process.stdout.write(serialized);
+    console.log('[agent-opportunity-smoke] report-json-end');
+  }
 }
 
 function smokeKey(label: string) {

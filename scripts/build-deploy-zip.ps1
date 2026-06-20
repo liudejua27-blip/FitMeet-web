@@ -396,6 +396,7 @@ Assert-FileContains "scripts/agent-remote-smoke-evidence.sh" @(
   "run_post_deploy_smoke 20-turn-memory",
   "run_post_deploy_smoke empty-candidate",
   "scripts/ecs-post-deploy-smoke.sh",
+  "fitmeet.agent-opportunity-smoke-report.v1",
   "prepare_agent_smoke_seed_once",
   "export AGENT_SMOKE_ALLOW_MUTATIONS=true",
   "redact()",
@@ -430,6 +431,7 @@ Assert-FileContains "scripts/launch-status.sh" @(
   "unredacted bearer token",
   "unredacted email address",
   "Social Codex trace eval passed",
+  "structured opportunity smoke reports",
   "ECS post-deploy Agent 20-turn-memory smoke",
   "ECS post-deploy Agent empty-candidate smoke",
   "readiness, 20-turn memory, empty-candidate, and full opportunity smoke"
@@ -440,7 +442,8 @@ Assert-FileContains "deploy/agent-smoke.remote.env.example" @(
   "AGENT_SMOKE_ALLOW_REMOTE=true",
   "AGENT_SMOKE_ALLOW_MUTATIONS=true",
   "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true",
-  "AGENT_SMOKE_RUN_20_TURN_MEMORY=false"
+  "AGENT_SMOKE_RUN_20_TURN_MEMORY=false",
+  "AGENT_SMOKE_REPORT_STDOUT=true"
 )
 Assert-FileContains "docs/deployment-aliyun-ecs.md" @(
   "preflight rejects",
@@ -461,6 +464,7 @@ Assert-FileContains "backend/src/scripts/smoke-agent-opportunity-journey.ts" @(
   "candidate preference correction preserves time/place/activity",
   "AGENT_SMOKE_SKIP_CORRECTION_MEMORY",
   "AGENT_SMOKE_RUN_20_TURN_MEMORY",
+  "AGENT_SMOKE_REPORT_STDOUT",
   "20-turn social task memory preserves task continuity"
 )
 Assert-FileContains "scripts/verify-agent-release.sh" @(
@@ -479,6 +483,7 @@ Assert-FileContains "scripts/ecs-post-deploy-smoke.sh" @(
   "RUN_AGENT_OPPORTUNITY_SMOKE=readiness",
   "AGENT_SMOKE_RUN_20_TURN_MEMORY=true",
   "AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK=true",
+  "AGENT_SMOKE_REPORT_STDOUT",
   "./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod",
   "./scripts/ecs-backend-pnpm.sh -- smoke:agent-opportunity:prod",
   "./scripts/ecs-backend-pnpm.sh -- smoke:agent-sse-abort:prod",
@@ -490,6 +495,11 @@ Assert-FileContains "scripts/ecs-post-deploy-smoke.sh" @(
   'AGENT_SMOKE_ACTIVITY="${AGENT_SMOKE_ACTIVITY:-咖啡轻聊天}"',
   'AGENT_SMOKE_TIME="${AGENT_SMOKE_TIME:-周末下午}"',
   'AGENT_SMOKE_INTENSITY="${AGENT_SMOKE_INTENSITY:-轻松}"'
+)
+Assert-FileContains "scripts/ecs-backend-pnpm.sh" @(
+  "AGENT_SMOKE_RUN_20_TURN_MEMORY",
+  "AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK",
+  "AGENT_SMOKE_REPORT_STDOUT"
 )
 Assert-FileContains "scripts/verify-agent-release.sh" @(
   "AGENT_SMOKE_ALLOW_MUTATIONS",

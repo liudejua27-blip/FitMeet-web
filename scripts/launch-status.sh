@@ -174,6 +174,13 @@ validate_agent_remote_smoke_evidence() {
     return 1
   fi
 
+  local smoke_report_count
+  smoke_report_count="$(grep -Fc -- 'fitmeet.agent-opportunity-smoke-report.v1' "${evidence_file}")"
+  if [[ "${smoke_report_count}" -lt 4 ]]; then
+    echo "[FAIL] Agent remote smoke evidence must include structured opportunity smoke reports for readiness, 20-turn memory, empty-candidate, and full opportunity smoke; found ${smoke_report_count}." >&2
+    return 1
+  fi
+
   local secret_assignment_pattern='(AGENT_SMOKE_PASSWORD|USER_JWT|FITMEET_USER_JWT|AGENT_SMOKE_JWT|AUTHORIZATION|Authorization)=["'\'']?[^"'\'']?[^\\"'\'']*[[:alnum:]_.~+/=-]+'
   local redacted_assignment_pattern='(AGENT_SMOKE_PASSWORD|USER_JWT|FITMEET_USER_JWT|AGENT_SMOKE_JWT|AUTHORIZATION|Authorization)=["'\'']?\[redacted\]["'\'']?'
   if grep -Eiq "${secret_assignment_pattern}" "${evidence_file}" &&
