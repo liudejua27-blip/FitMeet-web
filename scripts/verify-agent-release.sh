@@ -109,6 +109,9 @@ pnpm --dir "${ROOT_DIR}/backend" run seed:agent-smoke:dry-run
 step "Run backend Agent route, stream, and acceptance checks"
 pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/config/production-env-readiness.spec.ts \
+  src/config/production-deploy-readiness.spec.ts \
+  src/common/process-role.util.spec.ts \
+  src/agent-gateway/deepseek-streaming.util.spec.ts \
   src/agent-gateway/agent-control.controller.spec.ts \
   src/agent-gateway/agent-loop.service.spec.ts \
   src/agent-gateway/agent-l5-runtime.service.spec.ts \
