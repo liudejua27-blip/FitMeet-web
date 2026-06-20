@@ -91,7 +91,11 @@ case "${RUN_AGENT_SKILL_EVAL_API:-false}" in
     exit 1
     ;;
 esac
-node "${ROOT_DIR}/scripts/run-agent-skill-evals.mjs" "${agent_skill_eval_args[@]}"
+if ((${#agent_skill_eval_args[@]} > 0)); then
+  node "${ROOT_DIR}/scripts/run-agent-skill-evals.mjs" "${agent_skill_eval_args[@]}"
+else
+  node "${ROOT_DIR}/scripts/run-agent-skill-evals.mjs"
+fi
 
 step "Audit Agent assistant-ui release invariants"
 pnpm --dir "${ROOT_DIR}/frontend" run check:agent-chat-release

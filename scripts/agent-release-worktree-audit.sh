@@ -144,6 +144,48 @@ if ((${#deepseek_legacy_alias_entries[@]} > 0)); then
   fail 'DEEPSEEK_MODEL=deepseek-chat is a legacy alias. Production Agent routes must use explicit deepseek-v4-* models.'
 fi
 
+short_agent_timeout_config_entries=()
+for context_path in "${context_limit_files[@]}"; do
+  [[ -e "${context_path}" ]] || continue
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    short_agent_timeout_config_entries+=("${match}")
+  done < <(
+    grep -RInE --exclude-dir=node_modules --exclude-dir=dist \
+      --include='*.example' \
+      --include='*.env' \
+      --include='*.md' \
+      'SOCIAL_AGENT_[A-Z_]*(TIMEOUT|FIRST_CHUNK)[A-Z_]*_?MS=(2500|3500|5000|8000|10000|12000|15000|18000)([^0-9]|$)' \
+      "${context_path}" 2>/dev/null || true
+  )
+done
+if ((${#short_agent_timeout_config_entries[@]} > 0)); then
+  printf '\nShort Agent timeout settings found in deploy docs/templates:\n' >&2
+  printf '  %s\n' "${short_agent_timeout_config_entries[@]}" >&2
+  fail 'Production Agent config must not fall back before DeepSeek can respond; use 20s+ first-chunk and 25s+ route/planner budgets.'
+fi
+
+weak_agent_model_routing_entries=()
+for context_path in "${context_limit_files[@]}"; do
+  [[ -e "${context_path}" ]] || continue
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    weak_agent_model_routing_entries+=("${match}")
+  done < <(
+    grep -RInE --exclude-dir=node_modules --exclude-dir=dist \
+      --include='*.example' \
+      --include='*.env' \
+      --include='*.md' \
+      '(SOCIAL_AGENT_MODEL_ROUTING_MODE=(fast|rules_only|rules-only)|SOCIAL_AGENT_INTENT_ROUTER_MODE=(rules_only|rules-only)|DEEPSEEK_CHAT_MODEL=deepseek-v4-flash|AGENT_(CASUAL_CHAT|FINAL_RESPONSE|PLANNER|EXTRACTOR|CARD|SAFETY)_MODEL=deepseek-v4-flash)' \
+      "${context_path}" 2>/dev/null || true
+  )
+done
+if ((${#weak_agent_model_routing_entries[@]} > 0)); then
+  printf '\nWeak Agent model routing settings found in deploy docs/templates:\n' >&2
+  printf '  %s\n' "${weak_agent_model_routing_entries[@]}" >&2
+  fail 'Production Agent config must stay quality/llm_first and keep user-facing lanes on deepseek-v4-pro.'
+fi
+
 forbidden_legacy_paths=(
   "frontend/src/components/agent-workspace/CodexAntPet.tsx"
   "frontend/src/components/agent/ant-guide"

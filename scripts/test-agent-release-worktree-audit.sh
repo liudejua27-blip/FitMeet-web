@@ -233,6 +233,36 @@ assert_file_contains "${LOG_DIR}/stale-deepseek-alias.err" \
 
 git reset --hard -q HEAD
 rm -f docs/stale-deepseek-alias.md
+cat > docs/stale-agent-timeout.md <<'EOF'
+SOCIAL_AGENT_INTENT_TIMEOUT_MS=2500
+SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS=12000
+EOF
+if scripts/agent-release-worktree-audit.sh --review \
+  > "${LOG_DIR}/stale-timeout.out" \
+  2> "${LOG_DIR}/stale-timeout.err"; then
+  fail 'review audit unexpectedly allowed short Agent timeout docs'
+fi
+assert_file_contains "${LOG_DIR}/stale-timeout.err" \
+  'Production Agent config must not fall back before DeepSeek can respond'
+
+git reset --hard -q HEAD
+rm -f docs/stale-agent-timeout.md
+cat > docs/stale-agent-routing.md <<'EOF'
+SOCIAL_AGENT_MODEL_ROUTING_MODE=fast
+SOCIAL_AGENT_INTENT_ROUTER_MODE=rules_only
+DEEPSEEK_CHAT_MODEL=deepseek-v4-flash
+AGENT_PLANNER_MODEL=deepseek-v4-flash
+EOF
+if scripts/agent-release-worktree-audit.sh --review \
+  > "${LOG_DIR}/stale-routing.out" \
+  2> "${LOG_DIR}/stale-routing.err"; then
+  fail 'review audit unexpectedly allowed weak Agent model routing docs'
+fi
+assert_file_contains "${LOG_DIR}/stale-routing.err" \
+  'Production Agent config must stay quality/llm_first and keep user-facing lanes on deepseek-v4-pro.'
+
+git reset --hard -q HEAD
+rm -f docs/stale-agent-routing.md
 cat > frontend/src/styles/fitmeet-assistant-ui.css <<'EOF'
 .fitmeet-assistant-shell { display: grid; }
 EOF
