@@ -746,6 +746,12 @@ fail_if_entry "legacy Agent debug workbench" '^FitMeet-web/frontend/src/debug/(S
 fail_if_entry "legacy Agent workspace CSS" '^FitMeet-web/frontend/src/styles/agent-workspace\.css$'
 fail_if_entry "legacy Agent GPT shell CSS" '^FitMeet-web/frontend/src/styles/agent-gpt-copy-shell\.css$'
 fail_if_entry "legacy FitMeet assistant shell CSS" '^FitMeet-web/frontend/src/styles/fitmeet-assistant-ui\.css$'
+fail_if_entry "legacy standalone HomePage" '^FitMeet-web/frontend/src/pages/HomePage(\.legacy)?\.tsx$'
+fail_if_entry "legacy universe hero components" '^FitMeet-web/frontend/src/components/hero/'
+fail_if_entry "legacy product motion showcase" '^FitMeet-web/frontend/src/components/showcase/'
+fail_if_entry "legacy universe gateway data" '^FitMeet-web/frontend/src/data/(gateways|heroCopy)\.ts$'
+fail_if_entry "legacy universe card components" '^FitMeet-web/frontend/src/components/ui/(GatewayPortalCard|SectionHeading)\.tsx$'
+fail_if_entry "legacy universe Earth scene" '^FitMeet-web/frontend/src/components/three/EarthScene\.tsx$'
 fail_if_entry "one-off legacy rewrite scripts" '^FitMeet-web/scripts/fix-(aimatch|loginmodal|meetmodal|postmodal)'
 
 step "Write checksum"

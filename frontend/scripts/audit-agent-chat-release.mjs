@@ -185,7 +185,20 @@ const forbiddenPresentFiles = [
   'frontend/src/components/agent-workspace/agentFlow.types.ts',
   'frontend/src/components/agent-workspace/useAgentFlow.ts',
   'frontend/src/test/AgentFlowConfig.test.ts',
+  'frontend/src/pages/HomePage.tsx',
   'frontend/src/pages/HomePage.legacy.tsx',
+  'frontend/src/components/hero',
+  'frontend/src/components/sections/EcosystemGateways.tsx',
+  'frontend/src/components/sections/BrandPhilosophy.tsx',
+  'frontend/src/components/sections/SymbiosisNetwork.tsx',
+  'frontend/src/components/sections/VisionSection.tsx',
+  'frontend/src/components/sections/FinalCTA.tsx',
+  'frontend/src/components/showcase',
+  'frontend/src/components/three/EarthScene.tsx',
+  'frontend/src/components/ui/GatewayPortalCard.tsx',
+  'frontend/src/components/ui/SectionHeading.tsx',
+  'frontend/src/data/gateways.ts',
+  'frontend/src/data/heroCopy.ts',
   'frontend/src/styles/agent-gpt-copy-shell.css',
   'frontend/src/styles/agent-workspace.css',
   'frontend/src/styles/fitmeet-assistant-ui.css',
@@ -273,8 +286,8 @@ const requiredContentChecks = [
     file: 'docs/discover-entrypoint-audit-checklist.md',
     patterns: [
       "`'/legacy-home'` 仅作为兼容别名重定向到 `'/'`",
-      '旧 `HomePage.legacy.tsx` 已移除',
-      '旧 `HomePage.legacy.tsx` 不得回流',
+      '旧 `HomePage.tsx` / `HomePage.legacy.tsx` 已移除',
+      '旧 `HomePage.tsx`、旧 hero/showcase/gateway 入口不得回流',
     ],
   },
   {
@@ -2365,6 +2378,9 @@ const requiredContentChecks = [
       'fail_if_entry "legacy Agent workspace CSS"',
       'fail_if_entry "legacy Agent GPT shell CSS"',
       'fail_if_entry "legacy FitMeet assistant shell CSS"',
+      'fail_if_entry "legacy standalone HomePage"',
+      'fail_if_entry "legacy universe hero components"',
+      'fail_if_entry "legacy product motion showcase"',
     ],
   },
   {
@@ -2414,12 +2430,6 @@ const forbiddenContentChecks = [
     file: 'frontend/scripts/smoke-discover-entrypoints.mjs',
     patterns: [
       "  '/legacy-home',",
-    ],
-  },
-  {
-    file: 'docs/discover-entrypoint-audit-checklist.md',
-    patterns: [
-      '`frontend/src/pages/HomePage.legacy.tsx`',
     ],
   },
 ];

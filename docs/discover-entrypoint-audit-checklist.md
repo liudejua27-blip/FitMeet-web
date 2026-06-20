@@ -18,11 +18,16 @@
 - `frontend/src/routes/routeBoundaries.ts`
   - `publicWebsiteRoutes` 已包含 `'/discover'`、`'/app'`、`'/download-app'`
 
-### 2) Gateway 入口（已归一）
-- `frontend/src/data/gateways.ts`
-  - `Human` 网关入口 `href: '/discover'`
+### 2) 官网入口（已归一）
 - `frontend/src/components/website/WebsitePlatform.tsx`
-  - 通用按钮与 `SiteLink` 使用了上述 gateway 数据
+  - canonical 官网首页和内页入口由该组件承载
+  - Discover CTA 直接使用 `/discover` 或 discover-aware navigation
+- 旧宇宙首页入口已移除：
+  - `frontend/src/pages/HomePage.tsx`
+  - `frontend/src/data/gateways.ts`
+  - `frontend/src/data/heroCopy.ts`
+  - `frontend/src/components/hero/*`
+  - `frontend/src/components/showcase/*`
 
 ### 3) 落地页卡片入口（统一透传）
 - `frontend/src/data/geoLandingPagesData.mjs`
@@ -30,7 +35,7 @@
 - `frontend/src/pages/GeoLandingPage.tsx`
   - 入口按钮复用 `actions` 数据并跳转 `/discover`
 - canonical 首页由 `frontend/src/pages/PlatformPage.tsx` / `frontend/src/components/website/WebsitePlatform.tsx` 承载
-  - 旧 `HomePage.legacy.tsx` 已移除；`/legacy-home` 不再是 Discover 入口测试面
+  - 旧 `HomePage.tsx` / `HomePage.legacy.tsx` 已移除；`/legacy-home` 不再是 Discover 入口测试面
 - `frontend/src/pages/SportsPage.tsx`
   - `key={s.id} to={`/discover?category=${s.id}`}`
 - `frontend/src/pages/CitiesPage.tsx`
@@ -40,8 +45,6 @@
 - `frontend/src/components/Layout.tsx`
   - 桌面导航含 `/discover`
   - 底部 Tab `nearby` 配置映射到 `'/discover'`
-- `frontend/src/components/hero/HeroNavigation.tsx`
-  - `items` 尾项 `'/discover'`
 - `frontend/src/components/website/WebsitePlatform.tsx`
   - 多处主按钮 `to="/discover"` / `to` 配置 `'/discover'`
 - `frontend/src/components/agent/AgentConnectPage.tsx`
@@ -52,12 +55,8 @@
   - 默认落地动作含 `to="/discover"`
 
 ### 5) 内容/展示层入口（信息层）
-- `frontend/src/components/showcase/ProductMotionShowcase.tsx`
-  - card 详情入口 `to={`/discover?${card.discoverQuery}`}`
-- `frontend/src/components/portal/UniversePortal.tsx`
-  - 门户卡片 `href: '/discover'`
-- `frontend/src/data/heroCopy.ts`
-  - 首页入口文案按钮 `href: '/discover'`
+- 旧 `ProductMotionShowcase` / `UniversePortal` / `heroCopy` 不再参与生产入口。
+- 新增内容卡片时应直接使用 `SiteLink` / `DiscoverLink` 或 `navigateToRouteWithScrollReset`。
 
 ### 6) 生成脚本 / SEO 关联（需要持续检查）
 - `frontend/scripts/generate-geo-static.mjs`
@@ -102,8 +101,8 @@
    - `navigateToRouteWithScrollReset('/discover?...')` 触发 scroll reset（可配合 mock）
 2. `Layout` / `WebsitePlatform` / `HeroNavigation` 导航组件冒烟：
    - 发现入口按钮最终生成 `href="/discover"` 且通过 `SiteLink`
-3. `Gateways & Landing data` 冒烟：
-   - `gateways.ts`、`geoLandingPagesData.mjs` 中发现入口应只产生 `/discover*`
+3. `Landing data` 冒烟：
+   - `geoLandingPagesData.mjs` 中发现入口应只产生 `/discover*`
 4. `AppRoutes + routeBoundaries` 对齐：
    - alias route 都存在
    - `'/app'`、`'/download-app'` 仍映射到 `/download`
@@ -142,10 +141,7 @@
   - `publicWebsiteRoutes` 中含 `/discover`、`/app`、`/download-app`
 
 ### B. 数据侧入口源（应统一归口）
-- `frontend/src/data/gateways.ts`
-  - 人类入口 `href: '/discover'`
-- `frontend/src/data/heroCopy.ts`
-  - `href: '/discover'`
+- 旧 `frontend/src/data/gateways.ts` / `frontend/src/data/heroCopy.ts` 已删除，不能作为入口源回流。
 - `frontend/src/data/geoLandingPagesData.mjs`
   - 全量场景卡片按钮统一为 `/discover` / `/discover?category=...`
 - `frontend/src/pages/GeoLandingPage.tsx`
@@ -155,18 +151,12 @@
 - `frontend/src/components/Layout.tsx`
   - 底部/主导航中的 `to: '/discover'`
   - `tab.to === '/discover'` 分支逻辑
-- `frontend/src/components/hero/HeroNavigation.tsx`
-  - `['/discover', nav.enter]`
 - `frontend/src/components/website/WebsitePlatform.tsx`
   - 顶部/功能区的 `/discover` CTA 多点入口
-- `frontend/src/components/portal/UniversePortal.tsx`
-  - `href: '/discover'`（确认该入口是否经由 `SiteLink` 包装后渲染）
 - `frontend/src/components/agent/AgentConnectPage.tsx`
   - `href: '/discover'`
-- `frontend/src/components/showcase/ProductMotionShowcase.tsx`
-  - `to={`/discover?${card.discoverQuery}`}`
 - canonical 首页组件
-  - 入口必须经 `SiteLink` / `DiscoverLink` 或 `navigateToRouteWithScrollReset`，旧 `HomePage.legacy.tsx` 不得回流
+  - 入口必须经 `SiteLink` / `DiscoverLink` 或 `navigateToRouteWithScrollReset`，旧 `HomePage.tsx`、旧 hero/showcase/gateway 入口不得回流
 - `frontend/src/pages/SportsPage.tsx`
   - `to={`/discover?category=${s.id}`}`、`to="/discover"`
 - `frontend/src/pages/CitiesPage.tsx`
