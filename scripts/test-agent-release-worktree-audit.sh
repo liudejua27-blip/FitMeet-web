@@ -43,7 +43,7 @@ mkdir -p "${TMP_DIR}/scripts" \
   "${TMP_DIR}/docs" \
   "${TMP_DIR}/frontend/src/api" \
   "${TMP_DIR}/frontend/src/components/agent-workspace/api" \
-  "${TMP_DIR}/frontend/src/components/agent-loop" \
+  "${TMP_DIR}/frontend/src/components/assistant-ui" \
   "${TMP_DIR}/frontend/src/data" \
   "${TMP_DIR}/frontend/src/lib" \
   "${TMP_DIR}/frontend/src/pages" \
@@ -79,8 +79,8 @@ EOF
 cat > frontend/src/api/socialRequestsApi.ts <<'EOF'
 export const socialRequestsApi = {};
 EOF
-cat > frontend/src/components/agent-loop/AgentApprovalCard.tsx <<'EOF'
-export function AgentApprovalCard() { return null; }
+cat > frontend/src/components/assistant-ui/approval-panel.tsx <<'EOF'
+export function ApprovalPanel() { return null; }
 EOF
 cat > frontend/src/lib/agentApprovalCopy.ts <<'EOF'
 export const approvalCopyReady = true;
@@ -99,7 +99,7 @@ printf '\nexport const discoverContentReady = true;\n' >> frontend/src/data/disc
 printf '\nit("discover content replacement", () => {});\n' >> frontend/src/test/discoverContent.test.ts
 printf '\nexport const socialRequestsReady = true;\n' >> backend/src/social-requests/social-requests.service.ts
 printf '\nexport const socialRequestsApiReady = true;\n' >> frontend/src/api/socialRequestsApi.ts
-printf '\nexport const agentApprovalCardReady = true;\n' >> frontend/src/components/agent-loop/AgentApprovalCard.tsx
+printf '\nexport const approvalPanelReady = true;\n' >> frontend/src/components/assistant-ui/approval-panel.tsx
 printf '\nexport const agentApprovalCopyReady2 = true;\n' >> frontend/src/lib/agentApprovalCopy.ts
 printf '\nexport const agentControlCenterReady = true;\n' >> frontend/src/pages/AgentControlCenterPage.tsx
 
@@ -134,7 +134,7 @@ assert_file_contains_line "${LOG_DIR}/audit-out/discover-profile-closure.paths.t
 assert_file_contains_line "${LOG_DIR}/audit-out/discover-profile-closure.paths.txt" \
   'frontend/src/api/socialRequestsApi.ts'
 assert_file_contains_line "${LOG_DIR}/audit-out/agent-frontend-assistant-ui.paths.txt" \
-  'frontend/src/components/agent-loop/AgentApprovalCard.tsx'
+  'frontend/src/components/assistant-ui/approval-panel.tsx'
 assert_file_contains_line "${LOG_DIR}/audit-out/agent-frontend-assistant-ui.paths.txt" \
   'frontend/src/lib/agentApprovalCopy.ts'
 assert_file_contains_line "${LOG_DIR}/audit-out/agent-frontend-assistant-ui.paths.txt" \

@@ -53,6 +53,9 @@ describe('Agent user route isolation', () => {
     expect(existsSync(join(srcRoot, 'components', 'agent', 'ant-guide'))).toBe(false);
     expect(existsSync(join(srcRoot, 'assets', 'agent', 'ant-guide'))).toBe(false);
     expect(existsSync(join(srcRoot, 'components', 'ai-elements'))).toBe(false);
+    expect(existsSync(join(srcRoot, 'components', 'agent-loop', 'ActivityIcebreakerCard.tsx'))).toBe(false);
+    expect(existsSync(join(srcRoot, 'components', 'agent-loop', 'ActivityProofUploader.tsx'))).toBe(false);
+    expect(existsSync(join(srcRoot, 'components', 'agent-loop', 'AgentApprovalCard.tsx'))).toBe(false);
 
     const debugSourceFiles = collectSourceFiles(join(srcRoot, 'debug')).map((file) =>
       relative(srcRoot, file).replace(/\\/g, '/'),

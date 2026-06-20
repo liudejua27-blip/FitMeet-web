@@ -522,6 +522,9 @@ rsync -a "${ROOT_DIR}/" "${STAGE_DIR}/" \
   --exclude 'agent-reference-qa.png' \
   --exclude 'homepage-gsap-qa.png' \
   --exclude 'frontend/src/components/agent-workspace/CodexAntPet.tsx' \
+  --exclude 'frontend/src/components/agent-loop/ActivityIcebreakerCard.tsx' \
+  --exclude 'frontend/src/components/agent-loop/ActivityProofUploader.tsx' \
+  --exclude 'frontend/src/components/agent-loop/AgentApprovalCard.tsx' \
   --exclude 'frontend/src/components/agent/AgentConnectionCard.tsx' \
   --exclude 'frontend/src/components/agent-workspace/api/mockAgentAdapter.ts' \
   --exclude 'frontend/src/dev/' \
@@ -782,6 +785,9 @@ fail_if_entry "nested zip files" '\.zip$'
 fail_if_entry "logs" '(^|/)logs/|\.log$'
 fail_if_entry "QA screenshots" 'agent-gsap-qa\.png|agent-reference-qa\.png|homepage-gsap-qa\.png|qa-gsap-round2/|artifacts/|docs/qa/|frontend/qa/'
 fail_if_entry "legacy Agent pet component" '^FitMeet-web/frontend/src/components/agent-workspace/CodexAntPet\.tsx$'
+fail_if_entry "legacy Agent activity icebreaker card" '^FitMeet-web/frontend/src/components/agent-loop/ActivityIcebreakerCard\.tsx$'
+fail_if_entry "legacy Agent activity proof uploader" '^FitMeet-web/frontend/src/components/agent-loop/ActivityProofUploader\.tsx$'
+fail_if_entry "legacy Agent approval card" '^FitMeet-web/frontend/src/components/agent-loop/AgentApprovalCard\.tsx$'
 fail_if_entry "legacy Agent connection card" '^FitMeet-web/frontend/src/components/agent/AgentConnectionCard\.tsx$'
 fail_if_entry "legacy Agent flow hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentFlow\.tsx?$'
 fail_if_entry "legacy Agent static connection types" '^FitMeet-web/frontend/src/types/agent\.ts$'
