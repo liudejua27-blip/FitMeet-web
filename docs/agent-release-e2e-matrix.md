@@ -33,15 +33,15 @@ green checks.
 | Production browser QA        | `EXPECTED_RELEASE_COMMIT=<release-commit> FITMEET_AGENT_BROWSER_QA_ALLOW_REMOTE=true FITMEET_AGENT_BROWSER_QA_EMAIL=<smoke-email> FITMEET_AGENT_BROWSER_QA_PASSWORD=<smoke-password> pnpm --dir frontend run qa:agent-chat:production` | First verifies `/api/health.release.commit` matches the intended release, then logs in with a dedicated smoke account, checks the deployed `/agent/chat` assistant-ui shell at 390 / 768 / 1024 / 1440, proves ordinary chat does not render social UI, and proves explicit social intent clarifies or renders opportunities. |
 | Remote smoke safety preflight | `scripts/agent-remote-smoke-preflight.sh --readiness --api-base-url https://www.ourfitmeet.cn/api`                                                                           | Checks target API, auth, dedicated smoke-account shape, remote/mutation/JWT override flags, and prints no secrets.                                              |
 | Remote smoke env template    | `deploy/agent-smoke.remote.env.example`                                                                                                                                      | Provides non-secret placeholders for the dedicated smoke account, mutation guards, readiness stop flag, and stable Opportunity journey knobs.                    |
-| Remote smoke evidence capture | `scripts/agent-remote-smoke-evidence.sh --all --prepare-agent-smoke-seed`                                                                                                   | Runs readiness, full opportunity, and SSE abort smoke through the ECS wrapper and stores a redacted markdown evidence file.                                    |
+| Remote smoke evidence capture | `scripts/agent-remote-smoke-evidence.sh --all --prepare-agent-smoke-seed`                                                                                                   | Runs readiness, 20-turn memory, empty-candidate recovery, full opportunity, and SSE abort smoke through the ECS wrapper and stores a redacted markdown evidence file. |
 | Opportunity readiness smoke  | `RUN_AGENT_OPPORTUNITY_SMOKE=readiness bash scripts/verify-agent-release.sh`                                                                                                 | Ordinary chat stays conversational, vague social request clarifies, clarified social request returns 3+ OpportunityCards, then stops before high-risk actions and verifies `/events/eval`. |
 | 20-turn memory smoke         | `RUN_AGENT_20_TURN_MEMORY_SMOKE=true bash scripts/verify-agent-release.sh`                                                                                                   | Real Agent API preserves the same task, completed slots, time/place/activity context, and no-repeat-question behavior through a 20-turn continuation. |
 | Empty-candidate fallback smoke | `RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true bash scripts/verify-agent-release.sh`                                                                                                | Impossible public-candidate request returns `CandidateEmptyStateCard`, suggests publish / broaden / time-change recovery paths, and does not render fake `CandidateCards`. |
 | Full opportunity smoke       | `RUN_AGENT_OPPORTUNITY_SMOKE=true bash scripts/verify-agent-release.sh`                                                                                                      | Opener draft, reject, confirm send, activity confirmation, Meet Loop, review, Life Graph proposal actions, and `/events/eval` execute with dedicated smoke data. |
 | SSE abort smoke              | `RUN_AGENT_SSE_ABORT_SMOKE=true bash scripts/verify-agent-release.sh`                                                                                                        | First delta arrives, client abort stops the run, and no result continues after disconnect.                                                                     |
 | ECS post-deploy readiness    | `scripts/ecs-post-deploy-smoke.sh --prepare-agent-smoke-seed --run-agent-opportunity-readiness-smoke --scan-compose-logs`                                                    | Production API health, readiness, Agent opportunity readiness, and backend/worker log scan pass.                                                               |
-| ECS post-deploy full smoke   | `AGENT_SMOKE_ALLOW_MUTATIONS=true scripts/ecs-post-deploy-smoke.sh --prepare-agent-smoke-seed --run-agent-opportunity-smoke --run-agent-empty-candidate-smoke --run-agent-sse-abort-smoke --scan-compose-logs` | Dedicated smoke users prove full mutating chain, empty-candidate recovery, and SSE abort against the deployed API.                                                                        |
-| Final Agent cutover status   | `REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true AGENT_REMOTE_SMOKE_EVIDENCE_FILE=<evidence.md> scripts/launch-status.sh --topology ecs --skip-ios-testflight-check`                 | Launch status fails unless the redacted ECS evidence file proves readiness, full opportunity, SSE abort, and zero-exit post-deploy smoke.                       |
+| ECS post-deploy full smoke   | `AGENT_SMOKE_ALLOW_MUTATIONS=true scripts/ecs-post-deploy-smoke.sh --prepare-agent-smoke-seed --run-agent-opportunity-smoke --run-agent-20-turn-memory-smoke --run-agent-empty-candidate-smoke --run-agent-sse-abort-smoke --scan-compose-logs` | Dedicated smoke users prove full mutating chain, 20-turn memory continuity, empty-candidate recovery, and SSE abort against the deployed API.                                                                        |
+| Final Agent cutover status   | `REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true AGENT_REMOTE_SMOKE_EVIDENCE_FILE=<evidence.md> scripts/launch-status.sh --topology ecs --skip-ios-testflight-check`                 | Launch status fails unless the redacted ECS evidence file proves readiness, 20-turn memory, empty-candidate recovery, full opportunity, SSE abort, and zero-exit post-deploy smoke. |
 
 When `AGENT_RELEASE_AUDIT_OUT_DIR` is set, the worktree cleanup audit also
 writes executable `stage-<category>.sh` helpers next to each `*.paths.txt` and
@@ -88,7 +88,8 @@ guards remain covered by an executable regression check.
 
 ## Remote Smoke Rules
 
-- Remote readiness and full smoke both require dedicated smoke credentials.
+- Remote readiness, 20-turn memory, empty-candidate, full, and SSE abort smoke
+  require dedicated smoke credentials.
 - Copy `deploy/agent-smoke.remote.env.example` to
   `deploy/agent-smoke.remote.env` and fill only a dedicated smoke/test account.
   The filled file is gitignored and must never be packaged or shared.
@@ -404,14 +405,16 @@ A release candidate can proceed only when:
   `scripts/agent-remote-smoke-evidence.sh` contains
   `prepare_agent_smoke_seed_once`, parses `AGENT_SMOKE_EMAIL/PASSWORD/CITY`,
   exports `AGENT_SMOKE_ALLOW_MUTATIONS=true`, then reuses the same smoke account
-  for readiness, full opportunity, and SSE abort smoke.
+  for readiness, 20-turn memory, empty-candidate recovery, full opportunity,
+  and SSE abort smoke.
 - Current recommended ECS deploy archive:
   `/tmp/fitmeet-ecs-deploy-agent-evidence-fixed.zip`.
 
 2026-06-14 launch-status remote smoke evidence gate:
 
 - Passed: `launch-status.sh` accepts a redacted evidence markdown containing
-  readiness, full opportunity, and SSE abort sections with three successful
+  readiness, 20-turn memory, empty-candidate recovery, full opportunity, and
+  SSE abort sections with five successful
   `Exit code: 0` markers.
 - Passed: `launch-status.sh` fails when
   `REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true` and
@@ -449,7 +452,8 @@ A release candidate can proceed only when:
   `scripts/agent-remote-smoke-evidence.sh` contains
   `prepare_agent_smoke_seed_once`, parses `AGENT_SMOKE_EMAIL/PASSWORD/CITY`,
   exports `AGENT_SMOKE_ALLOW_MUTATIONS=true`, and reuses the same prepared
-  smoke account for readiness, full opportunity, and SSE abort smoke.
+  smoke account for readiness, 20-turn memory, empty-candidate recovery, full
+  opportunity, and SSE abort smoke.
 - Current recommended ECS deploy archive:
   `/tmp/fitmeet-ecs-deploy-agent-final-gate.zip`.
 

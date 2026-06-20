@@ -387,6 +387,10 @@ Assert-FileContains "scripts/agent-remote-smoke-preflight.sh" @(
 Assert-FileContains "scripts/agent-remote-smoke-evidence.sh" @(
   "FitMeet Agent Remote Smoke Evidence",
   "--all",
+  "--20-turn-memory",
+  "--empty-candidate",
+  "run_post_deploy_smoke 20-turn-memory",
+  "run_post_deploy_smoke empty-candidate",
   "scripts/ecs-post-deploy-smoke.sh",
   "prepare_agent_smoke_seed_once",
   "export AGENT_SMOKE_ALLOW_MUTATIONS=true",
@@ -422,7 +426,9 @@ Assert-FileContains "scripts/launch-status.sh" @(
   "unredacted bearer token",
   "unredacted email address",
   "Social Codex trace eval passed",
-  "readiness and full opportunity smoke"
+  "ECS post-deploy Agent 20-turn-memory smoke",
+  "ECS post-deploy Agent empty-candidate smoke",
+  "readiness, 20-turn memory, empty-candidate, and full opportunity smoke"
 )
 Assert-FileContains "deploy/agent-smoke.remote.env.example" @(
   "FitMeet Agent remote smoke environment template",
@@ -464,7 +470,11 @@ Assert-FileContains "backend/src/scripts/smoke-agent-sse-abort.ts" @(
 )
 Assert-FileContains "scripts/ecs-post-deploy-smoke.sh" @(
   "--run-agent-opportunity-readiness-smoke",
+  "--run-agent-20-turn-memory-smoke",
+  "--run-agent-empty-candidate-smoke",
   "RUN_AGENT_OPPORTUNITY_SMOKE=readiness",
+  "AGENT_SMOKE_RUN_20_TURN_MEMORY=true",
+  "AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK=true",
   "./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod",
   "./scripts/ecs-backend-pnpm.sh -- smoke:agent-opportunity:prod",
   "./scripts/ecs-backend-pnpm.sh -- smoke:agent-sse-abort:prod",
@@ -483,6 +493,10 @@ Assert-FileContains "scripts/verify-agent-release.sh" @(
   "agent_smoke_is_remote",
   "RUN_AGENT_OPPORTUNITY_SMOKE accepts",
   "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true",
+  "RUN_AGENT_20_TURN_MEMORY_SMOKE=true",
+  "--api-20-turn-memory",
+  "RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true",
+  "--api-empty-candidate",
   "run_agent_smoke_preflight",
   "scripts/agent-remote-smoke-preflight.sh",
   "social-agent-context-hydrator.service.spec.ts",

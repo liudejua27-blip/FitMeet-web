@@ -145,6 +145,8 @@ validate_agent_remote_smoke_evidence() {
   local required_patterns=(
     '# FitMeet Agent Remote Smoke Evidence'
     'ECS post-deploy Agent readiness smoke'
+    'ECS post-deploy Agent 20-turn-memory smoke'
+    'ECS post-deploy Agent empty-candidate smoke'
     'ECS post-deploy Agent full smoke'
     'ECS post-deploy Agent sse-abort smoke'
     'Post-deploy smoke completed.'
@@ -160,15 +162,15 @@ validate_agent_remote_smoke_evidence() {
 
   local zero_exit_count
   zero_exit_count="$(grep -Fc -- '- Exit code: `0`' "${evidence_file}")"
-  if [[ "${zero_exit_count}" -lt 3 ]]; then
-    echo "[FAIL] Agent remote smoke evidence must contain at least 3 successful smoke exit codes; found ${zero_exit_count}." >&2
+  if [[ "${zero_exit_count}" -lt 5 ]]; then
+    echo "[FAIL] Agent remote smoke evidence must contain at least 5 successful smoke exit codes; found ${zero_exit_count}." >&2
     return 1
   fi
 
   local trace_eval_count
   trace_eval_count="$(grep -Fc -- 'Social Codex trace eval passed' "${evidence_file}")"
-  if [[ "${trace_eval_count}" -lt 2 ]]; then
-    echo "[FAIL] Agent remote smoke evidence must prove Social Codex trace eval for readiness and full opportunity smoke; found ${trace_eval_count}." >&2
+  if [[ "${trace_eval_count}" -lt 4 ]]; then
+    echo "[FAIL] Agent remote smoke evidence must prove Social Codex trace eval for readiness, 20-turn memory, empty-candidate, and full opportunity smoke; found ${trace_eval_count}." >&2
     return 1
   fi
 

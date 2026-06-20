@@ -17,17 +17,19 @@ fitmeet_bootstrap_toolchain
 
 usage() {
   cat <<'EOF'
-Usage: scripts/agent-remote-smoke-evidence.sh [--readiness|--full|--sse-abort|--all] [--prepare-agent-smoke-seed] [--no-scan-compose-logs] [--evidence-file PATH]
+Usage: scripts/agent-remote-smoke-evidence.sh [--readiness|--20-turn-memory|--empty-candidate|--full|--sse-abort|--all] [--prepare-agent-smoke-seed] [--no-scan-compose-logs] [--evidence-file PATH]
 
 Runs the remote Agent smoke gates through scripts/ecs-post-deploy-smoke.sh and
 captures a redacted evidence log. It does not store raw passwords, JWTs, bearer
 tokens, or email addresses in the evidence file.
 
 Modes:
-  --readiness   OpportunityCard readiness only; stops before high-risk actions.
-  --full        Full mutating opportunity journey.
-  --sse-abort   SSE visibility/abort smoke.
-  --all         Readiness, then full opportunity + SSE abort.
+  --readiness        OpportunityCard readiness only; stops before high-risk actions.
+  --20-turn-memory   20-turn task-memory continuity smoke.
+  --empty-candidate  Empty-candidate recovery smoke; must not fabricate people.
+  --full             Full mutating opportunity journey.
+  --sse-abort        SSE visibility/abort smoke.
+  --all              Readiness, 20-turn memory, empty-candidate, full, then SSE abort.
 
 Environment:
   BASE_URL / API_BASE_URL        Target Web/API. Defaults to www.ourfitmeet.cn.
@@ -48,6 +50,12 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --readiness)
       MODE=readiness
+      ;;
+    --20-turn-memory)
+      MODE=20-turn-memory
+      ;;
+    --empty-candidate)
+      MODE=empty-candidate
       ;;
     --full)
       MODE=full
@@ -86,9 +94,9 @@ API_BASE_URL="${API_BASE_URL%/}"
 APP_DIR="${APP_DIR%/}"
 
 case "${MODE}" in
-  readiness|full|sse-abort|all) ;;
+  readiness|20-turn-memory|empty-candidate|full|sse-abort|all) ;;
   *)
-    echo "[agent-smoke-evidence][FAIL] MODE must be readiness, full, sse-abort, or all." >&2
+    echo "[agent-smoke-evidence][FAIL] MODE must be readiness, 20-turn-memory, empty-candidate, full, sse-abort, or all." >&2
     exit 2
     ;;
 esac
@@ -202,6 +210,10 @@ post_deploy_args() {
 
   if [[ "${smoke_mode}" == "readiness" ]]; then
     args+=(--run-agent-opportunity-readiness-smoke)
+  elif [[ "${smoke_mode}" == "20-turn-memory" ]]; then
+    args+=(--run-agent-20-turn-memory-smoke)
+  elif [[ "${smoke_mode}" == "empty-candidate" ]]; then
+    args+=(--run-agent-empty-candidate-smoke)
   elif [[ "${smoke_mode}" == "full" ]]; then
     args+=(--run-agent-opportunity-smoke)
   elif [[ "${smoke_mode}" == "sse-abort" ]]; then
@@ -238,6 +250,12 @@ case "${MODE}" in
   readiness)
     run_post_deploy_smoke readiness
     ;;
+  20-turn-memory)
+    run_post_deploy_smoke 20-turn-memory
+    ;;
+  empty-candidate)
+    run_post_deploy_smoke empty-candidate
+    ;;
   full)
     run_post_deploy_smoke full
     ;;
@@ -246,6 +264,8 @@ case "${MODE}" in
     ;;
   all)
     run_post_deploy_smoke readiness
+    run_post_deploy_smoke 20-turn-memory
+    run_post_deploy_smoke empty-candidate
     run_post_deploy_smoke full
     run_post_deploy_smoke sse-abort
     ;;

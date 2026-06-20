@@ -316,8 +316,8 @@ smoke commands, redacts passwords, JWTs, bearer tokens, and email addresses, and
 writes a markdown proof file under `artifacts/agent-smoke-evidence/`. With
 `--all --prepare-agent-smoke-seed`, the wrapper prepares the dedicated Agent
 smoke seed once in the parent process, exports the printed `AGENT_SMOKE_*`
-values, and reuses that same smoke account across readiness, full opportunity,
-and SSE abort checks:
+values, and reuses that same smoke account across readiness, 20-turn memory,
+empty-candidate recovery, full opportunity, and SSE abort checks:
 
 ```bash
 set -a
