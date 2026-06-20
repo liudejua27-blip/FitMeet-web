@@ -224,35 +224,37 @@ export class SocialAgentProfileGateService {
     ) {
       missing.push('availability');
     }
-    if (
-      !(
-        memory.boundaries.publicPlaceOnly ||
-        memory.boundaries.noAutoMessage ||
-        memory.boundaries.noContactExchange ||
-        memory.boundaries.noNightMeet ||
-        this.hasAny([taskSlots.safety_boundary]) ||
-        this.hasAny([
-          this.lifeGraphValue(
-            lifeGraph.fields,
-            'social_intent',
-            'privacyBoundary',
-          ),
-          this.lifeGraphValue(
-            lifeGraph.fields,
-            'privacy_boundary',
-            'privacyBoundary',
-          ),
-          this.extractBoundary(text),
-        ])
-      )
-    ) {
-      missing.push('boundary');
-    }
-    if (
-      memory.boundaries.publicActivityAllowed === null &&
-      !this.hasPublicAuthorizationSlot(taskSlots.visibility)
-    ) {
-      missing.push('publicAuthorization');
+    if (this.requiresActionConsent(input.route)) {
+      if (
+        !(
+          memory.boundaries.publicPlaceOnly ||
+          memory.boundaries.noAutoMessage ||
+          memory.boundaries.noContactExchange ||
+          memory.boundaries.noNightMeet ||
+          this.hasAny([taskSlots.safety_boundary]) ||
+          this.hasAny([
+            this.lifeGraphValue(
+              lifeGraph.fields,
+              'social_intent',
+              'privacyBoundary',
+            ),
+            this.lifeGraphValue(
+              lifeGraph.fields,
+              'privacy_boundary',
+              'privacyBoundary',
+            ),
+            this.extractBoundary(text),
+          ])
+        )
+      ) {
+        missing.push('boundary');
+      }
+      if (
+        memory.boundaries.publicActivityAllowed === null &&
+        !this.hasPublicAuthorizationSlot(taskSlots.visibility)
+      ) {
+        missing.push('publicAuthorization');
+      }
     }
 
     if (missing.length === 0) {
@@ -334,7 +336,29 @@ export class SocialAgentProfileGateService {
 
   private buildQuestion(missing: SocialAgentProfileGateMissingField[]) {
     const missingText = missing.map((field) => this.missingFieldLabel(field)).join('、');
-    return `为了让推荐更准，也避免误公开你的需求，我还需要补齐 ${missingText}。你可以直接按一句话回答，例如：“青岛市南区，周末下午，轻松跑步，公共场所先站内聊，接受陌生人，不公开发起活动”。如果你愿意公开到发现页，也可以说“可以公开发起活动”。`;
+    const examples = [
+      '可以，我先把最低画像补齐，这样不会乱推荐，也不会误公开你的需求。',
+      `还差：${missingText}。`,
+      this.profileGateExample(missing),
+    ];
+    if (missing.includes('publicAuthorization')) {
+      examples.push(
+        '如果愿意让这张约练卡出现在发现页，也可以说“可以公开到发现”。',
+      );
+    }
+    return examples.join('\n');
+  }
+
+  private profileGateExample(
+    missing: SocialAgentProfileGateMissingField[],
+  ): string {
+    if (
+      missing.includes('boundary') ||
+      missing.includes('publicAuthorization')
+    ) {
+      return '你可以一句话回答，例如：“青岛市南区，周末下午，低强度散步，第一次只接受公共场所，先站内聊，暂不公开到发现”。';
+    }
+    return '你可以一句话回答，例如：“青岛市南区，周末下午，低强度散步”。';
   }
 
   private missingFieldLabel(field: SocialAgentProfileGateMissingField) {
@@ -355,6 +379,14 @@ export class SocialAgentProfileGateService {
     });
   }
 
+  private requiresActionConsent(route: SocialAgentIntentRouterResult): boolean {
+    return (
+      route.shouldExecuteAction === true ||
+      route.replyStrategy === 'execute_action' ||
+      route.intent === 'action_request'
+    );
+  }
+
   private readTaskSlots(task: AgentTask): Record<string, string> {
     const memory = this.isRecord(task.memory) ? task.memory : {};
     const rawSlots = this.isRecord(memory.taskSlots) ? memory.taskSlots : {};
@@ -366,11 +398,26 @@ export class SocialAgentProfileGateService {
     const out: Record<string, string> = {};
     for (const [key, raw] of Object.entries(rawSlots)) {
       if (!this.isRecord(raw)) continue;
+      if (!this.isTaskSlotUsableForGate(key, raw)) continue;
       const value = cleanDisplayText(raw.value, '').trim();
       if (!value) continue;
       out[key] = value;
     }
     return out;
+  }
+
+  private isTaskSlotUsableForGate(
+    key: string,
+    slot: Record<string, unknown>,
+  ): boolean {
+    const value = cleanDisplayText(slot.value, '').trim();
+    if (!value) return false;
+    const state = cleanDisplayText(slot.state, '');
+    const source = cleanDisplayText(slot.source, '');
+    if (state === 'missing') return false;
+    if (key === 'geo_area') return true;
+    if (state === 'inferred' || source === 'inferred') return false;
+    return true;
   }
 
   private taskSlotsSatisfy(

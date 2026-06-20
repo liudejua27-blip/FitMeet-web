@@ -8,6 +8,7 @@ import type {
   SocialAgentIntentRouteResult,
   SocialAgentRuntimeResumeMetadata,
   SocialAgentRouteMessageBody,
+  SocialAgentStreamOptions,
   StreamEmit,
 } from './social-agent-chat.types';
 import { socialAgentAssistantMessageForRoute } from './social-agent-route-response.presenter';
@@ -17,6 +18,7 @@ import { SocialAgentRouteEntranceService } from './social-agent-route-entrance.s
 import { SocialAgentRouteDecisionService } from './social-agent-route-decision.service';
 import { createSocialAgentRouteTurnState } from './social-agent-route-turn-state';
 import { SocialAgentRouteAgentLoopRunnerService } from './social-agent-route-agent-loop-runner.service';
+import { hasExplicitCandidateMessageConfirmationIntent } from './social-agent-social-intent-gate';
 
 type QueueInitialSearchForTask = (
   ownerUserId: number,
@@ -49,6 +51,7 @@ export class SocialAgentRouteTurnService {
     body: SocialAgentRouteMessageBody;
     emit?: StreamEmit;
     signal?: AbortSignal | null;
+    streamOptions?: SocialAgentStreamOptions;
     replanAndRefresh: ReplanAndRefresh;
     queueInitialSearchForTask: QueueInitialSearchForTask;
   }): Promise<SocialAgentIntentRouteResult> {
@@ -67,18 +70,26 @@ export class SocialAgentRouteTurnService {
       task,
       body,
       message,
+      signal: input.signal,
     });
     task = decision.task;
     const { route } = decision;
 
-    const candidateConfirmation = await this.handleCandidateConfirmationInLoop({
-      ownerUserId,
+    let candidateConfirmation: CandidateConfirmationResult = {
+      handled: false,
       task,
-      message,
-      route,
-      startedAt,
-      signal: input.signal,
-    });
+      result: null,
+    };
+    if (hasExplicitCandidateMessageConfirmationIntent(message)) {
+      candidateConfirmation = await this.handleCandidateConfirmationInLoop({
+        ownerUserId,
+        task,
+        message,
+        route,
+        startedAt,
+        signal: input.signal,
+      });
+    }
     if (candidateConfirmation.handled) return candidateConfirmation.result;
 
     const state = createSocialAgentRouteTurnState(
@@ -94,6 +105,8 @@ export class SocialAgentRouteTurnService {
       state,
       message,
       decision,
+      conversationIntent:
+        body.clientContext?.conversationIntent ?? body.conversationIntent ?? null,
       clientContext: body.clientContext ?? null,
       emit: input.emit,
       signal: input.signal,
@@ -105,6 +118,8 @@ export class SocialAgentRouteTurnService {
       task: branchRun.task,
       route,
       assistantMessage: branchRun.actionTurn.assistantMessage,
+      assistantMessageSource:
+        branchRun.state.assistantMessageSource ?? 'fallback',
       savedContext: branchRun.state.savedContext,
       profileUpdated: branchRun.state.profileUpdated,
       queuedRun: branchRun.state.queuedRun,
@@ -117,6 +132,8 @@ export class SocialAgentRouteTurnService {
       subagentHandoffs: branchRun.subagentHandoffs,
       runtime: this.runtimeFromResumeContext(branchRun.resumeContext),
       startedAt,
+      deferAssistantMessageLog:
+        input.streamOptions?.deferAssistantMessageLog ?? false,
     });
   }
 

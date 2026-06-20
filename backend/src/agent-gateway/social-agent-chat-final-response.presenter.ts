@@ -3,6 +3,10 @@ import {
   summarizeSocialAgentTaskMemoryForLlm,
 } from './social-agent-chat-memory.presenter';
 import {
+  normalizeSocialAgentContextTurn,
+  selectSocialAgentContextWindow,
+} from './social-agent-context-window';
+import {
   readSocialAgentConversationBrainDecision,
   readSocialAgentConversationBrainLastToolResult,
   readSocialAgentCurrentAgentState,
@@ -24,20 +28,30 @@ type SocialAgentChatProfileUpdateMode =
 
 export function buildSocialAgentDirectReplyFinalResponseInput(input: {
   message: string;
+  traceId?: string | null;
   route: SocialAgentIntentRouterResult;
   task: AgentTask;
   memoryContext: SocialAgentMemoryContext | null;
+  taskContext?: Record<string, unknown> | null;
+  conversationHistory?: Array<Record<string, unknown>> | null;
+  contextTurnLimit?: number;
   toolResults?: Array<Record<string, unknown>>;
   fallbackReply: string;
 }): SocialAgentFinalResponseInput {
   return {
     userMessage: input.message,
+    traceId: input.traceId ?? null,
     intent: input.route.intent,
     route: input.route as unknown as Record<string, unknown>,
     agentState: readSocialAgentCurrentAgentState(input.task),
-    conversationHistory: buildSocialAgentLlmConversationHistory(input.task),
+    conversationHistory: conversationHistoryForFinalResponse(
+      input.task,
+      input.conversationHistory,
+      input.contextTurnLimit,
+    ),
     memoryContext: memoryContextRecord(input.memoryContext),
-    taskContext: summarizeSocialAgentTaskMemoryForLlm(input.task),
+    taskContext:
+      input.taskContext ?? summarizeSocialAgentTaskMemoryForLlm(input.task),
     plannerDecision: readSocialAgentConversationBrainDecision(input.task),
     toolResults:
       input.toolResults && input.toolResults.length > 0
@@ -51,8 +65,23 @@ export function buildSocialAgentDirectReplyFinalResponseInput(input: {
   };
 }
 
+function conversationHistoryForFinalResponse(
+  task: AgentTask,
+  hydratedHistory?: Array<Record<string, unknown>> | null,
+  contextTurnLimit?: number,
+): Array<Record<string, unknown>> {
+  const limit = contextTurnLimit;
+  if (Array.isArray(hydratedHistory) && hydratedHistory.length > 0) {
+    return selectSocialAgentContextWindow(hydratedHistory, limit)
+      .map(normalizeSocialAgentContextTurn)
+      .filter((turn) => turn.role && turn.text);
+  }
+  return buildSocialAgentLlmConversationHistory(task, limit);
+}
+
 export function buildSocialAgentAgentBrainFinalResponseInput(input: {
   message: string;
+  traceId?: string | null;
   task: AgentTask;
   intent: SocialAgentIntentType;
   mode: SocialAgentChatProfileUpdateMode;
@@ -61,14 +90,23 @@ export function buildSocialAgentAgentBrainFinalResponseInput(input: {
   toolOutput?: Record<string, unknown>;
   fallbackReply: string;
   memoryContext: SocialAgentMemoryContext | null;
+  taskContext?: Record<string, unknown> | null;
+  conversationHistory?: Array<Record<string, unknown>> | null;
+  contextTurnLimit?: number;
 }): SocialAgentFinalResponseInput {
   return {
     userMessage: input.message,
+    traceId: input.traceId ?? null,
     intent: input.intent,
     agentState: readSocialAgentCurrentAgentState(input.task),
-    conversationHistory: buildSocialAgentLlmConversationHistory(input.task),
+    conversationHistory: conversationHistoryForFinalResponse(
+      input.task,
+      input.conversationHistory ?? input.memoryContext?.shortTerm?.recentTurns,
+      input.contextTurnLimit,
+    ),
     memoryContext: memoryContextRecord(input.memoryContext),
-    taskContext: summarizeSocialAgentTaskMemoryForLlm(input.task),
+    taskContext:
+      input.taskContext ?? summarizeSocialAgentTaskMemoryForLlm(input.task),
     plannerDecision: readSocialAgentConversationBrainDecision(input.task),
     toolResults: input.toolOutput ? [input.toolOutput] : [],
     safetyRules: socialAgentFinalResponseSafetyRules(),

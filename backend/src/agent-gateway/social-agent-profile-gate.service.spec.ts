@@ -82,7 +82,7 @@ describe('SocialAgentProfileGateService', () => {
     expect(result.assistantMessage).toContain('可约时间');
   });
 
-  it('asks for the minimum profile fields before social execution', async () => {
+  it('asks only for search-critical fields before candidate search', async () => {
     const service = new SocialAgentProfileGateService({
       getLifeGraph: jest.fn().mockResolvedValue({
         completeness: { completenessScore: 0 },
@@ -103,11 +103,9 @@ describe('SocialAgentProfileGateService', () => {
       'city',
       'activity',
       'availability',
-      'boundary',
-      'publicAuthorization',
     ]);
-    expect(result.assistantMessage).toContain('是否允许公开发起活动');
-    expect(result.assistantMessage).toContain('不公开发起活动');
+    expect(result.assistantMessage).toContain('最低画像');
+    expect(result.assistantMessage).not.toContain('暂不公开到发现');
     expect(task.memory).toMatchObject({
       taskMemory: {
         currentTask: expect.objectContaining({
@@ -116,6 +114,39 @@ describe('SocialAgentProfileGateService', () => {
         }),
       },
     });
+  });
+
+  it('keeps action execution gated by boundary and public authorization', async () => {
+    const service = new SocialAgentProfileGateService({
+      getLifeGraph: jest.fn().mockResolvedValue({
+        completeness: { completenessScore: 0 },
+        fields: {},
+      }),
+    } as never);
+    const task = makeTask();
+
+    const result = await service.evaluateForSocialExecution({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        intent: 'action_request',
+        shouldExecuteAction: true,
+        replyStrategy: 'execute_action',
+        entities: {
+          city: '青岛',
+          activityType: '散步',
+          targetGender: '',
+          timePreference: '今晚',
+          locationPreference: '',
+        },
+      }),
+      message: '青岛今晚散步，帮我直接发邀请',
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.missing).toEqual(['boundary', 'publicAuthorization']);
+    expect(result.assistantMessage).toContain('社交边界');
+    expect(result.assistantMessage).toContain('是否允许公开发起活动');
   });
 
   it('passes when the user provides city, activity, time, boundary, and public authorization', async () => {
@@ -294,5 +325,126 @@ describe('SocialAgentProfileGateService', () => {
       assistantMessage: '',
       canEnterMatchPool: true,
     });
+  });
+
+  it('does not let inferred-only slots bypass the minimum gate', async () => {
+    const service = new SocialAgentProfileGateService(
+      {
+        getLifeGraph: jest.fn().mockResolvedValue({
+          completeness: { completenessScore: 20 },
+          fields: {},
+        }),
+      } as never,
+      {
+        get: jest.fn().mockResolvedValue({
+          completion: {
+            percent: 20,
+            readinessLevel: 'profile_missing',
+            canEnterMatchPool: false,
+            nextActions: ['补齐画像'],
+          },
+        }),
+      } as never,
+    );
+
+    const result = await service.getMinimumProfileStatusWithTaskSlots(7, {
+      activity: {
+        key: 'activity',
+        value: '散步',
+        state: 'inferred',
+        source: 'inferred',
+      },
+      time_window: {
+        key: 'time_window',
+        value: '周末下午',
+        state: 'inferred',
+        source: 'inferred',
+      },
+      location_text: {
+        key: 'location_text',
+        value: '青岛大学附近',
+        state: 'inferred',
+        source: 'inferred',
+      },
+      safety_boundary: {
+        key: 'safety_boundary',
+        value: '首次见面优先公共场所，先站内聊',
+        state: 'inferred',
+        source: 'inferred',
+      },
+      visibility: {
+        key: 'visibility',
+        value: '可公开到发现',
+        state: 'inferred',
+        source: 'inferred',
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.missing).toEqual([
+      'city',
+      'activity',
+      'availability',
+      'boundary',
+      'publicAuthorization',
+    ]);
+    expect(result.canEnterMatchPool).toBe(false);
+  });
+
+  it('allows inferred geo area as a coarse city signal but not inferred safety consent', async () => {
+    const service = new SocialAgentProfileGateService();
+    const task = makeTask({
+      memory: {
+        taskSlots: {
+          geo_area: {
+            key: 'geo_area',
+            value: '崂山区',
+            state: 'inferred',
+            source: 'inferred',
+          },
+          activity: {
+            key: 'activity',
+            value: '散步',
+            state: 'completed',
+            source: 'user_message',
+          },
+          time_window: {
+            key: 'time_window',
+            value: '今晚',
+            state: 'completed',
+            source: 'user_message',
+          },
+          safety_boundary: {
+            key: 'safety_boundary',
+            value: '首次见面优先公共场所，先站内聊',
+            state: 'inferred',
+            source: 'inferred',
+          },
+          visibility: {
+            key: 'visibility',
+            value: '可公开到发现',
+            state: 'inferred',
+            source: 'inferred',
+          },
+        },
+      },
+    });
+
+    const result = await service.evaluateForSocialExecution({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        intent: 'action_request',
+        shouldExecuteAction: true,
+        replyStrategy: 'execute_action',
+      }),
+      message: '可以，帮我发邀请',
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.missing).not.toContain('city');
+    expect(result.missing).not.toContain('activity');
+    expect(result.missing).not.toContain('availability');
+    expect(result.missing).toEqual(['boundary', 'publicAuthorization']);
   });
 });

@@ -70,6 +70,9 @@ jest.mock('../users/users.module', () => {
 import { AgentDiscoveryService } from './agent-discovery.service';
 import { AgentGatewayModule } from './agent-gateway.module';
 import { AgentUserController } from './agent-gateway.controller';
+import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
+import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
+import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
 
 type RouteInfo = { method: string; path: string };
 
@@ -205,6 +208,49 @@ describe('AgentGatewayModule startup', () => {
     expect(app.get(AgentUserController)).toBeInstanceOf(AgentUserController);
 
     await app.close();
+  });
+
+  it('wires final responses to the shared streaming DeepSeek client in production DI', async () => {
+    moduleRef = await Test.createTestingModule({
+      imports: [AgentGatewayModule],
+    })
+      .useMocker((token) => {
+        if (token === DataSource) return createDataSourceMock();
+        return createGenericMock();
+      })
+      .compile();
+
+    const finalResponses = moduleRef.get(SocialAgentFinalResponseService);
+    const deepSeek = moduleRef.get(SocialAgentChatDeepSeekClientService);
+
+    expect(finalResponses).toBeInstanceOf(SocialAgentFinalResponseService);
+    expect(deepSeek).toBeInstanceOf(SocialAgentChatDeepSeekClientService);
+    expect(
+      (finalResponses as unknown as {
+        deepSeek?: SocialAgentChatDeepSeekClientService;
+      }).deepSeek,
+    ).toBe(deepSeek);
+  });
+
+  it('wires chat LLM replies through the final response generator in production DI', async () => {
+    moduleRef = await Test.createTestingModule({
+      imports: [AgentGatewayModule],
+    })
+      .useMocker((token) => {
+        if (token === DataSource) return createDataSourceMock();
+        return createGenericMock();
+      })
+      .compile();
+
+    const chatLlm = moduleRef.get(SocialAgentChatLlmService);
+    const finalResponses = moduleRef.get(SocialAgentFinalResponseService);
+
+    expect(chatLlm).toBeInstanceOf(SocialAgentChatLlmService);
+    expect(
+      (chatLlm as unknown as {
+        finalResponses?: SocialAgentFinalResponseService;
+      }).finalResponses,
+    ).toBe(finalResponses);
   });
 
   it('registers social agent restore routes before the generic task route', async () => {

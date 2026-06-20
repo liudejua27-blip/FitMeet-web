@@ -127,8 +127,9 @@ describe('SocialAgentReplanRunService', () => {
       }),
     };
     const recommendationResults = {
-      completeRecommendationResult: jest.fn((input) =>
-        Promise.resolve({
+      completeRecommendationResult: jest.fn((input) => {
+        input.buildMemoryContext(input.task);
+        return Promise.resolve({
           taskId: input.task.id,
           status: AgentTaskStatus.AwaitingConfirmation,
           visibleSteps: input.visibleSteps,
@@ -137,11 +138,38 @@ describe('SocialAgentReplanRunService', () => {
           candidates: input.candidates,
           approvalRequiredActions: [],
           events: [],
-        }),
-      ),
+        });
+      }),
+    };
+    const finalTaskContext = {
+      conversationHistory: [
+        { role: 'user', text: '改成明天杭州瑜伽搭子' },
+        { role: 'assistant', text: '已记住新的时间、城市和活动。' },
+      ],
+      taskSlots: {
+        activity: { value: '瑜伽', state: 'completed' },
+        time_window: { value: '明天', state: 'completed' },
+        location_text: { value: '杭州', state: 'completed' },
+      },
     };
     const routeContext = {
       buildMemoryContext: jest.fn().mockReturnValue({}),
+      buildTaskContext: jest.fn().mockReturnValue(finalTaskContext),
+    };
+    const longTermSnapshot = {
+      userId: 7,
+      taskCount: 5,
+      profileFacts: { city: '青岛' },
+      preferences: { preferredTime: '周末下午' },
+      boundaries: { firstMeet: '公共场所优先' },
+      socialGoals: ['找轻松约练搭子'],
+      availability: ['周末下午'],
+      activityPreferences: ['瑜伽'],
+      matchSignals: ['低强度'],
+      updatedAt: '2026-06-17T00:00:00.000Z',
+    };
+    const longTermMemory = {
+      readSnapshot: jest.fn().mockResolvedValue(longTermSnapshot),
     };
     const taskLifecycle = {
       assertTaskOwner: jest.fn().mockResolvedValue(task),
@@ -160,6 +188,8 @@ describe('SocialAgentReplanRunService', () => {
       routeContext as never,
       taskLifecycle as never,
       realtime as never,
+      undefined,
+      longTermMemory as never,
     );
 
     const result = await service.execute({
@@ -177,10 +207,16 @@ describe('SocialAgentReplanRunService', () => {
       task,
       '改成明天杭州瑜伽搭子',
     );
+    expect(followUpContext.readLatestFollowUpContext).toHaveBeenCalledWith(
+      task,
+      '改成明天杭州瑜伽搭子',
+    );
     expect(planner.replanTask).toHaveBeenCalledWith(
       101,
       expect.objectContaining({
         userMessage: '改成明天杭州瑜伽搭子',
+        refreshedGoal:
+          expect.stringContaining('用户补充：改成明天杭州瑜伽搭子'),
         reason: 'user_follow_up',
       }),
     );
@@ -215,6 +251,25 @@ describe('SocialAgentReplanRunService', () => {
       7,
       'agent:approval_required',
       expect.objectContaining({ candidateCount: 1 }),
+    );
+    expect(longTermMemory.readSnapshot).toHaveBeenCalledWith(7);
+    expect(routeContext.buildMemoryContext).toHaveBeenCalledWith(
+      task,
+      longTermSnapshot,
+    );
+    expect(routeContext.buildTaskContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task,
+        body: { message: '改成明天杭州瑜伽搭子' },
+        longTermSnapshot,
+      }),
+    );
+    expect(
+      recommendationResults.completeRecommendationResult,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskContext: finalTaskContext,
+      }),
     );
     expect(savedEvents).toEqual(
       expect.arrayContaining([

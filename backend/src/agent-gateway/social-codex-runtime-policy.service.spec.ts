@@ -56,6 +56,36 @@ describe('SocialCodexRuntimePolicyService', () => {
     expect(decision.reasons.join(' ')).toContain('低风险的理解');
   });
 
+  it('treats CreateSocialRequest publish payloads as high-risk public publish actions', () => {
+    const decision = service.evaluate({
+      toolName: SocialAgentToolName.CreateSocialRequest,
+      payload: {
+        mode: 'publish',
+        publish: true,
+        syncPublicIntent: true,
+        title: '今晚青岛大学散步',
+      },
+    });
+
+    expect(decision).toMatchObject({
+      actionType: 'publish_social_request',
+      mode: 'approval_required',
+      riskLevel: 'high',
+      requiresApproval: true,
+      dryRunRequired: true,
+      auditRequired: true,
+      dryRunPreview: {
+        required: true,
+        title: '约练发布草稿',
+        sideEffectAllowedBeforeApproval: false,
+      },
+    });
+    expect(decision.idempotencyKeyScope).toBe(
+      'social_codex:publish_social_request',
+    );
+    expect(decision.sandbox.externalSideEffectAllowed).toBe(false);
+  });
+
   it('treats allowed tools as read-only rather than side-effect capable', () => {
     const decision = service.evaluate({
       actionType: 'summarize_intent',

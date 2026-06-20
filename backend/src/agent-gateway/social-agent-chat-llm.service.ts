@@ -14,23 +14,21 @@ import {
 import { AgentTask } from './entities/agent-task.entity';
 import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
-import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
-import type { SocialAgentMemoryContext } from './social-agent-memory-context.service';
 import type { ExtractedProfileFields } from './social-agent-chat.types';
-import type {
-  SocialAgentIntentRouterResult,
-  SocialAgentIntentType,
-} from './social-agent-intent-router.service';
 import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
+import { SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS, socialAgentContextTurnLimit } from './social-agent-context-window';
+import {
+  createTrackedSocialAgentDeltaHandler,
+  socialAgentAnswerSource,
+} from './social-agent-chat-llm-delta';
+import type { SocialAgentBrainReplyInput, SocialAgentDirectReplyInput, SocialAgentGeneratedAnswer } from './social-agent-chat-llm.types';
 import {
   buildSocialAgentProfileExtractionMessages,
   parseSocialAgentProfileExtractionContent,
   profileFieldsFromRecord,
 } from './social-agent-profile-extraction.presenter';
 
-type LongTermMemorySnapshot = Awaited<
-  ReturnType<SocialAgentLongTermMemoryService['readSnapshot']>
->;
+export type { SocialAgentGeneratedAnswer } from './social-agent-chat-llm.types';
 
 @Injectable()
 export class SocialAgentChatLlmService {
@@ -45,37 +43,42 @@ export class SocialAgentChatLlmService {
     private readonly selfImprove?: AgentSelfImproveService,
   ) {}
 
-  async generateConversationalAnswer(input: {
-    message: string;
-    route: SocialAgentIntentRouterResult;
-    profile: Record<string, unknown> | null;
-    task: AgentTask;
-    longTermSnapshot: LongTermMemorySnapshot | null;
-    memoryContext: SocialAgentMemoryContext | null;
-    toolResults?: Array<Record<string, unknown>>;
-    onDelta?: (delta: string) => void | Promise<void>;
-    signal?: AbortSignal | null;
-  }): Promise<string> {
+  async generateConversationalAnswer(
+    input: SocialAgentDirectReplyInput,
+  ): Promise<string> {
+    return (await this.generateConversationalAnswerWithSource(input)).text;
+  }
+
+  async generateConversationalAnswerWithSource(
+    input: SocialAgentDirectReplyInput,
+  ): Promise<SocialAgentGeneratedAnswer> {
     const fallbackReply = conversationalFallbackReply(
       input.message,
       input.route.intent,
     );
+    const delta = createTrackedSocialAgentDeltaHandler(input.onDelta);
     if (this.finalResponses) {
-      return this.finalResponses.generate(
+      const text = await this.finalResponses.generate(
         buildSocialAgentDirectReplyFinalResponseInput({
           ...input,
           fallbackReply,
+          contextTurnLimit: this.contextTurnLimit(),
         }),
         {
-          ...(input.onDelta ? { onDelta: input.onDelta } : {}),
+          ...(delta.onDelta ? { onDelta: delta.onDelta } : {}),
           signal: input.signal,
         },
       );
+      return { text, source: socialAgentAnswerSource(text, fallbackReply, delta.emittedDelta()) };
     }
     try {
-      const answer = await this.callDeepSeekForDirectReply(input);
-      if (answer) return answer;
+      const answer = await this.callDeepSeekForDirectReply({
+        ...input,
+        onDelta: delta.onDelta,
+      });
+      if (answer) return { text: answer, source: 'llm' };
     } catch (error) {
+      if (this.isClientAborted(error)) throw error;
       this.metrics.recordError('social_agent_chat_deepseek_failed');
       this.logger.warn(
         JSON.stringify({
@@ -84,35 +87,40 @@ export class SocialAgentChatLlmService {
         }),
       );
     }
-    return fallbackReply;
+    return { text: fallbackReply, source: 'fallback' };
   }
 
-  async generateAgentBrainReply(input: {
-    message: string;
-    task: AgentTask;
-    intent: SocialAgentIntentType;
-    mode: 'profile_extraction' | 'profile_correction' | 'profile_updated';
-    extractedProfile: ExtractedProfileFields;
-    sourceMessage: string;
-    toolOutput?: Record<string, unknown>;
-    fallbackReply: string;
-    memoryContext: SocialAgentMemoryContext | null;
-    onDelta?: (delta: string) => void | Promise<void>;
-    signal?: AbortSignal | null;
-  }): Promise<string> {
+  async generateAgentBrainReply(
+    input: SocialAgentBrainReplyInput,
+  ): Promise<string> {
+    return (await this.generateAgentBrainReplyWithSource(input)).text;
+  }
+
+  async generateAgentBrainReplyWithSource(
+    input: SocialAgentBrainReplyInput,
+  ): Promise<SocialAgentGeneratedAnswer> {
+    const delta = createTrackedSocialAgentDeltaHandler(input.onDelta);
     if (this.finalResponses) {
-      return this.finalResponses.generate(
-        buildSocialAgentAgentBrainFinalResponseInput(input),
+      const text = await this.finalResponses.generate(
+        buildSocialAgentAgentBrainFinalResponseInput({
+          ...input,
+          contextTurnLimit: this.contextTurnLimit(),
+        }),
         {
-          ...(input.onDelta ? { onDelta: input.onDelta } : {}),
+          ...(delta.onDelta ? { onDelta: delta.onDelta } : {}),
           signal: input.signal,
         },
       );
+      return { text, source: socialAgentAnswerSource(text, input.fallbackReply, delta.emittedDelta()) };
     }
     try {
-      const answer = await this.callDeepSeekForAgentBrain(input);
-      if (answer) return answer;
+      const answer = await this.callDeepSeekForAgentBrain({
+        ...input,
+        onDelta: delta.onDelta,
+      });
+      if (answer) return { text: answer, source: 'llm' };
     } catch (error) {
+      if (this.isClientAborted(error)) throw error;
       this.metrics.recordError('social_agent_brain_deepseek_failed');
       this.logger.warn(
         JSON.stringify({
@@ -121,7 +129,7 @@ export class SocialAgentChatLlmService {
         }),
       );
     }
-    return input.fallbackReply;
+    return { text: input.fallbackReply, source: 'fallback' };
   }
 
   async extractProfileFieldsWithLlm(
@@ -151,9 +159,7 @@ export class SocialAgentChatLlmService {
     }
   }
 
-  profileFieldsFromRecord(
-    value: Record<string, unknown>,
-  ): ExtractedProfileFields {
+  profileFieldsFromRecord(value: Record<string, unknown>): ExtractedProfileFields {
     return profileFieldsFromRecord(value);
   }
 
@@ -168,16 +174,9 @@ export class SocialAgentChatLlmService {
     }
   }
 
-  private async callDeepSeekForDirectReply(input: {
-    message: string;
-    route: SocialAgentIntentRouterResult;
-    profile: Record<string, unknown> | null;
-    task: AgentTask;
-    longTermSnapshot: LongTermMemorySnapshot | null;
-    memoryContext: SocialAgentMemoryContext | null;
-    onDelta?: (delta: string) => void | Promise<void>;
-    signal?: AbortSignal | null;
-  }): Promise<string | null> {
+  private async callDeepSeekForDirectReply(
+    input: SocialAgentDirectReplyInput,
+  ): Promise<string | null> {
     const useCase =
       input.route.intent === 'casual_chat' ? 'casual_chat' : 'final_response';
     return this.deepSeek.complete({
@@ -185,34 +184,57 @@ export class SocialAgentChatLlmService {
       taskId: input.task.id,
       intent: input.route.intent,
       fallbackTemperature: 0.6,
-      maxTokens: 700,
+      maxTokens: this.maxTokens(),
       onDelta: input.onDelta,
       signal: input.signal,
-      messages: buildSocialAgentDirectReplyMessages(input),
+      traceId: input.traceId ?? null,
+      messages: buildSocialAgentDirectReplyMessages({
+        ...input,
+        contextTurnLimit: this.contextTurnLimit(),
+      }),
     });
   }
 
-  private async callDeepSeekForAgentBrain(input: {
-    message: string;
-    task: AgentTask;
-    intent: SocialAgentIntentType;
-    mode: 'profile_extraction' | 'profile_correction' | 'profile_updated';
-    extractedProfile: ExtractedProfileFields;
-    sourceMessage: string;
-    toolOutput?: Record<string, unknown>;
-    onDelta?: (delta: string) => void | Promise<void>;
-    signal?: AbortSignal | null;
-  }): Promise<string | null> {
+  private async callDeepSeekForAgentBrain(
+    input: SocialAgentBrainReplyInput,
+  ): Promise<string | null> {
     const useCase = 'final_response' as const;
     return this.deepSeek.complete({
       useCase,
       taskId: input.task.id,
       intent: input.intent,
       fallbackTemperature: 0.6,
-      maxTokens: 650,
+      maxTokens: this.maxTokens(),
       onDelta: input.onDelta,
       signal: input.signal,
-      messages: buildSocialAgentAgentBrainMessages(input),
+      traceId: input.traceId ?? null,
+      messages: buildSocialAgentAgentBrainMessages({
+        ...input,
+        contextTurnLimit: this.contextTurnLimit(),
+      }),
     });
+  }
+
+  private contextTurnLimit(): number {
+    const reader = this.deepSeek.configReader();
+    return reader
+      ? socialAgentContextTurnLimit(reader)
+      : SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS;
+  }
+
+  private maxTokens(): number {
+    const reader = this.deepSeek.configReader();
+    const configured = Number(
+      reader?.get('SOCIAL_AGENT_FINAL_RESPONSE_MAX_TOKENS') ??
+        reader?.get('SOCIAL_AGENT_CHAT_MAX_TOKENS') ??
+        reader?.get('SOCIAL_AGENT_DEEPSEEK_MAX_TOKENS') ??
+        '',
+    );
+    if (!Number.isFinite(configured) || configured <= 0) return 1200;
+    return Math.min(Math.max(Math.floor(configured), 900), 4000);
+  }
+
+  private isClientAborted(error: unknown): boolean {
+    return error instanceof Error && error.message === 'client_aborted';
   }
 }

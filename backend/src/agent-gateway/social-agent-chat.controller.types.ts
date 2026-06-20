@@ -15,6 +15,7 @@ export type FitMeetRequest = Request & {
 export type SocialAgentRunBody = {
   goal?: string;
   permissionMode?: AgentTaskPermissionMode;
+  conversationIntent?: 'conversation' | 'social' | 'approval' | null;
   taskId?: number | null;
   city?: string | null;
   idempotencyKey?: string | null;
@@ -23,6 +24,7 @@ export type SocialAgentRunBody = {
     locale?: string | null;
     source?: string | null;
     threadId?: string | null;
+    conversationIntent?: 'conversation' | 'social' | 'approval' | null;
     checkpointId?: number | null;
     parentCheckpointId?: number | null;
     resumeCursor?: {
@@ -35,6 +37,7 @@ export type SocialAgentRunBody = {
     interrupt?: AgentRunInterruptPayload | null;
     stepId?: string | null;
     sourceCheckpointId?: number | null;
+    approvalId?: number | null;
     sourceStepId?: string | null;
     sourceStep?: SocialAgentRuntimeResumeMetadata['sourceStep'];
     stepScope?: SocialAgentRuntimeResumeMetadata['stepScope'];
@@ -61,6 +64,7 @@ export type SocialAgentReplanRunBody = {
 
 export type SocialAgentRouteMessageBody = {
   message?: string | null;
+  conversationIntent?: 'conversation' | 'social' | 'approval' | null;
   taskId?: number | null;
   hasCandidates?: boolean;
   idempotencyKey?: string | null;
@@ -69,6 +73,7 @@ export type SocialAgentRouteMessageBody = {
     locale?: string | null;
     source?: string | null;
     threadId?: string | null;
+    conversationIntent?: 'conversation' | 'social' | 'approval' | null;
     checkpointId?: number | null;
     parentCheckpointId?: number | null;
     resumeCursor?: {
@@ -81,6 +86,7 @@ export type SocialAgentRouteMessageBody = {
     interrupt?: AgentRunInterruptPayload | null;
     stepId?: string | null;
     sourceCheckpointId?: number | null;
+    approvalId?: number | null;
     sourceStepId?: string | null;
     sourceStep?: SocialAgentRuntimeResumeMetadata['sourceStep'];
     stepScope?: SocialAgentRuntimeResumeMetadata['stepScope'];

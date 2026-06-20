@@ -43,6 +43,7 @@ import { buildSocialAgentDirectCandidateMessageResult } from './social-agent-dir
 import {
   buildSocialAgentCandidateActionApprovalInput,
   buildSocialAgentCandidateActionApprovalState,
+  type SocialAgentActionApprovalRuntimeContext,
 } from './social-agent-candidate-action-approval.presenter';
 import {
   buildSocialAgentCandidateMessageDraft,
@@ -82,6 +83,10 @@ import {
 } from './social-agent-tool-executor.service';
 import { AgentL5RuntimeService } from './agent-l5-runtime.service';
 
+type CandidateActionOptions = {
+  signal?: AbortSignal | null;
+};
+
 @Injectable()
 export class SocialAgentCandidateActionService {
   private readonly logger = new Logger(SocialAgentCandidateActionService.name);
@@ -108,8 +113,9 @@ export class SocialAgentCandidateActionService {
     task: AgentTask;
     message: string;
     route: Pick<SocialAgentIntentRouteResult, 'intent' | 'entities'>;
+    runtimeContext?: SocialAgentActionApprovalRuntimeContext | null;
   }): Promise<SocialAgentPendingApprovalSnapshot | null> {
-    const { ownerUserId, task, message, route } = input;
+    const { ownerUserId, task, message, route, runtimeContext } = input;
     try {
       const candidates = readSocialAgentStoredCandidateSummaries(task);
       const firstCandidate = candidates[0] as
@@ -128,6 +134,7 @@ export class SocialAgentCandidateActionService {
           targetUserId,
           relatedCandidateId:
             this.number(firstCandidate?.candidateRecordId) ?? null,
+          runtimeContext: runtimeContext ?? null,
         }),
       );
       const pendingApproval = this.toPendingApprovalSnapshot(approval);
@@ -257,6 +264,7 @@ export class SocialAgentCandidateActionService {
     ownerUserId: number,
     taskId: number,
     body: SocialAgentCardActionBody,
+    options: CandidateActionOptions = {},
   ): Promise<SocialAgentIntentRouteResult> {
     const task = await this.assertTaskOwner(taskId, ownerUserId);
     const payload = body.payload ?? {};
@@ -288,7 +296,7 @@ export class SocialAgentCandidateActionService {
       .pendingActions.slice()
       .reverse()
       .find((action) => {
-        if (action.actionType !== 'send_candidate_message') return false;
+        if (!this.isCandidateInviteApprovalAction(action.actionType)) return false;
         return requestedApprovalId ? action.id === requestedApprovalId : true;
       });
     if (!pendingMessageAction) {
@@ -355,6 +363,7 @@ export class SocialAgentCandidateActionService {
         },
       },
       ownerUserId,
+      { signal: options.signal ?? null },
     );
     this.assertToolActionSucceeded(action, '发送消息失败，请稍后再试');
 
@@ -454,7 +463,7 @@ export class SocialAgentCandidateActionService {
       .pendingActions.slice()
       .reverse()
       .find((action) => {
-        if (action.actionType !== 'send_candidate_message') return false;
+        if (!this.isCandidateInviteApprovalAction(action.actionType)) return false;
         return requestedApprovalId ? action.id === requestedApprovalId : true;
       });
 
@@ -530,7 +539,7 @@ export class SocialAgentCandidateActionService {
       .pendingActions.slice()
       .reverse()
       .find((action) => {
-        if (action.actionType !== 'send_candidate_message') return false;
+        if (!this.isCandidateInviteApprovalAction(action.actionType)) return false;
         return requestedApprovalId ? action.id === requestedApprovalId : true;
       });
     if (pendingMessageAction) {
@@ -790,7 +799,7 @@ export class SocialAgentCandidateActionService {
           } satisfies SocialAgentPendingApprovalSnapshot)
         : null;
     const assistantMessage = isPending
-      ? '发送邀请前还需要你确认。我已经把这一步放进待确认动作里，确认前不会联系对方。'
+      ? '发送邀请前还需要你确认。我已经把这一步放进确认卡片；你确认前不会联系对方。'
       : '已按你的确认发送邀请，并打开后续沟通入口。接下来可以等待对方回复，或继续让我帮你准备更自然的沟通节奏。';
     const resolvedFriendRequestId =
       cleanDisplayText(connectResult.friendRequestId, '') || null;
@@ -851,7 +860,7 @@ export class SocialAgentCandidateActionService {
     const pendingMessageAction = readSocialAgentTaskMemory(task)
       .pendingActions.slice()
       .reverse()
-      .find((action) => action.actionType === 'send_candidate_message');
+      .find((action) => this.isCandidateInviteApprovalAction(action.actionType));
 
     const candidate =
       readSocialAgentStoredCandidateSummaries(task)[0] ??
@@ -1095,7 +1104,7 @@ export class SocialAgentCandidateActionService {
       recordSocialAgentPendingAction(task, {
         id: approvalId,
         type: ApprovalType.SendMessage,
-        actionType: 'send_candidate_message',
+        actionType: 'send_invite',
         summary: `发送消息给候选人 #${targetUserId}`,
         riskLevel: ApprovalRiskLevel.Medium,
         at: new Date().toISOString(),
@@ -1144,7 +1153,7 @@ export class SocialAgentCandidateActionService {
       riskReasons?: unknown;
     },
   ): Promise<Record<string, unknown>> {
-    let task = await this.assertTaskOwner(taskId, ownerUserId);
+    const task = await this.assertTaskOwner(taskId, ownerUserId);
     const targetUserId = await this.executor.resolveCandidateTargetUser(
       body as Record<string, unknown>,
       ownerUserId,
@@ -1237,17 +1246,18 @@ export class SocialAgentCandidateActionService {
     });
     await this.taskRepo.save(task);
 
+    const pendingFriendAction = {
+      ...pendingToolCall,
+      output: {
+        status: 'pending_approval',
+        requiresApproval: true,
+        approvalId: approval.id,
+      },
+    };
     return buildSocialAgentCandidateConnectResult({
       taskId,
       targetUserId,
-      friendAction: {
-        ...pendingToolCall,
-        output: {
-          status: 'pending_approval',
-          requiresApproval: true,
-          approvalId: approval.id,
-        },
-      },
+      friendAction: pendingFriendAction,
     });
   }
 
@@ -1281,7 +1291,9 @@ export class SocialAgentCandidateActionService {
         status: input.status,
         loopStage: 'invite_sent',
         connectionState:
-          input.status === 'pending_approval' ? 'pending_approval' : 'waiting_reply',
+          input.status === 'pending_approval'
+            ? 'pending_approval'
+            : 'waiting_reply',
         nextRecoverableActions:
           input.status === 'pending_approval'
             ? ['candidate.connect']
@@ -1329,18 +1341,19 @@ export class SocialAgentCandidateActionService {
     const approvalId =
       this.number(previous.approvalId) ?? this.number(pendingAction?.id);
     if (!approvalId) return null;
+    const pendingFriendAction = {
+      ...input.pendingToolCall,
+      output: {
+        status: 'pending_approval',
+        requiresApproval: true,
+        approvalId,
+        idempotentReuse: true,
+      },
+    };
     return buildSocialAgentCandidateConnectResult({
       taskId: input.taskId,
       targetUserId: input.targetUserId,
-      friendAction: {
-        ...input.pendingToolCall,
-        output: {
-          status: 'pending_approval',
-          requiresApproval: true,
-          approvalId,
-          idempotentReuse: true,
-        },
-      },
+      friendAction: pendingFriendAction,
     });
   }
 
@@ -1357,7 +1370,8 @@ export class SocialAgentCandidateActionService {
     ).readCandidateActions(input.task);
     const previous = actions[String(input.targetUserId)];
     if (!previous || previous.send !== 'sent') return null;
-    const conversationId = cleanDisplayText(previous.conversationId, '') || null;
+    const conversationId =
+      cleanDisplayText(previous.conversationId, '') || null;
     const messageId = cleanDisplayText(previous.messageId, '') || null;
     const name = cleanDisplayText(
       input.candidate.nickname ?? input.candidate.displayName,
@@ -1368,8 +1382,7 @@ export class SocialAgentCandidateActionService {
       taskId: input.task.id,
       candidateUserId: input.targetUserId,
       stage: 'message_sent',
-      nextAction:
-        '邀请已经发送过，不会重复触达；接下来等待对方回复。',
+      nextAction: '邀请已经发送过，不会重复触达；接下来等待对方回复。',
       description:
         '这次重复确认被识别为同一步的恢复请求，系统复用了已有发送状态。',
       payload: {
@@ -1391,7 +1404,12 @@ export class SocialAgentCandidateActionService {
         sideEffectPolicy: 'idempotent_no_duplicate_send',
       },
     });
-    return this.cardActionRouteResult(input.task, assistantMessage, [timelineCard], null);
+    return this.cardActionRouteResult(
+      input.task,
+      assistantMessage,
+      [timelineCard],
+      null,
+    );
   }
 
   candidateMessageDraft(task: AgentTask): string {
@@ -1524,6 +1542,10 @@ export class SocialAgentCandidateActionService {
     ).rememberCandidateAction(task, candidateUserId, patch);
   }
 
+  private isCandidateInviteApprovalAction(actionType: string | null | undefined): boolean {
+    return actionType === 'send_invite' || actionType === 'send_candidate_message';
+  }
+
   private connectCheckpointPayload(input: {
     taskId: number;
     targetUserId: number;
@@ -1550,7 +1572,8 @@ export class SocialAgentCandidateActionService {
       toolCallId: input.toolCallId,
       actionType: 'send_invite',
       sideEffect: 'send_message_or_connect',
-      schemaAction: cleanDisplayText(body.schemaAction, '') || 'candidate.connect',
+      schemaAction:
+        cleanDisplayText(body.schemaAction, '') || 'candidate.connect',
       approvalRequired: true,
       checkpointRequired: true,
       checkpointAction: 'resume',
@@ -1818,7 +1841,8 @@ export class SocialAgentCandidateActionService {
     } catch (error) {
       this.logger.warn(
         JSON.stringify({
-          event: 'social_agent.candidate_action.opener_approve_before_send_failed',
+          event:
+            'social_agent.candidate_action.opener_approve_before_send_failed',
           taskId: task.id,
           approvalId,
           message: error instanceof Error ? error.message : String(error),

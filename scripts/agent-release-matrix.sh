@@ -23,7 +23,7 @@ Options:
   --skip-browser-qa              Skip Playwright QA for /agent/chat.
   --opportunity-readiness-smoke  Run real Agent smoke through OpportunityCard readiness only.
   --opportunity-full-smoke       Run the full mutating Agent opportunity journey smoke.
-  --sse-abort-smoke              Run real Agent SSE abort smoke.
+  --sse-abort-smoke              Run real Agent SSE visibility/abort smoke.
   --build                        Also run frontend and backend production builds.
   --help                         Show this help.
 
@@ -31,6 +31,7 @@ Environment:
   RUN_AGENT_BROWSER_QA=false
   RUN_AGENT_OPPORTUNITY_SMOKE=false|readiness|true
   RUN_AGENT_SSE_ABORT_SMOKE=true
+  AGENT_SSE_SKIP_ACCEL_BUFFERING_HEADER=true only for non-nginx local smoke.
   RUN_AGENT_RELEASE_BUILD=true
 
 Remote smoke safety:
@@ -76,6 +77,9 @@ step() {
 cd "${ROOT_DIR}"
 
 step "Run Agent release matrix verification"
+"${ROOT_DIR}/scripts/agent-release-worktree-audit.sh"
+
+step "Run Agent release functional verification"
 RUN_AGENT_BROWSER_QA="${RUN_AGENT_BROWSER_QA}" \
   RUN_AGENT_OPPORTUNITY_SMOKE="${RUN_AGENT_OPPORTUNITY_SMOKE}" \
   RUN_AGENT_SSE_ABORT_SMOKE="${RUN_AGENT_SSE_ABORT_SMOKE}" \

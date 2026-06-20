@@ -6,6 +6,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -29,6 +30,10 @@ import {
   AgentTaskEventType,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
+import {
+  AgentApprovalRequest,
+  ApprovalStatus,
+} from './entities/agent-approval-request.entity';
 import { AgentPermissionService } from './agent-permission.service';
 import { AgentLoopService } from './agent-loop.service';
 import { AgentL5RuntimeService } from './agent-l5-runtime.service';
@@ -104,7 +109,11 @@ import {
   socialAgentRunNextReadReplyState,
   socialAgentRunNextSummaryFailedState,
 } from './social-agent-run-next-state';
-import { requiresMandatorySocialAgentApproval } from './social-agent-tool-policy';
+import {
+  getSocialAgentToolActionType,
+  requiresMandatorySocialAgentApproval,
+  SOCIAL_AGENT_MANDATORY_APPROVAL_TOOLS,
+} from './social-agent-tool-policy';
 import {
   socialAgentAdhocActionCompletionState,
   type SocialAgentAdhocActionTaskState,
@@ -122,6 +131,7 @@ import {
   buildSocialAgentCurrentTaskSummary,
   shouldPersistSocialAgentCurrentTaskSummary,
 } from './social-agent-current-task-summary.presenter';
+import { socialAgentContextTurnLimit } from './social-agent-context-window';
 import {
   buildSocialAgentLifeGraphUpdateCard,
   buildSocialAgentMeetLoopTimelineCard,
@@ -147,6 +157,11 @@ type StepRecord = Record<string, unknown>;
 type ExecuteTaskOptions = {
   maxSteps?: number;
   stopOnError?: boolean;
+  signal?: AbortSignal | null;
+};
+
+type ToolExecutionOptions = {
+  signal?: AbortSignal | null;
 };
 
 type ToolReliabilityContract = {
@@ -203,6 +218,8 @@ export class SocialAgentToolExecutorService {
     private readonly agentLoop?: AgentLoopService,
     @Optional()
     private readonly l5Runtime?: AgentL5RuntimeService,
+    @Optional()
+    private readonly config?: ConfigService,
   ) {}
 
   async executeTask(
@@ -230,7 +247,9 @@ export class SocialAgentToolExecutorService {
       const step = plan[index];
       if (!this.toolCallFactory.shouldExecuteStep(step)) continue;
 
-      const call = await this.executePlanStep(task, step, index);
+      const call = await this.executePlanStep(task, step, index, {
+        signal: options.signal ?? null,
+      });
       executedCalls.push(call);
       applySocialAgentPlanStepCallToTask({
         task,
@@ -289,6 +308,7 @@ export class SocialAgentToolExecutorService {
   async runNext(
     taskId: number,
     ownerUserId?: number,
+    options: ToolExecutionOptions = {},
   ): Promise<SocialAgentRunNextResult> {
     const task = await this.taskRepo.findOne({
       where: ownerUserId ? { id: taskId, ownerUserId } : { id: taskId },
@@ -303,6 +323,7 @@ export class SocialAgentToolExecutorService {
       agent: 'FitMeet Main Agent',
       maxToolCalls: 1,
       timeoutMs: 30_000,
+      signal: options.signal ?? null,
       plan: {
         reason: 'run-next must pass through the unified AgentLoop.',
         tools: [
@@ -313,8 +334,8 @@ export class SocialAgentToolExecutorService {
           },
         ],
       },
-      runner: async () => {
-        runNextResult = await this.runNextInternal(task);
+      runner: async ({ signal }) => {
+        runNextResult = await this.runNextInternal(task, { signal });
         return {
           taskId: runNextResult.taskId,
           status: runNextResult.status,
@@ -336,6 +357,7 @@ export class SocialAgentToolExecutorService {
 
   private async runNextInternal(
     task: AgentTask,
+    options: ToolExecutionOptions = {},
   ): Promise<SocialAgentRunNextResult> {
     const taskId = task.id;
     if (
@@ -343,7 +365,10 @@ export class SocialAgentToolExecutorService {
       task.status !== AgentTaskStatus.WaitingResult &&
       task.status !== AgentTaskStatus.AwaitingFeedback
     ) {
-      const result = await this.executeTask(taskId, { maxSteps: 1 });
+      const result = await this.executeTask(taskId, {
+        maxSteps: 1,
+        signal: options.signal ?? null,
+      });
       const updated = await this.taskRepo.findOne({ where: { id: taskId } });
       return {
         ...result,
@@ -360,12 +385,16 @@ export class SocialAgentToolExecutorService {
     await this.taskRepo.save(task);
 
     const calls: SocialAgentToolCallRecord[] = [];
-    const readCall = await this.executeAdhocStep(task, {
-      id: 'run_next_read_reply',
-      toolName: SocialAgentToolName.ReadTaskConversationMessages,
-      status: 'planned',
-      input: { limit: 50 },
-    });
+    const readCall = await this.executeAdhocStep(
+      task,
+      {
+        id: 'run_next_read_reply',
+        toolName: SocialAgentToolName.ReadTaskConversationMessages,
+        status: 'planned',
+        input: { limit: 50 },
+      },
+      options,
+    );
     calls.push(readCall);
 
     const newMessages = toSocialAgentMessageArray(readCall.output?.newMessages);
@@ -376,9 +405,7 @@ export class SocialAgentToolExecutorService {
       this.toolInput.string(readOutput.code) ??
       this.toolInput.string(readOutput.status);
     const readRetryable =
-      typeof readOutput.retryable === 'boolean'
-        ? readOutput.retryable
-        : null;
+      typeof readOutput.retryable === 'boolean' ? readOutput.retryable : null;
     if (readCall.status !== 'succeeded' || newMessages.length === 0) {
       const nextState = socialAgentRunNextReadReplyState({
         readCallStatus: readCall.status,
@@ -402,12 +429,16 @@ export class SocialAgentToolExecutorService {
       return this.runNextResult(task, calls, false, null);
     }
 
-    const summaryCall = await this.executeAdhocStep(task, {
-      id: 'run_next_summarize_reply',
-      toolName: SocialAgentToolName.SummarizeReply,
-      status: 'planned',
-      input: { messages: newMessages },
-    });
+    const summaryCall = await this.executeAdhocStep(
+      task,
+      {
+        id: 'run_next_summarize_reply',
+        toolName: SocialAgentToolName.SummarizeReply,
+        status: 'planned',
+        input: { messages: newMessages },
+      },
+      options,
+    );
     calls.push(summaryCall);
 
     if (summaryCall.status !== 'succeeded') {
@@ -417,15 +448,19 @@ export class SocialAgentToolExecutorService {
       return this.runNextResult(task, calls, true, null);
     }
 
-    const decisionCall = await this.executeAdhocStep(task, {
-      id: 'run_next_decide_action',
-      toolName: SocialAgentToolName.DecideNextSocialAction,
-      status: 'planned',
-      input: {
-        messages: newMessages,
-        summary: summaryCall.output,
+    const decisionCall = await this.executeAdhocStep(
+      task,
+      {
+        id: 'run_next_decide_action',
+        toolName: SocialAgentToolName.DecideNextSocialAction,
+        status: 'planned',
+        input: {
+          messages: newMessages,
+          summary: summaryCall.output,
+        },
       },
-    });
+      options,
+    );
     calls.push(decisionCall);
 
     const decision = decisionCall.output;
@@ -445,13 +480,17 @@ export class SocialAgentToolExecutorService {
     }
 
     const executableToolName = nextToolName as SocialAgentToolName;
-    const actionCall = await this.executeAdhocStep(task, {
-      id: `run_next_${executableToolName}`,
-      toolName: executableToolName,
-      action: decision?.action,
-      status: 'planned',
-      input: this.toolInput.isRecord(decision?.input) ? decision.input : {},
-    });
+    const actionCall = await this.executeAdhocStep(
+      task,
+      {
+        id: `run_next_${executableToolName}`,
+        toolName: executableToolName,
+        action: decision?.action,
+        status: 'planned',
+        input: this.toolInput.isRecord(decision?.input) ? decision.input : {},
+      },
+      options,
+    );
     calls.push(actionCall);
     await this.persistRunNextActionMeetLoopState({
       task,
@@ -601,6 +640,7 @@ export class SocialAgentToolExecutorService {
   async executeStep(
     taskId: number,
     stepId: string,
+    options: ToolExecutionOptions = {},
   ): Promise<SocialAgentToolCallRecord> {
     const task = await this.taskRepo.findOne({ where: { id: taskId } });
     if (!task) throw new NotFoundException(`Agent task ${taskId} not found`);
@@ -611,7 +651,12 @@ export class SocialAgentToolExecutorService {
     if (stepIndex < 0)
       throw new NotFoundException(`Agent plan step ${stepId} not found`);
 
-    const call = await this.executePlanStep(task, plan[stepIndex], stepIndex);
+    const call = await this.executePlanStep(
+      task,
+      plan[stepIndex],
+      stepIndex,
+      options,
+    );
     applySocialAgentPlanStepCallToTask({
       task,
       plan,
@@ -686,6 +731,7 @@ export class SocialAgentToolExecutorService {
     toolName: SocialAgentToolName | string,
     input: Record<string, unknown>,
     ownerUserId?: number,
+    options: ToolExecutionOptions = {},
   ): Promise<SocialAgentToolCallRecord> {
     const normalizedToolName = this.toolCallFactory.normalizeToolName(toolName);
     if (!normalizedToolName) {
@@ -702,6 +748,7 @@ export class SocialAgentToolExecutorService {
       maxToolCalls: 1,
       maxRetries: 0,
       timeoutMs: 30_000,
+      signal: options.signal ?? null,
       plan: {
         reason:
           'Adhoc task tool actions must enter the unified AgentLoop; the executor enforces approval gates.',
@@ -713,12 +760,13 @@ export class SocialAgentToolExecutorService {
           },
         ],
       },
-      runner: async () => {
+      runner: async ({ signal }) => {
         actionResult = await this.executeToolActionInternal(
           taskId,
           normalizedToolName,
           input,
           ownerUserId,
+          { signal },
         );
         didRun = true;
         return {
@@ -745,6 +793,7 @@ export class SocialAgentToolExecutorService {
     normalizedToolName: SocialAgentToolName,
     input: Record<string, unknown>,
     ownerUserId?: number,
+    options: ToolExecutionOptions = {},
   ): Promise<SocialAgentToolCallRecord> {
     const task = await this.taskRepo.findOne({
       where: ownerUserId ? { id: taskId, ownerUserId } : { id: taskId },
@@ -786,12 +835,16 @@ export class SocialAgentToolExecutorService {
       return unconfirmedDangerousAction;
     }
 
-    const call = await this.executeAdhocStep(task, {
-      id: stepId,
-      toolName: normalizedToolName,
-      status: 'planned',
-      input: actionInput,
-    });
+    const call = await this.executeAdhocStep(
+      task,
+      {
+        id: stepId,
+        toolName: normalizedToolName,
+        status: 'planned',
+        input: actionInput,
+      },
+      options,
+    );
 
     this.applyAdhocActionState(
       task,
@@ -937,6 +990,33 @@ export class SocialAgentToolExecutorService {
     };
   }
 
+  private withTaskRelationshipContext(
+    task: AgentTask,
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (!this.shouldAttachTaskRelationshipContext(toolName)) return input;
+    if (!task.agentConnectionId || input.agentConnectionId) return input;
+    return {
+      ...input,
+      agentConnectionId: task.agentConnectionId,
+      relationship: input.relationship ?? 'connected_agent_task',
+    };
+  }
+
+  private shouldAttachTaskRelationshipContext(
+    toolName: SocialAgentToolName,
+  ): boolean {
+    return [
+      SocialAgentToolName.SendMessage,
+      SocialAgentToolName.SendMessageToCandidate,
+      SocialAgentToolName.ReplyMessage,
+      SocialAgentToolName.ConnectCandidate,
+      SocialAgentToolName.AddFriend,
+      SocialAgentToolName.InviteActivity,
+    ].includes(toolName);
+  }
+
   private withReliabilityOutput(
     output: Record<string, unknown>,
     reliability: ToolReliabilityContract,
@@ -978,12 +1058,14 @@ export class SocialAgentToolExecutorService {
     input: Record<string, unknown>,
     stepId: string,
     reliability: ToolReliabilityContract,
+    options: ToolExecutionOptions = {},
   ): Promise<unknown> {
     let lastError: unknown = null;
     for (let attempt = 0; attempt <= reliability.maxRetries; attempt += 1) {
       try {
+        this.assertNotClientAborted(options.signal);
         return await this.withTimeout(
-          this.dispatchTool(task, toolName, input, stepId),
+          this.dispatchTool(task, toolName, input, stepId, options),
           reliability.timeoutMs,
           toolName,
         );
@@ -1025,6 +1107,12 @@ export class SocialAgentToolExecutorService {
     });
   }
 
+  private assertNotClientAborted(signal?: AbortSignal | null): void {
+    if (signal?.aborted) {
+      throw new Error('client_aborted');
+    }
+  }
+
   private shouldRetryTool(
     error: unknown,
     reliability: ToolReliabilityContract,
@@ -1033,6 +1121,7 @@ export class SocialAgentToolExecutorService {
     if (attempt >= reliability.maxRetries) return false;
     if (!reliability.retryable || reliability.highRisk) return false;
     const message = error instanceof Error ? error.message : String(error);
+    if (message === 'client_aborted') return false;
     return /timeout|temporar|network|rate|unavailable|ECONN|ETIMEDOUT|EAI_AGAIN/i.test(
       message,
     );
@@ -1095,15 +1184,15 @@ export class SocialAgentToolExecutorService {
     if (specific) return specific;
     const shared = this.positiveInt(process.env.FITMEET_AGENT_TOOL_TIMEOUT_MS);
     if (shared) return shared;
-    if (this.isHighRiskTool(toolName)) return 12_000;
+    if (this.isHighRiskTool(toolName)) return 20_000;
     if (
       toolName === SocialAgentToolName.SearchMatches ||
       toolName === SocialAgentToolName.SearchActivities ||
       toolName === SocialAgentToolName.SearchPublicIntents
     ) {
-      return 15_000;
+      return 25_000;
     }
-    return 10_000;
+    return 20_000;
   }
 
   private toolRetryCount(
@@ -1121,20 +1210,7 @@ export class SocialAgentToolExecutorService {
   }
 
   private isHighRiskTool(toolName: SocialAgentToolName): boolean {
-    return [
-      SocialAgentToolName.SendMessage,
-      SocialAgentToolName.SendMessageToCandidate,
-      SocialAgentToolName.ReplyMessage,
-      SocialAgentToolName.ConnectCandidate,
-      SocialAgentToolName.AddFriend,
-      SocialAgentToolName.CreateActivity,
-      SocialAgentToolName.InviteActivity,
-      SocialAgentToolName.JoinActivity,
-      SocialAgentToolName.OfflineMeeting,
-      SocialAgentToolName.ShareLocation,
-      SocialAgentToolName.Payment,
-      SocialAgentToolName.PublishSocialRequest,
-    ].includes(toolName);
+    return SOCIAL_AGENT_MANDATORY_APPROVAL_TOOLS.includes(toolName);
   }
 
   private compensationActionForTool(
@@ -1187,7 +1263,9 @@ export class SocialAgentToolExecutorService {
     task: AgentTask,
     step: StepRecord,
     index: number,
+    options: ToolExecutionOptions = {},
   ): Promise<SocialAgentToolCallRecord> {
+    this.assertNotClientAborted(options.signal);
     const stepId = this.toolCallFactory.stepId(step) || `step_${index + 1}`;
     const toolName = this.toolCallFactory.resolveToolName(step);
     const input = this.toolCallFactory.stepInput(step);
@@ -1197,7 +1275,10 @@ export class SocialAgentToolExecutorService {
       input,
       stepId,
     );
-    const executionInput = this.withReliabilityInput(input, reliability);
+    const executionInput = this.withReliabilityInput(
+      this.withTaskRelationshipContext(task, toolName, input),
+      reliability,
+    );
     const startedAt = new Date();
     const callId = this.toolCallFactory.safeToolCallId(
       task.id,
@@ -1261,43 +1342,47 @@ export class SocialAgentToolExecutorService {
       this.toolInput.safeUnknownText(executionInput),
       240,
     );
-    const socialCodexBlocked = this.buildSocialCodexBlockedCall({
-      callId,
-      executionInput,
-      policy,
-      reliability,
-      startedAt,
-      stepId,
-      toolName,
-    });
-    if (socialCodexBlocked) {
-      await this.recordActionSideEffects(
-        task,
-        toolName,
-        executionInput,
-        socialCodexBlocked,
-      );
-      await this.createTaskEvent(
-        task,
-        AgentTaskEventType.ToolFailed,
-        buildSocialAgentToolFailedEvent({
-          toolName,
-          stepId,
-          toolCallId: callId,
-          inputSummary,
-          call: socialCodexBlocked,
-        }),
-      );
-      return socialCodexBlocked;
-    }
-
     try {
       await this.confirmationPolicy.validateDangerousAdhocActionTarget(
         task,
         toolName,
         executionInput,
       );
+      const socialCodexBlocked = this.buildSocialCodexBlockedCall({
+        callId,
+        executionInput,
+        policy,
+        reliability,
+        startedAt,
+        stepId,
+        toolName,
+      });
+      if (socialCodexBlocked) {
+        await this.recordActionSideEffects(
+          task,
+          toolName,
+          executionInput,
+          socialCodexBlocked,
+        );
+        await this.createTaskEvent(
+          task,
+          AgentTaskEventType.ToolFailed,
+          buildSocialAgentToolFailedEvent({
+            toolName,
+            stepId,
+            toolCallId: callId,
+            inputSummary,
+            call: socialCodexBlocked,
+          }),
+        );
+        return socialCodexBlocked;
+      }
       this.toolExecutionPolicy.assertHighRiskFrequencyLimit(task, toolName);
+      const hasApprovedCredential = await this.hasApprovedToolActionCredential(
+        task,
+        toolName,
+        executionInput,
+      );
       const gatedOutput = await this.maybeGateActionByRisk(
         task,
         toolName,
@@ -1305,6 +1390,7 @@ export class SocialAgentToolExecutorService {
         stepId,
         policy.sceneRisk as SceneRiskPolicyResult,
         policy,
+        hasApprovedCredential,
       );
       if (gatedOutput) {
         const call = this.toolCallFactory.buildToolCall({
@@ -1364,6 +1450,7 @@ export class SocialAgentToolExecutorService {
         executionInput,
         stepId,
         reliability,
+        options,
       );
       const outputRecord = this.withReliabilityOutput(
         this.toolInput.asRecord(output),
@@ -1497,7 +1584,9 @@ export class SocialAgentToolExecutorService {
     toolName: SocialAgentToolName,
     input: Record<string, unknown>,
     stepId: string,
+    options: ToolExecutionOptions = {},
   ): Promise<unknown> {
+    this.assertNotClientAborted(options.signal);
     switch (toolName) {
       case SocialAgentToolName.GetMyProfile:
       case SocialAgentToolName.GetAiProfile:
@@ -1527,9 +1616,9 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.SearchMatches:
         return this.searchMatches(task, input);
       case SocialAgentToolName.ExplainMatches:
-        return this.explainMatches(task, input);
+        return this.explainMatches(task, input, options);
       case SocialAgentToolName.DraftOpener:
-        return this.draftOpener(input);
+        return this.draftOpener(input, options);
       case SocialAgentToolName.SendMessageToCandidate:
         return this.sendMessageToCandidate(task, input, stepId);
       case SocialAgentToolName.SendMessage:
@@ -1580,13 +1669,13 @@ export class SocialAgentToolExecutorService {
       case SocialAgentToolName.SummarizeReply:
         return this.runConversationTool(
           task,
-          await this.conversationTools.summarizeReply(task, input),
+          await this.conversationTools.summarizeReply(task, input, options),
           stepId,
         );
       case SocialAgentToolName.DecideNextSocialAction:
         return this.runDecisionTool(
           task,
-          await this.decisionTools.decideNextSocialAction(task, input),
+          await this.decisionTools.decideNextSocialAction(task, input, options),
         );
       case SocialAgentToolName.ReplyMessage:
         return this.replyMessage(task, input, stepId);
@@ -1603,6 +1692,7 @@ export class SocialAgentToolExecutorService {
     stepId: string,
     policy: SceneRiskPolicyResult,
     runtimePolicy?: Record<string, unknown> | null,
+    hasApprovedCredential?: boolean,
   ): Promise<Record<string, unknown> | null> {
     if (this.isDraftOnlySocialRequestTool(toolName, input)) return null;
 
@@ -1613,8 +1703,7 @@ export class SocialAgentToolExecutorService {
       stepId,
       policy,
       runtimePolicy,
-      hasUserApproval:
-        this.confirmationPolicy.hasExplicitApprovalCredential(input),
+      hasUserApproval: hasApprovedCredential === true,
     });
 
     if (decision.kind === 'none') return null;
@@ -1625,6 +1714,154 @@ export class SocialAgentToolExecutorService {
       approval,
       policy: decision.policy,
     });
+  }
+
+  private async hasApprovedToolActionCredential(
+    task: AgentTask,
+    toolName: SocialAgentToolName,
+    input: Record<string, unknown>,
+  ): Promise<boolean> {
+    const approvalId = this.toolInput.number(
+      input.approvalId ?? input.approvalRequestId,
+    );
+    if (!approvalId) return false;
+
+    let approval: AgentApprovalRequest;
+    try {
+      approval = await this.approvals.getById(approvalId, task.ownerUserId);
+    } catch {
+      return false;
+    }
+    if (approval.status !== ApprovalStatus.Approved) return false;
+    if (approval.agentTaskId && approval.agentTaskId !== task.id) return false;
+    if (!this.approvalMatchesTool(approval, toolName)) return false;
+    return this.approvalPayloadMatchesInput(approval.payload ?? {}, input);
+  }
+
+  private approvalMatchesTool(
+    approval: AgentApprovalRequest,
+    toolName: SocialAgentToolName,
+  ): boolean {
+    const skillName = this.toolInput.string(approval.skillName);
+    if (skillName) {
+      const normalizedSkill = this.toolCallFactory.normalizeToolName(skillName);
+      if (normalizedSkill === toolName) return true;
+      if (!this.isEquivalentApprovalAction(skillName, toolName)) return false;
+    }
+
+    const actionType = this.toolInput.string(approval.actionType);
+    if (!actionType) return true;
+    return this.isEquivalentApprovalAction(actionType, toolName);
+  }
+
+  private isEquivalentApprovalAction(
+    actionType: string,
+    toolName: SocialAgentToolName,
+  ): boolean {
+    const normalized = actionType.trim();
+    if (!normalized) return true;
+    const expectedAction = getSocialAgentToolActionType(toolName);
+    if (normalized === String(expectedAction)) return true;
+    const equivalents: Partial<Record<SocialAgentToolName, string[]>> = {
+      [SocialAgentToolName.SendMessage]: [
+        'send_invite',
+        'send_candidate_message',
+      ],
+      [SocialAgentToolName.SendMessageToCandidate]: [
+        'send_invite',
+        'send_message',
+        'send_candidate_message',
+      ],
+      [SocialAgentToolName.ReplyMessage]: [
+        'send_invite',
+        'send_message',
+        'send_candidate_message',
+      ],
+      [SocialAgentToolName.ConnectCandidate]: [
+        'add_friend',
+        'connect_candidate',
+      ],
+      [SocialAgentToolName.AddFriend]: ['add_friend', 'connect_candidate'],
+      [SocialAgentToolName.InviteActivity]: [
+        'invite_candidate',
+        'create_activity',
+      ],
+    };
+    return equivalents[toolName]?.includes(normalized) ?? false;
+  }
+
+  private approvalPayloadMatchesInput(
+    payload: Record<string, unknown>,
+    input: Record<string, unknown>,
+  ): boolean {
+    const toolInput = this.toolInput.isRecord(payload.toolInput)
+      ? payload.toolInput
+      : {};
+    return (
+      this.approvalNumberFieldMatches(input, payload, toolInput, [
+        'targetUserId',
+        'candidateUserId',
+        'toUserId',
+        'invitedUserId',
+      ]) &&
+      this.approvalNumberFieldMatches(input, payload, toolInput, [
+        'socialRequestId',
+      ]) &&
+      this.approvalNumberFieldMatches(input, payload, toolInput, [
+        'candidateRecordId',
+        'relatedCandidateId',
+      ]) &&
+      this.approvalTextFieldMatches(input, payload, toolInput, [
+        'idempotencyKey',
+        'resumeIdempotencyKey',
+      ])
+    );
+  }
+
+  private approvalNumberFieldMatches(
+    input: Record<string, unknown>,
+    payload: Record<string, unknown>,
+    toolInput: Record<string, unknown>,
+    keys: string[],
+  ): boolean {
+    const inputValue = this.firstNumber(input, keys);
+    const approvalValue =
+      this.firstNumber(payload, keys) ?? this.firstNumber(toolInput, keys);
+    return !inputValue || !approvalValue || inputValue === approvalValue;
+  }
+
+  private approvalTextFieldMatches(
+    input: Record<string, unknown>,
+    payload: Record<string, unknown>,
+    toolInput: Record<string, unknown>,
+    keys: string[],
+  ): boolean {
+    const inputValue = this.firstText(input, keys);
+    const approvalValue =
+      this.firstText(payload, keys) ?? this.firstText(toolInput, keys);
+    return !inputValue || !approvalValue || inputValue === approvalValue;
+  }
+
+  private firstNumber(
+    source: Record<string, unknown>,
+    keys: string[],
+  ): number | null {
+    for (const key of keys) {
+      const value = this.toolInput.number(source[key]);
+      if (value) return value;
+    }
+    return null;
+  }
+
+  private firstText(
+    source: Record<string, unknown>,
+    keys: string[],
+  ): string | null {
+    for (const key of keys) {
+      const value = this.toolInput.string(source[key]);
+      if (value) return value;
+    }
+    return null;
   }
 
   private isDraftOnlySocialRequestTool(
@@ -1738,6 +1975,7 @@ export class SocialAgentToolExecutorService {
         agentTaskId: task.id,
         agentId: task.agentConnectionId,
         source: 'social_agent_tool_executor',
+        taskContext: parsed.taskContext,
       });
     }
 
@@ -1746,6 +1984,11 @@ export class SocialAgentToolExecutorService {
         parsed.rawText,
         task.ownerUserId,
         agent,
+        {
+          agentTaskId: task.id,
+          source: 'social_agent_tool_executor',
+          taskContext: parsed.taskContext,
+        },
       );
     }
 
@@ -1787,11 +2030,16 @@ export class SocialAgentToolExecutorService {
     );
     return this.candidatePool.searchSocial({
       ownerUserId: task.ownerUserId,
+      taskId: task.id,
       socialRequestId,
       city: sanitizeCity(input.city),
       activityType: this.toolInput.string(input.activityType),
       interestTags: this.toolInput.stringArray(
         input.interestTags ?? input.tags,
+      ),
+      candidatePreference: this.toolInput.string(input.candidatePreference),
+      candidatePreferencePolicy: this.toolInput.string(
+        input.candidatePreferencePolicy,
       ),
       timePreference: this.toolInput.string(input.timePreference),
       locationPreference: this.toolInput.string(input.locationPreference),
@@ -1838,6 +2086,10 @@ export class SocialAgentToolExecutorService {
       interestTags: this.toolInput.stringArray(
         input.interestTags ?? input.tags,
       ),
+      candidatePreference: this.toolInput.string(input.candidatePreference),
+      candidatePreferencePolicy: this.toolInput.string(
+        input.candidatePreferencePolicy,
+      ),
       timePreference: this.toolInput.string(input.timePreference),
       locationPreference: this.toolInput.string(input.locationPreference),
       rawText: this.toolInput.string(
@@ -1854,6 +2106,7 @@ export class SocialAgentToolExecutorService {
   private async explainMatches(
     task: AgentTask,
     input: Record<string, unknown>,
+    options: ToolExecutionOptions = {},
   ): Promise<unknown> {
     const candidateUserId = this.toolInput.number(
       input.candidateUserId ?? input.targetUserId,
@@ -1864,6 +2117,8 @@ export class SocialAgentToolExecutorService {
         this.socialProfiles.get(candidateUserId),
       ]);
       return this.matchReasoner.explain({
+        taskId: task.id,
+        signal: options.signal ?? null,
         ownerProfile,
         candidateProfile,
         publicTags: this.toolInput.isRecord(input.publicTags)
@@ -1888,17 +2143,22 @@ export class SocialAgentToolExecutorService {
         this.toolInput.isRecord(input.request) ? input.request : {},
         this.toolInput.isRecord(input.candidate) ? input.candidate : {},
         this.toolInput.number(input.score) ?? undefined,
+        { signal: options.signal ?? null },
       ),
     };
   }
 
-  private async draftOpener(input: Record<string, unknown>): Promise<unknown> {
+  private async draftOpener(
+    input: Record<string, unknown>,
+    options: ToolExecutionOptions = {},
+  ): Promise<unknown> {
     const candidate = this.toolInput.isRecord(input.candidate)
       ? input.candidate
       : input;
     const message = await this.ai.generateInviteMessage(
       this.toolInput.isRecord(input.request) ? input.request : input,
       candidate,
+      { signal: options.signal ?? null },
     );
     const displayName =
       this.toolInput.string(candidate.displayName ?? candidate.nickname) ??
@@ -2144,6 +2404,7 @@ export class SocialAgentToolExecutorService {
       memory: this.taskMemory.currentTaskMemory(task),
       isRecord: (value): value is Record<string, unknown> =>
         this.toolInput.isRecord(value),
+      contextLimit: socialAgentContextTurnLimit(this.config),
     });
     const shouldPersist = shouldPersistSocialAgentCurrentTaskSummary({
       request: input,
@@ -2258,11 +2519,13 @@ export class SocialAgentToolExecutorService {
   private async executeAdhocStep(
     task: AgentTask,
     step: StepRecord,
+    options: ToolExecutionOptions = {},
   ): Promise<SocialAgentToolCallRecord> {
     const call = await this.executePlanStep(
       task,
       step,
       task.toolCalls?.length ?? 0,
+      options,
     );
     appendSocialAgentToolCallToTask({ task, call });
     await this.taskRepo.save(task);
@@ -2293,7 +2556,9 @@ export class SocialAgentToolExecutorService {
     const actionInput = this.toolInput.isRecord(decision.input)
       ? decision.input
       : {};
-    const proposal = this.toolInput.isRecord(decision.lifeGraphWritebackProposal)
+    const proposal = this.toolInput.isRecord(
+      decision.lifeGraphWritebackProposal,
+    )
       ? decision.lifeGraphWritebackProposal
       : {};
     const targetUserId =
@@ -2306,8 +2571,12 @@ export class SocialAgentToolExecutorService {
       decision,
       proposal,
     );
-    const nextSafeStep = this.nextSafeStepForRunNextDecision(decision, counterpartIntent);
-    const replyIntentLabel = this.runNextCounterpartIntentLabel(counterpartIntent);
+    const nextSafeStep = this.nextSafeStepForRunNextDecision(
+      decision,
+      counterpartIntent,
+    );
+    const replyIntentLabel =
+      this.runNextCounterpartIntentLabel(counterpartIntent);
     const replyIntentDescription =
       this.toolInput.string(decision.reason) ??
       this.runNextCounterpartIntentDescription(counterpartIntent);
@@ -2373,13 +2642,23 @@ export class SocialAgentToolExecutorService {
       this.toolInput.string(decision.nextAction) ??
       'continue_chat';
     const text = explicit.toLowerCase();
-    if (/decline|reject|refuse|cancel|not_interested|不去|拒绝|没空|不方便/.test(text)) {
+    if (
+      /decline|reject|refuse|cancel|not_interested|不去|拒绝|没空|不方便/.test(
+        text,
+      )
+    ) {
       return 'declined';
     }
-    if (/reschedule|modify|change_time|another_time|改期|换时间|改时间/.test(text)) {
+    if (
+      /reschedule|modify|change_time|another_time|改期|换时间|改时间/.test(text)
+    ) {
       return 'reschedule_requested';
     }
-    if (/ask|question|reply_message|location|where|when|地点|时间|询问|追问/.test(text)) {
+    if (
+      /ask|question|reply_message|location|where|when|地点|时间|询问|追问/.test(
+        text,
+      )
+    ) {
       return 'ask_question';
     }
     if (/accept|accepted|yes|agree|confirmed|可以|同意|确认/.test(text)) {
@@ -2415,8 +2694,10 @@ export class SocialAgentToolExecutorService {
   }
 
   private runNextSafeStepLabel(value: string): string {
-    if (value === 'reply_message') return '先回复对方的问题；发送任何消息前仍会让你确认。';
-    if (value === 'invite_activity') return '可以准备约练草案；创建活动前仍会让你确认。';
+    if (value === 'reply_message')
+      return '先回复对方的问题；发送任何消息前仍会让你确认。';
+    if (value === 'invite_activity')
+      return '可以准备约练草案；创建活动前仍会让你确认。';
     if (value === 'stop') return '尊重对方边界，结束这次推进。';
     return value;
   }

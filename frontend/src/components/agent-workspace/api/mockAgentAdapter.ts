@@ -2,7 +2,6 @@ import type {
   FitMeetAlphaCard,
   UserFacingAgentResponse,
 } from '../../../api/socialAgentApi';
-import { AGENT_FLOW_INTERESTS, getAgentFlowPhaseConfig } from '../agentFlow.constants';
 import type { AgentAdapter } from './agentAdapter.types';
 import type {
   AgentActionRequest,
@@ -16,6 +15,12 @@ const MOCK_AGENT_LABELS = {
   lifeGraph: '画像助手',
   socialMatch: '匹配助手',
   meetLoop: '约见助手',
+} as const;
+const MOCK_DISCOVERY_INTERESTS = ['咖啡', 'Citywalk', '散步', '轻聊天'] as const;
+const MOCK_FLOW_DELAYS = {
+  analyzingIntent: 900,
+  discoveringScenes: 1300,
+  generatingOpener: 900,
 } as const;
 
 function includesSocialActionIntent(goal: string) {
@@ -63,8 +68,8 @@ export function createMockAgentAdapter(): AgentAdapter {
       assertNotAborted(handlers.signal);
       if (!request.goal.trim()) throw new Error('MISSING_INFO');
 
-      const analyzingDuration = getAgentFlowPhaseConfig('analyzingIntent').recommendedDuration;
-      const discoveringDuration = getAgentFlowPhaseConfig('discoveringScenes').recommendedDuration;
+      const analyzingDuration = MOCK_FLOW_DELAYS.analyzingIntent;
+      const discoveringDuration = MOCK_FLOW_DELAYS.discoveringScenes;
       const hasPendingOpportunityClarification = pendingOpportunityGoal !== null;
       if (hasPendingOpportunityClarification && cancelsPendingSocialSearch(request.goal)) {
         pendingOpportunityGoal = null;
@@ -76,11 +81,7 @@ export function createMockAgentAdapter(): AgentAdapter {
         .join(' ')
         .trim();
 
-      emit(handlers, {
-        type: 'status',
-        lightStatus: '正在理解你的需求',
-        lifecycle: 'analyzing_intent',
-      });
+      emit(handlers, mockCoveringStatus('analyzing_intent'));
       emit(handlers, mockProgress('understand', '分析中', '正在理解你的需求', 'analysis'));
       await delay(analyzingDuration, handlers.signal);
 
@@ -139,11 +140,7 @@ export function createMockAgentAdapter(): AgentAdapter {
       }
 
       if (!socialIntent) {
-        emit(handlers, {
-          type: 'status',
-          lightStatus: '正在整理回复',
-          lifecycle: 'analyzing_intent',
-        });
+        emit(handlers, mockCoveringStatus('analyzing_intent'));
         emit(handlers, mockProgress('reply', '整理回复', '正在把回答组织得更清楚', 'status'));
         await delay(220, handlers.signal);
         const response = createMockConversationResponse(request.goal);
@@ -159,11 +156,7 @@ export function createMockAgentAdapter(): AgentAdapter {
       const clarification = evaluateMockOpportunityClarification(opportunityGoal);
       if (!clarification.complete) {
         pendingOpportunityGoal = opportunityGoal;
-        emit(handlers, {
-          type: 'status',
-          lightStatus: '正在整理回复',
-          lifecycle: 'analyzing_intent',
-        });
+        emit(handlers, mockCoveringStatus('analyzing_intent'));
         emit(handlers, mockProgress('clarify', '确认需求', '正在整理还需要补充的信息', 'analysis'));
         await delay(220, handlers.signal);
         const response = createMockClarificationResponse(clarification.assistantMessage);
@@ -177,11 +170,7 @@ export function createMockAgentAdapter(): AgentAdapter {
       }
       pendingOpportunityGoal = null;
 
-      emit(handlers, {
-        type: 'status',
-        lightStatus: '正在筛选合适的人',
-        lifecycle: 'searching_candidates',
-      });
+      emit(handlers, mockCoveringStatus('searching_candidates'));
       emit(
         handlers,
         mockProgress(
@@ -204,14 +193,14 @@ export function createMockAgentAdapter(): AgentAdapter {
         ),
       );
 
-      for (let index = 0; index < AGENT_FLOW_INTERESTS.length; index += 1) {
+      for (let index = 0; index < MOCK_DISCOVERY_INTERESTS.length; index += 1) {
         await delay(index === 0 ? 100 : 180, handlers.signal);
         emit(handlers, {
           type: 'lifecycle',
           lifecycle: 'searching_candidates',
           metadata: {
             activeInterestIndex: index,
-            activeInterest: AGENT_FLOW_INTERESTS[index],
+            activeInterest: MOCK_DISCOVERY_INTERESTS[index],
           },
         });
       }
@@ -226,7 +215,10 @@ export function createMockAgentAdapter(): AgentAdapter {
           { agentName: MOCK_AGENT_LABELS.meetLoop },
         ),
       );
-      await delay(Math.max(0, discoveringDuration - 100 - AGENT_FLOW_INTERESTS.length * 180), handlers.signal);
+      await delay(
+        Math.max(0, discoveringDuration - 100 - MOCK_DISCOVERY_INTERESTS.length * 180),
+        handlers.signal,
+      );
       const sensitive = includesSensitiveIntent(opportunityGoal);
       const response = createMockRecommendationResponse(opportunityGoal, sensitive);
       const lifecycle: AgentLifecycle = sensitive ? 'checking_safety' : 'completed';
@@ -245,15 +237,14 @@ export function createMockAgentAdapter(): AgentAdapter {
     ) {
       assertNotAborted(handlers.signal);
       if (!request.idempotencyKey) throw new Error('MISSING_INFO: idempotencyKey is required');
-      emit(handlers, {
-        type: 'status',
-        lightStatus:
+      emit(
+        handlers,
+        mockCoveringStatus(
           request.action === 'candidate.generate_opener'
-            ? '正在生成开场白'
-            : '正在检查安全边界',
-        lifecycle:
-          request.action === 'candidate.generate_opener' ? 'drafting_opener' : 'checking_safety',
-      });
+            ? 'drafting_opener'
+            : 'checking_safety',
+        ),
+      );
       if (request.action === 'candidate.view_detail') {
         await delay(420, handlers.signal);
         const response = createMockCandidateDetailResponse();
@@ -262,7 +253,7 @@ export function createMockAgentAdapter(): AgentAdapter {
         return toRunResponse(response, 'completed');
       }
       if (request.action === 'candidate.generate_opener' || request.action === 'opener.regenerate') {
-        await delay(getAgentFlowPhaseConfig('generatingOpener').recommendedDuration, handlers.signal);
+        await delay(MOCK_FLOW_DELAYS.generatingOpener, handlers.signal);
         const response = createMockOpenerResponse();
         emitStreamingAnswer(handlers, response.assistantMessage, 'drafting_opener');
         emit(handlers, { type: 'result', lifecycle: 'completed', result: response });
@@ -501,6 +492,36 @@ function mockProgress(
     state: 'running',
     metadata,
   };
+}
+
+function mockCoveringStatus(lifecycle: AgentLifecycle): AgentStreamEvent {
+  return {
+    type: 'progress',
+    id: 'social-codex:summary',
+    title: mockTitleForLifecycle(lifecycle),
+    kind: 'status',
+    state: 'running',
+    lifecycle,
+    metadata: {
+      processType: 'run_summary',
+      originalProcessType: 'mock_status',
+      sourceProtocol: 'mock_agent_stream',
+      displayMode: 'covering_status',
+      updateModel: 'latest_state',
+      defaultVisibleCount: 1,
+      historyVisibility: 'collapsed',
+    },
+  };
+}
+
+function mockTitleForLifecycle(lifecycle: AgentLifecycle): string {
+  if (lifecycle === 'reading_life_graph') return '正在读取你的偏好';
+  if (lifecycle === 'searching_candidates') return '正在筛选公开可发现的人';
+  if (lifecycle === 'ranking_matches') return '正在整理合适机会';
+  if (lifecycle === 'checking_safety') return '正在检查安全边界';
+  if (lifecycle === 'drafting_opener') return '正在生成开场白';
+  if (lifecycle === 'waiting_confirmation') return '需要你确认这一步';
+  return '正在理解你的需求';
 }
 
 function emitStreamingAnswer(

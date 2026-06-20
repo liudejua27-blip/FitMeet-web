@@ -11,6 +11,7 @@ export type SocialAgentPermissionMode =
   | 'lab';
 
 export type UserFacingAgentLightStatus =
+  | '正在思考'
   | '正在理解你的需求'
   | '正在整理回复'
   | '已整理回复'
@@ -37,6 +38,16 @@ export interface UserFacingAgentPendingConfirmation {
   summary: string;
   riskLevel: string;
   expiresAt: string | null;
+}
+
+export type UserFacingAgentAssistantMessageSource = 'llm' | 'fallback';
+
+export interface UserFacingAgentRecoveryNotice {
+  kind: 'failed' | 'timeout' | 'interrupted' | 'checkpoint';
+  title: string;
+  message: string;
+  retryable: boolean;
+  source: 'fallback_suppressed' | 'checkpoint_recovery' | 'stream_error';
 }
 
 export type FitMeetAgentLoopStage =
@@ -96,6 +107,8 @@ export interface UserFacingAgentCheckpointStepAction
 
 export interface UserFacingAgentResponse {
   assistantMessage: string;
+  assistantMessageSource?: UserFacingAgentAssistantMessageSource;
+  recoveryNotice?: UserFacingAgentRecoveryNotice;
   lightStatus: UserFacingAgentLightStatus;
   cards: FitMeetAlphaCard[];
   safeStatus: UserFacingAgentSafeStatus;
@@ -354,6 +367,7 @@ export type UserFacingAgentStreamEvent =
       lifecycle?: string;
       lightStatus: UserFacingAgentLightStatus;
       taskId?: number;
+      threadId?: string | number | null;
     }
   | (UserFacingAgentProgressEvent & { lifecycle?: string })
   | {
@@ -408,7 +422,14 @@ export type UserFacingAgentStreamEvent =
       riskLevel: string;
     }
   | { type: 'result'; lifecycle?: string; result: UserFacingAgentResponse }
-  | { type: 'error'; lifecycle?: string; code?: string; message: string; retryable?: boolean };
+  | {
+      type: 'error';
+      lifecycle?: string;
+      code?: string;
+      message: string;
+      retryable?: boolean;
+      recoveryNotice?: UserFacingAgentRecoveryNotice;
+    };
 
 export type SocialAgentEventV2Type =
   | 'run.started'
@@ -494,6 +515,26 @@ export type SocialCodexTraceEvalResult = {
   };
 };
 
+export type SocialCodexRunSummary = {
+  state: 'running' | 'waiting' | 'completed' | 'failed';
+  title: string;
+  detail: string | null;
+  displayMode?: 'covering_status';
+  updateModel?: 'latest_state';
+  defaultVisibleCount?: 1;
+  historyVisibility?: 'collapsed';
+  currentStage: SocialAgentEventV2Stage | null;
+  currentEventId: string | null;
+  currentSeq: number | null;
+  pendingApproval: boolean;
+  candidateCount: number | null;
+  activityCount: number | null;
+  hasOpportunityCard: boolean;
+  savedMemory: boolean;
+  visibleStepCount: number;
+  expandable: boolean;
+};
+
 export type SocialCodexReplayPackage = {
   taskId: number;
   threadId: string | null;
@@ -504,6 +545,7 @@ export type SocialCodexReplayPackage = {
   lastEventId: string | null;
   terminalType: 'run.completed' | 'run.failed' | null;
   pendingApproval: boolean;
+  summary?: SocialCodexRunSummary;
   events: SocialAgentEventV2[];
   eval?: SocialCodexTraceEvalResult;
 };
@@ -511,6 +553,7 @@ export type SocialCodexReplayPackage = {
 type RunChatInput = {
   goal: string;
   permissionMode: SocialAgentPermissionMode;
+  conversationIntent?: 'conversation' | 'social' | 'approval';
   taskId?: number | null;
   city?: string | null;
   idempotencyKey?: string;
@@ -519,6 +562,7 @@ type RunChatInput = {
     locale?: string;
     source: 'web' | 'ios';
     threadId?: string | null;
+    conversationIntent?: 'conversation' | 'social' | 'approval';
     checkpointId?: number | null;
     parentCheckpointId?: number | null;
     checkpointAction?: 'resume' | 'retry' | 'replay' | 'fork' | null;
@@ -528,6 +572,7 @@ type RunChatInput = {
 
 type RouteMessageInput = {
   message: string;
+  conversationIntent?: 'conversation' | 'social' | 'approval';
   taskId?: number | null;
   hasCandidates?: boolean;
   idempotencyKey?: string;
@@ -536,6 +581,7 @@ type RouteMessageInput = {
     locale?: string;
     source: 'web' | 'ios';
     threadId?: string | null;
+    conversationIntent?: 'conversation' | 'social' | 'approval';
   };
 };
 
@@ -945,7 +991,8 @@ async function runUserFacingAgentStreamAt(
         const sanitized = sanitizeSocialAgentResponse(event);
         onEvent(sanitized);
         if (sanitized.type === 'result') finalResult = sanitized.result;
-        if (sanitized.type === 'error') throw new Error(sanitized.message);
+        if (sanitized.type === 'error') throw streamEventError(sanitized);
+        if (isSocialAgentV2RunFailed(sanitized)) throw socialAgentV2RunFailedError(sanitized);
       }
     }
 
@@ -955,7 +1002,8 @@ async function runUserFacingAgentStreamAt(
         const sanitized = sanitizeSocialAgentResponse(event);
         onEvent(sanitized);
         if (sanitized.type === 'result') finalResult = sanitized.result;
-        if (sanitized.type === 'error') throw new Error(sanitized.message);
+        if (sanitized.type === 'error') throw streamEventError(sanitized);
+        if (isSocialAgentV2RunFailed(sanitized)) throw socialAgentV2RunFailedError(sanitized);
       }
     }
 
@@ -970,6 +1018,87 @@ async function runUserFacingAgentStreamAt(
       // The stream may already be closed or aborted.
     }
   }
+}
+
+function streamEventError(event: Extract<UserFacingAgentStreamEvent, { type: 'error' }>) {
+  const error = new Error(event.message) as Error & {
+    code?: string;
+    retryable?: boolean;
+    recoveryNotice?: UserFacingAgentRecoveryNotice;
+  };
+  error.name = event.code || 'AGENT_STREAM_FAILED';
+  error.code = event.code;
+  error.retryable = event.retryable;
+  error.recoveryNotice = event.recoveryNotice;
+  return error;
+}
+
+function isSocialAgentV2RunFailed(
+  event: UserFacingAgentStreamEvent,
+): event is SocialAgentEventV2 & { type: 'run.failed' } {
+  return (
+    event.type === 'run.failed' &&
+    typeof event.eventId === 'string' &&
+    typeof event.seq === 'number'
+  );
+}
+
+function socialAgentV2RunFailedError(event: SocialAgentEventV2 & { type: 'run.failed' }) {
+  const title = textFromUnknown(event.display?.title) ?? '这次处理没有完成';
+  const message =
+    textFromUnknown(event.display?.detail) ??
+    textFromUnknown(event.payload?.message) ??
+    '刚才连接中断了。当前需求还在，可以重试或继续补充。';
+  const code = textFromUnknown(event.payload?.code) ?? 'AGENT_RUN_FAILED';
+  const recoveryNotice = recoveryNoticeFromRunFailedEvent(event, title, message);
+  const error = new Error(message) as Error & {
+    code?: string;
+    retryable?: boolean;
+    recoveryNotice?: UserFacingAgentRecoveryNotice;
+  };
+  error.name = code;
+  error.code = code;
+  error.retryable = recoveryNotice.retryable;
+  error.recoveryNotice = recoveryNotice;
+  return error;
+}
+
+function recoveryNoticeFromRunFailedEvent(
+  event: SocialAgentEventV2 & { type: 'run.failed' },
+  fallbackTitle: string,
+  fallbackMessage: string,
+): UserFacingAgentRecoveryNotice {
+  const rawNotice = recordFromUnknown(event.payload?.recoveryNotice);
+  const kind = recoveryKindFromUnknown(rawNotice?.kind ?? event.payload?.kind);
+  const title = textFromUnknown(rawNotice?.title) ?? fallbackTitle;
+  const message = textFromUnknown(rawNotice?.message) ?? fallbackMessage;
+  return {
+    kind,
+    title,
+    message,
+    retryable: rawNotice?.retryable !== false && event.payload?.retryable !== false,
+    source: 'stream_error',
+  };
+}
+
+function recoveryKindFromUnknown(value: unknown): UserFacingAgentRecoveryNotice['kind'] {
+  return value === 'timeout' ||
+    value === 'interrupted' ||
+    value === 'checkpoint' ||
+    value === 'failed'
+    ? value
+    : 'failed';
+}
+
+function recordFromUnknown(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function textFromUnknown(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text ? text : null;
 }
 
 async function resolveStreamError(response: Response): Promise<string> {

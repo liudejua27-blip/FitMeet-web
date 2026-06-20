@@ -3,6 +3,8 @@ import type {
   SocialAgentIntentRouterResult,
 } from './social-agent-intent-router.service';
 
+type SocialAgentConversationIntent = 'conversation' | 'social' | 'approval';
+
 const socialSearchNegationPattern =
   /(不想|不用|不要|不是|先不|暂时不|别|无需|不需要).{0,12}(交友|找人|约练|搭子|匹配|推荐人|推荐用户|推荐朋友|推荐候选|活动|认识.{0,6}(新朋友|朋友|人))/i;
 
@@ -36,6 +38,9 @@ const explicitActivitySearchPattern =
 const explicitSocialActionPattern =
   /(发消息|发送.*(给|第一个|第二个|第三个|这个|那个|他|她|候选)|加好友|邀请(第一个|第二个|第三个|这个|那个|他|她|候选)|约他|约她|联系(第一个|第二个|第三个|这个|那个|他|她|候选)|收藏(第一个|第二个|第三个|这个|那个|他|她|候选)|确认发布|帮我发|帮我加|帮我邀请)/i;
 
+const explicitCandidateMessageConfirmationPattern =
+  /^(确认发送|确认发出|发送吧|可以发送|发吧|帮我发送|就发这条|确认)[。.!！\s]*$/i;
+
 export function hasExplicitSocialExecutionIntent(message: string): boolean {
   const text = message.trim().toLowerCase();
   if (!text) return false;
@@ -51,6 +56,40 @@ export function hasExplicitSocialExecutionIntent(message: string): boolean {
   if (hasSearchIntent) return true;
   if (socialSideEffectNegationPattern.test(text)) return false;
   return explicitSocialActionPattern.test(text);
+}
+
+export function hasExplicitSocialSideEffectIntent(message: string): boolean {
+  const text = message.trim().toLowerCase();
+  if (!text) return false;
+  if (isConversationOnlySocialMention(text)) return false;
+  if (socialSideEffectNegationPattern.test(text)) return false;
+  if (socialHelpQuestionPattern.test(text)) return false;
+  if (socialCapabilityQuestionPattern.test(text)) return false;
+  if (nonSocialLookupPattern.test(text)) return false;
+  return explicitSocialActionPattern.test(text);
+}
+
+export function hasExplicitCandidateMessageConfirmationIntent(
+  message: string,
+): boolean {
+  const text = message.trim();
+  if (!text) return false;
+  if (socialSideEffectNegationPattern.test(text)) return false;
+  if (socialHelpQuestionPattern.test(text)) return false;
+  if (socialCapabilityQuestionPattern.test(text)) return false;
+  if (nonSocialLookupPattern.test(text)) return false;
+  return explicitCandidateMessageConfirmationPattern.test(text);
+}
+
+export function explicitlyRejectsSocialExecution(message: string): boolean {
+  const text = message.trim().toLowerCase();
+  if (!text) return false;
+  return (
+    socialSearchNegationPattern.test(text) ||
+    /(不要|不需要|不用|别|先不|暂时不|无需).{0,20}(推荐|搜索|找人|匹配|候选|真实用户|活动|约练|搭子|发布|邀请|加好友)/i.test(
+      text,
+    )
+  );
 }
 
 export function isConversationOnlySocialMention(message: string): boolean {
@@ -92,6 +131,22 @@ export function hasExistingSocialExecutionContext(
   );
 }
 
+export function hasExistingSocialActionContext(
+  input: Pick<SocialAgentIntentRouterInput, 'taskContext'>,
+): boolean {
+  const context = input.taskContext;
+  if (!context) return false;
+  if (hasExistingSocialExecutionContext(input)) return true;
+  if (positiveNumber(context.candidateCount) > 0) return true;
+  if (positiveNumber(context.socialRequestId) > 0) return true;
+  if (nonEmptyArray(context.pendingApprovals)) return true;
+  if (nonEmptyArray(context.pendingActions)) return true;
+  if (nonEmptyRecord(context.candidateActions)) return true;
+  if (nonEmptyRecord(context.candidateState)) return true;
+  if (nonEmptyRecord(context.activityState)) return true;
+  return false;
+}
+
 export function isSocialExecutionIntent(intent: string): boolean {
   return [
     'social_search',
@@ -105,10 +160,28 @@ export function shouldAllowSocialExecution(input: {
   message: string;
   taskContext?: SocialAgentIntentRouterInput['taskContext'];
   intent?: string;
+  conversationIntent?: SocialAgentConversationIntent | null;
 }): boolean {
+  if (explicitlyRejectsSocialExecution(input.message)) return false;
+  if (isConversationOnlySocialMention(input.message)) return false;
+  if (
+    input.conversationIntent === 'conversation' &&
+    !hasExplicitSocialExecutionIntent(input.message)
+  ) {
+    return false;
+  }
+  if (input.intent === 'action_request') {
+    return (
+      hasExplicitSocialSideEffectIntent(input.message) &&
+      hasExistingSocialActionContext(input)
+    );
+  }
   if (hasExplicitSocialExecutionIntent(input.message)) return true;
   if (
-    input.intent === 'candidate_followup' &&
+    input.intent &&
+    ['social_search', 'activity_search', 'candidate_followup'].includes(
+      input.intent,
+    ) &&
     hasExistingSocialExecutionContext(input)
   ) {
     return true;
@@ -117,7 +190,9 @@ export function shouldAllowSocialExecution(input: {
 }
 
 export function enforceSocialIntentGate(
-  input: SocialAgentIntentRouterInput,
+  input: SocialAgentIntentRouterInput & {
+    conversationIntent?: SocialAgentConversationIntent | null;
+  },
   result: SocialAgentIntentRouterResult,
 ): SocialAgentIntentRouterResult {
   if (!isSocialExecutionIntent(result.intent)) return result;
@@ -126,6 +201,7 @@ export function enforceSocialIntentGate(
       message: input.message,
       taskContext: input.taskContext,
       intent: result.intent,
+      conversationIntent: input.conversationIntent,
     })
   ) {
     return normalizeAllowedSocialExecutionRoute(result);
@@ -139,6 +215,22 @@ export function enforceSocialIntentGate(
     shouldExecuteAction: false,
     replyStrategy: 'conversational_answer',
   };
+}
+
+function positiveNumber(value: unknown): number {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function nonEmptyArray(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function nonEmptyRecord(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  return Object.keys(value).length > 0;
 }
 
 function normalizeAllowedSocialExecutionRoute(

@@ -196,8 +196,11 @@ export function ChatGPTThreadList({
                     threadIndex <= 0 ||
                     !previousThread ||
                     getThreadGroupLabel(previousThread) !== groupLabel;
-                  const isActive =
-                    activeThreadId === thread.id || runtimeMainThreadId === thread.id;
+                  const isActive = isThreadActive(
+                    thread,
+                    activeThreadId,
+                    runtimeMainThreadId,
+                  );
                   return (
                     <div key={thread.id} data-thread-group={groupLabel}>
                       {shouldShowGroupLabel ? (
@@ -1111,6 +1114,58 @@ function createFallbackThreadSummary(threadListItem: {
     createdAt,
     custom,
   };
+}
+
+function isThreadActive(
+  thread: FitMeetAgentThreadSummary,
+  ...activeIds: Array<string | null | undefined>
+) {
+  const threadIdentities = identitiesForThread(thread);
+  return activeIds.some((activeId) => {
+    const activeIdentities = identitiesForValue(activeId);
+    for (const identity of activeIdentities) {
+      if (threadIdentities.has(identity)) return true;
+    }
+    return false;
+  });
+}
+
+function identitiesForThread(thread: FitMeetAgentThreadSummary) {
+  const identities = new Set<string>();
+  addIdentityVariants(identities, thread.id);
+  addIdentityVariants(identities, thread.threadId);
+  addIdentityVariants(identities, thread.taskId);
+  addIdentityVariants(identities, thread.custom?.threadId);
+  addIdentityVariants(identities, thread.custom?.taskId);
+  addIdentityVariants(identities, thread.custom?.fitmeetTaskId);
+  return identities;
+}
+
+function identitiesForValue(value: unknown) {
+  const identities = new Set<string>();
+  addIdentityVariants(identities, value);
+  return identities;
+}
+
+function addIdentityVariants(identities: Set<string>, value: unknown) {
+  const rawValue =
+    typeof value === 'number'
+      ? Number.isFinite(value)
+        ? String(Math.trunc(value))
+        : ''
+      : typeof value === 'string'
+        ? value.trim()
+        : '';
+  if (!rawValue) return;
+  identities.add(rawValue);
+  const numericMatch = rawValue.match(/^(?:agent-task|task|thread):(\d+)$/i);
+  const numericText = /^\d+$/.test(rawValue) ? rawValue : numericMatch?.[1];
+  if (!numericText) return;
+  const normalized = String(Number(numericText));
+  identities.add(normalized);
+  identities.add(`agent-task:${normalized}`);
+  identities.add(`task:${normalized}`);
+  identities.add(`thread:${normalized}`);
 }
 
 function threadListOperationError(error: unknown, fallback: string) {

@@ -4,6 +4,7 @@ import {
   buildSocialAgentActivityCompletionCard,
   buildSocialAgentActivityDetailCard,
   buildSocialAgentActivityPlanCard,
+  buildSocialAgentCandidateDetailCard,
   buildSocialAgentCardActionRouteResult,
   buildSocialAgentCheckinCard,
   buildSocialAgentLifeGraphUpdateCard,
@@ -527,6 +528,57 @@ describe('social agent card action presenter', () => {
         }),
       ],
     });
+  });
+
+  it('preserves candidate reasoning quality on detail cards without raw fallback leakage', () => {
+    const card = buildSocialAgentCandidateDetailCard({
+      taskId: 101,
+      candidate: {
+        userId: 22,
+        displayName: '小林',
+        city: '青岛',
+        matchScore: 87,
+        matchReasoner: {
+          source: 'fallback',
+          confidence: 0.43,
+          degraded: true,
+          retryable: true,
+          degradationReason: 'upstream overloaded',
+        },
+      },
+    });
+
+    expect(card).toMatchObject({
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'social_match.candidate',
+      data: expect.objectContaining({
+        reasonerSource: 'fallback',
+        reasoningConfidence: 0.43,
+        reasoningDegraded: true,
+        reasoningRetryable: true,
+        matchReasoner: {
+          source: 'fallback',
+          confidence: 0.43,
+          degraded: true,
+          retryable: true,
+          degradationReason: 'model_unavailable',
+        },
+        opportunity: expect.objectContaining({
+          reasonerSource: 'fallback',
+          reasoningConfidence: 0.43,
+          reasoningDegraded: true,
+          reasoningRetryable: true,
+          matchReasoner: {
+            source: 'fallback',
+            confidence: 0.43,
+            degraded: true,
+            retryable: true,
+            degradationReason: 'model_unavailable',
+          },
+        }),
+      }),
+    });
+    expect(JSON.stringify(card)).not.toContain('upstream overloaded');
   });
 
   it('merges activity payloads from draft, meet loop, and current payload', () => {

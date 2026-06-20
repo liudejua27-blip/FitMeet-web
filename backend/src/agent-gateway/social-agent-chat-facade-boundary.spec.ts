@@ -55,6 +55,14 @@ const agentGatewayServicePath = path.resolve(
   __dirname,
   'agent-gateway.service.ts',
 );
+const agentGatewayControllerPath = path.resolve(
+  __dirname,
+  'agent-gateway.controller.ts',
+);
+const socialAgentTasksControllerPath = path.resolve(
+  __dirname,
+  'social-agent-tasks.controller.ts',
+);
 const publicSocialCandidatePresenterPath = path.resolve(
   __dirname,
   'public-social-candidate.presenter.ts',
@@ -271,6 +279,10 @@ const candidateActionServicePath = path.resolve(
   __dirname,
   'social-agent-candidate-action.service.ts',
 );
+const agentGatewayModulePath = path.resolve(
+  __dirname,
+  'agent-gateway.module.ts',
+);
 
 describe('SocialAgentChatService facade boundary', () => {
   const compatibilitySource = fs.readFileSync(compatibilityExportPath, 'utf8');
@@ -298,6 +310,14 @@ describe('SocialAgentChatService facade boundary', () => {
   );
   const agentGatewayServiceSource = fs.readFileSync(
     agentGatewayServicePath,
+    'utf8',
+  );
+  const agentGatewayControllerSource = fs.readFileSync(
+    agentGatewayControllerPath,
+    'utf8',
+  );
+  const socialAgentTasksControllerSource = fs.readFileSync(
+    socialAgentTasksControllerPath,
     'utf8',
   );
   const publicSocialCandidatePresenterSource = fs.readFileSync(
@@ -477,6 +497,10 @@ describe('SocialAgentChatService facade boundary', () => {
     candidateActionServicePath,
     'utf8',
   );
+  const agentGatewayModuleSource = fs.readFileSync(
+    agentGatewayModulePath,
+    'utf8',
+  );
 
   it('keeps the legacy service module as a compatibility export', () => {
     expect(compatibilitySource.trim()).toBe(
@@ -541,7 +565,7 @@ describe('SocialAgentChatService facade boundary', () => {
     // L5 streaming adds AbortSignal propagation and model fallback wiring here;
     // keep the budget explicit while preserving prompt-assembly separation.
     expect(chatLlmServiceSource.trim().split('\n').length).toBeLessThanOrEqual(
-      225,
+      240,
     );
     expect(chatLlmServiceSource).toContain(
       'buildSocialAgentDirectReplyMessages',
@@ -741,6 +765,35 @@ describe('SocialAgentChatService facade boundary', () => {
     expect(runNextStateSource).toContain('next_action_needs_attention');
     expect(runNextStateSource.trim().split('\n').length).toBeLessThanOrEqual(
       60,
+    );
+  });
+
+  it('keeps public task run-next and adhoc tool endpoints behind the unified AgentLoop executor', () => {
+    expect(socialAgentTasksControllerSource).toContain(
+      'return this.executor.runNext(id, req.user.id)',
+    );
+    expect(agentGatewayControllerSource).toContain(
+      'return this.socialAgentExecutor.runNext(id, req.user.id)',
+    );
+    expect(socialAgentTasksControllerSource).toContain(
+      'return this.executor.executeToolAction(',
+    );
+    expect(socialAgentTasksControllerSource).not.toContain('runNextInternal(');
+    expect(socialAgentTasksControllerSource).not.toContain(
+      'executeToolActionInternal(',
+    );
+    expect(agentGatewayControllerSource).not.toContain('runNextInternal(');
+    expect(toolExecutorSource).toMatch(
+      /async runNext[\s\S]*?loopService\.execute\(/,
+    );
+    expect(toolExecutorSource).toMatch(
+      /async executeToolAction[\s\S]*?loopService\.execute\(/,
+    );
+    expect(toolExecutorSource).toContain(
+      'run-next must pass through the unified AgentLoop.',
+    );
+    expect(toolExecutorSource).toContain(
+      'Adhoc task tool actions must enter the unified AgentLoop',
     );
   });
 
@@ -1042,9 +1095,11 @@ describe('SocialAgentChatService facade boundary', () => {
     expect(candidateActionApprovalPresenterSource).toContain(
       '/(加好友|关注|加微信|加联系方式)/',
     );
+    // The presenter owns Social Codex runtime-context summaries; the action
+    // service must stay free of approval copy and regex inference.
     expect(
       candidateActionApprovalPresenterSource.trim().split('\n').length,
-    ).toBeLessThanOrEqual(130);
+    ).toBeLessThanOrEqual(220);
   });
 
   it('keeps candidate message draft selection split from candidate action flow', () => {
@@ -1523,6 +1578,29 @@ describe('SocialAgentChatService facade boundary', () => {
     expect(routeAgentLoopRunnerSource).not.toMatch(/InjectRepository/);
     expect(routeTurnSource).not.toMatch(/Repository</);
     expect(routeAgentLoopRunnerSource).not.toMatch(/Repository</);
+  });
+
+  it('keeps production route branches wired to the subagent worker runtime', () => {
+    expect(agentGatewayModuleSource).toContain(
+      'FitMeetSubagentWorkerDispatcherService',
+    );
+    expect(agentGatewayModuleSource).toContain('FitMeetSubagentWorkerService');
+    expect(agentGatewayModuleSource).toContain(
+      'FitMeetSubagentWorkerRuntimeService',
+    );
+    expect(agentGatewayModuleSource).toContain('SubagentWorkerQueueService');
+    expect(agentGatewayModuleSource).toContain(
+      'SocialAgentRouteAgentLoopRunnerService',
+    );
+    expect(routeAgentLoopRunnerSource).toContain(
+      'private readonly subagentWorker?: FitMeetSubagentWorkerService',
+    );
+    expect(routeAgentLoopRunnerSource).toContain('this.subagentWorker.run');
+    expect(routeAgentLoopRunnerSource).toContain("agent: 'Life Graph Agent'");
+    expect(routeAgentLoopRunnerSource).toContain(
+      "agent: 'Social Match Agent'",
+    );
+    expect(routeAgentLoopRunnerSource).toContain("agent: 'Meet Loop Agent'");
   });
 
   it('keeps chat turn entrypoints split from route-turn callback wiring', () => {

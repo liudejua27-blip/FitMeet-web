@@ -58,6 +58,33 @@ function makeHarness() {
   return { eventRepo, savedEvents, service };
 }
 
+function makeQueuedHarness() {
+  const task = makeTask();
+  const eventRepo = {
+    create: jest.fn((input) => input),
+    save: jest.fn().mockResolvedValue({}),
+  };
+  const runState = {
+    queueChatRun: jest.fn().mockResolvedValue({
+      taskId: task.id,
+      runId: 'sar_test_run',
+      status: 'queued',
+    }),
+    updateRunSnapshot: jest.fn().mockResolvedValue(task),
+    markRunFailed: jest.fn().mockResolvedValue(undefined),
+  };
+  const taskLifecycle = {
+    createOrReuseTask: jest.fn().mockResolvedValue(task),
+  };
+  const service = new SocialAgentQueuedRunService(
+    eventRepo as never,
+    runState as never,
+    taskLifecycle as never,
+  );
+
+  return { eventRepo, runState, service, task, taskLifecycle };
+}
+
 describe('SocialAgentQueuedRunService', () => {
   it('safe truncates long social agent timeline event summaries', async () => {
     const { eventRepo, savedEvents, service } = makeHarness();
@@ -90,5 +117,68 @@ describe('SocialAgentQueuedRunService', () => {
     expect(savedEvents[0].payload).toMatchObject({
       message: '完整内容放在 payload 里',
     });
+  });
+
+  it('binds queued runs to the requested task instead of creating a fresh conversation task', async () => {
+    const { runState, service, task, taskLifecycle } = makeQueuedHarness();
+    const executeRun = jest.fn().mockResolvedValue({
+      taskId: task.id,
+      visibleSteps: [],
+      candidates: [],
+    });
+
+    const queued = await service.runQueued({
+      ownerUserId: 7,
+      body: {
+        goal: '继续找今晚青岛大学附近散步搭子',
+        taskId: task.id,
+      },
+      executeRun,
+      visibleStepLabel: (_id, label) => label,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(queued).toMatchObject({ taskId: task.id, runId: 'sar_test_run' });
+    expect(taskLifecycle.createOrReuseTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        taskId: task.id,
+      }),
+    );
+    expect(runState.queueChatRun).toHaveBeenCalledWith(
+      expect.objectContaining({ task }),
+    );
+    expect(executeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        goal: '继续找今晚青岛大学附近散步搭子',
+        taskId: task.id,
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it('binds queued runs to task ids encoded in assistant-ui thread ids', async () => {
+    const { service, taskLifecycle } = makeQueuedHarness();
+
+    await service.runQueued({
+      ownerUserId: 7,
+      body: {
+        goal: '继续当前约练任务',
+        clientContext: { threadId: `agent-task:${101}` },
+      },
+      executeRun: jest.fn().mockResolvedValue({
+        taskId: 101,
+        visibleSteps: [],
+        candidates: [],
+      }),
+      visibleStepLabel: (_id, label) => label,
+    });
+
+    expect(taskLifecycle.createOrReuseTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        taskId: 101,
+      }),
+    );
   });
 });

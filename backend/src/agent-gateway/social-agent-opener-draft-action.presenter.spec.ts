@@ -31,8 +31,8 @@ describe('social agent opener draft action presenter', () => {
       agentConnectionId: null,
       agentTaskId: 101,
       type: 'send_message',
-      actionType: 'send_candidate_message',
-      skillName: 'send_candidate_message',
+      actionType: 'send_invite',
+      skillName: 'send_invite',
       payload: {
         source: 'agent_card_action',
         schemaAction: 'candidate.generate_opener',
@@ -86,7 +86,7 @@ describe('social agent opener draft action presenter', () => {
         pendingApproval: {
           id: 9001,
           type: ApprovalType.SendMessage,
-          actionType: 'send_candidate_message',
+          actionType: 'send_invite',
           summary: '发送开场白给候选人 #22',
           riskLevel: ApprovalRiskLevel.Medium,
           payload: {},
@@ -98,7 +98,7 @@ describe('social agent opener draft action presenter', () => {
       pendingAction: {
         id: 9001,
         type: ApprovalType.SendMessage,
-        actionType: 'send_candidate_message',
+        actionType: 'send_invite',
         summary: '发送开场白给候选人 #22',
         riskLevel: ApprovalRiskLevel.Medium,
         at: '2026-06-07T00:00:00.000Z',

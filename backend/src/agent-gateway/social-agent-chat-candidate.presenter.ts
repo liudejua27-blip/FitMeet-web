@@ -82,6 +82,29 @@ export function toSocialAgentChatCandidate(
     numberValue(candidate.candidateUserId) ??
     numberValue(candidate.userId) ??
     candidate.userId;
+  const nestedReasoner = isRecord(record.matchReasoner)
+    ? record.matchReasoner
+    : null;
+  const reasonerSource =
+    reasonerSourceValue(record.reasonerSource) ??
+    reasonerSourceValue(nestedReasoner?.source);
+  const reasoningConfidence =
+    numberValue(record.reasoningConfidence) ??
+    numberValue(nestedReasoner?.confidence) ??
+    undefined;
+  const reasoningDegraded =
+    booleanValue(record.reasoningDegraded) ??
+    booleanValue(record.degraded) ??
+    booleanValue(nestedReasoner?.degraded);
+  const reasoningRetryable =
+    booleanValue(record.reasoningRetryable) ??
+    booleanValue(record.retryable) ??
+    booleanValue(nestedReasoner?.retryable);
+  const degradationReason =
+    cleanDisplayText(
+      record.degradationReason ?? nestedReasoner?.degradationReason,
+      '',
+    ) || null;
   return {
     agentTaskId,
     source:
@@ -133,6 +156,20 @@ export function toSocialAgentChatCandidate(
       candidate.suggestedMessage ?? record.suggestedOpener,
       '',
     ),
+    reasonerSource,
+    reasoningConfidence,
+    reasoningDegraded,
+    reasoningRetryable,
+    degradationReason,
+    degraded: reasoningDegraded,
+    retryable: reasoningRetryable,
+    matchReasoner: {
+      source: reasonerSource,
+      confidence: reasoningConfidence,
+      degraded: reasoningDegraded,
+      retryable: reasoningRetryable,
+      degradationReason,
+    },
     candidateExplanation: candidateExplanationFromRecord(
       record.candidateExplanation,
     ),
@@ -157,4 +194,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function numberValue(value: unknown): number | null {
   const num = Number(value);
   return Number.isFinite(num) && num > 0 ? num : null;
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+  if (value === true) return true;
+  if (value === false) return false;
+  return undefined;
+}
+
+function reasonerSourceValue(
+  value: unknown,
+): 'deepseek' | 'fallback' | undefined {
+  return value === 'deepseek' || value === 'fallback' ? value : undefined;
 }

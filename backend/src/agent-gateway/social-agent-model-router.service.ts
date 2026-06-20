@@ -9,6 +9,42 @@ export type SocialAgentModelUseCase =
   | 'card_generation'
   | 'candidate_summary'
   | 'safety_check';
+export type SocialAgentModelRoutingMode = 'balanced' | 'quality' | 'fast';
+
+export const SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS = 30_000;
+export const SOCIAL_AGENT_QUALITY_CHAT_FIRST_CHUNK_TIMEOUT_MS = 20_000;
+export const SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS = 25_000;
+export const SOCIAL_AGENT_QUALITY_PLANNER_FIRST_CHUNK_TIMEOUT_MS = 20_000;
+export const SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS = 25_000;
+export const SOCIAL_AGENT_QUALITY_TOOL_FIRST_CHUNK_TIMEOUT_MS = 20_000;
+export const SOCIAL_AGENT_DEFAULT_FAST_MODEL = 'deepseek-v4-flash';
+export const SOCIAL_AGENT_DEFAULT_REASONING_MODEL = 'deepseek-v4-pro';
+
+export function normalizeSocialAgentModel(value?: string | null): string | null {
+  const model = `${value ?? ''}`.trim();
+  if (!model) return null;
+  if (model === 'deepseek-v4') return SOCIAL_AGENT_DEFAULT_REASONING_MODEL;
+  return model;
+}
+
+export function isSocialAgentLegacyDeepSeekAlias(model: string): boolean {
+  return /^deepseek-chat$/i.test(model);
+}
+
+export function isSocialAgentFastModel(model: string): boolean {
+  return /(^|[-_])(flash|fast|lite)([-_]|$)/i.test(model);
+}
+
+export function selectSocialAgentConfiguredModel(
+  value?: string | null,
+  options: { allowFast?: boolean } = {},
+): string | null {
+  const model = normalizeSocialAgentModel(value);
+  if (!model) return null;
+  if (isSocialAgentLegacyDeepSeekAlias(model)) return null;
+  if (!options.allowFast && isSocialAgentFastModel(model)) return null;
+  return model;
+}
 
 @Injectable()
 export class SocialAgentModelRouterService {
@@ -18,50 +54,34 @@ export class SocialAgentModelRouterService {
     switch (useCase) {
       case 'casual_chat':
         return (
-          this.firstModel(['AGENT_CASUAL_CHAT_MODEL', 'DEEPSEEK_CHAT_MODEL']) ??
+          this.firstModel(['AGENT_CASUAL_CHAT_MODEL', 'DEEPSEEK_CHAT_MODEL'], {
+            allowFast: false,
+          }) ??
           this.chatCompatibleLegacyModel() ??
-          'deepseek-v4-flash'
+          this.defaultChatModel()
         );
       case 'final_response':
         return (
           this.firstModel([
             'AGENT_FINAL_RESPONSE_MODEL',
             'DEEPSEEK_CHAT_MODEL',
-          ]) ??
+          ], {
+            allowFast: false,
+          }) ??
           this.chatCompatibleLegacyModel() ??
-          'deepseek-v4-flash'
+          this.defaultChatModel()
         );
       case 'planner':
-        return (
-          this.firstModel(
-            ['AGENT_PLANNER_MODEL', 'DEEPSEEK_FAST_MODEL', 'DEEPSEEK_MODEL'],
-            'deepseek-v4-flash',
-          ) ?? 'deepseek-v4-flash'
-        );
+        return this.plannerModel();
       case 'profile_extraction':
-        return (
-          this.firstModel(
-            ['AGENT_EXTRACTOR_MODEL', 'DEEPSEEK_FAST_MODEL', 'DEEPSEEK_MODEL'],
-            'deepseek-v4-flash',
-          ) ?? 'deepseek-v4-flash'
-        );
+        return this.reasoningToolModel(['AGENT_EXTRACTOR_MODEL']);
       case 'card_generation':
       case 'candidate_summary':
-        return (
-          this.firstModel(
-            ['AGENT_CARD_MODEL', 'DEEPSEEK_FAST_MODEL', 'DEEPSEEK_MODEL'],
-            'deepseek-v4-flash',
-          ) ?? 'deepseek-v4-flash'
-        );
+        return this.reasoningToolModel(['AGENT_CARD_MODEL']);
       case 'safety_check':
-        return (
-          this.firstModel(
-            ['DEEPSEEK_FAST_MODEL', 'DEEPSEEK_MODEL'],
-            'deepseek-v4-flash',
-          ) ?? 'deepseek-v4-flash'
-        );
+        return this.reasoningToolModel(['AGENT_SAFETY_MODEL']);
       default:
-        return 'deepseek-v4-flash';
+        return SOCIAL_AGENT_DEFAULT_REASONING_MODEL;
     }
   }
 
@@ -71,8 +91,21 @@ export class SocialAgentModelRouterService {
       this.config.get<string>('SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS') ??
       this.config.get<string>('DEEPSEEK_TIMEOUT_MS');
     const fallback =
-      useCase === 'final_response' || useCase === 'casual_chat' ? 7000 : 5000;
-    return this.positiveNumber(specific ?? shared, fallback);
+      this.routingMode() === 'quality'
+        ? useCase === 'final_response' || useCase === 'casual_chat'
+          ? SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS
+          : useCase === 'planner'
+            ? SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS
+            : SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS
+        : useCase === 'final_response' || useCase === 'casual_chat'
+          ? SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS
+          : useCase === 'planner'
+            ? SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS
+            : SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS;
+    return this.enforceMinimumTimeout(
+      useCase,
+      this.positiveNumber(specific ?? shared, fallback),
+    );
   }
 
   getFirstChunkTimeout(useCase: SocialAgentModelUseCase): number {
@@ -83,8 +116,56 @@ export class SocialAgentModelRouterService {
       this.config.get<string>('SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS') ??
       this.config.get<string>('DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS');
     const fallback =
-      useCase === 'final_response' || useCase === 'casual_chat' ? 3500 : 5000;
-    return this.positiveNumber(specific ?? shared, fallback);
+      this.routingMode() === 'quality'
+        ? useCase === 'final_response' || useCase === 'casual_chat'
+          ? SOCIAL_AGENT_QUALITY_CHAT_FIRST_CHUNK_TIMEOUT_MS
+          : useCase === 'planner'
+            ? SOCIAL_AGENT_QUALITY_PLANNER_FIRST_CHUNK_TIMEOUT_MS
+            : SOCIAL_AGENT_QUALITY_TOOL_FIRST_CHUNK_TIMEOUT_MS
+        : useCase === 'final_response' || useCase === 'casual_chat'
+          ? SOCIAL_AGENT_QUALITY_CHAT_FIRST_CHUNK_TIMEOUT_MS
+          : useCase === 'planner'
+            ? SOCIAL_AGENT_QUALITY_PLANNER_FIRST_CHUNK_TIMEOUT_MS
+            : SOCIAL_AGENT_QUALITY_TOOL_FIRST_CHUNK_TIMEOUT_MS;
+    return this.enforceMinimumFirstChunkTimeout(
+      useCase,
+      this.positiveNumber(specific ?? shared, fallback),
+    );
+  }
+
+  private plannerModel(): string {
+    return (
+      this.firstModel(
+        ['AGENT_PLANNER_MODEL', 'DEEPSEEK_CHAT_MODEL'],
+        {
+          fallback: SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+          allowFast: false,
+        },
+      ) ?? SOCIAL_AGENT_DEFAULT_REASONING_MODEL
+    );
+  }
+
+  private reasoningToolModel(specificKeys: string[]): string {
+    return (
+      this.firstModel(
+        [...specificKeys, 'DEEPSEEK_CHAT_MODEL'],
+        {
+          fallback: SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+          allowFast: false,
+        },
+      ) ??
+      SOCIAL_AGENT_DEFAULT_REASONING_MODEL
+    );
+  }
+
+  private routingMode(): SocialAgentModelRoutingMode {
+    const value =
+      `${this.config.get<string>('SOCIAL_AGENT_MODEL_ROUTING_MODE') ?? ''}`
+        .trim()
+        .toLowerCase();
+    if (value === 'quality') return 'quality';
+    if (value === 'fast') return 'fast';
+    return 'quality';
   }
 
   getThinkingMode(useCase: SocialAgentModelUseCase): 'disabled' | 'enabled' {
@@ -113,27 +194,33 @@ export class SocialAgentModelRouterService {
     }
   }
 
-  private firstModel(keys: string[], fallback?: string): string | null {
+  private firstModel(
+    keys: string[],
+    options: { fallback?: string; allowFast?: boolean } = {},
+  ): string | null {
     for (const key of keys) {
-      const value = this.normalizeModel(this.config.get<string>(key));
+      const value = selectSocialAgentConfiguredModel(
+        this.config.get<string>(key),
+        {
+          allowFast: options.allowFast,
+        },
+      );
       if (value) return value;
     }
-    return fallback ?? null;
+    return options.fallback ?? null;
   }
 
   private chatCompatibleLegacyModel(): string | null {
-    const legacy = this.normalizeModel(
+    const legacy = selectSocialAgentConfiguredModel(
       this.config.get<string>('DEEPSEEK_MODEL'),
+      { allowFast: false },
     );
     if (!legacy) return null;
     return /chat/i.test(legacy) ? legacy : null;
   }
 
-  private normalizeModel(value?: string | null): string | null {
-    const model = `${value ?? ''}`.trim();
-    if (!model) return null;
-    if (model === 'deepseek-v4') return 'deepseek-v4-flash';
-    return model;
+  private defaultChatModel(): string {
+    return SOCIAL_AGENT_DEFAULT_REASONING_MODEL;
   }
 
   private timeoutEnvKey(useCase: SocialAgentModelUseCase): string {
@@ -203,5 +290,40 @@ export class SocialAgentModelRouterService {
     const parsed = Number(value);
     if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
     return parsed;
+  }
+
+  private enforceMinimumTimeout(
+    useCase: SocialAgentModelUseCase,
+    timeoutMs: number,
+  ): number {
+    if (useCase === 'casual_chat' || useCase === 'final_response') {
+      return Math.max(timeoutMs, SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS);
+    }
+    if (useCase === 'planner') {
+      return Math.max(timeoutMs, SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS);
+    }
+    return Math.max(timeoutMs, SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS);
+  }
+
+  private enforceMinimumFirstChunkTimeout(
+    useCase: SocialAgentModelUseCase,
+    timeoutMs: number,
+  ): number {
+    if (useCase === 'casual_chat' || useCase === 'final_response') {
+      return Math.max(
+        timeoutMs,
+        SOCIAL_AGENT_QUALITY_CHAT_FIRST_CHUNK_TIMEOUT_MS,
+      );
+    }
+    if (useCase === 'planner') {
+      return Math.max(
+        timeoutMs,
+        SOCIAL_AGENT_QUALITY_PLANNER_FIRST_CHUNK_TIMEOUT_MS,
+      );
+    }
+    return Math.max(
+      timeoutMs,
+      SOCIAL_AGENT_QUALITY_TOOL_FIRST_CHUNK_TIMEOUT_MS,
+    );
   }
 }

@@ -24,6 +24,21 @@ describe('socialAgentApi Social Codex replay', () => {
       lastEventId: 'run-44:2',
       terminalType: 'run.completed',
       pendingApproval: false,
+      summary: {
+        state: 'completed',
+        title: '这一步处理完成',
+        detail: null,
+        currentStage: 'send_invite',
+        currentEventId: 'run-44:2',
+        currentSeq: 2,
+        pendingApproval: false,
+        candidateCount: null,
+        activityCount: null,
+        hasOpportunityCard: false,
+        savedMemory: false,
+        visibleStepCount: 2,
+        expandable: true,
+      },
       events: [],
       eval: {
         pass: true,
@@ -70,6 +85,10 @@ describe('socialAgentApi Social Codex replay', () => {
             pass: true,
           }),
         ],
+      }),
+      summary: expect.objectContaining({
+        state: 'completed',
+        title: '这一步处理完成',
       }),
     });
   });
@@ -148,6 +167,21 @@ describe('socialAgentApi Social Codex replay', () => {
       lastEventId: 'run-44:4',
       terminalType: 'run.completed',
       pendingApproval: false,
+      summary: {
+        state: 'completed',
+        title: '这一步处理完成',
+        detail: null,
+        currentStage: 'send_invite',
+        currentEventId: 'run-44:4',
+        currentSeq: 4,
+        pendingApproval: false,
+        candidateCount: null,
+        activityCount: null,
+        hasOpportunityCard: false,
+        savedMemory: false,
+        visibleStepCount: 4,
+        expandable: true,
+      },
       events: [
         {
           type: 'visible_process.delta',
@@ -261,6 +295,11 @@ describe('socialAgentApi Social Codex replay', () => {
     expect(replay.eval?.replayCase).toMatchObject({
       approvalRequired: true,
       terminalType: 'run.completed',
+    });
+    expect(replay.summary).toMatchObject({
+      state: 'completed',
+      currentStage: 'send_invite',
+      expandable: true,
     });
   });
 });

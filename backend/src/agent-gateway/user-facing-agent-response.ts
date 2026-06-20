@@ -8,10 +8,12 @@ import { LightStatusMapperService } from './response-quality/light-status-mapper
 import { UserFacingResponseSanitizerService } from './response-quality/user-facing-response-sanitizer.service';
 import type {
   SocialAgentChatRunResult,
+  SocialAgentAssistantMessageSource,
   SocialAgentIntentRouteResult,
 } from './social-agent-chat.types';
 
 export type UserFacingAgentLightStatus =
+  | '正在思考'
   | '正在理解你的需求'
   | '正在结合你的 Life Graph'
   | '正在筛选合适的人'
@@ -39,8 +41,18 @@ export interface UserFacingAgentPendingConfirmation {
   expiresAt: string | null;
 }
 
+export interface UserFacingAgentRecoveryNotice {
+  kind: 'failed' | 'timeout' | 'interrupted' | 'checkpoint';
+  title: string;
+  message: string;
+  retryable: boolean;
+  source: 'fallback_suppressed' | 'checkpoint_recovery' | 'stream_error';
+}
+
 export interface UserFacingAgentResponse {
   assistantMessage: string;
+  assistantMessageSource?: SocialAgentAssistantMessageSource;
+  recoveryNotice?: UserFacingAgentRecoveryNotice;
   lightStatus: UserFacingAgentLightStatus;
   cards: FitMeetAlphaCard[];
   safeStatus: UserFacingAgentSafeStatus;

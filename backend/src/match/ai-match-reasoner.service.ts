@@ -21,6 +21,10 @@ export type MatchReasoningResult = {
   suggestedOpener: string;
   nextAction: string;
   reasonerSource: 'deepseek' | 'fallback';
+  reasonerConfidence: number;
+  reasoningDegraded: boolean;
+  reasoningRetryable: boolean;
+  degradationReason: 'model_unavailable' | 'empty_response' | null;
 };
 
 type SocialRequestReasoningInput = {
@@ -123,10 +127,19 @@ export class AiMatchReasonerService {
         riskWarnings: input.riskWarnings,
       });
 
+      const reasonerSource =
+        aiScore.source === 'deepseek' || content.source === 'deepseek'
+          ? 'deepseek'
+          : 'fallback';
+      const reasoningDegraded = reasonerSource !== 'deepseek';
+      const reasonerConfidence = this.clampConfidence(aiScore.confidence);
+      const modelUnavailableWarning =
+        '智能推荐解释暂时不可用，当前候选仅基于公开资料和基础兼容度保守展示。';
       const riskWarnings = this.unique([
         ...content.riskWarnings,
         ...aiScore.riskWarnings,
         ...input.riskWarnings,
+        ...(reasoningDegraded ? [modelUnavailableWarning] : []),
       ]).slice(0, 5);
       const matchedSignals = this.unique([
         ...input.commonTags,
@@ -139,6 +152,8 @@ export class AiMatchReasonerService {
           ...input.scoreBreakdown,
           aiSecondPass: aiScore.score - input.baseScore,
           aiConfidence: Math.round(aiScore.confidence * 100),
+          aiReasoningConfidence: Math.round(reasonerConfidence * 100),
+          aiReasoningDegraded: reasoningDegraded ? 1 : 0,
         },
         matchedSignals,
         publicReason:
@@ -153,16 +168,17 @@ export class AiMatchReasonerService {
           this.sanitizer.sanitizeText(content.icebreakerMessage, 140) ||
           fallback.suggestedOpener,
         nextAction: fallback.nextAction,
-        reasonerSource:
-          aiScore.source === 'deepseek' || content.source === 'deepseek'
-            ? 'deepseek'
-            : 'fallback',
+        reasonerSource,
+        reasonerConfidence,
+        reasoningDegraded,
+        reasoningRetryable: reasoningDegraded,
+        degradationReason: reasoningDegraded ? 'model_unavailable' : null,
       };
     } catch (error) {
       this.logger.warn(
         `AI match reasoning fallback used: ${(error as Error).message}`,
       );
-      return fallback;
+      return this.withDegradedReasoning(fallback, 'model_unavailable');
     }
   }
 
@@ -200,7 +216,43 @@ export class AiMatchReasonerService {
       ),
       nextAction: 'owner_confirmation_required',
       reasonerSource: 'fallback',
+      reasonerConfidence: 0.5,
+      reasoningDegraded: false,
+      reasoningRetryable: false,
+      degradationReason: null,
     };
+  }
+
+  private withDegradedReasoning(
+    result: MatchReasoningResult,
+    reason: MatchReasoningResult['degradationReason'],
+  ): MatchReasoningResult {
+    const warning =
+      '智能推荐解释暂时不可用，当前候选仅基于公开资料和基础兼容度保守展示。';
+    const riskWarnings = this.unique([...result.riskWarnings, warning]).slice(
+      0,
+      5,
+    );
+    return {
+      ...result,
+      scoreBreakdown: {
+        ...result.scoreBreakdown,
+        aiReasoningConfidence: 45,
+        aiReasoningDegraded: 1,
+      },
+      riskWarning: this.sanitizer.sanitizeText(riskWarnings.join(' '), 320),
+      riskWarnings,
+      reasonerSource: 'fallback',
+      reasonerConfidence: 0.45,
+      reasoningDegraded: true,
+      reasoningRetryable: true,
+      degradationReason: reason,
+    };
+  }
+
+  private clampConfidence(value: number): number {
+    if (!Number.isFinite(value)) return 0.5;
+    return Math.max(0, Math.min(1, value));
   }
 
   private unique(values: string[]): string[] {

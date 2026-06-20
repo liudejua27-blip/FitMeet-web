@@ -40,7 +40,9 @@ Options:
                                  Run authenticated Agent opportunity smoke through
                                  clarification and OpportunityCard readiness only.
   --run-agent-opportunity-smoke  Run authenticated full Agent opportunity journey smoke.
-  --run-agent-sse-abort-smoke    Run Agent SSE abort smoke after the first delta.
+  --run-agent-sse-abort-smoke    Run Agent SSE visibility/abort smoke:
+                                 early visible status, no proxy buffering, then
+                                 abort after the first assistant delta.
   --run-public-intent-write      Also write/read-back a public social intent.
   --scan-compose-logs            Scan backend/worker logs for production failure patterns.
   --no-scan-compose-logs         Skip compose log scan.
@@ -72,6 +74,9 @@ Environment:
                                  Optional scenario knobs for Agent opportunity smoke.
                                  Defaults align with seed: city from seed, 咖啡轻聊天,
                                  周末下午, 轻松.
+  AGENT_SSE_SKIP_ACCEL_BUFFERING_HEADER=true
+                                 Skip the X-Accel-Buffering header assertion for
+                                 non-nginx local smoke only. Do not use for ECS.
   SCAN_COMPOSE_LOGS=auto|true|false
                                  Default auto. Scans logs when docker compose files exist.
   COMPOSE_LOG_TAIL=600           Number of recent log lines to scan per service.
@@ -200,11 +205,11 @@ scan_compose_logs() {
 [[ -d "${APP_DIR}" ]] || fail "APP_DIR does not exist: ${APP_DIR}"
 cd "${APP_DIR}"
 
-require_command pnpm
 require_command node
 require_command curl
 
 if [[ "${PREPARE_APP_SMOKE_USERS}" == "true" ]]; then
+  require_command pnpm
   [[ -n "${APP_SMOKE_SEED_PASSWORD:-}" ]] ||
     fail "APP_SMOKE_SEED_PASSWORD is required with --prepare-app-smoke-users."
 
@@ -225,11 +230,17 @@ if [[ "${PREPARE_APP_SMOKE_USERS}" == "true" ]]; then
 fi
 
 if [[ "${PREPARE_AGENT_SMOKE_SEED}" == "true" ]]; then
+  if ! is_truthy "${AGENT_SMOKE_SEED_ALLOW_PRODUCTION:-}"; then
+    fail "AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true is required with --prepare-agent-smoke-seed."
+  fi
+  [[ -x "./scripts/ecs-backend-pnpm.sh" ]] ||
+    fail "scripts/ecs-backend-pnpm.sh is required and must be executable."
+
   agent_seed_output="$(mktemp)"
   trap 'rm -f "${agent_seed_output}"' EXIT
 
   info "Preparing dedicated Agent smoke users and candidates."
-  pnpm -C backend run seed:agent-smoke | tee "${agent_seed_output}" >&2
+  ./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod -- --allow-production | tee "${agent_seed_output}" >&2
 
   agent_export_file="$(mktemp)"
   grep -E '^export AGENT_SMOKE_(EMAIL|PASSWORD|CITY)=' "${agent_seed_output}" >"${agent_export_file}" ||
@@ -288,7 +299,7 @@ if [[ "${RUN_AGENT_OPPORTUNITY_SMOKE}" == "readiness" || "${RUN_AGENT_OPPORTUNIT
     AGENT_SMOKE_ACTIVITY="${AGENT_SMOKE_ACTIVITY:-咖啡轻聊天}" \
     AGENT_SMOKE_TIME="${AGENT_SMOKE_TIME:-周末下午}" \
     AGENT_SMOKE_INTENSITY="${AGENT_SMOKE_INTENSITY:-轻松}" \
-    pnpm -C backend run smoke:agent-opportunity:prod
+    ./scripts/ecs-backend-pnpm.sh -- smoke:agent-opportunity:prod
 fi
 
 if [[ "${RUN_AGENT_SSE_ABORT_SMOKE}" == "true" ]]; then
@@ -297,11 +308,11 @@ if [[ "${RUN_AGENT_SSE_ABORT_SMOKE}" == "true" ]]; then
   [[ -n "${AGENT_SMOKE_PASSWORD:-}" ]] ||
     fail "AGENT_SMOKE_PASSWORD is required with --run-agent-sse-abort-smoke."
 
-  info "Running real Agent SSE abort smoke against ${API_BASE_URL}."
+  info "Running real Agent SSE visibility/abort smoke against ${API_BASE_URL}."
   run_agent_remote_preflight sse-abort
   AGENT_SMOKE_API_BASE_URL="${API_BASE_URL}" \
     AGENT_SMOKE_ALLOW_REMOTE=true \
-    pnpm -C backend run smoke:agent-sse-abort:prod
+    ./scripts/ecs-backend-pnpm.sh -- smoke:agent-sse-abort:prod
 fi
 
 if should_scan_compose_logs; then

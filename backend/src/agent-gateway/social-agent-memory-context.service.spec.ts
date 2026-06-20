@@ -155,4 +155,251 @@ describe('SocialAgentMemoryContextService', () => {
       expect.arrayContaining(['availableTimes', 'privacyBoundary']),
     );
   });
+
+  it('merges stored short-term turns with hydrated history using the unified context limit', () => {
+    const service = new SocialAgentMemoryContextService({
+      get: (key: string) =>
+        key === 'SOCIAL_AGENT_CONTEXT_TURN_LIMIT' ? '40' : undefined,
+    } as never);
+    const task = makeTask();
+    task.memory = {
+      ...task.memory,
+      shortTerm: {
+        recentTurns: Array.from({ length: 88 }, (_, index) => ({
+          role: 'user',
+          text: `stored-turn-${index + 1}`,
+        })),
+      },
+    };
+
+    const context = service.build({
+      task,
+      conversationHistory: Array.from({ length: 88 }, (_, index) => ({
+        role: 'user',
+        text: `history-turn-${index + 1}`,
+      })),
+      longTermSnapshot: {
+        userId: 7,
+        profileFacts: {},
+        preferences: {
+          interests: [],
+          socialStyle: '',
+          communicationStyle: '',
+          preferredTraits: [],
+          preferenceHistory: Array.from({ length: 88 }, (_, index) => ({
+            field: 'interest' as const,
+            value: `preference-${index + 1}`,
+            source: 'task_memory' as const,
+            taskId: index + 1,
+            outcome: 'succeeded' as const,
+            confirmed: true,
+            at: `2026-06-${String((index % 28) + 1).padStart(2, '0')}T00:00:00.000Z`,
+          })),
+        },
+        boundaries: {
+          excludedGenders: [],
+          noNightMeet: false,
+          publicPlaceOnly: false,
+          noAutoMessage: false,
+          noContactExchange: false,
+        },
+        socialGoals: [],
+        availability: [],
+        activityPreferences: {
+          favoriteCities: [],
+          favoriteActivityTypes: [],
+          favoriteTimePreferences: [],
+          favoriteLocationPreferences: [],
+        },
+        matchSignals: {
+          successfulMatches: [],
+          failedMatches: [],
+        },
+        taskCount: 48,
+        updatedAt: '2026-06-18T00:00:00.000Z',
+      },
+    });
+
+    expect(context.shortTerm.recentTurns).toHaveLength(80);
+    expect(context.shortTerm.recentTurns[0]).toMatchObject({
+      text: 'history-turn-9',
+    });
+    expect(context.shortTerm.recentTurns.at(-1)).toMatchObject({
+      text: 'history-turn-88',
+    });
+    expect(context.longTerm?.recentPreferenceHistory).toHaveLength(80);
+    expect(context.longTerm?.recentPreferenceHistory[0]).toMatchObject({
+      value: 'preference-9',
+    });
+  });
+
+  it('hydrates empty candidate search state for the next planner turn', () => {
+    const service = new SocialAgentMemoryContextService();
+    const task = makeTask();
+    task.memory = {
+      ...task.memory,
+      shortTerm: {
+        hasSearched: true,
+        lastSearchAt: '2026-06-18T10:00:00.000Z',
+        lastSearchIntent: 'social_search',
+        lastSearchCandidateCount: 0,
+        lastSearchEmptyReason: 'no_real_candidates',
+        lastSearchNextStep: '放宽条件、换时间范围，或确认发布约练卡到发现',
+        displayedCandidates: [],
+      },
+    };
+
+    const context = service.build({
+      task,
+      conversationHistory: [],
+      longTermSnapshot: null,
+    });
+
+    expect(context.shortTerm.lastSearch).toMatchObject({
+      intent: 'social_search',
+      candidateCount: 0,
+      emptyReason: 'no_real_candidates',
+      nextStep: '放宽条件、换时间范围，或确认发布约练卡到发现',
+    });
+    expect(context.shortTerm.candidateCount).toBe(0);
+  });
+
+  it('exposes canonical approval and candidate action aliases to every planner context', () => {
+    const service = new SocialAgentMemoryContextService();
+    const task = makeTask();
+    task.memory = {
+      taskMemory: {
+        currentGoal: 'find a weekend walking partner',
+        candidateActions: {
+          recommendedIds: [20],
+          savedIds: [22],
+          messagedIds: [24],
+          rejectedIds: [23],
+        },
+        pendingApprovals: [
+          {
+            id: 91,
+            type: 'send_invite',
+            actionType: 'send_invite',
+            summary: 'Send a walking invite to candidate 22',
+            riskLevel: 'medium',
+            at: '2026-06-18T00:00:00.000Z',
+          },
+        ],
+      },
+    };
+
+    const context = service.build({
+      task,
+      conversationHistory: [],
+      longTermSnapshot: null,
+    });
+
+    expect(context.taskMemory.candidateState).toMatchObject({
+      savedIds: [22],
+      rejectedIds: [23],
+      messagedIds: [24],
+    });
+    expect(context.taskMemory.candidateActions).toMatchObject(
+      context.taskMemory.candidateState,
+    );
+    expect(context.taskMemory.pendingActions).toEqual([
+      expect.objectContaining({
+        id: 91,
+        actionType: 'send_invite',
+      }),
+    ]);
+    expect(context.taskMemory.pendingApprovals).toEqual(
+      context.taskMemory.pendingActions,
+    );
+  });
+
+  it('does not let stale short-term cache hide the latest user correction from DeepSeek context', () => {
+    const service = new SocialAgentMemoryContextService();
+    const task = makeTask();
+    task.memory = {
+      ...task.memory,
+      taskSlots: {
+        time_window: { value: '今天晚上', state: 'completed' },
+        location_text: { value: '青岛大学附近', state: 'completed' },
+        activity: { value: '散步', state: 'completed' },
+        candidate_preference: {
+          value: '公开资料带舞蹈相关标签的人优先',
+          state: 'answered',
+        },
+      },
+      shortTerm: {
+        recentTurns: [
+          { role: 'user', text: '旧问题：周末找跑步搭子' },
+          { role: 'assistant', text: '我先问你时间。' },
+        ],
+      },
+    };
+
+    const context = service.build({
+      task,
+      conversationHistory: [
+        { role: 'user', text: '今天晚上，青岛大学，散步，找舞蹈相关公开标签的人' },
+        { role: 'assistant', text: '我已记录今晚、青岛大学附近、散步。' },
+        { role: 'user', text: '不是周末，我刚才说的是今天晚上' },
+      ],
+      longTermSnapshot: null,
+    });
+
+    expect(context.shortTerm.recentTurns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          text: '不是周末，我刚才说的是今天晚上',
+        }),
+      ]),
+    );
+    expect(context.retrievalHints.shouldRecallConversation).toBe(true);
+    expect(context.taskMemory.knownTaskSlotConstraints).toEqual(
+      expect.objectContaining({
+        treatAsHardConstraints: true,
+        doNotAskAgainFor: expect.arrayContaining([
+          'time_window',
+          'location_text',
+          'activity',
+          'candidate_preference',
+        ]),
+        candidatePreferencePolicy: expect.stringContaining('公开可发现资料'),
+      }),
+    );
+  });
+
+  it('preserves repeated short follow-up turns when they happened at different times', () => {
+    const service = new SocialAgentMemoryContextService();
+    const task = makeTask();
+    task.memory = {
+      ...task.memory,
+      shortTerm: {
+        recentTurns: [
+          {
+            role: 'user',
+            text: '可以，继续',
+            at: '2026-06-18T10:00:00.000Z',
+          },
+        ],
+      },
+    };
+
+    const context = service.build({
+      task,
+      conversationHistory: [
+        {
+          role: 'user',
+          text: '可以，继续',
+          at: '2026-06-18T10:05:00.000Z',
+        },
+      ],
+      longTermSnapshot: null,
+    });
+
+    expect(
+      context.shortTerm.recentTurns.filter(
+        (turn) => turn.text === '可以，继续',
+      ),
+    ).toHaveLength(2);
+  });
 });

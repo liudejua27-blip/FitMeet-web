@@ -1,7 +1,11 @@
 import { Injectable, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 import { cleanDisplayText } from '../common/display-text.util';
-import { REDACTED_VALUE, redactSensitiveValue } from '../common/privacy-redaction.util';
+import {
+  REDACTED_VALUE,
+  redactSensitiveValue,
+} from '../common/privacy-redaction.util';
 import { readSocialAgentConversationHistory } from './social-agent-chat-memory.presenter';
 import type { AgentTask } from './entities/agent-task.entity';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
@@ -11,16 +15,23 @@ import {
 } from './social-agent-memory.util';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
 import { SocialAgentTaskMemoryStateMachineService } from './social-agent-task-memory-state-machine.service';
+import {
+  buildSocialAgentKnownTaskSlotConstraints,
+  type SocialAgentKnownTaskSlotConstraints,
+} from './social-agent-task-slot-constraints.presenter';
 import { parseSocialAgentThreadTaskId } from './social-agent-thread-id.util';
 import { SocialCodexLifeGraphGovernanceService } from './social-codex-life-graph-governance.service';
+import { socialAgentContextTurnLimit } from './social-agent-context-window';
 
-type SocialAgentHydratedContext = {
+export type SocialAgentHydratedContext = {
   userId: number;
   threadId: string | number | null;
   taskId: number | null;
   recentMessages: Array<Record<string, unknown>>;
   taskMemory: SocialAgentTaskMemory | null;
   taskSlots: ReturnType<SocialAgentTaskMemoryStateMachineService['readSlots']>;
+  taskSlotSummary: Record<string, string>;
+  knownTaskSlotConstraints: SocialAgentKnownTaskSlotConstraints | null;
   lifeGraphFactProposals: ReturnType<
     SocialCodexLifeGraphGovernanceService['proposeStableFactsFromSlots']
   >;
@@ -32,7 +43,7 @@ type SocialAgentHydratedContext = {
   >;
   lifeGraphSummary: Record<string, unknown> | null;
   pendingApprovals: SocialAgentTaskMemory['pendingActions'];
-  candidateActions: SocialAgentTaskMemory['candidateState'] | null;
+  candidateActions: Record<string, unknown> | null;
 };
 
 @Injectable()
@@ -44,6 +55,8 @@ export class SocialAgentContextHydratorService {
     private readonly longTerm?: SocialAgentLongTermMemoryService,
     @Optional()
     private readonly lifeGraphGovernance?: SocialCodexLifeGraphGovernanceService,
+    @Optional()
+    private readonly config?: ConfigService,
   ) {}
 
   async hydrateContext(input: {
@@ -57,6 +70,13 @@ export class SocialAgentContextHydratorService {
       .catch(() => null);
     const taskMemory = task ? readSocialAgentTaskMemory(task) : null;
     const taskSlots = task ? this.slots.readSlots(task) : {};
+    const taskSlotSummary = this.slots.publicSlotSummary(taskSlots);
+    const knownTaskSlotConstraints =
+      buildSocialAgentKnownTaskSlotConstraints(taskSlots);
+    const candidateActions =
+      task && taskMemory ? this.readCandidateActions(task, taskMemory) : null;
+    const pendingApprovals =
+      task && taskMemory ? this.readPendingApprovals(task, taskMemory) : [];
     const lifeGraphFactProposals =
       this.lifeGraphGovernance?.proposeStableFactsFromSlots(taskSlots) ?? [];
     const lifeGraphGovernanceSummary =
@@ -76,13 +96,32 @@ export class SocialAgentContextHydratorService {
       ) ?? [];
     return {
       userId: input.userId,
-      threadId: input.threadId ?? task?.id ?? null,
+      threadId: this.canonicalThreadId(input.threadId, task?.id ?? null),
       taskId: task?.id ?? null,
       recentMessages: task
-        ? this.sanitizeRecentMessages(readSocialAgentConversationHistory(task, 40))
+        ? this.sanitizeRecentMessages(
+            readSocialAgentConversationHistory(
+              task,
+              socialAgentContextTurnLimit(this.config),
+            ),
+          )
         : [],
-      taskMemory: taskMemory ? this.sanitizeTaskMemory(taskMemory) : null,
+      taskMemory: taskMemory
+        ? this.sanitizeTaskMemory(taskMemory, {
+            taskSlots,
+            taskSlotSummary,
+            knownTaskSlotConstraints,
+            candidateActions,
+            pendingApprovals,
+          })
+        : null,
       taskSlots: this.sanitizeContextValue(taskSlots) as typeof taskSlots,
+      taskSlotSummary: this.sanitizeContextValue(
+        taskSlotSummary,
+      ) as Record<string, string>,
+      knownTaskSlotConstraints: this.sanitizeContextValue(
+        knownTaskSlotConstraints,
+      ) as SocialAgentKnownTaskSlotConstraints | null,
       lifeGraphFactProposals: this.sanitizeContextValue(
         lifeGraphFactProposals,
       ) as typeof lifeGraphFactProposals,
@@ -91,24 +130,20 @@ export class SocialAgentContextHydratorService {
       ) as typeof lifeGraphFactDisplaySummaries,
       lifeGraphGovernanceSummary,
       lifeGraphSummary: longTerm
-        ? this.sanitizeContextValue({
+        ? (this.sanitizeContextValue({
             profileFacts: longTerm.profileFacts,
             preferences: longTerm.preferences,
             boundaries: longTerm.boundaries,
             availability: longTerm.availability,
             activityPreferences: longTerm.activityPreferences,
-          }) as Record<string, unknown>
+          }) as Record<string, unknown>)
         : null,
-      pendingApprovals: taskMemory
-        ? (this.sanitizeContextValue(
-            taskMemory.pendingActions,
-          ) as SocialAgentTaskMemory['pendingActions'])
-        : [],
-      candidateActions: taskMemory
-        ? (this.sanitizeContextValue(
-            taskMemory.candidateState,
-          ) as SocialAgentTaskMemory['candidateState'])
-        : null,
+      pendingApprovals: this.sanitizeContextValue(
+        pendingApprovals,
+      ) as SocialAgentTaskMemory['pendingActions'],
+      candidateActions: this.sanitizeContextValue(candidateActions) as
+        | Record<string, unknown>
+        | null,
     };
   }
 
@@ -118,12 +153,25 @@ export class SocialAgentContextHydratorService {
     taskId?: number | null;
   }): Promise<AgentTask | null> {
     const taskId = this.positiveNumber(input.taskId ?? input.threadId);
-    if (!taskId) return null;
+    if (!taskId) {
+      return this.taskLifecycle.findActiveConversationTask(input.userId);
+    }
     return this.taskLifecycle.assertTaskOwner(taskId, input.userId);
   }
 
   private positiveNumber(value: unknown): number | null {
     return parseSocialAgentThreadTaskId(value);
+  }
+
+  private canonicalThreadId(
+    threadId: string | number | null | undefined,
+    taskId: number | null,
+  ): string | number | null {
+    const parsedThreadTaskId = parseSocialAgentThreadTaskId(threadId);
+    if (parsedThreadTaskId) return `agent-task:${parsedThreadTaskId}`;
+    if (typeof threadId === 'string' && threadId.trim()) return threadId.trim();
+    if (taskId) return `agent-task:${taskId}`;
+    return null;
   }
 
   private sanitizeRecentMessages(
@@ -136,6 +184,13 @@ export class SocialAgentContextHydratorService {
 
   private sanitizeTaskMemory(
     memory: SocialAgentTaskMemory,
+    slotContext?: {
+      taskSlots: ReturnType<SocialAgentTaskMemoryStateMachineService['readSlots']>;
+      taskSlotSummary: Record<string, string>;
+      knownTaskSlotConstraints: SocialAgentKnownTaskSlotConstraints | null;
+      candidateActions: Record<string, unknown> | null;
+      pendingApprovals: SocialAgentTaskMemory['pendingActions'];
+    },
   ): SocialAgentTaskMemory {
     return this.sanitizeContextValue({
       currentGoal: memory.currentGoal,
@@ -143,13 +198,73 @@ export class SocialAgentContextHydratorService {
       preferences: memory.preferences,
       boundaries: memory.boundaries,
       candidateState: memory.candidateState,
+      candidateActions: slotContext?.candidateActions ?? memory.candidateState,
       activityState: memory.activityState,
       pendingActions: memory.pendingActions,
+      pendingApprovals: slotContext?.pendingApprovals ?? memory.pendingActions,
       lastUserMessages: memory.lastUserMessages,
       currentTask: memory.currentTask,
       stableProfileFacts: memory.stableProfileFacts,
+      taskSlots: slotContext?.taskSlots ?? memory.taskSlots ?? {},
+      taskSlotSummary:
+        slotContext?.taskSlotSummary ?? memory.taskSlotSummary ?? {},
+      knownTaskSlotConstraints:
+        slotContext?.knownTaskSlotConstraints ??
+        memory.knownTaskSlotConstraints ??
+        null,
       updatedAt: memory.updatedAt,
     }) as SocialAgentTaskMemory;
+  }
+
+  private readCandidateActions(
+    task: AgentTask,
+    taskMemory: SocialAgentTaskMemory,
+  ): Record<string, unknown> {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const shortTerm = this.isRecord(memory.shortTerm) ? memory.shortTerm : {};
+    const rawTaskMemory = this.isRecord(memory.taskMemory)
+      ? memory.taskMemory
+      : {};
+    return (
+      this.firstRecord(
+        shortTerm.candidateActions,
+        rawTaskMemory.candidateActions,
+        memory.candidateActions,
+        taskMemory.candidateState,
+      ) ?? {}
+    );
+  }
+
+  private readPendingApprovals(
+    task: AgentTask,
+    taskMemory: SocialAgentTaskMemory,
+  ): SocialAgentTaskMemory['pendingActions'] {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const shortTerm = this.isRecord(memory.shortTerm) ? memory.shortTerm : {};
+    const rawTaskMemory = this.isRecord(memory.taskMemory)
+      ? memory.taskMemory
+      : {};
+    const pending = this.firstArray(
+      rawTaskMemory.pendingApprovals,
+      memory.pendingApprovals,
+      shortTerm.pendingApprovals,
+      taskMemory.pendingActions,
+    );
+    return (pending ?? []) as SocialAgentTaskMemory['pendingActions'];
+  }
+
+  private firstRecord(...values: unknown[]): Record<string, unknown> | null {
+    for (const value of values) {
+      if (this.isRecord(value) && Object.keys(value).length > 0) return value;
+    }
+    return null;
+  }
+
+  private firstArray(...values: unknown[]): unknown[] | null {
+    for (const value of values) {
+      if (Array.isArray(value) && value.length > 0) return value;
+    }
+    return null;
   }
 
   private sanitizeContextValue(
@@ -164,10 +279,7 @@ export class SocialAgentContextHydratorService {
       const clean = cleanDisplayText(redacted, '').trim();
       return clean ? clean.slice(0, 500) : REDACTED_VALUE;
     }
-    if (
-      typeof redacted === 'number' ||
-      typeof redacted === 'boolean'
-    ) {
+    if (typeof redacted === 'number' || typeof redacted === 'boolean') {
       return redacted;
     }
     if (Array.isArray(redacted)) {

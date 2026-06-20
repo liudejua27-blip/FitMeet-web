@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { sanitizeCity } from '../common/city.util';
-import { resolveDeepSeekModel } from '../common/deepseek.util';
+import {
+  callDeepSeekChatCompletion,
+  resolveDeepSeekModel,
+} from '../common/deepseek.util';
 
 /** 完整的社交需求草稿卡输出结构（用于站内 AI 助手页面）。 */
 export interface SocialRequestCard {
@@ -83,6 +86,13 @@ export interface AiCandidateMatchContent {
   riskWarnings: string[];
 }
 
+export interface AiGenerationOptions {
+  signal?: AbortSignal | null;
+}
+
+const AI_DEEPSEEK_TIMEOUT_FLOOR_MS = 25_000;
+const AI_DEEPSEEK_TIMEOUT_FALLBACK_MS = 30_000;
+
 /**
  * Pluggable AI capability surface used across FitMeet.
  *
@@ -123,6 +133,7 @@ export class AIService {
       if (parsed?.activityType) return parsed;
       return fallback;
     } catch (err) {
+      if (this.isClientAbort(err)) throw this.toError(err);
       this.logger.warn(
         `parseSocialIntent fell back: ${(err as Error).message}`,
       );
@@ -131,11 +142,14 @@ export class AIService {
   }
 
   /** Generate an invite message tailored to a candidate. */
-  async generateInviteText(input: {
-    requestTitle: string;
-    candidateNickname: string;
-    commonTags?: string[];
-  }): Promise<string> {
+  async generateInviteText(
+    input: {
+      requestTitle: string;
+      candidateNickname: string;
+      commonTags?: string[];
+    },
+    options: AiGenerationOptions = {},
+  ): Promise<string> {
     const tagPart =
       input.commonTags && input.commonTags.length > 0
         ? `我们都喜欢 ${input.commonTags.slice(0, 3).join('、')}，`
@@ -148,9 +162,11 @@ export class AIService {
       const out = await this.callDeepseek(
         '你是 FitMeet 的破冰文案助手，输出 60 字以内、自然、不油腻的开场白，中文。',
         JSON.stringify(input),
+        options,
       );
       return out?.trim() || fallback;
     } catch (err) {
+      if (this.isClientAbort(err)) throw this.toError(err);
       this.logger.warn(
         `generateInviteText fell back: ${(err as Error).message}`,
       );
@@ -172,10 +188,13 @@ export class AIService {
    * Each question MUST be one of the predefined keys so the saver can route
    * the answer to the correct destination.
    */
-  async generateProfileQuestions(input: {
-    missingKeys: string[];
-    contextSummary: string;
-  }): Promise<Array<{ key: string; question: string; type: string }>> {
+  async generateProfileQuestions(
+    input: {
+      missingKeys: string[];
+      contextSummary: string;
+    },
+    options: AiGenerationOptions = {},
+  ): Promise<Array<{ key: string; question: string; type: string }>> {
     if (!this.isLlmEnabled() || input.missingKeys.length === 0) return [];
     try {
       const out = await this.callDeepseekJson(
@@ -186,6 +205,7 @@ export class AIService {
           'question 简短自然，避免重复用户已说过的信息。' +
           'allow_auto_* 类用 boolean，autonomy_level 用 choice，其它用 text。',
         JSON.stringify(input),
+        options,
       );
       const parsed = this.safeJson<{
         questions?: Array<{ key?: string; question?: string; type?: string }>;
@@ -201,6 +221,7 @@ export class AIService {
         }))
         .slice(0, 5);
     } catch (err) {
+      if (this.isClientAbort(err)) throw this.toError(err);
       this.logger.warn(
         `generateProfileQuestions fell back: ${(err as Error).message}`,
       );
@@ -209,11 +230,14 @@ export class AIService {
   }
 
   /** Generate a short post-activity recap (one or two sentences). */
-  async generateRecap(input: {
-    title: string;
-    participantsCount: number;
-    durationMinutes?: number;
-  }): Promise<string> {
+  async generateRecap(
+    input: {
+      title: string;
+      participantsCount: number;
+      durationMinutes?: number;
+    },
+    options: AiGenerationOptions = {},
+  ): Promise<string> {
     const fallback =
       `${input.title} 已完成，共 ${input.participantsCount} 位伙伴参与。` +
       (input.durationMinutes ? `时长约 ${input.durationMinutes} 分钟。` : '');
@@ -222,9 +246,11 @@ export class AIService {
       const out = await this.callDeepseek(
         '你是 FitMeet 的活动复盘助手，用 2 句中文总结刚结束的活动，鼓励下次再约。',
         JSON.stringify(input),
+        options,
       );
       return out?.trim() || fallback;
     } catch (err) {
+      if (this.isClientAbort(err)) throw this.toError(err);
       this.logger.warn(`generateRecap fell back: ${(err as Error).message}`);
       return fallback;
     }
@@ -273,6 +299,7 @@ export class AIService {
       }
       return fallback;
     } catch (err) {
+      if (this.isClientAbort(err)) throw this.toError(err);
       this.logger.warn(
         `parseSocialRequest fell back: ${(err as Error).message}`,
       );
@@ -293,6 +320,7 @@ export class AIService {
       nickname?: string | null;
       commonTags?: string[] | null;
     },
+    options: AiGenerationOptions = {},
   ): Promise<string> {
     const reqTitle = request.title || request.activityType || '一起约个运动';
     const nickname = candidate.nickname || '朋友';
@@ -311,9 +339,11 @@ export class AIService {
       const out = await this.callDeepseek(
         '你是 FitMeet 的破冰文案助手，输出 60 字以内、自然、不油腻的中文开场白。',
         JSON.stringify({ request, candidate }),
+        options,
       );
       return out?.trim() || fallback;
     } catch (err) {
+      if (this.isClientAbort(err)) throw this.toError(err);
       this.logger.warn(
         `generateInviteMessage fell back: ${(err as Error).message}`,
       );
@@ -337,6 +367,7 @@ export class AIService {
       timeOverlap?: string | null;
     },
     score?: number,
+    options: AiGenerationOptions = {},
   ): Promise<string> {
     const reasons: string[] = [];
     const reqTags = (request.interestTags ?? []).filter(Boolean);
@@ -363,9 +394,11 @@ export class AIService {
       const out = await this.callDeepseek(
         '你是 FitMeet 的匹配解释助手，用 1-2 句中文向用户解释为何推荐这位候选。',
         JSON.stringify({ request, candidate, score }),
+        options,
       );
       return out?.trim() || fallback;
     } catch (err) {
+      if (this.isClientAbort(err)) throw this.toError(err);
       this.logger.warn(`explainMatchFor fell back: ${(err as Error).message}`);
       return fallback;
     }
@@ -387,6 +420,7 @@ export class AIService {
       rating?: number | null;
       text?: string | null;
     }> = [],
+    options: AiGenerationOptions = {},
   ): Promise<string> {
     const fallback = this.fallbackReviewSummary(activity, reviews);
     if (!this.isLlmEnabled()) return fallback;
@@ -395,9 +429,11 @@ export class AIService {
         '你是 FitMeet 的活动复盘助手，用 2-3 句中文输出活动总结，' +
           '点出亮点和值得改进的地方，鼓励下次再约。',
         JSON.stringify({ activity, reviews }),
+        options,
       );
       return out?.trim() || fallback;
     } catch (err) {
+      if (this.isClientAbort(err)) throw this.toError(err);
       this.logger.warn(
         `generateActivityReviewSummary fell back: ${(err as Error).message}`,
       );
@@ -429,6 +465,7 @@ export class AIService {
       rejectRules?: string | null;
       privacyBoundary?: string | null;
     } = {},
+    options: AiGenerationOptions = {},
   ): Promise<SocialRequestCard> {
     const text = (rawText || '').trim();
     const fallback = this.fallbackSocialRequestCard(text, profile);
@@ -480,13 +517,18 @@ export class AIService {
     });
 
     try {
-      const out = await this.callDeepseekJson(systemPrompt, userPayload);
+      const out = await this.callDeepseekJson(
+        systemPrompt,
+        userPayload,
+        options,
+      );
       const parsed = this.safeJson<Partial<SocialRequestCard>>(out);
       if (parsed && typeof parsed === 'object') {
         return this.normalizeSocialRequestCard(parsed, fallback, profile, text);
       }
       return fallback;
     } catch (err) {
+      if (this.isClientAbort(err)) throw this.toError(err);
       this.logger.warn(
         `generateSocialRequestCard fell back: ${(err as Error).message}`,
       );
@@ -498,12 +540,15 @@ export class AIService {
    * Generate a structured AI persona card from interview answers. This powers
    * both the in-app AI Profile Builder and OpenClaw social-skills profile fill.
    */
-  async generateProfileBuilderCard(input: {
-    answers: Array<{ question: string; answer: string }>;
-    existingProfile?: Record<string, unknown>;
-    user?: { nickname?: string | null; city?: string | null };
-    source?: string;
-  }): Promise<AiProfileBuilderCard> {
+  async generateProfileBuilderCard(
+    input: {
+      answers: Array<{ question: string; answer: string }>;
+      existingProfile?: Record<string, unknown>;
+      user?: { nickname?: string | null; city?: string | null };
+      source?: string;
+    },
+    options: AiGenerationOptions = {},
+  ): Promise<AiProfileBuilderCard> {
     const text = this.profileAnswersToText(input.answers);
     const fallback = this.fallbackProfileBuilderCard(input, text);
     if (!this.isLlmEnabled() || !text) return fallback;
@@ -574,10 +619,12 @@ export class AIService {
           existingProfile: input.existingProfile ?? {},
           answers: input.answers,
         }),
+        options,
       );
       const parsed = this.safeJson<Partial<AiProfileBuilderCard>>(out);
       return this.normalizeProfileBuilderCard(parsed, fallback);
     } catch (err) {
+      if (this.isClientAbort(err)) throw this.toError(err);
       this.logger.warn(
         `generateProfileBuilderCard fell back: ${(err as Error).message}`,
       );
@@ -593,36 +640,39 @@ export class AIService {
    * score only inside a small bounded window and returns a deterministic
    * fallback when the model is unavailable.
    */
-  async rescoreCompatibility(input: {
-    baseScore: number;
-    request: {
-      title?: string | null;
-      city?: string | null;
-      activityType?: string | null;
-      interestTags?: string[] | null;
-      timePreference?: string | null;
-      socialGoal?: string | null;
-      personalityPreference?: string[] | null;
-    };
-    ownerProfile?: {
-      city?: string | null;
-      publicTags?: string[] | null;
-      traits?: string[] | null;
-      preferredTraits?: string[] | null;
-      availability?: string[] | null;
-    } | null;
-    candidate: {
-      nickname?: string | null;
-      city?: string | null;
-      publicTags?: string[] | null;
-      traits?: string[] | null;
-      commonTags?: string[] | null;
-      verified?: boolean | null;
-      acceptsAgentMessages?: boolean | null;
-    };
-    deterministicReasons?: string[];
-    scoreBreakdown?: Record<string, number>;
-  }): Promise<AiCompatibilityRescore> {
+  async rescoreCompatibility(
+    input: {
+      baseScore: number;
+      request: {
+        title?: string | null;
+        city?: string | null;
+        activityType?: string | null;
+        interestTags?: string[] | null;
+        timePreference?: string | null;
+        socialGoal?: string | null;
+        personalityPreference?: string[] | null;
+      };
+      ownerProfile?: {
+        city?: string | null;
+        publicTags?: string[] | null;
+        traits?: string[] | null;
+        preferredTraits?: string[] | null;
+        availability?: string[] | null;
+      } | null;
+      candidate: {
+        nickname?: string | null;
+        city?: string | null;
+        publicTags?: string[] | null;
+        traits?: string[] | null;
+        commonTags?: string[] | null;
+        verified?: boolean | null;
+        acceptsAgentMessages?: boolean | null;
+      };
+      deterministicReasons?: string[];
+      scoreBreakdown?: Record<string, number>;
+    },
+    options: AiGenerationOptions = {},
+  ): Promise<AiCompatibilityRescore> {
     const baseScore = clampScore(input.baseScore);
     const fallback: AiCompatibilityRescore = {
       score: baseScore,
@@ -653,6 +703,7 @@ export class AIService {
           '输出字段：{"score":number,"confidence":number,"publicReason":string,"privateReason":string,"reasons":string[],"riskWarnings":string[]}',
         ].join('\n'),
         JSON.stringify(input),
+        options,
       );
       const parsed = this.safeJson<Partial<AiCompatibilityRescore>>(out);
       if (!parsed) return fallback;
@@ -679,6 +730,7 @@ export class AIService {
         riskWarnings: sanitizeAiMatchList(parsed.riskWarnings, []),
       };
     } catch (err) {
+      if (this.isClientAbort(err)) throw this.toError(err);
       this.logger.warn(
         `rescoreCompatibility fell back: ${(err as Error).message}`,
       );
@@ -686,27 +738,30 @@ export class AIService {
     }
   }
 
-  async generateCandidateMatchContent(input: {
-    request: {
-      title?: string | null;
-      city?: string | null;
-      activityType?: string | null;
-      interestTags?: string[] | null;
-      timePreference?: string | null;
-      socialGoal?: string | null;
-    };
-    candidate: {
-      nickname?: string | null;
-      city?: string | null;
-      commonTags?: string[] | null;
-      publicTags?: string[] | null;
-      distanceKm?: number | null;
-      verified?: boolean | null;
-    };
-    score?: number | null;
-    deterministicReasons?: string[];
-    riskWarnings?: string[];
-  }): Promise<AiCandidateMatchContent> {
+  async generateCandidateMatchContent(
+    input: {
+      request: {
+        title?: string | null;
+        city?: string | null;
+        activityType?: string | null;
+        interestTags?: string[] | null;
+        timePreference?: string | null;
+        socialGoal?: string | null;
+      };
+      candidate: {
+        nickname?: string | null;
+        city?: string | null;
+        commonTags?: string[] | null;
+        publicTags?: string[] | null;
+        distanceKm?: number | null;
+        verified?: boolean | null;
+      };
+      score?: number | null;
+      deterministicReasons?: string[];
+      riskWarnings?: string[];
+    },
+    options: AiGenerationOptions = {},
+  ): Promise<AiCandidateMatchContent> {
     const fallback = this.fallbackCandidateMatchContent(input);
     if (!this.isLlmEnabled()) return fallback;
 
@@ -725,6 +780,7 @@ export class AIService {
           '5. 不要承诺线下见面一定发生；涉及线下只建议公开地点、站内先沟通、用户确认。',
         ].join('\n'),
         JSON.stringify(input),
+        options,
       );
       const parsed = this.safeJson<Partial<AiCandidateMatchContent>>(out);
       if (!parsed) return fallback;
@@ -747,6 +803,7 @@ export class AIService {
         ),
       };
     } catch (err) {
+      if (this.isClientAbort(err)) throw this.toError(err);
       this.logger.warn(
         `generateCandidateMatchContent fell back: ${(err as Error).message}`,
       );
@@ -1350,42 +1407,11 @@ export class AIService {
   private async callDeepseekJson(
     systemPrompt: string,
     userPrompt: string,
+    options: AiGenerationOptions = {},
   ): Promise<string> {
-    const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
-    if (!apiKey) throw new Error('DEEPSEEK_API_KEY missing');
-    const baseUrl =
-      this.config.get<string>('DEEPSEEK_BASE_URL') ||
-      'https://api.deepseek.com';
-    const model = resolveDeepSeekModel(
-      this.config.get<string>('DEEPSEEK_MODEL'),
-    );
-
-    const res = await fetch(
-      `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          temperature: 0.4,
-          response_format: { type: 'json_object' },
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt },
-          ],
-        }),
-      },
-    );
-    if (!res.ok) {
-      throw new Error(`DeepSeek HTTP ${res.status}`);
-    }
-    const data = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
-    };
-    return data.choices?.[0]?.message?.content ?? '';
+    return this.callDeepseekCompletion(systemPrompt, userPrompt, options, {
+      type: 'json_object',
+    });
   }
 
   private fallbackParse(text: string): {
@@ -1642,41 +1668,72 @@ export class AIService {
   private async callDeepseek(
     systemPrompt: string,
     userPrompt: string,
+    options: AiGenerationOptions = {},
+  ): Promise<string> {
+    return this.callDeepseekCompletion(systemPrompt, userPrompt, options);
+  }
+
+  private async callDeepseekCompletion(
+    systemPrompt: string,
+    userPrompt: string,
+    options: AiGenerationOptions = {},
+    responseFormat?: { type: 'json_object' },
   ): Promise<string> {
     const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
     if (!apiKey) throw new Error('DEEPSEEK_API_KEY missing');
-    const baseUrl =
-      this.config.get<string>('DEEPSEEK_BASE_URL') ||
-      'https://api.deepseek.com';
-    const model = resolveDeepSeekModel(
-      this.config.get<string>('DEEPSEEK_MODEL'),
-    );
+    const model = this.deepseekModel();
+    const timeoutMs = this.deepseekTimeoutMs();
+    return callDeepSeekChatCompletion({
+      apiKey,
+      baseUrl: this.config.get<string>('DEEPSEEK_BASE_URL'),
+      model,
+      temperature: 0.4,
+      responseFormat,
+      timeoutMs,
+      retryAttempts: this.deepseekRetryAttempts(),
+      signal: options.signal,
+      timeoutMessage: `DeepSeek AIService timeout after ${timeoutMs}ms`,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+    });
+  }
 
-    const res = await fetch(
-      `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          temperature: 0.4,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt },
-          ],
-        }),
-      },
+  private deepseekModel(): string {
+    return resolveDeepSeekModel(
+      this.config.get<string>('DEEPSEEK_CHAT_MODEL') ??
+        this.config.get<string>('DEEPSEEK_MODEL'),
     );
-    if (!res.ok) {
-      throw new Error(`DeepSeek HTTP ${res.status}`);
+  }
+
+  private deepseekTimeoutMs(): number {
+    const raw =
+      this.config.get<string>('AI_DEEPSEEK_TIMEOUT_MS') ??
+      this.config.get<string>('SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS') ??
+      this.config.get<string>('DEEPSEEK_TIMEOUT_MS');
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return AI_DEEPSEEK_TIMEOUT_FALLBACK_MS;
     }
-    const data = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
-    };
-    return data.choices?.[0]?.message?.content ?? '';
+    return Math.max(parsed, AI_DEEPSEEK_TIMEOUT_FLOOR_MS);
+  }
+
+  private deepseekRetryAttempts(): number {
+    const raw =
+      this.config.get<string>('AI_DEEPSEEK_RETRY_ATTEMPTS') ??
+      this.config.get<string>('SOCIAL_AGENT_DEEPSEEK_RETRY_ATTEMPTS');
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 2;
+    return Math.max(1, Math.trunc(parsed));
+  }
+
+  private isClientAbort(error: unknown): boolean {
+    return (error as Error | undefined)?.message === 'client_aborted';
+  }
+
+  private toError(error: unknown): Error {
+    return error instanceof Error ? error : new Error(String(error));
   }
 }
 

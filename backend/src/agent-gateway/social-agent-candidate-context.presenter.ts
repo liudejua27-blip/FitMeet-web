@@ -1,16 +1,25 @@
 import { cleanDisplayText } from '../common/display-text.util';
 import type { AgentTask } from './entities/agent-task.entity';
 import { readSocialAgentStoredCandidateSummaries } from './social-agent-chat-session.presenter';
+import { readSocialAgentTaskMemory } from './social-agent-memory.util';
 
 export function hasSocialAgentSearchContext(task: AgentTask): boolean {
+  if (hasSocialAgentSearchResultContext(task)) return true;
+  return hasCompletedSearchSlots(task);
+}
+
+export function hasSocialAgentSearchResultContext(task: AgentTask): boolean {
   if (readSocialAgentStoredCandidateSummaries(task).length > 0) return true;
   const result = isRecord(task.result) ? task.result : {};
   const chatRun = isRecord(result.chatRun) ? result.chatRun : {};
-  return Boolean(
+  if (
     positiveNumber(chatRun.socialRequestId) ||
     positiveNumber(chatRun.candidateCount) ||
-    isRecord(chatRun.socialRequestDraft),
-  );
+    isRecord(chatRun.socialRequestDraft)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export function socialAgentCandidateFollowupReply(
@@ -68,6 +77,28 @@ function selectCandidate(
 function positiveNumber(value: unknown): number | null {
   const num = Number(value);
   return Number.isFinite(num) && num > 0 ? num : null;
+}
+
+function hasCompletedSearchSlots(task: AgentTask): boolean {
+  const memory = readSocialAgentTaskMemory(task);
+  const slots = isRecord(memory.taskSlots) ? memory.taskSlots : {};
+  const hasActivity = hasUsableSearchSlot(slots.activity);
+  const hasTime = hasUsableSearchSlot(slots.time_window);
+  const hasLocation =
+    hasUsableSearchSlot(slots.location_text) ||
+    hasUsableSearchSlot(slots.geo_area, { allowInferred: true });
+  return hasActivity && hasTime && hasLocation;
+}
+
+function hasUsableSearchSlot(
+  slot: unknown,
+  options: { allowInferred?: boolean } = {},
+): boolean {
+  if (!isRecord(slot)) return false;
+  if (!cleanDisplayText(slot.value, '')) return false;
+  const state = cleanDisplayText(slot.state, '');
+  if (options.allowInferred && state === 'inferred') return true;
+  return ['answered', 'confirmed', 'completed', 'modified'].includes(state);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

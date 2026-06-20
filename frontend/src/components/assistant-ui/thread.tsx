@@ -1,13 +1,13 @@
 import { AuiIf, SelectionToolbarPrimitive, ThreadPrimitive } from '@assistant-ui/react';
-import { ArrowDown, LogIn, Quote, RefreshCcw, ShieldAlert, X } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { ArrowDown, LogIn, Quote, RefreshCcw, ShieldAlert } from 'lucide-react';
+import { type ReactNode } from 'react';
 
 import { cn } from '../../lib/utils';
 import type { SocialAgentProfileGateStatus } from '../../api/socialAgentApi';
 import type {
   FitMeetAssistantMessage,
   FitMeetAssistantRecovery,
-} from '../agent-workspace/FitMeetAssistantUI';
+} from '../agent-workspace/FitMeetAssistantUI.types';
 import { ChatGPTComposer } from './composer';
 import { ChatGPTEditComposer, ChatGPTMessage } from './message';
 import { AssistantThinkingDots } from './thinking-dots';
@@ -16,6 +16,8 @@ import { TooltipIconButton } from './tooltip-icon-button';
 type ChatGPTThreadProps = {
   messages: FitMeetAssistantMessage[];
   isRunning: boolean;
+  liveProcessStatus?: string | null;
+  processStatusOwnedByMessage?: boolean;
   sessionRestoring: boolean;
   recovery?: FitMeetAssistantRecovery | null;
   profileGate?: SocialAgentProfileGateStatus | null;
@@ -30,14 +32,14 @@ type ChatGPTThreadProps = {
 };
 
 const ASSISTANT_STREAMING_PLACEHOLDER = '\u200b';
-const PROFILE_GATE_HINT_DISMISSED_KEY = 'fitmeet.agent.profileGateHintDismissed.v1';
 
 export function ChatGPTThread({
   messages,
   isRunning,
+  liveProcessStatus,
+  processStatusOwnedByMessage,
   sessionRestoring,
   recovery,
-  profileGate,
   requiresAuth,
   onLogin,
   onRetryRecovery,
@@ -51,11 +53,15 @@ export function ChatGPTThread({
   const density = messages.length >= 80 ? 'compact' : 'comfortable';
   const shouldShowViewport = !isEmpty;
   const lastMessage = messages.at(-1);
+  const latestAssistantMessageId =
+    [...messages].reverse().find((message) => message.role === 'assistant')?.id ?? null;
   const shouldShowInlineThinking =
     isRunning &&
+    !processStatusOwnedByMessage &&
     (lastMessage?.role !== 'assistant' ||
       (lastMessage.status === 'streaming' &&
-        lastMessage.content === ASSISTANT_STREAMING_PLACEHOLDER));
+        lastMessage.content === ASSISTANT_STREAMING_PLACEHOLDER &&
+        lastMessage.conversationIntent === 'conversation'));
 
   return (
     <ThreadPrimitive.Root
@@ -71,7 +77,6 @@ export function ChatGPTThread({
       <AssistantSelectionToolbar />
       <AuiIf condition={(state) => state.thread.isEmpty && isEmpty}>
         <AssistantEmptyState
-          profileGate={profileGate}
           requiresAuth={requiresAuth}
           onLogin={onLogin}
         />
@@ -106,6 +111,7 @@ export function ChatGPTThread({
                 ) : (
                   <ChatGPTMessage
                     density={density}
+                    isLatestAssistantMessage={message.id === latestAssistantMessageId}
                     onBranchSwitch={onBranchSwitch}
                     onFeedback={onFeedback}
                     onDisableReminders={onDisableReminders}
@@ -114,7 +120,9 @@ export function ChatGPTThread({
                 )
               }
             </ThreadPrimitive.Messages>
-            {shouldShowInlineThinking ? <AssistantInlineThinking /> : null}
+            {shouldShowInlineThinking ? (
+              <AssistantInlineThinking status={liveProcessStatus ?? undefined} />
+            ) : null}
             {sessionRestoring ? (
               <AssistantInlineNote>正在恢复上一次对话与未完成步骤...</AssistantInlineNote>
             ) : null}
@@ -155,7 +163,10 @@ function AssistantSelectionToolbar() {
   return (
     <SelectionToolbarPrimitive.Root
       className="flex items-center gap-1 rounded-xl border border-black/[0.08] bg-white/95 p-1 text-sm text-[#18181b] shadow-[0_10px_30px_rgba(0,0,0,0.10)] backdrop-blur"
-      style={{ transform: 'translate(-50%, calc(-100% - 22px))' }}
+      style={{
+        transform:
+          'translate(-50%, calc(-100% - var(--assistant-selection-toolbar-offset-y, 96px)))',
+      }}
       data-testid="assistant-ui-selection-toolbar"
       role="toolbar"
       aria-label="文本选择操作"
@@ -163,7 +174,8 @@ function AssistantSelectionToolbar() {
       data-selection-action="quote"
       data-overlap-policy="avoid-message-text"
       data-placement="above-selection"
-      data-offset-y="22"
+      data-offset-y="96"
+      data-selection-safe-distance="large"
     >
       <SelectionToolbarPrimitive.Quote
         className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-black/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/15"
@@ -177,40 +189,50 @@ function AssistantSelectionToolbar() {
   );
 }
 
-function AssistantInlineThinking() {
+function AssistantInlineThinking({ status }: { status?: string }) {
+  const displayStatus = inlineThinkingStatus(status);
+  const ariaLabel = displayStatus.replace(/[。！？…]+$/u, '');
   return (
     <div
-      className="mx-auto flex w-full max-w-3xl px-0 py-2 text-sm text-[#8a8f98]"
+      className="mx-auto flex w-full max-w-3xl px-0 py-2 text-sm text-[#71717a]"
+      data-testid="assistant-ui-inline-thinking"
+      role="status"
+      aria-live="polite"
+      data-status-model="single-line-replaceable"
+      data-status-role="ephemeral-visible-process"
+      data-status-persistence="temporary"
+      data-final-answer="false"
+      data-trace-detail-policy="collapsed"
+      data-update-model="replace-previous-status"
+      data-live-status={displayStatus}
     >
-      <AssistantThinkingDots />
+      <span className="inline-flex items-center gap-2 rounded-full bg-[#f7f7f8] px-3 py-1.5 ring-1 ring-black/[0.05]">
+        <AssistantThinkingDots className="p-0" label={ariaLabel} />
+        <span>{displayStatus}</span>
+      </span>
     </div>
   );
 }
 
+function inlineThinkingStatus(status?: string) {
+  const normalized = String(status ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return '正在组织回复…';
+  if (/[。！？…]$/u.test(normalized)) return normalized;
+  if (/^(正在|继续|准备|检查|读取|筛选|整理|生成|查找|确认|保存|发布|发送)/u.test(normalized)) {
+    return `${normalized}…`;
+  }
+  return normalized;
+}
+
 function AssistantEmptyState({
-  profileGate,
   requiresAuth,
   onLogin,
 }: {
-  profileGate?: SocialAgentProfileGateStatus | null;
   requiresAuth?: boolean;
   onLogin?: () => void;
 }) {
-  const [profileGateHintDismissed, setProfileGateHintDismissed] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return window.localStorage.getItem(PROFILE_GATE_HINT_DISMISSED_KEY) === '1';
-  });
-  const shouldShowProfileGate = Boolean(
-    profileGate && !profileGate.passed && !requiresAuth && !profileGateHintDismissed,
-  );
-
-  const dismissProfileGateHint = () => {
-    setProfileGateHintDismissed(true);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(PROFILE_GATE_HINT_DISMISSED_KEY, '1');
-    }
-  };
-
   return (
     <section
       className="flex grow flex-col items-center justify-center px-0"
@@ -248,12 +270,6 @@ function AssistantEmptyState({
             开始你的全球社交
           </p>
         </div>
-        {shouldShowProfileGate ? (
-          <AssistantProfileGateHint
-            profileGate={profileGate as SocialAgentProfileGateStatus}
-            onDismiss={dismissProfileGateHint}
-          />
-        ) : null}
         <div
           className="w-full [padding-bottom:calc(env(safe-area-inset-bottom)+env(keyboard-inset-height,0px))]"
           data-testid="assistant-ui-empty-composer-slot"
@@ -265,64 +281,6 @@ function AssistantEmptyState({
         </div>
       </div>
     </section>
-  );
-}
-
-function AssistantProfileGateHint({
-  profileGate,
-  onDismiss,
-}: {
-  profileGate: SocialAgentProfileGateStatus;
-  onDismiss: () => void;
-}) {
-  const nextActions = profileGate.nextActions.filter(Boolean).slice(0, 3);
-
-  return (
-    <div
-      className="mx-auto w-full max-w-2xl rounded-2xl border border-black/[0.06] bg-[#fafafa] px-3 py-2.5 text-left text-sm text-[#18181b] shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
-      data-testid="assistant-ui-profile-gate-hint"
-      data-profile-gate-state={profileGate.passed ? 'passed' : 'missing'}
-      role="note"
-    >
-      <div className="flex items-start gap-2">
-        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-[#71717a] ring-1 ring-black/[0.06]">
-          <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <p className="font-medium">匹配前还差一点人物画像</p>
-            {typeof profileGate.profileCompleteness === 'number' ? (
-              <span className="text-xs text-[#71717a]">
-                完整度 {Math.round(profileGate.profileCompleteness)}%
-              </span>
-            ) : null}
-          </div>
-          <p className="mt-0.5 leading-6 text-[#52525b]">
-            普通聊天可以直接开始；等你要找搭子、发约练或邀请别人时，我会再帮你补齐安全信息。
-          </p>
-        </div>
-        <button
-          type="button"
-          className="-mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[#8a8f98] transition-colors hover:bg-black/[0.04] hover:text-[#18181b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10"
-          aria-label="关闭人物画像提示"
-          onClick={onDismiss}
-        >
-          <X className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-      </div>
-      {nextActions.length > 0 ? (
-        <div className="mt-2 flex flex-wrap gap-1.5 pl-8">
-          {nextActions.map((action) => (
-            <span
-              key={action}
-              className="rounded-full bg-white px-2 py-0.5 text-xs text-[#71717a] ring-1 ring-black/[0.04]"
-            >
-              {action}
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </div>
   );
 }
 

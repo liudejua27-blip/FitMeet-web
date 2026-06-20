@@ -90,6 +90,8 @@ export class SubagentWorkerQueueService {
   }
 
   async complete(jobId: number, result: Record<string, unknown>) {
+    const job = await this.jobs.findOneByOrFail({ id: jobId });
+    if (job.status === 'cancelled') return job;
     await this.jobs.update(jobId, {
       status: 'succeeded',
       result: result as never,
@@ -105,11 +107,15 @@ export class SubagentWorkerQueueService {
     workerId?: string | null;
     error: unknown;
     context?: Record<string, unknown>;
+    retryable?: boolean;
   }) {
     const job = await this.jobs.findOneByOrFail({ id: input.jobId });
+    if (job.status === 'cancelled') return job;
     const error = this.errorMessage(input.error);
     const nextStatus: SubagentWorkerJobStatus =
-      job.attempts + 1 >= job.maxAttempts ? 'failed' : 'queued';
+      input.retryable === false || job.attempts + 1 >= job.maxAttempts
+        ? 'failed'
+        : 'queued';
     await this.failures.save(
       this.failures.create({
         jobId: job.id,
@@ -167,6 +173,10 @@ export class SubagentWorkerQueueService {
     });
   }
 
+  getJob(jobId: number) {
+    return this.jobs.findOneByOrFail({ id: jobId });
+  }
+
   listHeartbeats(limit?: number) {
     return this.heartbeats.find({
       order: { lastSeenAt: 'DESC' },
@@ -196,6 +206,7 @@ export class SubagentWorkerQueueService {
       status: 'cancelled',
       lockedBy: null,
       lockedUntil: null,
+      lastError: 'cancelled',
     });
     return this.jobs.findOneByOrFail({ id: jobId });
   }
@@ -229,8 +240,9 @@ export class SubagentWorkerQueueService {
       if (job.status === 'cancelled') {
         throw new Error('Subagent worker job cancelled.');
       }
-      await this.sleep(input.pollMs);
+      await this.sleep(input.pollMs, input.signal ?? null);
     }
+    await this.cancel(jobId);
     throw new Error(
       `Subagent worker job ${jobId} timed out waiting for result.`,
     );
@@ -245,7 +257,19 @@ export class SubagentWorkerQueueService {
     return error instanceof Error ? error.message : String(error);
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  private sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
+    if (signal?.aborted) return Promise.resolve();
+    return new Promise((resolve) => {
+      let timeout: NodeJS.Timeout | null = null;
+      let onAbort: (() => void) | null = null;
+      const done = () => {
+        if (timeout) clearTimeout(timeout);
+        if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+        resolve();
+      };
+      onAbort = done;
+      timeout = setTimeout(done, Math.max(0, ms));
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
   }
 }

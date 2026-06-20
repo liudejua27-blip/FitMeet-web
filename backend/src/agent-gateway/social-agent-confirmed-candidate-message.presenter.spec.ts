@@ -46,7 +46,7 @@ describe('buildSocialAgentConfirmedCandidateMessageState', () => {
       },
       transitionPatch: {
         objective: 'candidate_messaging',
-        nextStep: expect.stringContaining('继续发消息、发起约练或连接前仍会再次确认'),
+        nextStep: '等待候选人回复',
         waitingFor: 'candidate_reply',
         lastCompletedStep: 'message_sent',
       },

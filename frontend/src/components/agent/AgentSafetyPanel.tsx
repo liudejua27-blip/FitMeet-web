@@ -1,4 +1,4 @@
-import { safetyProtocols } from '@/data/agentMockData';
+import { safetyProtocols } from '@/data/agentStaticContent';
 
 export function AgentSafetyPanel() {
   return (

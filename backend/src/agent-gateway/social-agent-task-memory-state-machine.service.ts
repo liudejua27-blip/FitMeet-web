@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { cleanDisplayText } from '../common/display-text.util';
 import type { AgentTask } from './entities/agent-task.entity';
+import { buildSocialAgentKnownTaskSlotConstraints } from './social-agent-task-slot-constraints.presenter';
 
 export type SocialAgentSlotKey =
   | 'activity'
@@ -11,7 +12,8 @@ export type SocialAgentSlotKey =
   | 'intensity'
   | 'visibility'
   | 'safety_boundary'
-  | 'invite_tone';
+  | 'invite_tone'
+  | 'candidate_preference';
 
 export type SocialAgentSlotState =
   | 'missing'
@@ -34,6 +36,14 @@ export type SocialAgentTaskSlots = Partial<
   Record<SocialAgentSlotKey, SocialAgentTaskSlot>
 >;
 
+export type SocialAgentSlotTaskType =
+  | 'social_match'
+  | 'publish_social_request'
+  | 'send_invite'
+  | 'meet_loop'
+  | 'friendship'
+  | 'conversation';
+
 export type SocialAgentSlotMergeResult = {
   slots: SocialAgentTaskSlots;
   changed: SocialAgentTaskSlot[];
@@ -50,13 +60,32 @@ const SLOT_LABELS: Record<SocialAgentSlotKey, string> = {
   visibility: '公开方式',
   safety_boundary: '安全边界',
   invite_tone: '邀请语气',
+  candidate_preference: '候选偏好',
 };
 
-const REQUIRED_SOCIAL_SLOTS: SocialAgentSlotKey[] = [
-  'activity',
-  'time_window',
-  'location_text',
-];
+const REQUIRED_SOCIAL_SLOTS_BY_TASK_TYPE: Record<
+  SocialAgentSlotTaskType,
+  SocialAgentSlotKey[]
+> = {
+  conversation: [],
+  social_match: ['activity', 'time_window', 'location_text'],
+  publish_social_request: [
+    'activity',
+    'time_window',
+    'location_text',
+    'visibility',
+    'safety_boundary',
+  ],
+  send_invite: [
+    'activity',
+    'time_window',
+    'location_text',
+    'invite_tone',
+    'safety_boundary',
+  ],
+  meet_loop: ['activity', 'time_window', 'location_text', 'safety_boundary'],
+  friendship: ['activity', 'location_text', 'safety_boundary'],
+};
 
 @Injectable()
 export class SocialAgentTaskMemoryStateMachineService {
@@ -95,12 +124,15 @@ export class SocialAgentTaskMemoryStateMachineService {
     if (boundary) put('safety_boundary', boundary);
     const tone = this.extractInviteTone(text);
     if (tone) put('invite_tone', tone);
+    const candidatePreference = this.extractCandidatePreference(text);
+    if (candidatePreference) put('candidate_preference', candidatePreference);
     return slots;
   }
 
   mergeSlots(
     existing: SocialAgentTaskSlots,
     extracted: SocialAgentTaskSlots,
+    taskType: SocialAgentSlotTaskType = 'social_match',
   ): SocialAgentSlotMergeResult {
     const next: SocialAgentTaskSlots = { ...existing };
     const changed: SocialAgentTaskSlot[] = [];
@@ -124,7 +156,7 @@ export class SocialAgentTaskMemoryStateMachineService {
       changed.push(slot);
     }
 
-    for (const key of REQUIRED_SOCIAL_SLOTS) {
+    for (const key of this.requiredSlotsForTaskType(taskType)) {
       const slot = next[key];
       if (!slot) continue;
       if (!this.isRequiredSlotAnswered(slot)) continue;
@@ -142,7 +174,7 @@ export class SocialAgentTaskMemoryStateMachineService {
       slots: next,
       changed,
       completed,
-      missingRequired: this.getMissingRequiredSlots(next),
+      missingRequired: this.getMissingRequiredSlots(next, taskType),
     };
   }
 
@@ -159,8 +191,17 @@ export class SocialAgentTaskMemoryStateMachineService {
     };
   }
 
-  getMissingRequiredSlots(slots: SocialAgentTaskSlots): SocialAgentSlotKey[] {
-    return REQUIRED_SOCIAL_SLOTS.filter(
+  requiredSlotsForTaskType(
+    taskType: SocialAgentSlotTaskType = 'social_match',
+  ): SocialAgentSlotKey[] {
+    return REQUIRED_SOCIAL_SLOTS_BY_TASK_TYPE[taskType] ?? REQUIRED_SOCIAL_SLOTS_BY_TASK_TYPE.social_match;
+  }
+
+  getMissingRequiredSlots(
+    slots: SocialAgentTaskSlots,
+    taskType: SocialAgentSlotTaskType = 'social_match',
+  ): SocialAgentSlotKey[] {
+    return this.requiredSlotsForTaskType(taskType).filter(
       (key) => !this.isRequiredSlotAnswered(slots[key]),
     );
   }
@@ -198,20 +239,47 @@ export class SocialAgentTaskMemoryStateMachineService {
 
   writeSlots(task: AgentTask, slots: SocialAgentTaskSlots): void {
     const root = this.isRecord(task.memory) ? task.memory : {};
+    const taskSlotSummary = this.publicSlotSummary(slots);
+    const knownTaskSlotConstraints =
+      buildSocialAgentKnownTaskSlotConstraints(slots);
+    const taskMemory = this.isRecord(root.taskMemory) ? root.taskMemory : {};
+    const boundaries = this.isRecord(taskMemory.boundaries)
+      ? taskMemory.boundaries
+      : {};
+    const publicActivityAllowed =
+      this.publicActivityAllowedFromVisibility(slots.visibility?.value);
+    const nextBoundaries =
+      publicActivityAllowed === null
+        ? boundaries
+        : {
+            ...boundaries,
+            publicActivityAllowed,
+          };
     task.memory = {
       ...root,
       taskSlots: slots,
-      taskSlotSummary: this.publicSlotSummary(slots),
+      taskSlotSummary,
+      knownTaskSlotConstraints,
+      taskMemory: {
+        ...taskMemory,
+        taskSlots: slots,
+        taskSlotSummary,
+        knownTaskSlotConstraints,
+        ...(Object.keys(nextBoundaries).length > 0
+          ? { boundaries: nextBoundaries }
+          : {}),
+      },
     };
   }
 
   applyUserMessage(
     task: AgentTask,
     message: string,
+    taskType: SocialAgentSlotTaskType = this.taskTypeForTask(task),
   ): SocialAgentSlotMergeResult {
     const existing = this.readSlots(task);
     const extracted = this.extractSlotsFromUserMessage(message);
-    const merged = this.mergeSlots(existing, extracted);
+    const merged = this.mergeSlots(existing, extracted, taskType);
     this.writeSlots(task, merged.slots);
     return merged;
   }
@@ -297,9 +365,25 @@ export class SocialAgentTaskMemoryStateMachineService {
   }
 
   private extractVisibility(text: string): string | null {
+    if (
+      /(不要公开|先不公开|不发发现|不发布到发现|不要发布到发现|不要发到发现)/.test(
+        text,
+      )
+    )
+      return '暂不公开';
     if (/(可以公开|公开到发现|发到发现|发布到发现)/.test(text))
       return '可公开到发现';
-    if (/(不要公开|先不公开|不发发现)/.test(text)) return '暂不公开';
+    if (/(公开|大家能看到|让别人看到)/.test(text)) return '可公开到发现';
+    return null;
+  }
+
+  private publicActivityAllowedFromVisibility(value: string | undefined):
+    | boolean
+    | null {
+    const text = cleanDisplayText(value, '');
+    if (!text) return null;
+    if (/暂不公开|不公开/.test(text)) return false;
+    if (/可公开|公开到发现|发布到发现/.test(text)) return true;
     return null;
   }
 
@@ -321,6 +405,29 @@ export class SocialAgentTaskMemoryStateMachineService {
     return null;
   }
 
+  private extractCandidatePreference(text: string): string | null {
+    const parts: string[] = [];
+    if (/(女生|女孩|女孩子|女性|女舞蹈生|女同学|女大学生)/.test(text))
+      parts.push('女生');
+    if (/(男生|男孩|男孩子|男性|男同学|男大学生)/.test(text))
+      parts.push('男生');
+    if (/(舞蹈生|学舞蹈|跳舞|舞蹈|舞者)/.test(text)) parts.push('舞蹈相关');
+    if (/(同校|校友|青岛大学学生|大学生|学生)/.test(text)) parts.push('同校/学生');
+    if (/(附近|同城|崂山区|市南区|市北区|李沧区|黄岛区)/.test(text)) parts.push('附近同城');
+    const explicit = text.match(
+      /(理想型是|偏好是|希望认识|想认识|更想认识|最好是)([^，。；.!?]{2,32})/,
+    );
+    if (explicit?.[2]) {
+      parts.push(
+        cleanDisplayText(explicit[2], '')
+          .replace(/^(一个|个|一些)/, '')
+          .replace(/(的人|的朋友|的搭子|的伙伴|的对象)$/, '')
+          .trim(),
+      );
+    }
+    return Array.from(new Set(parts.filter(Boolean))).slice(0, 4).join('、') || null;
+  }
+
   private slotState(value: unknown): SocialAgentSlotState {
     return value === 'inferred' ||
       value === 'answered' ||
@@ -329,6 +436,37 @@ export class SocialAgentTaskMemoryStateMachineService {
       value === 'modified'
       ? value
       : 'missing';
+  }
+
+  private taskTypeForTask(task: AgentTask): SocialAgentSlotTaskType {
+    const root = this.isRecord(task.memory) ? task.memory : {};
+    const rootTaskMemory = this.isRecord(root.taskMemory)
+      ? root.taskMemory
+      : {};
+    const currentTask = this.isRecord(root.currentTask)
+      ? root.currentTask
+      : {};
+    const taskMemoryCurrentTask = this.isRecord(rootTaskMemory.currentTask)
+      ? rootTaskMemory.currentTask
+      : {};
+    const rawType =
+      typeof currentTask.type === 'string'
+        ? currentTask.type
+        : typeof taskMemoryCurrentTask.type === 'string'
+          ? taskMemoryCurrentTask.type
+        : typeof root.taskType === 'string'
+          ? root.taskType
+          : typeof rootTaskMemory.taskType === 'string'
+            ? rootTaskMemory.taskType
+          : task.taskType;
+    if (rawType === 'publish_social_request') return 'publish_social_request';
+    if (rawType === 'send_invite' || rawType === 'send_message')
+      return 'send_invite';
+    if (rawType === 'meet_loop') return 'meet_loop';
+    if (rawType === 'friendship' || rawType === 'connect_candidate')
+      return 'friendship';
+    if (rawType === 'conversation') return 'conversation';
+    return 'social_match';
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,5 +1,7 @@
 import { AgentTask } from './entities/agent-task.entity';
 import { cleanDisplayText } from '../common/display-text.util';
+import { SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS } from './social-agent-context-window';
+import type { SocialAgentKnownTaskSlotConstraints } from './social-agent-task-slot-constraints.presenter';
 
 export type SocialAgentShortTermStep = Record<string, unknown> & {
   id: string;
@@ -38,6 +40,8 @@ export type SocialAgentShortTermMemory = Record<string, unknown> & {
   lastSearchAt?: string;
   lastSearchIntent?: string;
   lastSearchCandidateCount?: number;
+  lastSearchEmptyReason?: string | null;
+  lastSearchNextStep?: string | null;
   misunderstandingDetected?: boolean;
   misunderstandingReason?: string;
   sentMessages?: Record<string, unknown>[];
@@ -103,7 +107,7 @@ export function appendShortTermMemoryItem<T extends Record<string, unknown>>(
 export function appendSocialAgentShortTermTurn(
   task: AgentTask,
   turn: Omit<SocialAgentShortTermTurn, 'at'> & { at?: string },
-  limit = 20,
+  limit = SOCIAL_AGENT_TASK_MEMORY_MESSAGE_LIMIT,
 ): SocialAgentShortTermMemory {
   const memory = isRecord(task.memory) ? task.memory : {};
   const shortTerm = isRecord(memory.shortTerm)
@@ -124,10 +128,38 @@ export function appendSocialAgentShortTermTurn(
   });
 }
 
+export function upsertLastSocialAgentShortTermAssistantTurn(
+  task: AgentTask,
+  turn: Omit<SocialAgentShortTermTurn, 'role' | 'at'> & { at?: string },
+  limit = SOCIAL_AGENT_TASK_MEMORY_MESSAGE_LIMIT,
+): SocialAgentShortTermMemory {
+  const memory = isRecord(task.memory) ? task.memory : {};
+  const shortTerm = isRecord(memory.shortTerm)
+    ? (memory.shortTerm as SocialAgentShortTermMemory)
+    : {};
+  const turns = Array.isArray(shortTerm.recentTurns)
+    ? shortTerm.recentTurns.filter(isRecord)
+    : [];
+  const nextTurn = {
+    ...turn,
+    role: 'assistant' as const,
+    text: cleanDisplayText(turn.text, '').slice(0, 500),
+    at: turn.at ?? new Date().toISOString(),
+  };
+  const last = turns.at(-1);
+  const nextTurns =
+    cleanDisplayText(last?.role, '') === 'assistant'
+      ? [...turns.slice(0, -1), nextTurn]
+      : [...turns, nextTurn];
+  return rememberSocialAgentShortTerm(task, {
+    recentTurns: nextTurns.slice(-limit) as SocialAgentShortTermTurn[],
+  });
+}
+
 export function recordSocialAgentShortTermAction(
   task: AgentTask,
   action: Omit<SocialAgentShortTermAction, 'at'> & { at?: string },
-  limit = 20,
+  limit = SOCIAL_AGENT_TASK_MEMORY_MESSAGE_LIMIT,
 ): SocialAgentShortTermMemory {
   const memory = isRecord(task.memory) ? task.memory : {};
   const shortTerm = isRecord(memory.shortTerm)
@@ -153,6 +185,8 @@ export function recordSocialAgentSearchMemory(
     intent: string;
     candidates?: Record<string, unknown>[];
     candidateCount?: number;
+    emptyReason?: string | null;
+    nextStep?: string | null;
   },
 ): SocialAgentShortTermMemory {
   const candidates = input.candidates ?? [];
@@ -161,6 +195,8 @@ export function recordSocialAgentSearchMemory(
     lastSearchAt: new Date().toISOString(),
     lastSearchIntent: input.intent,
     lastSearchCandidateCount: input.candidateCount ?? candidates.length,
+    lastSearchEmptyReason: cleanDisplayText(input.emptyReason, '') || null,
+    lastSearchNextStep: cleanDisplayText(input.nextStep, '') || null,
     displayedCandidates: candidates.slice(-20),
   });
 }
@@ -296,10 +332,14 @@ export type SocialAgentTaskMemory = {
     clarificationAskedAt: string;
   };
   stableProfileFacts: Record<string, string | string[]>;
+  taskSlots?: Record<string, unknown>;
+  taskSlotSummary?: Record<string, string>;
+  knownTaskSlotConstraints?: SocialAgentKnownTaskSlotConstraints | null;
   updatedAt: string;
 };
 
-const TASK_MEMORY_MESSAGE_LIMIT = 20;
+export const SOCIAL_AGENT_TASK_MEMORY_MESSAGE_LIMIT =
+  SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS;
 const TASK_MEMORY_PENDING_ACTION_LIMIT = 10;
 
 function defaultTaskMemory(): SocialAgentTaskMemory {
@@ -364,6 +404,21 @@ export function readSocialAgentTaskMemory(
   const memory = isRecord(task.memory) ? task.memory : {};
   const stored = isRecord(memory.taskMemory) ? memory.taskMemory : {};
   const base = defaultTaskMemory();
+  const taskSlots = isRecord(memory.taskSlots)
+    ? memory.taskSlots
+    : isRecord(stored.taskSlots)
+      ? stored.taskSlots
+      : {};
+  const taskSlotSummary = isRecord(memory.taskSlotSummary)
+    ? coerceStringMap(memory.taskSlotSummary)
+    : isRecord(stored.taskSlotSummary)
+      ? coerceStringMap(stored.taskSlotSummary)
+      : {};
+  const knownTaskSlotConstraints = isRecord(memory.knownTaskSlotConstraints)
+    ? (memory.knownTaskSlotConstraints as SocialAgentKnownTaskSlotConstraints)
+    : isRecord(stored.knownTaskSlotConstraints)
+      ? (stored.knownTaskSlotConstraints as SocialAgentKnownTaskSlotConstraints)
+      : undefined;
   return {
     currentGoal:
       typeof stored.currentGoal === 'string'
@@ -391,7 +446,9 @@ export function readSocialAgentTaskMemory(
       ...base.candidateState,
       ...(isRecord(stored.candidateState)
         ? coerceNumberLists(stored.candidateState)
-        : {}),
+        : isRecord(stored.candidateActions)
+          ? coerceNumberLists(stored.candidateActions)
+          : {}),
     },
     activityState: {
       ...base.activityState,
@@ -399,20 +456,17 @@ export function readSocialAgentTaskMemory(
         ? coerceStringLists(stored.activityState)
         : {}),
     },
-    pendingActions: Array.isArray(stored.pendingActions)
-      ? stored.pendingActions.filter(isRecord).map((entry) => ({
-          id: typeof entry.id === 'number' ? entry.id : 0,
-          type: typeof entry.type === 'string' ? entry.type : '',
-          actionType:
-            typeof entry.actionType === 'string' ? entry.actionType : '',
-          summary: typeof entry.summary === 'string' ? entry.summary : '',
-          riskLevel:
-            typeof entry.riskLevel === 'string' ? entry.riskLevel : 'low',
-          at:
-            typeof entry.at === 'string' ? entry.at : new Date(0).toISOString(),
-          payload: isRecord(entry.payload) ? entry.payload : undefined,
-        }))
-      : base.pendingActions,
+    pendingActions: pendingActionEntries(stored)
+      .filter(isRecord)
+      .map((entry) => ({
+        id: typeof entry.id === 'number' ? entry.id : 0,
+        type: typeof entry.type === 'string' ? entry.type : '',
+        actionType: typeof entry.actionType === 'string' ? entry.actionType : '',
+        summary: typeof entry.summary === 'string' ? entry.summary : '',
+        riskLevel: typeof entry.riskLevel === 'string' ? entry.riskLevel : 'low',
+        at: typeof entry.at === 'string' ? entry.at : new Date(0).toISOString(),
+        payload: isRecord(entry.payload) ? entry.payload : undefined,
+      })),
     lastUserMessages: Array.isArray(stored.lastUserMessages)
       ? stored.lastUserMessages.filter(isRecord).map((entry) => ({
           text: typeof entry.text === 'string' ? entry.text : '',
@@ -489,6 +543,9 @@ export function readSocialAgentTaskMemory(
     stableProfileFacts: isRecord(stored.stableProfileFacts)
       ? coerceProfileFacts(stored.stableProfileFacts)
       : base.stableProfileFacts,
+    taskSlots,
+    taskSlotSummary,
+    knownTaskSlotConstraints,
     updatedAt:
       typeof stored.updatedAt === 'string' ? stored.updatedAt : base.updatedAt,
   };
@@ -522,7 +579,7 @@ export function appendSocialAgentUserMemo(
     at: new Date().toISOString(),
   };
   memory.lastUserMessages = [...memory.lastUserMessages, entry].slice(
-    -TASK_MEMORY_MESSAGE_LIMIT,
+    -SOCIAL_AGENT_TASK_MEMORY_MESSAGE_LIMIT,
   );
   writeSocialAgentTaskMemory(task, memory);
   return memory;
@@ -733,9 +790,7 @@ export function stateForTransition(
       return 'searching_candidates';
     case 'candidates_returned':
     case 'activity_search_returned':
-      return patch.waitingFor === 'search_refinement'
-        ? 'error_recovery'
-        : 'showing_candidates';
+      return 'showing_candidates';
     case 'confirmation_required':
       return 'waiting_confirmation';
     case 'message_action':
@@ -831,6 +886,12 @@ function coerceStringMap(
     if (typeof value === 'string') out[key] = value;
   }
   return out;
+}
+
+function pendingActionEntries(input: Record<string, unknown>): unknown[] {
+  if (Array.isArray(input.pendingActions)) return input.pendingActions;
+  if (Array.isArray(input.pendingApprovals)) return input.pendingApprovals;
+  return [];
 }
 
 function coercePreferences(

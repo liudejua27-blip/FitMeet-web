@@ -36,6 +36,7 @@ import {
   AgentActionType,
 } from '../agent-gateway/entities/agent-action-log.entity';
 import { extractKnownCity, sanitizeCity } from '../common/city.util';
+import { cleanDisplayText } from '../common/display-text.util';
 
 /**
  * Activity types considered "offline / in-person" — for these we always
@@ -202,15 +203,29 @@ export class SocialRequestsService {
     rawText: string,
     userId: number,
     agent?: AgentConnection | null,
+    trace: {
+      agentTaskId?: number | null;
+      source?: string | null;
+      taskContext?: Record<string, unknown> | null;
+    } = {},
   ): Promise<UserSocialRequest> {
-    const ruleBased = this.parseNaturalLanguage(rawText);
-    let interestTags = ruleBased.interestTags ?? [];
+    const text = cleanDisplayText(rawText, '');
+    const taskContext = this.readPublicAiDraftTaskContext(trace.taskContext);
+    const effectiveText = this.composeAiDraftEffectiveText(text, taskContext);
+    const ruleBased = this.parseNaturalLanguage(effectiveText || text);
+    let interestTags = this.mergePublicAiDraftTags(
+      taskContext.activity,
+      ruleBased.interestTags ?? [],
+    );
     let title = ruleBased.title;
-    let description = ruleBased.description;
+    let description = ruleBased.description || taskContext.summary;
     try {
-      const ai = await this.ai.parseSocialRequest(rawText);
+      const ai = await this.ai.parseSocialRequest(effectiveText || text);
       if (Array.isArray(ai.interestTags) && ai.interestTags.length > 0) {
-        interestTags = ai.interestTags;
+        interestTags = this.mergePublicAiDraftTags(
+          taskContext.activity,
+          ai.interestTags,
+        );
       }
       if (!title && ai.suggestedTitle) title = ai.suggestedTitle;
       if (!description && ai.goal) description = ai.goal;
@@ -219,7 +234,31 @@ export class SocialRequestsService {
     }
     return this.create(
       userId,
-      { ...ruleBased, rawText, interestTags, title, description },
+      {
+        ...ruleBased,
+        rawText: text || taskContext.summary,
+        city: sanitizeCity(ruleBased.city, taskContext.city),
+        interestTags,
+        title,
+        description,
+        activityType: taskContext.activity || ruleBased.activityType,
+        metadata: {
+          ...(ruleBased.metadata ?? {}),
+          agentTaskId: trace.agentTaskId ?? null,
+          source: trace.source ?? 'social_requests.natural_language',
+          taskSlotSummary: taskContext.taskSlotSummary,
+          knownTaskSlotConstraints: taskContext.knownTaskSlotConstraints,
+          timePreference: taskContext.timePreference || undefined,
+          locationPreference: taskContext.locationPreference || undefined,
+          nearbyArea: taskContext.geoArea || undefined,
+          intensity: taskContext.intensity || undefined,
+          safetyBoundary: taskContext.safetyBoundary || undefined,
+          candidatePreference: taskContext.candidatePreference || undefined,
+          candidatePreferencePolicy: taskContext.candidatePreference
+            ? 'public_discoverable_profiles_and_user_consented_public_tags_only'
+            : undefined,
+        },
+      },
       { agent: agent ?? null },
     );
   }
@@ -240,6 +279,7 @@ export class SocialRequestsService {
       agentTaskId?: number | null;
       agentId?: number | null;
       source?: string | null;
+      taskContext?: Record<string, unknown> | null;
     } = {},
   ): Promise<{
     draft: CreateSocialRequestDto;
@@ -256,17 +296,19 @@ export class SocialRequestsService {
     llmEnabled: boolean;
     mode: 'ai' | 'fallback';
   }> {
-    const text = (rawText || '').trim();
-    const ruleBased = this.parseNaturalLanguage(text);
+    const text = cleanDisplayText(rawText, '');
+    const taskContext = this.readPublicAiDraftTaskContext(trace.taskContext);
+    const effectiveText = this.composeAiDraftEffectiveText(text, taskContext);
+    const ruleBased = this.parseNaturalLanguage(effectiveText || text);
     const user = await this.userRepo.findOne({ where: { id: userId } });
     const socialProfile = await this.socialProfileRepo.findOne({
       where: { userId },
     });
 
     // 社交画像优先，未填则回落到 user 表上的 city / interestTags。
-    const textCity = extractKnownCity(text);
+    const textCity = extractKnownCity(effectiveText || text);
     const profileCity = sanitizeCity(
-      socialProfile?.city,
+      taskContext.city || socialProfile?.city,
       sanitizeCity(user?.city, textCity),
     );
     const profileTags =
@@ -285,7 +327,7 @@ export class SocialRequestsService {
 
     let card: SocialRequestCard;
     try {
-      card = await this.ai.generateSocialRequestCard(text, {
+      card = await this.ai.generateSocialRequestCard(effectiveText || text, {
         nickname: user?.name,
         city: profileCity,
         interestTags: profileTags,
@@ -301,19 +343,37 @@ export class SocialRequestsService {
     } catch {
       // generateSocialRequestCard never throws, but stay defensive.
       mode = 'fallback';
-      card = await this.ai.generateSocialRequestCard('', {});
+      card = await this.ai.generateSocialRequestCard(effectiveText || '', {});
     }
 
     // Build the (persistable) CreateSocialRequestDto from the card.
     const fallbackTitle = this.autoTitle(ruleBased.type, text);
+    const interestTags = this.mergePublicAiDraftTags(
+      taskContext.activity,
+      card.interestTags,
+    );
     const draft: CreateSocialRequestDto = {
       type: ruleBased.type,
       title: card.title || fallbackTitle,
-      description: card.description || text,
-      rawText: text,
+      description: card.description || taskContext.summary || text,
+      rawText: text || taskContext.summary,
       city: profileCity,
       radiusKm: 5,
-      interestTags: card.interestTags,
+      interestTags,
+      activityType: taskContext.activity || undefined,
+      metadata: {
+        taskSlotSummary: taskContext.taskSlotSummary,
+        knownTaskSlotConstraints: taskContext.knownTaskSlotConstraints,
+        timePreference: taskContext.timePreference || undefined,
+        locationPreference: taskContext.locationPreference || undefined,
+        nearbyArea: taskContext.geoArea || undefined,
+        intensity: taskContext.intensity || undefined,
+        safetyBoundary: taskContext.safetyBoundary || undefined,
+        candidatePreference: taskContext.candidatePreference || undefined,
+        candidatePreferencePolicy: taskContext.candidatePreference
+          ? 'public_discoverable_profiles_and_user_consented_public_tags_only'
+          : undefined,
+      },
     };
 
     await this.actionLogs.logAgentAction({
@@ -346,6 +406,157 @@ export class SocialRequestsService {
       llmEnabled,
       mode,
     };
+  }
+
+  private readPublicAiDraftTaskContext(
+    context: Record<string, unknown> | null | undefined,
+  ): {
+    activity: string;
+    timePreference: string;
+    locationPreference: string;
+    geoArea: string;
+    city: string;
+    intensity: string;
+    safetyBoundary: string;
+    candidatePreference: string;
+    summary: string;
+    taskSlotSummary: Record<string, string>;
+    knownTaskSlotConstraints: unknown;
+  } {
+    const record = this.isRecord(context) ? context : {};
+    const slots = this.isRecord(record.taskSlots) ? record.taskSlots : {};
+    const summaryRecord = this.isRecord(record.taskSlotSummary)
+      ? record.taskSlotSummary
+      : {};
+    const read = (key: string): string =>
+      this.publicAiDraftText(
+        this.readSlotText(slots, key) || summaryRecord[key],
+      );
+    const activity = read('activity');
+    const timePreference = read('time_window');
+    const locationPreference = read('location_text');
+    const geoArea = read('geo_area');
+    const intensity = read('intensity');
+    const safetyBoundary = read('safety_boundary');
+    const candidatePreference = read('candidate_preference');
+    const taskSlotSummary = this.publicAiDraftSummary(summaryRecord);
+    const city = sanitizeCity(
+      this.publicAiDraftText(record.city) ||
+        this.inferCityFromPublicContext(locationPreference, geoArea),
+    );
+    const summary = [
+      activity ? `活动：${activity}` : '',
+      timePreference ? `时间：${timePreference}` : '',
+      locationPreference ? `地点：${locationPreference}` : '',
+      geoArea ? `区域：${geoArea}` : '',
+      intensity ? `强度：${intensity}` : '',
+      safetyBoundary ? `安全边界：${safetyBoundary}` : '',
+      candidatePreference ? `候选偏好：${candidatePreference}` : '',
+    ]
+      .filter(Boolean)
+      .join('；');
+    return {
+      activity,
+      timePreference,
+      locationPreference,
+      geoArea,
+      city,
+      intensity,
+      safetyBoundary,
+      candidatePreference,
+      summary,
+      taskSlotSummary,
+      knownTaskSlotConstraints: record.knownTaskSlotConstraints ?? null,
+    };
+  }
+
+  private composeAiDraftEffectiveText(
+    rawText: string,
+    context: ReturnType<SocialRequestsService['readPublicAiDraftTaskContext']>,
+  ): string {
+    const lines = [rawText];
+    if (context.summary) {
+      lines.push(`已确认信息：${context.summary}`);
+      lines.push('请基于已确认信息生成约练草稿，不要重复追问这些字段。');
+    }
+    if (context.candidatePreference) {
+      lines.push(
+        '候选偏好只能基于公开可发现资料和用户自愿公开标签使用，不能读取或推断隐私字段。',
+      );
+    }
+    return lines.filter(Boolean).join('\n').slice(0, 1200);
+  }
+
+  private mergePublicAiDraftTags(
+    activity: string,
+    tags: string[] | null | undefined,
+  ): string[] {
+    const out: string[] = [];
+    const add = (value: unknown) => {
+      const text = this.publicAiDraftText(value);
+      if (text && !out.includes(text)) out.push(text);
+    };
+    add(activity);
+    for (const tag of Array.isArray(tags) ? tags : []) add(tag);
+    return out.slice(0, 20);
+  }
+
+  private publicAiDraftSummary(
+    summary: Record<string, unknown>,
+  ): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(summary)) {
+      const text = this.publicAiDraftText(value);
+      if (text) out[key] = text;
+    }
+    return out;
+  }
+
+  private readSlotText(slots: Record<string, unknown>, key: string): string {
+    const slot = slots[key];
+    if (!this.isRecord(slot)) return '';
+    const state = cleanDisplayText(slot.state, '');
+    if (
+      !(
+        state === 'answered' ||
+        state === 'confirmed' ||
+        state === 'completed' ||
+        state === 'modified' ||
+        ((key === 'geo_area' || key === 'intensity') && state === 'inferred')
+      )
+    ) {
+      return '';
+    }
+    return this.publicAiDraftText(slot.value);
+  }
+
+  private publicAiDraftText(value: unknown): string {
+    const text = cleanDisplayText(value, '').slice(0, 180);
+    if (!text || this.containsSensitivePublishInfo(text)) return '';
+    return text;
+  }
+
+  private inferCityFromPublicContext(...values: string[]): string {
+    const text = values.filter(Boolean).join(' ');
+    if (!text) return '';
+    if (
+      /(青岛|崂山|市南|市北|李沧|黄岛|青岛大学|五四广场|奥帆中心|石老人|浮山|麦岛|台东|栈桥)/.test(
+        text,
+      )
+    ) {
+      return '青岛';
+    }
+    return sanitizeCity(text);
+  }
+
+  private containsSensitivePublishInfo(text: string): boolean {
+    return /(\b1[3-9]\d{9}\b|微信|vx|wechat|手机号|电话|身份证|门牌|单元|楼栋|具体地址|精确位置|联系方式|加我|私聊我|转账|支付|红包)/i.test(
+      text,
+    );
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   /** Pluggable rule-based parser. Always synchronous, always safe. */

@@ -57,6 +57,10 @@ export type SocialAgentLifeGraphWritebackProposal = {
   revokeHint: string;
 };
 
+type SocialAgentDecisionToolOptions = {
+  signal?: AbortSignal | null;
+};
+
 @Injectable()
 export class SocialAgentDecisionToolService {
   constructor(
@@ -72,6 +76,7 @@ export class SocialAgentDecisionToolService {
   async decideNextSocialAction(
     task: AgentTask,
     input: Record<string, unknown>,
+    options: SocialAgentDecisionToolOptions = {},
   ): Promise<SocialAgentDecisionToolResult> {
     const loop = this.taskMemory.socialLoopMemory(task);
     const messages = toSocialAgentMessageArray(
@@ -92,6 +97,7 @@ export class SocialAgentDecisionToolService {
       fallback: () =>
         buildFallbackSocialAgentNextAction(task, messages, summary, loop),
       taskId: task.id,
+      signal: options.signal ?? null,
     });
     const safeDecision = normalizeSocialAgentNextActionDecision(
       task,
@@ -100,13 +106,12 @@ export class SocialAgentDecisionToolService {
       this.permissions,
       (value) => this.toolCallFactory.normalizeToolName(value),
     );
-    const lifeGraphWritebackProposal =
-      this.buildLifeGraphWritebackProposal({
-        task,
-        loop,
-        summary,
-        decision: safeDecision,
-      });
+    const lifeGraphWritebackProposal = this.buildLifeGraphWritebackProposal({
+      task,
+      loop,
+      summary,
+      decision: safeDecision,
+    });
     const output = {
       ...safeDecision,
       lifeGraphWritebackProposal,
@@ -277,7 +282,9 @@ export class SocialAgentDecisionToolService {
       return this.intentBasedReplySummary(input.replyIntent, input.nextAction);
     }
     const clean = candidate.replace(/\s+/g, ' ').trim();
-    return clean || this.intentBasedReplySummary(input.replyIntent, input.nextAction);
+    return (
+      clean || this.intentBasedReplySummary(input.replyIntent, input.nextAction)
+    );
   }
 
   private looksLikeRawCounterpartReply(value: string): boolean {
@@ -286,10 +293,15 @@ export class SocialAgentDecisionToolService {
     if (/^对方回复[:：]/.test(text)) return true;
     if (/["“”'‘’]/.test(text)) return true;
     if (/[a-zA-Z][a-zA-Z\s,.!?'-]{12,}/.test(text)) return true;
-    return text.length > 36 && /(我|你|吗|可以|哪里|几点|路线|见|约)/.test(text);
+    return (
+      text.length > 36 && /(我|你|吗|可以|哪里|几点|路线|见|约)/.test(text)
+    );
   }
 
-  private intentBasedReplySummary(replyIntent: string, nextAction: string): string {
+  private intentBasedReplySummary(
+    replyIntent: string,
+    nextAction: string,
+  ): string {
     if (replyIntent === 'accept') {
       return '对方表达了正向回应，适合在用户确认后继续站内沟通。';
     }

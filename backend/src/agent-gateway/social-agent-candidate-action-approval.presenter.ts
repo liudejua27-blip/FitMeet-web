@@ -3,10 +3,16 @@ import {
   ApprovalRiskLevel,
   ApprovalType,
 } from './entities/agent-approval-request.entity';
+import {
+  buildActionApprovalRuntimeContextSummary,
+  type SocialAgentActionApprovalRuntimeContext,
+} from './social-agent-candidate-action-approval-context.presenter';
 import type {
   SocialAgentIntentRouteResult,
   SocialAgentPendingApprovalSnapshot,
 } from './social-agent-chat.types';
+
+export type { SocialAgentActionApprovalRuntimeContext };
 
 export function buildSocialAgentCandidateActionApprovalInput(input: {
   ownerUserId: number;
@@ -16,11 +22,15 @@ export function buildSocialAgentCandidateActionApprovalInput(input: {
   candidate?: Record<string, unknown>;
   targetUserId: number | null;
   relatedCandidateId: number | null;
+  runtimeContext?: SocialAgentActionApprovalRuntimeContext | null;
 }) {
   const inferred = inferSocialAgentCandidateActionApproval(
     input.message,
     input.candidate,
     input.targetUserId,
+  );
+  const runtimeContext = buildActionApprovalRuntimeContextSummary(
+    input.runtimeContext,
   );
   return {
     userId: input.ownerUserId,
@@ -36,6 +46,13 @@ export function buildSocialAgentCandidateActionApprovalInput(input: {
       entities: input.route.entities,
       candidateUserId: input.targetUserId,
       agentTaskId: input.taskId,
+      ...(runtimeContext
+        ? {
+            socialCodex: {
+              runtimeContext,
+            },
+          }
+        : {}),
     },
     summary: inferred.summary,
     riskLevel: inferred.riskLevel,
@@ -88,7 +105,7 @@ function inferSocialAgentCandidateActionApproval(
   if (/(发消息|打招呼|私信|联系)/.test(message)) {
     return {
       type: ApprovalType.SendMessage,
-      actionType: 'send_candidate_message',
+      actionType: 'send_invite',
       riskLevel: ApprovalRiskLevel.Medium,
       summary: `用户请求向${candidateLabel}发送消息`,
     };

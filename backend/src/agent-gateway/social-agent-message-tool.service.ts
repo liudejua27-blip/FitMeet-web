@@ -154,9 +154,6 @@ export class SocialAgentMessageToolService {
     input: Record<string, unknown>,
     stepId: string,
   ): Promise<SocialAgentMessageToolResult> {
-    if (!task.agentConnectionId) {
-      throw new BadRequestException('agentConnectionId is required');
-    }
     const conversationId = this.toolInput.string(input.conversationId);
     const text = this.toolInput.string(
       input.text ?? input.message ?? input.content,
@@ -165,6 +162,15 @@ export class SocialAgentMessageToolService {
       throw new BadRequestException('conversationId is required');
     }
     if (!text) throw new BadRequestException('text is required');
+    if (
+      !task.agentConnectionId &&
+      !this.confirmationPolicy.canRunAsConfirmedUserAction(
+        SocialAgentToolName.ReplyMessage,
+        input,
+      )
+    ) {
+      throw new BadRequestException('agentConnectionId is required');
+    }
 
     const targetForDedupe =
       this.toolInput.number(input.targetUserId) ??
@@ -188,15 +194,36 @@ export class SocialAgentMessageToolService {
       };
     }
 
-    const message = await this.messages.sendAgentReply(
-      conversationId,
-      task.agentConnectionId,
-      text,
-      {
-        ownerUserId: task.ownerUserId,
-        metadata: buildSocialAgentMessageMetadata(task, stepId, input.metadata),
-      },
-    );
+    const message = task.agentConnectionId
+      ? await this.messages.sendAgentReply(
+          conversationId,
+          task.agentConnectionId,
+          text,
+          {
+            ownerUserId: task.ownerUserId,
+            metadata: buildSocialAgentMessageMetadata(
+              task,
+              stepId,
+              input.metadata,
+            ),
+          },
+        )
+      : await this.messages.sendMessage(
+          conversationId,
+          task.ownerUserId,
+          text,
+          buildSocialAgentMessageSendOptions(
+            task,
+            stepId,
+            input,
+            (toolName, currentInput) =>
+              this.confirmationPolicy.canRunAsConfirmedUserAction(
+                toolName,
+                currentInput,
+              ),
+            SocialAgentToolName.ReplyMessage,
+          ),
+        );
     const output = this.toolInput.asRecord(message);
     const targetUserId =
       this.toolInput.number(output.recipientUserId) ??

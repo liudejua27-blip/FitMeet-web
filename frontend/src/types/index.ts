@@ -33,7 +33,6 @@ export interface Post {
   level?: string;
   sourceId?: number;
   createdAt?: string;
-  mock?: boolean;
 }
 
 /** 约练活动 */
@@ -89,7 +88,6 @@ export interface Meet {
   autoCancelAt?: string;
   cancelReason?: string | null;
   createdAt?: string;
-  mock?: boolean;
 }
 
 /** 圈子 / 俱乐部 */

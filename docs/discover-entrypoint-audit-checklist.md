@@ -14,6 +14,7 @@
   - `'/hall'/'/nearby'/'/meet'/'/human'/'/social-hall'/'/agent-connect/social-hall'` 全部走 `DiscoverAliasRoute`
   - `'/discover'` 走 `DiscoverPage`
   - `'/download-app'`、`'/app'` 重定向到 `'/download'`
+  - `'/legacy-home'` 仅作为兼容别名重定向到 `'/'`，不再渲染独立首页
 - `frontend/src/routes/routeBoundaries.ts`
   - `publicWebsiteRoutes` 已包含 `'/discover'`、`'/app'`、`'/download-app'`
 
@@ -28,8 +29,8 @@
   - 所有场景卡片 action 链路仍统一使用 `/discover` 或 `/discover?category=...`
 - `frontend/src/pages/GeoLandingPage.tsx`
   - 入口按钮复用 `actions` 数据并跳转 `/discover`
-- `frontend/src/pages/HomePage.legacy.tsx`
-  - `featuredCards / sceneCards` 的按钮复用 `href: '/discover'` 与 `to={`/discover?category=...`}`
+- canonical 首页由 `frontend/src/pages/PlatformPage.tsx` / `frontend/src/components/website/WebsitePlatform.tsx` 承载
+  - 旧 `HomePage.legacy.tsx` 已移除；`/legacy-home` 不再是 Discover 入口测试面
 - `frontend/src/pages/SportsPage.tsx`
   - `key={s.id} to={`/discover?category=${s.id}`}`
 - `frontend/src/pages/CitiesPage.tsx`
@@ -164,8 +165,8 @@
   - `href: '/discover'`
 - `frontend/src/components/showcase/ProductMotionShowcase.tsx`
   - `to={`/discover?${card.discoverQuery}`}`
-- `frontend/src/pages/HomePage.legacy.tsx`
-  - 多处 `SiteLink` 指向 `/discover` 与 `/discover?category=...`
+- canonical 首页组件
+  - 入口必须经 `SiteLink` / `DiscoverLink` 或 `navigateToRouteWithScrollReset`，旧 `HomePage.legacy.tsx` 不得回流
 - `frontend/src/pages/SportsPage.tsx`
   - `to={`/discover?category=${s.id}`}`、`to="/discover"`
 - `frontend/src/pages/CitiesPage.tsx`

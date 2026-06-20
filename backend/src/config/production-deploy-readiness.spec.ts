@@ -107,6 +107,8 @@ describe('production deploy readiness', () => {
   });
 
   it('keeps the ECS upload package self-contained without bundling real env files', () => {
+    const rootEnvTemplate = readRepoFile('.env.example');
+    const backendEnvTemplate = readRepoFile('backend/.env.example');
     const ecsTemplate = readRepoFile('deploy/env.production.ecs.example');
     const buildZipScript = readRepoFile('scripts/build-deploy-zip.sh');
     const cloudPreflight = readRepoFile('scripts/cloud-platform-preflight.sh');
@@ -122,6 +124,9 @@ describe('production deploy readiness', () => {
     const ecsUploadRelease = readRepoFile('scripts/ecs-upload-release.sh');
     const ecsPreflight = readRepoFile('scripts/ecs-host-preflight.sh');
     const ecsPostDeploySmoke = readRepoFile('scripts/ecs-post-deploy-smoke.sh');
+    const agentGoalVerifier = readRepoFile(
+      'scripts/verify-agent-goal-production.sh',
+    );
     const packageJson = readRepoFile('backend/package.json');
     const frontendPackageJson = readRepoFile('frontend/package.json');
     const smokeSeed = readRepoFile(
@@ -140,11 +145,46 @@ describe('production deploy readiness', () => {
     expect(ecsTemplate).toContain('FITMEET_PROCESS_ROLE=api');
     expect(ecsTemplate).toContain('ENABLE_SCHEDULER=false');
     expect(ecsTemplate).toContain('FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS=10000');
+    expect(ecsTemplate).toContain('FITMEET_SUBAGENT_WORKER_TIMEOUT_MS=30000');
     expect(ecsTemplate).toContain('VITE_API_BASE_URL=/api');
     expect(ecsTemplate).toContain(
       'JWT_SECRET=CHANGE_ME_RANDOM_32_BYTE_HEX_SECRET',
     );
     expect(ecsTemplate).toContain('DEEPSEEK_CHAT_MODEL=deepseek-v4-pro');
+    expect(ecsTemplate).toContain('DEEPSEEK_MODEL=deepseek-v4-pro');
+    expect(ecsTemplate).toContain('AGENT_PLANNER_MODEL=deepseek-v4-pro');
+    expect(ecsTemplate).toContain('AGENT_SAFETY_MODEL=');
+    expect(ecsTemplate).toContain('SOCIAL_AGENT_MODEL_ROUTING_MODE=quality');
+    expect(ecsTemplate).toContain('SOCIAL_AGENT_INTENT_ROUTER_MODE=llm_first');
+    expect(ecsTemplate).toContain('SOCIAL_AGENT_CONTEXT_TURN_LIMIT=80');
+    expect(ecsTemplate).toContain('SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS=30000');
+    expect(ecsTemplate).toContain(
+      'SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS=20000',
+    );
+    expect(ecsTemplate).toContain('SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS=30000');
+    expect(ecsTemplate).toContain(
+      'SOCIAL_AGENT_CHAT_FIRST_CHUNK_TIMEOUT_MS=20000',
+    );
+    expect(ecsTemplate).toContain(
+      'SOCIAL_AGENT_FINAL_RESPONSE_TIMEOUT_MS=30000',
+    );
+    expect(ecsTemplate).toContain(
+      'SOCIAL_AGENT_FINAL_RESPONSE_FIRST_CHUNK_TIMEOUT_MS=20000',
+    );
+    expect(ecsTemplate).toContain('SOCIAL_AGENT_FINAL_RESPONSE_MAX_TOKENS=1200');
+    expect(ecsTemplate).toContain('SOCIAL_AGENT_PLANNER_TIMEOUT_MS=25000');
+    expect(ecsTemplate).toContain('SOCIAL_AGENT_INTENT_TIMEOUT_MS=25000');
+    expect(ecsTemplate).toContain('SOCIAL_AGENT_DEEPSEEK_RETRY_ATTEMPTS=2');
+    expect(rootEnvTemplate).toContain('DEEPSEEK_MODEL=deepseek-v4-pro');
+    expect(backendEnvTemplate).toContain('DEEPSEEK_MODEL=deepseek-v4-pro');
+    for (const template of [rootEnvTemplate, backendEnvTemplate, ecsTemplate]) {
+      expect(template).toContain('SOCIAL_AGENT_MODEL_ROUTING_MODE=quality');
+      expect(template).toContain('SOCIAL_AGENT_INTENT_ROUTER_MODE=llm_first');
+      expect(template).toContain('SOCIAL_AGENT_CONTEXT_TURN_LIMIT=80');
+      expect(template).toContain('SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS=30000');
+      expect(template).toContain('SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS=20000');
+      expect(template).toContain('SOCIAL_AGENT_DEEPSEEK_RETRY_ATTEMPTS=2');
+    }
     expect(buildZipScript).toContain('deploy/env.production.ecs.example');
     expect(buildZipScript).toContain('docs/deployment-vercel-railway.md');
     expect(buildZipScript).toContain('scripts/cloud-platform-preflight.sh');
@@ -155,6 +195,7 @@ describe('production deploy readiness', () => {
     expect(buildZipScript).toContain('scripts/ecs-install-release.sh');
     expect(buildZipScript).toContain('scripts/ecs-upload-release.sh');
     expect(buildZipScript).toContain('scripts/ecs-host-preflight.sh');
+    expect(buildZipScript).toContain('scripts/ecs-backend-pnpm.sh');
     expect(buildZipScript).toContain('scripts/ecs-post-deploy-smoke.sh');
     expect(buildZipScript).toContain('Dry-run production Agent smoke seed');
     expect(buildZipScript).toContain('seed:agent-smoke:prod:dry-run');
@@ -257,6 +298,7 @@ describe('production deploy readiness', () => {
     expect(ecsInstallRelease).toContain(
       'APP_DIR=%s ./scripts/ecs-host-preflight.sh',
     );
+    expect(ecsInstallRelease).toContain('./scripts/ecs-backend-pnpm.sh');
     expect(ecsUploadRelease).toContain('ECS_SSH_TARGET');
     expect(ecsUploadRelease).toContain('fitmeet-ecs-deploy.zip.sha256');
     expect(ecsUploadRelease).toContain('fitmeet-ecs-install-release.sh');
@@ -279,7 +321,13 @@ describe('production deploy readiness', () => {
       'pnpm -C backend run seed:app-smoke-users',
     );
     expect(ecsPostDeploySmoke).toContain(
-      'pnpm -C backend run seed:agent-smoke',
+      './scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod',
+    );
+    expect(ecsPostDeploySmoke).toContain(
+      './scripts/ecs-backend-pnpm.sh -- smoke:agent-opportunity:prod',
+    );
+    expect(ecsPostDeploySmoke).toContain(
+      './scripts/ecs-backend-pnpm.sh -- smoke:agent-sse-abort:prod',
     );
     expect(ecsPostDeploySmoke).toContain('./scripts/verify-production.sh');
     expect(ecsPostDeploySmoke).toContain('APP_SMOKE_RUN_MUTATIONS');
@@ -316,6 +364,12 @@ describe('production deploy readiness', () => {
     expect(ecsRunbook).toContain('--scan-compose-logs');
     expect(ecsRunbook).toContain('AGENT_SMOKE_ALLOW_MUTATIONS=true');
     expect(ecsRunbook).toContain('ordinary chat does not trigger social cards');
+    expect(agentGoalVerifier).toContain(
+      './scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod',
+    );
+    expect(agentGoalVerifier).not.toContain(
+      'pnpm -C backend run seed:agent-smoke:prod',
+    );
   });
 
   it('keeps the ECS critical table check aligned with worker migrations', () => {
@@ -413,9 +467,7 @@ describe('production deploy readiness', () => {
     expect(opportunitySmoke).toContain('socialCodexEventCount');
     expect(opportunitySmoke).toContain('SocialAgentEventV2 rows');
     expect(launchStatus).toContain('Social Codex trace eval passed');
-    expect(launchStatus).toContain(
-      'readiness and full opportunity smoke',
-    );
+    expect(launchStatus).toContain('readiness and full opportunity smoke');
   });
 
   it('keeps Vercel and Railway platform deploy config explicit', () => {

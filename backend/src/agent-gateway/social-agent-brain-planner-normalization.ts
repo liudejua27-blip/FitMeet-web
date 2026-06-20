@@ -84,6 +84,7 @@ function canonicalBrainToolName(name: string): string {
     update_social_profile: 'update_profile_from_agent_context',
     update_ai_profile: 'update_profile_from_agent_context',
     save_profile_memory: 'update_profile_from_agent_context',
+    get_conversation_history: 'get_conversation_messages',
   };
   return aliases[normalized] ?? normalized;
 }

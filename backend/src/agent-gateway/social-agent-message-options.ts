@@ -44,6 +44,7 @@ export function buildSocialAgentMessageSendOptions(
   stepId: string,
   input: Record<string, unknown>,
   canRunAsConfirmedUserAction: ConfirmationPredicate,
+  toolName: SocialAgentToolName = SocialAgentToolName.SendMessage,
 ) {
   const metadata = buildSocialAgentMessageMetadata(
     task,
@@ -52,7 +53,7 @@ export function buildSocialAgentMessageSendOptions(
   );
   if (
     !task.agentConnectionId &&
-    canRunAsConfirmedUserAction(SocialAgentToolName.SendMessage, input)
+    canRunAsConfirmedUserAction(toolName, input)
   ) {
     return {
       senderType: 'user' as const,

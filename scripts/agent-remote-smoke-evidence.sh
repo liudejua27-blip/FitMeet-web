@@ -26,7 +26,7 @@ tokens, or email addresses in the evidence file.
 Modes:
   --readiness   OpportunityCard readiness only; stops before high-risk actions.
   --full        Full mutating opportunity journey.
-  --sse-abort   SSE cancellation smoke.
+  --sse-abort   SSE visibility/abort smoke.
   --all         Readiness, then full opportunity + SSE abort.
 
 Environment:

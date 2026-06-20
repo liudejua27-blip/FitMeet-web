@@ -155,13 +155,14 @@ check_domain_env() {
   [ "$wechat_redirect" = "https://www.ourfitmeet.cn/api/auth/wechat/callback" ] && pass "WECHAT_REDIRECT_URI targets production callback" || warn "WECHAT_REDIRECT_URI is not the production callback"
   [ "${alerts:-false}" = "false" ] && pass "Agent alert delivery disabled for first launch" || warn "Agent alert delivery is enabled; verify webhook/token before launch."
   check_deepseek_models
+  check_agent_intelligence_env
   check_worker_env
   [[ "$upload_temp" = /* ]] && pass "UPLOAD_TEMP_DIR is absolute: $upload_temp" || fail "UPLOAD_TEMP_DIR must be an absolute writable path."
 }
 
 check_deepseek_models() {
   local key model checked=0 invalid=0
-  for key in DEEPSEEK_CHAT_MODEL DEEPSEEK_FAST_MODEL DEEPSEEK_MODEL AGENT_CASUAL_CHAT_MODEL AGENT_FINAL_RESPONSE_MODEL AGENT_PLANNER_MODEL AGENT_EXTRACTOR_MODEL AGENT_CARD_MODEL; do
+  for key in DEEPSEEK_CHAT_MODEL DEEPSEEK_FAST_MODEL DEEPSEEK_MODEL AGENT_CASUAL_CHAT_MODEL AGENT_FINAL_RESPONSE_MODEL AGENT_PLANNER_MODEL AGENT_EXTRACTOR_MODEL AGENT_CARD_MODEL AGENT_SAFETY_MODEL; do
     model="$(env_value "$key")"
     [ -z "$model" ] && continue
     checked=$((checked + 1))
@@ -177,6 +178,65 @@ check_deepseek_models() {
   elif [ "$checked" -eq 0 ]; then
     fail "At least one DeepSeek model must be configured."
   fi
+}
+
+check_minimum_integer_env() {
+  local key="$1"
+  local minimum="$2"
+  local value
+  value="$(env_value "$key")"
+  if [[ "$value" =~ ^[0-9]+$ ]] && [ "$value" -ge "$minimum" ]; then
+    pass "$key is ${value} (>= ${minimum})"
+  else
+    fail "$key must be an integer >= ${minimum}; lower values force DeepSeek into brittle fallback paths."
+  fi
+}
+
+check_not_false_env() {
+  local key="$1"
+  local value
+  value="$(env_value "$key" | tr '[:upper:]' '[:lower:]')"
+  case "$value" in
+    false|0|off|no)
+      fail "$key must not be disabled in production; this would bypass the LLM planner/router."
+      ;;
+    *)
+      pass "$key is not disabled"
+      ;;
+  esac
+}
+
+check_agent_intelligence_env() {
+  local routing_mode intent_mode chat_model key model
+  routing_mode="$(env_value SOCIAL_AGENT_MODEL_ROUTING_MODE)"
+  intent_mode="$(env_value SOCIAL_AGENT_INTENT_ROUTER_MODE)"
+  chat_model="$(env_value DEEPSEEK_CHAT_MODEL)"
+
+  [ "$routing_mode" = "quality" ] && pass "SOCIAL_AGENT_MODEL_ROUTING_MODE keeps release quality routing" || fail "SOCIAL_AGENT_MODEL_ROUTING_MODE must be quality."
+  [ "$intent_mode" = "llm_first" ] && pass "SOCIAL_AGENT_INTENT_ROUTER_MODE keeps LLM-first routing" || fail "SOCIAL_AGENT_INTENT_ROUTER_MODE must be llm_first."
+  check_not_false_env SOCIAL_AGENT_INTENT_LLM
+  check_not_false_env SOCIAL_AGENT_BRAIN_LLM_PLANNER
+  check_minimum_integer_env SOCIAL_AGENT_CONTEXT_TURN_LIMIT 40
+  check_minimum_integer_env SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS 30000
+  check_minimum_integer_env SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS 20000
+  check_minimum_integer_env SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS 30000
+  check_minimum_integer_env SOCIAL_AGENT_CHAT_FIRST_CHUNK_TIMEOUT_MS 20000
+  check_minimum_integer_env SOCIAL_AGENT_FINAL_RESPONSE_TIMEOUT_MS 30000
+  check_minimum_integer_env SOCIAL_AGENT_FINAL_RESPONSE_FIRST_CHUNK_TIMEOUT_MS 20000
+  check_minimum_integer_env SOCIAL_AGENT_FINAL_RESPONSE_MAX_TOKENS 900
+  check_minimum_integer_env SOCIAL_AGENT_PLANNER_TIMEOUT_MS 25000
+  check_minimum_integer_env SOCIAL_AGENT_INTENT_TIMEOUT_MS 25000
+  check_minimum_integer_env SOCIAL_AGENT_DEEPSEEK_RETRY_ATTEMPTS 2
+
+  for key in AGENT_CASUAL_CHAT_MODEL AGENT_FINAL_RESPONSE_MODEL AGENT_PLANNER_MODEL AGENT_EXTRACTOR_MODEL AGENT_CARD_MODEL AGENT_SAFETY_MODEL; do
+    model="$(env_value "$key")"
+    [ -z "$model" ] && continue
+    if [ -n "$chat_model" ] && [ "$model" != "$chat_model" ]; then
+      fail "$key must match DEEPSEEK_CHAT_MODEL in quality mode; weaker overrides silently downgrade the Agent."
+    else
+      pass "$key matches the release chat model"
+    fi
+  done
 }
 
 check_positive_integer_env() {

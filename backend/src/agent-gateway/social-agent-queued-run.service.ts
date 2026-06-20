@@ -23,6 +23,7 @@ import type {
 } from './social-agent-chat.types';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
+import { parseSocialAgentThreadTaskId } from './social-agent-thread-id.util';
 
 type ExecuteRun = (
   body: SocialAgentChatRunBody,
@@ -44,8 +45,10 @@ export class SocialAgentQueuedRunService {
     ownerUserId: number;
     body: SocialAgentChatRunBody;
     executeRun: ExecuteRun;
+    signal?: AbortSignal | null;
     visibleStepLabel: (id: string, label: string) => string;
   }): Promise<SocialAgentAsyncRunSnapshot> {
+    this.assertNotAborted(input.signal);
     const goal = cleanDisplayText(input.body.goal, '').trim();
     if (!goal) throw new BadRequestException('请输入你的社交需求');
     const permissionMode = this.normalizePermissionMode(
@@ -54,12 +57,15 @@ export class SocialAgentQueuedRunService {
     const idempotencyKey =
       cleanDisplayText(input.body.idempotencyKey, '') ||
       `social-agent-chat:${input.ownerUserId}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+    const requestedTaskId = this.requestedTaskId(input.body);
     const task = await this.taskLifecycle.createOrReuseTask({
       ownerUserId: input.ownerUserId,
       goal,
       permissionMode,
       idempotencyKey,
+      taskId: requestedTaskId,
     });
+    this.assertNotAborted(input.signal);
     const runId = createSocialAgentRunId();
     const queuedRun = await this.runState.queueChatRun({
       task,
@@ -72,12 +78,14 @@ export class SocialAgentQueuedRunService {
       taskId: task.id,
       body: {
         ...input.body,
+        taskId: task.id,
         goal,
         permissionMode,
         idempotencyKey,
       },
       runId,
       executeRun: input.executeRun,
+      signal: input.signal ?? null,
       visibleStepLabel: input.visibleStepLabel,
     }).catch((error) => {
       this.logger.error(
@@ -122,8 +130,10 @@ export class SocialAgentQueuedRunService {
     body: SocialAgentChatRunBody;
     runId: string;
     executeRun: ExecuteRun;
+    signal?: AbortSignal | null;
     visibleStepLabel: (id: string, label: string) => string;
   }): Promise<SocialAgentChatRunResult> {
+    this.assertNotAborted(input.signal);
     const visibleSteps: SocialAgentVisibleStep[] = [];
     await this.updateRunSnapshot(input, {
       status: 'running',
@@ -131,7 +141,9 @@ export class SocialAgentQueuedRunService {
       startedAt: new Date().toISOString(),
       message: '正在理解需求',
     });
+    this.assertNotAborted(input.signal);
     const result = await input.executeRun(input.body, async (event) => {
+      this.assertNotAborted(input.signal);
       if (event.type !== 'step') return;
       const existingIndex = visibleSteps.findIndex(
         (step) => step.id === event.step.id,
@@ -148,6 +160,7 @@ export class SocialAgentQueuedRunService {
         visibleSteps: [...visibleSteps],
       });
     });
+    this.assertNotAborted(input.signal);
     const task = await this.updateRunSnapshot(input, {
       status: 'completed',
       phase: 'completed',
@@ -202,6 +215,17 @@ export class SocialAgentQueuedRunService {
       error,
       visibleStepLabel,
       options,
+    );
+  }
+
+  private assertNotAborted(signal?: AbortSignal | null): void {
+    if (signal?.aborted) throw new Error('Subagent worker job cancelled.');
+  }
+
+  private requestedTaskId(body: SocialAgentChatRunBody): number | null {
+    return (
+      parseSocialAgentThreadTaskId(body.taskId) ??
+      parseSocialAgentThreadTaskId(body.clientContext?.threadId)
     );
   }
 

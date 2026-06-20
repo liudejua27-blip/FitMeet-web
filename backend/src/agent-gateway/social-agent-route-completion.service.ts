@@ -8,6 +8,7 @@ import type {
 } from './fitmeet-alpha-agent.types';
 import type {
   SocialAgentActivityResult,
+  SocialAgentAssistantMessageSource,
   SocialAgentAsyncRunSnapshot,
   SocialAgentIntentRouteResult,
   SocialAgentPendingApprovalSnapshot,
@@ -18,12 +19,23 @@ import type { SocialAgentIntentRouterResult } from './social-agent-intent-router
 import { SocialAgentMessageLogService } from './social-agent-message-log.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { socialAgentRouteAction } from './social-agent-route-response.presenter';
+import { shouldStreamFallbackAssistantText } from './social-agent-chat-stream.presenter';
 import { AgentSelfImproveService } from './agent-self-improve.service';
+import { SocialAgentEventStore } from './social-agent-event-store.service';
+import { SocialAgentEventV2Service } from './social-agent-event-v2.service';
+import type {
+  SocialAgentEventV2,
+  SocialAgentEventV2DisplayState,
+  SocialAgentEventV2Stage,
+  SocialAgentEventV2Type,
+} from './social-agent-event-v2.types';
+import { summarizeSocialCodexRun } from './social-codex-run-summary';
 
 type CompleteRouteTurnInput = {
   task: AgentTask;
   route: SocialAgentIntentRouterResult;
   assistantMessage: string;
+  assistantMessageSource?: SocialAgentAssistantMessageSource;
   savedContext: boolean;
   profileUpdated: boolean;
   queuedRun: SocialAgentAsyncRunSnapshot | null;
@@ -36,6 +48,7 @@ type CompleteRouteTurnInput = {
   subagentHandoffs?: SubagentHandoffResult[];
   runtime?: SocialAgentRuntimeResumeMetadata | null;
   startedAt: number;
+  deferAssistantMessageLog?: boolean;
 };
 
 @Injectable()
@@ -44,6 +57,8 @@ export class SocialAgentRouteCompletionService {
     private readonly messageLog: SocialAgentMessageLogService,
     private readonly metrics: SocialAgentMetricsService,
     @Optional() private readonly selfImprove?: AgentSelfImproveService,
+    @Optional() private readonly eventV2?: SocialAgentEventV2Service,
+    @Optional() private readonly eventStore?: SocialAgentEventStore,
   ) {}
 
   async complete(
@@ -61,6 +76,9 @@ export class SocialAgentRouteCompletionService {
       ),
       taskId: input.task.id,
       assistantMessage: input.assistantMessage,
+      ...(input.assistantMessageSource
+        ? { assistantMessageSource: input.assistantMessageSource }
+        : {}),
       savedContext: input.savedContext,
       profileUpdated: input.profileUpdated,
       shouldQueueRun: Boolean(input.queuedRun),
@@ -81,21 +99,225 @@ export class SocialAgentRouteCompletionService {
       this.metrics.recordQueuedRun(input.runMode);
     }
     this.metrics.recordAction(result.action);
-    await this.messageLog.recordAssistantMessage(
-      input.task,
-      input.assistantMessage,
-      result,
-    );
-    await this.selfImprove?.recordOnlineReplayFromRoute({
-      ownerUserId: input.task.ownerUserId,
-      taskId: input.task.id,
-      userMessage: input.task.goal,
-      assistantMessage: input.assistantMessage,
-      route: input.route as unknown as Record<string, unknown>,
-      result: result as unknown as Record<string, unknown>,
-    });
+    if (!input.deferAssistantMessageLog) {
+      await this.messageLog.recordAssistantMessage(
+        input.task,
+        input.assistantMessage,
+        result,
+      );
+    }
+    if (!input.deferAssistantMessageLog) {
+      await this.recordNonStreamingRunTrace(input, result);
+    }
+    if (
+      !input.deferAssistantMessageLog &&
+      this.shouldRecordOnlineReplay(input.assistantMessage)
+    ) {
+      await this.selfImprove?.recordOnlineReplayFromRoute({
+        ownerUserId: input.task.ownerUserId,
+        taskId: input.task.id,
+        userMessage: input.task.goal,
+        assistantMessage: input.assistantMessage,
+        route: input.route as unknown as Record<string, unknown>,
+        result: result as unknown as Record<string, unknown>,
+      });
+    }
     this.metrics.observeRouteLatency(Date.now() - input.startedAt);
     return result;
+  }
+
+  private async recordNonStreamingRunTrace(
+    input: CompleteRouteTurnInput,
+    result: SocialAgentIntentRouteResult,
+  ) {
+    if (!this.eventStore) return;
+    const eventV2 = this.eventV2 ?? new SocialAgentEventV2Service();
+    const runId = [
+      'social-codex',
+      'route',
+      input.task.ownerUserId,
+      input.task.id,
+      Date.now(),
+      Math.random().toString(36).slice(2, 8),
+    ].join(':');
+    const events: SocialAgentEventV2[] = [];
+    const append = async (
+      type: SocialAgentEventV2Type,
+      stage: SocialAgentEventV2Stage,
+      title: string,
+      state: SocialAgentEventV2DisplayState,
+      payload?: Record<string, unknown>,
+    ) => {
+      let event = eventV2.envelope({
+        type,
+        userId: input.task.ownerUserId,
+        taskId: input.task.id,
+        threadId: `agent-task:${input.task.id}`,
+        runId,
+        stage,
+        visibility: 'user_visible',
+        display: { title, state },
+        payload,
+      });
+      if (event.type === 'run.completed' || event.type === 'run.failed') {
+        event = {
+          ...event,
+          payload: {
+            ...(event.payload ?? {}),
+            summary: summarizeSocialCodexRun([...events, event]),
+          },
+        };
+      }
+      await this.eventStore?.appendEvent(input.task, event);
+      events.push(event);
+      return event;
+    };
+
+    await append(
+      'run.started',
+      'detect_social_intent',
+      '正在理解你的需求',
+      'done',
+      {
+        source: 'non_streaming_route',
+        intent: result.intent,
+      },
+    );
+    await append(
+      'visible_process.delta',
+      'hydrate_context',
+      '已读取当前对话和任务记忆',
+      'done',
+      {
+        savedContext: result.savedContext,
+        profileUpdated: result.profileUpdated,
+      },
+    );
+    if (this.shouldRecordAssistantPreview(input.assistantMessage)) {
+      await append(
+        'assistant.delta',
+        'detect_social_intent',
+        '已生成回复',
+        'done',
+        {
+          messagePreview: input.assistantMessage.slice(0, 240),
+        },
+      );
+    }
+    if (input.pendingApproval) {
+      const pendingPayload = this.isRecord(input.pendingApproval.payload)
+        ? input.pendingApproval.payload
+        : {};
+      const checkpointId = this.checkpointIdForPendingApproval(
+        pendingPayload,
+        input.runtime,
+      );
+      const resumeCursor = this.publicResumeCursor(
+        input.runtime,
+        checkpointId,
+        input.task,
+      );
+      await append(
+        'approval.required',
+        'approval',
+        '这一步需要你确认',
+        'waiting',
+        {
+          ...pendingPayload,
+          approvalId: input.pendingApproval.id,
+          checkpointId,
+          resumeCursor,
+          actionType: input.pendingApproval.actionType,
+          riskLevel: input.pendingApproval.riskLevel,
+          resumePolicy: 'confirm_then_resume_same_run',
+          sideEffectPolicy:
+            input.runtime?.sideEffectPolicy ?? {
+              sideEffectsBeforeResume: 'idempotent_only',
+            },
+        },
+      );
+    }
+    const completedState: SocialAgentEventV2DisplayState = input.pendingApproval
+      ? 'waiting'
+      : 'done';
+    const completedStage = this.completionStageFor(input);
+    await append(
+      'run.completed',
+      completedStage,
+      input.pendingApproval
+        ? '发送邀请前需要你确认'
+        : input.queuedRun
+          ? '已接上候选搜索任务'
+          : '这一步处理完成',
+      completedState,
+      {
+        action: result.action,
+        shouldQueueRun: result.shouldQueueRun,
+        cardCount: result.cards?.length ?? 0,
+        ...(input.pendingApproval
+          ? {
+              checkpointId: this.checkpointIdForPendingApproval(
+                this.isRecord(input.pendingApproval.payload)
+                  ? input.pendingApproval.payload
+                  : {},
+                input.runtime,
+              ),
+              resumeCursor: this.publicResumeCursor(
+                input.runtime,
+                this.checkpointIdForPendingApproval(
+                  this.isRecord(input.pendingApproval.payload)
+                    ? input.pendingApproval.payload
+                    : {},
+                  input.runtime,
+                ),
+                input.task,
+              ),
+              approvalId: input.pendingApproval.id,
+              actionType: input.pendingApproval.actionType,
+            }
+          : {}),
+      },
+    );
+    if (input.queuedRun) {
+      const confirmedContext = this.confirmedTaskContext(input.task);
+      await append(
+        'candidate_search.started',
+        'search_candidates',
+        input.runMode === 'follow_up'
+          ? '正在按最新偏好重新筛选候选人'
+          : '正在筛选公开可发现的人',
+        'running',
+        {
+          queuedRunId: input.queuedRun.runId,
+          runMode: input.runMode,
+          action: result.action,
+          confirmedContext,
+          instruction:
+            confirmedContext.length > 0
+              ? '基于已确认信息继续，不重复追问。'
+              : '只会使用公开可发现资料和用户授权信息。',
+        },
+      );
+    }
+  }
+
+  private completionStageFor(
+    input: CompleteRouteTurnInput,
+  ): SocialAgentEventV2Stage {
+    if (input.pendingApproval) return 'approval';
+    if (input.queuedRun) return 'search_candidates';
+    if (input.profileUpdated || input.profileUpdateProposal) {
+      return 'life_graph_writeback';
+    }
+    return 'detect_social_intent';
+  }
+
+  private shouldRecordAssistantPreview(message: string): boolean {
+    return shouldStreamFallbackAssistantText(message);
+  }
+
+  private shouldRecordOnlineReplay(message: string): boolean {
+    return shouldStreamFallbackAssistantText(message);
   }
 
   private cardsForActivityResults(
@@ -261,6 +483,34 @@ export class SocialAgentRouteCompletionService {
     return output.slice(0, 5);
   }
 
+  private confirmedTaskContext(task: AgentTask): string[] {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const taskSlots = this.isRecord(memory.taskSlots) ? memory.taskSlots : {};
+    const labels: Array<[string, string]> = [
+      ['time_window', '时间'],
+      ['activity', '活动'],
+      ['location_text', '地点'],
+      ['geo_area', '区域'],
+      ['candidate_preference', '候选偏好'],
+      ['safety_boundary', '安全边界'],
+    ];
+    return labels
+      .map(([key, label]) => {
+        const raw = taskSlots[key];
+        if (!this.isRecord(raw)) return '';
+        const state = this.display(raw.state, '');
+        if (
+          !['answered', 'confirmed', 'completed', 'modified'].includes(state)
+        ) {
+          return '';
+        }
+        const value = this.display(raw.value, '');
+        return value ? `${label}：${value}` : '';
+      })
+      .filter(Boolean)
+      .slice(0, 5);
+  }
+
   private activityExplanationSteps(input: {
     source: string;
     city: string;
@@ -295,5 +545,49 @@ export class SocialAgentRouteCompletionService {
 
   private display(value: unknown, fallback: string): string {
     return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  }
+
+  private checkpointIdForPendingApproval(
+    payload: Record<string, unknown>,
+    runtime?: SocialAgentRuntimeResumeMetadata | null,
+  ): number | null {
+    return (
+      this.positiveNumber(payload.checkpointId) ??
+      this.positiveNumber(payload.resumeCheckpointId) ??
+      this.positiveNumber(runtime?.checkpointId) ??
+      this.positiveNumber(runtime?.resumeCursor?.checkpointId)
+    );
+  }
+
+  private publicResumeCursor(
+    runtime: SocialAgentRuntimeResumeMetadata | null | undefined,
+    checkpointId: number | null,
+    task: AgentTask,
+  ): Record<string, unknown> | null {
+    const cursor = runtime?.resumeCursor;
+    const cursorCheckpointId =
+      this.positiveNumber(cursor?.checkpointId) ?? checkpointId;
+    if (!cursorCheckpointId) return null;
+    return {
+      threadId:
+        this.display(cursor?.threadId, '') ||
+        runtime?.threadId ||
+        `agent-task:${task.id}`,
+      checkpointId: cursorCheckpointId,
+      parentCheckpointId:
+        this.positiveNumber(cursor?.parentCheckpointId) ??
+        this.positiveNumber(runtime?.parentCheckpointId),
+      action: cursor?.action ?? runtime?.checkpointAction ?? 'resume',
+      stepId: this.display(cursor?.stepId, '') || null,
+    };
+  }
+
+  private positiveNumber(value: unknown): number | null {
+    const num = Number(value);
+    return Number.isFinite(num) && num > 0 ? num : null;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
   }
 }

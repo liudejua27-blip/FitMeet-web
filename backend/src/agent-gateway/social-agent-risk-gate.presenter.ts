@@ -55,17 +55,13 @@ export function buildSocialAgentRiskGateDecision(input: {
     mandatoryApproval && !hasUserApproval
       ? ({
           ...policy,
-          riskLevel:
-            policy.riskLevel === 'critical' ? policy.riskLevel : 'high',
+          riskLevel: policy.riskLevel === 'critical' ? policy.riskLevel : 'high',
           requiresConfirmation: true,
           requiresDoubleConfirmation:
             policy.requiresDoubleConfirmation ||
             toolName === SocialAgentToolName.Payment ||
             toolName === SocialAgentToolName.ShareLocation,
-          safetyPrompts: [
-            ...policy.safetyPrompts,
-            'mandatory_high_risk_approval',
-          ],
+          safetyPrompts: [...policy.safetyPrompts, 'mandatory_high_risk_approval'],
         } satisfies SceneRiskPolicyResult)
       : policy;
   if (policy.blockedActions.includes('execute_real_action')) {
@@ -120,10 +116,7 @@ export function buildSocialAgentRiskGateDecision(input: {
         effectivePolicy.safetyPrompts.join('；') ||
         '该动作需要用户确认后再执行。',
       createdBy: 'agent',
-      relatedSocialRequestId: getSocialAgentRelatedSocialRequestId(
-        toolInput,
-        null,
-      ),
+          relatedSocialRequestId: getSocialAgentRelatedSocialRequestId(toolInput, null),
       relatedCandidateId: getSocialAgentRelatedCandidateId(
         toolName,
         toolInput,

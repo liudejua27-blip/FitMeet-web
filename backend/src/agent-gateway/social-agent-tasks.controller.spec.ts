@@ -4,6 +4,11 @@ import {
   SocialAgentToolName,
 } from './social-agent-tool-executor.service';
 import type { SocialAgentEventV2 } from './social-agent-event-v2.types';
+import {
+  AgentTaskPermissionMode,
+  AgentTaskRiskLevel,
+  AgentTaskStatus,
+} from './entities/agent-task.entity';
 
 describe('SocialAgentTasksController', () => {
   function socialCodexEvent(
@@ -43,7 +48,9 @@ describe('SocialAgentTasksController', () => {
       findOne: jest.fn().mockResolvedValue(task),
     };
     const eventRepo = {
-      find: jest.fn().mockResolvedValue(events.map((event) => taskEvent(event))),
+      find: jest
+        .fn()
+        .mockResolvedValue(events.map((event) => taskEvent(event))),
     };
     const controller = new SocialAgentTasksController(
       taskRepo as never,
@@ -98,6 +105,80 @@ describe('SocialAgentTasksController', () => {
       controller.runNext({ user: { id: 7 } } as never, 42),
     ).resolves.toEqual(runNextResult);
     expect(executor.runNext).toHaveBeenCalledWith(42, 7);
+  });
+
+  it('creates neutral production chat tasks instead of legacy demo social tasks', async () => {
+    const savedTask = {
+      id: 91,
+      ownerUserId: 7,
+      agentConnectionId: null,
+      taskType: 'social_agent_chat',
+      title: '新对话',
+      goal: '继续当前对话',
+      input: { source: 'social_agent_tasks_api' },
+      plan: [],
+      toolCalls: [],
+      result: {},
+      memory: {},
+      status: AgentTaskStatus.Pending,
+      permissionMode: AgentTaskPermissionMode.LimitedAuto,
+      riskLevel: AgentTaskRiskLevel.Low,
+      statusReason: '',
+      error: null,
+      createdAt: new Date('2026-06-18T00:00:00.000Z'),
+      updatedAt: new Date('2026-06-18T00:00:00.000Z'),
+      completedAt: null,
+    };
+    const taskRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+      create: jest.fn((input: Record<string, unknown>) => ({
+        ...savedTask,
+        ...input,
+      })),
+      save: jest.fn((task: Record<string, unknown>) =>
+        Promise.resolve({
+          ...savedTask,
+          ...task,
+        }),
+      ),
+    };
+    const connectionRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+    };
+    const controller = new SocialAgentTasksController(
+      taskRepo as never,
+      {} as never,
+      connectionRepo as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const result = await controller.createTask(
+      { user: { id: 7 } } as never,
+      {},
+    );
+
+    expect(taskRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        taskType: 'social_agent_chat',
+        title: '新对话',
+        goal: '继续当前对话',
+        input: expect.objectContaining({
+          source: 'social_agent_tasks_api',
+        }),
+      }),
+    );
+    expect(JSON.stringify(taskRepo.create.mock.calls[0][0])).not.toMatch(
+      /social_agent_demo|演示任务|青岛今晚一起跑步|social_agent_console/,
+    );
+    expect(result).toMatchObject({
+      id: 91,
+      taskType: 'social_agent_chat',
+      title: '新对话',
+      goal: '继续当前对话',
+    });
   });
 
   it('routes registered tool calls through the unified executor boundary', async () => {
@@ -157,6 +238,7 @@ describe('SocialAgentTasksController', () => {
           approvalId: 88,
           checkpointId: 99,
           actionType: 'send_invite',
+          idempotencyKey: 'candidate-connect:42:22',
           dryRunPreview: { title: '邀请发送草稿' },
           auditRequired: true,
         },
@@ -201,6 +283,7 @@ describe('SocialAgentTasksController', () => {
           approvalId: 88,
           checkpointId: 99,
           actionType: 'send_invite',
+          idempotencyKey: 'candidate-connect:42:22',
           dryRunPreview: { title: '邀请发送草稿' },
           auditRequired: true,
         },
@@ -212,13 +295,17 @@ describe('SocialAgentTasksController', () => {
           approvalId: 88,
           checkpointId: 99,
           actionType: 'send_invite',
+          idempotencyKey: 'candidate-connect:42:22',
           decision: 'approved',
         },
       }),
       socialCodexEvent(5, 'tool.done', {
         stage: 'send_invite',
         display: { title: '邀请已按你的确认发送', state: 'done' },
-        payload: { actionType: 'send_invite' },
+        payload: {
+          actionType: 'send_invite',
+          idempotencyKey: 'candidate-connect:42:22',
+        },
       }),
       socialCodexEvent(6, 'run.completed', {
         stage: 'send_invite',
@@ -235,6 +322,21 @@ describe('SocialAgentTasksController', () => {
       taskId: 42,
       pendingApproval: false,
       terminalType: 'run.completed',
+      events: expect.arrayContaining([
+        expect.objectContaining({
+          type: 'run.completed',
+          payload: expect.objectContaining({
+            summary: expect.objectContaining({
+              title: replay.summary.title,
+              state: replay.summary.state,
+              displayMode: 'covering_status',
+              updateModel: 'latest_state',
+              defaultVisibleCount: 1,
+              historyVisibility: 'collapsed',
+            }),
+          }),
+        }),
+      ]),
       eval: expect.objectContaining({
         pass: true,
         replayCase: expect.objectContaining({
@@ -283,6 +385,12 @@ describe('SocialAgentTasksController', () => {
 
     expect(replay).toMatchObject({
       pendingApproval: true,
+      summary: expect.objectContaining({
+        state: 'waiting',
+        title: '发送邀请前需要你确认',
+        currentStage: 'approval',
+        currentSeq: 2,
+      }),
     });
   });
 
@@ -345,6 +453,45 @@ describe('SocialAgentTasksController', () => {
       runId: 'run-after-confirm',
       terminalType: 'run.completed',
       lastEventId: 'run-after-confirm:3',
+    });
+  });
+
+  it('normalizes fallback replay events that were persisted before task identity was bound', async () => {
+    const { controller } = makeControllerForEvents([
+      socialCodexEvent(1, 'run.started', {
+        taskId: null,
+        threadId: 'user-7',
+      }),
+      socialCodexEvent(2, 'visible_process.delta', {
+        taskId: null,
+        threadId: 'user-7',
+        stage: 'hydrate_context',
+        display: { title: '正在读取你的偏好', state: 'running' },
+      }),
+      socialCodexEvent(3, 'run.completed', {
+        taskId: 42,
+        threadId: 'agent-task:42',
+        display: { title: '这一步处理完成', state: 'done' },
+      }),
+    ]);
+
+    const replay = await controller.replayEvents(
+      { user: { id: 7 } } as never,
+      42,
+    );
+
+    expect(replay.threadId).toBe('agent-task:42');
+    expect(replay.events[0]).toMatchObject({
+      taskId: 42,
+      threadId: 'agent-task:42',
+    });
+    expect(replay.events[1]).toMatchObject({
+      taskId: 42,
+      threadId: 'agent-task:42',
+    });
+    expect(replay.summary).toMatchObject({
+      title: '已理解你的需求',
+      currentSeq: 3,
     });
   });
 

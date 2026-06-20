@@ -135,6 +135,8 @@ import { SocialAgentContextHydratorService } from './social-agent-context-hydrat
 import { SocialAgentTaskMemoryStateMachineService } from './social-agent-task-memory-state-machine.service';
 import { SocialAgentEventV2Service } from './social-agent-event-v2.service';
 import { SocialAgentEventStore } from './social-agent-event-store.service';
+import { SocialCodexApprovalSchemaService } from './social-codex-approval-schema.service';
+import { SocialCodexEventPipelineService } from './social-codex-event-pipeline.service';
 import { SocialCodexRuntimePolicyService } from './social-codex-runtime-policy.service';
 import { SocialCodexLifeGraphGovernanceService } from './social-codex-life-graph-governance.service';
 import { SocialCodexTraceEvalService } from './social-codex-trace-eval.service';
@@ -363,6 +365,8 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentTaskMemoryStateMachineService,
     SocialAgentEventV2Service,
     SocialAgentEventStore,
+    SocialCodexApprovalSchemaService,
+    SocialCodexEventPipelineService,
     SocialCodexRuntimePolicyService,
     SocialCodexLifeGraphGovernanceService,
     SocialCodexTraceEvalService,
@@ -476,6 +480,8 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     AgentRunCheckpointService,
     SocialAgentEventV2Service,
     SocialAgentEventStore,
+    SocialCodexApprovalSchemaService,
+    SocialCodexEventPipelineService,
     SocialCodexRuntimePolicyService,
     SocialCodexLifeGraphGovernanceService,
     SocialCodexTraceEvalService,

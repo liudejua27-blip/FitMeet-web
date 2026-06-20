@@ -74,6 +74,18 @@ function silenceServiceWarns(service: SocialAgentToolExecutorService) {
   jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
 }
 
+const publicCandidateBoundary = (
+  index = 1,
+): {
+  candidateRecordId: number;
+  socialRequestId: number;
+  candidateVisibility: string;
+} => ({
+  candidateRecordId: 700 + index,
+  socialRequestId: 900 + index,
+  candidateVisibility: 'public',
+});
+
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
     id: 100,
@@ -102,7 +114,7 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   } as AgentTask;
 }
 
-function makeService() {
+function makeService(options: { agentLoop?: unknown } = {}) {
   const taskRepo = repo<AgentTask>();
   const eventRepo = repo<Record<string, unknown>>();
   const connectionRepo = repo();
@@ -182,6 +194,18 @@ function makeService() {
           payload: input.payload,
           expiresAt: new Date(Date.now() + 10 * 60 * 1000),
         }),
+    ),
+    getById: jest.fn((id: number, userId: number) =>
+      Promise.resolve({
+        id,
+        userId,
+        agentTaskId: 100,
+        status: 'approved',
+        skillName: '',
+        actionType: '',
+        payload: {},
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      }),
     ),
     getPending: jest.fn(),
     approve: jest.fn<
@@ -303,7 +327,7 @@ function makeService() {
     conversationTools,
     decisionTools,
     taskMemory,
-    undefined,
+    options.agentLoop as never,
     l5Runtime as never,
   );
 
@@ -341,7 +365,104 @@ function makeService() {
   };
 }
 
+function readToolTimeoutMs(
+  service: SocialAgentToolExecutorService,
+  toolName: SocialAgentToolName,
+): number {
+  return (
+    service as unknown as {
+      toolTimeoutMs(toolName: SocialAgentToolName): number;
+    }
+  ).toolTimeoutMs(toolName);
+}
+
 describe('SocialAgentToolExecutorService', () => {
+  it('uses production-grade default tool timeouts without enabling high-risk retries', () => {
+    const previousSharedTimeout = process.env.FITMEET_AGENT_TOOL_TIMEOUT_MS;
+    const previousSendTimeout =
+      process.env.FITMEET_AGENT_TOOL_SEND_MESSAGE_TIMEOUT_MS;
+    delete process.env.FITMEET_AGENT_TOOL_TIMEOUT_MS;
+    delete process.env.FITMEET_AGENT_TOOL_SEND_MESSAGE_TIMEOUT_MS;
+    try {
+      const { service } = makeService();
+
+      expect(readToolTimeoutMs(service, SocialAgentToolName.SearchMatches)).toBe(
+        25_000,
+      );
+      expect(readToolTimeoutMs(service, SocialAgentToolName.SendMessage)).toBe(
+        20_000,
+      );
+      expect(readToolTimeoutMs(service, SocialAgentToolName.GetMyProfile)).toBe(
+        20_000,
+      );
+    } finally {
+      if (previousSharedTimeout === undefined) {
+        delete process.env.FITMEET_AGENT_TOOL_TIMEOUT_MS;
+      } else {
+        process.env.FITMEET_AGENT_TOOL_TIMEOUT_MS = previousSharedTimeout;
+      }
+      if (previousSendTimeout === undefined) {
+        delete process.env.FITMEET_AGENT_TOOL_SEND_MESSAGE_TIMEOUT_MS;
+      } else {
+        process.env.FITMEET_AGENT_TOOL_SEND_MESSAGE_TIMEOUT_MS =
+          previousSendTimeout;
+      }
+    }
+  });
+
+  it('still allows explicit production env overrides for tool timeouts', () => {
+    const previousSharedTimeout = process.env.FITMEET_AGENT_TOOL_TIMEOUT_MS;
+    process.env.FITMEET_AGENT_TOOL_TIMEOUT_MS = '30000';
+    try {
+      const { service } = makeService();
+
+      expect(readToolTimeoutMs(service, SocialAgentToolName.SearchMatches)).toBe(
+        30_000,
+      );
+      expect(readToolTimeoutMs(service, SocialAgentToolName.SendMessage)).toBe(
+        30_000,
+      );
+    } finally {
+      if (previousSharedTimeout === undefined) {
+        delete process.env.FITMEET_AGENT_TOOL_TIMEOUT_MS;
+      } else {
+        process.env.FITMEET_AGENT_TOOL_TIMEOUT_MS = previousSharedTimeout;
+      }
+    }
+  });
+
+  it('does not execute skipped planner recovery steps after DeepSeek planning degrades', async () => {
+    const { service, taskRepo, candidatePool, messages, approvals } =
+      makeService();
+    const task = makeTask({
+      plan: [
+        {
+          id: 'fallback_1',
+          action: 'generate_content',
+          status: 'skipped',
+          input: {
+            executionDeferred: true,
+            recoveryMessage:
+              '暂时没有得到可靠计划，已保留上下文；请重试或继续补充。',
+          },
+        },
+      ],
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+
+    const result = await service.executeTask(100);
+
+    expect(result).toMatchObject({
+      executedSteps: 0,
+      succeededSteps: 0,
+      failedSteps: 0,
+      blockedSteps: 0,
+    });
+    expect(candidatePool.searchSocial).not.toHaveBeenCalled();
+    expect(messages.sendMessage).not.toHaveBeenCalled();
+    expect(approvals.create).not.toHaveBeenCalled();
+  });
+
   it('does not run-next a task that does not belong to the authenticated user', async () => {
     const { service, taskRepo, messages, l5Runtime } = makeService();
     taskRepo.findOne.mockResolvedValue(null);
@@ -357,6 +478,62 @@ describe('SocialAgentToolExecutorService', () => {
     });
     expect(messages.getAgentInboxMessages).not.toHaveBeenCalled();
     expect(messages.sendAgentReply).not.toHaveBeenCalled();
+    expect(l5Runtime.transitionMeetLoop).not.toHaveBeenCalled();
+  });
+
+  it('does not execute run-next reply reading unless AgentLoop runs the tool runner', async () => {
+    const agentLoop = {
+      execute: jest.fn().mockResolvedValue({
+        loop: {
+          runId: 'loop:run-next-boundary',
+          taskId: 100,
+          goal: 'Continue Social Agent task 100',
+          status: 'completed',
+          steps: [],
+        },
+      }),
+    };
+    const { service, taskRepo, messages, approvals, l5Runtime } = makeService({
+      agentLoop,
+    });
+    taskRepo.findOne.mockResolvedValue(
+      makeTask({
+        status: AgentTaskStatus.WaitingReply,
+        memory: {
+          socialLoop: {
+            conversationId: 'conv_1',
+            targetUserId: 2,
+          },
+        },
+      }),
+    );
+
+    await expect(service.runNext(100, 1)).rejects.toThrow(
+      'AgentLoop did not produce a run-next result',
+    );
+
+    expect(agentLoop.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 100,
+        goal: 'Continue Social Agent task 100',
+        plan: expect.objectContaining({
+          reason: 'run-next must pass through the unified AgentLoop.',
+          tools: [
+            expect.objectContaining({
+              agent: 'Meet Loop Agent',
+              toolName: 'run_next_execute',
+            }),
+          ],
+        }),
+        maxToolCalls: 1,
+        timeoutMs: 30_000,
+      }),
+    );
+    expect(messages.getAgentInboxMessages).not.toHaveBeenCalled();
+    expect(messages.getTaskConversationMessages).not.toHaveBeenCalled();
+    expect(messages.sendAgentReply).not.toHaveBeenCalled();
+    expect(messages.sendMessage).not.toHaveBeenCalled();
+    expect(approvals.create).not.toHaveBeenCalled();
     expect(l5Runtime.transitionMeetLoop).not.toHaveBeenCalled();
   });
 
@@ -614,7 +791,13 @@ describe('SocialAgentToolExecutorService', () => {
           toolName: 'search_real_candidates',
           action: 'search_profiles',
           status: 'planned',
-          input: { city: 'Qingdao', rawText: 'find running partner' },
+          input: {
+            city: 'Qingdao',
+            rawText: 'find running partner',
+            candidatePreference: '公开资料里有舞蹈相关标签的女生优先',
+            candidatePreferencePolicy:
+              'public_discoverable_profiles_and_user_consented_public_tags_only',
+          },
         },
       ],
     });
@@ -634,8 +817,72 @@ describe('SocialAgentToolExecutorService', () => {
     });
     expect(candidatePool.searchSocial).toHaveBeenCalledWith(
       expect.objectContaining({
+        taskId: 100,
         city: 'Qingdao',
         rawText: 'find running partner',
+        candidatePreference: '公开资料里有舞蹈相关标签的女生优先',
+        candidatePreferencePolicy:
+          'public_discoverable_profiles_and_user_consented_public_tags_only',
+      }),
+    );
+  });
+
+  it('passes task context into candidate explanation reasoning', async () => {
+    const { service, taskRepo, socialProfiles, matchReasoner } = makeService();
+    const abortController = new AbortController();
+    const task = makeTask({ id: 100, ownerUserId: 1 });
+    taskRepo.findOne.mockResolvedValue(task);
+    socialProfiles.get
+      .mockResolvedValueOnce({
+        userId: 1,
+        nickname: 'Owner',
+        city: '青岛',
+        interestTags: ['散步'],
+      })
+      .mockResolvedValueOnce({
+        userId: 2,
+        nickname: 'Candidate',
+        city: '青岛',
+        interestTags: ['散步'],
+      });
+    matchReasoner.explain.mockResolvedValue({
+      publicReason: '都喜欢散步，适合先轻松聊聊。',
+      privateReason: '公开兴趣重合，发送邀请前需要确认。',
+      sharedPoints: ['散步'],
+      complementaryPoints: [],
+      riskWarnings: ['邀请前需要确认'],
+      suggestedOpener: '你好，要不要先聊聊散步？',
+      nextAction: '用户确认后再发送邀请。',
+      requiresUserConfirmation: true,
+      confidence: 0.8,
+      source: 'deepseek',
+    });
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.ExplainMatches,
+      {
+        candidateUserId: 2,
+        publicTags: {
+          owner: ['散步'],
+          candidate: ['散步'],
+          shared: ['散步'],
+        },
+      },
+      1,
+      { signal: abortController.signal },
+    );
+
+    expect(call.status).toBe('succeeded');
+    expect(matchReasoner.explain).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 100,
+        signal: abortController.signal,
+        ownerProfile: expect.objectContaining({ userId: 1 }),
+        candidateProfile: expect.objectContaining({ userId: 2 }),
+        publicTags: expect.objectContaining({
+          shared: ['散步'],
+        }),
       }),
     );
   });
@@ -1141,9 +1388,9 @@ describe('SocialAgentToolExecutorService', () => {
         }),
       }),
     });
-    const proposal = (nextActionInboxEvent?.metadata as
-      | Record<string, unknown>
-      | undefined)?.lifeGraphWritebackProposal;
+    const proposal = (
+      nextActionInboxEvent?.metadata as Record<string, unknown> | undefined
+    )?.lifeGraphWritebackProposal;
     expect(JSON.stringify(proposal)).not.toContain(
       'Sure, let us confirm the route and meeting point first.',
     );
@@ -1294,7 +1541,7 @@ describe('SocialAgentToolExecutorService', () => {
       handledReply: true,
       status: AgentTaskStatus.WaitingReply,
     });
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
     expect(approvals.create).toHaveBeenCalledWith(
       expect.objectContaining({
         skillName: SocialAgentToolName.ReplyMessage,
@@ -1448,6 +1695,7 @@ describe('SocialAgentToolExecutorService', () => {
       SocialAgentToolName.SendMessageToCandidate,
       {
         targetUserId: 2,
+        ...publicCandidateBoundary(2),
         text: 'Hi, want to grab coffee?',
         metadata: { confirmationSource: 'social_agent_chat' },
       },
@@ -1476,6 +1724,68 @@ describe('SocialAgentToolExecutorService', () => {
         status: 'succeeded',
       }),
     );
+  });
+
+  it('executes a candidate invite message after a send_invite approval is confirmed', async () => {
+    const { service, taskRepo, messages, approvals } = makeService();
+    const task = makeTask({
+      agentConnectionId: null,
+      permissionMode: AgentTaskPermissionMode.Confirm,
+    });
+    taskRepo.findOne.mockResolvedValue(task);
+    approvals.getById.mockResolvedValue({
+      id: 501,
+      userId: 1,
+      agentTaskId: 100,
+      status: 'approved',
+      skillName: SocialAgentToolName.SendMessageToCandidate,
+      actionType: 'send_invite',
+      payload: { targetUserId: 2 },
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    });
+    messages.startConversation.mockResolvedValue({
+      conversationId: 'conv_user',
+    });
+    messages.sendMessage.mockResolvedValue({
+      id: 'msg_user',
+      conversationId: 'conv_user',
+    });
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.SendMessageToCandidate,
+      {
+        targetUserId: 2,
+        ...publicCandidateBoundary(2),
+        text: '今晚在青岛大学附近散步吗？',
+        approvalId: 501,
+        metadata: { confirmationSource: 'social_agent_chat' },
+      },
+      1,
+    );
+
+    expect(call.status).toBe('succeeded');
+    expect(approvals.getById).toHaveBeenCalledWith(501, 1);
+    expect(messages.startConversation).toHaveBeenCalledWith(
+      1,
+      2,
+      expect.objectContaining({ agentConnectionId: null, ownerUserId: 1 }),
+    );
+    expect(messages.sendMessage).toHaveBeenCalledWith(
+      'conv_user',
+      1,
+      '今晚在青岛大学附近散步吗？',
+      expect.objectContaining({
+        agentConnectionId: null,
+        metadata: expect.objectContaining({
+          confirmationSource: 'social_agent_chat',
+        }),
+      }),
+    );
+    expect(call.output).toMatchObject({
+      success: true,
+      status: 'sent',
+    });
   });
 
   it('safely truncates long task event varchar fields while keeping full payload', async () => {
@@ -1551,6 +1861,7 @@ describe('SocialAgentToolExecutorService', () => {
       SocialAgentToolName.SendMessageToCandidate,
       {
         targetUserId: 2,
+        ...publicCandidateBoundary(2),
         text: 'hello',
         metadata: { confirmationSource: 'social_agent_chat' },
       },
@@ -1592,6 +1903,7 @@ describe('SocialAgentToolExecutorService', () => {
       SocialAgentToolName.ConnectCandidate,
       {
         targetUserId: 2,
+        ...publicCandidateBoundary(2),
         openConversation: true,
         approvalId: 501,
         metadata: { confirmationSource: 'social_agent_chat' },
@@ -1628,6 +1940,7 @@ describe('SocialAgentToolExecutorService', () => {
       SocialAgentToolName.SendMessageToCandidate,
       {
         targetUserId: 2,
+        ...publicCandidateBoundary(2),
         text: longMessage,
         metadata: { confirmationSource: 'social_agent_chat' },
       },
@@ -1675,6 +1988,7 @@ describe('SocialAgentToolExecutorService', () => {
       SocialAgentToolName.ConnectCandidate,
       {
         targetUserId: 2,
+        ...publicCandidateBoundary(2),
         openConversation: true,
         approvalId: 501,
         metadata: { confirmationSource: 'social_agent_chat' },
@@ -1713,7 +2027,11 @@ describe('SocialAgentToolExecutorService', () => {
       100,
       SocialAgentToolName.ConnectCandidate,
       {
-        candidate: { candidateUserId: 3 },
+        candidate: {
+          candidateUserId: 3,
+          publiclyDiscoverable: true,
+          ...publicCandidateBoundary(3),
+        },
         openConversation: true,
         approvalId: 501,
         metadata: { confirmationSource: 'social_agent_chat' },
@@ -1769,13 +2087,23 @@ describe('SocialAgentToolExecutorService', () => {
     const first = await service.executeToolAction(
       100,
       SocialAgentToolName.ConnectCandidate,
-      { candidateUserId: 2, openConversation: true, approvalId: 501 },
+      {
+        candidateUserId: 2,
+        ...publicCandidateBoundary(2),
+        openConversation: true,
+        approvalId: 501,
+      },
       1,
     );
     const second = await service.executeToolAction(
       100,
       SocialAgentToolName.ConnectCandidate,
-      { candidateUserId: 3, openConversation: true, approvalId: 502 },
+      {
+        candidateUserId: 3,
+        ...publicCandidateBoundary(3),
+        openConversation: true,
+        approvalId: 502,
+      },
       1,
     );
 
@@ -1920,7 +2248,11 @@ describe('SocialAgentToolExecutorService', () => {
     const call = await service.executeToolAction(
       100,
       SocialAgentToolName.AddFriend,
-      { targetUserId: 2, openConversation: true },
+      {
+        targetUserId: 2,
+        ...publicCandidateBoundary(2),
+        openConversation: true,
+      },
       1,
     );
 
@@ -1973,6 +2305,45 @@ describe('SocialAgentToolExecutorService', () => {
         riskLevel: 'high',
       }),
     );
+    expect(activities.create).not.toHaveBeenCalled();
+  });
+
+  it('does not execute a high-risk action with an unapproved approval credential', async () => {
+    const { service, taskRepo, activities, approvals } = makeService();
+    taskRepo.findOne.mockResolvedValue(
+      makeTask({
+        agentConnectionId: 7,
+        permissionMode: AgentTaskPermissionMode.LimitedAuto,
+      }),
+    );
+    approvals.getById.mockResolvedValue({
+      id: 501,
+      userId: 1,
+      agentTaskId: 100,
+      status: 'pending',
+      skillName: SocialAgentToolName.CreateActivity,
+      actionType: 'create_activity',
+      payload: { targetUserId: 2 },
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    });
+
+    const call = await service.executeToolAction(
+      100,
+      SocialAgentToolName.CreateActivity,
+      {
+        targetUserId: 2,
+        title: 'Saturday easy run',
+        city: 'Qingdao',
+        approvalId: 501,
+      },
+      1,
+    );
+
+    expect(call.status).toBe('succeeded');
+    expect(call.output).toMatchObject({
+      status: 'pending_approval',
+      pendingApproval: true,
+    });
     expect(activities.create).not.toHaveBeenCalled();
   });
 
@@ -2061,6 +2432,7 @@ describe('SocialAgentToolExecutorService', () => {
   it('drafts an opener as a confirmation-ready Meet Loop step only', async () => {
     const { service, taskRepo, ai, messages, friends, activities } =
       makeService();
+    const abortController = new AbortController();
     taskRepo.findOne.mockResolvedValue(
       makeTask({ permissionMode: AgentTaskPermissionMode.Assist }),
     );
@@ -2076,9 +2448,15 @@ describe('SocialAgentToolExecutorService', () => {
         candidate: { targetUserId: 2, displayName: '小林' },
       },
       1,
+      { signal: abortController.signal },
     );
 
     expect(call.status).toBe('succeeded');
+    expect(ai.generateInviteMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ activityType: 'running' }),
+      expect.objectContaining({ targetUserId: 2, displayName: '小林' }),
+      { signal: abortController.signal },
+    );
     expect(call.output).toMatchObject({
       message: expect.stringContaining('公共场所'),
       meetLoopStage: 'opener_drafted',
@@ -2105,7 +2483,11 @@ describe('SocialAgentToolExecutorService', () => {
           toolName: SocialAgentToolName.SendMessage,
           action: 'send_message',
           status: 'planned',
-          input: { targetUserId: 2, text: 'Hi' },
+          input: {
+            targetUserId: 2,
+            ...publicCandidateBoundary(2),
+            text: 'Hi',
+          },
         },
       ],
     });
@@ -2466,6 +2848,11 @@ describe('SocialAgentToolExecutorService', () => {
       'find someone to run this weekend',
       1,
       agent,
+      expect.objectContaining({
+        agentTaskId: 100,
+        source: 'social_agent_tool_executor',
+        taskContext: null,
+      }),
     );
   });
 
@@ -2497,6 +2884,21 @@ describe('SocialAgentToolExecutorService', () => {
         mode: 'ai_draft',
         rawText: '今晚想找人一起喝咖啡，不想太尴尬',
         goal: '今晚想找人一起喝咖啡，不想太尴尬',
+        taskContext: {
+          taskSlots: {
+            activity: { value: '咖啡', state: 'completed' },
+            time_window: { value: '今天晚上', state: 'completed' },
+            location_text: { value: '市南区', state: 'completed' },
+          },
+          taskSlotSummary: {
+            activity: '咖啡',
+            time_window: '今天晚上',
+            location_text: '市南区',
+          },
+          knownTaskSlotConstraints: {
+            doNotAskAgainFor: ['activity', 'time_window', 'location_text'],
+          },
+        },
       },
       1,
     );
@@ -2511,6 +2913,16 @@ describe('SocialAgentToolExecutorService', () => {
       expect.objectContaining({
         agentTaskId: 100,
         source: 'social_agent_tool_executor',
+        taskContext: expect.objectContaining({
+          taskSlots: expect.objectContaining({
+            activity: expect.objectContaining({ value: '咖啡' }),
+            time_window: expect.objectContaining({ value: '今天晚上' }),
+            location_text: expect.objectContaining({ value: '市南区' }),
+          }),
+          knownTaskSlotConstraints: expect.objectContaining({
+            doNotAskAgainFor: ['activity', 'time_window', 'location_text'],
+          }),
+        }),
       }),
     );
     expect(approvals.create).not.toHaveBeenCalled();

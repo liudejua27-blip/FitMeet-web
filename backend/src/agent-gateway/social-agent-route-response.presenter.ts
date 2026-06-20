@@ -9,6 +9,7 @@ import { socialAgentFitnessMathReply } from './social-agent-fitness-math-reply';
 import type { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
 import { hasSocialAgentSearchContext } from './social-agent-candidate-context.presenter';
 import { evaluateSocialOpportunityClarification } from './social-agent-opportunity-clarification';
+import { readSocialAgentTaskMemory } from './social-agent-memory.util';
 import type {
   SocialAgentAsyncRunSnapshot,
   SocialAgentIntentAction,
@@ -61,6 +62,10 @@ export function socialAgentAssistantMessageForRoute(input: {
       message,
     });
     if (!clarification.complete) return clarification.assistantMessage;
+    const confirmed = confirmedSocialSearchContext(task);
+    if (confirmed.length > 0) {
+      return `明白，我会按已确认的：${confirmed.join('、')} 继续筛选公开可发现的人。不会自动发送消息、加好友或发布约练。`;
+    }
     const city = route.entities.city ? `${route.entities.city} ` : '';
     const activity = route.entities.activityType
       ? `${route.entities.activityType} `
@@ -96,26 +101,32 @@ export function shouldUseSocialAgentLlmDirectReply(
 
 export function socialAgentAlphaNeedsClarification(
   alphaTurn?: FitMeetAlphaTurnDecision,
+  task?: AgentTask,
 ): boolean {
   const intent = isRecord(alphaTurn?.structuredIntent)
     ? alphaTurn?.structuredIntent
     : {};
-  return (
+  const needsClarification =
     intent.requiresSearch === false &&
-    cleanDisplayText(intent.readiness, '') === 'clarify'
-  );
+    cleanDisplayText(intent.readiness, '') === 'clarify';
+  if (!needsClarification) return false;
+  const question = cleanDisplayText(intent.clarifyingQuestion, '');
+  if (task && shouldSuppressAlphaClarification(task, question)) return false;
+  return true;
 }
 
 export function socialAgentAlphaClarifyingMessage(
   alphaTurn?: FitMeetAlphaTurnDecision,
   safeAssistantMessage?: (question: string, fallback: string) => string,
+  task?: AgentTask,
 ): string {
   const intent = isRecord(alphaTurn?.structuredIntent)
     ? alphaTurn?.structuredIntent
     : {};
   const question = cleanDisplayText(intent.clarifyingQuestion, '');
-  const fallback =
-    '可以。我先帮你找轻松一点、不需要太强社交压力的人。你更想今晚附近试试，还是周末下午找个时间？';
+  const fallback = task
+    ? alphaClarificationFallbackFromTask(task)
+    : '可以。我先帮你找轻松一点、不需要太强社交压力的人。你可以告诉我时间、地点或活动偏好，我会基于已知信息继续推进。';
   return safeAssistantMessage?.(question, fallback) || question || fallback;
 }
 
@@ -127,6 +138,169 @@ function casualChatReply(message: string): string {
     return '可以先说场景、城市、时间和边界，比如“青岛周末拍照搭子，不要夜间见面”。我会先记住你的偏好，等你明确要搜索时再匹配候选人。';
   }
   return '你好，我在。你可以随便聊，也可以补充偏好；等你明确说要找人、找活动或找搭子时，我再开始搜索。';
+}
+
+function confirmedSocialSearchContext(task: AgentTask): string[] {
+  const taskMemory = readSocialAgentTaskMemory(task);
+  const slots = isRecord(taskMemory.taskSlots) ? taskMemory.taskSlots : {};
+  const labels: Array<[string, string]> = [
+    ['time_window', '时间'],
+    ['activity', '活动'],
+    ['location_text', '地点'],
+    ['geo_area', '区域'],
+    ['candidate_preference', '候选偏好'],
+    ['safety_boundary', '安全边界'],
+  ];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (key: string, label: string, value: string) => {
+    const cleanValue = cleanDisplayText(value, '');
+    if (!cleanValue || seen.has(key)) return;
+    seen.add(key);
+    out.push(`${label}：${cleanValue}`);
+  };
+  for (const [key, label] of labels) {
+    const raw = slots[key];
+    if (!isRecord(raw)) continue;
+    const state = cleanDisplayText(raw.state, '');
+    if (
+      !['answered', 'confirmed', 'completed', 'modified'].includes(state)
+    ) {
+      continue;
+    }
+    push(key, label, cleanDisplayText(raw.value, ''));
+  }
+  const constraints: Record<string, unknown> = isRecord(
+    taskMemory.knownTaskSlotConstraints,
+  )
+    ? taskMemory.knownTaskSlotConstraints
+    : {};
+  const knownSlots = Array.isArray(constraints['knownSlots'])
+    ? constraints['knownSlots']
+    : [];
+  const doNotAskAgainFor = Array.isArray(constraints['doNotAskAgainFor'])
+    ? new Set(
+        constraints['doNotAskAgainFor']
+          .map((key) => cleanDisplayText(key, ''))
+          .filter(Boolean),
+      )
+    : new Set<string>();
+  const labelMap = Object.fromEntries(labels);
+  for (const raw of knownSlots) {
+    if (!isRecord(raw)) continue;
+    const key = cleanDisplayText(raw.key, '');
+    const label = labelMap[key];
+    if (!label) continue;
+    const state = cleanDisplayText(raw.state, '');
+    if (
+      !doNotAskAgainFor.has(key) &&
+      !['answered', 'confirmed', 'completed', 'modified'].includes(state)
+    ) {
+      continue;
+    }
+    push(key, label, cleanDisplayText(raw.value, ''));
+  }
+  return out.slice(0, 5);
+}
+
+function shouldSuppressAlphaClarification(
+  task: AgentTask,
+  question: string,
+): boolean {
+  if (!hasCompletedCoreSocialSlots(task)) return false;
+  const cleanQuestion = cleanDisplayText(question, '');
+  if (!cleanQuestion) return true;
+  const knownKeys = completedSocialSlotKeys(task);
+  const asksKnownTime =
+    /(今晚|今天晚上|周末|下午|上午|中午|晚上|什么时候|哪个时间|时间)/.test(
+      cleanQuestion,
+    ) && knownKeys.has('time_window');
+  const asksKnownLocation =
+    /(哪里|地点|位置|附近|区域|城市|校|大学|商圈)/.test(cleanQuestion) &&
+    (knownKeys.has('location_text') || knownKeys.has('geo_area'));
+  const asksKnownActivity =
+    /(活动|做什么|运动|散步|跑步|羽毛球|篮球|健身|项目)/.test(
+      cleanQuestion,
+    ) && knownKeys.has('activity');
+  const asksOnlyKnownCoreSlots =
+    asksKnownTime || asksKnownLocation || asksKnownActivity;
+  const asksUnknownCandidatePreference =
+    /(什么样的人|候选|偏好|男生|女生|舞蹈|标签)/.test(cleanQuestion) &&
+    !knownKeys.has('candidate_preference');
+  return asksOnlyKnownCoreSlots && !asksUnknownCandidatePreference;
+}
+
+function alphaClarificationFallbackFromTask(task: AgentTask): string {
+  const confirmed = confirmedSocialSearchContext(task);
+  const missing = missingCoreSocialSlotLabels(task);
+  if (confirmed.length > 0 && missing.length === 0) {
+    return `明白，我已记住：${confirmed.join('、')}。如果这些条件不变，我会按公开可发现资料继续筛选；发送消息、加好友或发布约练前都会先让你确认。`;
+  }
+  if (confirmed.length > 0) {
+    return `我已记住：${confirmed.join('、')}。还差 ${missing.join('、')}，补齐后我就能继续筛选公开可发现的人。`;
+  }
+  return '可以。我会先帮你整理需求。你可以补充时间、地点和活动，我会基于已知信息继续推进。';
+}
+
+function hasCompletedCoreSocialSlots(task: AgentTask): boolean {
+  const keys = completedSocialSlotKeys(task);
+  return (
+    keys.has('time_window') &&
+    keys.has('activity') &&
+    (keys.has('location_text') || keys.has('geo_area'))
+  );
+}
+
+function missingCoreSocialSlotLabels(task: AgentTask): string[] {
+  const keys = completedSocialSlotKeys(task);
+  const missing: string[] = [];
+  if (!keys.has('time_window')) missing.push('时间');
+  if (!keys.has('activity')) missing.push('活动');
+  if (!keys.has('location_text') && !keys.has('geo_area')) {
+    missing.push('地点');
+  }
+  return missing;
+}
+
+function completedSocialSlotKeys(task: AgentTask): Set<string> {
+  const taskMemory = readSocialAgentTaskMemory(task);
+  const keys = new Set<string>();
+  const visit = (key: string, raw: unknown) => {
+    if (!isRecord(raw)) return;
+    const state = cleanDisplayText(raw.state, '');
+    const value = cleanDisplayText(raw.value, '');
+    if (
+      value &&
+      ['answered', 'confirmed', 'completed', 'modified'].includes(state)
+    ) {
+      keys.add(key);
+    }
+  };
+  const taskSlots = isRecord(taskMemory.taskSlots) ? taskMemory.taskSlots : {};
+  for (const [key, raw] of Object.entries(taskSlots)) visit(key, raw);
+  const constraints: Record<string, unknown> = isRecord(
+    taskMemory.knownTaskSlotConstraints,
+  )
+    ? taskMemory.knownTaskSlotConstraints
+    : {};
+  const knownSlots = Array.isArray(constraints.knownSlots)
+    ? constraints.knownSlots
+    : [];
+  const doNotAskAgainFor = Array.isArray(constraints.doNotAskAgainFor)
+    ? new Set(
+        constraints.doNotAskAgainFor
+          .map((key) => cleanDisplayText(key, ''))
+          .filter(Boolean),
+      )
+    : new Set<string>();
+  for (const raw of knownSlots) {
+    if (!isRecord(raw)) continue;
+    const key = cleanDisplayText(raw.key, '');
+    if (!key || !doNotAskAgainFor.has(key)) continue;
+    const value = cleanDisplayText(raw.value, '');
+    if (value) keys.add(key);
+  }
+  return keys;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

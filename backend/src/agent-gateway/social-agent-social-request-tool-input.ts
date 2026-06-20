@@ -9,6 +9,7 @@ export type SocialAgentSocialRequestToolInput = {
   rawText: string;
   dto: CreateSocialRequestDto;
   socialRequestId: number | undefined;
+  taskContext: Record<string, unknown> | null;
   shouldCreateDraft: boolean;
   shouldCreateFromNaturalLanguage: boolean;
   shouldSyncPublicIntent: boolean;
@@ -25,6 +26,9 @@ export function buildSocialAgentSocialRequestToolInput(
   const socialRequestId = toolInput.number(
     input.socialRequestId ?? input.requestId,
   );
+  const taskContext = toolInput.isRecord(input.taskContext)
+    ? (input.taskContext as Record<string, unknown>)
+    : null;
   const dto: CreateSocialRequestDto = {
     ...(input as Partial<CreateSocialRequestDto>),
     type: toolInput.socialRequestType(input.type) ?? SocialRequestType.Custom,
@@ -46,6 +50,7 @@ export function buildSocialAgentSocialRequestToolInput(
     rawText,
     dto,
     socialRequestId,
+    taskContext,
     shouldCreateDraft: mode === 'ai_draft' || mode === 'draft_only',
     shouldCreateFromNaturalLanguage:
       !toolInput.string(input.type) && Boolean(rawText),

@@ -47,7 +47,7 @@ export class AgentObservabilityService {
     traceId: string;
     runId: string;
     taskId: number | null;
-    status: 'started' | 'completed' | 'failed';
+    status: 'started' | 'completed' | 'approval_required' | 'failed';
     latencyMs?: number | null;
     failureReason?: string | null;
   }): void {

@@ -130,6 +130,7 @@ export function buildApprovalActions(
     });
     actions.push({
       type: 'send_message',
+      actionType: 'send_invite',
       label: `确认发送给 ${candidate.nickname}`,
       riskLevel: 'medium',
       requiresConfirmation: true,
@@ -139,7 +140,7 @@ export function buildApprovalActions(
       targetUserId,
     });
     actions.push({
-      type: 'add_friend',
+      type: 'connect_candidate',
       label: `加好友并聊天：${candidate.nickname}`,
       riskLevel: 'medium',
       requiresConfirmation: true,

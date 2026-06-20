@@ -162,6 +162,7 @@ describe('SocialAgentInitialSearchQueueService', () => {
         idempotencyKey: 'task-key-101',
       },
       executeRun: expect.any(Function),
+      signal: null,
       visibleStepLabel: expect.any(Function),
     });
 
@@ -178,6 +179,7 @@ describe('SocialAgentInitialSearchQueueService', () => {
       7,
       { goal: '后台搜索' },
       emit,
+      { signal: null },
     );
     expect(runInput.visibleStepLabel('search', '正在搜索候选人')).toBe(
       '用户可见：正在搜索候选人',

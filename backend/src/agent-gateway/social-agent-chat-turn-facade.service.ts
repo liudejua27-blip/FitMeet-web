@@ -43,7 +43,7 @@ export class SocialAgentChatTurnFacadeService {
   ) {
     const callbacks = this.turnCallbacks.forOwner(ownerUserId);
     // prettier-ignore
-    return this.routeTurns.handleMessage({ ownerUserId, body, emit, signal: options.signal, ...callbacks });
+    return this.routeTurns.handleMessage({ ownerUserId, body, emit, signal: options.signal, streamOptions: options, ...callbacks });
   }
 
   performCardAction(

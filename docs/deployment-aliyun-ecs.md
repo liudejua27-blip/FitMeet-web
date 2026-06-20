@@ -116,7 +116,8 @@ Required values include:
 - `REDIS_PASSWORD`
 - `JWT_SECRET`
 - object storage credentials for uploads; avatar upload and feed image E2E require a real OSS/S3 bucket. If S3/R2 uses a custom endpoint, set `S3_PUBLIC_BASE_URL` to the HTTPS public media domain.
-- `DEEPSEEK_API_KEY`, `DEEPSEEK_CHAT_MODEL=deepseek-v4-pro`, `DEEPSEEK_FAST_MODEL=deepseek-v4-flash`
+- `DEEPSEEK_API_KEY`, `DEEPSEEK_CHAT_MODEL=deepseek-v4-pro`, `DEEPSEEK_FAST_MODEL=deepseek-v4-flash`, `AGENT_PLANNER_MODEL=deepseek-v4-pro`
+- Agent 智能策略：`SOCIAL_AGENT_MODEL_ROUTING_MODE=quality`, `SOCIAL_AGENT_INTENT_ROUTER_MODE=llm_first`, `SOCIAL_AGENT_CONTEXT_TURN_LIMIT=80`, `SOCIAL_AGENT_PLANNER_TIMEOUT_MS=25000`, `SOCIAL_AGENT_INTENT_TIMEOUT_MS=25000`, `SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS=30000`, `SOCIAL_AGENT_FINAL_RESPONSE_TIMEOUT_MS=30000`, `SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS=20000`
 - First launch can keep `AGENT_OBSERVABILITY_ALERTS_ENABLED=false`. When traffic grows, set it to `true` and configure `AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL`, `AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN`, and `AGENT_OBSERVABILITY_ALERT_COOLDOWN_MS=300000`.
 
 Copy SSL files:
@@ -151,12 +152,18 @@ pnpm -C backend install --frozen-lockfile
 pnpm -C backend run check:prod-env -- ../.env.production
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d postgres redis mongo zookeeper kafka
 docker compose -f docker-compose.prod.yml --env-file .env.production build backend subagent-worker
-docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm uploads:check:prod
-docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm migration:run:prod
-docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm db:check-critical-tables:prod
+./scripts/ecs-backend-pnpm.sh -- uploads:check:prod
+./scripts/ecs-backend-pnpm.sh -- migration:run:prod
+./scripts/ecs-backend-pnpm.sh -- db:check-critical-tables:prod
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d --no-build backend subagent-worker nginx
 docker compose -f docker-compose.prod.yml --env-file .env.production ps
 ```
+
+Use `scripts/ecs-backend-pnpm.sh` for every one-off backend command after the
+runtime images are built. It runs inside the production Compose backend service
+and pins `pnpm@10.30.3` through Corepack. Do not replace it with host
+`pnpm -C backend ...`; on Node 20 hosts Corepack can otherwise activate a newer
+pnpm and fail before the production command starts.
 
 Or use the packaged deploy script:
 
@@ -209,10 +216,10 @@ Prepare Agent smoke data inside the production Docker network without
 `ts-node`:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm seed:agent-smoke:prod:dry-run
+./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod:dry-run
 
 AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true \
-docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm seed:agent-smoke:prod -- --allow-production
+./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod -- --allow-production
 ```
 
 The Agent smoke seed refuses to write in `NODE_ENV=production` unless
@@ -346,8 +353,8 @@ Run migrations explicitly before app startup if you are not using the deploy
 script:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm migration:run:prod
-docker compose -f docker-compose.prod.yml --env-file .env.production run --rm --no-deps backend pnpm db:check-critical-tables:prod
+./scripts/ecs-backend-pnpm.sh -- migration:run:prod
+./scripts/ecs-backend-pnpm.sh -- db:check-critical-tables:prod
 ```
 
 ## Verification
@@ -365,6 +372,34 @@ BASE_URL=https://www.ourfitmeet.cn \
 API_BASE_URL=https://www.ourfitmeet.cn/api \
 FITMEET_LAUNCH_TOPOLOGY=ecs \
 ./scripts/verify-production.sh
+```
+
+For the specific Agent/Discover regression gate from the Social Codex launch,
+run the goal verifier after `/api/health` shows the newly installed release.
+It fails if the public API is still serving an older build, Discover has no
+public social-intent supply, the old fake 128-person copy is present, or the
+production Agent browser QA detects ordinary-chat social leakage, stale recovery
+copy, account-menu blocking, or socialized ordinary thread titles:
+
+```bash
+EXPECTED_RELEASE_COMMIT="$(node -e 'const fs=require("fs");const r=JSON.parse(fs.readFileSync("release.json","utf8"));process.stdout.write(String(r.commit||"unknown"))')"
+EXPECTED_RELEASE_BUILT_AT="$(node -e 'const fs=require("fs");const r=JSON.parse(fs.readFileSync("release.json","utf8"));process.stdout.write(String(r.builtAt||""))')"
+
+BASE_URL=https://www.ourfitmeet.cn \
+API_BASE_URL=https://www.ourfitmeet.cn/api \
+EXPECTED_RELEASE_COMMIT="$EXPECTED_RELEASE_COMMIT" \
+EXPECTED_RELEASE_BUILT_AT="$EXPECTED_RELEASE_BUILT_AT" \
+FITMEET_AGENT_BROWSER_QA_EMAIL=agent-smoke-owner@ourfitmeet.cn \
+FITMEET_AGENT_BROWSER_QA_PASSWORD='***' \
+./scripts/verify-agent-goal-production.sh
+```
+
+If this verifier fails because `/public/social-intents` is empty on a fresh
+database, seed one safe smoke intent and rerun it:
+
+```bash
+AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true \
+./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod -- --allow-production
 ```
 
 With prepared staging users:

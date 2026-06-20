@@ -30,7 +30,9 @@ export class SocialAgentInitialSearchQueueService {
     ownerUserId: number;
     task: AgentTask;
     goal: string;
+    signal?: AbortSignal | null;
   }): Promise<SocialAgentAsyncRunSnapshot> {
+    this.assertNotAborted(input.signal);
     const { ownerUserId, task, goal } = input;
     const idempotencyKey =
       cleanDisplayText(task.idempotencyKey, '') ||
@@ -52,27 +54,40 @@ export class SocialAgentInitialSearchQueueService {
       waitingFor: 'search_results',
     });
     await this.taskRepo.save(task);
-    return this.runQueued(ownerUserId, {
-      goal,
-      permissionMode: task.permissionMode ?? AgentTaskPermissionMode.Confirm,
-      idempotencyKey,
-    });
+    this.assertNotAborted(input.signal);
+    return this.runQueued(
+      ownerUserId,
+      {
+        goal,
+        permissionMode: task.permissionMode ?? AgentTaskPermissionMode.Confirm,
+        idempotencyKey,
+      },
+      { signal: input.signal ?? null },
+    );
   }
 
   private runQueued(
     ownerUserId: number,
     body: SocialAgentChatRunBody,
+    options: { signal?: AbortSignal | null } = {},
   ): Promise<SocialAgentAsyncRunSnapshot> {
     return this.queuedRuns.runQueued({
       ownerUserId,
       body,
       executeRun: (runBody, emit) =>
-        this.runOrchestrator.run(ownerUserId, runBody, emit),
+        this.runOrchestrator.run(ownerUserId, runBody, emit, {
+          signal: options.signal ?? null,
+        }),
+      signal: options.signal ?? null,
       visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
     });
   }
 
   private userVisibleStepLabel(id: string, label: string): string {
     return this.tonePolicy?.userStatus(id, label) ?? label;
+  }
+
+  private assertNotAborted(signal?: AbortSignal | null): void {
+    if (signal?.aborted) throw new Error('Subagent worker job cancelled.');
   }
 }

@@ -53,12 +53,12 @@ export class SocialAgentInboxToolService {
   ): Promise<unknown> {
     const agentConnectionId =
       task.agentConnectionId ?? this.toolInput.number(input.agentConnectionId);
-    if (!agentConnectionId) {
-      throw new BadRequestException('agentConnectionId is required');
-    }
 
     const conversationId = this.toolInput.string(input.conversationId);
     if (conversationId) {
+      if (!agentConnectionId) {
+        throw new BadRequestException('agentConnectionId is required');
+      }
       return {
         messages: await this.messages.getAgentInboxMessages(
           conversationId,
@@ -71,11 +71,17 @@ export class SocialAgentInboxToolService {
     }
 
     return {
-      events: await this.messages.getAgentInboxEvents(agentConnectionId, {
-        limit: this.toolInput.number(input.limit) ?? undefined,
-        unreadOnly: this.toolInput.bool(input.unreadOnly) ?? undefined,
-        eventType: this.toolInput.string(input.eventType) || undefined,
-      }),
+      events: agentConnectionId
+        ? await this.messages.getAgentInboxEvents(agentConnectionId, {
+            limit: this.toolInput.number(input.limit) ?? undefined,
+            unreadOnly: this.toolInput.bool(input.unreadOnly) ?? undefined,
+            eventType: this.toolInput.string(input.eventType) || undefined,
+          })
+        : await this.messages.getAgentInboxEventsForOwner(task.ownerUserId, {
+            limit: this.toolInput.number(input.limit) ?? undefined,
+            unreadOnly: this.toolInput.bool(input.unreadOnly) ?? undefined,
+            eventType: this.toolInput.string(input.eventType) || undefined,
+          }),
     };
   }
 

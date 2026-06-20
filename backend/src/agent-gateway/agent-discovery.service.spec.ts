@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   AgentAutonomyLevel,
   AgentProfile,
@@ -83,6 +85,17 @@ function makeHarness() {
 }
 
 describe('AgentDiscoveryService approval gating', () => {
+  it('does not couple outbound social actions to generic autonomy auto-execution', () => {
+    const source = readFileSync(
+      join(__dirname, 'agent-discovery.service.ts'),
+      'utf8',
+    );
+
+    expect(source).not.toContain('canAutoExecute');
+    expect(source).toContain('a2a_requires_approval');
+    expect(source).toContain('a2a_invite_requires_approval');
+  });
+
   it('creates a real approval request instead of sending agent-initiated messages directly', async () => {
     const harness = makeHarness();
     harness.profiles.getDiscoverable.mockResolvedValue(
@@ -155,7 +168,7 @@ describe('AgentDiscoveryService approval gating', () => {
         userId: 7,
         agentConnectionId: 77,
         type: ApprovalType.ContactRequest,
-        actionType: 'add_friend',
+        actionType: 'connect_candidate',
         riskLevel: ApprovalRiskLevel.Medium,
         payload: expect.objectContaining({
           fromAgentId: 8,

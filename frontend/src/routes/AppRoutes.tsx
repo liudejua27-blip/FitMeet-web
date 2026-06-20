@@ -5,6 +5,8 @@ import { ProtectedRoute } from '../components/ProtectedRoute';
 import { NotFoundPage } from '../pages/NotFoundPage';
 import { navigateToDiscoverWithScrollReset } from '../lib/scrollNavigation';
 
+const ENABLE_INTERNAL_DEMO_ROUTES = import.meta.env.DEV;
+
 const PlatformPage = lazy(() =>
   import('../pages/PlatformPage').then((m) => ({ default: m.PlatformPage })),
 );
@@ -73,12 +75,18 @@ const PublicIntentDetailPage = lazy(() =>
     default: m.PublicIntentDetailPage,
   })),
 );
-const DemoAgentSocialLoopPage = lazy(() =>
-  import('../pages/DemoAgentSocialLoopPage').then((m) => ({ default: m.DemoAgentSocialLoopPage })),
-);
-const DemoInvestorPage = lazy(() =>
-  import('../pages/DemoInvestorPage').then((m) => ({ default: m.DemoInvestorPage })),
-);
+const DemoAgentSocialLoopPage = ENABLE_INTERNAL_DEMO_ROUTES
+  ? lazy(() =>
+      import('../pages/DemoAgentSocialLoopPage').then((m) => ({
+        default: m.DemoAgentSocialLoopPage,
+      })),
+    )
+  : null;
+const DemoInvestorPage = ENABLE_INTERNAL_DEMO_ROUTES
+  ? lazy(() =>
+      import('../pages/DemoInvestorPage').then((m) => ({ default: m.DemoInvestorPage })),
+    )
+  : null;
 const ProfilePage = lazy(() =>
   import('../pages/ProfilePage').then((m) => ({ default: m.ProfilePage })),
 );
@@ -127,9 +135,6 @@ const SportsPage = lazy(() =>
   import('../pages/SportsPage').then((m) => ({ default: m.SportsPage })),
 );
 
-const ENABLE_DEMO_ROUTES =
-  import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO_ROUTES === 'true';
-
 function PageLoader() {
   return (
     <div
@@ -177,7 +182,7 @@ export function AppRoutes() {
         <Route path="/demo" element={<PlatformPage page="demo" />} />
         <Route path="/life-graph" element={<PlatformPage page="lifeGraph" />} />
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/legacy-home" element={<PlatformPage page="home" />} />
+        <Route path="/legacy-home" element={<Navigate to="/" replace />} />
         <Route path="/agent" element={<AgentWorkspacePage view="home" />} />
         <Route path="/agent/chat" element={<AgentWorkspacePage view="chat" />} />
         <Route path="/agent/chat/:taskId" element={<AgentWorkspacePage view="chat" />} />
@@ -294,7 +299,7 @@ export function AppRoutes() {
             </ProtectedRoute>
           }
         />
-        {ENABLE_DEMO_ROUTES ? (
+        {ENABLE_INTERNAL_DEMO_ROUTES && DemoAgentSocialLoopPage && DemoInvestorPage ? (
           <>
             <Route path="/internal/demo/agent-social-loop" element={<DemoAgentSocialLoopPage />} />
             <Route path="/internal/demo/investor" element={<DemoInvestorPage />} />

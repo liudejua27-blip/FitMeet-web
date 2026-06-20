@@ -56,6 +56,32 @@ describe('SocialAgentTaskMemoryService', () => {
     ).toBe(true);
   });
 
+  it('uses the unified context window for current task tool-call memory', () => {
+    const configured = new SocialAgentTaskMemoryService(
+      new SocialAgentToolInputParserService(),
+      {
+        get: (key: string) =>
+          key === 'SOCIAL_AGENT_CONTEXT_TURN_LIMIT' ? '40' : undefined,
+      } as never,
+    );
+    const memory = configured.currentTaskMemory(
+      makeTask({
+        toolCalls: Array.from({ length: 88 }, (_, index) => ({
+          id: `tool-${index + 1}`,
+          name: 'search_public_candidates',
+        })),
+      }),
+    );
+
+    expect(memory.recentToolCalls).toHaveLength(80);
+    expect(memory.recentToolCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'tool-9' }),
+        expect.objectContaining({ id: 'tool-88' }),
+      ]),
+    );
+  });
+
   it('records conversation and sent message memory without dropping existing fields', () => {
     const task = makeTask({
       memory: {

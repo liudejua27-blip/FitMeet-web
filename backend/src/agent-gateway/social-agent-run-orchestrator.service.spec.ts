@@ -50,10 +50,20 @@ describe('SocialAgentRunOrchestratorService thread/session binding', () => {
         result,
       }),
     };
+    const messageLog = {
+      recordUserMessage: jest.fn().mockResolvedValue(undefined),
+      recordAssistantRunMessage: jest.fn().mockResolvedValue(undefined),
+    };
     const service = new SocialAgentRunOrchestratorService(
       taskLifecycle as never,
       mainAgentTurn as never,
       { run: jest.fn() } as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      messageLog as never,
     );
     const emit = jest.fn();
 
@@ -77,6 +87,15 @@ describe('SocialAgentRunOrchestratorService thread/session binding', () => {
       'agent-task:202',
     );
     expect(taskLifecycle.createOrReuseTask).not.toHaveBeenCalled();
+    expect(messageLog.recordUserMessage).toHaveBeenCalledWith(
+      task,
+      '周末下午继续找青岛大学附近散步搭子',
+    );
+    expect(messageLog.recordAssistantRunMessage).toHaveBeenCalledWith(
+      task,
+      '我会在这个对话里继续。',
+      result,
+    );
     expect(mainAgentTurn.handleRunTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         ownerUserId: 7,
@@ -89,5 +108,81 @@ describe('SocialAgentRunOrchestratorService thread/session binding', () => {
       taskId: 202,
       status: AgentTaskStatus.AwaitingFeedback,
     });
+  });
+
+  it('records the final stream-user assistant result into task memory', async () => {
+    const task = makeTask(303);
+    const taskLifecycle = {
+      ensureConversationTask: jest.fn().mockResolvedValue(task),
+      createOrReuseTask: jest.fn(),
+    };
+    const finalResult = {
+      taskId: 303,
+      status: AgentTaskStatus.AwaitingFeedback,
+      visibleSteps: [],
+      assistantMessage: '我已按你的时间和地点整理了 3 个公开可发现候选。',
+      socialRequestDraft: null,
+      candidates: [
+        {
+          userId: 22,
+          nickname: '青岛散步搭子',
+          city: '青岛',
+          score: 88,
+          reasons: ['周末下午也方便', '偏好低强度散步'],
+        },
+      ],
+      approvalRequiredActions: [],
+      events: [],
+      cards: [],
+    };
+    const mainAgentTurn = {
+      handleRunTurn: jest.fn().mockResolvedValue({
+        task,
+        result: null,
+        alphaTurn: null,
+      }),
+    };
+    const runRecommendations = {
+      run: jest.fn().mockResolvedValue({
+        task,
+        result: finalResult,
+      }),
+    };
+    const messageLog = {
+      recordUserMessage: jest.fn().mockResolvedValue(undefined),
+      recordAssistantRunMessage: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new SocialAgentRunOrchestratorService(
+      taskLifecycle as never,
+      mainAgentTurn as never,
+      runRecommendations as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      messageLog as never,
+    );
+
+    await expect(
+      service.run(7, {
+        goal: '可以，帮我找人',
+        taskId: 303,
+        clientContext: { threadId: 'agent-task:303' },
+      }),
+    ).resolves.toBe(finalResult);
+
+    expect(runRecommendations.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        task,
+        goal: '可以，帮我找人',
+      }),
+    );
+    expect(messageLog.recordAssistantRunMessage).toHaveBeenCalledWith(
+      task,
+      '我已按你的时间和地点整理了 3 个公开可发现候选。',
+      finalResult,
+    );
   });
 });

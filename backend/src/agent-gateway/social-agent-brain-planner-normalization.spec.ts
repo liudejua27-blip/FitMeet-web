@@ -120,6 +120,21 @@ describe('social agent brain planner normalization', () => {
     ).toEqual(['search_public_intents']);
   });
 
+  it('canonicalizes model-friendly conversation history aliases into the executable message read tool', () => {
+    expect(
+      normalizeSocialAgentBrainPlannedTools({
+        intent: 'casual_chat',
+        availableTools,
+        tools: [{ name: 'get_conversation_history', arguments: {} }],
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        name: 'get_conversation_messages',
+        arguments: {},
+      }),
+    ]);
+  });
+
   it('keeps action tools only for explicit action requests', () => {
     expect(
       normalizeSocialAgentBrainPlannedTools({

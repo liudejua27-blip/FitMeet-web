@@ -31,7 +31,9 @@ export class SocialAgentReplanFacadeService {
     ownerUserId: number,
     taskId: number,
     body: SocialAgentChatReplanRunBody,
+    options: { signal?: AbortSignal | null } = {},
   ): Promise<SocialAgentAsyncRunSnapshot> {
+    this.assertNotAborted(options.signal);
     let task = await this.taskLifecycle.assertTaskOwner(taskId, ownerUserId);
     const userMessage = cleanDisplayText(body.userMessage, '').trim();
     const followUp = userMessage
@@ -39,6 +41,7 @@ export class SocialAgentReplanFacadeService {
       : this.readLatestFollowUpContext(task);
     if (!followUp) throw new BadRequestException('请输入补充要求');
     task = followUp.task;
+    this.assertNotAborted(options.signal);
 
     const runId = createSocialAgentRunId();
     const queuedRun = await this.runState.queueReplanRun({
@@ -56,6 +59,7 @@ export class SocialAgentReplanFacadeService {
           userMessage: followUp.userMessage,
         },
         runId,
+        signal: options.signal ?? null,
         visibleStepLabel: (id, label) => this.userVisibleStepLabel(id, label),
       })
       .catch((error) => {
@@ -143,5 +147,9 @@ export class SocialAgentReplanFacadeService {
       (id, label) => this.userVisibleStepLabel(id, label),
       options,
     );
+  }
+
+  private assertNotAborted(signal?: AbortSignal | null): void {
+    if (signal?.aborted) throw new Error('Subagent worker job cancelled.');
   }
 }

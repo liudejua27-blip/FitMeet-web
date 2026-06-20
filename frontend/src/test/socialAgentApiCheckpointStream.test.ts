@@ -112,6 +112,37 @@ describe('socialAgentApi checkpoint stream endpoints', () => {
       expect.objectContaining({ method: 'POST' }),
     );
   });
+
+  it('turns SocialAgentEventV2 run.failed into a structured stream recovery error', async () => {
+    fetchWithAuthMock.mockResolvedValueOnce(runFailedStreamResponse());
+    const onEvent = vi.fn();
+
+    await expect(
+      socialAgentApi.runCheckpointStream(
+        {
+          checkpointId: 21,
+          action: 'retry',
+        },
+        onEvent,
+      ),
+    ).rejects.toMatchObject({
+      code: 'NETWORK_ERROR',
+      message: '当前需求还在，可以继续处理。',
+      recoveryNotice: expect.objectContaining({
+        kind: 'interrupted',
+        title: '刚才连接中断了',
+        source: 'stream_error',
+      }),
+    });
+
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'run.failed',
+        eventId: 'run-failed:1',
+        stage: 'hydrate_context',
+      }),
+    );
+  });
 });
 
 function streamResponse(): Response {
@@ -135,6 +166,39 @@ function streamResponse(): Response {
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(encoder.encode(`event: result\ndata: ${JSON.stringify(result)}\n\n`));
+      controller.close();
+    },
+  });
+  return new Response(body, { status: 200 });
+}
+
+function runFailedStreamResponse(): Response {
+  const encoder = new TextEncoder();
+  const event = {
+    type: 'run.failed',
+    eventId: 'run-failed:1',
+    seq: 1,
+    createdAt: '2026-06-17T00:00:00.000Z',
+    userId: '7',
+    threadId: 'agent-task:21',
+    taskId: 21,
+    runId: 'run-failed',
+    stage: 'hydrate_context',
+    visibility: 'user_visible',
+    display: {
+      title: '刚才连接中断了',
+      detail: '当前需求还在，可以继续处理。',
+      state: 'failed',
+    },
+    payload: {
+      code: 'NETWORK_ERROR',
+      kind: 'interrupted',
+      retryable: true,
+    },
+  };
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`event: run.failed\ndata: ${JSON.stringify(event)}\n\n`));
       controller.close();
     },
   });

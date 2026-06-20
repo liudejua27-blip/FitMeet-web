@@ -19,7 +19,7 @@ This script does not call the API, create users, write data, or print secrets.
 Modes:
   --readiness   Check env for OpportunityCard readiness smoke.
   --full        Check env for the full mutating opportunity journey smoke.
-  --sse-abort   Check env for Agent SSE abort smoke.
+  --sse-abort   Check env for Agent SSE visibility/abort smoke.
 
 Required for remote opportunity smoke:
   AGENT_SMOKE_ALLOW_REMOTE=true
@@ -191,7 +191,12 @@ if [[ "${MODE}" == "readiness" ]]; then
 elif [[ "${MODE}" == "full" ]]; then
   warn "Full mode can send invitations, create activities, submit reviews, and exercise Life Graph proposal actions."
 else
-  pass "SSE abort mode checks streaming cancellation and should not run the opportunity journey."
+  if is_truthy "${AGENT_SSE_SKIP_ACCEL_BUFFERING_HEADER:-}"; then
+    warn "AGENT_SSE_SKIP_ACCEL_BUFFERING_HEADER=true; only use this for non-nginx local smoke."
+  else
+    pass "SSE visibility/abort mode will require early visible status and X-Accel-Buffering: no."
+  fi
+  pass "SSE visibility/abort mode checks streaming cancellation and should not run the opportunity journey."
 fi
 
 if [[ "${failures}" -gt 0 ]]; then

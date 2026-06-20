@@ -15,6 +15,7 @@ import type {
 } from './social-agent-chat.types';
 import { SocialAgentMainAgentTurnResultService } from './social-agent-main-agent-turn-result.service';
 import { socialAgentAlphaNeedsClarification } from './social-agent-route-response.presenter';
+import { SocialAgentContextHydratorService } from './social-agent-context-hydrator.service';
 
 @Injectable()
 export class SocialAgentMainAgentTurnService {
@@ -24,6 +25,8 @@ export class SocialAgentMainAgentTurnService {
     private readonly alphaAgent?: FitMeetAlphaAgentSdkService,
     @Optional()
     private readonly agentLoop?: AgentLoopService,
+    @Optional()
+    private readonly contextHydrator?: SocialAgentContextHydratorService,
   ) {}
 
   async handleRouteTurn(input: {
@@ -42,7 +45,11 @@ export class SocialAgentMainAgentTurnService {
       task: input.task,
       message: input.message,
       permissionMode: input.task.permissionMode,
-      context: { hasCandidates: input.hasCandidates },
+      context: await this.hydratedMainAgentContext({
+        ownerUserId: input.ownerUserId,
+        task: input.task,
+        base: { hasCandidates: input.hasCandidates },
+      }),
       flow: 'route_turn',
       signal: input.signal,
       resultFactory: async (alphaTurn) => {
@@ -53,7 +60,7 @@ export class SocialAgentMainAgentTurnService {
             startedAt: input.startedAt,
           });
         }
-        if (socialAgentAlphaNeedsClarification(alphaTurn)) {
+        if (socialAgentAlphaNeedsClarification(alphaTurn, input.task)) {
           return this.turnResults.handleClarificationRouteTurn({
             task: input.task,
             alphaTurn,
@@ -87,7 +94,11 @@ export class SocialAgentMainAgentTurnService {
       task: input.task,
       message: input.message,
       permissionMode: input.permissionMode,
-      context: { flow: 'run_stream' },
+      context: await this.hydratedMainAgentContext({
+        ownerUserId: input.ownerUserId,
+        task: input.task,
+        base: { flow: 'run_stream' },
+      }),
       flow: 'run_turn',
       signal: input.signal,
       resultFactory: async (alphaTurn) => {
@@ -100,7 +111,7 @@ export class SocialAgentMainAgentTurnService {
             emit: input.emit,
           });
         }
-        if (socialAgentAlphaNeedsClarification(alphaTurn)) {
+        if (socialAgentAlphaNeedsClarification(alphaTurn, input.task)) {
           const result = await this.turnResults.handleClarificationRunTurn({
             ownerUserId: input.ownerUserId,
             task: input.task,
@@ -174,7 +185,10 @@ export class SocialAgentMainAgentTurnService {
         return {
           handled: Boolean(result),
           blocked: alphaTurn?.safety.blocked === true,
-          needsClarification: socialAgentAlphaNeedsClarification(alphaTurn),
+          needsClarification: socialAgentAlphaNeedsClarification(
+            alphaTurn,
+            input.task,
+          ),
           traceId: alphaTurn?.traceId ?? null,
         };
       },
@@ -183,5 +197,33 @@ export class SocialAgentMainAgentTurnService {
       (result as { agentLoop?: unknown }).agentLoop ??= execution.loop;
     }
     return { task: input.task, result, alphaTurn };
+  }
+
+  private async hydratedMainAgentContext(input: {
+    ownerUserId: number;
+    task: AgentTask;
+    base: Record<string, unknown>;
+  }): Promise<Record<string, unknown>> {
+    if (!this.contextHydrator) return input.base;
+    const hydrated = await this.contextHydrator
+      .hydrateContext({
+        userId: input.ownerUserId,
+        taskId: input.task.id,
+        threadId: `agent-task:${input.task.id}`,
+      })
+      .catch(() => null);
+    if (!hydrated) return input.base;
+    return {
+      ...input.base,
+      recentMessages: hydrated.recentMessages,
+      taskMemory: hydrated.taskMemory,
+      taskSlots: hydrated.taskSlots,
+      taskSlotSummary: hydrated.taskSlotSummary,
+      knownTaskSlotConstraints: hydrated.knownTaskSlotConstraints,
+      pendingApprovals: hydrated.pendingApprovals,
+      candidateActions: hydrated.candidateActions,
+      lifeGraphSummary: hydrated.lifeGraphSummary,
+      lifeGraphGovernanceSummary: hydrated.lifeGraphGovernanceSummary,
+    };
   }
 }

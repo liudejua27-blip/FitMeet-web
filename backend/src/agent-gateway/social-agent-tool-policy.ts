@@ -18,7 +18,8 @@ export const SOCIAL_AGENT_HIGH_RISK_TOOL_DAILY_LIMITS: Partial<
   [SocialAgentToolName.Payment]: 3,
 };
 
-const MANDATORY_APPROVAL_TOOLS = new Set<SocialAgentToolName>([
+export const SOCIAL_AGENT_MANDATORY_APPROVAL_TOOLS: readonly SocialAgentToolName[] =
+  [
   SocialAgentToolName.SendMessage,
   SocialAgentToolName.SendMessageToCandidate,
   SocialAgentToolName.ReplyMessage,
@@ -31,7 +32,11 @@ const MANDATORY_APPROVAL_TOOLS = new Set<SocialAgentToolName>([
   SocialAgentToolName.ShareLocation,
   SocialAgentToolName.Payment,
   SocialAgentToolName.PublishSocialRequest,
-]);
+];
+
+const MANDATORY_APPROVAL_TOOLS = new Set<SocialAgentToolName>(
+  SOCIAL_AGENT_MANDATORY_APPROVAL_TOOLS,
+);
 
 const PRIVACY_SENSITIVE_PROFILE_FIELDS = [
   'privacyBoundary',

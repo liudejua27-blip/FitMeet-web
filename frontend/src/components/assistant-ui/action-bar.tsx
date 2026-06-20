@@ -18,7 +18,7 @@ import {
 import { useState } from 'react';
 
 import { cn } from '../../lib/utils';
-import type { FitMeetAssistantMessage } from '../agent-workspace/FitMeetAssistantUI';
+import type { FitMeetAssistantMessage } from '../agent-workspace/FitMeetAssistantUI.types';
 import { TooltipIconButton } from './tooltip-icon-button';
 
 const assistantActionClassName =
@@ -62,9 +62,9 @@ export function AssistantActionBar({
       autohide={pinned ? 'never' : 'not-last'}
       autohideFloat={pinned ? 'never' : 'always'}
       className={cn(
-        'flex translate-y-0 items-center gap-0.5 opacity-100 transition-[opacity,transform] duration-150',
+        'flex translate-y-0 items-center gap-0.5 opacity-100 transition-[color,opacity,transform] duration-150',
         !pinned &&
-          'data-[floating]:opacity-100 md:data-[floating]:opacity-0 md:data-[floating]:group-hover:opacity-100 md:data-[floating]:group-focus-within:opacity-100',
+          'md:data-[floating]:opacity-0 md:data-[floating]:group-hover:opacity-100 md:data-[floating]:group-focus-within:opacity-100',
         !feedback && !feedbackBusy && !feedbackFailed && 'text-[#6b6b6b]',
       )}
       data-testid="assistant-ui-action-bar"
@@ -80,7 +80,7 @@ export function AssistantActionBar({
       data-message-id={messageId}
       data-feedback-status={feedbackStatus ?? 'idle'}
       data-feedback-pinned={pinned ? 'true' : 'false'}
-      data-visibility={pinned ? 'pinned' : 'autohide'}
+      data-visibility={pinned ? 'pinned' : 'hover-focus'}
       data-touch-visibility={pinned ? 'pinned' : 'visible'}
     >
       {feedbackStatusText ? (

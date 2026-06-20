@@ -8,6 +8,11 @@ import {
   ConnectionStatus,
   KnownAgent,
 } from '../agent-gateway/entities/agent-connection.entity';
+import { PublicSocialIntent } from '../agent-gateway/entities/public-social-intent.entity';
+import {
+  SocialRequestRiskLevel,
+  SocialRequestStatus,
+} from '../agent-gateway/entities/social-request.entity';
 import { LifeGraphField } from '../life-graph/entities/life-graph-field.entity';
 import { LifeGraphProfile } from '../life-graph/entities/life-graph-profile.entity';
 import {
@@ -34,6 +39,7 @@ const nearbyArea =
   (process.env.AGENT_SMOKE_AREA ?? '市南-五四广场').trim() || '市南-五四广场';
 const coreInterests = ['咖啡', 'Citywalk', '轻聊天'];
 const seedKey = 'agent-api-smoke-20260609';
+const publicIntentId = 'public_agent_api_smoke_qingdao_walk';
 
 type SeedPerson = {
   email: string;
@@ -141,7 +147,7 @@ async function main() {
 
   if (DRY_RUN) {
     console.log(
-      `[agent-smoke-seed] dry-run ok: owner=${owner.email}, city=${city}, candidates=${candidates.length}`,
+      `[agent-smoke-seed] dry-run ok: owner=${owner.email}, city=${city}, candidates=${candidates.length}, publicIntent=${publicIntentId}`,
     );
     return;
   }
@@ -154,6 +160,7 @@ async function main() {
     const lifeProfileRepo = dataSource.getRepository(LifeGraphProfile);
     const lifeFieldRepo = dataSource.getRepository(LifeGraphField);
     const connectionRepo = dataSource.getRepository(AgentConnection);
+    const publicIntentRepo = dataSource.getRepository(PublicSocialIntent);
 
     const ownerUser = await ensurePerson({
       input: owner,
@@ -190,6 +197,11 @@ async function main() {
       ownerUserId: ownerUser.id,
       connectionRepo,
     });
+    const publicIntent = await ensurePublicSocialIntent({
+      ownerUserId: ownerUser.id,
+      candidateUserIds: candidateUsers.map((user) => user.id),
+      publicIntentRepo,
+    });
 
     console.log('[agent-smoke-seed] prepared Agent API smoke data.');
     console.log(`ownerUserId=${ownerUser.id}`);
@@ -198,6 +210,8 @@ async function main() {
       `candidateUserIds=${candidateUsers.map((user) => user.id).join(',')}`,
     );
     console.log(`profileRows=${profiles.length}`);
+    console.log(`publicIntentId=${publicIntent.id}`);
+    console.log(`publicIntentStatus=${publicIntent.status}`);
     console.log('');
     console.log('# /agent real API smoke login');
     console.log(`export AGENT_SMOKE_EMAIL=${shellQuote(ownerUser.email)}`);
@@ -206,6 +220,59 @@ async function main() {
   } finally {
     if (dataSource.isInitialized) await dataSource.destroy();
   }
+}
+
+async function ensurePublicSocialIntent(input: {
+  ownerUserId: number;
+  candidateUserIds: number[];
+  publicIntentRepo: Repository<PublicSocialIntent>;
+}) {
+  const existing =
+    (await input.publicIntentRepo.findOne({ where: { id: publicIntentId } })) ??
+    input.publicIntentRepo.create({ id: publicIntentId });
+
+  Object.assign(existing, {
+    userId: input.ownerUserId,
+    linkedSocialRequestId: null,
+    source: 'agent_smoke_seed',
+    mode: 'public',
+    requestType: 'city_walk',
+    title: `${city}周末低压力散步搭子`,
+    description:
+      'Agent smoke 专用公开场景：周末下午在公共区域散步或咖啡轻聊天，先站内聊，确认后再发邀请。',
+    interestTags: ['散步', 'Citywalk', '咖啡', '轻聊天', '公共场所'],
+    city,
+    loc: nearbyArea,
+    lat: owner.lat,
+    lng: owner.lng,
+    radiusKm: 5,
+    timePreference: '周末下午',
+    locationPreference: nearbyArea,
+    socialGoal: '找一个低压力散步或咖啡轻聊天搭子',
+    riskLevel: SocialRequestRiskLevel.Low,
+    requiresUserConfirmation: true,
+    filters: {
+      source: seedKey,
+      verifiedOnly: true,
+      publicPlaceFirst: true,
+      inAppChatFirst: true,
+    },
+    candidateUserIds: input.candidateUserIds,
+    matchedCount: input.candidateUserIds.length,
+    status: SocialRequestStatus.Active,
+    metadata: {
+      source: seedKey,
+      smoke: true,
+      publicSupplySeed: true,
+      safety: {
+        publicPlaceFirst: true,
+        noContactExchange: true,
+        requireConfirmation: true,
+      },
+    },
+  });
+
+  return input.publicIntentRepo.save(existing);
 }
 
 async function ensurePerson(input: {

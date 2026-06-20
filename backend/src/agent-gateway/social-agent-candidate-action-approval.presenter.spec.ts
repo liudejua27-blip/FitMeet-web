@@ -41,8 +41,8 @@ describe('social agent candidate action approval presenter', () => {
       agentConnectionId: null,
       agentTaskId: 101,
       type: 'send_message',
-      actionType: 'send_candidate_message',
-      skillName: 'send_candidate_message',
+      actionType: 'send_invite',
+      skillName: 'send_invite',
       payload: {
         source: 'social_agent_chat',
         userMessage: '帮我给她发消息',
@@ -94,6 +94,74 @@ describe('social agent candidate action approval presenter', () => {
     });
   });
 
+  it('summarizes Social Codex runtime context into the approval payload', () => {
+    expect(
+      buildSocialAgentCandidateActionApprovalInput({
+        ownerUserId: 7,
+        taskId: 101,
+        message: '邀请她一起散步',
+        route,
+        candidate,
+        targetUserId: 22,
+        relatedCandidateId: 501,
+        runtimeContext: {
+          hydratedContext: {
+            userId: 7,
+            threadId: 'agent-task:101',
+            taskId: 101,
+            recentMessages: [
+              { role: 'user', content: '今晚青岛大学附近散步' },
+            ],
+            taskMemory: null,
+            taskSlots: {
+              time_window: { value: '今晚', state: 'completed' },
+              location_text: { value: '青岛大学附近', state: 'completed' },
+              activity: { value: '散步', state: 'completed' },
+            },
+            lifeGraphFactProposals: [],
+            lifeGraphFactDisplaySummaries: [],
+            lifeGraphGovernanceSummary: {
+              total: 0,
+              autoSaveCount: 0,
+              confirmationRequiredCount: 0,
+              blockedCount: 0,
+              sensitiveCount: 0,
+              expiringFactKeys: [],
+            },
+            lifeGraphSummary: { preferences: { intensity: '低强度' } },
+            pendingApprovals: [{ id: 'approval-existing' }],
+            candidateActions: { saved: ['candidate-1'] },
+          } as never,
+          brainToolResults: [{ toolName: 'candidate_confirmation_check' }],
+        },
+      }),
+    ).toMatchObject({
+      payload: {
+        socialCodex: {
+          runtimeContext: {
+            schemaVersion: 'fitmeet.social_codex.action_context.v1',
+            hasHydratedContext: true,
+            threadId: 'agent-task:101',
+            taskId: 101,
+            completedSlots: [
+              { key: 'time_window', value: '今晚', state: 'completed' },
+              {
+                key: 'location_text',
+                value: '青岛大学附近',
+                state: 'completed',
+              },
+              { key: 'activity', value: '散步', state: 'completed' },
+            ],
+            pendingApprovalCount: 1,
+            hasCandidateActions: true,
+            hasLifeGraphSummary: true,
+            brainToolResultCount: 1,
+          },
+        },
+      },
+    });
+  });
+
   it('falls back to a custom low-risk approval for unknown actions', () => {
     expect(
       buildSocialAgentCandidateActionApprovalInput({
@@ -120,7 +188,7 @@ describe('social agent candidate action approval presenter', () => {
         pendingApproval: {
           id: 9001,
           type: ApprovalType.SendMessage,
-          actionType: 'send_candidate_message',
+          actionType: 'send_invite',
           summary: '用户请求向候选人 #22发送消息',
           riskLevel: ApprovalRiskLevel.Medium,
           payload: {},
@@ -132,7 +200,7 @@ describe('social agent candidate action approval presenter', () => {
       pendingAction: {
         id: 9001,
         type: ApprovalType.SendMessage,
-        actionType: 'send_candidate_message',
+        actionType: 'send_invite',
         summary: '用户请求向候选人 #22发送消息',
         riskLevel: ApprovalRiskLevel.Medium,
         at: '2026-06-07T00:00:00.000Z',

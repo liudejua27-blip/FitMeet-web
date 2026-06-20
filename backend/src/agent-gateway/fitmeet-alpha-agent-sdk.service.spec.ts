@@ -70,6 +70,83 @@ describe('FitMeetAlphaAgentSdkService', () => {
     );
   });
 
+  it('uses hydrated task slots when local intent fallback handles a short follow-up', async () => {
+    const service = new FitMeetAlphaAgentSdkService(config);
+
+    const decision = await service.prepareTurn({
+      ownerUserId: 1,
+      taskId: 103,
+      message: '可以，帮我找人',
+      permissionMode: 'limited_auto',
+      context: {
+        taskSlots: {
+          activity: { value: '散步', state: 'completed' },
+          time_window: { value: '今天晚上', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+          candidate_preference: {
+            value: '女生，舞蹈相关公开标签优先',
+            state: 'answered',
+          },
+          safety_boundary: {
+            value: '第一次见面只接受公共场所',
+            state: 'completed',
+          },
+        },
+        recentMessages: [
+          {
+            role: 'user',
+            content: '我想在青岛大学，今天晚上，找个女生散步，最好是舞蹈生。',
+          },
+        ],
+      },
+    });
+
+    expect(decision.safety.blocked).toBe(false);
+    expect(decision.structuredIntent).toMatchObject({
+      intent: 'find_nearby_partner',
+      nextAgent: 'social_match',
+      activityType: '散步',
+      timePreference: '今天晚上',
+      locationText: '青岛大学附近',
+      readiness: 'search',
+      requiresSearch: true,
+    });
+    expect(decision.structuredIntent?.['targetPeople']).toContain('舞蹈');
+    expect(decision.structuredIntent?.['relationshipGoal']).toContain('舞蹈');
+    expect(decision.structuredIntent?.['missingInformation']).toEqual([]);
+    expect(decision.structuredIntent?.['optionalPreferences']).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('舞蹈相关公开标签优先'),
+        expect.stringContaining('公共场所'),
+      ]),
+    );
+  });
+
+  it('keeps weekend person-search requests on the candidate matching path', async () => {
+    const service = new FitMeetAlphaAgentSdkService(config);
+
+    const decision = await service.prepareTurn({
+      ownerUserId: 1,
+      taskId: 104,
+      message: '周末下午在青岛大学附近找女生散步，最好是舞蹈生',
+      permissionMode: 'limited_auto',
+    });
+
+    expect(decision.safety.blocked).toBe(false);
+    expect(decision.structuredIntent).toMatchObject({
+      intent: 'find_nearby_partner',
+      nextAgent: 'social_match',
+      activityType: '散步',
+      timePreference: '周末',
+      locationText: '青岛大学',
+      readiness: 'search',
+      requiresSearch: true,
+    });
+    expect(decision.structuredIntent?.['intent']).not.toBe(
+      'recommend_weekly_activity',
+    );
+  });
+
   it('asks a warm clarification before searching for vague low-pressure companionship', async () => {
     const service = new FitMeetAlphaAgentSdkService(config);
 

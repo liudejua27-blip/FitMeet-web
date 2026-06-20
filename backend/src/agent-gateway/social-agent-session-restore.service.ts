@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Not, Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 
 import {
   cleanDisplayText,
@@ -34,12 +35,21 @@ import {
   readSocialAgentRestorableResult,
 } from './social-agent-chat-session.presenter';
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
+import { socialAgentContextTurnLimit } from './social-agent-context-window';
 
 type VisibleStepLabeler = (id: string, label: string) => string;
 
 @Injectable()
 export class SocialAgentSessionRestoreService {
   private readonly logger = new Logger(SocialAgentSessionRestoreService.name);
+  private readonly restorableTaskStatuses = [
+    AgentTaskStatus.Pending,
+    AgentTaskStatus.Planning,
+    AgentTaskStatus.AwaitingConfirmation,
+    AgentTaskStatus.Executing,
+    AgentTaskStatus.WaitingResult,
+    AgentTaskStatus.WaitingReply,
+  ];
 
   constructor(
     @InjectRepository(AgentTask)
@@ -51,6 +61,8 @@ export class SocialAgentSessionRestoreService {
     private readonly assembler: AgentSessionAssemblerService,
     @Optional()
     private readonly checkpoints?: AgentRunCheckpointService,
+    @Optional()
+    private readonly config?: ConfigService,
   ) {}
 
   findLatestRestorableTask(ownerUserId: number): Promise<AgentTask | null> {
@@ -60,11 +72,10 @@ export class SocialAgentSessionRestoreService {
         taskType: In([
           'social_agent',
           'social_agent_chat',
-          'social_agent_demo',
           'social_search',
           'activity_search',
         ]),
-        status: Not(AgentTaskStatus.Cancelled),
+        status: In(this.restorableTaskStatuses),
       },
       order: { updatedAt: 'DESC' },
     });
@@ -77,6 +88,9 @@ export class SocialAgentSessionRestoreService {
   }): Promise<SocialAgentSessionSnapshot> {
     const restoredAt = new Date().toISOString();
     if (!input.task) return this.assembler.emptySession(restoredAt);
+    if (!this.isRestorableTask(input.task)) {
+      return this.assembler.emptySession(restoredAt);
+    }
 
     const context = await this.readTaskSessionContext(
       input.ownerUserId,
@@ -95,9 +109,22 @@ export class SocialAgentSessionRestoreService {
       result: context.result,
       latestRun: context.latestRun,
       pendingApprovals: context.pendingApprovals,
-      conversationHistory: readSocialAgentConversationHistory(input.task),
+      conversationHistory: this.conversationHistory(input.task),
       restoredAt,
     });
+  }
+
+  private isRestorableTask(task: AgentTask): boolean {
+    if (!this.restorableTaskStatuses.includes(task.status)) return false;
+    const reason = cleanDisplayText(task.statusReason, '').trim();
+    if (reason === 'task_conversation_unbound') return false;
+    if (
+      task.status === AgentTaskStatus.WaitingReply &&
+      task.agentConnectionId == null
+    ) {
+      return false;
+    }
+    return true;
   }
 
   async buildTaskTimeline(input: {
@@ -120,7 +147,7 @@ export class SocialAgentSessionRestoreService {
         task: input.task,
         result: context.result,
         pendingApprovals: context.pendingApprovals,
-        conversationHistory: readSocialAgentConversationHistory(input.task),
+        conversationHistory: this.conversationHistory(input.task),
       }),
       memory: sanitizeForDisplay(input.task.memory) as Record<string, unknown>,
       result: context.result,
@@ -207,6 +234,13 @@ export class SocialAgentSessionRestoreService {
       toolCallId: event.toolCallId,
       createdAt: event.createdAt,
     }) as Record<string, unknown>;
+  }
+
+  private conversationHistory(task: AgentTask) {
+    return readSocialAgentConversationHistory(
+      task,
+      socialAgentContextTurnLimit(this.config),
+    );
   }
 
   private withCheckpointRuntime(
@@ -334,7 +368,7 @@ export class SocialAgentSessionRestoreService {
     ) {
       return false;
     }
-    return /你有什么功能|有什么功能|能做什么|介绍一下|介绍你自己|help|hello|你好|普通聊天|功能咨询/.test(
+    return /你有什么功能|有什么功能|能做什么|会做什么|可以做什么|怎么用|如何使用|怎么使用|使用说明|介绍一下|介绍你自己|help|hello|你好|普通聊天|功能咨询|为什么|怎么回事|我的记忆|记忆.*没|上下文.*没|隐私|安全吗|安全性|数据/.test(
       normalized,
     );
   }

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-import { sanitizeForDisplay } from '../../common/display-text.util';
+import { cleanDisplayText, sanitizeForDisplay } from '../../common/display-text.util';
 import { AgentTaskPermissionMode } from '../entities/agent-task.entity';
 import type { LifeGraphProposalDto } from '../../life-graph/dto/life-graph.dto';
 import type {
@@ -10,10 +10,12 @@ import type {
 import type {
   SanitizableAgentResult,
   UserFacingAgentPendingConfirmation,
+  UserFacingAgentRecoveryNotice,
   UserFacingAgentResponse,
 } from '../user-facing-agent-response';
 import { AgentCardAssemblerService } from './agent-card-assembler.service';
 import { LightStatusMapperService } from './light-status-mapper.service';
+import { shouldStreamFallbackAssistantText } from '../social-agent-chat-stream.presenter';
 
 type PendingApprovalLike = {
   id: number | string | null;
@@ -38,11 +40,24 @@ export class UserFacingResponseSanitizerService {
   ): UserFacingAgentResponse {
     const safety = this.readSafety(result);
     const pendingConfirmations = this.readPendingConfirmations(result);
+    const rawAssistantMessage = cleanDisplayText(result.assistantMessage, '').trim();
+    const assistantMessage = this.readAssistantMessage(rawAssistantMessage);
+    const assistantMessageSource = this.readAssistantMessageSource(result);
+    const cards = this.cardAssembler.assemble(this.readCards(result));
 
     return {
-      assistantMessage: result.assistantMessage,
+      assistantMessage,
+      ...(assistantMessageSource ? { assistantMessageSource } : {}),
+      ...this.readRecoveryNoticePatch({
+        assistantMessage,
+        assistantMessageSource,
+        rawAssistantMessage,
+        cards,
+        pendingConfirmations,
+        safety,
+      }),
       lightStatus: this.lightStatusMapper.resolve(result, pendingConfirmations),
-      cards: this.cardAssembler.assemble(this.readCards(result)),
+      cards,
       safeStatus: {
         blocked: safety?.blocked ?? false,
         level: safety?.level ?? 'low',
@@ -54,6 +69,90 @@ export class UserFacingResponseSanitizerService {
       permissionMode,
       runtime: this.readRuntime(result),
     };
+  }
+
+  private readAssistantMessage(value: unknown): string {
+    const text = cleanDisplayText(value, '').trim();
+    return shouldStreamFallbackAssistantText(text) ? text : '';
+  }
+
+  private readRecoveryNoticePatch(input: {
+    assistantMessage: string;
+    assistantMessageSource: UserFacingAgentResponse['assistantMessageSource'];
+    rawAssistantMessage: string;
+    cards: FitMeetAlphaCard[];
+    pendingConfirmations: UserFacingAgentPendingConfirmation[];
+    safety?: FitMeetAgentSafety;
+  }):
+    | { recoveryNotice: UserFacingAgentRecoveryNotice }
+    | Record<string, never> {
+    if (input.assistantMessageSource !== 'fallback') return {};
+    if (!input.rawAssistantMessage || input.assistantMessage) return {};
+    if (input.cards.length > 0) return {};
+    if (input.pendingConfirmations.length > 0) return {};
+    if (input.safety?.blocked) return {};
+
+    return {
+      recoveryNotice: this.recoveryNoticeForSuppressedFallback(
+        input.rawAssistantMessage,
+      ),
+    };
+  }
+
+  private recoveryNoticeForSuppressedFallback(
+    rawText: string,
+  ): UserFacingAgentRecoveryNotice {
+    if (/处理时间有点久|timeout|timed?\s*out|超时/i.test(rawText)) {
+      return {
+        kind: 'timeout',
+        title: '这次处理时间有点久',
+        message: '我已经保留当前对话。你可以重试，或者继续告诉我下一步。',
+        retryable: true,
+        source: 'stream_error',
+      };
+    }
+
+    if (/连接中断|连接恢复|aborted|abort/i.test(rawText)) {
+      return {
+        kind: 'interrupted',
+        title: '刚才连接中断了',
+        message: '我已经保留当前对话。你可以重试，或者继续补充新的要求。',
+        retryable: true,
+        source: 'stream_error',
+      };
+    }
+
+    if (
+      /我已经恢复了(?:上一次|这段|当前)|从已保存的(?:步骤|工具步骤|Agent 状态)|继续刚才保存的 Agent 步骤|原始目标|我可以继续上次的话题，也可以重新开始|已从刚才的确认点继续处理/.test(
+        rawText,
+      )
+    ) {
+      return {
+        kind: 'checkpoint',
+        title: '可以继续上次进度',
+        message: '我会从已保存的上下文继续；你也可以重新开始一个新话题。',
+        retryable: true,
+        source: 'checkpoint_recovery',
+      };
+    }
+
+    return {
+      kind: 'failed',
+      title: '这次没有顺利完成',
+      message: '我已经保留当前对话。你可以重试，或者继续告诉我下一步。',
+      retryable: true,
+      source: 'fallback_suppressed',
+    };
+  }
+
+  private readAssistantMessageSource(
+    result: SanitizableAgentResult,
+  ): UserFacingAgentResponse['assistantMessageSource'] {
+    if (!('assistantMessageSource' in result)) return undefined;
+    return result.assistantMessageSource === 'llm' ||
+      result.assistantMessageSource === 'fallback'
+      ? result.assistantMessageSource
+      : undefined;
   }
 
   private readRuntime(
@@ -373,20 +472,14 @@ export class UserFacingResponseSanitizerService {
   private fromPendingApproval(
     approval: PendingApprovalLike,
   ): UserFacingAgentPendingConfirmation {
+    const payload = this.publicApprovalPayload(approval.payload);
     return {
       id: approval.id,
       type: approval.type,
       actionType: approval.actionType,
       summary: approval.summary,
       riskLevel: approval.riskLevel,
-      ...(this.isRecord(approval.payload)
-        ? {
-            payload: sanitizeForDisplay(approval.payload) as Record<
-              string,
-              unknown
-            >,
-          }
-        : {}),
+      ...(payload ? { payload } : {}),
       expiresAt: approval.expiresAt,
     };
   }
@@ -394,6 +487,7 @@ export class UserFacingResponseSanitizerService {
   private fromApprovalAction(
     action: Record<string, unknown>,
   ): UserFacingAgentPendingConfirmation {
+    const payload = this.publicApprovalPayload(action.payload);
     return {
       id: this.readPrimitive(action.id) ?? null,
       type: this.readText(
@@ -412,16 +506,79 @@ export class UserFacingResponseSanitizerService {
         action.riskLevel,
         this.readText(action.risk, 'medium'),
       ),
-      ...(this.isRecord(action.payload)
-        ? {
-            payload: sanitizeForDisplay(action.payload) as Record<
-              string,
-              unknown
-            >,
-          }
-        : {}),
+      ...(payload ? { payload } : {}),
       expiresAt: typeof action.expiresAt === 'string' ? action.expiresAt : null,
     };
+  }
+
+  private publicApprovalPayload(value: unknown): Record<string, unknown> | null {
+    if (!this.isRecord(value)) return null;
+    const payload: Record<string, unknown> = {};
+    this.copySafePayloadPrimitive(value, payload, 'checkpointId');
+    this.copySafePayloadPrimitive(value, payload, 'resumeCheckpointId');
+    this.copySafePayloadPrimitive(value, payload, 'parentCheckpointId');
+    this.copySafePayloadPrimitive(value, payload, 'taskId');
+    this.copySafePayloadPrimitive(value, payload, 'threadId');
+    this.copySafePayloadPrimitive(value, payload, 'proposalId');
+    this.copySafePayloadPrimitive(value, payload, 'publicIntentId');
+    this.copySafePayloadPrimitive(value, payload, 'cardId');
+    this.copySafePayloadPrimitive(value, payload, 'candidateId');
+
+    const dryRunPreview = this.publicDryRunPreview(value.dryRunPreview);
+    if (dryRunPreview) payload.dryRunPreview = dryRunPreview;
+
+    const socialCodex = this.publicSocialCodexPayload(value.socialCodex);
+    if (socialCodex) payload.socialCodex = socialCodex;
+
+    return Object.keys(payload).length > 0 ? payload : null;
+  }
+
+  private publicDryRunPreview(value: unknown): Record<string, unknown> | null {
+    if (!this.isRecord(value)) return null;
+    const preview: Record<string, unknown> = {};
+    this.copySafePayloadPrimitive(value, preview, 'title');
+    this.copySafePayloadPrimitive(value, preview, 'summary');
+    this.copySafePayloadPrimitive(value, preview, 'visibleTo');
+    this.copySafePayloadPrimitive(value, preview, 'executionBoundary');
+    this.copySafePayloadPrimitive(value, preview, 'reversible');
+    return Object.keys(preview).length > 0 ? preview : null;
+  }
+
+  private publicSocialCodexPayload(value: unknown): Record<string, unknown> | null {
+    if (!this.isRecord(value)) return null;
+    const approvalPolicy = this.isRecord(value.approvalPolicy)
+      ? value.approvalPolicy
+      : null;
+    if (!approvalPolicy) return null;
+    const safePolicy: Record<string, unknown> = {};
+    this.copySafePayloadPrimitive(approvalPolicy, safePolicy, 'required');
+    this.copySafePayloadPrimitive(approvalPolicy, safePolicy, 'lifecycleNode');
+    return Object.keys(safePolicy).length > 0
+      ? { approvalPolicy: safePolicy }
+      : null;
+  }
+
+  private copySafePayloadPrimitive(
+    source: Record<string, unknown>,
+    target: Record<string, unknown>,
+    key: string,
+  ): void {
+    const value = source[key];
+    if (
+      typeof value !== 'string' &&
+      typeof value !== 'number' &&
+      typeof value !== 'boolean'
+    ) {
+      return;
+    }
+    const sanitized = sanitizeForDisplay(value);
+    if (
+      typeof sanitized === 'string' ||
+      typeof sanitized === 'number' ||
+      typeof sanitized === 'boolean'
+    ) {
+      target[key] = sanitized;
+    }
   }
 
   private readPrimitive(value: unknown): string | number | null {

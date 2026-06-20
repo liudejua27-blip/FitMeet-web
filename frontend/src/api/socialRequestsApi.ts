@@ -93,6 +93,11 @@ export interface CreateSocialRequestPayload {
   metadata?: Record<string, unknown>;
 }
 
+export interface AiDraftSocialRequestInput {
+  rawText: string;
+  taskContext?: Record<string, unknown> | null;
+}
+
 export interface UpdateSocialRequestPayload {
   status?: SocialRequestStatus;
   title?: string;
@@ -155,8 +160,15 @@ export const socialRequestsApi = {
       { method: 'POST' },
     ),
 
-  aiDraft: (rawText: string) =>
-    api.request<{
+  aiDraft: (input: string | AiDraftSocialRequestInput) => {
+    const body =
+      typeof input === 'string'
+        ? { rawText: input }
+        : {
+            rawText: input.rawText,
+            taskContext: input.taskContext ?? null,
+          };
+    return api.request<{
       draft: CreateSocialRequestPayload & {
         type: SocialRequestType;
         title: string;
@@ -190,6 +202,7 @@ export const socialRequestsApi = {
       mode: 'ai' | 'fallback';
     }>('/social-requests/ai-draft', {
       method: 'POST',
-      body: JSON.stringify({ rawText }),
-    }),
+      body: JSON.stringify(body),
+    });
+  },
 };

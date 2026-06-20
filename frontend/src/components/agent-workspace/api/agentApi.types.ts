@@ -4,6 +4,7 @@ import type {
   FitMeetAgentCardExecutableAction,
   SocialAgentPermissionMode,
   UserFacingAgentPendingConfirmation,
+  UserFacingAgentRecoveryNotice,
   UserFacingAgentResponse,
   UserFacingAgentSafeStatus,
   UserFacingAgentStreamEvent,
@@ -29,6 +30,7 @@ export type AgentLifecycle =
 export interface AgentRunRequest {
   goal: string;
   permissionMode: AgentPermissionMode;
+  conversationIntent?: 'conversation' | 'social' | 'approval';
   taskId?: number | null;
   city?: string | null;
   idempotencyKey: string;
@@ -37,6 +39,7 @@ export interface AgentRunRequest {
     locale?: string;
     source: 'web' | 'ios';
     threadId?: string | null;
+    conversationIntent?: 'conversation' | 'social' | 'approval';
   };
 }
 
@@ -83,6 +86,7 @@ export interface AgentError {
   retryable: boolean;
   lifecycle: AgentLifecycle;
   statusCode?: number;
+  recoveryNotice?: UserFacingAgentRecoveryNotice;
 }
 
 export type AgentCandidateCard = Extract<FitMeetAlphaCard, { type: 'candidate_card' }>;

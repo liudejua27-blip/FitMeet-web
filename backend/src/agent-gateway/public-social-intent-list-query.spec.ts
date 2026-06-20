@@ -2,7 +2,7 @@ import { SocialRequestStatus } from './entities/social-request.entity';
 import { normalizePublicSocialIntentListFilters } from './public-social-intent-list-query';
 
 describe('normalizePublicSocialIntentListFilters', () => {
-  it('defaults the public feed to the first active page', () => {
+  it('defaults the public feed to discoverable supply statuses', () => {
     expect(normalizePublicSocialIntentListFilters()).toEqual({
       page: 1,
       take: 30,
@@ -10,7 +10,12 @@ describe('normalizePublicSocialIntentListFilters', () => {
       q: undefined,
       city: undefined,
       requestType: undefined,
-      status: SocialRequestStatus.Active,
+      status: undefined,
+      statuses: [
+        SocialRequestStatus.Active,
+        SocialRequestStatus.Matched,
+        SocialRequestStatus.Searching,
+      ],
     });
   });
 
@@ -32,6 +37,7 @@ describe('normalizePublicSocialIntentListFilters', () => {
       city: '上海',
       requestType: 'fitness_partner',
       status: SocialRequestStatus.Matched,
+      statuses: [SocialRequestStatus.Matched],
     });
   });
 
@@ -50,7 +56,12 @@ describe('normalizePublicSocialIntentListFilters', () => {
       q: undefined,
       city: undefined,
       requestType: undefined,
-      status: SocialRequestStatus.Active,
+      status: undefined,
+      statuses: [
+        SocialRequestStatus.Active,
+        SocialRequestStatus.Matched,
+        SocialRequestStatus.Searching,
+      ],
     });
   });
 });

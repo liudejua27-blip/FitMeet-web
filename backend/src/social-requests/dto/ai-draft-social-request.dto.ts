@@ -1,4 +1,10 @@
-import { IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 /**
  * Body for `POST /social-requests/ai-draft`.
@@ -13,4 +19,8 @@ export class AiDraftSocialRequestDto {
   @MinLength(2)
   @MaxLength(2000)
   rawText!: string;
+
+  @IsOptional()
+  @IsObject()
+  taskContext?: Record<string, unknown> | null;
 }

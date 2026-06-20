@@ -17,6 +17,7 @@ import {
   type LongTermMemorySnapshot,
   type LongTermPreferenceHistoryItem,
 } from './social-agent-long-term-memory.service';
+import { socialCodexThreadIdForTask } from './social-codex-runtime-model';
 
 export type SocialAgentReminderPreferenceDto = {
   enabled?: boolean;
@@ -523,7 +524,7 @@ export class SocialAgentReminderService {
       title,
       message,
       taskId: task?.id ?? null,
-      threadId: task?.id ? String(task.id) : null,
+      threadId: task?.id ? socialCodexThreadIdForTask(task.id) : null,
       dedupeKey: `reminder:${userId}:${topic}:${slugify(safeInterest)}:${weekKey(new Date())}`,
       context: {
         source: 'social_agent_reminder',

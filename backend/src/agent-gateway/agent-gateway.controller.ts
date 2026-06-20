@@ -3,7 +3,6 @@ import {
   Body,
   Controller,
   Delete,
-  ForbiddenException,
   Get,
   HttpCode,
   Logger,
@@ -71,6 +70,8 @@ import { UpdateAgentPermissionsDto } from './dto/agent-control.dto';
 import { UpdateSocialProfileDto } from '../users/dto/update-social-profile.dto';
 import { SocialRequestStatus } from './entities/social-request.entity';
 import type { AiProfileBuilderCard } from '../ai/ai.service';
+import { AdminRbacGuard } from '../admin-rbac/admin-rbac.guard';
+import { RequireAdminPermission } from '../admin-rbac/admin-rbac.decorator';
 
 type FitMeetRequest = Request & {
   user: { id: number };
@@ -350,8 +351,9 @@ export class AgentUserController {
 
   /** GET /api/agents/profile-match/autopilot/debug */
   @Get('profile-match/autopilot/debug')
-  getProfileMatchAutopilotDebug(@Req() req: FitMeetRequest) {
-    this.assertAdmin(req.user.id);
+  @UseGuards(AdminRbacGuard)
+  @RequireAdminPermission('agent:l5:read')
+  getProfileMatchAutopilotDebug() {
     return {
       ok: true,
       autopilot: 'profile_match_autopilot',
@@ -383,17 +385,6 @@ export class AgentUserController {
       req.user.id,
       this.profileMatchAutopilot.getStatus(),
     );
-  }
-
-  private assertAdmin(userId: number) {
-    const ids = (process.env.ADMIN_USER_IDS ?? '')
-      .split(',')
-      .map((id) => Number(id.trim()))
-      .filter(Number.isFinite);
-    const isDevAdmin = process.env.NODE_ENV !== 'production' && userId === 1;
-    if (!ids.includes(userId) && !isDevAdmin) {
-      throw new ForbiddenException('Admin permission required');
-    }
   }
 
   /** GET /api/agents/profile-matches?limit=30 */

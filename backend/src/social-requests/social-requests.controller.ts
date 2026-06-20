@@ -55,7 +55,10 @@ export class SocialRequestsController {
     @Req() req: AuthenticatedRequest,
     @Body() dto: AiDraftSocialRequestDto,
   ) {
-    return this.svc.aiDraft(req.user.id, dto.rawText);
+    return this.svc.aiDraft(req.user.id, dto.rawText, {
+      source: 'user_social_requests.ai_draft',
+      taskContext: dto.taskContext ?? null,
+    });
   }
 
   @Get('my')

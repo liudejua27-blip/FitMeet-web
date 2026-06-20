@@ -20,18 +20,50 @@ describe('Agent user route isolation', () => {
     );
   });
 
+  it('keeps legacy website aliases as redirects instead of duplicate product surfaces', () => {
+    const routeSource = readSource(join('routes', 'AppRoutes.tsx'));
+
+    expect(routeSource).toMatch(
+      /path="\/legacy-home"[\s\S]*element=\{<Navigate to="\/" replace \/>}/,
+    );
+    expect(routeSource).not.toMatch(
+      /path="\/legacy-home"[\s\S]*element=\{<PlatformPage page="home" \/>}/,
+    );
+  });
+
+  it('keeps internal demo pages behind the development-only route gate', () => {
+    const routeSource = readSource(join('routes', 'AppRoutes.tsx'));
+
+    expect(routeSource).toContain('const ENABLE_INTERNAL_DEMO_ROUTES = import.meta.env.DEV;');
+    expect(routeSource).toContain('const DemoAgentSocialLoopPage = ENABLE_INTERNAL_DEMO_ROUTES');
+    expect(routeSource).toContain('const DemoInvestorPage = ENABLE_INTERNAL_DEMO_ROUTES');
+    expect(routeSource).toMatch(
+      /ENABLE_INTERNAL_DEMO_ROUTES && DemoAgentSocialLoopPage && DemoInvestorPage/,
+    );
+    expect(routeSource).toContain('<Route path="/internal/demo/*" element={<Navigate to="/" replace />} />');
+    expect(routeSource).not.toMatch(/path="\/internal\/demo\/agent-social-loop"[\s\S]*<PlatformPage/);
+  });
+
   it('removes the old user-facing and debug workbench files', () => {
     expect(existsSync(join(srcRoot, 'components', 'agent-workbench'))).toBe(false);
     expect(existsSync(join(srcRoot, 'pages', 'SocialAgentConsolePage.tsx'))).toBe(false);
     expect(existsSync(join(srcRoot, 'debug', 'agent-workbench'))).toBe(false);
     expect(existsSync(join(srcRoot, 'debug', 'SocialAgentConsolePage.tsx'))).toBe(false);
     expect(existsSync(join(srcRoot, 'debug', 'agentTaskEvents.ts'))).toBe(false);
-    expect(existsSync(join(srcRoot, 'debug', 'agentPageModuleAudit.ts'))).toBe(true);
+    expect(existsSync(join(srcRoot, 'debug', 'agentPageModuleAudit.ts'))).toBe(false);
+    expect(existsSync(join(srcRoot, 'components', 'agent', 'ant-guide'))).toBe(false);
+    expect(existsSync(join(srcRoot, 'assets', 'agent', 'ant-guide'))).toBe(false);
+
+    const debugSourceFiles = collectSourceFiles(join(srcRoot, 'debug')).map((file) =>
+      relative(srcRoot, file).replace(/\\/g, '/'),
+    );
+    expect(debugSourceFiles).toEqual([]);
   });
 
-  it('allows debug API imports only inside the debug source tree', () => {
+  it('removes the retired social agent debug API from the production source tree', () => {
+    expect(existsSync(join(srcRoot, 'api', 'socialAgentDebugApi.ts'))).toBe(false);
+
     const offenders = collectSourceFiles(srcRoot)
-      .filter((file) => !file.endsWith(join('api', 'socialAgentDebugApi.ts')))
       .filter((file) => !relative(srcRoot, file).replace(/\\/g, '/').startsWith('test/'))
       .filter((file) => readFileSync(file, 'utf8').includes('socialAgentDebugApi'))
       .map((file) => relative(srcRoot, file).replace(/\\/g, '/'))
@@ -44,12 +76,114 @@ describe('Agent user route isolation', () => {
     const userPathSources = [
       join(srcRoot, 'pages', 'AgentWorkspacePage.tsx'),
       ...collectSourceFiles(join(srcRoot, 'components', 'agent-workspace')),
+      ...collectSourceFiles(join(srcRoot, 'components', 'assistant-ui')),
     ];
 
     const userPathText = userPathSources.map((file) => readFileSync(file, 'utf8')).join('\n');
     expect(userPathText).not.toMatch(
       /socialAgentDebugApi|AgentRunTrace|SocialAgentConsolePage|agent-workbench/,
     );
+    expect(userPathText).not.toMatch(
+      /socialAgentApi\.(performAction|handleMessage|routeMessage)\s*\(/,
+    );
+    expect(userPathText).not.toMatch(
+      /fitMeetCoreEndpoints\.socialAgentChat\.(taskActions|messages|routeMessage)\b/,
+    );
+  });
+
+  it('keeps legacy non-stream Agent endpoints confined to the API compatibility layer', () => {
+    const offenders = collectSourceFiles(srcRoot)
+      .filter((file) => {
+        const relativePath = relative(srcRoot, file).replace(/\\/g, '/');
+        return (
+          !relativePath.startsWith('test/') &&
+          relativePath !== 'api/socialAgentApi.ts'
+        );
+      })
+      .flatMap((file) => {
+        const relativePath = relative(srcRoot, file).replace(/\\/g, '/');
+        const source = readFileSync(file, 'utf8');
+        const patterns = [
+          /socialAgentApi\.(performAction|handleMessage|routeMessage)\s*\(/,
+          /fitMeetCoreEndpoints\.socialAgentChat\.(taskActions|messages|routeMessage)\b/,
+        ];
+        return patterns
+          .filter((pattern) => pattern.test(source))
+          .map((pattern) => `${relativePath}: ${pattern}`);
+      });
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('keeps production Agent streams on the SocialAgentEventV2 user-facing endpoints', () => {
+    const productionAgentSources = [
+      join(srcRoot, 'api', 'socialAgentApi.ts'),
+      join(srcRoot, 'pages', 'AgentWorkspacePage.tsx'),
+      ...collectSourceFiles(join(srcRoot, 'components', 'agent-workspace')),
+      ...collectSourceFiles(join(srcRoot, 'components', 'assistant-ui')),
+    ];
+
+    const productionAgentText = productionAgentSources
+      .map((file) => readFileSync(file, 'utf8'))
+      .join('\n');
+    const socialAgentApiSource = readSource(join('api', 'socialAgentApi.ts'));
+    const realAdapterSource = readSource(
+      join('components', 'agent-workspace', 'api', 'realAgentAdapter.ts'),
+    );
+
+    expect(socialAgentApiSource).toContain('fitMeetCoreEndpoints.socialAgentChat.streamUser');
+    expect(socialAgentApiSource).toContain('fitMeetCoreEndpoints.socialAgentChat.messagesStream');
+    expect(socialAgentApiSource).toContain('fitMeetCoreEndpoints.socialAgentChat.routeMessageStream');
+    expect(socialAgentApiSource).toContain('fitMeetCoreEndpoints.socialAgentChat.taskMessagesStream');
+    expect(socialAgentApiSource).not.toContain('fitMeetCoreEndpoints.socialAgentChat.stream,');
+
+    expect(productionAgentText).toContain('runUserFacingStream');
+    expect(productionAgentText).toContain('runUserFacingAgentStreamAt');
+    expect(realAdapterSource).toContain('apiClient.performActionStream(');
+    expect(realAdapterSource).not.toContain('apiClient.performAction(');
+    expect(realAdapterSource).not.toContain("'performAction'");
+    expect(realAdapterSource).not.toContain('performActionStream?:');
+    expect(productionAgentText).not.toMatch(
+      /socialAgentDebugApi|runSocialAgentStream|fitMeetCoreEndpoints\.socialAgentChat\.stream\b/,
+    );
+  });
+
+  it('keeps message submission inside the active thread instead of creating a thread per message', () => {
+    const submitRuntimeSource = readSource(
+      join('components', 'agent-workspace', 'useAgentSubmitRuntime.ts'),
+    );
+    const threadRuntimeSource = readSource(
+      join('components', 'agent-workspace', 'useAgentThreadRuntime.ts'),
+    );
+    const workspaceSource = readSource(
+      join('components', 'agent-workspace', 'AgentWorkspace.tsx'),
+    );
+    const controllerSource = readSource(
+      join('components', 'agent-workspace', 'useAgentWorkspaceController.ts'),
+    );
+    const assistantPropsSource = readSource(
+      join('components', 'agent-workspace', 'buildAgentAssistantProps.ts'),
+    );
+
+    expect(submitRuntimeSource).toContain('threadId: canonicalActiveThreadId');
+    expect(submitRuntimeSource).toContain('beginAbortableRun(controller, canonicalActiveThreadId)');
+    expect(submitRuntimeSource).toContain('threadIdFromResponse(finalResult.response)');
+    expect(submitRuntimeSource).toContain('observedRunThreadIdRef.current');
+    expect(submitRuntimeSource).toContain('socialCodexThreadIdForTask(finalResult.taskId)');
+    expect(submitRuntimeSource).not.toMatch(/createThread\s*\(/);
+    expect(submitRuntimeSource).not.toMatch(/socialAgentApi\.createThread/);
+
+    expect(threadRuntimeSource).toContain('getThread(threadId)');
+    expect(threadRuntimeSource).toContain('updateThread(canonicalActiveThreadId');
+    expect(threadRuntimeSource).toContain('const startNewThread = async () =>');
+    expect(threadRuntimeSource).toContain('newThreadCreatingRef.current');
+    expect(threadRuntimeSource).toContain('if (newThreadCreatingRef.current) return');
+    expect(threadRuntimeSource).toContain('socialAgentApi.createThread()');
+    expect(workspaceSource).not.toMatch(/createThread\s*\(/);
+    expect(workspaceSource).toContain('useAgentWorkspaceController');
+    expect(controllerSource).toContain('startNewThread');
+    expect(assistantPropsSource).toContain('onNewConversation');
+    expect(assistantPropsSource).toContain('void startNewThread()');
   });
 
   it('keeps retired agent copy and shell selectors out of production source', () => {
@@ -89,6 +223,54 @@ describe('Agent user route isolation', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('keeps mock-named Agent data out of production components', () => {
+    expect(existsSync(join(srcRoot, 'data', 'agentMockData.ts'))).toBe(false);
+
+    const offenders = collectSourceFiles(srcRoot)
+      .filter((file) => !relative(srcRoot, file).replace(/\\/g, '/').startsWith('test/'))
+      .flatMap((file) => {
+        const source = readFileSync(file, 'utf8');
+        return source.includes('agentMockData')
+          ? [relative(srcRoot, file).replace(/\\/g, '/')]
+          : [];
+      });
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('keeps the mock Agent adapter isolated to development-only loading', () => {
+    const allowedFiles = new Set([
+      'components/agent-workspace/api/createAgentAdapter.ts',
+      'components/agent-workspace/api/mockAgentAdapter.ts',
+    ]);
+    const offenders = collectSourceFiles(srcRoot)
+      .filter((file) => !relative(srcRoot, file).replace(/\\/g, '/').startsWith('test/'))
+      .flatMap((file) => {
+        const relativePath = relative(srcRoot, file).replace(/\\/g, '/');
+        const source = readFileSync(file, 'utf8');
+        const mentionsMockAdapter =
+          source.includes('mockAgentAdapter') || source.includes('createMockAgentAdapter');
+        const mentionsMockRuntimeIds =
+          source.includes('mock-candidate') ||
+          source.includes('mock-opportunity') ||
+          source.includes('mock-thread-checkpoint');
+        if ((!mentionsMockAdapter && !mentionsMockRuntimeIds) || allowedFiles.has(relativePath)) {
+          return [];
+        }
+        return [relativePath];
+      });
+
+    const createAgentAdapterSource = readSource(
+      join('components', 'agent-workspace', 'api', 'createAgentAdapter.ts'),
+    );
+    expect(createAgentAdapterSource).toContain('const loadDevelopmentMockAgentAdapter = import.meta.env.DEV');
+    expect(createAgentAdapterSource).toContain('if (IS_PRODUCTION_AGENT_BUNDLE) return createRealAgentAdapter();');
+    expect(createAgentAdapterSource).toContain("import('./mockAgentAdapter')");
+    expect(createAgentAdapterSource).toContain('Agent mock adapter is disabled in production builds.');
+    expect(createAgentAdapterSource).not.toContain("from './mockAgentAdapter'");
+    expect(offenders).toEqual([]);
+  });
+
   it('does not introduce AI SDK chat architecture dependencies into the app shell', () => {
     const packageJson = readFileSync(join(process.cwd(), 'package.json'), 'utf8');
     const allSourceText = collectSourceFiles(srcRoot)
@@ -97,6 +279,44 @@ describe('Agent user route isolation', () => {
 
     expect(packageJson).not.toContain('@ai-sdk/react');
     expect(allSourceText).not.toMatch(/useChat\s*\(/);
+  });
+
+  it('keeps heavy assistant Tool UI out of the initial message renderer chunk', () => {
+    const messageSource = readSource(join('components', 'assistant-ui', 'message.tsx'));
+    const assistantShellSource = readSource(
+      join('components', 'agent-workspace', 'FitMeetAssistantUI.tsx'),
+    );
+
+    expect(messageSource).toContain("import('./tool-fallback')");
+    expect(messageSource).toContain('lazy(() =>');
+    expect(messageSource).not.toMatch(/import\s+\{[^}]*AssistantToolFallback[^}]*\}\s+from\s+['"]\.\/tool-fallback['"]/);
+    expect(messageSource).not.toMatch(/from\s+['"]\.\/tool-fallback['"]/);
+    expect(assistantShellSource).not.toContain('./tool-fallback');
+  });
+
+  it('keeps AgentWorkspace as a thin assistant-ui shell backed by controller hooks', () => {
+    const workspaceSource = readSource(
+      join('components', 'agent-workspace', 'AgentWorkspace.tsx'),
+    );
+    const controllerPath = join(
+      srcRoot,
+      'components',
+      'agent-workspace',
+      'useAgentWorkspaceController.ts',
+    );
+    const controllerSource = readFileSync(controllerPath, 'utf8');
+
+    expect(existsSync(controllerPath)).toBe(true);
+    expect(workspaceSource).toContain('useAgentWorkspaceController');
+    expect(workspaceSource).toContain('FitMeetAssistantUI');
+    expect(workspaceSource).not.toMatch(/useAgentSessionRestore|useAgentStreamingRun|useAgentApprovalRuntime|useAgentThreadBranches/);
+    expect(workspaceSource).not.toMatch(/SocialAgentConsolePage|agent-workbench|CodexAntPet|AntGuide/);
+
+    expect(controllerSource).toContain('useAgentSessionRestore');
+    expect(controllerSource).toContain('useAgentStreamingRun');
+    expect(controllerSource).toContain('useAgentApprovalRuntime');
+    expect(controllerSource).toContain('useAgentThreadBranches');
+    expect(controllerSource).not.toMatch(/SocialAgentConsolePage|agent-workbench|CodexAntPet|AntGuide/);
   });
 });
 

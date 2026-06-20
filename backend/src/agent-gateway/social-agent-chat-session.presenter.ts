@@ -16,7 +16,6 @@ import type {
   SocialAgentVisibleStep,
 } from './social-agent-chat.types';
 import { readSocialAgentTimelineCandidates } from './social-agent-chat-timeline.presenter';
-import type { CandidatePoolDebugReasons } from './social-agent-candidate-pool.service';
 import { normalizeSocialAgentVisibleStepSnapshot } from './social-agent-visible-step-snapshot.presenter';
 
 export { buildSocialAgentTimelineSnapshot } from './social-agent-chat-timeline.presenter';
@@ -56,7 +55,7 @@ export function readSocialAgentRestorableResult(input: {
     const runResult = latestRun.result as
       | SocialAgentChatRunResult
       | SocialAgentChatReplanRunResult;
-    return sanitizeForDisplay({
+    return sanitizeRestorableRunResult({
       ...runResult,
       taskId: task.id,
       status: task.status,
@@ -65,10 +64,21 @@ export function readSocialAgentRestorableResult(input: {
           ? runResult.visibleSteps
           : latestRun.visibleSteps,
       events,
-    }) as SocialAgentChatRunResult | SocialAgentChatReplanRunResult;
+    });
   }
 
   return readResultFromTaskMemory(task, events, visibleStepLabel);
+}
+
+function sanitizeRestorableRunResult(
+  result: SocialAgentChatRunResult | SocialAgentChatReplanRunResult,
+): SocialAgentChatRunResult | SocialAgentChatReplanRunResult {
+  return {
+    ...(sanitizeForDisplay(result) as
+      | SocialAgentChatRunResult
+      | SocialAgentChatReplanRunResult),
+    debugReasons: null,
+  };
 }
 
 function readResultFromTaskMemory(
@@ -129,9 +139,7 @@ function readResultFromTaskMemory(
       cleanDisplayText(chatRun.message, '') ||
       cleanDisplayText(eventResult?.message, '') ||
       null,
-    debugReasons: isRecord(chatRun.debugReasons)
-      ? (chatRun.debugReasons as CandidatePoolDebugReasons)
-      : null,
+    debugReasons: null,
     socialRequestDraft,
     candidates,
     approvalRequiredActions: socialRequestDraft

@@ -1,7 +1,11 @@
 import type { ConfigService } from '@nestjs/config';
-import type {
-  SocialAgentModelRouterService,
-  SocialAgentModelUseCase,
+import {
+  SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+  SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS,
+  SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS,
+  selectSocialAgentConfiguredModel,
+  type SocialAgentModelRouterService,
+  type SocialAgentModelUseCase,
 } from './social-agent-model-router.service';
 
 export type SocialAgentToolModelConfig = Pick<ConfigService, 'get'>;
@@ -33,26 +37,30 @@ export function selectSocialAgentToolModel(
 
   const legacy = input.config.get<string>('DEEPSEEK_MODEL');
   if (useCase === 'candidate_summary' || useCase === 'card_generation') {
-    return (
-      input.config.get<string>('AGENT_CARD_MODEL') ||
-      input.config.get<string>('DEEPSEEK_FAST_MODEL') ||
-      legacy ||
-      'deepseek-v4-flash'
-    );
+    return firstModel([
+      input.config.get<string>('AGENT_CARD_MODEL'),
+      input.config.get<string>('DEEPSEEK_CHAT_MODEL'),
+      SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+      legacy,
+      SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+    ]);
   }
   if (useCase === 'safety_check') {
-    return (
-      input.config.get<string>('DEEPSEEK_FAST_MODEL') ||
-      legacy ||
-      'deepseek-v4-flash'
-    );
+    return firstModel([
+      input.config.get<string>('AGENT_SAFETY_MODEL'),
+      input.config.get<string>('DEEPSEEK_CHAT_MODEL'),
+      SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+      legacy,
+      SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+    ]);
   }
-  return (
-    input.config.get<string>('AGENT_PLANNER_MODEL') ||
-    input.config.get<string>('DEEPSEEK_FAST_MODEL') ||
-    legacy ||
-    'deepseek-v4-flash'
-  );
+  return firstModel([
+    input.config.get<string>('AGENT_PLANNER_MODEL'),
+    input.config.get<string>('DEEPSEEK_CHAT_MODEL'),
+    SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+    legacy,
+    SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+  ]);
 }
 
 export function selectSocialAgentToolTimeoutMs(
@@ -68,15 +76,33 @@ export function selectSocialAgentToolTimeoutMs(
   const configured =
     input.config.get<string>('SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS') ??
     input.config.get<string>('DEEPSEEK_TIMEOUT_MS');
-  return positiveTimeoutMs(configured, 5000, 15_000);
+  return boundedQualityTimeoutMs(configured, minimumToolTimeoutMs(useCase));
 }
 
-function positiveTimeoutMs(
+function minimumToolTimeoutMs(useCase: SocialAgentModelUseCase): number {
+  return useCase === 'planner'
+    ? SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS
+    : SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS;
+}
+
+function boundedQualityTimeoutMs(
   value: string | undefined,
-  fallback: number,
-  max: number,
+  minimum: number,
 ): number {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-  return Math.min(parsed, max);
+  if (!Number.isFinite(parsed) || parsed <= 0) return minimum;
+  return Math.min(Math.max(parsed, minimum), 30_000);
+}
+
+function firstModel(
+  values: Array<string | undefined | null>,
+  options: { allowFast?: boolean } = {},
+): string {
+  for (const value of values) {
+    const normalized = selectSocialAgentConfiguredModel(value, {
+      allowFast: options.allowFast,
+    });
+    if (normalized) return normalized;
+  }
+  return SOCIAL_AGENT_DEFAULT_REASONING_MODEL;
 }

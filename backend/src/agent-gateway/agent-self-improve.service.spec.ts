@@ -367,6 +367,36 @@ describe('AgentSelfImproveService', () => {
     );
   });
 
+  it('does not capture generic recovery fallback messages as online replay eval cases', async () => {
+    const reflectionRepo = makeRepo<AgentReflectionRun>();
+    const patchRepo = makeRepo<AgentSkillPatch>();
+    const evalCaseRepo = makeRepo<AgentEvalCase>();
+    const l5Runtime = {
+      captureReplaySample: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new AgentSelfImproveService(
+      reflectionRepo as never,
+      patchRepo as never,
+      evalCaseRepo as never,
+      l5Runtime as never,
+    );
+
+    await expect(
+      service.recordOnlineReplayFromRoute({
+        ownerUserId: 7,
+        taskId: 44,
+        userMessage: '我之前的记忆呢',
+        assistantMessage:
+          'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。',
+        route: { intent: 'casual_chat' },
+        result: { assistantMessageSource: 'fallback' },
+      }),
+    ).resolves.toBeNull();
+
+    expect(evalCaseRepo.save).not.toHaveBeenCalled();
+    expect(l5Runtime.captureReplaySample).not.toHaveBeenCalled();
+  });
+
   it('discovers automation clusters from online replay and canary metrics', async () => {
     const reflectionRepo = makeRepo<AgentReflectionRun>();
     const patchRepo = makeRepo<AgentSkillPatch>();

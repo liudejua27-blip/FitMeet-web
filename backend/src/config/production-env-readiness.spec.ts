@@ -37,10 +37,24 @@ const validEnv = {
   DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
   DEEPSEEK_CHAT_MODEL: 'deepseek-v4-pro',
   DEEPSEEK_FAST_MODEL: 'deepseek-v4-flash',
+  SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS: '30000',
+  SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS: '20000',
+  SOCIAL_AGENT_MODEL_ROUTING_MODE: 'quality',
+  SOCIAL_AGENT_INTENT_ROUTER_MODE: 'llm_first',
+  SOCIAL_AGENT_CONTEXT_TURN_LIMIT: '80',
+  SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS: '30000',
+  SOCIAL_AGENT_CHAT_FIRST_CHUNK_TIMEOUT_MS: '20000',
+  SOCIAL_AGENT_FINAL_RESPONSE_TIMEOUT_MS: '30000',
+  SOCIAL_AGENT_FINAL_RESPONSE_FIRST_CHUNK_TIMEOUT_MS: '20000',
+  SOCIAL_AGENT_FINAL_RESPONSE_MAX_TOKENS: '1200',
+  SOCIAL_AGENT_PLANNER_TIMEOUT_MS: '25000',
+  SOCIAL_AGENT_INTENT_TIMEOUT_MS: '25000',
+  SOCIAL_AGENT_DEEPSEEK_RETRY_ATTEMPTS: '2',
+  AGENT_PLANNER_MODEL: 'deepseek-v4-pro',
   FITMEET_SUBAGENT_WORKER_MODE: 'db_queue',
   FITMEET_SUBAGENT_WORKER_CONCURRENCY: '2',
   FITMEET_SUBAGENT_WORKER_POLL_MS: '1000',
-  FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: '15000',
+  FITMEET_SUBAGENT_WORKER_TIMEOUT_MS: '30000',
   FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS: '10000',
   FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS: '90000',
   AGENT_OBSERVABILITY_ALERTS_ENABLED: 'false',
@@ -270,6 +284,7 @@ describe('production-env-readiness', () => {
       DEEPSEEK_FAST_MODEL: 'deepseek-v4',
       AGENT_FINAL_RESPONSE_MODEL: 'deepseek-v4',
       AGENT_CASUAL_CHAT_MODEL: 'deepseek-reasoner',
+      AGENT_SAFETY_MODEL: 'deepseek-v4',
     });
 
     expect(missingModels.ok).toBe(false);
@@ -287,6 +302,119 @@ describe('production-env-readiness', () => {
         expect.objectContaining({ key: 'DEEPSEEK_FAST_MODEL' }),
         expect.objectContaining({ key: 'AGENT_FINAL_RESPONSE_MODEL' }),
         expect.objectContaining({ key: 'AGENT_CASUAL_CHAT_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_SAFETY_MODEL' }),
+      ]),
+    );
+  });
+
+  it('requires release-quality Social Agent intelligence policy', () => {
+    const report = buildProductionEnvReport({
+      ...validEnv,
+      SOCIAL_AGENT_MODEL_ROUTING_MODE: 'balanced',
+      SOCIAL_AGENT_INTENT_ROUTER_MODE: 'hybrid',
+      SOCIAL_AGENT_INTENT_LLM: 'false',
+      SOCIAL_AGENT_BRAIN_LLM_PLANNER: 'false',
+      SOCIAL_AGENT_CONTEXT_TURN_LIMIT: '8',
+      SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS: '5000',
+      SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS: '3500',
+      SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS: '5000',
+      SOCIAL_AGENT_CHAT_FIRST_CHUNK_TIMEOUT_MS: '3500',
+      SOCIAL_AGENT_FINAL_RESPONSE_TIMEOUT_MS: '5000',
+      SOCIAL_AGENT_FINAL_RESPONSE_FIRST_CHUNK_TIMEOUT_MS: '3500',
+      SOCIAL_AGENT_FINAL_RESPONSE_MAX_TOKENS: '512',
+      SOCIAL_AGENT_PLANNER_TIMEOUT_MS: '2500',
+      SOCIAL_AGENT_INTENT_TIMEOUT_MS: '2500',
+      SOCIAL_AGENT_DEEPSEEK_RETRY_ATTEMPTS: '1',
+      SOCIAL_AGENT_INTENT_RETRY_ATTEMPTS: '1',
+      DEEPSEEK_MODEL: 'deepseek-v4-flash',
+      AGENT_CASUAL_CHAT_MODEL: 'deepseek-v4-flash',
+      AGENT_FINAL_RESPONSE_MODEL: 'deepseek-v4-flash',
+      AGENT_PLANNER_MODEL: 'deepseek-v4-flash',
+      AGENT_EXTRACTOR_MODEL: 'deepseek-v4-flash',
+      AGENT_CARD_MODEL: 'deepseek-v4-flash',
+      AGENT_SAFETY_MODEL: 'deepseek-v4-flash',
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'SOCIAL_AGENT_MODEL_ROUTING_MODE' }),
+        expect.objectContaining({ key: 'SOCIAL_AGENT_INTENT_ROUTER_MODE' }),
+        expect.objectContaining({ key: 'SOCIAL_AGENT_INTENT_LLM' }),
+        expect.objectContaining({ key: 'SOCIAL_AGENT_BRAIN_LLM_PLANNER' }),
+        expect.objectContaining({ key: 'SOCIAL_AGENT_CONTEXT_TURN_LIMIT' }),
+        expect.objectContaining({ key: 'SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS' }),
+        expect.objectContaining({
+          key: 'SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS',
+        }),
+        expect.objectContaining({ key: 'SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS' }),
+        expect.objectContaining({
+          key: 'SOCIAL_AGENT_CHAT_FIRST_CHUNK_TIMEOUT_MS',
+        }),
+        expect.objectContaining({
+          key: 'SOCIAL_AGENT_FINAL_RESPONSE_TIMEOUT_MS',
+        }),
+        expect.objectContaining({
+          key: 'SOCIAL_AGENT_FINAL_RESPONSE_FIRST_CHUNK_TIMEOUT_MS',
+        }),
+        expect.objectContaining({ key: 'SOCIAL_AGENT_FINAL_RESPONSE_MAX_TOKENS' }),
+        expect.objectContaining({ key: 'SOCIAL_AGENT_PLANNER_TIMEOUT_MS' }),
+        expect.objectContaining({ key: 'SOCIAL_AGENT_INTENT_TIMEOUT_MS' }),
+        expect.objectContaining({
+          key: 'SOCIAL_AGENT_DEEPSEEK_RETRY_ATTEMPTS',
+        }),
+        expect.objectContaining({ key: 'SOCIAL_AGENT_INTENT_RETRY_ATTEMPTS' }),
+        expect.objectContaining({ key: 'DEEPSEEK_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_CASUAL_CHAT_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_FINAL_RESPONSE_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_PLANNER_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_EXTRACTOR_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_CARD_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_SAFETY_MODEL' }),
+      ]),
+    );
+  });
+
+  it('rejects per-lane quality model overrides that would silently downgrade DeepSeek', () => {
+    const report = buildProductionEnvReport({
+      ...validEnv,
+      AGENT_CASUAL_CHAT_MODEL: 'deepseek-v4-flash',
+      AGENT_FINAL_RESPONSE_MODEL: 'deepseek-v4-flash',
+      AGENT_PLANNER_MODEL: 'deepseek-v4-flash',
+      AGENT_EXTRACTOR_MODEL: 'deepseek-v4-flash',
+      AGENT_CARD_MODEL: 'deepseek-v4-flash',
+      AGENT_SAFETY_MODEL: 'deepseek-v4-flash',
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'AGENT_CASUAL_CHAT_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_FINAL_RESPONSE_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_PLANNER_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_EXTRACTOR_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_CARD_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_SAFETY_MODEL' }),
+      ]),
+    );
+  });
+
+  it('rejects a fast model as the production Social Agent reasoning model', () => {
+    const report = buildProductionEnvReport({
+      ...validEnv,
+      DEEPSEEK_CHAT_MODEL: 'deepseek-v4-flash',
+      AGENT_CASUAL_CHAT_MODEL: 'deepseek-v4-flash',
+      AGENT_FINAL_RESPONSE_MODEL: 'deepseek-v4-flash',
+      AGENT_PLANNER_MODEL: 'deepseek-v4-flash',
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'DEEPSEEK_CHAT_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_CASUAL_CHAT_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_FINAL_RESPONSE_MODEL' }),
+        expect.objectContaining({ key: 'AGENT_PLANNER_MODEL' }),
       ]),
     );
   });
@@ -338,6 +466,34 @@ describe('production-env-readiness', () => {
         }),
         expect.objectContaining({
           key: 'FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS',
+        }),
+      ]),
+    );
+  });
+
+  it('rejects subagent worker model overrides that would downgrade DeepSeek quality', () => {
+    const report = buildProductionEnvReport({
+      ...validEnv,
+      FITMEET_LIFE_GRAPH_AGENT_WORKER_MODEL: 'deepseek-chat',
+      FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODEL: 'deepseek-v4-flash',
+      FITMEET_MEET_LOOP_AGENT_WORKER_MODEL: 'deepseek-v4',
+      FITMEET_SUBAGENT_WORKER_MODEL: 'deepseek-fast-worker',
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'FITMEET_LIFE_GRAPH_AGENT_WORKER_MODEL',
+        }),
+        expect.objectContaining({
+          key: 'FITMEET_SOCIAL_MATCH_AGENT_WORKER_MODEL',
+        }),
+        expect.objectContaining({
+          key: 'FITMEET_MEET_LOOP_AGENT_WORKER_MODEL',
+        }),
+        expect.objectContaining({
+          key: 'FITMEET_SUBAGENT_WORKER_MODEL',
         }),
       ]),
     );

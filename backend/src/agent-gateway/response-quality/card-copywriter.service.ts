@@ -340,6 +340,7 @@ export class CardCopywriterService {
       intensity,
       safetyBoundary,
     ]);
+    const reasoningQuality = this.candidateReasoningQuality(candidate);
     return {
       id: `candidate_card:${input.taskId}:${cardIdentity}`,
       type: 'candidate_card',
@@ -377,6 +378,11 @@ export class CardCopywriterService {
           reasons: reasons.slice(0, 4),
           explanationSteps,
           rankingBreakdown,
+          reasonerSource: reasoningQuality.reasonerSource,
+          reasoningConfidence: reasoningQuality.reasoningConfidence,
+          reasoningDegraded: reasoningQuality.reasoningDegraded,
+          reasoningRetryable: reasoningQuality.reasoningRetryable,
+          matchReasoner: reasoningQuality.matchReasoner,
           safetyBadges,
           recommendationConsent:
             Object.keys(recommendationConsent).length > 0
@@ -418,6 +424,11 @@ export class CardCopywriterService {
         sharedInterests: interestTags,
         explanationSteps,
         rankingBreakdown,
+        reasonerSource: reasoningQuality.reasonerSource,
+        reasoningConfidence: reasoningQuality.reasoningConfidence,
+        reasoningDegraded: reasoningQuality.reasoningDegraded,
+        reasoningRetryable: reasoningQuality.reasoningRetryable,
+        matchReasoner: reasoningQuality.matchReasoner,
         distanceLabel: this.candidateDistanceLabel(candidate),
         loopStage: 'candidate_recommendation',
         targetUserId,
@@ -659,10 +670,11 @@ export class CardCopywriterService {
       opportunityId: string;
     },
   ): FitMeetAlphaCardAction[] {
+    const safeCandidate = this.candidateActionSnapshot(candidate);
     const basePayload = {
       taskId,
       targetUserId,
-      candidate,
+      candidate: safeCandidate,
       opportunityId: context.opportunityId,
       displayName: context.displayName,
       safetyBoundary: context.safetyBoundary,
@@ -754,6 +766,46 @@ export class CardCopywriterService {
         },
       },
     ];
+  }
+
+  private candidateActionSnapshot(candidate: Record<string, unknown>) {
+    const reasoningQuality = this.candidateReasoningQuality(candidate);
+    return {
+      targetUserId:
+        candidate.targetUserId ?? candidate.candidateUserId ?? candidate.userId,
+      candidateUserId: candidate.candidateUserId ?? candidate.userId,
+      userId: candidate.userId,
+      candidateRecordId: candidate.candidateRecordId ?? null,
+      socialRequestId: candidate.socialRequestId ?? null,
+      publicIntentId: candidate.publicIntentId ?? null,
+      activityId: candidate.activityId ?? null,
+      displayName:
+        cleanDisplayText(candidate.displayName, '') ||
+        cleanDisplayText(candidate.nickname, '') ||
+        '候选人',
+      avatarUrl: cleanDisplayText(candidate.avatarUrl ?? candidate.avatar, '') || null,
+      city: cleanDisplayText(candidate.city, '') || null,
+      score: candidate.score ?? candidate.matchScore ?? null,
+      matchScore: candidate.matchScore ?? candidate.score ?? null,
+      commonTags: this.stringList(candidate.commonTags).slice(0, 6),
+      matchReasons: this.stringList(
+        candidate.matchReasons ?? candidate.reasons,
+      ).slice(0, 6),
+      suggestedOpener:
+        cleanDisplayText(
+          candidate.suggestedOpener ?? candidate.suggestedMessage,
+          '',
+        ) || null,
+      recommendationConsent:
+        Object.keys(this.record(candidate.recommendationConsent)).length > 0
+          ? this.record(candidate.recommendationConsent)
+          : null,
+      reasonerSource: reasoningQuality.reasonerSource,
+      reasoningConfidence: reasoningQuality.reasoningConfidence,
+      reasoningDegraded: reasoningQuality.reasoningDegraded,
+      reasoningRetryable: reasoningQuality.reasoningRetryable,
+      matchReasoner: reasoningQuality.matchReasoner,
+    };
   }
 
   private inferActivity(candidate: Record<string, unknown>): string {
@@ -1112,6 +1164,92 @@ export class CardCopywriterService {
           `${input.relationshipGoal ?? '低压力认识'}，${input.intensity}节奏更贴近你的偏好。`,
       },
     ].filter((item) => item.reason);
+  }
+
+  private candidateReasoningQuality(candidate: Record<string, unknown>): {
+    reasonerSource?: 'deepseek' | 'fallback';
+    reasoningConfidence?: number;
+    reasoningDegraded?: boolean;
+    reasoningRetryable?: boolean;
+    matchReasoner?: {
+      source?: 'deepseek' | 'fallback';
+      confidence?: number;
+      degraded?: boolean;
+      retryable?: boolean;
+      degradationReason?: 'empty_response' | 'model_unavailable';
+    };
+  } {
+    const nested = this.record(
+      candidate.matchReasoner ?? candidate.candidateExplanation,
+    );
+    const reasonerSource = this.reasonerSource(
+      candidate.reasonerSource ??
+        candidate.explanationSource ??
+        nested.source ??
+        nested.reasonerSource,
+    );
+    const reasoningConfidence =
+      this.optionalNumber(candidate.reasoningConfidence) ??
+      this.optionalNumber(nested.confidence);
+    const reasoningDegraded =
+      this.optionalBoolean(candidate.reasoningDegraded) ??
+      this.optionalBoolean(candidate.degraded) ??
+      this.optionalBoolean(nested.degraded);
+    const reasoningRetryable =
+      this.optionalBoolean(candidate.reasoningRetryable) ??
+      this.optionalBoolean(candidate.retryable) ??
+      this.optionalBoolean(nested.retryable);
+    const degradationReason = this.publicDegradationReason(
+      candidate.degradationReason ?? nested.degradationReason,
+    );
+    const hasReasoner =
+      reasonerSource ||
+      reasoningConfidence !== undefined ||
+      reasoningDegraded !== undefined ||
+      reasoningRetryable !== undefined ||
+      degradationReason;
+    return {
+      reasonerSource,
+      reasoningConfidence,
+      reasoningDegraded,
+      reasoningRetryable,
+      matchReasoner: hasReasoner
+        ? {
+            source: reasonerSource,
+            confidence: reasoningConfidence,
+            degraded: reasoningDegraded,
+            retryable: reasoningRetryable,
+            degradationReason,
+          }
+        : undefined,
+    };
+  }
+
+  private reasonerSource(value: unknown): 'deepseek' | 'fallback' | undefined {
+    return value === 'deepseek' || value === 'fallback' ? value : undefined;
+  }
+
+  private optionalBoolean(value: unknown): boolean | undefined {
+    if (value === true) return true;
+    if (value === false) return false;
+    return undefined;
+  }
+
+  private optionalNumber(value: unknown): number | undefined {
+    const parsed =
+      typeof value === 'number'
+        ? value
+        : typeof value === 'string' && value.trim()
+          ? Number(value)
+          : NaN;
+    return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : undefined;
+  }
+
+  private publicDegradationReason(
+    value: unknown,
+  ): 'empty_response' | 'model_unavailable' | undefined {
+    if (value === 'empty_response') return 'empty_response';
+    return value ? 'model_unavailable' : undefined;
   }
 
   private activityExplanationSteps(input: {

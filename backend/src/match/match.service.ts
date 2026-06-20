@@ -107,6 +107,11 @@ export interface MatchedCandidateView {
   suggestedOpener: string;
   nextAction: string;
   emotionalInsight: SocialEmotionalInsight;
+  reasonerSource?: 'deepseek' | 'fallback';
+  reasoningConfidence?: number;
+  reasoningDegraded?: boolean;
+  reasoningRetryable?: boolean;
+  degradationReason?: string | null;
 }
 
 export interface SocialEmotionalInsight {
@@ -434,6 +439,11 @@ export class MatchService {
       view.suggestedOpener = reasoning.suggestedOpener;
       view.nextAction = this.nextActionForScene(c.scenePolicy);
       view.suggestedMessage = reasoning.suggestedOpener;
+      view.reasonerSource = reasoning.reasonerSource;
+      view.reasoningConfidence = reasoning.reasonerConfidence;
+      view.reasoningDegraded = reasoning.reasoningDegraded;
+      view.reasoningRetryable = reasoning.reasoningRetryable;
+      view.degradationReason = reasoning.degradationReason;
       view.reasons = Array.from(
         new Set([reasoning.publicReason, ...view.reasons].filter(Boolean)),
       ).slice(0, 6);
@@ -1805,6 +1815,11 @@ export class MatchService {
       suggestedOpener: suggestedMessage,
       nextAction: this.nextActionForScene(cand.scenePolicy),
       emotionalInsight,
+      reasonerSource: 'fallback',
+      reasoningConfidence: 0.5,
+      reasoningDegraded: false,
+      reasoningRetryable: false,
+      degradationReason: null,
       status: row?.status,
       candidateRecordId: row?.id,
     };
@@ -1838,6 +1853,9 @@ export class MatchService {
         warning: (row.riskWarnings ?? [])[0] ?? '',
       },
     };
+    const reasonerQuality = this.reasonerQualityFromBreakdown(
+      row.scoreBreakdown ?? {},
+    );
     return {
       targetType: 'user',
       userId: user.id,
@@ -1865,8 +1883,37 @@ export class MatchService {
         undefined,
         row.reasons ?? [],
       ),
+      ...reasonerQuality,
       status: row.status,
       candidateRecordId: row.id,
+    };
+  }
+
+  private reasonerQualityFromBreakdown(
+    breakdown: Record<string, number>,
+  ): Pick<
+    MatchedCandidateView,
+    | 'reasonerSource'
+    | 'reasoningConfidence'
+    | 'reasoningDegraded'
+    | 'reasoningRetryable'
+    | 'degradationReason'
+  > {
+    const degraded = breakdown.aiReasoningDegraded === 1;
+    const hasReasoningQuality =
+      typeof breakdown.aiReasoningConfidence === 'number' ||
+      typeof breakdown.aiReasoningDegraded === 'number';
+    const confidence =
+      typeof breakdown.aiReasoningConfidence === 'number'
+        ? Math.max(0, Math.min(100, breakdown.aiReasoningConfidence)) / 100
+        : 0.5;
+    return {
+      reasonerSource:
+        hasReasoningQuality && !degraded ? 'deepseek' : 'fallback',
+      reasoningConfidence: confidence,
+      reasoningDegraded: degraded,
+      reasoningRetryable: degraded,
+      degradationReason: degraded ? 'model_unavailable' : null,
     };
   }
 

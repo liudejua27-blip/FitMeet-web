@@ -2,7 +2,22 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { UserSocialProfile } from '../users/user-social-profile.entity';
 import { MatchPrivacySanitizer } from '../match/match-privacy-sanitizer.service';
-import { resolveDeepSeekModel } from '../common/deepseek.util';
+import {
+  SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+  SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS,
+  SocialAgentModelRouterService,
+} from './social-agent-model-router.service';
+import {
+  selectSocialAgentToolModel,
+  selectSocialAgentToolTimeoutMs,
+} from './social-agent-tool-model';
+import {
+  isRetryableSocialAgentDeepSeekFailure,
+  socialAgentDeepSeekFailureReason,
+  socialAgentDeepSeekRetryAttempts,
+} from './social-agent-deepseek-resilience';
+import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
+import { callDeepSeekChatCompletion } from '../common/deepseek.util';
 
 /**
  * AI Match Reasoner
@@ -33,6 +48,9 @@ import { resolveDeepSeekModel } from '../common/deepseek.util';
  */
 
 export interface MatchReasonerInput {
+  taskId?: number | null;
+  traceId?: string | null;
+  signal?: AbortSignal | null;
   ownerProfile: UserSocialProfile;
   candidateProfile: UserSocialProfile;
   matchSignals?: {
@@ -68,15 +86,23 @@ export interface MatchReasonerOutput {
   requiresUserConfirmation: boolean;
   confidence: number;
   source: 'deepseek' | 'fallback';
+  fallbackReason?: string | null;
+  degraded?: boolean;
+  retryable?: boolean;
+  degradationReason?: string | null;
 }
 
 export interface MatchScoreSecondPass {
   score: number;
   confidence: number;
   source: 'deepseek' | 'fallback';
+  fallbackReason?: string | null;
   publicReason: string;
   privateReason: string;
   riskWarnings: string[];
+  degraded?: boolean;
+  retryable?: boolean;
+  degradationReason?: string | null;
 }
 
 const MAX_REASON_LEN = 320;
@@ -119,27 +145,37 @@ export class MatchReasonerService {
   constructor(
     @Optional() private readonly config?: ConfigService,
     @Optional() private readonly sanitizer?: MatchPrivacySanitizer,
+    @Optional()
+    private readonly modelRouter?: SocialAgentModelRouterService,
+    @Optional()
+    private readonly deepSeek?: SocialAgentChatDeepSeekClientService,
   ) {}
 
   /**
-   * Main entry point — always resolves. LLM failures fall back silently
-   * to the deterministic builder so callers never need a try/catch.
+   * Main entry point. LLM failures fall back silently to the deterministic
+   * builder; client cancellation is preserved so stopped runs do not produce
+   * misleading fallback explanations.
    */
   async explain(input: MatchReasonerInput): Promise<MatchReasonerOutput> {
+    this.assertNotClientAborted(input.signal);
     const fallback = this.buildFallback(input);
     if (!this.isDeepseekEnabled()) {
-      return fallback;
+      return this.withFallbackReason(fallback, this.deepseekDisabledReason());
     }
     try {
-      const augmented = await this.tryDeepseek(input, fallback);
-      return this.sanitizeOutput(augmented ?? fallback);
-    } catch (err) {
-      this.logger.warn(
-        `MatchReasoner deepseek augmentation failed: ${
-          (err as Error)?.message ?? err
-        }`,
+      const augmented = await this.tryDeepseekWithRetry(input, fallback);
+      return this.sanitizeOutput(
+        augmented ?? this.degradeFallbackExplanation(fallback, 'empty_response'),
       );
-      return fallback;
+    } catch (err) {
+      if (this.isClientAbort(err)) {
+        throw this.toError(err);
+      }
+      const reason = socialAgentDeepSeekFailureReason(err);
+      this.logger.warn(
+        `MatchReasoner deepseek augmentation failed: ${reason}`,
+      );
+      return this.degradeFallbackExplanation(fallback, reason);
     }
   }
 
@@ -147,12 +183,14 @@ export class MatchReasonerService {
     input: MatchReasonerInput,
     baseScore: number,
   ): Promise<MatchScoreSecondPass> {
+    this.assertNotClientAborted(input.signal);
     const fallbackExplanation = this.buildFallback(input);
     const base = this.clampScore(baseScore);
     const fallback: MatchScoreSecondPass = {
       score: base,
       confidence: fallbackExplanation.confidence,
       source: 'fallback',
+      fallbackReason: this.deepseekDisabledReason(),
       publicReason: fallbackExplanation.publicReason,
       privateReason:
         '未启用 DeepSeek 二次评分，当前分数来自确定性画像兼容度评分。',
@@ -161,15 +199,21 @@ export class MatchReasonerService {
     if (!this.isDeepseekEnabled()) return fallback;
 
     try {
-      const scored = await this.tryDeepseekScore(input, base, fallback);
-      return scored ?? fallback;
-    } catch (err) {
-      this.logger.warn(
-        `MatchReasoner deepseek score adjustment failed: ${
-          (err as Error)?.message ?? err
-        }`,
+      const scored = await this.tryDeepseekScoreWithRetry(
+        input,
+        base,
+        fallback,
       );
-      return fallback;
+      return scored ?? this.degradeFallbackScore(fallback, 'empty_response');
+    } catch (err) {
+      if (this.isClientAbort(err)) {
+        throw this.toError(err);
+      }
+      const reason = socialAgentDeepSeekFailureReason(err);
+      this.logger.warn(
+        `MatchReasoner deepseek score adjustment failed: ${reason}`,
+      );
+      return this.degradeFallbackScore(fallback, reason);
     }
   }
 
@@ -327,6 +371,29 @@ export class MatchReasonerService {
     });
   }
 
+  private deepseekDisabledReason(): string {
+    if (!this.config) return 'config_unavailable';
+    const enabled = this.config.get<string>('ENABLE_MATCH_REASONER_LLM');
+    if (enabled && enabled !== 'true' && enabled !== '1') {
+      return 'match_reasoner_llm_disabled';
+    }
+    if (!this.config.get<string>('DEEPSEEK_API_KEY')) {
+      return 'DEEPSEEK_API_KEY missing';
+    }
+    return 'deepseek_disabled';
+  }
+
+  private withFallbackReason(
+    output: MatchReasonerOutput,
+    fallbackReason: string,
+  ): MatchReasonerOutput {
+    return {
+      ...output,
+      source: 'fallback',
+      fallbackReason,
+    };
+  }
+
   private buildOpener(args: {
     candidateName: string;
     shared: string[];
@@ -342,6 +409,93 @@ export class MatchReasonerService {
     );
   }
 
+  private degradeFallbackExplanation(
+    fallback: MatchReasonerOutput,
+    reason: string,
+  ): MatchReasonerOutput {
+    return this.sanitizeOutput({
+      ...fallback,
+      confidence: Math.min(fallback.confidence, 0.48),
+      riskWarnings: this.takeList(
+        [
+          '智能推荐解释暂时不可用，当前理由仅基于公开标签和基础兼容度保守生成。',
+          ...fallback.riskWarnings,
+        ],
+        5,
+      ),
+      nextAction:
+        '建议先保存候选或稍后重试智能解释；发送邀请前仍需你确认。',
+      requiresUserConfirmation: true,
+      source: 'fallback',
+      fallbackReason: reason,
+      degraded: true,
+      retryable: true,
+      degradationReason: this.publicDegradationReason(reason),
+    });
+  }
+
+  private degradeFallbackScore(
+    fallback: MatchScoreSecondPass,
+    reason: string,
+  ): MatchScoreSecondPass {
+    return {
+      ...fallback,
+      confidence: Number(Math.min(fallback.confidence, 0.45).toFixed(2)),
+      publicReason: this.clipReason(
+        this.sanitizeText(
+          '智能二次评分暂时不可用，当前分数仅来自公开资料和基础兼容度。',
+        ),
+      ),
+      riskWarnings: this.sanitizeList([
+        '智能二次评分暂时不可用，请在发送邀请前再次确认候选资料。',
+        ...fallback.riskWarnings,
+      ]),
+      source: 'fallback',
+      fallbackReason: reason,
+      degraded: true,
+      retryable: true,
+      degradationReason: this.publicDegradationReason(reason),
+    };
+  }
+
+  private publicDegradationReason(reason: string): string {
+    return reason === 'empty_response' ? 'empty_response' : 'model_unavailable';
+  }
+
+  private async tryDeepseekWithRetry(
+    input: MatchReasonerInput,
+    fallback: MatchReasonerOutput,
+  ): Promise<MatchReasonerOutput | null> {
+    const maxAttempts = socialAgentDeepSeekRetryAttempts(this.config, {
+      specificKey: 'MATCH_REASONER_RETRY_ATTEMPTS',
+    });
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      this.assertNotClientAborted(input.signal);
+      try {
+        return await this.tryDeepseek(input, fallback);
+      } catch (error) {
+        if (this.isClientAbort(error)) {
+          throw this.toError(error);
+        }
+        lastError = error;
+        const reason = socialAgentDeepSeekFailureReason(error);
+        if (
+          attempt < maxAttempts &&
+          isRetryableSocialAgentDeepSeekFailure(reason)
+        ) {
+          this.logger.warn(
+            `MatchReasoner deepseek augmentation retrying: ${reason} (${attempt}/${maxAttempts})`,
+          );
+          continue;
+        }
+        throw this.toError(error);
+      }
+    }
+    if (lastError) throw this.toError(lastError);
+    return null;
+  }
+
   /**
    * DeepSeek augmentation. Returns null if the response is unusable.
    * The fallback object is given as a hint so the LLM doesn't have to
@@ -353,13 +507,6 @@ export class MatchReasonerService {
   ): Promise<MatchReasonerOutput | null> {
     const apiKey = this.config?.get<string>('DEEPSEEK_API_KEY');
     if (!apiKey) return null;
-    const baseUrl =
-      this.config?.get<string>('DEEPSEEK_BASE_URL') ||
-      'https://api.deepseek.com';
-    const model = resolveDeepSeekModel(
-      this.config?.get<string>('DEEPSEEK_MODEL'),
-    );
-
     const system = [
       '你是 FitMeet 的 AI 匹配解释器。',
       '严格遵守隐私安全规范：',
@@ -384,31 +531,43 @@ export class MatchReasonerService {
       safetySignals: input.safetySignals,
       scoreBreakdown: input.scoreBreakdown,
     });
+    const messages = [
+      { role: 'system' as const, content: system },
+      { role: 'user' as const, content: user },
+    ];
+    const fallbackTemperature =
+      this.modelRouter?.getTemperature('candidate_summary') ?? 0.5;
 
-    const res = await fetch(
-      `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          temperature: 0.5,
-          response_format: { type: 'json_object' },
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: user },
-          ],
-        }),
-      },
-    );
-    if (!res.ok) throw new Error(`DeepSeek HTTP ${res.status}`);
-    const data = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
-    };
-    const raw = data.choices?.[0]?.message?.content ?? '';
+    if (this.deepSeek) {
+      this.assertNotClientAborted(input.signal);
+      const content = await this.deepSeek.complete({
+        useCase: 'candidate_summary',
+        taskId: input.taskId ?? null,
+        intent: 'match_reasoner',
+        fallbackTemperature,
+        responseFormat: { type: 'json_object' },
+        retryAttempts: 1,
+        messages,
+        traceId: input.traceId ?? null,
+        signal: input.signal ?? null,
+      });
+      return this.parseDeepseekExplanation(content, fallback);
+    }
+
+    const raw = await this.callDeepSeekJson({
+      apiKey,
+      messages,
+      temperature: fallbackTemperature,
+      signal: input.signal ?? null,
+    });
+    if (!raw) return null;
+    return this.parseDeepseekExplanation(raw, fallback);
+  }
+
+  private parseDeepseekExplanation(
+    raw: string | null,
+    fallback: MatchReasonerOutput,
+  ): MatchReasonerOutput | null {
     if (!raw) return null;
     let parsed: Record<string, unknown>;
     try {
@@ -456,6 +615,41 @@ export class MatchReasonerService {
     return out;
   }
 
+  private async tryDeepseekScoreWithRetry(
+    input: MatchReasonerInput,
+    baseScore: number,
+    fallback: MatchScoreSecondPass,
+  ): Promise<MatchScoreSecondPass | null> {
+    const maxAttempts = socialAgentDeepSeekRetryAttempts(this.config, {
+      specificKey: 'MATCH_REASONER_RETRY_ATTEMPTS',
+    });
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      this.assertNotClientAborted(input.signal);
+      try {
+        return await this.tryDeepseekScore(input, baseScore, fallback);
+      } catch (error) {
+        if (this.isClientAbort(error)) {
+          throw this.toError(error);
+        }
+        lastError = error;
+        const reason = socialAgentDeepSeekFailureReason(error);
+        if (
+          attempt < maxAttempts &&
+          isRetryableSocialAgentDeepSeekFailure(reason)
+        ) {
+          this.logger.warn(
+            `MatchReasoner deepseek score retrying: ${reason} (${attempt}/${maxAttempts})`,
+          );
+          continue;
+        }
+        throw this.toError(error);
+      }
+    }
+    if (lastError) throw this.toError(lastError);
+    return null;
+  }
+
   private async tryDeepseekScore(
     input: MatchReasonerInput,
     baseScore: number,
@@ -463,12 +657,6 @@ export class MatchReasonerService {
   ): Promise<MatchScoreSecondPass | null> {
     const apiKey = this.config?.get<string>('DEEPSEEK_API_KEY');
     if (!apiKey) return null;
-    const baseUrl =
-      this.config?.get<string>('DEEPSEEK_BASE_URL') ||
-      'https://api.deepseek.com';
-    const model = resolveDeepSeekModel(
-      this.config?.get<string>('DEEPSEEK_MODEL'),
-    );
     const system = [
       '你是 FitMeet 的画像匹配二次评分器。',
       '确定性 CompatibilityScorerService 已经完成硬过滤、隐私过滤和基础评分。',
@@ -487,30 +675,44 @@ export class MatchReasonerService {
       safetySignals: input.safetySignals,
       scoreBreakdown: input.scoreBreakdown,
     });
-    const res = await fetch(
-      `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          temperature: 0.25,
-          response_format: { type: 'json_object' },
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: user },
-          ],
-        }),
-      },
-    );
-    if (!res.ok) throw new Error(`DeepSeek HTTP ${res.status}`);
-    const data = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
-    };
-    const raw = data.choices?.[0]?.message?.content ?? '';
+    const messages = [
+      { role: 'system' as const, content: system },
+      { role: 'user' as const, content: user },
+    ];
+    const fallbackTemperature =
+      this.modelRouter?.getTemperature('candidate_summary') ?? 0.25;
+
+    if (this.deepSeek) {
+      this.assertNotClientAborted(input.signal);
+      const content = await this.deepSeek.complete({
+        useCase: 'candidate_summary',
+        taskId: input.taskId ?? null,
+        intent: 'match_reasoner_score',
+        fallbackTemperature,
+        responseFormat: { type: 'json_object' },
+        retryAttempts: 1,
+        messages,
+        traceId: input.traceId ?? null,
+        signal: input.signal ?? null,
+      });
+      return this.parseDeepseekScore(content, baseScore, fallback);
+    }
+
+    const raw = await this.callDeepSeekJson({
+      apiKey,
+      messages,
+      temperature: fallbackTemperature,
+      signal: input.signal ?? null,
+    });
+    if (!raw) return null;
+    return this.parseDeepseekScore(raw, baseScore, fallback);
+  }
+
+  private parseDeepseekScore(
+    raw: string | null,
+    baseScore: number,
+    fallback: MatchScoreSecondPass,
+  ): MatchScoreSecondPass | null {
     if (!raw) return null;
     let parsed: Record<string, unknown>;
     try {
@@ -617,6 +819,56 @@ export class MatchReasonerService {
     const base = this.clampScore(baseScore);
     const next = this.clampScore(value);
     return Math.max(base - 12, Math.min(base + 12, next));
+  }
+
+  private deepseekModel(): string {
+    if (!this.config) return SOCIAL_AGENT_DEFAULT_REASONING_MODEL;
+    return selectSocialAgentToolModel('candidate_summary', {
+      config: this.config,
+      modelRouter: this.modelRouter,
+    });
+  }
+
+  private deepseekTimeoutMs(): number {
+    if (!this.config) return SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS;
+    return selectSocialAgentToolTimeoutMs('candidate_summary', {
+      config: this.config,
+      modelRouter: this.modelRouter,
+    });
+  }
+
+  private assertNotClientAborted(signal?: AbortSignal | null): void {
+    if (signal?.aborted) {
+      throw new Error('client_aborted');
+    }
+  }
+
+  private isClientAbort(error: unknown): boolean {
+    return (error as Error | undefined)?.message === 'client_aborted';
+  }
+
+  private async callDeepSeekJson(input: {
+    apiKey: string;
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+    temperature: number;
+    signal?: AbortSignal | null;
+  }): Promise<string> {
+    return callDeepSeekChatCompletion({
+      apiKey: input.apiKey,
+      baseUrl: this.config?.get<string>('DEEPSEEK_BASE_URL'),
+      model: this.deepseekModel(),
+      temperature: input.temperature,
+      responseFormat: { type: 'json_object' },
+      retryAttempts: 1,
+      messages: input.messages,
+      signal: input.signal ?? null,
+      timeoutMs: this.deepseekTimeoutMs(),
+      timeoutMessage: 'deepseek_timeout',
+    });
+  }
+
+  private toError(error: unknown): Error {
+    return error instanceof Error ? error : new Error(String(error));
   }
 
   private asString(value: unknown, def: string): string {

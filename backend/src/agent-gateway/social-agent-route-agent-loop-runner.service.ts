@@ -24,7 +24,11 @@ import { SocialAgentRouteProfileTurnService } from './social-agent-route-profile
 import { SocialAgentRouteSearchTurnService } from './social-agent-route-search-turn.service';
 import { SocialAgentRouteActionTurnService } from './social-agent-route-action-turn.service';
 import { SocialAgentRouteDecisionService } from './social-agent-route-decision.service';
+import type { SocialAgentHydratedContext } from './social-agent-context-hydrator.service';
+import { buildSocialAgentKnownTaskSlotConstraints } from './social-agent-task-slot-constraints.presenter';
 import {
+  hasExistingSocialActionContext,
+  hasExplicitSocialSideEffectIntent,
   isSocialExecutionIntent,
   shouldAllowSocialExecution,
 } from './social-agent-social-intent-gate';
@@ -60,12 +64,14 @@ type QueueInitialSearchForTask = (
   ownerUserId: number,
   task: AgentTask,
   goal: string,
+  options?: { signal?: AbortSignal | null },
 ) => Promise<SocialAgentAsyncRunSnapshot>;
 
 type ReplanAndRefresh = (
   ownerUserId: number,
   taskId: number,
   body: SocialAgentChatReplanRunBody,
+  options?: { signal?: AbortSignal | null },
 ) => Promise<SocialAgentAsyncRunSnapshot>;
 type RouteResumeContext = {
   threadId: string | null;
@@ -115,6 +121,7 @@ export class SocialAgentRouteAgentLoopRunnerService {
     state: SocialAgentRouteTurnState;
     message: string;
     decision: RouteDecision;
+    conversationIntent?: SocialAgentRouteMessageBody['conversationIntent'];
     clientContext?: SocialAgentRouteMessageBody['clientContext'];
     emit?: StreamEmit;
     signal?: AbortSignal | null;
@@ -131,6 +138,10 @@ export class SocialAgentRouteAgentLoopRunnerService {
     const loopService = this.agentLoop ?? new AgentLoopService();
     const { ownerUserId, message, decision } = input;
     const { route, profile, longTermSnapshot, brainToolResults } = decision;
+    const conversationIntent =
+      input.conversationIntent ??
+      input.clientContext?.conversationIntent ??
+      null;
     const resumeContext = this.resumeContext(input.clientContext);
     let task = input.task;
     let state = input.state;
@@ -149,7 +160,12 @@ export class SocialAgentRouteAgentLoopRunnerService {
         reason:
           decision.brainDecision?.reason ??
           'Route turn branches are executed through AgentLoop.',
-        tools: this.routeBranchTools(decision, message, resumeContext),
+        tools: this.routeBranchTools(
+          decision,
+          message,
+          resumeContext,
+          conversationIntent,
+        ),
       },
       maxToolCalls: 4,
       maxRetries: 0,
@@ -157,15 +173,17 @@ export class SocialAgentRouteAgentLoopRunnerService {
       emit: (event) => {
         void this.emitLoopStep(input.emit, event.step);
       },
-      runner: async ({ toolName }) => {
+      runner: async ({ toolName, traceId }) => {
         const branch = await this.runRouteBranchTool({
           toolName: toolName as RouteBranchToolName,
           ownerUserId,
           task,
+          traceId,
           state,
           message,
           route,
           taskContext: decision.taskContext,
+          conversationIntent,
           profile,
           longTermSnapshot,
           brainToolResults,
@@ -189,10 +207,21 @@ export class SocialAgentRouteAgentLoopRunnerService {
         return branch.observation;
       },
     });
+    const observedSavedContext = observations.some(
+      (observation) => observation.savedContext === true,
+    );
+    const observedProfileUpdated = observations.some(
+      (observation) => observation.profileUpdated === true,
+    );
 
     return {
       task,
-      state: { ...state, agentLoop: execution.loop },
+      state: {
+        ...state,
+        savedContext: state.savedContext || observedSavedContext,
+        profileUpdated: state.profileUpdated || observedProfileUpdated,
+        agentLoop: execution.loop,
+      },
       loop: execution.loop,
       actionTurn,
       subagentHandoffs: [
@@ -215,10 +244,12 @@ export class SocialAgentRouteAgentLoopRunnerService {
     toolName: RouteBranchToolName;
     ownerUserId: number;
     task: AgentTask;
+    traceId?: string | null;
     state: SocialAgentRouteTurnState;
     message: string;
     route: RouteDecision['route'];
     taskContext?: RouteDecision['taskContext'];
+    conversationIntent?: SocialAgentRouteMessageBody['conversationIntent'];
     profile: RouteDecision['profile'];
     longTermSnapshot: RouteDecision['longTermSnapshot'];
     brainToolResults: Array<Record<string, unknown>>;
@@ -234,6 +265,12 @@ export class SocialAgentRouteAgentLoopRunnerService {
     observation: Record<string, unknown>;
     handoff?: SubagentHandoffResult;
   }> {
+    const hydratedContext = this.hydratedContextFromTaskContext({
+      ownerUserId: input.ownerUserId,
+      task: input.task,
+      taskContext: input.taskContext,
+    });
+    const contextualInput = { ...input, hydratedContext };
     if (input.toolName === 'route_conversation_turn') {
       if (
         this.shouldRunWorkerForBranch(
@@ -241,16 +278,17 @@ export class SocialAgentRouteAgentLoopRunnerService {
           input.route,
           input.message,
           input.taskContext,
+          input.conversationIntent,
         )
       ) {
-        return this.runWorkerBranch(input, {
+        return this.runWorkerBranch(contextualInput, {
           agent: 'Life Graph Agent',
           workerToolName: 'life_graph_conversation_turn',
           memoryScope: 'life_graph.worker_conversation_turn',
-          run: () => this.runConversationBranch(input),
+          run: () => this.runConversationBranch(contextualInput),
         });
       }
-      return this.runConversationBranch(input);
+      return this.runConversationBranch(contextualInput);
     }
     if (input.toolName === 'route_profile_turn') {
       if (
@@ -259,33 +297,61 @@ export class SocialAgentRouteAgentLoopRunnerService {
           input.route,
           input.message,
           input.taskContext,
+          input.conversationIntent,
         )
       ) {
-        return this.runProfileBranch(input);
+        return this.runProfileBranch(contextualInput);
       }
-      return this.runWorkerBranch(input, {
+      return this.runWorkerBranch(contextualInput, {
         agent: 'Life Graph Agent',
         workerToolName: 'life_graph_profile_turn',
         memoryScope: 'life_graph.worker_profile_turn',
-        run: () => this.runProfileBranch(input),
+        run: () => this.runProfileBranch(contextualInput),
       });
     }
     if (input.toolName === 'route_search_turn') {
+      if (
+        !this.shouldExecuteSearchBranch(
+          input.route,
+          input.message,
+          input.taskContext,
+          input.conversationIntent,
+        )
+      ) {
+        return this.skippedBranch(contextualInput, {
+          branch: 'search',
+          reason: 'social_intent_gate_blocked',
+        });
+      }
       if (
         !this.shouldRunWorkerForBranch(
           input.toolName,
           input.route,
           input.message,
           input.taskContext,
+          input.conversationIntent,
         )
       ) {
-        return this.runSearchBranch(input);
+        return this.runSearchBranch(contextualInput);
       }
-      return this.runWorkerBranch(input, {
+      return this.runWorkerBranch(contextualInput, {
         agent: 'Social Match Agent',
         workerToolName: 'social_match_search_turn',
         memoryScope: 'matching.worker_search_turn',
-        run: () => this.runSearchBranch(input),
+        run: () => this.runSearchBranch(contextualInput),
+      });
+    }
+    if (
+      !this.shouldExecuteActionBranch(
+        input.route,
+        input.message,
+        input.taskContext,
+        input.conversationIntent,
+      )
+    ) {
+      return this.skippedBranch(contextualInput, {
+        branch: 'action',
+        reason: 'side_effect_intent_gate_blocked',
       });
     }
     if (
@@ -294,26 +360,55 @@ export class SocialAgentRouteAgentLoopRunnerService {
         input.route,
         input.message,
         input.taskContext,
+        input.conversationIntent,
       )
     ) {
-      return this.runActionBranch(input);
+      return this.runActionBranch(contextualInput);
     }
-    return this.runWorkerBranch(input, {
+    return this.runWorkerBranch(contextualInput, {
       agent: 'Meet Loop Agent',
       workerToolName: 'meet_loop_action_turn',
       memoryScope: 'meet_loop.worker_action_turn',
-      run: () => this.runActionBranch(input),
+      run: () => this.runActionBranch(contextualInput),
     });
+  }
+
+  private async skippedBranch(
+    input: {
+      task: AgentTask;
+      state: SocialAgentRouteTurnState;
+    },
+    output: {
+      branch: 'search' | 'action';
+      reason: string;
+    },
+  ): Promise<{
+    task: AgentTask;
+    state: SocialAgentRouteTurnState;
+    observation: Record<string, unknown>;
+  }> {
+    return {
+      task: input.task,
+      state: input.state,
+      observation: {
+        branch: output.branch,
+        handled: false,
+        skipped: true,
+        reason: output.reason,
+      },
+    };
   }
 
   private async runConversationBranch(input: {
     ownerUserId: number;
     task: AgentTask;
+    traceId?: string | null;
     state: SocialAgentRouteTurnState;
     message: string;
     route: RouteDecision['route'];
     profile: RouteDecision['profile'];
     longTermSnapshot: RouteDecision['longTermSnapshot'];
+    hydratedContext?: SocialAgentHydratedContext | null;
     brainToolResults: Array<Record<string, unknown>>;
     emit?: StreamEmit;
     signal?: AbortSignal | null;
@@ -344,6 +439,8 @@ export class SocialAgentRouteAgentLoopRunnerService {
     state: SocialAgentRouteTurnState;
     message: string;
     route: RouteDecision['route'];
+    hydratedContext?: SocialAgentHydratedContext | null;
+    signal?: AbortSignal | null;
   }): Promise<{
     task: AgentTask;
     state: SocialAgentRouteTurnState;
@@ -379,6 +476,10 @@ export class SocialAgentRouteAgentLoopRunnerService {
     state: SocialAgentRouteTurnState;
     message: string;
     route: RouteDecision['route'];
+    taskContext?: RouteDecision['taskContext'];
+    longTermSnapshot: RouteDecision['longTermSnapshot'];
+    hydratedContext?: SocialAgentHydratedContext | null;
+    signal?: AbortSignal | null;
     replanAndRefresh: ReplanAndRefresh;
     queueInitialSearchForTask: QueueInitialSearchForTask;
   }): Promise<{
@@ -391,10 +492,16 @@ export class SocialAgentRouteAgentLoopRunnerService {
       task: input.task,
       route: input.route,
       message: input.message,
+      taskContext: input.taskContext,
       replanAndRefresh: input.replanAndRefresh,
       queueInitialSearchForTask: input.queueInitialSearchForTask,
+      signal: input.signal,
       buildMemoryContext: (task) =>
-        this.routeContext.buildMemoryContext(task, null),
+        this.routeContext.buildMemoryContext(
+          task,
+          input.longTermSnapshot,
+          input.hydratedContext ?? null,
+        ),
     });
     const state = turn.handled
       ? applySearchTurnState(input.state, turn)
@@ -424,6 +531,13 @@ export class SocialAgentRouteAgentLoopRunnerService {
     state: SocialAgentRouteTurnState;
     message: string;
     route: RouteDecision['route'];
+    taskContext?: RouteDecision['taskContext'];
+    hydratedContext?: SocialAgentHydratedContext | null;
+    profile?: RouteDecision['profile'];
+    longTermSnapshot?: RouteDecision['longTermSnapshot'];
+    brainToolResults?: Array<Record<string, unknown>>;
+    resumeContext?: RouteResumeContext | null;
+    signal?: AbortSignal | null;
   }): Promise<{
     task: AgentTask;
     state: SocialAgentRouteTurnState;
@@ -436,6 +550,15 @@ export class SocialAgentRouteAgentLoopRunnerService {
       route: input.route,
       message: input.message,
       assistantMessage: input.state.assistantMessage,
+      signal: input.signal,
+      runtimeContext: {
+        taskContext: input.taskContext ?? null,
+        hydratedContext: input.hydratedContext ?? null,
+        profile: input.profile ?? null,
+        longTermSnapshot: input.longTermSnapshot ?? null,
+        brainToolResults: input.brainToolResults ?? [],
+        resumeContext: input.resumeContext ?? null,
+      },
     });
     return {
       task: input.task,
@@ -449,6 +572,11 @@ export class SocialAgentRouteAgentLoopRunnerService {
         handled: actionTurn.handled,
         pendingApprovalId: actionTurn.pendingApproval?.id ?? null,
         requiresConfirmation: Boolean(actionTurn.pendingApproval),
+        hasTaskContext: Boolean(input.taskContext),
+        hasProfileContext: Boolean(input.profile),
+        hasLongTermMemoryContext: Boolean(input.longTermSnapshot),
+        brainToolResultCount: input.brainToolResults?.length ?? 0,
+        hasResumeContext: Boolean(input.resumeContext),
       },
     };
   }
@@ -460,6 +588,8 @@ export class SocialAgentRouteAgentLoopRunnerService {
       state: SocialAgentRouteTurnState;
       message: string;
       route: RouteDecision['route'];
+      taskContext?: RouteDecision['taskContext'];
+      hydratedContext?: SocialAgentHydratedContext | null;
       profile?: RouteDecision['profile'];
       longTermSnapshot?: RouteDecision['longTermSnapshot'];
       brainToolResults?: Array<Record<string, unknown>>;
@@ -485,6 +615,8 @@ export class SocialAgentRouteAgentLoopRunnerService {
         intent: input.route.intent,
         routeSource: input.route.source,
         route: input.route,
+        taskContext: input.taskContext ?? null,
+        hydratedContext: input.hydratedContext ?? null,
         profile: input.profile ?? null,
         longTermSnapshot: input.longTermSnapshot ?? null,
         brainToolResults: input.brainToolResults ?? [],
@@ -503,6 +635,11 @@ export class SocialAgentRouteAgentLoopRunnerService {
             taskId: input.task.id,
             intent: input.route.intent,
             message: input.message,
+            taskContext: input.taskContext ?? null,
+            hydratedContext: input.hydratedContext ?? null,
+            profile: input.profile ?? null,
+            longTermSnapshot: input.longTermSnapshot ?? null,
+            brainToolResults: input.brainToolResults ?? [],
             resumeContext: input.resumeContext,
           },
         },
@@ -571,15 +708,30 @@ export class SocialAgentRouteAgentLoopRunnerService {
     decision: RouteDecision,
     message: string,
     resumeContext: RouteResumeContext | null,
+    conversationIntent: SocialAgentRouteMessageBody['conversationIntent'],
   ): AgentLoopToolPlan[] {
     const tools = [
       this.branchTool('route_conversation_turn', decision, resumeContext),
       this.branchTool('route_profile_turn', decision, resumeContext),
     ];
-    if (this.shouldPlanSocialBranch(decision, message, 'route_search_turn')) {
+    if (
+      this.shouldPlanSocialBranch(
+        decision,
+        message,
+        'route_search_turn',
+        conversationIntent,
+      )
+    ) {
       tools.push(this.branchTool('route_search_turn', decision, resumeContext));
     }
-    if (this.shouldPlanSocialBranch(decision, message, 'route_action_turn')) {
+    if (
+      this.shouldPlanSocialBranch(
+        decision,
+        message,
+        'route_action_turn',
+        conversationIntent,
+      )
+    ) {
       tools.push(this.branchTool('route_action_turn', decision, resumeContext));
     }
     return tools;
@@ -590,6 +742,7 @@ export class SocialAgentRouteAgentLoopRunnerService {
     route: RouteDecision['route'],
     message: string,
     taskContext?: Record<string, unknown>,
+    conversationIntent?: SocialAgentRouteMessageBody['conversationIntent'],
   ): boolean {
     if (toolName === 'route_conversation_turn') {
       return (
@@ -610,6 +763,7 @@ export class SocialAgentRouteAgentLoopRunnerService {
           message,
           intent: route.intent,
           taskContext,
+          conversationIntent,
         }) &&
         (route.intent === 'social_search' ||
           route.intent === 'activity_search' ||
@@ -619,11 +773,8 @@ export class SocialAgentRouteAgentLoopRunnerService {
     if (toolName === 'route_action_turn') {
       return (
         route.intent === 'action_request' &&
-        shouldAllowSocialExecution({
-          message,
-          intent: route.intent,
-          taskContext,
-        })
+        hasExplicitSocialSideEffectIntent(message) &&
+        hasExistingSocialActionContext({ taskContext })
       );
     }
     return false;
@@ -636,25 +787,63 @@ export class SocialAgentRouteAgentLoopRunnerService {
       RouteBranchToolName,
       'route_search_turn' | 'route_action_turn'
     >,
+    conversationIntent?: SocialAgentRouteMessageBody['conversationIntent'],
   ): boolean {
     const route = decision.route;
     if (!isSocialExecutionIntent(route.intent)) return false;
+    if (toolName === 'route_action_turn') {
+      return (
+        route.intent === 'action_request' &&
+        hasExplicitSocialSideEffectIntent(message) &&
+        hasExistingSocialActionContext({
+          taskContext: decision.taskContext,
+        })
+      );
+    }
     const allowed = shouldAllowSocialExecution({
       message,
       intent: route.intent,
       taskContext: decision.taskContext,
+      conversationIntent,
     });
-    const routeAlreadyAuthorized =
-      (toolName === 'route_action_turn' && route.shouldExecuteAction) ||
-      (toolName === 'route_search_turn' &&
-        (route.shouldSearch || route.shouldReplan));
-    if (!allowed && !routeAlreadyAuthorized) return false;
-    if (toolName === 'route_action_turn')
-      return route.intent === 'action_request';
+    if (!allowed) return false;
     return (
       route.intent === 'social_search' ||
       route.intent === 'activity_search' ||
       route.intent === 'candidate_followup'
+    );
+  }
+
+  private shouldExecuteSearchBranch(
+    route: RouteDecision['route'],
+    message: string,
+    taskContext?: Record<string, unknown>,
+    conversationIntent?: SocialAgentRouteMessageBody['conversationIntent'],
+  ): boolean {
+    if (!isSocialExecutionIntent(route.intent)) return false;
+    return (
+      shouldAllowSocialExecution({
+        message,
+        intent: route.intent,
+        taskContext,
+        conversationIntent,
+      }) &&
+      (route.intent === 'social_search' ||
+        route.intent === 'activity_search' ||
+        route.intent === 'candidate_followup')
+    );
+  }
+
+  private shouldExecuteActionBranch(
+    route: RouteDecision['route'],
+    message: string,
+    taskContext?: Record<string, unknown>,
+    _conversationIntent?: SocialAgentRouteMessageBody['conversationIntent'],
+  ): boolean {
+    return (
+      route.intent === 'action_request' &&
+      hasExplicitSocialSideEffectIntent(message) &&
+      hasExistingSocialActionContext({ taskContext })
     );
   }
 
@@ -668,8 +857,10 @@ export class SocialAgentRouteAgentLoopRunnerService {
       toolName,
       input: {
         intent: decision.route.intent,
+        taskContext: decision.taskContext ?? null,
         ...(resumeContext ? { resumeContext } : {}),
       },
+      requiresApproval: false,
     };
   }
 
@@ -715,7 +906,9 @@ export class SocialAgentRouteAgentLoopRunnerService {
       clientContext.resumeCursor?.action ??
       null;
     const checkpointId =
-      clientContext.checkpointId ?? clientContext.resumeCursor?.checkpointId ?? null;
+      clientContext.checkpointId ??
+      clientContext.resumeCursor?.checkpointId ??
+      null;
     const parentCheckpointId =
       clientContext.parentCheckpointId ??
       clientContext.resumeCursor?.parentCheckpointId ??
@@ -766,11 +959,110 @@ export class SocialAgentRouteAgentLoopRunnerService {
   }
 
   private loopStepLabel(step: AgentLoopStep): string {
-    if (step.phase === 'tool') return `执行 ${step.toolName ?? step.agent}`;
-    if (step.phase === 'observe') return `观察 ${step.toolName ?? step.agent}`;
-    if (step.phase === 'replan') return '根据结果重新规划';
-    if (step.phase === 'answer') return '生成最终回复';
+    if (step.phase === 'tool')
+      return this.userVisibleToolLabel(step.toolName, 'running');
+    if (step.phase === 'observe')
+      return this.userVisibleToolLabel(step.toolName, 'done');
+    if (step.phase === 'replan') return '正在根据结果调整';
+    if (step.phase === 'answer') return '正在整理回复';
     return '理解用户需求';
+  }
+
+  private userVisibleToolLabel(
+    toolName: string | null | undefined,
+    state: 'running' | 'done',
+  ): string {
+    const running = state === 'running';
+    if (toolName === 'route_conversation_turn')
+      return running ? '正在组织回复' : '已整理好回复方向';
+    if (toolName === 'route_profile_turn')
+      return running ? '正在读取你的偏好' : '已整理你的偏好';
+    if (toolName === 'route_search_turn')
+      return running ? '正在筛选公开可发现的人' : '已整理候选机会';
+    if (toolName === 'route_action_turn')
+      return running ? '正在准备需要你确认的动作' : '已整理确认内容';
+    if (toolName === 'candidate_confirmation_check')
+      return running ? '正在确认候选动作' : '已确认候选动作状态';
+    return running ? '正在处理这一步' : '已完成这一步';
+  }
+
+  private hydratedContextFromTaskContext(input: {
+    ownerUserId: number;
+    task: AgentTask;
+    taskContext?: Record<string, unknown>;
+  }): SocialAgentHydratedContext | null {
+    const context = this.isRecord(input.taskContext) ? input.taskContext : null;
+    if (!context) return null;
+    const recentMessages = this.recordArray(
+      context.recentMessages ?? context.conversationHistory,
+    );
+    const taskSlots = this.recordOrEmpty(context.taskSlots);
+    const taskSlotSummary = this.recordOrEmpty(context.taskSlotSummary);
+    const knownTaskSlotConstraints =
+      (this.recordOrNull(
+        context.knownTaskSlotConstraints,
+      ) as SocialAgentHydratedContext['knownTaskSlotConstraints']) ??
+      buildSocialAgentKnownTaskSlotConstraints(taskSlots);
+    const pendingApprovals = Array.isArray(context.pendingApprovals)
+      ? context.pendingApprovals
+      : [];
+    const threadId =
+      typeof context.threadId === 'string' ||
+      typeof context.threadId === 'number'
+        ? context.threadId
+        : input.task.id;
+    return {
+      userId: input.ownerUserId,
+      threadId,
+      taskId:
+        typeof context.hydratedTaskId === 'number'
+          ? context.hydratedTaskId
+          : input.task.id,
+      recentMessages,
+      taskMemory: this.recordOrNull(context.taskMemory) as never,
+      taskSlots: taskSlots as SocialAgentHydratedContext['taskSlots'],
+      taskSlotSummary:
+        taskSlotSummary as SocialAgentHydratedContext['taskSlotSummary'],
+      knownTaskSlotConstraints,
+      lifeGraphFactProposals: [],
+      lifeGraphFactDisplaySummaries: this.recordArray(
+        context.lifeGraphFactDisplaySummaries,
+      ) as SocialAgentHydratedContext['lifeGraphFactDisplaySummaries'],
+      lifeGraphGovernanceSummary:
+        (this.recordOrNull(context.lifeGraphGovernanceSummary) as
+          | SocialAgentHydratedContext['lifeGraphGovernanceSummary']
+          | null) ?? {
+          total: 0,
+          autoSaveCount: 0,
+          confirmationRequiredCount: 0,
+          blockedCount: 0,
+          sensitiveCount: 0,
+          expiringFactKeys: [],
+        },
+      lifeGraphSummary: this.recordOrNull(context.lifeGraphSummary),
+      pendingApprovals:
+        pendingApprovals as SocialAgentHydratedContext['pendingApprovals'],
+      candidateActions: (this.recordOrNull(context.candidateActions) ??
+        this.recordOrNull(context.candidateState)) as
+        | SocialAgentHydratedContext['candidateActions']
+        | null,
+    };
+  }
+
+  private recordOrEmpty(value: unknown): Record<string, unknown> {
+    return this.isRecord(value) ? value : {};
+  }
+
+  private recordOrNull(value: unknown): Record<string, unknown> | null {
+    return this.isRecord(value) ? value : null;
+  }
+
+  private recordArray(value: unknown): Array<Record<string, unknown>> {
+    return Array.isArray(value)
+      ? value.filter((item): item is Record<string, unknown> =>
+          this.isRecord(item),
+        )
+      : [];
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

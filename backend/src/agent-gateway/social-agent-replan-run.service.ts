@@ -27,6 +27,7 @@ import { SocialAgentRouteContextService } from './social-agent-route-context.ser
 import { SocialAgentRunStateService } from './social-agent-run-state.service';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
+import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
 import type {
   SocialAgentChatReplanRunBody,
   SocialAgentChatRunResult,
@@ -53,6 +54,8 @@ export class SocialAgentReplanRunService {
     private readonly realtime?: RealtimeEventService,
     @Optional()
     private readonly agentLoop?: AgentLoopService,
+    @Optional()
+    private readonly longTermMemory?: SocialAgentLongTermMemoryService,
   ) {}
 
   async execute(input: {
@@ -60,9 +63,12 @@ export class SocialAgentReplanRunService {
     taskId: number;
     body: SocialAgentChatReplanRunBody;
     runId: string;
+    signal?: AbortSignal | null;
     visibleStepLabel: (id: string, label: string) => string;
   }): Promise<SocialAgentChatReplanRunResult> {
-    const { ownerUserId, taskId, body, runId, visibleStepLabel } = input;
+    const { ownerUserId, taskId, body, runId, signal, visibleStepLabel } =
+      input;
+    this.assertNotAborted(signal);
     let task = await this.runState.updateRunSnapshot(
       ownerUserId,
       taskId,
@@ -75,13 +81,15 @@ export class SocialAgentReplanRunService {
       },
       visibleStepLabel,
     );
+    this.assertNotAborted(signal);
     const userMessage = cleanDisplayText(body.userMessage, '').trim();
     if (!userMessage) throw new BadRequestException('请输入补充要求');
     const followUp =
-      this.followUpContext.readLatestFollowUpContext(task) ??
+      this.followUpContext.readLatestFollowUpContext(task, userMessage) ??
       (await this.followUpContext.appendFollowUpContext(task, userMessage));
     task = followUp.task;
     const refreshedGoal = followUp.refreshedGoal;
+    this.assertNotAborted(signal);
 
     await this.writeEvent(
       task,
@@ -115,6 +123,8 @@ export class SocialAgentReplanRunService {
 
     let replan: SocialAgentChatReplanRunResult['replan'] | null = null;
     let finalResultBase: SocialAgentChatRunResult | null = null;
+    const longTermSnapshot = await this.readLongTermSnapshot(ownerUserId);
+    this.assertNotAborted(signal);
     let draft:
       | Awaited<
           ReturnType<SocialAgentDraftSearchService['refreshDraftAndCandidates']>
@@ -136,6 +146,7 @@ export class SocialAgentReplanRunService {
       agent: 'FitMeet Main Agent',
       maxToolCalls: 5,
       timeoutMs: 30_000,
+      signal,
       plan: {
         reason:
           'Follow-up route/search/recommendation refresh must run through the unified AgentLoop.',
@@ -171,6 +182,7 @@ export class SocialAgentReplanRunService {
         ],
       },
       runner: async ({ toolName }) => {
+        this.assertNotAborted(signal);
         switch (toolName) {
           case 'replan_understand_follow_up':
             await done(
@@ -184,8 +196,11 @@ export class SocialAgentReplanRunService {
             replan = await this.planner.replanTask(taskId, {
               reason: body.reason ?? 'user_follow_up',
               userMessage,
+              refreshedGoal,
               failure: body.failure ?? null,
+              signal: signal ?? null,
             });
+            this.assertNotAborted(signal);
             task = await this.taskLifecycle.assertTaskOwner(
               taskId,
               ownerUserId,
@@ -195,10 +210,10 @@ export class SocialAgentReplanRunService {
             await done(
               'follow_up_replan',
               usedTimeoutFallback
-                ? 'AI 分析超时，已使用规则匹配继续执行'
+                ? '分析时间较长，已保留上下文并安全继续'
                 : replan.source === 'fallback'
-                  ? '已使用本地策略更新 Agent 计划'
-                  : '已调用 DeepSeek 更新 Agent 计划',
+                  ? '已根据当前上下文更新处理计划'
+                  : '已更新处理计划',
               AgentTaskEventType.PlanUpdated,
               {
                 planSource: replan.source,
@@ -214,8 +229,8 @@ export class SocialAgentReplanRunService {
               {
                 replan,
                 message: usedTimeoutFallback
-                  ? '已收到补充信息，当前先基于规则匹配继续搜索。'
-                  : '已更新 Agent 计划，正在刷新候选人。',
+                  ? '已收到补充信息，正在基于已知条件继续处理。'
+                  : '已更新处理计划，正在刷新候选人。',
               },
               visibleStepLabel,
             );
@@ -228,12 +243,15 @@ export class SocialAgentReplanRunService {
           }
           case 'replan_refresh_draft_candidates': {
             if (!replan) throw new Error('replan must complete before search');
+            this.assertNotAborted(signal);
             const refreshed = await this.draftSearch.refreshDraftAndCandidates({
               task,
               goal: refreshedGoal,
               refreshTask: () =>
                 this.taskLifecycle.assertTaskOwner(taskId, ownerUserId),
+              signal: signal ?? null,
             });
+            this.assertNotAborted(signal);
             task = refreshed.task;
             draft = refreshed.draft;
             searchResult = refreshed.searchResult;
@@ -264,6 +282,7 @@ export class SocialAgentReplanRunService {
             };
           }
           case 'replan_rank_and_explain':
+            this.assertNotAborted(signal);
             await done(
               'rank',
               '已根据新的时间、地点、兴趣和安全边界排序',
@@ -307,6 +326,12 @@ export class SocialAgentReplanRunService {
             if (!draft || !searchResult || !replan) {
               throw new Error('replan result is incomplete');
             }
+            this.assertNotAborted(signal);
+            const finalTaskContext = this.routeContext.buildTaskContext({
+              task,
+              body: { message: userMessage },
+              longTermSnapshot,
+            });
             finalResultBase =
               await this.recommendationResults.completeRecommendationResult({
                 ownerUserId,
@@ -317,7 +342,11 @@ export class SocialAgentReplanRunService {
                 searchResult,
                 statusReason: 'follow_up_replan_refreshed',
                 buildMemoryContext: (currentTask) =>
-                  this.routeContext.buildMemoryContext(currentTask, null),
+                  this.routeContext.buildMemoryContext(
+                    currentTask,
+                    longTermSnapshot,
+                  ),
+                taskContext: finalTaskContext,
                 toEventDto: (event) => this.toEventDto(event),
               });
             return {
@@ -334,6 +363,7 @@ export class SocialAgentReplanRunService {
     if (!finalResultBase || !replan) {
       throw new Error('AgentLoop did not produce a replan answer');
     }
+    this.assertNotAborted(signal);
     const resultBase = finalResultBase as SocialAgentChatRunResult;
     const finalResult: SocialAgentChatReplanRunResult = {
       ...resultBase,
@@ -350,6 +380,10 @@ export class SocialAgentReplanRunService {
       visibleStepLabel,
     });
     return finalResult;
+  }
+
+  private assertNotAborted(signal?: AbortSignal | null): void {
+    if (signal?.aborted) throw new Error('Subagent worker job cancelled.');
   }
 
   private async writeEvent(
@@ -380,6 +414,18 @@ export class SocialAgentReplanRunService {
         }),
       );
     }
+  }
+
+  private async readLongTermSnapshot(ownerUserId: number) {
+    if (!this.longTermMemory) return null;
+    return this.longTermMemory.readSnapshot(ownerUserId).catch((error) => {
+      this.logger.warn(
+        `Social Agent replan long-term memory read failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    });
   }
 
   private toEventDto(event: AgentTaskEvent): Record<string, unknown> {

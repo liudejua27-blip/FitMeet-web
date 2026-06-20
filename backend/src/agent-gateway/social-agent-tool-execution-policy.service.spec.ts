@@ -10,6 +10,10 @@ import { SceneRiskPolicyService } from './scene-risk-policy.service';
 import { SocialAgentToolExecutionPolicyService } from './social-agent-tool-execution-policy.service';
 import { SocialCodexRuntimePolicyService } from './social-codex-runtime-policy.service';
 import {
+  requiresMandatorySocialAgentApproval,
+  SOCIAL_AGENT_MANDATORY_APPROVAL_TOOLS,
+} from './social-agent-tool-policy';
+import {
   SocialAgentToolCallRecord,
   SocialAgentToolName,
 } from './social-agent-tool.types';
@@ -62,6 +66,38 @@ function makePolicyService(
 }
 
 describe('SocialAgentToolExecutionPolicyService', () => {
+  it('keeps every mandatory social side-effect tool behind approval, dry-run, audit, and idempotency', () => {
+    const service = makePolicyService();
+
+    for (const toolName of SOCIAL_AGENT_MANDATORY_APPROVAL_TOOLS) {
+      const policy = service.buildPolicyMetadata(makeTask(), toolName, {
+        targetUserId: 2,
+        candidateRecordId: 701,
+        publiclyDiscoverable: true,
+        message: '周末下午一起散步吗？',
+      });
+
+      expect(requiresMandatorySocialAgentApproval(toolName)).toBe(true);
+      expect(policy).toEqual(
+        expect.objectContaining({
+          requiresApproval: true,
+          dryRunRequired: true,
+          auditRequired: true,
+          highRisk: true,
+          idempotencyKey: expect.any(String),
+        }),
+      );
+      expect(policy.idempotencyKey).toContain(`tool:${toolName}`);
+      expect(policy.socialCodex).toEqual(
+        expect.objectContaining({
+          requiresApproval: true,
+          dryRunRequired: true,
+          auditRequired: true,
+        }),
+      );
+    }
+  });
+
   it('builds critical payment policy metadata with limit and idempotency contract', () => {
     const service = makePolicyService();
 
@@ -283,6 +319,49 @@ describe('SocialAgentToolExecutionPolicyService', () => {
       }),
       idempotencyKey: expect.stringMatching(
         /^social_codex:send_invite:task:100:tool:send_message_to_candidate:/,
+      ),
+    });
+  });
+
+  it('classifies CreateSocialRequest publish payloads as approval-gated publish actions', () => {
+    const service = makePolicyService();
+
+    const policy = service.buildPolicyMetadata(
+      makeTask({ title: '今晚青岛大学散步', goal: '发布到发现找搭子' }),
+      SocialAgentToolName.CreateSocialRequest,
+      {
+        mode: 'publish',
+        publish: true,
+        syncPublicIntent: true,
+        title: '今晚青岛大学散步',
+      },
+    );
+
+    expect(policy).toMatchObject({
+      requiresApproval: true,
+      dryRunRequired: true,
+      auditRequired: true,
+      highRisk: true,
+      executionContract: 'approval_required_dry_run_audit',
+      socialCodex: expect.objectContaining({
+        actionType: 'publish_social_request',
+        mode: 'approval_required',
+        riskLevel: 'high',
+        requiresApproval: true,
+        dryRunRequired: true,
+        auditRequired: true,
+        idempotencyKeyScope: 'social_codex:publish_social_request',
+        idempotencyKey: expect.stringMatching(
+          /^social_codex:publish_social_request:task:100:tool:create_social_request:/,
+        ),
+      }),
+      socialCodexAudit: expect.objectContaining({
+        event: 'social_codex.policy_decision',
+        actionType: 'publish_social_request',
+        taskId: 100,
+      }),
+      idempotencyKey: expect.stringMatching(
+        /^social_codex:publish_social_request:task:100:tool:create_social_request:/,
       ),
     });
   });

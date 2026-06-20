@@ -127,6 +127,135 @@ describe('SocialAgentRouteProfileTurnService', () => {
     expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
   });
 
+  it('passes sanitized worker context into Life Graph extraction', async () => {
+    const lifeGraph = {
+      extractFromChat: jest.fn().mockResolvedValue({
+        proposedFields: [
+          { fieldKey: 'availableTimes', fieldValue: '周末下午' },
+        ],
+      }),
+    };
+    const { service } = makeHarness({ lifeGraph });
+    const task = makeTask();
+    const hydratedContext = {
+      userId: 7,
+      threadId: 'agent-task:101',
+      taskId: 101,
+      recentMessages: [
+        { role: 'user', content: '今晚青岛大学附近散步' },
+        { role: 'assistant', text: '已记住时间、地点和活动。' },
+      ],
+      taskMemory: null,
+      taskSlots: {
+        time_window: { value: '今晚', state: 'completed' },
+        location_text: { value: '青岛大学附近', state: 'completed' },
+        activity: { value: '散步', state: 'completed' },
+      },
+      lifeGraphFactProposals: [],
+      lifeGraphFactDisplaySummaries: [],
+      lifeGraphGovernanceSummary: {
+        total: 0,
+        autoSaveCount: 0,
+        confirmationRequiredCount: 0,
+        blockedCount: 0,
+        sensitiveCount: 0,
+        expiringFactKeys: [],
+      },
+      lifeGraphSummary: {
+        preferences: { firstMeet: '公共场所优先' },
+      },
+      pendingApprovals: [{ approvalId: 'approval-1' }],
+      candidateActions: { saved: ['candidate-1'] },
+    } as never;
+
+    await service.handle({
+      ownerUserId: 7,
+      task,
+      message: '我周末下午有空',
+      route: makeRoute(),
+      hydratedContext,
+    });
+
+    expect(lifeGraph.extractFromChat).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({
+        message: '我周末下午有空',
+        taskId: task.id,
+        context: expect.objectContaining({
+          intent: 'profile_update',
+          threadId: 'agent-task:101',
+          taskId: 101,
+          taskSlots: expect.objectContaining({
+            time_window: expect.objectContaining({ value: '今晚' }),
+          }),
+          lifeGraphSummary: expect.objectContaining({
+            preferences: { firstMeet: '公共场所优先' },
+          }),
+          pendingApprovalCount: 1,
+          candidateActions: { saved: ['candidate-1'] },
+          recentMessages: [
+            { role: 'user', text: '今晚青岛大学附近散步' },
+            { role: 'assistant', text: '已记住时间、地点和活动。' },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it('keeps enough recent messages for Life Graph extraction instead of a tiny profile-only window', async () => {
+    const lifeGraph = {
+      extractFromChat: jest.fn().mockResolvedValue({
+        proposedFields: [
+          { fieldKey: 'availableTimes', fieldValue: '周末下午' },
+        ],
+      }),
+    };
+    const { service } = makeHarness({ lifeGraph });
+    const task = makeTask();
+    const recentMessages = Array.from({ length: 12 }, (_, index) => ({
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      content:
+        index === 0
+          ? '我第一次见面只接受公共场所'
+          : `画像上下文第 ${index + 1} 轮`,
+    }));
+
+    await service.handle({
+      ownerUserId: 7,
+      task,
+      message: '我周末下午有空',
+      route: makeRoute(),
+      hydratedContext: {
+        userId: 7,
+        threadId: 'agent-task:101',
+        taskId: 101,
+        recentMessages,
+        taskMemory: null,
+        taskSlots: {},
+        lifeGraphFactProposals: [],
+        lifeGraphFactDisplaySummaries: [],
+        lifeGraphGovernanceSummary: {
+          total: 0,
+          autoSaveCount: 0,
+          confirmationRequiredCount: 0,
+          blockedCount: 0,
+          sensitiveCount: 0,
+          expiringFactKeys: [],
+        },
+        lifeGraphSummary: {},
+        pendingApprovals: [],
+        candidateActions: {},
+      } as never,
+    });
+
+    const [, call] = lifeGraph.extractFromChat.mock.calls[0];
+    expect(call.context.recentMessages).toHaveLength(12);
+    expect(call.context.recentMessages[0]).toMatchObject({
+      role: 'user',
+      text: '我第一次见面只接受公共场所',
+    });
+  });
+
   it('persists routed profile updates when no Life Graph proposal is available', async () => {
     const { eventRepo, service, socialProfiles, taskRepo } = makeHarness();
     const task = makeTask();
@@ -177,7 +306,7 @@ describe('SocialAgentRouteProfileTurnService', () => {
     );
   });
 
-  it('records event-write failures without failing the profile turn', async () => {
+  it('records event-write failures without directly persisting sensitive safety boundaries', async () => {
     const warnSpy = jest
       .spyOn(Logger.prototype, 'warn')
       .mockImplementation(() => undefined);
@@ -198,13 +327,17 @@ describe('SocialAgentRouteProfileTurnService', () => {
         assistantMessage:
           expect.stringContaining('不会自动发送消息、加好友或创建活动'),
         savedContext: true,
-        profileUpdated: true,
+        profileUpdated: false,
       });
-      expect(socialProfiles.saveAnswer).toHaveBeenCalledWith(
-        7,
-        'avoidTraits',
-        '不要夜间见面',
-      );
+      expect(socialProfiles.saveAnswer).not.toHaveBeenCalled();
+      expect(task.memory).toMatchObject({
+        taskMemory: {
+          currentTask: {
+            waitingFor: 'life_graph_profile_confirmation',
+            lastCompletedStep: 'profile_context_saved_pending_confirmation',
+          },
+        },
+      });
       expect(metrics.recordError).toHaveBeenCalledWith(
         'context_append_event_failed',
       );

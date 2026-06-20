@@ -147,6 +147,54 @@ describe('SocialAgentMessageLogService', () => {
     expect(taskRepo.save).toHaveBeenCalledWith(task);
   });
 
+  it('extracts current-turn social slots before planner hydration can run', async () => {
+    const task = makeTask();
+    const { service, taskRepo } = makeHarness();
+
+    await service.recordUserMessage(
+      task,
+      '我想今天晚上在青岛大学附近，找个女生舞蹈生散步。',
+    );
+
+    expect(task.memory).toMatchObject({
+      taskSlots: {
+        activity: expect.objectContaining({
+          value: '散步',
+          state: 'completed',
+        }),
+        time_window: expect.objectContaining({
+          value: '今天晚上',
+          state: 'completed',
+        }),
+        location_text: expect.objectContaining({
+          value: '青岛大学附近',
+          state: 'completed',
+        }),
+        candidate_preference: expect.objectContaining({
+          value: expect.stringContaining('舞蹈相关'),
+          state: 'answered',
+        }),
+      },
+      taskSlotSummary: expect.objectContaining({
+        活动: '散步',
+        时间: '今天晚上',
+        地点: '青岛大学附近',
+        候选偏好: expect.stringContaining('舞蹈相关'),
+      }),
+    });
+    expect(taskRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memory: expect.objectContaining({
+          taskSlots: expect.objectContaining({
+            activity: expect.objectContaining({ value: '散步' }),
+            time_window: expect.objectContaining({ value: '今天晚上' }),
+            location_text: expect.objectContaining({ value: '青岛大学附近' }),
+          }),
+        }),
+      }),
+    );
+  });
+
   it('records intent route decisions as system events', async () => {
     const task = makeTask();
     const { savedEvents, service } = makeHarness();
@@ -246,6 +294,244 @@ describe('SocialAgentMessageLogService', () => {
       }),
     ]);
     expect(taskRepo.save).toHaveBeenCalledWith(task);
+  });
+
+  it('does not persist generic recovery fallback copy as assistant conversation memory', async () => {
+    const task = makeTask({
+      memory: {
+        socialAgentConversation: {
+          turns: [
+            {
+              role: 'user',
+              text: '我想今晚在青岛大学附近散步',
+              at: '2026-06-05T00:00:00.000Z',
+            },
+          ],
+        },
+        shortTerm: {
+          recentTurns: [
+            {
+              role: 'user',
+              text: '我想今晚在青岛大学附近散步',
+              at: '2026-06-05T00:00:00.000Z',
+            },
+          ],
+        },
+      },
+    });
+    const { savedEvents, service, taskRepo } = makeHarness();
+
+    await service.recordAssistantMessage(
+      task,
+      'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。',
+      makeRoute({
+        assistantMessageSource: 'fallback',
+        action: 'answer',
+        shouldExecuteAction: false,
+      }),
+    );
+
+    expect(task.memory).toMatchObject({
+      socialAgentConversation: {
+        turns: [
+          expect.objectContaining({
+            role: 'user',
+            text: '我想今晚在青岛大学附近散步',
+          }),
+        ],
+      },
+      shortTerm: {
+        recentTurns: [
+          expect.objectContaining({
+            role: 'user',
+            text: '我想今晚在青岛大学附近散步',
+          }),
+        ],
+        lastAgentActions: [
+          expect.objectContaining({
+            action: 'answer',
+            intent: 'action_request',
+            status: 'completed',
+          }),
+        ],
+      },
+    });
+    expect(
+      (task.memory as Record<string, unknown>).socialAgentConversation,
+    ).toMatchObject({
+      turns: expect.not.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          text: expect.stringContaining('稍后再试'),
+        }),
+      ]),
+    });
+    expect(savedEvents[0]).toEqual(
+      expect.objectContaining({
+        summary: 'Social Agent 状态更新',
+        payload: expect.objectContaining({
+          message: null,
+          messageSuppressed: true,
+          action: 'answer',
+        }),
+      }),
+    );
+    expect(taskRepo.save).toHaveBeenCalledWith(task);
+  });
+
+  it('can replace the last assistant turn with final streamed text', async () => {
+    const task = makeTask();
+    const { service } = makeHarness();
+
+    await service.recordAssistantMessage(
+      task,
+      '旧的工具摘要。',
+      makeRoute({ action: 'await_confirmation' }),
+    );
+    await service.recordAssistantMessage(
+      task,
+      '我已经为你整理好邀请内容，发送前会再次让你确认。',
+      makeRoute({
+        action: 'await_confirmation',
+        assistantMessageSource: 'llm',
+      }),
+      { replaceLastAssistantTurn: true },
+    );
+
+    const memory = task.memory as Record<string, unknown>;
+    const conversation = memory.socialAgentConversation as Record<
+      string,
+      unknown
+    >;
+    const shortTerm = memory.shortTerm as Record<string, unknown>;
+    expect(conversation.turns).toEqual([
+      expect.objectContaining({
+        role: 'assistant',
+        text: '我已经为你整理好邀请内容，发送前会再次让你确认。',
+      }),
+    ]);
+    expect(shortTerm.recentTurns).toEqual([
+      expect.objectContaining({
+        role: 'assistant',
+        text: '我已经为你整理好邀请内容，发送前会再次让你确认。',
+      }),
+    ]);
+  });
+
+  it('records stream-user run assistant results into conversation memory', async () => {
+    const task = makeTask();
+    const { savedEvents, service, taskRepo } = makeHarness();
+
+    await service.recordAssistantRunMessage(
+      task,
+      '我已按你的时间和地点整理了 3 个公开可发现候选。',
+      {
+        taskId: 101,
+        status: AgentTaskStatus.AwaitingFeedback,
+        visibleSteps: [],
+        assistantMessage: '我已按你的时间和地点整理了 3 个公开可发现候选。',
+        socialRequestDraft: null,
+        candidates: [
+          {
+            userId: 22,
+            nickname: '青岛散步搭子',
+            city: '青岛',
+            score: 88,
+            reasons: ['周末下午也方便', '偏好低强度散步'],
+          } as never,
+        ],
+        approvalRequiredActions: [],
+        events: [],
+      },
+    );
+
+    expect(task.memory).toMatchObject({
+      socialAgentConversation: {
+        turns: [
+          expect.objectContaining({
+            role: 'assistant',
+            text: '我已按你的时间和地点整理了 3 个公开可发现候选。',
+            action: 'recommend_candidates',
+            candidateCount: 1,
+          }),
+        ],
+      },
+      shortTerm: {
+        lastAgentActions: [
+          expect.objectContaining({
+            action: 'recommend_candidates',
+            intent: 'social_search',
+            status: 'completed',
+          }),
+        ],
+      },
+    });
+    expect(savedEvents[0]).toEqual(
+      expect.objectContaining({
+        actor: AgentTaskEventActor.Agent,
+        eventType: AgentTaskEventType.SocialAgentMessageAssistant,
+        payload: expect.objectContaining({
+          message: '我已按你的时间和地点整理了 3 个公开可发现候选。',
+          action: 'recommend_candidates',
+          candidateCount: 1,
+        }),
+      }),
+    );
+    expect(taskRepo.save).toHaveBeenCalledWith(task);
+  });
+
+  it('suppresses generic recovery copy from stream-user run memory', async () => {
+    const task = makeTask({
+      memory: {
+        socialAgentConversation: {
+          turns: [
+            {
+              role: 'user',
+              text: '今天晚上青岛大学附近散步',
+              at: '2026-06-05T00:00:00.000Z',
+            },
+          ],
+        },
+      },
+    });
+    const { savedEvents, service } = makeHarness();
+
+    await service.recordAssistantRunMessage(
+      task,
+      'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。',
+      {
+        taskId: 101,
+        status: AgentTaskStatus.AwaitingFeedback,
+        visibleSteps: [],
+        assistantMessage:
+          'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。',
+        socialRequestDraft: null,
+        candidates: [],
+        approvalRequiredActions: [],
+        events: [],
+      },
+    );
+
+    expect(
+      (task.memory as Record<string, unknown>).socialAgentConversation,
+    ).toMatchObject({
+      turns: expect.not.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          text: expect.stringContaining('稍后再试'),
+        }),
+      ]),
+    });
+    expect(savedEvents[0]).toEqual(
+      expect.objectContaining({
+        summary: 'Social Agent 状态更新',
+        payload: expect.objectContaining({
+          message: null,
+          messageSuppressed: true,
+          action: 'answer',
+        }),
+      }),
+    );
   });
 
   it('adds safety advice for safety boundary assistant messages', async () => {

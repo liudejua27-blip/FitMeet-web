@@ -127,6 +127,14 @@ describe('FitMeetAgentToolRegistryService', () => {
     expect(plannerTools.map((tool) => tool.name)).not.toContain(
       'approve_action',
     );
+    expect(plannerTools.map((tool) => tool.name)).not.toContain(
+      'get_candidate_pool_debug',
+    );
+    expect(
+      plannerTools.every(
+        (tool) => tool.category !== FitMeetAgentToolCategory.AdminDebug,
+      ),
+    ).toBe(true);
   });
 
   it('exposes the canonical model-facing tool list', () => {
@@ -137,6 +145,7 @@ describe('FitMeetAgentToolRegistryService', () => {
       expect.arrayContaining([...SOCIAL_AGENT_MODEL_TOOL_NAMES]),
     );
     expect(modelTools).toHaveLength(SOCIAL_AGENT_MODEL_TOOL_NAMES.length);
+    expect(modelToolNames).not.toContain('get_candidate_pool_debug');
 
     for (const tool of modelTools) {
       expect(tool.runtimeStatus).toBe('implemented');

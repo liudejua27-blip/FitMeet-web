@@ -192,13 +192,13 @@ describe('SocialAgentCandidateActionService', () => {
         userId: 7,
         agentTaskId: 101,
         type: 'send_message',
-        actionType: 'send_candidate_message',
+        actionType: 'send_invite',
         relatedCandidateId: 501,
       }),
     );
     expect(approval).toMatchObject({
       id: 9001,
-      actionType: 'send_candidate_message',
+      actionType: 'send_invite',
       riskLevel: 'medium',
     });
     expect(taskRepo.save).toHaveBeenCalledWith(task);
@@ -214,7 +214,7 @@ describe('SocialAgentCandidateActionService', () => {
         pendingActions: [
           expect.objectContaining({
             id: 9001,
-            actionType: 'send_candidate_message',
+            actionType: 'send_invite',
             summary: expect.stringContaining('候选人 #22'),
             riskLevel: 'medium',
           }),
@@ -243,7 +243,7 @@ describe('SocialAgentCandidateActionService', () => {
     expect(approvals.create).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'send_message',
-        actionType: 'send_candidate_message',
+        actionType: 'send_invite',
         relatedCandidateId: 501,
         payload: expect.objectContaining({
           approvalRequired: true,
@@ -261,7 +261,7 @@ describe('SocialAgentCandidateActionService', () => {
     expect(result).toMatchObject({
       action: 'await_confirmation',
       pendingApproval: expect.objectContaining({
-        actionType: 'send_candidate_message',
+        actionType: 'send_invite',
       }),
       cards: [
         expect.objectContaining({
@@ -643,6 +643,7 @@ describe('SocialAgentCandidateActionService', () => {
         }),
       }),
       7,
+      { signal: null },
     );
     expect(result).toMatchObject({
       action: 'reply',
@@ -1035,7 +1036,7 @@ describe('SocialAgentCandidateActionService', () => {
     expect(approvals.reject).toHaveBeenCalledWith(9001, 7);
     expect(approvals.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        actionType: 'send_candidate_message',
+        actionType: 'send_invite',
         payload: expect.objectContaining({
           schemaAction: 'opener.regenerate',
           message: expect.stringContaining('站内确认时间和公共地点'),
@@ -1059,7 +1060,7 @@ describe('SocialAgentCandidateActionService', () => {
     expect(result).toMatchObject({
       action: 'await_confirmation',
       pendingApproval: expect.objectContaining({
-        actionType: 'send_candidate_message',
+        actionType: 'send_invite',
       }),
       assistantMessage: expect.stringContaining('重新写了一版'),
       cards: [
@@ -1092,7 +1093,7 @@ describe('SocialAgentCandidateActionService', () => {
         pendingActions: [
           expect.objectContaining({
             id: 9001,
-            actionType: 'send_candidate_message',
+            actionType: 'send_invite',
           }),
         ],
         currentTask: expect.objectContaining({
@@ -1800,7 +1801,7 @@ describe('SocialAgentCandidateActionService', () => {
           expect.objectContaining({
             id: 501,
             type: 'send_message',
-            actionType: 'send_candidate_message',
+            actionType: 'send_invite',
             summary: '发送消息给候选人 #22',
             riskLevel: 'medium',
           }),

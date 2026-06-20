@@ -1,14 +1,17 @@
 import { AgentTaskPermissionMode } from './entities/agent-task.entity';
 import { cleanDisplayText } from '../common/display-text.util';
 import type { UserFacingResponseSanitizerService } from './response-quality/user-facing-response-sanitizer.service';
+import type { UserFacingAgentRecoveryNotice } from './user-facing-agent-response';
 import type { SocialAgentEventV2 } from './social-agent-event-v2.types';
 
 const DEFAULT_STREAM_ERROR_MESSAGE =
   'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。';
 const TIMEOUT_STREAM_ERROR_MESSAGE =
   '这次处理时间有点久。我已经保留当前对话，你可以稍后再试。';
+const GENERIC_RECOVERY_PATTERN =
+  /保留当前(?:对话|方向|上下文|需求)|稍后再试|暂时没有顺利完成|连接中断|连接恢复|处理时间有点久|可以稍后再试|我已经恢复了(?:上一次|这段|当前)|我已经恢复了这段(?:对话|约练任务|任务)|我可以继续上次的话题，也可以重新开始|从已保存的(?:步骤|工具步骤|Agent 状态)|继续刚才保存的 Agent 步骤|原始目标|已从刚才的确认点继续处理/;
 const TECHNICAL_ERROR_PATTERN =
-  /\b(traceId|agentTrace|structuredIntent|planner|tool\s*call|toolCall|toolCalls|DeepSeek|OpenAI|SDK|database|QueryFailedError|TypeError|ReferenceError|stack|stack trace|UnhandledPromiseRejection)\b|工具调用|数据库字段|错误堆栈/i;
+  /\b(traceId|agentTrace|structuredIntent|planner|tool\s*call|toolCall|toolCalls|DeepSeek|OpenAI|SDK|database|QueryFailedError|BadRequestException|ForbiddenException|NotFoundException|InternalServerErrorException|TypeError|ReferenceError|stack|stack trace|UnhandledPromiseRejection|agentConnectionId|connectionId|taskId|runId|seq|SQL|Postgres|TypeORM|foreign key|constraint|relation .* does not exist|column .* does not exist|violates .* constraint)\b|工具调用|数据库字段|错误堆栈/i;
 
 export type UserFacingStreamEvent =
   | SocialAgentEventV2
@@ -17,6 +20,7 @@ export type UserFacingStreamEvent =
       lightStatus: string;
       lifecycle: UserFacingAgentLifecycle;
       taskId?: number;
+      threadId?: string | number | null;
     }
   | {
       type: 'progress';
@@ -98,6 +102,7 @@ export type UserFacingStreamEvent =
       code: 'AGENT_STREAM_FAILED';
       message: string;
       retryable: true;
+      recoveryNotice: UserFacingAgentRecoveryNotice;
     };
 
 export type UserFacingAgentLifecycle =
@@ -341,13 +346,21 @@ function toolNameFromLabel(label: string): string | null {
 export function userFacingStreamErrorEvent(
   error: unknown,
 ): UserFacingStreamEvent {
+  const message = userFacingStreamErrorMessage(error);
   return {
     type: 'error',
     lifecycle: 'failed',
     code: 'AGENT_STREAM_FAILED',
-    message: userFacingStreamErrorMessage(error),
+    message,
     retryable: true,
+    recoveryNotice: userFacingStreamRecoveryNotice(error, message),
   };
+}
+
+export function shouldStreamFallbackAssistantText(value: unknown): boolean {
+  const text = cleanDisplayText(value, '').trim();
+  if (!text) return false;
+  return !GENERIC_RECOVERY_PATTERN.test(text);
 }
 
 function userFacingStreamErrorMessage(error: unknown): string {
@@ -363,6 +376,41 @@ function userFacingStreamErrorMessage(error: unknown): string {
   if (/^\s*[{[][\s\S]*[}\]]\s*$/.test(cleaned))
     return DEFAULT_STREAM_ERROR_MESSAGE;
   return cleaned.length > 140 ? DEFAULT_STREAM_ERROR_MESSAGE : cleaned;
+}
+
+function userFacingStreamRecoveryNotice(
+  error: unknown,
+  message: string,
+): UserFacingAgentRecoveryNotice {
+  const raw = errorMessage(error);
+  if (/timeout|timed?\s*out|deepseek_timeout|处理时间有点久|超时/i.test(raw)) {
+    return {
+      kind: 'timeout',
+      title: '这次处理时间有点久',
+      message: '我已经保留当前对话。你可以重试，或者继续告诉我下一步。',
+      retryable: true,
+      source: 'stream_error',
+    };
+  }
+  if (/abort|aborted|连接中断|连接恢复/i.test(raw)) {
+    return {
+      kind: 'interrupted',
+      title: '刚才连接中断了',
+      message: '我已经保留当前对话。你可以重试，或者继续补充新的要求。',
+      retryable: true,
+      source: 'stream_error',
+    };
+  }
+  return {
+    kind: 'failed',
+    title: '这次没有顺利完成',
+    message:
+      shouldStreamFallbackAssistantText(message) && !TECHNICAL_ERROR_PATTERN.test(message)
+        ? message
+        : '我已经保留当前对话。你可以重试，或者继续告诉我下一步。',
+    retryable: true,
+    source: 'stream_error',
+  };
 }
 
 function errorMessage(error: unknown): string {

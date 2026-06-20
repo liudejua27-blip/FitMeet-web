@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -49,14 +51,13 @@ describe('Discover closure links', () => {
     ).toBe('/meet/88');
   });
 
-  it('keeps fallback cards out of fake Discover focus links', () => {
-    expect(
-      detailHrefForDiscoverMeet({
-        id: -1,
-        title: '今晚慢跑',
-        sourceKind: 'fallback',
-      } as never),
-    ).toBe('/agent/chat?scene=%E4%BB%8A%E6%99%9A%E6%85%A2%E8%B7%91');
+  it('does not keep built-in fallback Discover cards in the production page source', () => {
+    const source = readFileSync(join(process.cwd(), 'src/pages/DiscoverPage.tsx'), 'utf8');
+
+    expect(source).not.toContain('fallbackMeets');
+    expect(source).not.toContain('VITE_ENABLE_DISCOVER_FALLBACK');
+    expect(source).not.toContain("sourceKind: 'fallback'");
+    expect(source).toContain('data-testid="discover-real-empty-state"');
   });
 });
 

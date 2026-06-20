@@ -1,5 +1,3 @@
-import type { AgentFlowPhase } from '../agentFlow.types';
-import type { AntGuideState, AntGuideTarget } from '../../agent/ant-guide';
 import type {
   AgentError,
   AgentErrorCode,
@@ -8,46 +6,9 @@ import type {
 } from './agentApi.types';
 import type {
   UserFacingAgentLightStatus,
+  UserFacingAgentRecoveryNotice,
   UserFacingAgentResponse,
 } from '../../../api/socialAgentApi';
-
-export interface AgentLifecycleUiState {
-  phase: AgentFlowPhase;
-  antState: AntGuideState;
-  antTarget: AntGuideTarget;
-}
-
-export const AGENT_LIFECYCLE_UI: Record<AgentLifecycle, AgentLifecycleUiState> = {
-  received: { phase: 'userSubmitted', antState: 'thinking', antTarget: 'input' },
-  idle: { phase: 'welcome', antState: 'idle', antTarget: 'input' },
-  input_focused: { phase: 'inputFocused', antState: 'idle', antTarget: 'input' },
-  user_submitted: { phase: 'userSubmitted', antState: 'thinking', antTarget: 'input' },
-  analyzing_intent: { phase: 'analyzingIntent', antState: 'thinking', antTarget: 'input' },
-  reading_life_graph: { phase: 'analyzingIntent', antState: 'thinking', antTarget: 'input' },
-  searching_candidates: {
-    phase: 'discoveringScenes',
-    antState: 'discovering',
-    antTarget: 'recommendation',
-  },
-  ranking_matches: {
-    phase: 'discoveringScenes',
-    antState: 'discovering',
-    antTarget: 'recommendation',
-  },
-  checking_safety: { phase: 'safetyReminder', antState: 'reminding', antTarget: 'safetyCard' },
-  drafting_opener: { phase: 'generatingOpener', antState: 'thinking', antTarget: 'recommendation' },
-  waiting_confirmation: {
-    phase: 'awaitingConfirmation',
-    antState: 'confirming',
-    antTarget: 'confirmButton',
-  },
-  completed: { phase: 'completed', antState: 'success', antTarget: null },
-  failed: { phase: 'failed', antState: 'error', antTarget: 'input' },
-};
-
-export function mapLifecycleToFlow(lifecycle: AgentLifecycle): AgentLifecycleUiState {
-  return AGENT_LIFECYCLE_UI[lifecycle];
-}
 
 export function lifecycleFromLightStatus(status: UserFacingAgentLightStatus): AgentLifecycle {
   if (status.includes('Life Graph')) return 'reading_life_graph';
@@ -91,10 +52,57 @@ export function mapAgentError(error: unknown): AgentError {
   if (isAbortError(error)) {
     return createAgentError('ABORTED', '已停止这次查找', '我已经停止当前处理，刚才的需求还在这里。');
   }
+  const recoveryNotice = recoveryNoticeFromError(error);
+  if (recoveryNotice) {
+    return {
+      ...createAgentError(
+        recoveryNotice.kind === 'interrupted' ? 'NETWORK_ERROR' : 'SERVER_ERROR',
+        recoveryNotice.title,
+        recoveryNotice.message,
+      ),
+      retryable: recoveryNotice.retryable,
+      recoveryNotice,
+    };
+  }
+
+  const explicitCode = agentErrorCodeFromUnknown(
+    error && typeof error === 'object' ? (error as { code?: unknown }).code : null,
+  ) ?? agentErrorCodeFromUnknown(
+    error && typeof error === 'object' ? (error as { name?: unknown }).name : null,
+  );
+  if (explicitCode) {
+    return createAgentError(explicitCode, undefined, undefined, statusCodeFromUnknown(error));
+  }
 
   const message = error instanceof Error ? error.message : String(error ?? '');
   const code = inferAgentErrorCode(message);
   return createAgentError(code, undefined, undefined, statusCodeFromMessage(message));
+}
+
+function recoveryNoticeFromError(error: unknown): UserFacingAgentRecoveryNotice | null {
+  if (!error || typeof error !== 'object') return null;
+  const value = (error as { recoveryNotice?: unknown }).recoveryNotice;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const kind = record.kind;
+  const title = typeof record.title === 'string' ? record.title.trim() : '';
+  const message = typeof record.message === 'string' ? record.message.trim() : '';
+  const source = record.source;
+  if (
+    (kind !== 'failed' && kind !== 'timeout' && kind !== 'interrupted' && kind !== 'checkpoint') ||
+    !title ||
+    !message ||
+    (source !== 'fallback_suppressed' && source !== 'checkpoint_recovery' && source !== 'stream_error')
+  ) {
+    return null;
+  }
+  return {
+    kind,
+    title,
+    message,
+    retryable: record.retryable !== false,
+    source,
+  };
 }
 
 export function createAgentError(
@@ -132,7 +140,7 @@ const AGENT_ERROR_COPY: Record<
   },
   RATE_LIMITED: {
     title: '请求有点频繁',
-    message: '稍后再试一次，我会保留当前输入。',
+    message: '这次请求被限流了。刚才的内容还在，你可以稍后重试或继续补充。',
     retryable: true,
     lifecycle: 'failed',
   },
@@ -162,7 +170,7 @@ const AGENT_ERROR_COPY: Record<
   },
   SERVER_ERROR: {
     title: '服务暂时没有准备好',
-    message: '我已经保留当前对话。你可以稍后再试一次。',
+    message: '刚才连接中断了。当前需求还在，可以重试或继续补充。',
     retryable: true,
     lifecycle: 'failed',
   },
@@ -191,8 +199,44 @@ function statusCodeFromMessage(message: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
+function statusCodeFromUnknown(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const statusCode = (error as { statusCode?: unknown }).statusCode;
+  if (typeof statusCode === 'number' && Number.isFinite(statusCode)) return statusCode;
+  const status = (error as { status?: unknown }).status;
+  if (typeof status === 'number' && Number.isFinite(status)) return status;
+  return undefined;
+}
+
+function agentErrorCodeFromUnknown(value: unknown): AgentErrorCode | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toUpperCase();
+  if (
+    normalized === 'MISSING_INFO' ||
+    normalized === 'UNAUTHORIZED' ||
+    normalized === 'RATE_LIMITED' ||
+    normalized === 'SAFETY_BLOCKED' ||
+    normalized === 'CONFIRMATION_REQUIRED' ||
+    normalized === 'TASK_NOT_FOUND' ||
+    normalized === 'NETWORK_ERROR' ||
+    normalized === 'SERVER_ERROR' ||
+    normalized === 'ABORTED'
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
 function isAgentError(error: unknown): error is AgentError {
-  return error !== null && typeof error === 'object' && 'code' in error && 'retryable' in error;
+  if (!error || typeof error !== 'object') return false;
+  const record = error as Record<string, unknown>;
+  return (
+    typeof record.code === 'string' &&
+    typeof record.title === 'string' &&
+    typeof record.message === 'string' &&
+    typeof record.retryable === 'boolean' &&
+    typeof record.lifecycle === 'string'
+  );
 }
 
 function isAbortError(error: unknown): boolean {

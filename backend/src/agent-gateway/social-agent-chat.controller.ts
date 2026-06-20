@@ -1,7 +1,9 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
+  Header,
   HttpCode,
   Optional,
   Param,
@@ -38,10 +40,15 @@ import {
   resolveUserPermissionMode,
   agentLoopStepStreamEvent,
   toolCallStreamEvent,
+  shouldStreamFallbackAssistantText,
   userFacingStreamErrorEvent,
   type UserFacingStreamEvent,
 } from './social-agent-chat-stream.presenter';
 import { SocialAgentChatService } from './social-agent-chat.service';
+import type {
+  SocialAgentChatRunResult,
+  SocialAgentIntentRouteResult,
+} from './social-agent-chat.types';
 import type { SocialAgentCardActionBody } from './social-agent-action.types';
 import { SocialAgentCandidateCommandService } from './social-agent-candidate-command.service';
 import { AgentObservabilityService } from './agent-observability.service';
@@ -53,9 +60,14 @@ import { SocialAgentProfileGateService } from './social-agent-profile-gate.servi
 import { SocialAgentEventV2Service } from './social-agent-event-v2.service';
 import { SocialAgentContextHydratorService } from './social-agent-context-hydrator.service';
 import { SocialAgentEventStore } from './social-agent-event-store.service';
-import type { SocialAgentEventV2Stage } from './social-agent-event-v2.types';
 import { SocialAgentTaskMemoryStateMachineService } from './social-agent-task-memory-state-machine.service';
-import type { UserFacingAgentResponse } from './user-facing-agent-response';
+import { SocialAgentMessageLogService } from './social-agent-message-log.service';
+import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
+import {
+  SocialCodexEventPipelineService,
+  type SocialCodexEventWriter,
+} from './social-codex-event-pipeline.service';
+import { parseSocialAgentThreadTaskId } from './social-agent-thread-id.util';
 import {
   AgentRunCheckpointService,
   type AgentRunCheckpointAction,
@@ -64,6 +76,27 @@ import {
 type LlmAssistantTextResult = {
   streamed: boolean;
   text: string | null;
+};
+
+type StreamUserFacingMessageOptions = {
+  prepared?: boolean;
+  signal?: AbortSignal;
+  runIdPrefix?: string;
+};
+
+type UserFacingConversationIntent = 'conversation' | 'social' | 'approval';
+
+type InitialRunCopyInput = {
+  conversationIntent?: UserFacingConversationIntent | null;
+  clientContext?: {
+    conversationIntent?: UserFacingConversationIntent | null;
+  } | null;
+};
+
+type FinalResponseHydratedContext = {
+  conversationHistory: Array<Record<string, unknown>>;
+  memoryContext: Record<string, unknown> | null;
+  taskContextPatch: Record<string, unknown>;
 };
 
 @Controller('social-agent/chat')
@@ -95,7 +128,34 @@ export class SocialAgentChatController {
     private readonly eventStore?: SocialAgentEventStore,
     @Optional()
     private readonly taskSlotStateMachine?: SocialAgentTaskMemoryStateMachineService,
+    @Optional()
+    private readonly socialCodexEvents?: SocialCodexEventPipelineService,
+    @Optional()
+    private readonly messageLog?: SocialAgentMessageLogService,
+    @Optional()
+    private readonly taskLifecycle?: SocialAgentTaskLifecycleService,
   ) {}
+
+  private initialRunCopy(input?: InitialRunCopyInput | null) {
+    const intent =
+      input?.conversationIntent ?? input?.clientContext?.conversationIntent ?? null;
+    if (intent === 'conversation') {
+      return {
+        title: '正在思考',
+        detail: '会直接回复，不触发社交工具。',
+      };
+    }
+    if (intent === 'approval') {
+      return {
+        title: '正在恢复待确认步骤',
+        detail: '确认前不会执行高风险动作。',
+      };
+    }
+    return {
+      title: '正在理解你的需求',
+      detail: '会结合最近对话和已确认偏好，整理成自然回复。',
+    };
+  }
 
   @Get('threads')
   listThreads(@Req() req: FitMeetRequest, @Query('limit') limit?: string) {
@@ -112,20 +172,20 @@ export class SocialAgentChatController {
   }
 
   @Get('threads/:id')
-  getThread(@Req() req: FitMeetRequest, @Param('id', ParseIntPipe) id: number) {
-    return this.requireThreads().get(req.user.id, id);
+  getThread(@Req() req: FitMeetRequest, @Param('id') id: string) {
+    return this.requireThreads().get(req.user.id, this.threadTaskIdParam(id));
   }
 
   @Post('threads/:id')
   @HttpCode(200)
   updateThread(
     @Req() req: FitMeetRequest,
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id') id: string,
     @Body() body: SocialAgentThreadUpdateBody,
   ) {
     return this.requireThreads().update(
       req.user.id,
-      id,
+      this.threadTaskIdParam(id),
       body?.title,
       body?.branchSnapshot,
       body?.metadata,
@@ -134,11 +194,11 @@ export class SocialAgentChatController {
 
   @Post('threads/:id/delete')
   @HttpCode(200)
-  deleteThread(
-    @Req() req: FitMeetRequest,
-    @Param('id', ParseIntPipe) id: number,
-  ) {
-    return this.requireThreads().delete(req.user.id, id);
+  deleteThread(@Req() req: FitMeetRequest, @Param('id') id: string) {
+    return this.requireThreads().delete(
+      req.user.id,
+      this.threadTaskIdParam(id),
+    );
   }
 
   @Post('messages/:messageId/feedback')
@@ -173,6 +233,8 @@ export class SocialAgentChatController {
 
   @Post('route-message')
   @HttpCode(200)
+  @Header('X-FitMeet-Agent-Compatibility', 'legacy-json')
+  @Header('X-FitMeet-Agent-Preferred-Protocol', 'social-agent-event-v2')
   async routeMessage(
     @Req() req: FitMeetRequest,
     @Body() body: SocialAgentRouteMessageBody,
@@ -195,6 +257,8 @@ export class SocialAgentChatController {
 
   @Post('messages')
   @HttpCode(200)
+  @Header('X-FitMeet-Agent-Compatibility', 'legacy-json')
+  @Header('X-FitMeet-Agent-Preferred-Protocol', 'social-agent-event-v2')
   async handleMessage(
     @Req() req: FitMeetRequest,
     @Body() body: SocialAgentRouteMessageBody,
@@ -235,6 +299,8 @@ export class SocialAgentChatController {
 
   @Post('tasks/:id/messages')
   @HttpCode(200)
+  @Header('X-FitMeet-Agent-Compatibility', 'legacy-json')
+  @Header('X-FitMeet-Agent-Preferred-Protocol', 'social-agent-event-v2')
   async handleTaskMessage(
     @Req() req: FitMeetRequest,
     @Param('id', ParseIntPipe) id: number,
@@ -269,6 +335,8 @@ export class SocialAgentChatController {
 
   @Post('tasks/:id/actions')
   @HttpCode(200)
+  @Header('X-FitMeet-Agent-Compatibility', 'legacy-json')
+  @Header('X-FitMeet-Agent-Preferred-Protocol', 'social-agent-event-v2')
   async performTaskAction(
     @Req() req: FitMeetRequest,
     @Param('id', ParseIntPipe) id: number,
@@ -395,28 +463,125 @@ export class SocialAgentChatController {
     @Body() body: SocialAgentRunBody,
     @Res() res: Response,
   ) {
-    res.status(200);
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders?.();
+    this.prepareSseResponse(res);
 
-    const write = (event: string, data: unknown) => {
-      res.write(`event: ${event}\n`);
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
-    };
+    const write = (event: string, data: unknown) =>
+      this.writeSseEvent(res, event, data);
 
     const signal = this.clientAbortSignal(req, res, 'run_stream');
+    const runId = this.runId(
+      'legacy-run',
+      req.user.id,
+      body?.taskId ?? body?.clientContext?.threadId,
+    );
+    const initialThreadId = this.eventThreadId(
+      body?.taskId,
+      body?.clientContext?.threadId,
+    );
+    const socialCodexEvents = this.socialCodexEventPipeline();
+    const v2 = socialCodexEvents.createWriter({
+      write: write as (event: string, data: UserFacingStreamEvent) => void,
+      userId: req.user.id,
+      taskId: body?.taskId ?? null,
+      threadId: initialThreadId,
+      runId,
+    });
+    let wroteResult = false;
+    let taskBoundInitialTraceTaskId = body?.taskId ?? null;
     try {
+      const initialCopy = this.initialRunCopy(body);
+      await socialCodexEvents.writeRunStarted(
+        v2,
+        initialCopy.title,
+        initialCopy.detail,
+      );
+      await socialCodexEvents.writeHydrateContext(v2);
+      await socialCodexEvents.writeEarlySlotInferenceEvents(v2, body?.goal, {
+        taskId: body?.taskId ?? null,
+        threadId: initialThreadId,
+      });
+      await socialCodexEvents.writeProfileGateIfNeeded(v2, req.user.id, {
+        text: body?.goal,
+        taskId: body?.taskId ?? null,
+        threadId: initialThreadId,
+      });
       await this.chat.runStream(
         req.user.id,
         body ?? {},
-        (payload) => {
+        async (payload) => {
+          if (
+            payload.type === 'task' &&
+            taskBoundInitialTraceTaskId !== payload.taskId
+          ) {
+            taskBoundInitialTraceTaskId = payload.taskId;
+            await this.writeTaskBoundInitialTrace({
+              socialCodexEvents,
+              write: write as (
+                event: string,
+                data: UserFacingStreamEvent,
+              ) => void,
+              userId: req.user.id,
+              taskId: payload.taskId,
+              threadId: this.eventThreadId(
+                payload.taskId,
+                body?.clientContext?.threadId,
+              ),
+              runId,
+              text: body?.goal,
+            });
+          }
           write(payload.type, payload);
+          if (payload.type === 'assistant_delta') {
+            await this.writeSocialCodexAssistantDelta({
+              socialCodexEvents,
+              v2,
+              delta: payload.delta,
+              messageId: payload.messageId,
+              source: payload.source,
+            });
+          }
+          if (payload.type === 'step') {
+            await socialCodexEvents.writeStep(v2, payload.step);
+          }
+          if (payload.type === 'result' && !wroteResult) {
+            const userFacing =
+              this.userFacingSanitizer.toUserFacingAgentResponse(
+                payload.result,
+                resolveUserPermissionMode(body?.permissionMode),
+              );
+            const lifecycle = lifecycleFromUserFacingResponse(userFacing);
+            const resultV2 = socialCodexEvents.createWriter({
+              write: write as (
+                event: string,
+                data: UserFacingStreamEvent,
+              ) => void,
+              userId: req.user.id,
+              taskId: payload.result.taskId ?? body?.taskId ?? null,
+              threadId: this.eventThreadId(
+                payload.result.taskId ?? body?.taskId,
+                body?.clientContext?.threadId,
+              ),
+              runId,
+            });
+            await socialCodexEvents.writeResultEvents(resultV2, userFacing);
+            await socialCodexEvents.writeContextEvents(
+              resultV2,
+              req.user.id,
+              payload.result.taskId ?? body?.taskId ?? null,
+              runId,
+              this.eventThreadId(
+                payload.result.taskId ?? body?.taskId,
+                body?.clientContext?.threadId,
+              ),
+            );
+            await socialCodexEvents.writeRunCompleted(resultV2, lifecycle);
+            wroteResult = true;
+          }
         },
         { signal },
       );
     } catch (error) {
+      await socialCodexEvents.writeRunFailed(v2);
       write('error', {
         type: 'error',
         message:
@@ -433,16 +598,10 @@ export class SocialAgentChatController {
     @Body() body: SocialAgentRunBody,
     @Res() res: Response,
   ) {
-    res.status(200);
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders?.();
+    this.prepareSseResponse(res);
 
-    const write = (event: string, data: UserFacingStreamEvent) => {
-      res.write(`event: ${event}\n`);
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
-    };
+    const write = (event: string, data: UserFacingStreamEvent) =>
+      this.writeSseEvent(res, event, data);
 
     const signal = this.clientAbortSignal(req, res, 'user_run_stream');
     const runId = this.runId(
@@ -450,55 +609,90 @@ export class SocialAgentChatController {
       req.user.id,
       body?.taskId ?? body?.clientContext?.threadId,
     );
-    const v2 = this.v2Writer(
-      write,
-      req.user.id,
-      body?.taskId ?? null,
+    const initialThreadId = this.eventThreadId(
+      body?.taskId,
       body?.clientContext?.threadId,
-      runId,
     );
+    const socialCodexEvents = this.socialCodexEventPipeline();
+    const v2 = socialCodexEvents.createWriter({
+      write,
+      userId: req.user.id,
+      taskId: body?.taskId ?? null,
+      threadId: initialThreadId,
+      runId,
+    });
     let hasAssistantDelta = false;
     let hasAssistantDone = false;
     let wroteResult = false;
+    let taskBoundInitialTraceTaskId = body?.taskId ?? null;
     try {
-      await v2('run.started', 'detect_social_intent', '正在理解你的需求', {
-        state: 'running',
-        detail: '我会先识别这是普通聊天，还是需要进入约练/社交流程。',
+      const initialCopy = this.initialRunCopy(body);
+      await socialCodexEvents.writeRunStarted(
+        v2,
+        initialCopy.title,
+        initialCopy.detail,
+      );
+      await socialCodexEvents.writeHydrateContext(v2);
+      await socialCodexEvents.writeEarlySlotInferenceEvents(v2, body?.goal, {
+        taskId: body?.taskId ?? null,
+        threadId: initialThreadId,
       });
-      await v2('visible_process.delta', 'hydrate_context', '正在读取你的偏好', {
-        state: 'running',
-        detail:
-          '会读取最近对话、当前任务和 Life Graph 摘要，不展示内部思考链。',
+      await socialCodexEvents.writeProfileGateIfNeeded(v2, req.user.id, {
+        text: body?.goal,
+        taskId: body?.taskId ?? null,
+        threadId: initialThreadId,
       });
-      await this.writeEarlySlotInferenceEvents(v2, body?.goal);
-      if (
-        await this.shouldEmitProfileGateV2(req.user.id, {
-          text: body?.goal,
-          taskId: body?.taskId ?? null,
-          threadId: body?.clientContext?.threadId ?? null,
-        })
-      ) {
-        await this.writeProfileGateV2Event(v2, req.user.id, {
-          text: body.goal,
-          taskId: body?.taskId ?? null,
-          threadId: body?.clientContext?.threadId ?? null,
-        });
-      }
       await this.chat.runStream(
         req.user.id,
         body ?? {},
         async (payload) => {
+          if (
+            payload.type === 'task' &&
+            taskBoundInitialTraceTaskId !== payload.taskId
+          ) {
+            taskBoundInitialTraceTaskId = payload.taskId;
+            await this.writeTaskBoundInitialTrace({
+              socialCodexEvents,
+              write,
+              userId: req.user.id,
+              taskId: payload.taskId,
+              threadId: this.eventThreadId(
+                payload.taskId,
+                body?.clientContext?.threadId,
+              ),
+              runId,
+              text: body?.goal,
+            });
+          }
           if (payload.type === 'result') {
             if (wroteResult) return;
             let streamResult = payload.result;
             if (!hasAssistantDelta) {
+              const assistantV2 = socialCodexEvents.createWriter({
+                write,
+                userId: req.user.id,
+                taskId: payload.result.taskId ?? body?.taskId ?? null,
+                threadId: this.eventThreadId(
+                  payload.result.taskId ?? body?.taskId,
+                  body?.clientContext?.threadId,
+                ),
+                runId,
+              });
               const streamed = await this.writeLlmAssistantTextForResult(
                 write,
                 {
                   rawResult: streamResult as unknown as Record<string, unknown>,
                   userMessage: body?.goal ?? '',
                   messageId: `agent-run:${payload.result.taskId}`,
+                  userId: req.user.id,
+                  taskId: payload.result.taskId ?? body?.taskId ?? null,
+                  threadId: this.eventThreadId(
+                    payload.result.taskId ?? body?.taskId,
+                    body?.clientContext?.threadId,
+                  ),
                   signal,
+                  socialCodexEvents,
+                  v2: assistantV2,
                 },
               );
               hasAssistantDelta = streamed.streamed;
@@ -508,6 +702,7 @@ export class SocialAgentChatController {
                   ...streamResult,
                   assistantMessage: streamed.text ?? '',
                   assistantStreamed: true,
+                  assistantMessageSource: 'llm',
                 };
               } else {
                 const result =
@@ -515,15 +710,25 @@ export class SocialAgentChatController {
                     streamResult,
                     resolveUserPermissionMode(body?.permissionMode),
                   );
-                await this.writeFallbackAssistantText(write, {
-                  text: result.assistantMessage,
-                  messageId: `agent-run:${streamResult.taskId}`,
-                  traceId: streamResult.traceId,
-                });
-                hasAssistantDelta = true;
-                hasAssistantDone = true;
+                const wroteFallback = await this.writeFallbackAssistantText(
+                  write,
+                  {
+                    text: result.assistantMessage,
+                    messageId: `agent-run:${streamResult.taskId}`,
+                    traceId: streamResult.traceId,
+                    socialCodexEvents,
+                    v2: assistantV2,
+                  },
+                );
+                hasAssistantDelta = wroteFallback;
+                hasAssistantDone = wroteFallback;
+                streamResult = {
+                  ...streamResult,
+                  assistantMessageSource: 'fallback',
+                };
               }
             }
+            await this.persistFinalRunAssistantMemory(req.user.id, streamResult);
             const result = this.userFacingSanitizer.toUserFacingAgentResponse(
               streamResult,
               resolveUserPermissionMode(body?.permissionMode),
@@ -533,33 +738,28 @@ export class SocialAgentChatController {
               write,
               result.pendingConfirmations,
             );
-            const resultV2 = this.v2Writer(
+            const resultV2 = socialCodexEvents.createWriter({
               write,
-              req.user.id,
-              streamResult.taskId,
-              body?.clientContext?.threadId ?? streamResult.taskId,
+              userId: req.user.id,
+              taskId: streamResult.taskId,
+              threadId: this.eventThreadId(
+                streamResult.taskId,
+                body?.clientContext?.threadId,
+              ),
               runId,
-            );
-            await this.writeResultV2Events(resultV2, result);
-            await this.writeContextEvents(
+            });
+            await socialCodexEvents.writeResultEvents(resultV2, result);
+            await socialCodexEvents.writeContextEvents(
               resultV2,
               req.user.id,
               streamResult.taskId,
               runId,
+              this.eventThreadId(
+                streamResult.taskId,
+                body?.clientContext?.threadId,
+              ),
             );
-            await resultV2(
-              'run.completed',
-              lifecycle === 'waiting_confirmation'
-                ? 'approval'
-                : 'life_graph_writeback',
-              lifecycle === 'waiting_confirmation'
-                ? '发送邀请前需要你确认'
-                : '这一步处理完成',
-              {
-                state:
-                  lifecycle === 'waiting_confirmation' ? 'waiting' : 'done',
-              },
-            );
+            await socialCodexEvents.writeRunCompleted(resultV2, lifecycle);
             write('result', {
               type: 'result',
               lifecycle,
@@ -578,12 +778,12 @@ export class SocialAgentChatController {
               delta: payload.delta,
               source: payload.source ?? 'llm',
             });
-            void v2('assistant.delta', 'detect_social_intent', '正在回复', {
-              state: 'running',
-              payload: {
-                delta: payload.delta,
-                messageId: payload.messageId ?? null,
-              },
+            void this.writeSocialCodexAssistantDelta({
+              socialCodexEvents,
+              v2,
+              delta: payload.delta,
+              messageId: payload.messageId,
+              source: payload.source,
             });
             return;
           }
@@ -601,10 +801,7 @@ export class SocialAgentChatController {
           }
 
           if (payload.type === 'error') {
-            void v2('run.failed', 'detect_social_intent', '这次处理没有完成', {
-              state: 'failed',
-              detail: '我已经保留当前对话，你可以继续补充。',
-            });
+            void socialCodexEvents.writeRunFailed(v2);
             write('error', userFacingStreamErrorEvent(payload.message));
             return;
           }
@@ -620,35 +817,26 @@ export class SocialAgentChatController {
                 ? lightStatusFromStep(payload.step.label)
                 : '正在理解你的需求',
             taskId: payload.type === 'task' ? payload.taskId : undefined,
+            threadId:
+              payload.type === 'task'
+                ? this.eventThreadId(
+                    payload.taskId,
+                    body?.clientContext?.threadId,
+                  ) ?? undefined
+                : undefined,
           });
           if (payload.type === 'step') {
-            void v2(
-              this.v2ToolType(payload.step.status),
-              this.stageFromStep(payload.step.label),
-              lightStatusFromStep(payload.step.label),
-              {
-                state:
-                  payload.step.status === 'done'
-                    ? 'done'
-                    : payload.step.status === 'failed'
-                      ? 'failed'
-                      : 'running',
-                detail: payload.step.detail,
-              },
-            );
+            void socialCodexEvents.writeStep(v2, payload.step);
             write('agent_loop_step', agentLoopStepStreamEvent(payload.step));
             const toolEvent = toolCallStreamEvent(payload.step);
             if (toolEvent) write(toolEvent.type, toolEvent);
             write('progress', progressFromStep(payload.step));
           }
         },
-        { signal },
+        { signal, deferAssistantMessageLog: true },
       );
     } catch (error) {
-      await v2('run.failed', 'detect_social_intent', '这次处理没有完成', {
-        state: 'failed',
-        detail: '我已经保留当前对话，你可以继续补充。',
-      });
+      await socialCodexEvents.writeRunFailed(v2);
       write('error', userFacingStreamErrorEvent(error));
     } finally {
       res.end();
@@ -659,58 +847,68 @@ export class SocialAgentChatController {
     req: FitMeetRequest,
     body: SocialAgentRouteMessageBody,
     res: Response,
+    options: StreamUserFacingMessageOptions = {},
   ) {
-    res.status(200);
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders?.();
+    if (!options.prepared) this.prepareSseResponse(res);
 
-    const write = (event: string, data: UserFacingStreamEvent) => {
-      res.write(`event: ${event}\n`);
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
-    };
+    const write = (event: string, data: UserFacingStreamEvent) =>
+      this.writeSseEvent(res, event, data);
 
-    const signal = this.clientAbortSignal(req, res, 'message_stream');
+    const signal =
+      options.signal ?? this.clientAbortSignal(req, res, 'message_stream');
     const runId = this.runId(
-      'message',
+      options.runIdPrefix ?? 'message',
       req.user.id,
       body.taskId ?? body.clientContext?.threadId,
     );
-    const v2 = this.v2Writer(
-      write,
-      req.user.id,
-      body.taskId ?? null,
+    const initialThreadId = this.eventThreadId(
+      body.taskId,
       body.clientContext?.threadId,
-      runId,
     );
+    const socialCodexEvents = this.socialCodexEventPipeline();
+    const v2 = socialCodexEvents.createWriter({
+      write,
+      userId: req.user.id,
+      taskId: body.taskId ?? null,
+      threadId: initialThreadId,
+      runId,
+    });
     let hasAssistantDelta = false;
+    let taskBoundInitialTraceTaskId = body.taskId ?? null;
     try {
-      await v2('run.started', 'detect_social_intent', '正在理解你的需求', {
-        state: 'running',
+      const initialCopy = this.initialRunCopy(body);
+      await socialCodexEvents.writeRunStarted(
+        v2,
+        initialCopy.title,
+        initialCopy.detail,
+      );
+      await socialCodexEvents.writeApprovalResolved(v2, {
+        decision: body.clientContext?.decision,
+        approvalId:
+          body.clientContext?.approvalId ??
+          body.clientContext?.interrupt?.payload?.approvalRequestId ??
+          null,
+        checkpointId: body.clientContext?.checkpointId,
+        sourceCheckpointId: body.clientContext?.sourceCheckpointId,
+        resumeCursor: body.clientContext?.resumeCursor ?? null,
+        checkpointAction: body.clientContext?.checkpointAction ?? null,
       });
-      await this.writeApprovalResolvedV2Event(v2, body);
-      await v2('visible_process.delta', 'hydrate_context', '正在读取你的偏好', {
-        state: 'running',
+      await socialCodexEvents.writeHydrateContext(v2);
+      await socialCodexEvents.writeEarlySlotInferenceEvents(v2, body.message, {
+        taskId: body.taskId ?? null,
+        threadId: initialThreadId,
       });
-      await this.writeEarlySlotInferenceEvents(v2, body.message);
-      if (
-        await this.shouldEmitProfileGateV2(req.user.id, {
-          text: body.message,
-          taskId: body.taskId ?? null,
-          threadId: body.clientContext?.threadId ?? null,
-        })
-      ) {
-        await this.writeProfileGateV2Event(v2, req.user.id, {
-          text: body.message,
-          taskId: body.taskId ?? null,
-          threadId: body.clientContext?.threadId ?? null,
-        });
-      }
+      await socialCodexEvents.writeProfileGateIfNeeded(v2, req.user.id, {
+        text: body.message,
+        taskId: body.taskId ?? null,
+        threadId: initialThreadId,
+      });
       write('status', {
         type: 'status',
         lifecycle: 'received',
-        lightStatus: '正在理解你的需求',
+        lightStatus: initialCopy.title,
+        taskId: body.taskId ?? undefined,
+        threadId: initialThreadId ?? undefined,
       });
       const result = await this.chat.handleMessageStream(
         req.user.id,
@@ -725,12 +923,12 @@ export class SocialAgentChatController {
               delta: payload.delta,
               source: payload.source ?? 'llm',
             });
-            void v2('assistant.delta', 'detect_social_intent', '正在回复', {
-              state: 'running',
-              payload: {
-                delta: payload.delta,
-                messageId: payload.messageId ?? null,
-              },
+            void this.writeSocialCodexAssistantDelta({
+              socialCodexEvents,
+              v2,
+              delta: payload.delta,
+              messageId: payload.messageId,
+              source: payload.source,
             });
           }
           if (payload.type === 'assistant_done') {
@@ -742,35 +940,55 @@ export class SocialAgentChatController {
             });
           }
           if (payload.type === 'step') {
-            void v2(
-              this.v2ToolType(payload.step.status),
-              this.stageFromStep(payload.step.label),
-              lightStatusFromStep(payload.step.label),
-              {
-                state:
-                  payload.step.status === 'done'
-                    ? 'done'
-                    : payload.step.status === 'failed'
-                      ? 'failed'
-                      : 'running',
-                detail: payload.step.detail,
-              },
-            );
+            void socialCodexEvents.writeStep(v2, payload.step);
             write('agent_loop_step', agentLoopStepStreamEvent(payload.step));
             const toolEvent = toolCallStreamEvent(payload.step);
             if (toolEvent) write(toolEvent.type, toolEvent);
             write('progress', progressFromStep(payload.step));
           }
         },
-        { signal },
+        { signal, deferAssistantMessageLog: true },
       );
       let streamResult = result;
+      if (result.taskId && taskBoundInitialTraceTaskId !== result.taskId) {
+        taskBoundInitialTraceTaskId = result.taskId;
+        await this.writeTaskBoundInitialTrace({
+          socialCodexEvents,
+          write,
+          userId: req.user.id,
+          taskId: result.taskId,
+          threadId: this.eventThreadId(
+            result.taskId,
+            body.clientContext?.threadId,
+          ),
+          runId,
+          text: body.message,
+        });
+      }
+      const assistantV2 = socialCodexEvents.createWriter({
+        write,
+        userId: req.user.id,
+        taskId: result.taskId ?? body.taskId ?? null,
+        threadId: this.eventThreadId(
+          result.taskId ?? body.taskId,
+          body.clientContext?.threadId,
+        ),
+        runId,
+      });
       if (!hasAssistantDelta) {
         const streamed = await this.writeLlmAssistantTextForResult(write, {
           rawResult: streamResult as unknown as Record<string, unknown>,
           userMessage: body.message ?? '',
           messageId: `agent-message:${result.taskId ?? Date.now()}`,
+          userId: req.user.id,
+          taskId: result.taskId ?? body.taskId ?? null,
+          threadId: this.eventThreadId(
+            result.taskId ?? body.taskId,
+            body.clientContext?.threadId,
+          ),
           signal,
+          socialCodexEvents,
+          v2: assistantV2,
         });
         hasAssistantDelta = streamed.streamed;
         if (streamed.streamed) {
@@ -778,6 +996,12 @@ export class SocialAgentChatController {
             ...streamResult,
             assistantMessage: streamed.text ?? '',
             assistantStreamed: true,
+            assistantMessageSource: 'llm',
+          };
+        } else {
+          streamResult = {
+            ...streamResult,
+            assistantMessageSource: 'fallback',
           };
         }
       }
@@ -787,45 +1011,43 @@ export class SocialAgentChatController {
       );
       const lifecycle = lifecycleFromUserFacingResponse(userFacing);
       if (!hasAssistantDelta) {
-        await this.writeFallbackAssistantText(write, {
+        const wroteFallback = await this.writeFallbackAssistantText(write, {
           text: userFacing.assistantMessage,
           messageId: `agent-message:${result.taskId ?? Date.now()}`,
           traceId: result.traceId,
+          socialCodexEvents,
+          v2: assistantV2,
         });
-        hasAssistantDelta = true;
+        hasAssistantDelta = wroteFallback;
       }
+      await this.persistFinalRouteAssistantMemory(req.user.id, streamResult);
       this.writeApprovalRequiredEvents(write, userFacing.pendingConfirmations);
-      const resultV2 = this.v2Writer(
+      const resultV2 = socialCodexEvents.createWriter({
         write,
-        req.user.id,
-        result.taskId ?? null,
-        body.clientContext?.threadId ?? result.taskId ?? null,
+        userId: req.user.id,
+        taskId: result.taskId ?? null,
+        threadId: this.eventThreadId(
+          result.taskId,
+          body.clientContext?.threadId,
+        ),
         runId,
+      });
+      await socialCodexEvents.writeResultEvents(resultV2, userFacing);
+      await socialCodexEvents.writeContextEvents(
+        resultV2,
+        req.user.id,
+        result.taskId,
+        runId,
+        this.eventThreadId(result.taskId, body.clientContext?.threadId),
       );
-      await this.writeResultV2Events(resultV2, userFacing);
-      await this.writeContextEvents(resultV2, req.user.id, result.taskId, runId);
-      await resultV2(
-        'run.completed',
-        lifecycle === 'waiting_confirmation'
-          ? 'approval'
-          : 'life_graph_writeback',
-        lifecycle === 'waiting_confirmation'
-          ? '发送邀请前需要你确认'
-          : '这一步处理完成',
-        {
-          state: lifecycle === 'waiting_confirmation' ? 'waiting' : 'done',
-        },
-      );
+      await socialCodexEvents.writeRunCompleted(resultV2, lifecycle);
       write('result', {
         type: 'result',
         lifecycle,
         result: userFacing,
       });
     } catch (error) {
-      await v2('run.failed', 'detect_social_intent', '这次处理没有完成', {
-        state: 'failed',
-        detail: '我已经保留当前对话，你可以继续补充。',
-      });
+      await socialCodexEvents.writeRunFailed(v2);
       write('error', userFacingStreamErrorEvent(error));
     } finally {
       res.end();
@@ -838,29 +1060,38 @@ export class SocialAgentChatController {
     body: SocialAgentCardActionBody,
     res: Response,
   ) {
-    res.status(200);
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders?.();
+    this.prepareSseResponse(res);
 
-    const write = (event: string, data: UserFacingStreamEvent) => {
-      res.write(`event: ${event}\n`);
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
-    };
+    const write = (event: string, data: UserFacingStreamEvent) =>
+      this.writeSseEvent(res, event, data);
 
     const signal = this.clientAbortSignal(req, res, 'action_stream');
     const runId = this.runId('action', req.user.id, taskId);
-    const v2 = this.v2Writer(write, req.user.id, taskId, taskId, runId);
+    const actionThreadId =
+      this.eventThreadId(taskId, body.clientContext?.threadId) ??
+      `agent-task:${taskId}`;
+    const socialCodexEvents = this.socialCodexEventPipeline();
+    const v2 = socialCodexEvents.createWriter({
+      write,
+      userId: req.user.id,
+      taskId,
+      threadId: actionThreadId,
+      runId,
+    });
     let hasAssistantDelta = false;
     try {
-      await v2('run.started', 'detect_social_intent', '正在处理你的选择', {
-        state: 'running',
-      });
+      await socialCodexEvents.writeRunStarted(
+        v2,
+        '正在处理你的选择',
+        '会先确认当前动作和安全边界，再继续处理。',
+      );
+      await socialCodexEvents.writeHydrateContext(v2);
       write('status', {
         type: 'status',
         lifecycle: 'received',
-        lightStatus: '正在理解你的需求',
+        lightStatus: '正在处理你的选择',
+        taskId,
+        threadId: actionThreadId,
       });
       const result = await this.chat.performCardActionStream(
         req.user.id,
@@ -876,12 +1107,12 @@ export class SocialAgentChatController {
               delta: payload.delta,
               source: payload.source ?? 'llm',
             });
-            void v2('assistant.delta', 'detect_social_intent', '正在回复', {
-              state: 'running',
-              payload: {
-                delta: payload.delta,
-                messageId: payload.messageId ?? null,
-              },
+            void this.writeSocialCodexAssistantDelta({
+              socialCodexEvents,
+              v2,
+              delta: payload.delta,
+              messageId: payload.messageId,
+              source: payload.source,
             });
           }
           if (payload.type === 'assistant_done') {
@@ -893,20 +1124,7 @@ export class SocialAgentChatController {
             });
           }
           if (payload.type === 'step') {
-            void v2(
-              this.v2ToolType(payload.step.status),
-              this.stageFromStep(payload.step.label),
-              lightStatusFromStep(payload.step.label),
-              {
-                state:
-                  payload.step.status === 'done'
-                    ? 'done'
-                    : payload.step.status === 'failed'
-                      ? 'failed'
-                      : 'running',
-                detail: payload.step.detail,
-              },
-            );
+            void socialCodexEvents.writeStep(v2, payload.step);
             write('agent_loop_step', agentLoopStepStreamEvent(payload.step));
             const toolEvent = toolCallStreamEvent(payload.step);
             if (toolEvent) write(toolEvent.type, toolEvent);
@@ -916,12 +1134,24 @@ export class SocialAgentChatController {
         { signal },
       );
       let streamResult = result;
+      const assistantV2 = socialCodexEvents.createWriter({
+        write,
+        userId: req.user.id,
+        taskId: result.taskId ?? taskId,
+        threadId: actionThreadId,
+        runId,
+      });
       if (!hasAssistantDelta) {
         const streamed = await this.writeLlmAssistantTextForResult(write, {
           rawResult: streamResult as unknown as Record<string, unknown>,
           userMessage: this.actionUserMessage(body),
           messageId: `agent-action:${result.taskId ?? taskId}`,
+          userId: req.user.id,
+          taskId: result.taskId ?? taskId,
+          threadId: actionThreadId,
           signal,
+          socialCodexEvents,
+          v2: assistantV2,
         });
         hasAssistantDelta = streamed.streamed;
         if (streamed.streamed) {
@@ -929,6 +1159,12 @@ export class SocialAgentChatController {
             ...streamResult,
             assistantMessage: streamed.text ?? '',
             assistantStreamed: true,
+            assistantMessageSource: 'llm',
+          };
+        } else {
+          streamResult = {
+            ...streamResult,
+            assistantMessageSource: 'fallback',
           };
         }
       }
@@ -938,54 +1174,61 @@ export class SocialAgentChatController {
       );
       const lifecycle = lifecycleFromUserFacingResponse(userFacing);
       if (!hasAssistantDelta) {
-        await this.writeFallbackAssistantText(write, {
+        const wroteFallback = await this.writeFallbackAssistantText(write, {
           text: userFacing.assistantMessage,
           messageId: `agent-action:${result.taskId ?? taskId}`,
           traceId: result.traceId,
+          socialCodexEvents,
+          v2: assistantV2,
         });
-        hasAssistantDelta = true;
+        hasAssistantDelta = wroteFallback;
       }
+      await this.persistFinalRouteAssistantMemory(req.user.id, streamResult, {
+        replaceLastAssistantTurn: true,
+      });
       this.writeApprovalRequiredEvents(write, userFacing.pendingConfirmations);
-      const resultV2 = this.v2Writer(
+      const resultV2 = socialCodexEvents.createWriter({
         write,
-        req.user.id,
-        result.taskId ?? taskId,
-        result.taskId ?? taskId,
+        userId: req.user.id,
+        taskId: result.taskId ?? taskId,
+        threadId: actionThreadId,
         runId,
-      );
-      await this.writeResultV2Events(resultV2, userFacing);
-      await this.writeContextEvents(
+      });
+      await socialCodexEvents.writeResultEvents(resultV2, userFacing);
+      await socialCodexEvents.writeContextEvents(
         resultV2,
         req.user.id,
         result.taskId ?? taskId,
         runId,
+        actionThreadId,
       );
-      await resultV2(
-        'run.completed',
-        lifecycle === 'waiting_confirmation'
-          ? 'approval'
-          : 'life_graph_writeback',
-        lifecycle === 'waiting_confirmation'
-          ? '发送邀请前需要你确认'
-          : '这一步处理完成',
-        {
-          state: lifecycle === 'waiting_confirmation' ? 'waiting' : 'done',
-        },
-      );
+      await socialCodexEvents.writeRunCompleted(resultV2, lifecycle);
       write('result', {
         type: 'result',
         lifecycle,
         result: userFacing,
       });
     } catch (error) {
-      await v2('run.failed', 'detect_social_intent', '这次处理没有完成', {
-        state: 'failed',
-        detail: '我已经保留当前对话，你可以继续补充。',
-      });
+      await socialCodexEvents.writeRunFailed(v2);
       write('error', userFacingStreamErrorEvent(error));
     } finally {
       res.end();
     }
+  }
+
+  private prepareSseResponse(res: Response) {
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+  }
+
+  private writeSseEvent(res: Response, event: string, data: unknown) {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+    (res as Response & { flush?: () => void }).flush?.();
   }
 
   private async streamCheckpointAction(
@@ -995,38 +1238,69 @@ export class SocialAgentChatController {
     body: SocialAgentCheckpointActionBody,
     res: Response,
   ) {
-    const plan = await this.requireCheckpoints().prepareAction({
-      ownerUserId: req.user.id,
-      checkpointId,
-      action,
-    });
-    return this.streamUserFacingMessage(
+    this.prepareSseResponse(res);
+    const write = (event: string, data: UserFacingStreamEvent) =>
+      this.writeSseEvent(res, event, data);
+    const signal = this.clientAbortSignal(
       req,
-      {
-        message: plan.resumePrompt,
-        taskId: plan.taskId,
-        idempotencyKey: plan.idempotencyKey,
-        clientContext: {
-          source: 'web',
-          threadId: plan.threadId,
-          checkpointId: plan.checkpointId,
-          parentCheckpointId: plan.parentCheckpointId,
-          resumeCursor: plan.resumeCursor,
-          interrupt: plan.interrupt,
-          sourceCheckpointId:
-            plan.resumeCursor.parentCheckpointId ?? checkpointId,
-          sourceStepId: plan.resumeCursor.stepId ?? null,
-          sourceStep: plan.sourceStep,
-          stepScope: plan.stepScope,
-          sideEffectPolicy: plan.sideEffectPolicy,
-          resumeMode: this.resumeModeFor(action, body.decision ?? null),
-          resumeIdempotencyKey: plan.idempotencyKey,
-          checkpointAction: action,
-          decision: body.decision ?? null,
-        },
-      },
       res,
+      `checkpoint_${action}_stream`,
     );
+    const socialCodexEvents = this.socialCodexEventPipeline();
+    const runId = this.runId(`checkpoint-${action}`, req.user.id, checkpointId);
+    const v2 = socialCodexEvents.createWriter({
+      write,
+      userId: req.user.id,
+      taskId: null,
+      threadId: `checkpoint:${checkpointId}`,
+      runId,
+    });
+    try {
+      await socialCodexEvents.writeRunStarted(
+        v2,
+        this.checkpointActionTitle(action),
+        '会先恢复保存点，再继续处理这一步。',
+      );
+      await socialCodexEvents.writeCheckpointRestore(v2, action);
+      const plan = await this.requireCheckpoints().prepareAction({
+        ownerUserId: req.user.id,
+        checkpointId,
+        action,
+      });
+      return this.streamUserFacingMessage(
+        req,
+        {
+          message: plan.resumePrompt,
+          taskId: plan.taskId,
+          idempotencyKey: plan.idempotencyKey,
+          clientContext: {
+            source: 'web',
+            threadId: plan.threadId,
+            checkpointId: plan.checkpointId,
+            parentCheckpointId: plan.parentCheckpointId,
+            resumeCursor: plan.resumeCursor,
+            interrupt: plan.interrupt,
+            approvalId: plan.interrupt?.payload?.approvalRequestId ?? null,
+            sourceCheckpointId:
+              plan.resumeCursor.parentCheckpointId ?? checkpointId,
+            sourceStepId: plan.resumeCursor.stepId ?? null,
+            sourceStep: plan.sourceStep,
+            stepScope: plan.stepScope,
+            sideEffectPolicy: plan.sideEffectPolicy,
+            resumeMode: this.resumeModeFor(action, body.decision ?? null),
+            resumeIdempotencyKey: plan.idempotencyKey,
+            checkpointAction: action,
+            decision: body.decision ?? null,
+          },
+        },
+        res,
+        { prepared: true, signal, runIdPrefix: `checkpoint-${action}` },
+      );
+    } catch (error) {
+      await socialCodexEvents.writeRunFailed(v2);
+      write('error', userFacingStreamErrorEvent(error));
+      res.end();
+    }
   }
 
   private async streamCheckpointStepAction(
@@ -1037,40 +1311,79 @@ export class SocialAgentChatController {
     body: SocialAgentCheckpointActionBody,
     res: Response,
   ) {
-    const plan = await this.requireCheckpoints().prepareStepAction({
-      ownerUserId: req.user.id,
-      checkpointId,
-      stepId,
-      action,
-    });
-    return this.streamUserFacingMessage(
+    this.prepareSseResponse(res);
+    const write = (event: string, data: UserFacingStreamEvent) =>
+      this.writeSseEvent(res, event, data);
+    const signal = this.clientAbortSignal(
       req,
-      {
-        message: plan.resumePrompt,
-        taskId: plan.taskId,
-        idempotencyKey: plan.idempotencyKey,
-        clientContext: {
-          source: 'web',
-          threadId: plan.threadId,
-          checkpointId: plan.checkpointId,
-          parentCheckpointId: plan.parentCheckpointId,
-          resumeCursor: plan.resumeCursor,
-          interrupt: plan.interrupt,
-          stepId,
-          sourceCheckpointId:
-            plan.resumeCursor.parentCheckpointId ?? checkpointId,
-          sourceStepId: plan.resumeCursor.stepId ?? stepId,
-          sourceStep: plan.sourceStep,
-          stepScope: plan.stepScope,
-          sideEffectPolicy: plan.sideEffectPolicy,
-          resumeMode: this.resumeModeFor(action, body.decision ?? null),
-          resumeIdempotencyKey: plan.idempotencyKey,
-          checkpointAction: action,
-          decision: body.decision ?? null,
-        },
-      },
       res,
+      `checkpoint_step_${action}_stream`,
     );
+    const socialCodexEvents = this.socialCodexEventPipeline();
+    const runId = this.runId(
+      `checkpoint-step-${action}`,
+      req.user.id,
+      `${checkpointId}:${stepId}`,
+    );
+    const v2 = socialCodexEvents.createWriter({
+      write,
+      userId: req.user.id,
+      taskId: null,
+      threadId: `checkpoint:${checkpointId}`,
+      runId,
+    });
+    try {
+      await socialCodexEvents.writeRunStarted(
+        v2,
+        this.checkpointActionTitle(action),
+        '会先恢复保存点，再继续处理这一步。',
+      );
+      await socialCodexEvents.writeCheckpointRestore(v2, action);
+      const plan = await this.requireCheckpoints().prepareStepAction({
+        ownerUserId: req.user.id,
+        checkpointId,
+        stepId,
+        action,
+      });
+      return this.streamUserFacingMessage(
+        req,
+        {
+          message: plan.resumePrompt,
+          taskId: plan.taskId,
+          idempotencyKey: plan.idempotencyKey,
+          clientContext: {
+            source: 'web',
+            threadId: plan.threadId,
+            checkpointId: plan.checkpointId,
+            parentCheckpointId: plan.parentCheckpointId,
+            resumeCursor: plan.resumeCursor,
+            interrupt: plan.interrupt,
+            approvalId: plan.interrupt?.payload?.approvalRequestId ?? null,
+            stepId,
+            sourceCheckpointId:
+              plan.resumeCursor.parentCheckpointId ?? checkpointId,
+            sourceStepId: plan.resumeCursor.stepId ?? stepId,
+            sourceStep: plan.sourceStep,
+            stepScope: plan.stepScope,
+            sideEffectPolicy: plan.sideEffectPolicy,
+            resumeMode: this.resumeModeFor(action, body.decision ?? null),
+            resumeIdempotencyKey: plan.idempotencyKey,
+            checkpointAction: action,
+            decision: body.decision ?? null,
+          },
+        },
+        res,
+        {
+          prepared: true,
+          signal,
+          runIdPrefix: `checkpoint-step-${action}`,
+        },
+      );
+    } catch (error) {
+      await socialCodexEvents.writeRunFailed(v2);
+      write('error', userFacingStreamErrorEvent(error));
+      res.end();
+    }
   }
 
   private clientAbortSignal(
@@ -1111,6 +1424,32 @@ export class SocialAgentChatController {
     return this.threads;
   }
 
+  private threadTaskIdParam(value: unknown): number {
+    const taskId = parseSocialAgentThreadTaskId(value);
+    if (!taskId) {
+      throw new BadRequestException('Invalid social agent thread id');
+    }
+    return taskId;
+  }
+
+  private eventThreadId(
+    taskId: unknown,
+    fallbackThreadId?: unknown,
+  ): string | number | null {
+    const parsedTaskId = parseSocialAgentThreadTaskId(taskId);
+    if (parsedTaskId) return `agent-task:${parsedTaskId}`;
+    const parsedFallbackTaskId =
+      parseSocialAgentThreadTaskId(fallbackThreadId);
+    if (parsedFallbackTaskId) return `agent-task:${parsedFallbackTaskId}`;
+    if (typeof fallbackThreadId === 'string' && fallbackThreadId.trim()) {
+      return fallbackThreadId.trim();
+    }
+    if (typeof fallbackThreadId === 'number' && Number.isFinite(fallbackThreadId)) {
+      return fallbackThreadId;
+    }
+    return null;
+  }
+
   private requireProfileGate(): SocialAgentProfileGateService {
     if (!this.profileGate) {
       throw new Error('SocialAgentProfileGateService is not configured.');
@@ -1135,6 +1474,13 @@ export class SocialAgentChatController {
     return 'resume';
   }
 
+  private checkpointActionTitle(action: AgentRunCheckpointAction) {
+    if (action === 'fork') return '正在生成新版本';
+    if (action === 'replay') return '正在重新运行这一步';
+    if (action === 'retry') return '正在重试这一步';
+    return '正在恢复进度';
+  }
+
   private writeApprovalRequiredEvents(
     write: (event: string, data: UserFacingStreamEvent) => void,
     pendingConfirmations: Array<{
@@ -1156,6 +1502,56 @@ export class SocialAgentChatController {
     }
   }
 
+  private socialCodexEventPipeline(): SocialCodexEventPipelineService {
+    return (
+      this.socialCodexEvents ??
+      new SocialCodexEventPipelineService(
+        this.eventV2,
+        this.eventStore,
+        this.taskSlotStateMachine,
+        this.contextHydrator,
+        this.profileGate,
+      )
+    );
+  }
+
+  private async writeTaskBoundInitialTrace(input: {
+    socialCodexEvents: SocialCodexEventPipelineService;
+    write: (event: string, data: UserFacingStreamEvent) => void;
+    userId: number;
+    taskId: number;
+    threadId: string | number | null;
+    runId: string;
+    text?: string | null;
+  }) {
+    const writer = input.socialCodexEvents.createWriter({
+      write: input.write,
+      userId: input.userId,
+      taskId: input.taskId,
+      threadId: input.threadId ?? `agent-task:${input.taskId}`,
+      runId: input.runId,
+    });
+    await input.socialCodexEvents.writeRunStarted(writer);
+    await input.socialCodexEvents.writeHydrateContext(writer);
+    await input.socialCodexEvents.writeEarlySlotInferenceEvents(
+      writer,
+      input.text,
+      {
+        taskId: input.taskId,
+        threadId: input.threadId ?? `agent-task:${input.taskId}`,
+      },
+    );
+    await input.socialCodexEvents.writeProfileGateIfNeeded(
+      writer,
+      input.userId,
+      {
+        text: input.text,
+        taskId: input.taskId,
+        threadId: input.threadId ?? `agent-task:${input.taskId}`,
+      },
+    );
+  }
+
   private runId(prefix: string, userId: number, taskOrThread: unknown): string {
     return [
       'social-codex',
@@ -1174,535 +1570,24 @@ export class SocialAgentChatController {
     return 'new';
   }
 
-  private v2Writer(
-    write: (event: string, data: UserFacingStreamEvent) => void,
-    userId: number,
-    taskId: number | null,
-    threadId: string | number | null | undefined,
-    runId: string,
-  ) {
-    return async (
-      type: Parameters<SocialAgentEventV2Service['envelope']>[0]['type'],
-      stage: SocialAgentEventV2Stage,
-      title: string,
-      options: {
-        state: 'running' | 'done' | 'waiting' | 'failed';
-        detail?: string;
-        payload?: Record<string, unknown>;
-      },
-    ) => {
-      const event = (this.eventV2 ?? new SocialAgentEventV2Service()).envelope({
-        type,
-        userId,
-        threadId,
-        taskId,
-        runId,
-        stage,
-        visibility: 'user_visible',
-        display: {
-          title,
-          detail: options.detail,
-          state: options.state,
-        },
-        payload: options.payload,
-      });
-      write(event.type, event);
-      if (event.type !== 'assistant.delta') {
-        await this.eventStore?.appendEventByTaskId(userId, event.taskId, event);
-      }
-      return event;
-    };
-  }
-
-  private async writeContextEvents(
-    v2: ReturnType<SocialAgentChatController['v2Writer']>,
-    userId: number,
-    taskId: number | null,
-    runId: string,
-  ): Promise<void> {
-    if (!taskId) return;
-    const context = await this.contextHydrator
-      ?.hydrateContext({ userId, taskId, threadId: taskId })
-      .catch(() => null);
-    const slots = context?.taskSlots ?? {};
-    const lifeGraphFactProposals = context?.lifeGraphFactProposals ?? [];
-    const lifeGraphFactDisplaySummaries =
-      context?.lifeGraphFactDisplaySummaries ?? [];
-    const lifeGraphGovernanceSummary = context?.lifeGraphGovernanceSummary ?? {
-      total: lifeGraphFactProposals.length,
-      autoSaveCount: 0,
-      confirmationRequiredCount: 0,
-      blockedCount: 0,
-      sensitiveCount: 0,
-      expiringFactKeys: [],
-    };
-    const summary = Object.entries(slots)
-      .filter(([, slot]) => slot && typeof slot === 'object' && 'value' in slot)
-      .map(([key, slot]) => [key, (slot as { value?: unknown }).value]);
-    const previousSlotValues = await this.previousSlotEventValues(
-      userId,
-      taskId,
-    );
-    const newSlots = Object.fromEntries(
-      summary.filter(([key]) => !previousSlotValues.has(String(key))),
-    );
-    const modifiedSlots = Object.fromEntries(
-      summary.filter(([key, value]) => {
-        const previous = previousSlotValues.get(String(key));
-        return previous !== undefined && previous !== String(value);
-      }),
-    );
-    if (summary.length > 0) {
-      if (Object.keys(newSlots).length > 0) {
-        await v2('slot.completed', 'slot_filling', '已记录你的关键信息', {
-          state: 'done',
-          detail: Object.values(newSlots)
-            .map((value) => String(value))
-            .filter(Boolean)
-            .slice(0, 4)
-            .join('、'),
-          payload: { slots: this.pickSlots(slots, Object.keys(newSlots)) },
-        });
-      }
-      if (Object.keys(modifiedSlots).length > 0) {
-        await v2('slot.filled', 'slot_filling', '已更新你的关键信息', {
-          state: 'done',
-          detail: Object.values(modifiedSlots)
-            .map((value) => String(value))
-            .filter(Boolean)
-            .slice(0, 4)
-            .join('、'),
-          payload: {
-            slots: this.pickSlots(slots, Object.keys(modifiedSlots)),
-          },
-        });
-      }
-      if (
-        Object.keys(newSlots).length > 0 ||
-        Object.keys(modifiedSlots).length > 0
-      ) {
-        await v2('memory.saved', 'hydrate_context', '这些信息下次会继续使用', {
-          state: 'done',
-          detail: lifeGraphFactProposals.length
-            ? `已整理 ${lifeGraphGovernanceSummary.total} 条长期偏好建议：${lifeGraphGovernanceSummary.autoSaveCount} 条可低风险保留，${lifeGraphGovernanceSummary.confirmationRequiredCount} 条需你确认。`
-            : undefined,
-          payload: {
-            taskId,
-            runId,
-            saved: ['task_slots', 'recent_messages'],
-            lifeGraphFacts: lifeGraphFactDisplaySummaries,
-            lifeGraphGovernanceSummary,
-          },
-        });
-      }
-    }
-  }
-
-  private async writeEarlySlotInferenceEvents(
-    v2: ReturnType<SocialAgentChatController['v2Writer']>,
-    message: unknown,
-  ): Promise<void> {
-    if (!this.taskSlotStateMachine || typeof message !== 'string') return;
-    const slots = this.taskSlotStateMachine.extractSlotsFromUserMessage(message);
-    const summary = Object.entries(slots)
-      .filter(([, slot]) => slot?.value && slot.state !== 'inferred')
-      .map(([key, slot]) => [key, slot.value]);
-    if (summary.length === 0) return;
-    await v2('slot.filled', 'slot_filling', '已记录你补充的信息', {
-      state: 'done',
-      detail: summary
-        .map(([, value]) => String(value))
-        .filter(Boolean)
-        .slice(0, 4)
-        .join('、'),
-      payload: {
-        slots: this.pickSlots(slots, summary.map(([key]) => String(key))),
-        provisional: true,
-      },
-    });
-  }
-
-  private async previousSlotEventValues(
-    userId: number,
-    taskId: number,
-  ): Promise<Map<string, string>> {
-    const values = new Map<string, string>();
-    const events = await this.eventStore
-      ?.listSocialCodexEventsByTask(taskId, userId, { take: 2000 })
-      .catch(() => []);
-    for (const event of events ?? []) {
-      if (event.type !== 'slot.completed' && event.type !== 'slot.filled') {
-        continue;
-      }
-      const slots = this.recordValue(event.payload?.slots);
-      if (!slots) continue;
-      for (const [key, slot] of Object.entries(slots)) {
-        const value = this.recordValue(slot)?.value;
-        if (value != null) values.set(key, String(value));
-      }
-    }
-    return values;
-  }
-
-  private pickSlots(
-    slots: Record<string, unknown>,
-    keys: string[],
-  ): Record<string, unknown> {
-    const out: Record<string, unknown> = {};
-    for (const key of keys) {
-      if (Object.prototype.hasOwnProperty.call(slots, key)) {
-        out[key] = slots[key];
-      }
-    }
-    return out;
-  }
-
-  private async writeProfileGateV2Event(
-    v2: ReturnType<SocialAgentChatController['v2Writer']>,
-    userId: number,
-    input?: {
-      text?: string | null;
-      taskId?: number | null;
-      threadId?: string | number | null;
-    },
-  ): Promise<void> {
-    if (!this.profileGate) return;
-    const taskId =
-      this.positiveNumber(input?.taskId) ?? this.positiveNumber(input?.threadId);
-    const context = taskId
-      ? await this.contextHydrator
-          ?.hydrateContext({ userId, taskId, threadId: taskId })
-          .catch(() => null)
-      : null;
-    const status = await (typeof this.profileGate.getMinimumProfileStatusWithTaskSlots ===
-    'function'
-      ? this.profileGate.getMinimumProfileStatusWithTaskSlots(userId, context?.taskSlots)
-      : this.profileGate.getMinimumProfileStatus(userId)
-    ).catch(() => null);
-    if (!status) return;
-    await v2(
-      status.passed ? 'tool.done' : 'tool.progress',
-      'profile_gate',
-      status.passed ? '画像门槛已满足' : '匹配前还差一点人物画像',
-      {
-        state: status.passed ? 'done' : 'waiting',
-        detail: status.passed
-          ? '普通聊天可以继续；进入匹配、发布或邀请前也已满足最低画像要求。'
-          : `还需要补充：${status.nextActions.slice(0, 3).join('、') || '城市、兴趣、时间或边界'}`,
-        payload: {
-          passed: status.passed,
-          missing: status.missing,
-          profileCompleteness: status.profileCompleteness,
-          canEnterMatchPool: status.canEnterMatchPool,
-        },
-      },
-    );
-  }
-
-  private async shouldEmitProfileGateV2(
-    userId: number,
-    input: {
-      text?: string | null;
-      taskId?: number | null;
-      threadId?: string | number | null;
-    },
-  ): Promise<boolean> {
-    if (this.hasExplicitSocialExecutionIntent(input.text)) return true;
-    const taskId =
-      this.positiveNumber(input.taskId) ?? this.positiveNumber(input.threadId);
-    if (!taskId || !this.contextHydrator) return false;
-    const context = await this.contextHydrator
-      .hydrateContext({ userId, taskId, threadId: taskId })
-      .catch(() => null);
-    const slots = context?.taskSlots;
-    if (!slots || typeof slots !== 'object') return false;
-    return ['activity', 'time_window', 'location_text', 'geo_area'].some(
-      (key) => {
-        const slot = this.recordValue((slots as Record<string, unknown>)[key]);
-        return Boolean(slot?.value);
-      },
-    );
-  }
-
-  private hasExplicitSocialExecutionIntent(text: unknown): boolean {
-    const normalized =
-      typeof text === 'string' ? text.trim().toLowerCase() : '';
-    if (!normalized) return false;
-    if (
-      /(找人|找.*搭子|搭子|约练|约人|约局|活动|认识新朋友|匹配|推荐.*人|候选|加好友|发邀请|邀请|发布到发现|发到发现|discover|meet)/i.test(
-        normalized,
-      )
-    ) {
-      return true;
-    }
-    const hasActivity =
-      /(散步|跑步|羽毛球|篮球|健身|徒步|爬山|骑行|游泳|瑜伽|飞盘|网球|乒乓|咖啡|吃饭|电影)/i.test(
-        normalized,
-      );
-    const hasTime =
-      /(周末|今天|明天|今晚|上午|下午|晚上|中午|早上|[0-9一二三四五六七八九十]+点)/i.test(
-        normalized,
-      );
-    const hasPlace =
-      /(附近|大学|公园|商场|体育馆|健身房|校区|区|市|青岛|上海|北京|深圳|广州|杭州|成都|武汉|南京)/i.test(
-        normalized,
-      );
-    return hasActivity && hasTime && hasPlace;
-  }
-
-  private async writeApprovalResolvedV2Event(
-    v2: ReturnType<SocialAgentChatController['v2Writer']>,
-    body: SocialAgentRouteMessageBody,
-  ): Promise<void> {
-    const decision = body.clientContext?.decision;
-    if (decision !== 'approved' && decision !== 'rejected') return;
-    const checkpointId =
-      this.positiveNumber(body.clientContext?.checkpointId) ??
-      this.positiveNumber(body.clientContext?.sourceCheckpointId) ??
-      this.positiveNumber(body.clientContext?.resumeCursor?.checkpointId);
-    await v2(
-      'approval.resolved',
-      'approval',
-      decision === 'approved' ? '已确认这一步' : '已取消这一步',
-      {
-        state: 'done',
-        detail:
-          decision === 'approved'
-            ? '我会从同一个任务继续处理，不会重新询问已确认的信息。'
-            : '我不会执行刚才的高风险动作，会继续保留当前对话。',
-        payload: {
-          decision,
-          checkpointId,
-          resumeCursor: this.publicResumeCursor(
-            body.clientContext?.resumeCursor,
-          ),
-          checkpointAction: body.clientContext?.checkpointAction ?? null,
-        },
-      },
-    );
-  }
-
-  private async writeResultV2Events(
-    v2: ReturnType<SocialAgentChatController['v2Writer']>,
-    result: UserFacingAgentResponse,
-  ): Promise<void> {
-    if (
-      result.safeStatus.boundaryNotes.length > 0 ||
-      result.safeStatus.level !== 'low'
-    ) {
-      await v2('safety_check.done', 'safety_filter', '已检查安全边界', {
-        state: result.safeStatus.blocked ? 'failed' : 'done',
-        detail:
-          result.safeStatus.boundaryNotes.slice(0, 2).join('；') ||
-          `风险等级：${result.safeStatus.level}`,
-        payload: {
-          level: result.safeStatus.level,
-          blocked: result.safeStatus.blocked,
-          requiredConfirmations: result.safeStatus.requiredConfirmations,
-        },
-      });
-    }
-
-    const candidateCount = result.cards.filter((card) =>
-      this.isCandidateCard(card),
-    ).length;
-    if (candidateCount > 0) {
-      await v2(
-        'candidate_search.started',
-        'search_candidates',
-        '正在筛选公开可发现的人',
-        {
-          state: 'running',
-          detail: '只会使用公开资料、公开动态、活动报名和公开约练意图。',
-        },
-      );
-      await v2(
-        'candidate_search.done',
-        'rank_candidates',
-        `找到 ${candidateCount} 个公开可发现的人`,
-        {
-          state: 'done',
-          detail: '我只会展示公开可发现的信息，联系对方前仍需要你确认。',
-          payload: { candidateCount },
-        },
-      );
-    }
-
-    const activityCount = result.cards.filter((card) =>
-      this.isActivityCard(card),
-    ).length;
-    if (activityCount > 0) {
-      await v2(
-        'candidate_search.started',
-        'search_candidates',
-        '正在查找可参考活动',
-        {
-          state: 'running',
-          detail: '会先整理公开活动，再让你决定是否继续。',
-        },
-      );
-      await v2(
-        'candidate_search.done',
-        'search_candidates',
-        `找到 ${activityCount} 个可参考活动`,
-        {
-          state: 'done',
-          detail: '你可以先查看详情，再决定是否发起邀请。',
-          payload: { activityCount },
-        },
-      );
-    }
-
-    const opportunity = result.cards.find((card) =>
-      this.isOpportunityCard(card),
-    );
-    if (opportunity) {
-      await v2(
-        'opportunity_card.created',
-        'create_opportunity_card',
-        '这张约练卡可以发布到发现',
-        {
-          state: 'done',
-          detail: this.cardTitle(opportunity) || '发布前会先让你确认公开内容。',
-          payload: {
-            cardId: this.cardId(opportunity),
-            schemaType: this.cardSchemaType(opportunity),
-          },
-        },
-      );
-    }
-
-    if (result.lifeGraphWritebackProposal) {
-      await v2('memory.saved', 'life_graph_writeback', '已整理画像变化建议', {
-        state: 'waiting',
-        detail: '确认前不会写入长期 Life Graph，你可以修改或忽略。',
-        payload: {
-          proposal: result.lifeGraphWritebackProposal,
-        },
-      });
-    }
-
-    for (const item of result.pendingConfirmations) {
-      const itemPayload = this.recordValue(item.payload)
-        ? (item.payload as Record<string, unknown>)
-        : {};
-      const checkpointId =
-        this.positiveNumber(itemPayload.checkpointId) ??
-        this.positiveNumber(itemPayload.resumeCheckpointId) ??
-        result.runtime?.checkpointId ??
-        null;
-      const dryRunPreview = this.recordValue(itemPayload.dryRunPreview)
-        ? itemPayload.dryRunPreview
-        : this.recordValue(itemPayload.socialCodex) &&
-            this.recordValue(
-              (itemPayload.socialCodex as Record<string, unknown>)
-                .dryRunPreview,
-            )
-          ? (itemPayload.socialCodex as Record<string, unknown>).dryRunPreview
-          : null;
-      await v2('approval.required', 'approval', '发送邀请前需要你确认', {
-        state: 'waiting',
-        detail: item.summary,
-        payload: {
-          approvalId: item.id,
-          checkpointId,
-          actionType: item.actionType,
-          riskLevel: item.riskLevel,
-          ...(dryRunPreview ? { dryRunPreview } : {}),
-          ...itemPayload,
-        },
-      });
-    }
-  }
-
-  private isCandidateCard(card: unknown): boolean {
-    return (
-      this.cardType(card) === 'candidate_card' ||
-      this.cardSchemaType(card) === 'social_match.candidate'
-    );
-  }
-
-  private isActivityCard(card: unknown): boolean {
-    const schema = this.cardSchemaType(card);
-    return (
-      schema === 'social_match.activity' ||
-      this.cardType(card) === 'activity_card'
-    );
-  }
-
-  private isOpportunityCard(card: unknown): boolean {
-    const schema = this.cardSchemaType(card);
-    if (
-      schema === 'opportunity.card' ||
-      schema === 'social_request.opportunity'
-    ) {
-      return true;
-    }
-    const record = this.recordValue(card);
-    const data = this.recordValue(record?.data);
-    return Boolean(data?.opportunity || data?.opportunityCard === true);
-  }
-
-  private cardType(card: unknown): string {
-    const record = this.recordValue(card);
-    return this.stringValue(record?.type);
-  }
-
-  private cardSchemaType(card: unknown): string {
-    const record = this.recordValue(card);
-    const data = this.recordValue(record?.data);
-    return (
-      this.stringValue(record?.schemaType) || this.stringValue(data?.schemaType)
-    );
-  }
-
-  private cardTitle(card: unknown): string {
-    const record = this.recordValue(card);
-    const data = this.recordValue(record?.data);
-    const opportunity = this.recordValue(data?.opportunity);
-    return (
-      this.stringValue(record?.title) ||
-      this.stringValue(data?.title) ||
-      this.stringValue(opportunity?.title)
-    );
-  }
-
-  private cardId(card: unknown): string | null {
-    const record = this.recordValue(card);
-    return this.stringValue(record?.id) || null;
-  }
-
-  private stageFromStep(label: string): SocialAgentEventV2Stage {
-    if (/Life Graph|画像|profile/i.test(label)) return 'profile_gate';
-    if (/筛选|候选|匹配|search|candidate/i.test(label))
-      return 'search_candidates';
-    if (/时间|排除|rank/i.test(label)) return 'rank_candidates';
-    if (/安全|边界|guardrail|risk/i.test(label)) return 'safety_filter';
-    if (/开场白|message|opener/i.test(label)) return 'generate_opener';
-    if (/确认|approval|confirm/i.test(label)) return 'approval';
-    if (/活动|约练|activity/i.test(label)) return 'create_opportunity_card';
-    return 'detect_social_intent';
-  }
-
-  private v2ToolType(status: 'pending' | 'running' | 'done' | 'failed') {
-    if (status === 'done') return 'tool.done' as const;
-    if (status === 'failed') return 'run.failed' as const;
-    return status === 'pending'
-      ? ('tool.started' as const)
-      : ('tool.progress' as const);
-  }
-
   private async writeFallbackAssistantText(
     write: (event: string, data: UserFacingStreamEvent) => void,
-    input: { text?: string | null; messageId: string; traceId?: string | null },
-  ): Promise<void> {
+    input: {
+      text?: string | null;
+      messageId: string;
+      traceId?: string | null;
+      socialCodexEvents?: SocialCodexEventPipelineService | null;
+      v2?: SocialCodexEventWriter | null;
+    },
+  ): Promise<boolean> {
+    if (!shouldStreamFallbackAssistantText(input.text)) return false;
     const streaming =
       this.streamingResponses ?? new SocialAgentStreamingResponseService();
-    await streaming.streamAssistantText({
+    return streaming.streamAssistantText({
       messageId: input.messageId,
       text: input.text ?? '',
       traceId: input.traceId,
-      emit: (payload) => {
+      emit: async (payload) => {
         if (payload.type === 'assistant_delta') {
           write('assistant_delta', {
             type: 'assistant_delta',
@@ -1730,16 +1615,34 @@ export class SocialAgentChatController {
       rawResult: Record<string, unknown>;
       userMessage: string;
       messageId: string;
+      userId: number;
+      taskId?: number | string | null;
+      threadId?: string | number | null;
       signal?: AbortSignal | null;
+      socialCodexEvents?: SocialCodexEventPipelineService | null;
+      v2?: SocialCodexEventWriter | null;
     },
   ): Promise<LlmAssistantTextResult> {
     if (!this.finalResponses) return { streamed: false, text: null };
-    const first = await this.tryWriteLlmAssistantText(write, input);
+    const hydratedContext = await this.hydrateFinalResponseContext({
+      userId: input.userId,
+      taskId:
+        input.taskId ?? this.identifierValue(input.rawResult.taskId) ?? null,
+      threadId:
+        input.threadId ??
+        this.identifierValue(input.rawResult.threadId) ??
+        null,
+    });
+    const first = await this.tryWriteLlmAssistantText(write, {
+      ...input,
+      ...hydratedContext,
+    });
     if (first.streamed) return first;
     const compactRawResult = this.compactFinalResponseResult(input.rawResult);
     if (compactRawResult === input.rawResult) return first;
     return this.tryWriteLlmAssistantText(write, {
       ...input,
+      ...hydratedContext,
       rawResult: compactRawResult,
     });
   }
@@ -1750,22 +1653,32 @@ export class SocialAgentChatController {
       rawResult: Record<string, unknown>;
       userMessage: string;
       messageId: string;
+      conversationHistory: Array<Record<string, unknown>>;
+      memoryContext: Record<string, unknown> | null;
+      taskContextPatch: Record<string, unknown>;
       signal?: AbortSignal | null;
+      socialCodexEvents?: SocialCodexEventPipelineService | null;
+      v2?: SocialCodexEventWriter | null;
     },
   ): Promise<LlmAssistantTextResult> {
     let streamed = false;
     const streamedText: string[] = [];
-    const fallbackReply = this.stringValue(input.rawResult.assistantMessage);
+    const rawFallbackReply = this.stringValue(input.rawResult.assistantMessage);
+    const fallbackReply = shouldStreamFallbackAssistantText(rawFallbackReply)
+      ? rawFallbackReply
+      : '';
     const generated = await this.finalResponses?.generate(
       {
         userMessage: input.userMessage,
         intent: this.stringValue(input.rawResult.intent),
         route: input.rawResult,
         agentState: this.stringValue(input.rawResult.action),
-        conversationHistory: [],
-        memoryContext: null,
+        conversationHistory: input.conversationHistory,
+        memoryContext: input.memoryContext,
         taskContext: {
-          taskId: input.rawResult.taskId ?? null,
+          ...input.taskContextPatch,
+          taskId:
+            input.rawResult.taskId ?? input.taskContextPatch.taskId ?? null,
           permissionMode: input.rawResult.permissionMode ?? null,
           traceId: input.rawResult.traceId ?? null,
         },
@@ -1793,6 +1706,15 @@ export class SocialAgentChatController {
             delta,
             source: 'llm',
           });
+          if (input.socialCodexEvents && input.v2) {
+            void this.writeSocialCodexAssistantDelta({
+              socialCodexEvents: input.socialCodexEvents,
+              v2: input.v2,
+              delta,
+              messageId: input.messageId,
+              source: 'llm',
+            });
+          }
         },
       },
     );
@@ -1808,6 +1730,96 @@ export class SocialAgentChatController {
       text:
         (generated ?? streamedText.join('')).trim() || streamedText.join(''),
     };
+  }
+
+  private async writeSocialCodexAssistantDelta(input: {
+    socialCodexEvents: SocialCodexEventPipelineService;
+    v2: SocialCodexEventWriter;
+    delta: string;
+    messageId?: string | null;
+    source?: string | null;
+  }): Promise<void> {
+    if (input.source === 'fallback') return;
+    await input.socialCodexEvents.writeAssistantDelta(
+      input.v2,
+      input.delta,
+      input.messageId ?? null,
+      'llm',
+    );
+  }
+
+  private async hydrateFinalResponseContext(input: {
+    userId: number;
+    taskId?: number | string | null;
+    threadId?: string | number | null;
+  }): Promise<FinalResponseHydratedContext> {
+    const empty: FinalResponseHydratedContext = {
+      conversationHistory: [],
+      memoryContext: null,
+      taskContextPatch: {},
+    };
+    if (!this.contextHydrator) return empty;
+    const hydrated = await this.contextHydrator
+      .hydrateContext({
+        userId: input.userId,
+        taskId: this.positiveNumber(input.taskId),
+        threadId: input.threadId ?? null,
+      })
+      .catch(() => null);
+    if (!hydrated) return empty;
+    const memoryContext = this.recordValue({
+      taskMemory: hydrated.taskMemory,
+      taskSlots: hydrated.taskSlots,
+      lifeGraphSummary: hydrated.lifeGraphSummary,
+      lifeGraphGovernanceSummary: hydrated.lifeGraphGovernanceSummary,
+      lifeGraphFactDisplaySummaries: hydrated.lifeGraphFactDisplaySummaries,
+      pendingApprovals: hydrated.pendingApprovals,
+      candidateActions: hydrated.candidateActions,
+    });
+    return {
+      conversationHistory: hydrated.recentMessages,
+      memoryContext,
+      taskContextPatch: {
+        taskId: hydrated.taskId,
+        threadId: hydrated.threadId,
+        taskSlots: hydrated.taskSlots,
+        pendingApprovals: hydrated.pendingApprovals,
+        candidateActions: hydrated.candidateActions,
+      },
+    };
+  }
+
+  private async persistFinalRunAssistantMemory(
+    ownerUserId: number,
+    result: SocialAgentChatRunResult,
+  ): Promise<void> {
+    if (!this.messageLog || !this.taskLifecycle) return;
+    const taskId = this.positiveNumber(result.taskId);
+    if (!taskId) return;
+    const task = await this.taskLifecycle
+      .assertTaskOwner(taskId, ownerUserId)
+      .catch(() => null);
+    if (!task) return;
+    await this.messageLog
+      .recordAssistantRunMessage(task, result.assistantMessage, result)
+      .catch(() => undefined);
+  }
+
+  private async persistFinalRouteAssistantMemory(
+    ownerUserId: number,
+    result: SocialAgentIntentRouteResult,
+    options: { replaceLastAssistantTurn?: boolean } = {},
+  ): Promise<void> {
+    if (!this.messageLog || !this.taskLifecycle) return;
+    const taskId = this.positiveNumber(result.taskId);
+    if (!taskId) return;
+    const task = await this.taskLifecycle
+      .assertTaskOwner(taskId, ownerUserId)
+      .catch(() => null);
+    if (!task) return;
+    await this.messageLog
+      .recordAssistantMessage(task, result.assistantMessage, result, options)
+      .catch(() => undefined);
   }
 
   private compactFinalResponseResult(
@@ -1860,6 +1872,12 @@ export class SocialAgentChatController {
   private positiveNumber(value: unknown): number | null {
     const numeric = Number(value);
     return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+  }
+
+  private identifierValue(value: unknown): string | number | null {
+    return typeof value === 'string' || typeof value === 'number'
+      ? value
+      : null;
   }
 
   private publicResumeCursor(value: unknown): Record<string, unknown> | null {

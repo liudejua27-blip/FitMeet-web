@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 import { AgentTask } from './entities/agent-task.entity';
+import { socialAgentContextTurnLimit } from './social-agent-context-window';
 import {
   appendShortTermMemoryItem,
   readSocialAgentTaskMemory,
@@ -28,10 +30,14 @@ export type SocialAgentSentMessageMemoryInput = {
 
 @Injectable()
 export class SocialAgentTaskMemoryService {
-  constructor(private readonly toolInput: SocialAgentToolInputParserService) {}
+  constructor(
+    private readonly toolInput: SocialAgentToolInputParserService,
+    @Optional() private readonly config?: ConfigService,
+  ) {}
 
   currentTaskMemory(task: AgentTask): Record<string, unknown> {
     const memory = this.toolInput.isRecord(task.memory) ? task.memory : {};
+    const contextLimit = socialAgentContextTurnLimit(this.config);
     return {
       taskId: task.id,
       ownerUserId: task.ownerUserId,
@@ -44,7 +50,7 @@ export class SocialAgentTaskMemoryService {
         : {},
       socialLoop: this.socialLoopMemory(task),
       recentToolCalls: Array.isArray(task.toolCalls)
-        ? task.toolCalls.slice(-10)
+        ? task.toolCalls.slice(-contextLimit)
         : [],
       result: this.toolInput.isRecord(task.result) ? task.result : {},
     };

@@ -59,7 +59,11 @@ export class AgentOwnerSocialActionsController {
   @RequirePermission(AgentAction.CreateSocialRequest)
   aiDraft(@Req() req: AgentRequest, @Body() dto: AiDraftSocialRequestDto) {
     const agent = req[AGENT_CONNECTION_KEY]!;
-    return this.socialRequests.aiDraft(agent.userId, dto.rawText);
+    return this.socialRequests.aiDraft(agent.userId, dto.rawText, {
+      agentId: agent.id,
+      source: 'agent_token_social_request_ai_draft',
+      taskContext: dto.taskContext ?? null,
+    });
   }
 
   /** POST /api/agent/social-requests/:id/publish */

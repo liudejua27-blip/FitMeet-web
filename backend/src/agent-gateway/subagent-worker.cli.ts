@@ -1,9 +1,20 @@
 import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from '../app.module';
-import { FitMeetSubagentWorkerService } from './fitmeet-subagent-worker.service';
+import {
+  FitMeetSubagentWorkerService,
+  isNonRetryableSubagentWorkerJobError,
+} from './fitmeet-subagent-worker.service';
 import type { FitMeetSubagentWorkerJobContext } from './fitmeet-subagent-worker-runtime.service';
-import type { SocialAgentModelUseCase } from './social-agent-model-router.service';
+import { FITMEET_SUBAGENT_WORKER_DEFAULT_TIMEOUT_MS } from './fitmeet-subagent-worker-runtime.service';
+import {
+  SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+  SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS,
+  SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS,
+  SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS,
+  selectSocialAgentConfiguredModel,
+  type SocialAgentModelUseCase,
+} from './social-agent-model-router.service';
 import type { SubagentWorkerJob } from './entities/agent-l5-runtime.entity';
 import { SubagentWorkerQueueService } from './subagent-worker-queue.service';
 import { workerRuntimeFromSubagentPayload } from './fitmeet-subagent-worker-command.contract';
@@ -20,7 +31,7 @@ async function main() {
   const pollMs = positiveInt(process.env.FITMEET_SUBAGENT_WORKER_POLL_MS, 2000);
   const timeoutMs = positiveInt(
     process.env.FITMEET_SUBAGENT_WORKER_TIMEOUT_MS,
-    15000,
+    FITMEET_SUBAGENT_WORKER_DEFAULT_TIMEOUT_MS,
   );
   const heartbeatMs = positiveInt(
     process.env.FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS,
@@ -74,7 +85,7 @@ async function main() {
           timeoutMs,
         });
         if (!job) break;
-        const run = processJob({
+        const run = processSubagentWorkerJob({
           queue,
           worker,
           workerId,
@@ -108,17 +119,26 @@ async function main() {
   process.on('SIGTERM', () => void shutdown());
 }
 
-async function processJob(input: {
+export async function processSubagentWorkerJob(input: {
   queue: SubagentWorkerQueueService;
   worker: FitMeetSubagentWorkerService;
   workerId: string;
   timeoutMs: number;
   job: SubagentWorkerJob;
 }): Promise<void> {
-  const context = workerContextForJob(
+  const cancellation = createWorkerJobCancellationWatcher({
+    queue: input.queue,
+    jobId: input.job.id,
+    pollMs: positiveInt(
+      process.env.FITMEET_SUBAGENT_WORKER_CANCEL_POLL_MS,
+      Math.min(Math.max(Math.floor(input.timeoutMs / 10), 500), 2000),
+    ),
+  });
+  const context = subagentWorkerContextForJob(
     input.job,
     input.workerId,
     input.timeoutMs,
+    cancellation.signal,
   );
   await input.queue.heartbeat({
     workerId: input.workerId,
@@ -156,6 +176,7 @@ async function processJob(input: {
       jobId: input.job.id,
       workerId: input.workerId,
       error,
+      retryable: !isNonRetryableSubagentWorkerJobError(error),
       context: {
         processId: process.pid,
         queueName: input.job.queueName,
@@ -173,27 +194,76 @@ async function processJob(input: {
         error: error instanceof Error ? error.message : String(error),
       },
     });
+  } finally {
+    cancellation.stop();
   }
 }
 
-function workerContextForJob(
+export function subagentWorkerContextForJob(
   job: SubagentWorkerJob,
   workerId: string,
   fallbackTimeoutMs: number,
+  signal?: AbortSignal | null,
 ): FitMeetSubagentWorkerJobContext {
   const runtime = workerRuntimeFromSubagentPayload(job.payload);
+  const modelUseCase = modelUseCaseValue(runtime.modelUseCase);
   return {
     workerId,
     agent: job.agentName,
     mode: 'queue_worker_ready',
     queueName: job.queueName,
-    timeoutMs: positiveIntValue(runtime.timeoutMs, fallbackTimeoutMs),
+    timeoutMs: qualitySafeTimeoutValue(
+      runtime.timeoutMs,
+      fallbackTimeoutMs,
+      modelUseCase,
+    ),
     crashIsolation: true,
     scalable: true,
-    modelUseCase: modelUseCaseValue(runtime.modelUseCase),
-    model: stringValue(runtime.model) ?? 'deepseek-v4-flash',
+    modelUseCase,
+    model: qualitySafeModelValue(runtime.model),
     runId: job.runId ?? `subagent-job:${job.id}`,
-    signal: null,
+    signal: signal ?? null,
+  };
+}
+
+export function createWorkerJobCancellationWatcher(input: {
+  queue: SubagentWorkerQueueService;
+  jobId: number;
+  pollMs: number;
+}): { signal: AbortSignal; stop: () => void } {
+  const controller = new AbortController();
+  let stopped = false;
+  let polling = false;
+  const abort = () => {
+    if (!controller.signal.aborted) {
+      controller.abort(new Error('Subagent worker job cancelled.'));
+    }
+  };
+  const poll = async () => {
+    if (stopped || polling || controller.signal.aborted) return;
+    polling = true;
+    try {
+      const job = await input.queue.getJob(input.jobId);
+      if (job.status === 'cancelled') abort();
+    } catch {
+      // Health/cancellation polling must not crash the worker process.
+    } finally {
+      polling = false;
+    }
+  };
+  const timer = setInterval(
+    () => {
+      void poll();
+    },
+    Math.max(100, input.pollMs),
+  );
+  void poll();
+  return {
+    signal: controller.signal,
+    stop: () => {
+      stopped = true;
+      clearInterval(timer);
+    },
   };
 }
 
@@ -209,8 +279,36 @@ function positiveIntValue(value: unknown, fallback: number): number {
   return Math.trunc(parsed);
 }
 
+function qualitySafeTimeoutValue(
+  value: unknown,
+  fallback: number,
+  useCase: SocialAgentModelUseCase,
+): number {
+  return Math.max(
+    positiveIntValue(value, fallback),
+    positiveIntValue(fallback, FITMEET_SUBAGENT_WORKER_DEFAULT_TIMEOUT_MS),
+    qualityTimeoutFloor(useCase),
+  );
+}
+
+function qualityTimeoutFloor(useCase: SocialAgentModelUseCase): number {
+  if (useCase === 'casual_chat' || useCase === 'final_response') {
+    return SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS;
+  }
+  if (useCase === 'planner') return SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS;
+  return SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS;
+}
+
 function stringValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function qualitySafeModelValue(value: unknown): string {
+  return (
+    selectSocialAgentConfiguredModel(stringValue(value), {
+      allowFast: false,
+    }) ?? SOCIAL_AGENT_DEFAULT_REASONING_MODEL
+  );
 }
 
 function modelUseCaseValue(value: unknown): SocialAgentModelUseCase {
@@ -229,4 +327,6 @@ function modelUseCaseValue(value: unknown): SocialAgentModelUseCase {
   return 'planner';
 }
 
-void main();
+if (require.main === module) {
+  void main();
+}

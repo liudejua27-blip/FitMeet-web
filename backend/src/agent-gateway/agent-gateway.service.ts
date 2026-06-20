@@ -929,7 +929,13 @@ export class AgentGatewayService {
       });
     }
 
-    query.andWhere('intent.status = :status', { status: normalized.status });
+    if (normalized.status) {
+      query.andWhere('intent.status = :status', { status: normalized.status });
+    } else {
+      query.andWhere('intent.status IN (:...statuses)', {
+        statuses: normalized.statuses,
+      });
+    }
 
     if (normalized.q) {
       query.andWhere(
@@ -955,7 +961,8 @@ export class AgentGatewayService {
           q: normalized.q,
           city: normalized.city,
           requestType: normalized.requestType,
-          status: normalized.status,
+          status: normalized.status ?? 'discoverable',
+          statuses: normalized.statuses,
         },
       },
     };

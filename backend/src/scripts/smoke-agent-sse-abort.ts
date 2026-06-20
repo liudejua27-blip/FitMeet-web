@@ -1,11 +1,13 @@
 /**
  * Real HTTP/SSE abort smoke for FitMeet Agent streaming.
  *
- * It opens the user-facing Agent run stream, waits for the first assistant
- * delta, aborts the HTTP request, and verifies the client did not receive a
- * complete result after the abort. Server-side AbortSignal propagation is
- * covered by controller tests; this script proves the deployed HTTP path is
- * abortable from a real client.
+ * It opens the user-facing Agent run stream, verifies an immediate
+ * user-visible Social Codex status arrives before the first assistant delta,
+ * waits for that first assistant delta, aborts the HTTP request, and verifies
+ * the client did not receive a complete result after the abort. Server-side
+ * AbortSignal propagation is covered by controller tests; this script proves
+ * the deployed HTTP path is visible, unbuffered, and abortable from a real
+ * client.
  *
  * Required auth, choose one:
  *   USER_JWT / FITMEET_USER_JWT
@@ -17,6 +19,7 @@
  *   AGENT_SMOKE_ALLOW_NON_SMOKE_USER=true to use a non-smoke email remotely
  *   AGENT_SMOKE_ALLOW_JWT_MUTATIONS=true to use USER_JWT remotely
  *   AGENT_SSE_ABORT_TIMEOUT_MS=15000
+ *   AGENT_SSE_SKIP_ACCEL_BUFFERING_HEADER=true to skip X-Accel-Buffering check
  */
 
 type JsonRecord = Record<string, unknown>;
@@ -33,16 +36,26 @@ async function main() {
   assertRemoteSmokeAccountSafety();
   const token = await resolveUserToken();
   const result = await abortAfterFirstAssistantDelta(token);
+  if (!result.responseDisablesProxyBuffering) {
+    throw new Error(
+      'SSE visibility/abort smoke expected response header X-Accel-Buffering: no so users see early process status through nginx/proxies.',
+    );
+  }
+  if (!result.sawEarlyVisibleStatus) {
+    throw new Error(
+      `SSE visibility/abort smoke did not receive run.started/visible_process.delta before assistant_delta. Events: ${result.events.join(',')}`,
+    );
+  }
   if (!result.sawAssistantDelta) {
     throw new Error(
-      'SSE abort smoke did not receive assistant_delta before abort.',
+      'SSE visibility/abort smoke did not receive assistant_delta before abort.',
     );
   }
   if (result.sawResult) {
-    throw new Error('SSE abort smoke received result after client abort.');
+    throw new Error('SSE visibility/abort smoke received result after client abort.');
   }
   console.log(
-    `[agent-sse-abort-smoke] PASS (events=${result.events.join(',')})`,
+    `[agent-sse-abort-smoke] PASS (first=${result.firstEventName ?? 'none'}, events=${result.events.join(',')})`,
   );
 }
 
@@ -71,11 +84,16 @@ async function abortAfterFirstAssistantDelta(token: string) {
     );
   }
   if (!response.body) throw new Error('SSE response did not expose a body.');
+  const responseDisablesProxyBuffering =
+    truthy(process.env.AGENT_SSE_SKIP_ACCEL_BUFFERING_HEADER) ||
+    /^no$/i.test(response.headers.get('x-accel-buffering') ?? '');
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   const events: string[] = [];
+  let firstEventName: string | null = null;
+  let sawEarlyVisibleStatus = false;
   let sawAssistantDelta = false;
   let sawResult = false;
 
@@ -88,8 +106,12 @@ async function abortAfterFirstAssistantDelta(token: string) {
       buffer = parsed.remainder;
       for (const event of parsed.events) {
         const eventName = eventNameOrType(event);
+        firstEventName ??= eventName;
         events.push(eventName);
         if (eventName === 'result') sawResult = true;
+        if (!sawAssistantDelta && isEarlyVisibleStatus(eventName, event.data)) {
+          sawEarlyVisibleStatus = true;
+        }
         if (eventName === 'assistant_delta') {
           const data = asRecord(event.data);
           if (readString(data.delta)) {
@@ -97,7 +119,14 @@ async function abortAfterFirstAssistantDelta(token: string) {
             controller.abort();
             await reader.cancel().catch(() => undefined);
             clearTimeout(timeout);
-            return { sawAssistantDelta, sawResult, events };
+            return {
+              responseDisablesProxyBuffering,
+              firstEventName,
+              sawEarlyVisibleStatus,
+              sawAssistantDelta,
+              sawResult,
+              events,
+            };
           }
         }
       }
@@ -107,7 +136,14 @@ async function abortAfterFirstAssistantDelta(token: string) {
   } finally {
     clearTimeout(timeout);
   }
-  return { sawAssistantDelta, sawResult, events };
+  return {
+    responseDisablesProxyBuffering,
+    firstEventName,
+    sawEarlyVisibleStatus,
+    sawAssistantDelta,
+    sawResult,
+    events,
+  };
 }
 
 async function resolveUserToken() {
@@ -178,6 +214,24 @@ function eventNameOrType(event: { event: string; data: unknown }): string {
   return readString(data.type) ?? event.event;
 }
 
+function isEarlyVisibleStatus(eventName: string, data: unknown): boolean {
+  if (eventName === 'run.started' || eventName === 'visible_process.delta') {
+    return true;
+  }
+  const record = asRecord(data);
+  const type = readString(record.type);
+  if (type === 'run.started' || type === 'visible_process.delta') return true;
+  if (type === 'progress') {
+    const metadata = asRecord(record.metadata);
+    return (
+      readString(metadata.sourceProtocol) === 'social_agent_event_v2' ||
+      readString(metadata.processType) === 'run_summary'
+    );
+  }
+  if (type === 'status') return readString(record.lightStatus) !== undefined;
+  return false;
+}
+
 function resolveApiBaseUrl() {
   const value =
     process.env.AGENT_SMOKE_API_BASE_URL ??
@@ -192,7 +246,7 @@ function assertRemoteIntent() {
   const url = new URL(API_BASE_URL);
   if (LOCAL_HOSTS.has(url.hostname)) return;
   throw new Error(
-    `Refusing to run Agent SSE abort smoke against remote API "${API_BASE_URL}". Set AGENT_SMOKE_ALLOW_REMOTE=true for staging/production.`,
+      `Refusing to run Agent SSE visibility/abort smoke against remote API "${API_BASE_URL}". Set AGENT_SMOKE_ALLOW_REMOTE=true for staging/production.`,
   );
 }
 
@@ -203,7 +257,7 @@ function assertRemoteSmokeAccountSafety() {
   const directJwt = process.env.USER_JWT ?? process.env.FITMEET_USER_JWT;
   if (directJwt && !truthy(process.env.AGENT_SMOKE_ALLOW_JWT_MUTATIONS)) {
     throw new Error(
-      'Refusing to run remote Agent SSE abort smoke with USER_JWT/FITMEET_USER_JWT. Set AGENT_SMOKE_ALLOW_JWT_MUTATIONS=true only for a dedicated smoke token.',
+      'Refusing to run remote Agent SSE visibility/abort smoke with USER_JWT/FITMEET_USER_JWT. Set AGENT_SMOKE_ALLOW_JWT_MUTATIONS=true only for a dedicated smoke token.',
     );
   }
 

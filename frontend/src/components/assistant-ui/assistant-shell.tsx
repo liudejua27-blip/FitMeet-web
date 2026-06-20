@@ -10,7 +10,7 @@ import type {
 import type {
   FitMeetAssistantMessage,
   FitMeetAssistantRecovery,
-} from '../agent-workspace/FitMeetAssistantUI';
+} from '../agent-workspace/FitMeetAssistantUI.types';
 import { ChatGPTThread } from './thread';
 import { ChatGPTThreadList, MobileThreadListButton } from './thread-list';
 import { TooltipIconButton } from './tooltip-icon-button';
@@ -23,6 +23,8 @@ type AssistantShellProps = {
   threadsLoading: boolean;
   activeThreadId: string | null;
   isRunning: boolean;
+  liveProcessStatus?: string | null;
+  processStatusOwnedByMessage?: boolean;
   sessionRestoring: boolean;
   recovery?: FitMeetAssistantRecovery | null;
   profileGate?: SocialAgentProfileGateStatus | null;
@@ -54,6 +56,8 @@ export function AssistantShell({
   threadsLoading,
   activeThreadId,
   isRunning,
+  liveProcessStatus,
+  processStatusOwnedByMessage,
   sessionRestoring,
   recovery,
   profileGate,
@@ -148,7 +152,7 @@ export function AssistantShell({
 
   return (
     <div
-      className="flex h-[100dvh] overflow-hidden bg-white text-[#0d0d0d]"
+      className="flex h-[100dvh] min-h-[100svh] overflow-hidden bg-white text-[#0d0d0d]"
       data-testid="assistant-ui-shell"
       data-sidebar-state={sidebarOpen ? 'open' : 'closed'}
       data-sidebar-mode={isDesktopSidebar ? 'desktop' : 'mobile'}
@@ -231,6 +235,8 @@ export function AssistantShell({
         <ChatGPTThread
           messages={messages}
           isRunning={isRunning}
+          liveProcessStatus={liveProcessStatus}
+          processStatusOwnedByMessage={processStatusOwnedByMessage}
           sessionRestoring={sessionRestoring}
           recovery={recovery}
           profileGate={profileGate}

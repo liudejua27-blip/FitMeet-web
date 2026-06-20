@@ -26,6 +26,101 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   } as AgentTask;
 }
 
+function makeTaskWithCompletedSlots(
+  overrides: Partial<AgentTask> = {},
+): AgentTask {
+  return makeTask({
+    goal: '今晚青岛大学附近散步，最好找公开资料里有舞蹈相关标签的人',
+    memory: {
+      taskSlots: {
+        activity: {
+          value: '散步',
+          state: 'completed',
+          source: 'user_message',
+        },
+        time_window: {
+          value: '今天晚上',
+          state: 'completed',
+          source: 'user_message',
+        },
+        location_text: {
+          value: '青岛大学附近',
+          state: 'completed',
+          source: 'user_message',
+        },
+        geo_area: {
+          value: '崂山区',
+          state: 'inferred',
+          source: 'location_parser',
+        },
+        intensity: {
+          value: '低强度',
+          state: 'inferred',
+          source: 'activity_parser',
+        },
+        candidate_preference: {
+          value: '公开资料里有舞蹈相关标签的人优先',
+          state: 'answered',
+          source: 'user_message',
+        },
+      },
+      taskSlotSummary: {
+        activity: '散步',
+        time_window: '今天晚上',
+        location_text: '青岛大学附近',
+        candidate_preference: '公开资料里有舞蹈相关标签的人优先',
+      },
+    },
+    ...overrides,
+  });
+}
+
+function makeTaskWithRestoredTaskMemorySlots(
+  overrides: Partial<AgentTask> = {},
+): AgentTask {
+  return makeTask({
+    goal: '今晚青岛大学附近散步，最好找公开资料里有舞蹈相关标签的人',
+    memory: {
+      taskMemory: {
+        taskSlots: {
+          activity: {
+            value: '散步',
+            state: 'completed',
+            source: 'user_message',
+          },
+          time_window: {
+            value: '今天晚上',
+            state: 'completed',
+            source: 'user_message',
+          },
+          location_text: {
+            value: '青岛大学附近',
+            state: 'completed',
+            source: 'user_message',
+          },
+          geo_area: {
+            value: '崂山区',
+            state: 'inferred',
+            source: 'location_parser',
+          },
+          candidate_preference: {
+            value: '公开资料里有舞蹈相关标签的人优先',
+            state: 'answered',
+            source: 'user_message',
+          },
+        },
+        taskSlotSummary: {
+          activity: '散步',
+          time_window: '今天晚上',
+          location_text: '青岛大学附近',
+          candidate_preference: '公开资料里有舞蹈相关标签的人优先',
+        },
+      },
+    },
+    ...overrides,
+  });
+}
+
 function makeDraft(
   overrides: Partial<SocialAgentRequestDraft> = {},
 ): SocialAgentRequestDraft {
@@ -84,6 +179,18 @@ function makeHarness() {
             toolName,
             status: 'succeeded',
             output: { id: 301, socialRequestId: 301 },
+            error: null,
+          });
+        }
+        if (
+          toolName === SocialAgentToolName.CreateSocialRequest &&
+          input.mode === 'publish'
+        ) {
+          return Promise.resolve({
+            id: 'action_create_social_request_publish_1',
+            toolName,
+            status: 'succeeded',
+            output: { publicIntentId: 'pub_301', synced: true },
             error: null,
           });
         }
@@ -171,6 +278,7 @@ describe('SocialAgentDraftSearchService', () => {
       SocialAgentToolName.CreateSocialRequest,
       expect.objectContaining({ mode: 'ai_draft' }),
       7,
+      { signal: null },
     );
     expect(executor.executeToolAction).toHaveBeenNthCalledWith(
       2,
@@ -178,6 +286,7 @@ describe('SocialAgentDraftSearchService', () => {
       SocialAgentToolName.CreateSocialRequest,
       expect.objectContaining({ mode: 'private_draft' }),
       7,
+      { signal: null },
     );
     expect(executor.executeToolAction).toHaveBeenNthCalledWith(
       3,
@@ -191,12 +300,13 @@ describe('SocialAgentDraftSearchService', () => {
         }),
       }),
       7,
+      { signal: null },
     );
   });
 
   it('generates a social request draft through the AI draft tool', async () => {
     const { executor, service } = makeHarness();
-    const task = makeTask();
+    const task = makeTaskWithCompletedSlots();
 
     const result = await service.generateDraftWithTool(
       task,
@@ -210,17 +320,138 @@ describe('SocialAgentDraftSearchService', () => {
         mode: 'ai_draft',
         rawText: '今晚青岛轻松跑步',
         goal: '今晚青岛轻松跑步',
-        metadata: {
+        taskId: 101,
+        taskContext: expect.objectContaining({
+          knownSlotsAreHardConstraints: true,
+          doNotRepeatQuestionsForSlots: expect.arrayContaining([
+            'activity',
+            'time_window',
+            'location_text',
+            'candidate_preference',
+          ]),
+          candidatePreference: '公开资料里有舞蹈相关标签的人优先',
+          candidatePreferencePolicy:
+            'public_discoverable_profiles_and_user_consented_public_tags_only',
+          taskSlots: expect.objectContaining({
+            activity: expect.objectContaining({ value: '散步' }),
+            time_window: expect.objectContaining({ value: '今天晚上' }),
+            location_text: expect.objectContaining({ value: '青岛大学附近' }),
+            candidate_preference: expect.objectContaining({
+              value: '公开资料里有舞蹈相关标签的人优先',
+            }),
+          }),
+        }),
+        metadata: expect.objectContaining({
           agentTaskId: 101,
           source: 'social_agent_chat',
-        },
+          candidatePreferencePolicy:
+            'public_discoverable_profiles_and_user_consented_public_tags_only',
+        }),
       }),
       7,
+      { signal: null },
+    );
+    const taskContext = (
+      executor.executeToolAction.mock.calls[0]?.[2] as Record<string, unknown>
+    )?.taskContext as {
+      knownTaskSlotConstraints?: {
+        knownSlots?: Array<{ key: string; confirmation: string }>;
+        doNotAskAgainFor?: string[];
+      };
+      knownContextSlots?: string[];
+      doNotRepeatQuestionsForSlots?: string[];
+    };
+    expect(taskContext.knownTaskSlotConstraints).toMatchObject({
+      knownSlots: expect.arrayContaining([
+        expect.objectContaining({
+          key: 'geo_area',
+          confirmation: 'inferred_context',
+        }),
+        expect.objectContaining({
+          key: 'intensity',
+          confirmation: 'inferred_context',
+        }),
+      ]),
+      doNotAskAgainFor: expect.arrayContaining([
+        'activity',
+        'time_window',
+        'location_text',
+        'candidate_preference',
+      ]),
+    });
+    expect(taskContext.knownContextSlots).toEqual(
+      expect.arrayContaining(['geo_area', 'intensity']),
+    );
+    expect(taskContext.doNotRepeatQuestionsForSlots).toEqual(
+      expect.not.arrayContaining(['geo_area', 'intensity']),
     );
     expect(result).toMatchObject({
-      draft: { title: '今晚青岛轻松跑步', city: '青岛' },
+      draft: {
+        title: '今晚青岛轻松跑步',
+        city: '青岛',
+        activityType: '散步',
+        interestTags: expect.arrayContaining(['散步']),
+        metadata: expect.objectContaining({
+          timePreference: '今天晚上',
+          locationPreference: '青岛大学附近',
+          nearbyArea: '崂山区',
+          intensity: '低强度',
+          candidatePreference: '公开资料里有舞蹈相关标签的人优先',
+          knownSlotsAreHardConstraints: true,
+        }),
+      },
       card: { title: '今晚青岛轻松跑步' },
       profileUsed: { city: '青岛' },
+    });
+  });
+
+  it('enriches AI draft output from restored taskMemory slots', async () => {
+    const { executor, service } = makeHarness();
+    const task = makeTaskWithRestoredTaskMemorySlots();
+
+    const result = await service.generateDraftWithTool(
+      task,
+      '可以，继续帮我找人',
+    );
+
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.CreateSocialRequest,
+      expect.objectContaining({
+        taskContext: expect.objectContaining({
+          taskSlots: expect.objectContaining({
+            activity: expect.objectContaining({ value: '散步' }),
+            time_window: expect.objectContaining({ value: '今天晚上' }),
+            location_text: expect.objectContaining({ value: '青岛大学附近' }),
+            candidate_preference: expect.objectContaining({
+              value: '公开资料里有舞蹈相关标签的人优先',
+            }),
+          }),
+          knownSlotsAreHardConstraints: true,
+          doNotRepeatQuestionsForSlots: expect.arrayContaining([
+            'activity',
+            'time_window',
+            'location_text',
+            'candidate_preference',
+          ]),
+        }),
+      }),
+      7,
+      { signal: null },
+    );
+    expect(result.draft).toMatchObject({
+      city: '青岛',
+      activityType: '散步',
+      interestTags: expect.arrayContaining(['散步']),
+      metadata: expect.objectContaining({
+        timePreference: '今天晚上',
+        locationPreference: '青岛大学附近',
+        nearbyArea: '崂山区',
+        candidatePreference: '公开资料里有舞蹈相关标签的人优先',
+        candidatePreferencePolicy:
+          'public_discoverable_profiles_and_user_consented_public_tags_only',
+        knownSlotsAreHardConstraints: true,
+      }),
     });
   });
 
@@ -246,42 +477,154 @@ describe('SocialAgentDraftSearchService', () => {
         }),
       }),
       7,
+      { signal: null },
+    );
+  });
+
+  it('blocks auto publish when task memory says not to publish to Discover', async () => {
+    const { executor, service } = makeHarness();
+    const task = makeTask({
+      memory: {
+        taskMemory: {
+          boundaries: {
+            publicActivityAllowed: false,
+          },
+        },
+      },
+    });
+
+    const result = await service.autoPublishDraftIfAllowed(
+      task,
+      makeDraft({
+        metadata: {
+          visibilityConsent: true,
+          publicActivityAllowed: true,
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      autoPublished: false,
+      synced: false,
+      publicIntentId: null,
+      discoverHref: null,
+      publishPolicy: 'requires_user_confirmation',
+      blockedReason: 'public_visibility_denied_in_task_memory',
+    });
+    expect(executor.executeToolAction).not.toHaveBeenCalledWith(
+      expect.any(Number),
+      SocialAgentToolName.CreateSocialRequest,
+      expect.objectContaining({ mode: 'publish' }),
+      expect.any(Number),
+      expect.any(Object),
+    );
+  });
+
+  it('allows auto publish when task memory has explicit public authorization', async () => {
+    const { executor, service } = makeHarness();
+    const task = makeTask({
+      memory: {
+        taskMemory: {
+          boundaries: {
+            publicActivityAllowed: true,
+          },
+        },
+      },
+    });
+
+    const result = await service.autoPublishDraftIfAllowed(
+      task,
+      makeDraft({
+        metadata: {},
+      }),
+    );
+
+    expect(result).toMatchObject({
+      autoPublished: true,
+      synced: true,
+      publicIntentId: 'pub_301',
+      discoverHref: '/public-intent/pub_301',
+      publishPolicy: 'auto_after_first_public_authorization',
+      blockedReason: null,
+    });
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.CreateSocialRequest,
+      expect.objectContaining({
+        mode: 'publish',
+        metadata: expect.objectContaining({
+          visibilityConsent: true,
+          autoPublished: true,
+          publishPolicy: 'auto_after_first_public_authorization',
+        }),
+      }),
+      7,
+      { signal: null },
     );
   });
 
   it('searches persisted social request candidates and normalizes matches', async () => {
     const { executor, service } = makeHarness();
-    const task = makeTask();
+    const task = makeTaskWithCompletedSlots();
 
     const result = await service.searchCandidates(task, makeDraft());
 
     expect(executor.executeToolAction).toHaveBeenCalledWith(
       101,
       SocialAgentToolName.SearchMatches,
-      {
+      expect.objectContaining({
+        taskId: 101,
         socialRequestId: 301,
         rawText: '今晚青岛轻松跑步',
         limit: 10,
-        safetyPolicy: {
+        taskContext: expect.objectContaining({
+          knownSlotsAreHardConstraints: true,
+          knownTaskSlotConstraints: expect.objectContaining({
+            knownSlots: expect.arrayContaining([
+              expect.objectContaining({
+                key: 'geo_area',
+                confirmation: 'inferred_context',
+              }),
+              expect.objectContaining({
+                key: 'intensity',
+                confirmation: 'inferred_context',
+              }),
+            ]),
+          }),
+          knownContextSlots: expect.arrayContaining(['geo_area', 'intensity']),
+          doNotRepeatQuestionsForSlots: expect.arrayContaining([
+            'activity',
+            'time_window',
+            'location_text',
+            'candidate_preference',
+          ]),
+          candidatePreference: '公开资料里有舞蹈相关标签的人优先',
+          candidatePreferencePolicy:
+            'public_discoverable_profiles_and_user_consented_public_tags_only',
+        }),
+        candidatePreference: '公开资料里有舞蹈相关标签的人优先',
+        candidatePreferencePolicy:
+          'public_discoverable_profiles_and_user_consented_public_tags_only',
+        safetyPolicy: expect.objectContaining({
           policyVersion: 'fitmeet.candidate-search.v1',
           source: 'social_agent_chat',
           taskId: 101,
           socialRequestId: 301,
-          candidateEligibility: {
+          candidateEligibility: expect.objectContaining({
             profileDiscoverable: true,
             agentCanRecommendMe: true,
             publicOrAuthorizedSourceOnly: true,
             excludeBlockedUsers: true,
             excludeComplaintRisk: true,
             excludeUnsafeMeetRisk: true,
-          },
-          privacy: {
+          }),
+          privacy: expect.objectContaining({
             redactPreciseLocation: true,
             redactContactInfo: true,
             exposeOnlyPublicProfileFields: true,
             noPrivateLifeGraphLeakage: true,
-          },
-          rankingSignals: [
+          }),
+          rankingSignals: expect.arrayContaining([
             'city_or_distance',
             'interests',
             'time_overlap',
@@ -289,13 +632,14 @@ describe('SocialAgentDraftSearchService', () => {
             'activity_intensity',
             'relationship_goal',
             'public_life_graph_preferences',
-          ],
+          ]),
           sideEffectPolicy: 'search_only_no_contact_without_approval',
           approvalPolicy:
             'send_message_add_friend_connect_create_activity_publish_require_checkpoint',
-        },
-      },
+        }),
+      }),
       7,
+      { signal: null },
     );
     expect(result).toMatchObject({
       message: '找到 1 位候选人',
@@ -312,9 +656,45 @@ describe('SocialAgentDraftSearchService', () => {
     });
   });
 
+  it('passes restored taskMemory slots into the real candidate search tool input', async () => {
+    const { executor, service } = makeHarness();
+    const task = makeTaskWithRestoredTaskMemorySlots();
+
+    await service.searchCandidates(task, makeDraft());
+
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.SearchMatches,
+      expect.objectContaining({
+        taskContext: expect.objectContaining({
+          taskSlots: expect.objectContaining({
+            activity: expect.objectContaining({ value: '散步' }),
+            time_window: expect.objectContaining({ value: '今天晚上' }),
+            location_text: expect.objectContaining({ value: '青岛大学附近' }),
+            candidate_preference: expect.objectContaining({
+              value: '公开资料里有舞蹈相关标签的人优先',
+            }),
+          }),
+          candidatePreference: '公开资料里有舞蹈相关标签的人优先',
+          doNotRepeatQuestionsForSlots: expect.arrayContaining([
+            'activity',
+            'time_window',
+            'location_text',
+            'candidate_preference',
+          ]),
+        }),
+        candidatePreference: '公开资料里有舞蹈相关标签的人优先',
+        candidatePreferencePolicy:
+          'public_discoverable_profiles_and_user_consented_public_tags_only',
+      }),
+      7,
+      { signal: null },
+    );
+  });
+
   it('searches draft criteria when no persisted request exists', async () => {
     const { executor, service } = makeHarness();
-    const task = makeTask();
+    const task = makeTaskWithCompletedSlots();
 
     await service.searchCandidates(
       task,
@@ -325,12 +705,21 @@ describe('SocialAgentDraftSearchService', () => {
       101,
       SocialAgentToolName.SearchMatches,
       expect.objectContaining({
+        taskId: 101,
         city: '青岛',
         activityType: 'running',
         interestTags: ['跑步', '低压力'],
         radiusKm: 5,
         rawText: '今晚青岛轻松跑步',
         limit: 10,
+        taskContext: expect.objectContaining({
+          candidatePreference: '公开资料里有舞蹈相关标签的人优先',
+          privacyPolicy:
+            'do_not_use_private_life_graph_or_hidden_profile_fields_for_candidate_search',
+        }),
+        candidatePreference: '公开资料里有舞蹈相关标签的人优先',
+        candidatePreferencePolicy:
+          'public_discoverable_profiles_and_user_consented_public_tags_only',
         safetyPolicy: expect.objectContaining({
           candidateEligibility: expect.objectContaining({
             profileDiscoverable: true,
@@ -354,6 +743,7 @@ describe('SocialAgentDraftSearchService', () => {
         }),
       }),
       7,
+      { signal: null },
     );
   });
 

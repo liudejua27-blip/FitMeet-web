@@ -1,6 +1,7 @@
 import { LifeGraphProposalDto } from '../life-graph/dto/life-graph.dto';
 import type {
   SocialAgentActivityResult,
+  SocialAgentAssistantMessageSource,
   SocialAgentAsyncRunSnapshot,
   SocialAgentIntentRouteResult,
 } from './social-agent-chat.types';
@@ -12,6 +13,7 @@ export type SocialAgentRouteTurnState = {
   queuedRun: SocialAgentAsyncRunSnapshot | null;
   runMode: SocialAgentIntentRouteResult['runMode'];
   assistantMessage: string;
+  assistantMessageSource?: SocialAgentAssistantMessageSource;
   activityResults: SocialAgentActivityResult[];
   profileUpdateProposal: LifeGraphProposalDto | null;
   assistantStreamed: boolean;
@@ -21,6 +23,7 @@ export type SocialAgentRouteTurnState = {
 
 type ConversationTurnPatch = {
   assistantMessage?: string;
+  assistantMessageSource?: SocialAgentAssistantMessageSource;
   savedContext: boolean;
   profileUpdated: boolean;
   profileUpdateProposal: LifeGraphProposalDto | null;
@@ -44,6 +47,7 @@ export function createSocialAgentRouteTurnState(
     queuedRun: null,
     runMode: null,
     assistantMessage,
+    assistantMessageSource: 'fallback',
     activityResults: [],
     profileUpdateProposal: null,
     assistantStreamed: false,
@@ -59,7 +63,9 @@ export function applyConversationTurnState(
   return {
     ...state,
     assistantMessage: patch.assistantMessage ?? state.assistantMessage,
-    savedContext: patch.savedContext,
+    assistantMessageSource:
+      patch.assistantMessageSource ?? state.assistantMessageSource,
+    savedContext: patch.savedContext || state.savedContext,
     profileUpdated: patch.profileUpdated,
     profileUpdateProposal: patch.profileUpdateProposal,
     assistantStreamed: patch.assistantStreamed ?? state.assistantStreamed,

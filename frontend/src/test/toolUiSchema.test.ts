@@ -373,6 +373,48 @@ describe('tool-ui-schema', () => {
     ]);
   });
 
+  it('normalizes degraded candidate reasoning without exposing internal errors', () => {
+    const card = normalizeAssistantCard({
+      schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+      schemaType: 'social_match.candidate',
+      title: '候选机会',
+      data: {
+        schemaName: 'OpportunityCard',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'social_match.candidate',
+        opportunity: {
+          title: '和小林低压力认识',
+          summary: '当前只适合作为保守候选。',
+          candidateExplanation: {
+            source: 'fallback',
+            degraded: true,
+            retryable: true,
+            degradationReason: 'model_unavailable',
+            confidence: 0.43,
+          },
+        },
+      },
+      actions: [],
+    });
+
+    expect(normalizeCandidateOpportunityView(card).reasoningQuality).toEqual({
+      degraded: true,
+      retryable: true,
+      source: 'fallback',
+      confidence: 0.43,
+      label: '我先用公开资料保守推荐',
+      detail: '更细的个性化解释稍后可重试；发送邀请前仍会等你确认。',
+      actionLabel: '可稍后重新生成推荐解释',
+    });
+    expect(
+      [
+        normalizeCandidateOpportunityView(card).reasoningQuality.label,
+        normalizeCandidateOpportunityView(card).reasoningQuality.detail,
+        normalizeCandidateOpportunityView(card).reasoningQuality.actionLabel,
+      ].join('\n'),
+    ).not.toMatch(/fallback|deepseek|model_unavailable|tool|trace/i);
+  });
+
   it('normalizes social OpportunityCard aliases into stable product fields', () => {
     const candidate = normalizeCandidateOpportunityView(
       normalizeAssistantCard({
@@ -1042,6 +1084,15 @@ describe('tool-ui-schema', () => {
       suggestedOpener: '周末如果方便，可以先在公共路线轻松跑一圈。',
       recommendedNextAction: '先生成开场白，确认后再发送。',
       safetyBoundary: '不会自动发送消息。',
+      reasoningQuality: {
+        degraded: false,
+        retryable: false,
+        source: null,
+        confidence: null,
+        label: null,
+        detail: null,
+        actionLabel: null,
+      },
     });
   });
 
