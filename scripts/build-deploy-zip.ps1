@@ -547,6 +547,7 @@ Invoke-Step "Create deploy zip" {
       "--exclude=homepage-gsap-qa.png",
       "--exclude=frontend/src/components/agent-workspace/CodexAntPet.tsx",
       "--exclude=frontend/src/components/agent-workspace/api/mockAgentAdapter.ts",
+      "--exclude=frontend/src/dev",
       "--exclude=frontend/src/dev/agent/mockAgentAdapter.ts",
       "--exclude=frontend/src/components/ai-elements",
       "--exclude=frontend/src/debug",
@@ -717,7 +718,7 @@ Invoke-Step "Scan deploy zip" {
       $_ -notmatch '(^|/)deploy/agent-smoke\.remote\.env\.example$'
     })
     HasQaArtifacts = [bool]($entries | Where-Object { $_ -match '(^|/)(artifacts|docs/qa|frontend/qa|qa-gsap-round2)(/|$)|(^|/)(agent-gsap-qa|agent-reference-qa|homepage-gsap-qa)\.png$' })
-    HasLegacyAgentShell = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/src/components/agent-workspace/(CodexAntPet\.tsx|useAgentFlow\.tsx?)$|(^|/)frontend/src/components/agent-workspace/api/mockAgentAdapter\.ts$|(^|/)frontend/src/dev/agent/mockAgentAdapter\.ts$|(^|/)frontend/src/components/agent/ant-guide(/|$)|(^|/)frontend/src/assets/agent/ant-guide(/|$)|(^|/)frontend/src/components/ai-elements(/|$)|(^|/)frontend/src/debug(/|$)|(^|/)frontend/src/pages/(HomePage(\.legacy)?|DemoAgentSocialLoopPage|DemoInvestorPage)\.tsx$|(^|/)frontend/src/components/hero(/|$)|(^|/)frontend/src/components/showcase(/|$)|(^|/)frontend/src/components/three/EarthScene\.tsx$|(^|/)frontend/src/components/ui/(GatewayPortalCard|SectionHeading)\.tsx$|(^|/)frontend/src/data/(gateways|heroCopy)\.ts$|(^|/)frontend/src/styles/(agent-workspace|agent-gpt-copy-shell|fitmeet-assistant-ui)\.css$|(^|/)scripts/fix-(aimatch|loginmodal|meetmodal|postmodal)' })
+    HasLegacyAgentShell = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/src/components/agent-workspace/(CodexAntPet\.tsx|useAgentFlow\.tsx?)$|(^|/)frontend/src/components/agent-workspace/api/mockAgentAdapter\.ts$|(^|/)frontend/src/dev(/|$)|(^|/)frontend/src/dev/agent/mockAgentAdapter\.ts$|(^|/)frontend/src/components/agent/ant-guide(/|$)|(^|/)frontend/src/assets/agent/ant-guide(/|$)|(^|/)frontend/src/components/ai-elements(/|$)|(^|/)frontend/src/debug(/|$)|(^|/)frontend/src/pages/(HomePage(\.legacy)?|DemoAgentSocialLoopPage|DemoInvestorPage)\.tsx$|(^|/)frontend/src/components/hero(/|$)|(^|/)frontend/src/components/showcase(/|$)|(^|/)frontend/src/components/three/EarthScene\.tsx$|(^|/)frontend/src/components/ui/(GatewayPortalCard|SectionHeading)\.tsx$|(^|/)frontend/src/data/(gateways|heroCopy)\.ts$|(^|/)frontend/src/styles/(agent-workspace|agent-gpt-copy-shell|fitmeet-assistant-ui)\.css$|(^|/)scripts/fix-(aimatch|loginmodal|meetmodal|postmodal)' })
     HasZipFiles = [bool]($entries | Where-Object { $_ -match '\.zip$' })
     HasDeployStaging = [bool]($entries | Where-Object { $_ -match '(^|/)\.deploy-staging(/|$)' })
     HasNodeModules = [bool]($entries | Select-String -SimpleMatch 'node_modules')
