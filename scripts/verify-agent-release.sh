@@ -88,6 +88,9 @@ case "${RUN_AGENT_SKILL_EVAL_API:-false}" in
   empty-candidate|empty)
     agent_skill_eval_args+=(--api-empty-candidate)
     ;;
+  20-turn-memory|20-turn|memory)
+    agent_skill_eval_args+=(--api-20-turn-memory)
+    ;;
   full)
     agent_skill_eval_args+=(--api-full)
     ;;
@@ -100,7 +103,7 @@ case "${RUN_AGENT_SKILL_EVAL_API:-false}" in
   false|'')
     ;;
   *)
-    echo "[FAIL] Unsupported RUN_AGENT_SKILL_EVAL_API=${RUN_AGENT_SKILL_EVAL_API}. Use false, readiness, empty-candidate, full, sse-abort, or all." >&2
+    echo "[FAIL] Unsupported RUN_AGENT_SKILL_EVAL_API=${RUN_AGENT_SKILL_EVAL_API}. Use false, readiness, empty-candidate, 20-turn-memory, full, sse-abort, or all." >&2
     exit 1
     ;;
 esac

@@ -84,9 +84,11 @@ available:
 
 ```bash
 node scripts/run-agent-skill-evals.mjs --api-readiness
+node scripts/run-agent-skill-evals.mjs --api-20-turn-memory
 node scripts/run-agent-skill-evals.mjs --api-empty-candidate
 node scripts/run-agent-skill-evals.mjs --api-sse-abort
 RUN_AGENT_SKILL_EVAL_API=readiness bash scripts/verify-agent-release.sh
+RUN_AGENT_SKILL_EVAL_API=20-turn-memory bash scripts/verify-agent-release.sh
 RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true bash scripts/verify-agent-release.sh
 ```
 
@@ -95,6 +97,10 @@ RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true bash scripts/verify-agent-release.sh
 isolation, clarification, OpportunityCard readiness, and the correction-memory
 path where a user updates candidate preference without losing the already
 answered time/place/activity slots.
+`node scripts/run-agent-skill-evals.mjs --api-20-turn-memory` runs the real
+smoke harness through a 20-turn continuation and requires the Agent to preserve
+task continuity and completed time/place/activity slots without repeat
+questions.
 `RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true` runs the same real smoke harness through
 an impossible public-candidate request and requires `CandidateEmptyStateCard`
 with safe recovery actions instead of fabricated candidates.
