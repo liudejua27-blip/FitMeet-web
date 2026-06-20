@@ -59,6 +59,26 @@ describe('Discover closure links', () => {
     expect(source).not.toContain("sourceKind: 'fallback'");
     expect(source).toContain('data-testid="discover-real-empty-state"');
   });
+
+  it('keeps public intent cards product-safe without leaking internal ids or fake recency', () => {
+    const meet = publicIntentToDiscoverMeet(
+      publicIntent({
+        id: 'intent:visible-owner',
+        userId: 912,
+        city: '上海',
+        radiusKm: 3,
+      }),
+      0,
+    );
+    const source = readFileSync(join(process.cwd(), 'src/pages/DiscoverPage.tsx'), 'utf8');
+
+    expect(meet.username).toBe('同频发起人');
+    expect(meet.username).not.toContain('912');
+    expect(meet.city).toBe('上海');
+    expect(source).not.toContain('青岛 · {resolvedDistance}');
+    expect(source).not.toContain('`${(index + 1) * 10} 分钟前`');
+    expect(source).toContain("formatRelativePublishedTime(meet.createdAt, '刚刚更新')");
+  });
 });
 
 function publicIntent(

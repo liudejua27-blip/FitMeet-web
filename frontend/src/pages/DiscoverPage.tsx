@@ -635,7 +635,7 @@ function MeetupMatchCard({
           <span className="match-card__sport">{sportIcon(meet.sport)}</span>
           <div>
             <h2>{meet.title}</h2>
-            <p>青岛 · {resolvedDistance}</p>
+            <p>{meet.city || '附近'} · {resolvedDistance}</p>
           </div>
           <span className="match-card__more" aria-hidden="true">
             ⋯
@@ -670,7 +670,7 @@ function MeetupMatchCard({
           <strong>
             {meet.slots}/{meet.maxSlots} 人已加入
           </strong>
-          <time>{index < 2 ? `${(index + 1) * 10} 分钟前` : `${(index + 1) * 15} 分钟前`}</time>
+          <time>{formatRelativePublishedTime(meet.createdAt, '刚刚更新')}</time>
         </div>
         <div className="match-score" style={{ '--score': `${score}%` } as CSSProperties}>
           <strong>{score}%</strong>
@@ -696,7 +696,7 @@ export function publicIntentToDiscoverMeet(
     title: intent.title || '新的社交机会',
     type: intent.requestType || sport,
     sport,
-    username: intent.userId ? `用户 ${intent.userId}` : 'FitMeet 用户',
+    username: '同频发起人',
     color,
     colorBg: `${color}22`,
     time: intent.timePreference || '时间待定',
@@ -778,7 +778,14 @@ function matchScore(meet: Meet) {
 
 function publicDisplayName(name: string | undefined, index: number) {
   const trimmed = (name || '').trim();
-  if (!trimmed || trimmed.length <= 1 || /^(test|demo|seed|user)$/i.test(trimmed)) {
+  if (
+    !trimmed ||
+    trimmed.length <= 1 ||
+    /^(test|demo|seed|user)$/i.test(trimmed) ||
+    /^用户\s*\d+$/i.test(trimmed) ||
+    /^同频发起人$/i.test(trimmed) ||
+    /^FitMeet\s*用户$/i.test(trimmed)
+  ) {
     return `同频用户 ${index + 1}`;
   }
   const first = trimmed.slice(0, 1);
