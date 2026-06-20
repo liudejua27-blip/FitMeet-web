@@ -147,6 +147,8 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-brain.service.spec.ts \
   src/agent-gateway/social-agent-intent-router.service.spec.ts \
   src/agent-gateway/social-agent-chat.controller.spec.ts \
+  src/agent-gateway/social-agent-chat-turn-callbacks.service.spec.ts \
+  src/agent-gateway/social-agent-chat-turn-facade.service.spec.ts \
   src/agent-gateway/social-agent-chat-llm.service.spec.ts \
   src/agent-gateway/social-agent-chat-llm-prompts.spec.ts \
   src/agent-gateway/social-agent-chat-brain-memory.presenter.spec.ts \
@@ -160,14 +162,34 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-planner.service.spec.ts \
   src/agent-gateway/social-agent-intent-memory.presenter.spec.ts \
   src/agent-gateway/social-agent-memory-context.service.spec.ts \
+  src/agent-gateway/social-agent-confirmation-policy.service.spec.ts \
+  src/agent-gateway/social-agent-execution-pipeline.contract.spec.ts \
+  src/agent-gateway/social-agent-loop-state.spec.ts \
+  src/agent-gateway/social-agent-main-agent-turn.service.spec.ts \
+  src/agent-gateway/social-agent-main-agent-turn-events.service.spec.ts \
   src/agent-gateway/social-agent-route-entrance.service.spec.ts \
   src/agent-gateway/social-agent-route-search-turn.service.spec.ts \
+  src/agent-gateway/social-agent-route-action-turn.service.spec.ts \
+  src/agent-gateway/social-agent-route-conversation-turn.service.spec.ts \
+  src/agent-gateway/social-agent-route-profile-turn.service.spec.ts \
+  src/agent-gateway/social-agent-route-turn.service.spec.ts \
+  src/agent-gateway/social-agent-route-turn-state.spec.ts \
   src/agent-gateway/social-agent-model-router.service.spec.ts \
   src/agent-gateway/match-reasoner.service.spec.ts \
   src/agent-gateway/social-agent-reminder.service.spec.ts \
   src/agent-gateway/social-agent-thread-id.util.spec.ts \
   src/agent-gateway/social-agent-long-term-memory.service.spec.ts \
   src/agent-gateway/social-agent-meet-loop.service.spec.ts \
+  src/agent-gateway/social-agent-adhoc-action-state.spec.ts \
+  src/agent-gateway/social-agent-run-completion.presenter.spec.ts \
+  src/agent-gateway/social-agent-run-next-result.spec.ts \
+  src/agent-gateway/social-agent-run-next-state.spec.ts \
+  src/agent-gateway/social-agent-run-orchestrator.service.spec.ts \
+  src/agent-gateway/social-agent-run-progress.tracker.spec.ts \
+  src/agent-gateway/social-agent-run-state.service.spec.ts \
+  src/agent-gateway/social-agent-state-machine.spec.ts \
+  src/agent-gateway/social-agent-task-execution-state.spec.ts \
+  src/agent-gateway/social-agent-task-lifecycle.service.spec.ts \
   src/agent-gateway/social-agent-candidate-score-breakdown.spec.ts \
   src/agent-gateway/social-agent-candidate-pool.service.spec.ts \
   src/agent-gateway/social-agent-route-branch-boundary.spec.ts \
@@ -179,7 +201,11 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/subagent-worker.cli.spec.ts \
   src/agent-gateway/subagent-worker-queue.service.spec.ts \
   src/agent-gateway/social-agent-tool-policy.spec.ts \
+  src/agent-gateway/social-agent-tool-audit.spec.ts \
+  src/agent-gateway/social-agent-tool-dispatch.contract.spec.ts \
+  src/agent-gateway/social-agent-tool-execution-state.spec.ts \
   src/agent-gateway/social-agent-tool-execution-policy.service.spec.ts \
+  src/agent-gateway/social-agent-tool-execution-summary.spec.ts \
   src/agent-gateway/social-agent-tool-executor.service.spec.ts \
   src/agent-gateway/social-agent-tool-json-model.service.spec.ts \
   src/agent-gateway/social-agent-tool-model.spec.ts \
