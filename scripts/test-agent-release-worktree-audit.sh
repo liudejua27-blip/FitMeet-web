@@ -303,6 +303,19 @@ assert_file_contains "${LOG_DIR}/static-mock-import.err" \
 
 git reset --hard -q HEAD
 rm -f frontend/src/components/agent-workspace/api/prodMockLeak.ts
+mkdir -p frontend/src/dev/agent
+cat > frontend/src/dev/agent/mockAgentAdapter.ts <<'EOF'
+export const accidentalReleaseMockChange = true;
+EOF
+if scripts/agent-release-worktree-audit.sh --review \
+  > "${LOG_DIR}/dev-mock-dirty.out" \
+  2> "${LOG_DIR}/dev-mock-dirty.err"; then
+  fail 'review audit unexpectedly allowed a dirty dev-only mock Agent adapter'
+fi
+assert_file_contains "${LOG_DIR}/dev-mock-dirty.err" \
+  'dev-only Agent mock fixture'
+
+git reset --hard -q HEAD
 cat > frontend/src/components/agent-workspace/prodDevImport.ts <<'EOF'
 import { testOnlyHelper } from '../../dev/agent/testOnlyHelper';
 export const prodDevImportLeak = testOnlyHelper;

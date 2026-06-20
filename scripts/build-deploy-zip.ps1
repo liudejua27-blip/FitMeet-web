@@ -375,6 +375,10 @@ Assert-FileContains "scripts/agent-release-matrix.sh" @(
   "scripts/agent-release-worktree-audit.sh",
   "scripts/verify-agent-release.sh"
 )
+Assert-FileContains "scripts/agent-release-worktree-audit.sh" @(
+  "frontend/src/dev/agent/mockAgentAdapter.ts",
+  "dev-only Agent mock fixture"
+)
 Assert-FileContains "scripts/agent-remote-smoke-preflight.sh" @(
   "--readiness",
   "--full",

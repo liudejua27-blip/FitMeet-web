@@ -81,6 +81,9 @@ cd "${ROOT_DIR}"
 
 stale_context_limit_entries=()
 stale_generic_model_entries=()
+forbidden_release_dirty_paths=(
+  "frontend/src/dev/agent/mockAgentAdapter.ts"
+)
 context_limit_files=(
   ".env.example"
   "backend/.env.example"
@@ -400,11 +403,18 @@ category_for_path() {
 }
 
 status_output="$(git status --short)"
+status_output_all="$(git status --short --untracked-files=all)"
 
 if [[ -z "${status_output}" ]]; then
   ok "Worktree clean"
   exit 0
 fi
+
+for forbidden_dirty_path in "${forbidden_release_dirty_paths[@]}"; do
+  if grep -Eq "^[ MARCUD?!]{2}[[:space:]]+${forbidden_dirty_path//./\\.}$" <<<"${status_output_all}"; then
+    fail "${forbidden_dirty_path} is a dev-only Agent mock fixture. Do not include mock adapter changes in release cleanup; move real assertions into API smoke/eval paths instead."
+  fi
+done
 
 agent_backend_core_count=0
 agent_frontend_assistant_ui_count=0

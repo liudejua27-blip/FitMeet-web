@@ -323,6 +323,8 @@ require_file_contains "scripts/agent-release-matrix.sh" "--opportunity-readiness
 require_file_contains "scripts/agent-release-matrix.sh" "--opportunity-full-smoke"
 require_file_contains "scripts/agent-release-matrix.sh" "scripts/agent-release-worktree-audit.sh"
 require_file_contains "scripts/agent-release-matrix.sh" "scripts/verify-agent-release.sh"
+require_file_contains "scripts/agent-release-worktree-audit.sh" "frontend/src/dev/agent/mockAgentAdapter.ts"
+require_file_contains "scripts/agent-release-worktree-audit.sh" "dev-only Agent mock fixture"
 require_file_contains "scripts/verify-agent-release.sh" "scripts/verify-agent-skills.mjs"
 require_file_contains "scripts/verify-agent-release.sh" "scripts/run-agent-skill-evals.mjs"
 require_file_contains "scripts/run-agent-skill-evals.mjs" "twenty_turn_memory_no_repeat_questions"
