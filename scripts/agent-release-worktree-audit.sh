@@ -165,6 +165,27 @@ if ((${#short_agent_timeout_config_entries[@]} > 0)); then
   fail 'Production Agent config must not fall back before DeepSeek can respond; use 20s+ first-chunk and 25s+ route/planner budgets.'
 fi
 
+short_subagent_timeout_config_entries=()
+for context_path in "${context_limit_files[@]}"; do
+  [[ -e "${context_path}" ]] || continue
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    short_subagent_timeout_config_entries+=("${match}")
+  done < <(
+    grep -RInE --exclude-dir=node_modules --exclude-dir=dist \
+      --include='*.example' \
+      --include='*.env' \
+      --include='*.md' \
+      'FITMEET_SUBAGENT_WORKER_TIMEOUT_MS=(2500|3500|5000|8000|10000|12000|15000|18000|20000)([^0-9]|$)' \
+      "${context_path}" 2>/dev/null || true
+  )
+done
+if ((${#short_subagent_timeout_config_entries[@]} > 0)); then
+  printf '\nShort subagent worker timeout settings found in deploy docs/templates:\n' >&2
+  printf '  %s\n' "${short_subagent_timeout_config_entries[@]}" >&2
+  fail 'Subagent worker model/tool execution must not fall back before DeepSeek can respond; use 25s+ worker timeouts.'
+fi
+
 weak_agent_model_routing_entries=()
 for context_path in "${context_limit_files[@]}"; do
   [[ -e "${context_path}" ]] || continue

@@ -263,7 +263,7 @@ check_worker_env() {
   esac
   check_positive_integer_env FITMEET_SUBAGENT_WORKER_CONCURRENCY
   check_positive_integer_env FITMEET_SUBAGENT_WORKER_POLL_MS
-  check_positive_integer_env FITMEET_SUBAGENT_WORKER_TIMEOUT_MS
+  check_minimum_integer_env FITMEET_SUBAGENT_WORKER_TIMEOUT_MS 25000
   check_positive_integer_env FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS
   check_positive_integer_env FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS
 }

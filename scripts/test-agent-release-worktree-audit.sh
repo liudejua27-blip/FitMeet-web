@@ -247,6 +247,19 @@ assert_file_contains "${LOG_DIR}/stale-timeout.err" \
 
 git reset --hard -q HEAD
 rm -f docs/stale-agent-timeout.md
+cat > docs/stale-subagent-timeout.md <<'EOF'
+FITMEET_SUBAGENT_WORKER_TIMEOUT_MS=15000
+EOF
+if scripts/agent-release-worktree-audit.sh --review \
+  > "${LOG_DIR}/stale-subagent-timeout.out" \
+  2> "${LOG_DIR}/stale-subagent-timeout.err"; then
+  fail 'review audit unexpectedly allowed short subagent worker timeout docs'
+fi
+assert_file_contains "${LOG_DIR}/stale-subagent-timeout.err" \
+  'Subagent worker model/tool execution must not fall back before DeepSeek can respond'
+
+git reset --hard -q HEAD
+rm -f docs/stale-subagent-timeout.md
 cat > docs/stale-agent-routing.md <<'EOF'
 SOCIAL_AGENT_MODEL_ROUTING_MODE=fast
 SOCIAL_AGENT_INTENT_ROUTER_MODE=rules_only
