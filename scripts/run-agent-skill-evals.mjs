@@ -615,6 +615,7 @@ function runCase(caseItem) {
 
 function runBackendAssertions() {
   const testTargets = [
+    'src/agent-gateway/social-agent-chat.acceptance.spec.ts',
     'src/agent-gateway/social-agent-task-memory-state-machine.service.spec.ts',
     'src/agent-gateway/social-agent-candidate-pool-result.presenter.spec.ts',
     'src/agent-gateway/social-agent-meet-loop.service.spec.ts',
