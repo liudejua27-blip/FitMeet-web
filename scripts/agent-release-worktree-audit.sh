@@ -124,6 +124,144 @@ if ((${#stale_generic_model_entries[@]} > 0)); then
   fail 'DEEPSEEK_MODEL=deepseek-v4-flash downgrades shared DeepSeek fallback paths. Use deepseek-v4-pro; keep flash only in DEEPSEEK_FAST_MODEL.'
 fi
 
+deepseek_legacy_alias_entries=()
+for context_path in "${context_limit_files[@]}"; do
+  [[ -e "${context_path}" ]] || continue
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    deepseek_legacy_alias_entries+=("${match}")
+  done < <(
+    grep -RIn --exclude-dir=node_modules --exclude-dir=dist \
+      --include='*.example' \
+      --include='*.env' \
+      --include='*.md' \
+      'DEEPSEEK_MODEL=deepseek-chat' "${context_path}" 2>/dev/null || true
+  )
+done
+if ((${#deepseek_legacy_alias_entries[@]} > 0)); then
+  printf '\nLegacy DeepSeek model aliases found:\n' >&2
+  printf '  %s\n' "${deepseek_legacy_alias_entries[@]}" >&2
+  fail 'DEEPSEEK_MODEL=deepseek-chat is a legacy alias. Production Agent routes must use explicit deepseek-v4-* models.'
+fi
+
+forbidden_legacy_paths=(
+  "frontend/src/components/agent-workspace/CodexAntPet.tsx"
+  "frontend/src/components/agent/ant-guide"
+  "frontend/src/assets/agent/ant-guide"
+  "frontend/src/debug/agent-workbench"
+  "frontend/src/pages/SocialAgentConsolePage.tsx"
+  "frontend/src/styles/agent-workspace.css"
+  "frontend/src/styles/agent-gpt-copy-shell.css"
+  "frontend/src/styles/fitmeet-assistant-ui.css"
+)
+existing_forbidden_paths=()
+for legacy_path in "${forbidden_legacy_paths[@]}"; do
+  if [[ -e "${legacy_path}" ]]; then
+    existing_forbidden_paths+=("${legacy_path}")
+  fi
+done
+if ((${#existing_forbidden_paths[@]} > 0)); then
+  printf '\nLegacy Agent files still exist in the source tree:\n' >&2
+  printf '  %s\n' "${existing_forbidden_paths[@]}" >&2
+  fail 'Legacy Agent workbench/pet/custom-shell artifacts must not ship with the assistant-ui Agent mainline.'
+fi
+
+frontend_legacy_source_entries=()
+if [[ -d frontend/src ]]; then
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    frontend_legacy_source_entries+=("${match}")
+  done < <(
+    grep -RIn --exclude-dir=node_modules --exclude-dir=dist \
+      --exclude='*.test.ts' \
+      --exclude='*.test.tsx' \
+      --exclude='*.spec.ts' \
+      --exclude='*.spec.tsx' \
+      --include='*.ts' \
+      --include='*.tsx' \
+      --include='*.css' \
+      -E 'agent-gpt-copy-shell|agent-workspace--gpt|agent-gpt-result-block|fitmeet-assistant-ui\.css|CodexAntPet|agent-workbench|SocialAgentConsolePage' \
+      frontend/src 2>/dev/null | grep -vE '/test/|\.test\.|\.spec\.' || true
+  )
+fi
+if ((${#frontend_legacy_source_entries[@]} > 0)); then
+  printf '\nLegacy Agent source references found outside tests:\n' >&2
+  printf '  %s\n' "${frontend_legacy_source_entries[@]}" >&2
+  fail 'Production /agent/chat must stay on the assistant-ui mainline without old shell, pet, or debug workbench references.'
+fi
+
+frontend_static_mock_import_entries=()
+if [[ -d frontend/src ]]; then
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    frontend_static_mock_import_entries+=("${match}")
+  done < <(
+    grep -RIn --exclude-dir=node_modules --exclude-dir=dist \
+      --exclude='*.test.ts' \
+      --exclude='*.test.tsx' \
+      --exclude='*.spec.ts' \
+      --exclude='*.spec.tsx' \
+      --include='*.ts' \
+      --include='*.tsx' \
+      -E "from ['\"][^'\"]*mockAgentAdapter['\"]|import[[:space:]]+[^;]*mockAgentAdapter" \
+      frontend/src 2>/dev/null | grep -vE '/test/|\.test\.|\.spec\.' || true
+  )
+fi
+if ((${#frontend_static_mock_import_entries[@]} > 0)); then
+  printf '\nStatic mock Agent adapter imports found outside tests:\n' >&2
+  printf '  %s\n' "${frontend_static_mock_import_entries[@]}" >&2
+  fail 'Mock Agent adapter must remain behind explicit dynamic mock-mode loading so production cannot bundle the demo path.'
+fi
+
+critical_agent_context_files=(
+  "backend/src/agent-gateway/social-agent-intent-router.service.ts"
+  "backend/src/agent-gateway/social-agent-brain.service.ts"
+  "backend/src/agent-gateway/social-agent-planner.service.ts"
+  "backend/src/agent-gateway/social-agent-final-response.service.ts"
+  "backend/src/agent-gateway/social-agent-model-router.service.ts"
+  "backend/src/agent-gateway/social-agent-context-hydrator.service.ts"
+  "backend/src/agent-gateway/social-agent-memory-context.service.ts"
+  "backend/src/agent-gateway/social-agent-run-orchestrator.service.ts"
+  "backend/src/agent-gateway/social-agent-route-agent-loop-runner.service.ts"
+  "backend/src/agent-gateway/social-agent-context-window.ts"
+)
+critical_existing_files=()
+for critical_file in "${critical_agent_context_files[@]}"; do
+  [[ -f "${critical_file}" ]] && critical_existing_files+=("${critical_file}")
+done
+
+short_context_source_entries=()
+if ((${#critical_existing_files[@]} > 0)); then
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    short_context_source_entries+=("${match}")
+  done < <(
+    grep -nE 'contextTurnLimit[[:space:]]*[:=][[:space:]]*(8|10|40)\b|slice[[:space:]]*\([[:space:]]*-[[:space:]]*(8|10|40)[[:space:]]*\)|recentMessages[[:space:]]*:[[:space:]]*(8|10|40)\b|conversationHistory[[:space:]]*:[[:space:]]*(8|10|40)\b' \
+      "${critical_existing_files[@]}" 2>/dev/null || true
+  )
+fi
+if ((${#short_context_source_entries[@]} > 0)); then
+  printf '\nShort Agent context windows found in critical DeepSeek routes:\n' >&2
+  printf '  %s\n' "${short_context_source_entries[@]}" >&2
+  fail 'Critical Agent model routes must keep long conversation context; do not regress to 8/10/40-turn windows.'
+fi
+
+short_timeout_source_entries=()
+if ((${#critical_existing_files[@]} > 0)); then
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    short_timeout_source_entries+=("${match}")
+  done < <(
+    grep -nE 'SOCIAL_AGENT_[A-Z_]*TIMEOUT[A-Z_]*[[:space:]]*[:=][^0-9]*2500\b|timeoutMs[[:space:]]*[:=][^0-9]*2500\b|intentTimeoutMs[[:space:]]*[:=][^0-9]*2500\b|plannerTimeoutMs[[:space:]]*[:=][^0-9]*2500\b' \
+      "${critical_existing_files[@]}" 2>/dev/null || true
+  )
+fi
+if ((${#short_timeout_source_entries[@]} > 0)); then
+  printf '\nShort Agent model timeout budgets found in critical DeepSeek routes:\n' >&2
+  printf '  %s\n' "${short_timeout_source_entries[@]}" >&2
+  fail 'Critical Agent model routes must not fall back after the old 2.5s cap; use production-grade timeout budgets.'
+fi
+
 category_for_path() {
   local path="$1"
   case "${path}" in

@@ -38,13 +38,16 @@ assert_file_contains() {
 }
 
 mkdir -p "${TMP_DIR}/scripts" \
+  "${TMP_DIR}/backend/src/agent-gateway" \
   "${TMP_DIR}/backend/src/social-requests" \
   "${TMP_DIR}/docs" \
   "${TMP_DIR}/frontend/src/api" \
+  "${TMP_DIR}/frontend/src/components/agent-workspace/api" \
   "${TMP_DIR}/frontend/src/components/agent-loop" \
   "${TMP_DIR}/frontend/src/data" \
   "${TMP_DIR}/frontend/src/lib" \
   "${TMP_DIR}/frontend/src/pages" \
+  "${TMP_DIR}/frontend/src/styles" \
   "${TMP_DIR}/frontend/src/test"
 cp "${ROOT_DIR}/scripts/agent-release-worktree-audit.sh" \
   "${TMP_DIR}/scripts/agent-release-worktree-audit.sh"
@@ -214,5 +217,71 @@ if scripts/agent-release-worktree-audit.sh --review \
 fi
 assert_file_contains "${LOG_DIR}/stale-model.err" \
   'DEEPSEEK_MODEL=deepseek-v4-flash downgrades shared DeepSeek fallback paths.'
+
+git reset --hard -q HEAD
+rm -f docs/stale-agent-model.md
+cat > docs/stale-deepseek-alias.md <<'EOF'
+DEEPSEEK_MODEL=deepseek-chat
+EOF
+if scripts/agent-release-worktree-audit.sh --review \
+  > "${LOG_DIR}/stale-deepseek-alias.out" \
+  2> "${LOG_DIR}/stale-deepseek-alias.err"; then
+  fail 'review audit unexpectedly allowed a legacy DeepSeek model alias'
+fi
+assert_file_contains "${LOG_DIR}/stale-deepseek-alias.err" \
+  'DEEPSEEK_MODEL=deepseek-chat is a legacy alias.'
+
+git reset --hard -q HEAD
+rm -f docs/stale-deepseek-alias.md
+cat > frontend/src/styles/fitmeet-assistant-ui.css <<'EOF'
+.fitmeet-assistant-shell { display: grid; }
+EOF
+if scripts/agent-release-worktree-audit.sh --review \
+  > "${LOG_DIR}/legacy-source-file.out" \
+  2> "${LOG_DIR}/legacy-source-file.err"; then
+  fail 'review audit unexpectedly allowed a restored legacy assistant shell stylesheet'
+fi
+assert_file_contains "${LOG_DIR}/legacy-source-file.err" \
+  'Legacy Agent workbench/pet/custom-shell artifacts must not ship with the assistant-ui Agent mainline.'
+
+git reset --hard -q HEAD
+rm -f frontend/src/styles/fitmeet-assistant-ui.css
+cat > frontend/src/components/agent-workspace/api/prodMockLeak.ts <<'EOF'
+import { createMockAgentAdapter } from './mockAgentAdapter';
+export const prodMockLeak = createMockAgentAdapter;
+EOF
+if scripts/agent-release-worktree-audit.sh --review \
+  > "${LOG_DIR}/static-mock-import.out" \
+  2> "${LOG_DIR}/static-mock-import.err"; then
+  fail 'review audit unexpectedly allowed a static mock Agent adapter import'
+fi
+assert_file_contains "${LOG_DIR}/static-mock-import.err" \
+  'Mock Agent adapter must remain behind explicit dynamic mock-mode loading'
+
+git reset --hard -q HEAD
+rm -f frontend/src/components/agent-workspace/api/prodMockLeak.ts
+cat > backend/src/agent-gateway/social-agent-intent-router.service.ts <<'EOF'
+export const contextTurnLimit = 8;
+EOF
+if scripts/agent-release-worktree-audit.sh --review \
+  > "${LOG_DIR}/short-context.out" \
+  2> "${LOG_DIR}/short-context.err"; then
+  fail 'review audit unexpectedly allowed short DeepSeek context windows'
+fi
+assert_file_contains "${LOG_DIR}/short-context.err" \
+  'Critical Agent model routes must keep long conversation context'
+
+git reset --hard -q HEAD
+rm -f backend/src/agent-gateway/social-agent-intent-router.service.ts
+cat > backend/src/agent-gateway/social-agent-model-router.service.ts <<'EOF'
+export const intentTimeoutMs = 2500;
+EOF
+if scripts/agent-release-worktree-audit.sh --review \
+  > "${LOG_DIR}/short-timeout.out" \
+  2> "${LOG_DIR}/short-timeout.err"; then
+  fail 'review audit unexpectedly allowed short DeepSeek timeout budgets'
+fi
+assert_file_contains "${LOG_DIR}/short-timeout.err" \
+  'Critical Agent model routes must not fall back after the old 2.5s cap'
 
 printf '[OK] agent-release-worktree-audit self-test passed\n'
