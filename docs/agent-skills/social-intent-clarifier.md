@@ -40,6 +40,9 @@ Optional but useful:
 - Completed slots are hard constraints for the planner.
 - Do not ask again for completed slots unless the user modifies them.
 - Corrections update only the changed slot or preference.
+- If the user says the Agent misunderstood them, acknowledge the correction,
+  preserve completed core slots, and update public candidate preferences only
+  from public discoverable fields.
 
 ## Success Output
 
@@ -56,4 +59,5 @@ recommendations or Discover cards yet.
 
 - `ordinary_chat_no_social_tools`
 - `social_intent_extracts_slots_once`
+- `correction_updates_candidate_preference_without_reasking_core_slots`
 - `twenty_turn_memory_no_repeat_questions`

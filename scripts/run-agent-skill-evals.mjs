@@ -344,6 +344,35 @@ const validators = {
     ]);
   },
 
+  correction_updates_candidate_preference_without_reasking_core_slots(caseItem) {
+    expectCase(
+      caseItem,
+      (item) => item.expected.updatedSlots?.includes('candidate_preference'),
+      'correction must update candidate preference',
+    );
+    expectCase(
+      caseItem,
+      (item) =>
+        item.expected.mustNotAskAgain?.includes('activity') &&
+        item.expected.mustNotAskAgain?.includes('time_window') &&
+        item.expected.mustNotAskAgain?.includes('location_text'),
+      'correction must not reopen completed core slots',
+    );
+    expectCase(
+      caseItem,
+      (item) =>
+        item.expected.mustIncludePreference?.includes('女生') &&
+        item.expected.mustIncludePreference?.includes('舞蹈相关'),
+      'correction must preserve public candidate preference labels',
+    );
+    expectIncludes('stateMachineSpec', [
+      'preserves completed core slots when the user corrects only candidate preference',
+      '我说的是找个女舞蹈生散步，你到底懂没懂我的意思',
+      'candidatePreferencePolicy',
+      '公开可发现资料',
+    ]);
+  },
+
   twenty_turn_memory_no_repeat_questions(caseItem) {
     expectCase(caseItem, (item) => item.turns?.length >= 20, 'must include at least 20 turns');
     expectIncludes('stateMachineSpec', [

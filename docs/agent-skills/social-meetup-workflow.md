@@ -43,6 +43,10 @@ ordinary_chat
   Life Graph summary, pending approvals, and candidate actions.
 - Missing required slots should produce one concise clarification question.
 - Completed slots must not be asked again unless the user changes them.
+- User corrections should update only the changed slot or public candidate
+  preference. The Agent should acknowledge the correction, restate the known
+  context, and continue from the same task instead of asking for time, activity,
+  or location again.
 - During execution, the UI should show one covering status such as
   `正在整理你的约练需求...`; detailed steps stay expandable.
 - No raw chain-of-thought, raw JSON, planner internals, trace ids, private
