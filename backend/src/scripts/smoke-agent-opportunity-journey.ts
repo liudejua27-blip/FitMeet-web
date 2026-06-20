@@ -23,6 +23,9 @@
  *     clarification -> OpportunityCard readiness checks. This still writes
  *     chat/search smoke data, but avoids opener send, activity creation,
  *     review, and Life Graph proposal actions.
+ *   AGENT_SMOKE_SKIP_CORRECTION_MEMORY=true to skip the correction-memory
+ *     scenario when a smoke environment has intentionally disabled social
+ *     candidate preference extraction.
  *
  * Recommended staging flow:
  *   pnpm --dir backend run seed:agent-smoke
@@ -57,6 +60,9 @@ const SMOKE_TIME = nonEmpty(process.env.AGENT_SMOKE_TIME, '周末下午');
 const SMOKE_INTENSITY = nonEmpty(process.env.AGENT_SMOKE_INTENSITY, '轻松');
 const STOP_AFTER_OPPORTUNITIES = truthy(
   process.env.AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES,
+);
+const SKIP_CORRECTION_MEMORY = truthy(
+  process.env.AGENT_SMOKE_SKIP_CORRECTION_MEMORY,
 );
 
 let passCount = 0;
@@ -102,6 +108,14 @@ async function main() {
     ['类型', '建议', '适合', '可以', '方向'],
   );
   pass('social advice questions do not trigger candidate search');
+
+  if (SKIP_CORRECTION_MEMORY) {
+    pass(
+      'correction-memory smoke skipped by AGENT_SMOKE_SKIP_CORRECTION_MEMORY',
+    );
+  } else {
+    await assertCorrectionMemoryScenario(token, socialAdvice.taskId);
+  }
 
   const vague = await postMessageStream(token, {
     message: `我想找人一起${SMOKE_ACTIVITY}`,
@@ -441,6 +455,70 @@ async function main() {
   );
 
   console.log(`\n[agent-opportunity-smoke] PASS (${passCount} checks)`);
+}
+
+async function assertCorrectionMemoryScenario(
+  token: string,
+  existingTaskId: number | undefined,
+) {
+  const first = await postMessageStream(token, {
+    message:
+      '我想在青岛大学，今天晚上，找个女生散步，公共场所，先站内聊，发送前确认。',
+    taskId: existingTaskId,
+  });
+  assertNoPendingApproval('correction-memory first turn', first);
+  assertTaskContinuity(
+    'correction-memory first turn',
+    existingTaskId,
+    first.taskId,
+  );
+  assertTextIncludesAny(
+    'correction-memory first turn response',
+    first.assistantMessage,
+    ['青岛', '散步', '今晚', '今天晚上'],
+  );
+
+  const correction = await postMessageStream(token, {
+    message: '我说的是找个女舞蹈生散步，你到底懂没懂我的意思',
+    taskId: first.taskId ?? existingTaskId,
+  });
+  assertNoPendingApproval(
+    'correction-memory preference correction',
+    correction,
+  );
+  assertTaskContinuity(
+    'correction-memory preference correction',
+    first.taskId ?? existingTaskId,
+    correction.taskId,
+  );
+  assertTextIncludesAny(
+    'correction-memory preference correction keeps candidate preference',
+    correction.assistantMessage,
+    ['舞蹈', '舞蹈生', '舞蹈相关'],
+  );
+  assertTextIncludesAny(
+    'correction-memory preference correction keeps place/activity context',
+    correction.assistantMessage,
+    ['青岛大学', '青岛', '散步', '今晚', '今天晚上'],
+  );
+  assertTextExcludesAll(
+    'correction-memory preference correction must not restart slot filling',
+    correction.assistantMessage,
+    [
+      '今晚还是周末',
+      '今天还是周末',
+      '想在什么地方',
+      '想做什么活动',
+      '你想找什么活动',
+      '哪个城市',
+      '什么城市',
+      '先告诉我时间',
+      '告诉我你的时间',
+    ],
+  );
+  pass(
+    'candidate preference correction preserves time/place/activity and does not restart slot filling',
+  );
 }
 
 async function resolveUserToken() {
@@ -931,10 +1009,14 @@ function assertCandidateOpportunitySafetyConsent(
     opportunity.recommendationConsent ?? data.recommendationConsent,
   );
   if (consent.profileDiscoverable !== true) {
-    throw new Error(`${label} missing profileDiscoverable recommendation consent.`);
+    throw new Error(
+      `${label} missing profileDiscoverable recommendation consent.`,
+    );
   }
   if (consent.agentCanRecommendMe !== true) {
-    throw new Error(`${label} missing agentCanRecommendMe recommendation consent.`);
+    throw new Error(
+      `${label} missing agentCanRecommendMe recommendation consent.`,
+    );
   }
   const safetySignals = readStringArray(
     opportunity.discoverySafetySignals ?? data.discoverySafetySignals,
@@ -942,7 +1024,9 @@ function assertCandidateOpportunitySafetyConsent(
   const safetyText = safetySignals.join(' ');
   for (const required of ['公开可发现', 'Agent 匹配', '资料已脱敏']) {
     if (!safetyText.includes(required)) {
-      throw new Error(`${label} missing discovery safety signal "${required}".`);
+      throw new Error(
+        `${label} missing discovery safety signal "${required}".`,
+      );
     }
   }
   if (!/无拉黑|无投诉|无.*风险/.test(safetyText)) {
@@ -959,9 +1043,13 @@ function assertCandidateOpportunityRationale(
 ) {
   const rationaleSignals = [
     ...readStringArray(opportunity.coldStartSignals ?? data.coldStartSignals),
-    ...readStringArray(opportunity.preferenceHistorySignals ?? data.preferenceHistorySignals),
+    ...readStringArray(
+      opportunity.preferenceHistorySignals ?? data.preferenceHistorySignals,
+    ),
     ...readStringArray(opportunity.trustSignals ?? data.trustSignals),
-    ...readStringArray(opportunity.reasons ?? data.fitReasons ?? data.matchReasons),
+    ...readStringArray(
+      opportunity.reasons ?? data.fitReasons ?? data.matchReasons,
+    ),
     ...readStringArray(opportunity.explanationSteps ?? data.explanationSteps),
     ...readStringArray(opportunity.confirmedContext ?? data.confirmedContext),
   ];
@@ -973,7 +1061,8 @@ function assertCandidateOpportunityRationale(
     },
     {
       label: 'interest/activity',
-      pattern: /兴趣|运动|活动|跑步|羽毛球|篮球|健身|咖啡|搭子|activity|interest/i,
+      pattern:
+        /兴趣|运动|活动|跑步|羽毛球|篮球|健身|咖啡|搭子|activity|interest/i,
     },
     {
       label: 'time/window',
@@ -1016,7 +1105,9 @@ function assertActivityOpportunityProtocol(
     readString(opportunity.meetLoopNextStep ?? data.meetLoopNextStep),
     readString(opportunity.checkinReminder ?? data.checkinReminder),
     readString(opportunity.reviewPrompt ?? data.reviewPrompt),
-    readString(opportunity.lifeGraphUpdatePreview ?? data.lifeGraphUpdatePreview),
+    readString(
+      opportunity.lifeGraphUpdatePreview ?? data.lifeGraphUpdatePreview,
+    ),
     readString(opportunity.location ?? data.location ?? data.locationName),
     readString(opportunity.time ?? data.timeLabel ?? data.timePreference),
     readString(opportunity.intensity ?? data.intensity),
@@ -1045,7 +1136,8 @@ function assertActivityOpportunityProtocol(
     },
     {
       label: 'meet-loop continuity',
-      pattern: /等待回复|改期|确认到达|签到|评价|回写|Life Graph|闭环|meet loop/i,
+      pattern:
+        /等待回复|改期|确认到达|签到|评价|回写|Life Graph|闭环|meet loop/i,
     },
   ];
 
@@ -1158,6 +1250,31 @@ function assertTextIncludesAny(
   const text = value ?? '';
   if (!expected.some((item) => text.includes(item))) {
     throw new Error(`${label} missing any of: ${expected.join(', ')}`);
+  }
+}
+
+function assertTextExcludesAll(
+  label: string,
+  value: string | undefined,
+  forbidden: string[],
+) {
+  const text = value ?? '';
+  const found = forbidden.find((item) => text.includes(item));
+  if (found) {
+    throw new Error(`${label} unexpectedly included: ${found}`);
+  }
+}
+
+function assertTaskContinuity(
+  label: string,
+  expectedTaskId: number | undefined,
+  actualTaskId: number | undefined,
+) {
+  if (!expectedTaskId || !actualTaskId) return;
+  if (expectedTaskId !== actualTaskId) {
+    throw new Error(
+      `${label} created a new task instead of continuing task ${expectedTaskId}; got ${actualTaskId}.`,
+    );
   }
 }
 

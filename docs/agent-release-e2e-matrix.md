@@ -106,6 +106,10 @@ guards remain covered by an executable regression check.
 - Full remote smoke requires `AGENT_SMOKE_ALLOW_MUTATIONS=true`.
 - Readiness smoke sets `AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true` and stops
   before opener send, activity creation, review, and Life Graph proposal actions.
+- Readiness smoke also verifies a correction-memory path: when the user
+  corrects “普通散步搭子” into “女舞蹈生散步”, the Agent must preserve the
+  previously supplied time/place/activity and update candidate preference
+  instead of restarting slot filling.
 - Do not run mutating smoke with a real user account.
 - Do not package `.env.production`, SSL private keys, `frontend/qa`, `docs/qa`,
   `qa-gsap-round2`, `deploy/agent-smoke.remote.env`, or screenshot artifacts.

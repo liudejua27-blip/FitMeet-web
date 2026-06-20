@@ -446,7 +446,9 @@ Assert-FileContains "backend/src/scripts/smoke-agent-opportunity-journey.ts" @(
   "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES",
   "readiness-only smoke stopped before high-risk card actions",
   "search-critical context without over-asking stranger/public policy",
-  "assertNoPendingApproval('clarified search', clarified)"
+  "assertNoPendingApproval('clarified search', clarified)",
+  "candidate preference correction preserves time/place/activity",
+  "AGENT_SMOKE_SKIP_CORRECTION_MEMORY"
 )
 Assert-FileContains "backend/src/scripts/smoke-agent-sse-abort.ts" @(
   "AGENT_SMOKE_ALLOW_NON_SMOKE_USER",

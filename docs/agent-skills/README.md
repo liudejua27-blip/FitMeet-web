@@ -86,3 +86,9 @@ node scripts/run-agent-skill-evals.mjs --api-readiness
 node scripts/run-agent-skill-evals.mjs --api-sse-abort
 RUN_AGENT_SKILL_EVAL_API=readiness bash scripts/verify-agent-release.sh
 ```
+
+`--api-readiness` runs the real Agent opportunity smoke in
+`AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true` mode. It checks ordinary-chat
+isolation, clarification, OpportunityCard readiness, and the correction-memory
+path where a user updates candidate preference without losing the already
+answered time/place/activity slots.
