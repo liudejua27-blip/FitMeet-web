@@ -139,6 +139,7 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-fallback-source-boundary.spec.ts \
   src/agent-gateway/social-agent-final-response.service.spec.ts \
   src/agent-gateway/social-agent-planner.service.spec.ts \
+  src/agent-gateway/social-agent-route-entrance.service.spec.ts \
   src/agent-gateway/social-agent-route-search-turn.service.spec.ts \
   src/agent-gateway/social-agent-model-router.service.spec.ts \
   src/agent-gateway/match-reasoner.service.spec.ts \
@@ -175,6 +176,8 @@ pnpm --dir "${ROOT_DIR}/frontend" exec vitest run \
   src/test/discoverContent.test.ts \
   src/test/socialAgentApiCheckpointStream.test.ts \
   src/test/socialAgentApiReplay.test.ts \
+  src/test/socialCodexThreadId.test.ts \
+  src/test/buildAgentAssistantProps.test.ts \
   src/test/toolProcessModel.test.ts \
   src/test/toolUiSchema.test.ts \
   --testTimeout=20000 \
