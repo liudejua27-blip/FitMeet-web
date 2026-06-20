@@ -8,7 +8,7 @@ import {
   resolveAgentAdapterMode,
   type AgentStreamEvent,
 } from '../components/agent-workspace/api';
-import { createMockAgentAdapter } from '../components/agent-workspace/api/mockAgentAdapter';
+import { createMockAgentAdapter } from '../dev/agent/mockAgentAdapter';
 
 describe('Agent adapter layer', () => {
   it('keeps production on the real adapter even when mock env flags are misconfigured', () => {

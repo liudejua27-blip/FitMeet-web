@@ -29,7 +29,7 @@ export function createAgentAdapter(
 
 const loadDevelopmentMockAgentAdapter = import.meta.env.DEV
   ? async () => {
-      const module = await import('./mockAgentAdapter');
+      const module = await import('../../../dev/agent/mockAgentAdapter');
       return module.createMockAgentAdapter();
     }
   : null;

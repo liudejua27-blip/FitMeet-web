@@ -241,7 +241,7 @@ describe('Agent user route isolation', () => {
   it('keeps the mock Agent adapter isolated to development-only loading', () => {
     const allowedFiles = new Set([
       'components/agent-workspace/api/createAgentAdapter.ts',
-      'components/agent-workspace/api/mockAgentAdapter.ts',
+      'dev/agent/mockAgentAdapter.ts',
     ]);
     const offenders = collectSourceFiles(srcRoot)
       .filter((file) => !relative(srcRoot, file).replace(/\\/g, '/').startsWith('test/'))
@@ -263,9 +263,11 @@ describe('Agent user route isolation', () => {
     const createAgentAdapterSource = readSource(
       join('components', 'agent-workspace', 'api', 'createAgentAdapter.ts'),
     );
+    expect(existsSync(join(srcRoot, 'components', 'agent-workspace', 'api', 'mockAgentAdapter.ts'))).toBe(false);
+    expect(existsSync(join(srcRoot, 'dev', 'agent', 'mockAgentAdapter.ts'))).toBe(true);
     expect(createAgentAdapterSource).toContain('const loadDevelopmentMockAgentAdapter = import.meta.env.DEV');
     expect(createAgentAdapterSource).toContain('if (IS_PRODUCTION_AGENT_BUNDLE) return createRealAgentAdapter();');
-    expect(createAgentAdapterSource).toContain("import('./mockAgentAdapter')");
+    expect(createAgentAdapterSource).toContain("import('../../../dev/agent/mockAgentAdapter')");
     expect(createAgentAdapterSource).toContain('Agent mock adapter is disabled in production builds.');
     expect(createAgentAdapterSource).not.toContain("from './mockAgentAdapter'");
     expect(offenders).toEqual([]);

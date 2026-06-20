@@ -1,14 +1,14 @@
 import type {
   FitMeetAlphaCard,
   UserFacingAgentResponse,
-} from '../../../api/socialAgentApi';
-import type { AgentAdapter } from './agentAdapter.types';
+} from '../../api/socialAgentApi';
+import type { AgentAdapter } from '../../components/agent-workspace/api/agentAdapter.types';
 import type {
   AgentActionRequest,
   AgentLifecycle,
   AgentRunResponse,
   AgentStreamEvent,
-} from './agentApi.types';
+} from '../../components/agent-workspace/api/agentApi.types';
 
 const MOCK_TASK_ID = 9001;
 const MOCK_AGENT_LABELS = {
