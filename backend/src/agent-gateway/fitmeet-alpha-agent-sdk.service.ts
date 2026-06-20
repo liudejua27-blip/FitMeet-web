@@ -578,6 +578,11 @@ export class FitMeetAlphaAgentSdkService {
       });
     }
 
+    if ((input.candidates ?? []).length === 0 && draft) {
+      const emptyStateCard = this.emptyCandidateRecoveryCard(taskId, draft);
+      if (emptyStateCard) cards.push(emptyStateCard);
+    }
+
     if (draft && hasOpportunityCardRoom()) {
       const city = this.text(draft.city) || '同城';
       const activityType = this.text(draft.activityType) || '活动';
@@ -746,6 +751,148 @@ export class FitMeetAlphaAgentSdkService {
     }
 
     return cards;
+  }
+
+  private emptyCandidateRecoveryCard(
+    taskId: number,
+    draft: Record<string, unknown>,
+  ): FitMeetAlphaCard | null {
+    const activityType = this.text(draft.activityType) || '活动';
+    const city = this.text(draft.city) || '同城';
+    const timePreference =
+      this.text(draft.timePreference ?? draft.preferredTime) || '时间待确认';
+    const locationName =
+      this.text(draft.locationName ?? draft.location) || `${city}的公共场所`;
+    const candidatePreference =
+      this.text(draft.candidatePreference ?? draft.targetPreference) ||
+      this.text(draft.idealType) ||
+      '';
+    const criteria = this.uniqueStrings([
+      activityType,
+      city,
+      locationName,
+      timePreference,
+      candidatePreference,
+    ]).slice(0, 5);
+    const summary =
+      criteria.length > 0
+        ? `我已经按「${criteria.join('、')}」查过一轮，没有找到真实、公开可发现且符合安全边界的人。`
+        : '我已经按当前条件查过一轮，没有找到真实、公开可发现且符合安全边界的人。';
+
+    return {
+      id: `candidate_empty_state:${taskId}`,
+      type: 'candidate_empty_state',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'social_match.empty',
+      title: '暂时没有找到合适的人',
+      body: `${summary}我不会用假候选凑数。可以先发布到发现，或放宽范围、时间、偏好后再查。`,
+      status: 'ready',
+      data: {
+        taskId,
+        schemaName: 'CandidateEmptyStateCard',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'social_match.empty',
+        reason: 'no_real_candidates',
+        summary,
+        criteria,
+        recoveryOptions: [
+          {
+            key: 'publish_to_discover',
+            label: '发布到发现',
+            detail: '把这张约练卡公开给符合公开可发现条件的人看见；发布前仍需要你确认。',
+            requiresConfirmation: true,
+          },
+          {
+            key: 'expand_radius',
+            label: '扩大范围',
+            detail: '扩大到更大的同城范围，继续只使用公开可发现资料。',
+            requiresConfirmation: false,
+          },
+          {
+            key: 'change_time',
+            label: '换个时间',
+            detail: '保留活动和地点，把时间改成更容易匹配的窗口。',
+            requiresConfirmation: false,
+          },
+          {
+            key: 'relax_preference',
+            label: '放宽偏好',
+            detail: '保留安全边界，先放宽非必要偏好再搜索。',
+            requiresConfirmation: false,
+          },
+        ],
+        safetyBoundary:
+          '不会编造候选；不会读取非公开隐私；发送邀请、公开精确位置或交换联系方式前必须确认。',
+        nextBestStep: '建议先发布到发现，或选择扩大范围后重新搜索。',
+      },
+      actions: [
+        {
+          id: 'publish_to_discover',
+          label: '发布到发现',
+          action: 'activity.confirm_create',
+          schemaAction: 'activity.confirm_create',
+          loopStage: 'activity_draft_created',
+          requiresConfirmation: true,
+          payload: {
+            taskId,
+            socialRequestDraft: draft,
+            approvalRequired: true,
+            checkpointRequired: true,
+            resumeMode: 'resume_after_approval',
+            recoveryMode: 'publish_to_discover',
+            sideEffect: 'publish_public_intent',
+            riskLevel: 'medium',
+            riskReasons: [
+              '这一步会公开约练卡',
+              '公开前需要确认展示内容和位置边界',
+              '不会公开联系方式或精确位置',
+            ],
+          },
+        },
+        {
+          id: 'expand_radius',
+          label: '扩大范围再找',
+          action: 'see_more',
+          schemaAction: 'candidate.more_like_this',
+          loopStage: 'candidate_recommendation',
+          requiresConfirmation: false,
+          payload: {
+            taskId,
+            recoveryMode: 'expand_radius',
+            socialRequestDraft: draft,
+            sideEffect: 'search_only',
+          },
+        },
+        {
+          id: 'change_time',
+          label: '换个时间',
+          action: 'activity.modify_time',
+          schemaAction: 'activity.modify_time',
+          loopStage: 'activity_draft_created',
+          requiresConfirmation: false,
+          payload: {
+            taskId,
+            recoveryMode: 'change_time',
+            socialRequestDraft: draft,
+            sideEffect: 'draft_only',
+          },
+        },
+        {
+          id: 'relax_preference',
+          label: '放宽偏好',
+          action: 'see_more',
+          schemaAction: 'candidate.more_like_this',
+          loopStage: 'candidate_recommendation',
+          requiresConfirmation: false,
+          payload: {
+            taskId,
+            recoveryMode: 'relax_preference',
+            socialRequestDraft: draft,
+            sideEffect: 'search_only',
+          },
+        },
+      ],
+    };
   }
 
   private subagentObservations(

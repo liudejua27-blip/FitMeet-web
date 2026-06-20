@@ -439,6 +439,89 @@ describe('FitMeetAlphaAgentSdkService', () => {
     });
   });
 
+  it('builds a recovery card instead of fake candidates when real candidate search is empty', () => {
+    const service = new FitMeetAlphaAgentSdkService(config);
+
+    const cards = service.buildResultCards({
+      taskId: 42,
+      socialRequestDraft: {
+        description: '今晚在青岛大学附近找舞蹈生散步',
+        city: '青岛',
+        activityType: '散步',
+        timePreference: '今天晚上',
+        locationName: '青岛大学附近',
+        candidatePreference: '公开资料里有舞蹈相关标签的女生优先',
+      },
+      candidates: [],
+      approvalRequiredActions: [],
+    });
+
+    const emptyCard = cards.find(
+      (card) => card.type === 'candidate_empty_state',
+    );
+
+    expect(emptyCard).toMatchObject({
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'social_match.empty',
+      title: '暂时没有找到合适的人',
+      status: 'ready',
+      data: expect.objectContaining({
+        schemaName: 'CandidateEmptyStateCard',
+        schemaType: 'social_match.empty',
+        reason: 'no_real_candidates',
+        criteria: expect.arrayContaining([
+          '散步',
+          '青岛',
+          '青岛大学附近',
+          '今天晚上',
+          '公开资料里有舞蹈相关标签的女生优先',
+        ]),
+        recoveryOptions: expect.arrayContaining([
+          expect.objectContaining({
+            key: 'publish_to_discover',
+            label: '发布到发现',
+            requiresConfirmation: true,
+          }),
+          expect.objectContaining({
+            key: 'expand_radius',
+            label: '扩大范围',
+          }),
+          expect.objectContaining({
+            key: 'change_time',
+            label: '换个时间',
+          }),
+        ]),
+        safetyBoundary: expect.stringContaining('不会编造候选'),
+      }),
+      actions: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'publish_to_discover',
+          schemaAction: 'activity.confirm_create',
+          requiresConfirmation: true,
+          payload: expect.objectContaining({
+            approvalRequired: true,
+            checkpointRequired: true,
+            sideEffect: 'publish_public_intent',
+          }),
+        }),
+        expect.objectContaining({
+          id: 'expand_radius',
+          schemaAction: 'candidate.more_like_this',
+          requiresConfirmation: false,
+        }),
+        expect.objectContaining({
+          id: 'change_time',
+          schemaAction: 'activity.modify_time',
+          requiresConfirmation: false,
+        }),
+      ]),
+    });
+    expect(emptyCard?.body).toContain('不会用假候选凑数');
+    expect(cards.filter((card) => card.type === 'candidate_card')).toHaveLength(
+      0,
+    );
+  });
+
   it('limits user-visible opportunity cards to three while keeping safety and audit cards', () => {
     const service = new FitMeetAlphaAgentSdkService(config);
 

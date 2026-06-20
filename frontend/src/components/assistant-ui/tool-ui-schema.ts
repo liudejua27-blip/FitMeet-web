@@ -1,6 +1,7 @@
 export type ToolUISchemaType =
   | 'social_match.candidate'
   | 'social_match.activity'
+  | 'social_match.empty'
   | 'life_graph.diff'
   | 'meet_loop.timeline'
   | 'safety.approval'
@@ -9,6 +10,7 @@ export type ToolUISchemaType =
 export type ToolUIProductComponent =
   | 'CandidateCards'
   | 'OpportunityCard'
+  | 'CandidateEmptyStateCard'
   | 'LifeGraphDiffCard'
   | 'MeetLoopTimeline'
   | 'ApprovalPanel'
@@ -64,6 +66,7 @@ export type ToolUICardCollectionSummary = {
   title: string;
   detail: string;
   candidateCount: number;
+  emptyCount: number;
   opportunityCount: number;
   approvalCount: number;
   lifeGraphDiffCount: number;
@@ -163,6 +166,22 @@ export type ActivityProtocolItemView = {
   key: string;
   label: string;
   detail: string;
+};
+
+export type CandidateEmptyStateRecoveryOptionView = {
+  key: string;
+  label: string;
+  detail: string;
+  requiresConfirmation: boolean;
+};
+
+export type CandidateEmptyStateView = {
+  title: string;
+  summary: string;
+  criteria: string[];
+  recoveryOptions: CandidateEmptyStateRecoveryOptionView[];
+  safetyBoundary: string | null;
+  nextBestStep: string | null;
 };
 
 export type DefaultOpportunityActionStep = {
@@ -295,6 +314,7 @@ export function productComponentForSchemaType(
 ): ToolUIProductComponent {
   if (schemaType === 'social_match.candidate') return 'CandidateCards';
   if (schemaType === 'social_match.activity') return 'OpportunityCard';
+  if (schemaType === 'social_match.empty') return 'CandidateEmptyStateCard';
   if (schemaType === 'life_graph.diff') return 'LifeGraphDiffCard';
   if (schemaType === 'meet_loop.timeline') return 'MeetLoopTimeline';
   if (schemaType === 'safety.approval') return 'ApprovalPanel';
@@ -307,6 +327,7 @@ export function summarizeToolUICardCollection(
   const candidateCount = cards.filter(
     (card) => card.schemaType === 'social_match.candidate',
   ).length;
+  const emptyCount = cards.filter((card) => card.schemaType === 'social_match.empty').length;
   const activityCount = cards.filter(
     (card) => card.schemaType === 'social_match.activity',
   ).length;
@@ -322,6 +343,7 @@ export function summarizeToolUICardCollection(
   );
   const titleParts = [
     candidateCount > 0 ? `${candidateCount} 个候选` : null,
+    emptyCount > 0 ? `${emptyCount} 个恢复建议` : null,
     activityCount > 0 ? `${activityCount} 张约练卡` : null,
     meetLoopCount > 0 ? `${meetLoopCount} 个约练进展` : null,
     lifeGraphDiffCount > 0 ? `${lifeGraphDiffCount} 条画像建议` : null,
@@ -331,6 +353,8 @@ export function summarizeToolUICardCollection(
   const detail =
     opportunityCount > 0
       ? '候选、约练和真实动作都按结构化卡片展示；涉及连接、发送或公开时会先确认。'
+      : emptyCount > 0
+        ? '没有真实候选时，不会编造结果；你可以选择发布到发现、扩大范围或调整时间。'
       : approvalCount > 0
         ? '这一步涉及真实动作或隐私边界，确认前不会自动执行。'
         : lifeGraphDiffCount > 0
@@ -343,6 +367,7 @@ export function summarizeToolUICardCollection(
     title,
     detail,
     candidateCount,
+    emptyCount,
     opportunityCount,
     approvalCount,
     lifeGraphDiffCount,
@@ -378,6 +403,7 @@ export function normalizeCardActions(value: unknown): AssistantCardAction[] {
 export function schemaDefaultTitle(schemaType: ToolUISchemaType) {
   if (schemaType === 'social_match.candidate') return '候选机会';
   if (schemaType === 'social_match.activity') return '活动机会';
+  if (schemaType === 'social_match.empty') return '暂时没有找到合适的人';
   if (schemaType === 'life_graph.diff') return '画像更新建议';
   if (schemaType === 'meet_loop.timeline') return '约练进展';
   if (schemaType === 'safety.approval') return '安全确认';
@@ -389,6 +415,7 @@ export function toolUISchemaTypeFromUnknown(value: unknown): ToolUISchemaType | 
   if (
     text === 'social_match.candidate' ||
     text === 'social_match.activity' ||
+    text === 'social_match.empty' ||
     text === 'life_graph.diff' ||
     text === 'meet_loop.timeline' ||
     text === 'safety.approval' ||
@@ -467,6 +494,7 @@ function legacyActionRequiresConfirmation(
 
 export function schemaTypeFromLegacyCardType(type: string): ToolUISchemaType {
   if (type === 'candidate_card') return 'social_match.candidate';
+  if (type === 'candidate_empty_state') return 'social_match.empty';
   if (type === 'activity_plan' || type === 'activity_status') return 'social_match.activity';
   if (type === 'profile_proposal' || type === 'audit_update') return 'life_graph.diff';
   if (type === 'checkin_card' || type === 'review_card') return 'meet_loop.timeline';
@@ -492,7 +520,35 @@ export function defaultOpportunityActionsForSchema(
       { schemaAction: 'activity.confirm_create', requiresConfirmation: true, source: 'default' },
     ];
   }
+  if (schemaType === 'social_match.empty') {
+    return [
+      { schemaAction: 'activity.confirm_create', requiresConfirmation: true, source: 'default' },
+      { schemaAction: 'candidate.more_like_this', requiresConfirmation: false, source: 'default' },
+      { schemaAction: 'activity.modify_time', requiresConfirmation: false, source: 'default' },
+    ];
+  }
   return [];
+}
+
+export function normalizeCandidateEmptyStateView(
+  card: SchemaDrivenAssistantCard,
+): CandidateEmptyStateView {
+  const recoveryOptions = normalizeCandidateEmptyRecoveryOptions(card.data.recoveryOptions);
+  return {
+    title: card.title || '暂时没有找到合适的人',
+    summary:
+      card.body ??
+      publicDetail(card.data.summary) ??
+      '这次没有找到真实、公开可发现且符合安全边界的人；我不会用假候选凑数。',
+    criteria: publicStringArray(card.data.criteria).slice(0, 5),
+    recoveryOptions,
+    safetyBoundary:
+      publicDetail(card.data.safetyBoundary) ??
+      '不会编造候选；发送邀请、公开位置或交换联系方式前必须确认。',
+    nextBestStep:
+      publicDetail(card.data.nextBestStep) ??
+      '建议先发布到发现，或放宽范围后重新搜索。',
+  };
 }
 
 export function normalizeCandidateOpportunityView(
@@ -758,6 +814,51 @@ function normalizeCandidateRecommendationProtocol(
     })
     .filter((item): item is CandidateRecommendationProtocolItemView => Boolean(item))
     .slice(0, 5);
+}
+
+function normalizeCandidateEmptyRecoveryOptions(
+  value: unknown,
+): CandidateEmptyStateRecoveryOptionView[] {
+  if (!Array.isArray(value)) return defaultCandidateEmptyRecoveryOptions();
+  const options = value
+    .filter(isRecord)
+    .map((item, index) => {
+      const label = publicDetail(item.label);
+      const detail = publicDetail(item.detail ?? item.value ?? item.description);
+      if (!label || !detail) return null;
+      return {
+        key: publicString(item.key) ?? `recovery-${index}`,
+        label,
+        detail,
+        requiresConfirmation: item.requiresConfirmation === true,
+      };
+    })
+    .filter((item): item is CandidateEmptyStateRecoveryOptionView => Boolean(item))
+    .slice(0, 4);
+  return options.length > 0 ? options : defaultCandidateEmptyRecoveryOptions();
+}
+
+function defaultCandidateEmptyRecoveryOptions(): CandidateEmptyStateRecoveryOptionView[] {
+  return [
+    {
+      key: 'publish_to_discover',
+      label: '发布到发现',
+      detail: '让公开可发现的人看到你的约练卡；发布前仍需要确认。',
+      requiresConfirmation: true,
+    },
+    {
+      key: 'expand_radius',
+      label: '扩大范围',
+      detail: '扩大同城范围后继续搜索真实公开资料。',
+      requiresConfirmation: false,
+    },
+    {
+      key: 'change_time',
+      label: '换个时间',
+      detail: '保留活动和地点，把时间换成更容易匹配的窗口。',
+      requiresConfirmation: false,
+    },
+  ];
 }
 
 function candidateRecommendationProtocol(

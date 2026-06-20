@@ -34,6 +34,7 @@ export function ToolUICardCollectionBlock({
       data-schema-version="fitmeet.tool-ui.v1"
       data-product-components={collection.components.join(',')}
       data-candidate-count={collection.candidateCount}
+      data-empty-count={collection.emptyCount}
       data-opportunity-count={collection.opportunityCount}
       data-approval-count={collection.approvalCount}
       data-life-graph-diff-count={collection.lifeGraphDiffCount}

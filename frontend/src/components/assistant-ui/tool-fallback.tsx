@@ -61,6 +61,11 @@ const LazyCandidateResultCard = lazy(() =>
 const LazyActivityOpportunityCard = lazy(() =>
   import('./tool-activity-card').then((module) => ({ default: module.ActivityOpportunityCard })),
 );
+const LazyCandidateEmptyStateCard = lazy(() =>
+  import('./tool-candidate-empty-card').then((module) => ({
+    default: module.CandidateEmptyStateCard,
+  })),
+);
 const LazyLifeGraphDiffCard = lazy(() =>
   import('./tool-life-graph-card').then((module) => ({ default: module.LifeGraphDiffCard })),
 );
@@ -74,6 +79,7 @@ const LazySafetyResultCard = lazy(() =>
 const ASSISTANT_CARD_RENDERERS: Record<ToolUISchemaType, ToolUICardRenderer> = {
   'social_match.candidate': CandidateResultCard,
   'social_match.activity': ActivityOpportunityCard,
+  'social_match.empty': CandidateEmptyStateCard,
   'life_graph.diff': LifeGraphDiffCard,
   'meet_loop.timeline': MeetLoopResultCard,
   'safety.approval': SafetyResultCard,
@@ -139,6 +145,14 @@ function ActivityOpportunityCard({ card }: { card: SchemaDrivenAssistantCard }) 
   return (
     <Suspense fallback={<GenericResultCard card={card} />}>
       <LazyActivityOpportunityCard card={card} />
+    </Suspense>
+  );
+}
+
+function CandidateEmptyStateCard({ card }: { card: SchemaDrivenAssistantCard }) {
+  return (
+    <Suspense fallback={<GenericResultCard card={card} />}>
+      <LazyCandidateEmptyStateCard card={card} />
     </Suspense>
   );
 }

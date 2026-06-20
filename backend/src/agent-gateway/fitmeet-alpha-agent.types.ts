@@ -15,7 +15,8 @@ export type FitMeetAlphaCardType =
   | 'checkin_card'
   | 'review_card'
   | 'audit_update'
-  | 'safety_boundary';
+  | 'safety_boundary'
+  | 'candidate_empty_state';
 
 export type FitMeetAgentLoopStage =
   | 'social_search'
@@ -91,6 +92,7 @@ export interface FitMeetAlphaCard {
   schemaType?:
     | 'social_match.candidate'
     | 'social_match.activity'
+    | 'social_match.empty'
     | 'life_graph.diff'
     | 'meet_loop.timeline'
     | 'safety.approval'

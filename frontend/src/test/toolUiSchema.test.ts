@@ -8,6 +8,7 @@ import {
   isCanonicalAssistantCard,
   normalizeAssistantCard,
   normalizeActivityOpportunityView,
+  normalizeCandidateEmptyStateView,
   normalizeCandidateOpportunityView,
   normalizeGenericCardView,
   normalizeLifeGraphDiffView,
@@ -33,6 +34,7 @@ describe('tool-ui-schema', () => {
   it('maps stable schemas to product Tool UI components and collection copy', () => {
     expect(productComponentForSchemaType('social_match.candidate')).toBe('CandidateCards');
     expect(productComponentForSchemaType('social_match.activity')).toBe('OpportunityCard');
+    expect(productComponentForSchemaType('social_match.empty')).toBe('CandidateEmptyStateCard');
     expect(productComponentForSchemaType('life_graph.diff')).toBe('LifeGraphDiffCard');
     expect(productComponentForSchemaType('meet_loop.timeline')).toBe('MeetLoopTimeline');
     expect(productComponentForSchemaType('safety.approval')).toBe('ApprovalPanel');
@@ -60,6 +62,16 @@ describe('tool-ui-schema', () => {
       }),
       normalizeAssistantCard({
         schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'social_match.empty',
+        title: '暂时没有找到合适的人',
+        data: {
+          schemaName: 'CandidateEmptyStateCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'social_match.empty',
+        },
+      }),
+      normalizeAssistantCard({
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
         schemaType: 'social_match.activity',
         title: '约练卡',
         data: {
@@ -81,11 +93,17 @@ describe('tool-ui-schema', () => {
     ];
 
     expect(summarizeToolUICardCollection(cards)).toMatchObject({
-      title: '2 个候选 · 1 张约练卡 · 1 个确认',
+      title: '2 个候选 · 1 个恢复建议 · 1 张约练卡 · 1 个确认',
       candidateCount: 2,
+      emptyCount: 1,
       opportunityCount: 3,
       approvalCount: 1,
-      components: ['CandidateCards', 'OpportunityCard', 'ApprovalPanel'],
+      components: [
+        'CandidateCards',
+        'CandidateEmptyStateCard',
+        'OpportunityCard',
+        'ApprovalPanel',
+      ],
     });
     expect(summarizeToolUICardCollection(cards).detail).toContain('结构化卡片');
   });
@@ -131,6 +149,72 @@ describe('tool-ui-schema', () => {
       },
     ]);
     expect(defaultOpportunityActionsForSchema('life_graph.diff')).toEqual([]);
+  });
+
+  it('normalizes candidate empty-state recovery cards without fake candidate data', () => {
+    const card = normalizeAssistantCard({
+      type: 'candidate_empty_state',
+      schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+      schemaType: 'social_match.empty',
+      title: '暂时没有找到合适的人',
+      body: 'tool_call raw JSON traceId planner debug 没有真实候选，我不会编造候选。',
+      data: {
+        schemaName: 'CandidateEmptyStateCard',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'social_match.empty',
+        criteria: ['青岛大学', '今天晚上', '散步'],
+        recoveryOptions: [
+          {
+            key: 'publish_to_discover',
+            label: '发布到发现',
+            detail: '公开前仍需要你确认。',
+            requiresConfirmation: true,
+          },
+          {
+            key: 'expand_radius',
+            label: '扩大范围',
+            detail: '只搜索公开可发现资料。',
+          },
+        ],
+        safetyBoundary: 'traceId planner debug 不会编造候选；不会公开联系方式。',
+        nextBestStep: '先发布到发现，或者扩大范围再查。',
+      },
+      actions: [
+        {
+          id: 'publish',
+          label: '发布到发现',
+          schemaAction: 'activity.confirm_create',
+          requiresConfirmation: true,
+          payload: { taskId: 1 },
+        },
+      ],
+    });
+
+    const view = normalizeCandidateEmptyStateView(card);
+
+    expect(card.schemaType).toBe('social_match.empty');
+    expect(schemaTypeFromLegacyCardType('candidate_empty_state')).toBe('social_match.empty');
+    expect(toolUISchemaTypeFromUnknown('social_match.empty')).toBe('social_match.empty');
+    expect(isCanonicalAssistantCard(card)).toBe(true);
+    expect(view.criteria).toEqual(['青岛大学', '今天晚上', '散步']);
+    expect(view.recoveryOptions).toEqual([
+      {
+        key: 'publish_to_discover',
+        label: '发布到发现',
+        detail: '公开前仍需要你确认。',
+        requiresConfirmation: true,
+      },
+      {
+        key: 'expand_radius',
+        label: '扩大范围',
+        detail: '只搜索公开可发现资料。',
+        requiresConfirmation: false,
+      },
+    ]);
+    expect(JSON.stringify(view)).not.toMatch(
+      /tool[_\s-]?call|traceId|planner|raw JSON|debug/i,
+    );
+    expect(JSON.stringify(view)).toContain('不会编造候选');
   });
 
   it('normalizes public schema cards without leaking technical wording', () => {
