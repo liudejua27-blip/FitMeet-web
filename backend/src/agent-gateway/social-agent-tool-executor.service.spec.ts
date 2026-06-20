@@ -431,6 +431,24 @@ describe('SocialAgentToolExecutorService', () => {
     }
   });
 
+  it('blocks admin debug tools from user-facing adhoc task actions', async () => {
+    const { service, taskRepo, candidatePool } = makeService();
+
+    await expect(
+      service.executeToolAction(
+        100,
+        SocialAgentToolName.GetCandidatePoolDebug,
+        {},
+        1,
+      ),
+    ).rejects.toThrow(
+      'Admin/debug tools cannot be executed from user-facing Agent task actions.',
+    );
+
+    expect(taskRepo.findOne).not.toHaveBeenCalled();
+    expect(candidatePool.debugCandidatePool).not.toHaveBeenCalled();
+  });
+
   it('does not execute skipped planner recovery steps after DeepSeek planning degrades', async () => {
     const { service, taskRepo, candidatePool, messages, approvals } =
       makeService();

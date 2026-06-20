@@ -737,6 +737,11 @@ export class SocialAgentToolExecutorService {
     if (!normalizedToolName) {
       throw new BadRequestException(`Unknown tool ${String(toolName)}`);
     }
+    if (this.isAdminDebugTool(normalizedToolName)) {
+      throw new ForbiddenException(
+        'Admin/debug tools cannot be executed from user-facing Agent task actions.',
+      );
+    }
 
     let didRun = false;
     let actionResult: SocialAgentToolCallRecord | null = null;
@@ -910,6 +915,10 @@ export class SocialAgentToolExecutorService {
       return 'Meet Loop Agent';
     }
     return 'FitMeet Main Agent';
+  }
+
+  private isAdminDebugTool(toolName: SocialAgentToolName): boolean {
+    return toolName === SocialAgentToolName.GetCandidatePoolDebug;
   }
 
   private toolActionLoopInput(

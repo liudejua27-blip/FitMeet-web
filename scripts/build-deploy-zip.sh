@@ -454,6 +454,7 @@ require_file_contains "scripts/verify-agent-release.sh" "fitmeet-subagent-worker
 require_file_contains "scripts/verify-agent-release.sh" "subagent-worker.cli.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "subagent-worker-queue.service.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-tool-execution-policy.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "fitmeet-agent-tool-registry.controller.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-tool-executor.service.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-tool-json-model.service.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-tool-model.spec.ts"

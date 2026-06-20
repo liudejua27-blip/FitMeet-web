@@ -3,6 +3,7 @@ import { AuthGuard } from '@nestjs/passport';
 
 import {
   FitMeetAgentToolCategory,
+  type FitMeetAgentToolRegistryManifest,
   FitMeetAgentToolRegistryFilter,
   FitMeetAgentToolRegistryService,
 } from './fitmeet-agent-tool-registry.service';
@@ -38,6 +39,23 @@ function registryFilter(input: {
   return filter;
 }
 
+function stripAdminDebugTools(
+  manifest: FitMeetAgentToolRegistryManifest,
+): FitMeetAgentToolRegistryManifest {
+  return {
+    ...manifest,
+    categories: manifest.categories.filter(
+      (category) => category.id !== FitMeetAgentToolCategory.AdminDebug,
+    ),
+    tools: manifest.tools.filter(
+      (tool) => tool.category !== FitMeetAgentToolCategory.AdminDebug,
+    ),
+    modelTools: manifest.modelTools.filter(
+      (tool) => tool.category !== FitMeetAgentToolCategory.AdminDebug,
+    ),
+  };
+}
+
 @Controller('social-agent/tools')
 @UseGuards(AuthGuard('jwt'))
 export class FitMeetAgentToolRegistryUserController {
@@ -49,8 +67,10 @@ export class FitMeetAgentToolRegistryUserController {
     @Query('permissionMode') permissionMode?: string,
     @Query('plannerOnly') plannerOnly?: string,
   ) {
-    return this.registry.getManifest(
-      registryFilter({ category, permissionMode, plannerOnly }),
+    return stripAdminDebugTools(
+      this.registry.getManifest(
+        registryFilter({ category, permissionMode, plannerOnly }),
+      ),
     );
   }
 }
@@ -66,8 +86,10 @@ export class FitMeetAgentToolRegistryAgentController {
     @Query('permissionMode') permissionMode?: string,
     @Query('plannerOnly') plannerOnly?: string,
   ) {
-    return this.registry.getManifest(
-      registryFilter({ category, permissionMode, plannerOnly }),
+    return stripAdminDebugTools(
+      this.registry.getManifest(
+        registryFilter({ category, permissionMode, plannerOnly }),
+      ),
     );
   }
 }

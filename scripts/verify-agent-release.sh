@@ -271,6 +271,7 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-tool-execution-state.spec.ts \
   src/agent-gateway/social-agent-tool-execution-policy.service.spec.ts \
   src/agent-gateway/social-agent-tool-execution-summary.spec.ts \
+  src/agent-gateway/fitmeet-agent-tool-registry.controller.spec.ts \
   src/agent-gateway/social-agent-tool-executor.service.spec.ts \
   src/agent-gateway/social-agent-tool-json-model.service.spec.ts \
   src/agent-gateway/social-agent-tool-model.spec.ts \

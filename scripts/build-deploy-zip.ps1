@@ -539,6 +539,7 @@ Assert-FileContains "scripts/verify-agent-release.sh" @(
   "fitmeet-subagent-worker.service.spec.ts",
   "subagent-worker-queue.service.spec.ts",
   "social-agent-tool-execution-policy.service.spec.ts",
+  "fitmeet-agent-tool-registry.controller.spec.ts",
   "social-agent-tool-executor.service.spec.ts",
   "social-agent-tool-json-model.service.spec.ts",
   "social-agent-tool-model.spec.ts",
