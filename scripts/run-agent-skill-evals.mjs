@@ -6,7 +6,12 @@ import process from 'node:process';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const evalFile = path.join(root, 'docs', 'agent-skills', 'eval-cases.jsonl');
+const workflowFile = path.join(root, 'docs', 'agent-skills', 'social-meetup-workflow.md');
+const toolExamplesFile = path.join(root, 'docs', 'agent-skills', 'tool-examples.jsonl');
 const args = new Set(process.argv.slice(2));
+const reportArgIndex = process.argv.findIndex((arg) => arg === '--report');
+const reportFile =
+  reportArgIndex >= 0 ? process.argv[reportArgIndex + 1] : undefined;
 const supportedApiFlags = [
   '--api-readiness',
   '--api-full',
@@ -14,7 +19,7 @@ const supportedApiFlags = [
   '--api-all',
 ];
 if (args.has('--help') || args.has('-h')) {
-  console.log(`Usage: node scripts/run-agent-skill-evals.mjs [--backend] [--show-details] [${supportedApiFlags.join('|')}]
+  console.log(`Usage: node scripts/run-agent-skill-evals.mjs [--backend] [--show-details] [--report FILE] [${supportedApiFlags.join('|')}]
 
 Default mode validates FitMeet skill eval cases against project contracts and
 evidence files. --backend also runs the critical Jest assertions. API modes run
@@ -24,6 +29,10 @@ FITMEET_API_BASE_URL, API_BASE_URL, or http://localhost:3000/api.
 API modes require USER_JWT/FITMEET_USER_JWT or AGENT_SMOKE_EMAIL/PASSWORD.
 Remote targets also require the existing AGENT_SMOKE_ALLOW_* safety flags.`);
   process.exit(0);
+}
+if (reportArgIndex >= 0 && (!reportFile || reportFile.startsWith('--'))) {
+  console.error('[FAIL] --report requires a file path');
+  process.exit(1);
 }
 const runBackend = args.has('--backend');
 const showDetails = args.has('--show-details');
@@ -71,6 +80,8 @@ const sourceFiles = {
 const sourceCache = new Map();
 const failures = [];
 const passes = [];
+const toolExamplePasses = [];
+const workflowPasses = [];
 
 function readSource(name) {
   const file = sourceFiles[name];
@@ -104,7 +115,15 @@ function expectCase(caseItem, predicate, message) {
 }
 
 function parseEvalCases() {
-  const source = fs.readFileSync(evalFile, 'utf8');
+  return parseJsonlFile(evalFile, 'eval-cases.jsonl');
+}
+
+function parseToolExamples() {
+  return parseJsonlFile(toolExamplesFile, 'tool-examples.jsonl');
+}
+
+function parseJsonlFile(file, label) {
+  const source = fs.readFileSync(file, 'utf8');
   return source
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -114,11 +133,24 @@ function parseEvalCases() {
         return JSON.parse(line);
       } catch (error) {
         throw new Error(
-          `eval-cases.jsonl line ${index + 1} is invalid JSON: ${error.message}`,
+          `${label} line ${index + 1} is invalid JSON: ${error.message}`,
         );
       }
     });
 }
+
+const requiredSkills = [
+  'profile_onboarding_skill',
+  'social_intent_clarifier_skill',
+  'opportunity_card_skill',
+  'discover_publish_skill',
+  'candidate_search_skill',
+  'candidate_rank_skill',
+  'safety_approval_skill',
+  'invitation_skill',
+  'meet_loop_skill',
+  'life_graph_memory_skill',
+];
 
 function commonCaseChecks(caseItem) {
   expectCase(
@@ -136,6 +168,133 @@ function commonCaseChecks(caseItem) {
     (item) => item.expected && typeof item.expected === 'object',
     'missing expected object',
   );
+}
+
+function validateWorkflowContract() {
+  const source = fs.readFileSync(workflowFile, 'utf8');
+  const requiredPhrases = [
+    'ordinary_chat',
+    'detect_social_intent',
+    'check_profile_gate',
+    'clarify_social_intent',
+    'create_opportunity_card',
+    'request_publish_approval',
+    'publish_public_intent',
+    'search_public_candidates',
+    'rank_candidates',
+    'generate_opener',
+    'request_invite_approval',
+    'send_invite',
+    'meet_loop',
+    'life_graph_writeback',
+    'must not block normal conversation',
+    'Approval confirmation resumes the same checkpoint',
+    'must not invent people',
+  ];
+  for (const phrase of requiredPhrases) {
+    expect(source.includes(phrase), `social-meetup-workflow.md missing ${phrase}`);
+  }
+  workflowPasses.push('social-meetup-workflow');
+}
+
+function commonToolExampleChecks(example) {
+  expect(
+    typeof example.id === 'string' && example.id.length > 0,
+    'tool example missing id',
+  );
+  expect(
+    requiredSkills.includes(example.skillId),
+    `${example.id}: unknown skillId ${example.skillId}`,
+  );
+  expect(
+    Array.isArray(example.expectedToolSequence) &&
+      example.expectedToolSequence.length > 0,
+    `${example.id}: missing expectedToolSequence`,
+  );
+  expect(
+    Array.isArray(example.expectedEvents),
+    `${example.id}: missing expectedEvents`,
+  );
+  expect(
+    Array.isArray(example.expectedToolUi),
+    `${example.id}: missing expectedToolUi`,
+  );
+  expect(
+    typeof example.approvalPolicy === 'string' &&
+      example.approvalPolicy.length > 0,
+    `${example.id}: missing approvalPolicy`,
+  );
+}
+
+function validateToolExample(example) {
+  commonToolExampleChecks(example);
+
+  if (example.id === 'ordinary_chat_stays_conversation') {
+    expect(
+      example.expectedToolSequence.length === 1 &&
+        example.expectedToolSequence[0] === 'detect_social_intent',
+      'ordinary chat should only detect intent',
+    );
+    for (const forbidden of [
+      'search_public_candidates',
+      'publish_public_intent',
+      'send_invite',
+    ]) {
+      expect(
+        example.mustNot?.includes(forbidden),
+        `ordinary chat must forbid ${forbidden}`,
+      );
+    }
+  }
+
+  if (example.id === 'discover_publish_checkpoint') {
+    expect(
+      example.expectedToolSequence.indexOf('request_approval') <
+        example.expectedToolSequence.indexOf('publish_public_intent'),
+      'publish must request approval before side effect',
+    );
+    expect(
+      example.expectedEvents.includes('approval.required'),
+      'publish example must emit approval.required',
+    );
+  }
+
+  if (example.id === 'invite_send_requires_resume_checkpoint') {
+    expect(
+      example.expectedToolSequence.indexOf('request_approval') <
+        example.expectedToolSequence.indexOf('send_invite'),
+      'invite must request approval before sending',
+    );
+    expect(
+      example.mustNot?.includes('double_send_on_retry'),
+      'invite example must forbid double send',
+    );
+  }
+
+  if (example.id === 'candidate_empty_result_fallback') {
+    expect(
+      example.mustNot?.includes('fake_candidates') &&
+        example.mustNot?.includes('mock_people'),
+      'empty candidate fallback must forbid fake people',
+    );
+    expect(
+      example.mustSuggest?.includes('发布到发现') &&
+        example.mustSuggest?.includes('扩大范围') &&
+        example.mustSuggest?.includes('改时间'),
+      'empty candidate fallback must suggest safe next steps',
+    );
+  }
+
+  if (example.id === 'life_graph_stable_fact_with_evidence') {
+    expect(
+      example.expectedToolSequence.includes('propose_life_graph_facts'),
+      'Life Graph example must propose facts first',
+    );
+    expect(
+      example.mustNot?.includes('save_one_off_noise'),
+      'Life Graph example must forbid one-off noise',
+    );
+  }
 }
 
 const validators = {
@@ -442,6 +601,87 @@ function runApiScenarioAssertions() {
   }
 }
 
+function validateToolExamples() {
+  const examples = parseToolExamples();
+  const seen = new Set();
+  const skillCoverage = new Map(requiredSkills.map((skillId) => [skillId, 0]));
+  for (const example of examples) {
+    if (seen.has(example.id)) {
+      failures.push({ id: example.id, message: 'duplicate tool example id' });
+      continue;
+    }
+    seen.add(example.id);
+    try {
+      validateToolExample(example);
+      skillCoverage.set(
+        example.skillId,
+        (skillCoverage.get(example.skillId) ?? 0) + 1,
+      );
+      toolExamplePasses.push(example.id);
+      if (showDetails) console.log(`[PASS] ${example.id}`);
+    } catch (error) {
+      failures.push({
+        id: example.id ?? 'tool-example',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  for (const [skillId, count] of skillCoverage.entries()) {
+    if (count === 0) {
+      failures.push({
+        id: `tool-example-coverage:${skillId}`,
+        message: 'skill has no tool example coverage',
+      });
+    }
+  }
+}
+
+function currentGitBranch() {
+  const result = spawnSync('git', ['branch', '--show-current'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  return result.status === 0 ? result.stdout.trim() : null;
+}
+
+function writeReport(status) {
+  if (!reportFile) return;
+  const absoluteReportPath = path.isAbsolute(reportFile)
+    ? reportFile
+    : path.join(root, reportFile);
+  fs.mkdirSync(path.dirname(absoluteReportPath), { recursive: true });
+  const report = {
+    status,
+    generatedAt: new Date().toISOString(),
+    branch: currentGitBranch(),
+    workflow: {
+      files: [
+        path.relative(root, workflowFile),
+        path.relative(root, toolExamplesFile),
+        path.relative(root, evalFile),
+      ],
+      passed: workflowPasses,
+    },
+    evalCases: {
+      total: cases.length,
+      passed: passes,
+    },
+    toolExamples: {
+      total: parseToolExamples().length,
+      passed: toolExamplePasses,
+    },
+    modes: {
+      backend: runBackend,
+      apiReadiness: runApiReadiness,
+      apiFull: runApiFull,
+      apiSseAbort: runApiSseAbort,
+    },
+    failures,
+  };
+  fs.writeFileSync(absoluteReportPath, `${JSON.stringify(report, null, 2)}\n`);
+  console.log(`[OK] Wrote Agent skill eval report: ${absoluteReportPath}`);
+}
+
 function agentSmokeApiBaseUrl() {
   return (
     process.env.AGENT_SMOKE_API_BASE_URL ??
@@ -452,6 +692,14 @@ function agentSmokeApiBaseUrl() {
 }
 
 const cases = parseEvalCases();
+try {
+  validateWorkflowContract();
+} catch (error) {
+  failures.push({
+    id: 'social-meetup-workflow',
+    message: error instanceof Error ? error.message : String(error),
+  });
+}
 const seen = new Set();
 for (const caseItem of cases) {
   if (seen.has(caseItem.id)) {
@@ -470,11 +718,13 @@ for (const caseItem of cases) {
     });
   }
 }
+validateToolExamples();
 
 if (runBackend) runBackendAssertions();
 runApiScenarioAssertions();
 
 if (failures.length > 0) {
+  writeReport('failed');
   console.error(
     `[FAIL] Agent skill eval runner failed: ${passes.length}/${cases.length} case(s) passed`,
   );
@@ -484,6 +734,7 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
+writeReport('passed');
 console.log(
-  `[OK] Agent skill eval runner passed: ${passes.length}/${cases.length} case(s)${runBackend ? ' + backend assertions' : ''}${runApiReadiness || runApiFull || runApiSseAbort ? ' + API scenario smoke' : ''}`,
+  `[OK] Agent skill eval runner passed: ${passes.length}/${cases.length} case(s), ${toolExamplePasses.length} tool example(s)${runBackend ? ' + backend assertions' : ''}${runApiReadiness || runApiFull || runApiSseAbort ? ' + API scenario smoke' : ''}`,
 );

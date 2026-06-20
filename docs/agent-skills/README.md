@@ -22,6 +22,11 @@ The first production social/meet-up chain uses these skills:
 Ordinary chat must not enter this chain unless the user explicitly expresses a
 social, meet-up, activity, friend-making, candidate, or invite goal.
 
+The canonical release workflow is defined in
+[social-meetup-workflow.md](./social-meetup-workflow.md). It is the product
+contract for thread/task/run/session behavior, profile gate scope, approvals,
+empty candidate fallback, and release acceptance.
+
 ## Non-Negotiable Invariants
 
 - Do not block ordinary chat with onboarding.
@@ -46,6 +51,14 @@ social, meet-up, activity, friend-making, candidate, or invite goal.
 
 All tool outputs should follow [tool-contract.md](./tool-contract.md).
 
+## Tool Examples
+
+The canonical tool-call examples live in
+[tool-examples.jsonl](./tool-examples.jsonl). Each record maps a user input or
+task context to the expected skill, tool sequence, user-visible events, Tool UI
+parts, approval policy, and forbidden behavior. These examples are release
+guards, not mock data.
+
 ## Eval Matrix
 
 The canonical local skill eval cases live in
@@ -57,6 +70,12 @@ Use backend assertion mode before a serious release:
 
 ```bash
 node scripts/run-agent-skill-evals.mjs --backend
+```
+
+Write a report artifact for release evidence:
+
+```bash
+node scripts/run-agent-skill-evals.mjs --backend --report .agent-eval-report.json
 ```
 
 Use API modes when a local/staging backend and dedicated smoke credentials are

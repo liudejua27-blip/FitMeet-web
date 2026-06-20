@@ -6,6 +6,8 @@ import process from 'node:process';
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const skillDir = path.join(root, 'docs', 'agent-skills');
 const evalFile = path.join(skillDir, 'eval-cases.jsonl');
+const workflowFile = path.join(skillDir, 'social-meetup-workflow.md');
+const toolExamplesFile = path.join(skillDir, 'tool-examples.jsonl');
 const runnerFile = path.join(root, 'scripts', 'run-agent-skill-evals.mjs');
 
 const requiredSkills = [
@@ -59,6 +61,23 @@ const requiredEvalIds = [
   'one_off_noise_not_saved',
 ];
 
+const requiredToolExampleIds = [
+  'profile_onboarding_minimum_gate',
+  'ordinary_chat_stays_conversation',
+  'social_slots_are_extracted_once',
+  'opportunity_card_from_slots',
+  'discover_publish_checkpoint',
+  'candidate_search_public_only',
+  'candidate_rank_top_three',
+  'candidate_empty_result_fallback',
+  'opener_preview_dry_run',
+  'invite_send_requires_resume_checkpoint',
+  'safety_approval_reject_cancel_side_effect',
+  'meet_loop_wait_reply_safe_skip',
+  'meet_loop_review_writeback',
+  'life_graph_stable_fact_with_evidence',
+];
+
 const errors = [];
 
 function fail(message) {
@@ -102,6 +121,31 @@ for (const phrase of [
 ]) {
   if (!contract.includes(phrase)) {
     fail(`tool-contract.md missing ${phrase}`);
+  }
+}
+
+const workflow = readRequired(workflowFile);
+for (const phrase of [
+  'ordinary_chat',
+  'detect_social_intent',
+  'check_profile_gate',
+  'clarify_social_intent',
+  'create_opportunity_card',
+  'request_publish_approval',
+  'publish_public_intent',
+  'search_public_candidates',
+  'rank_candidates',
+  'generate_opener',
+  'request_invite_approval',
+  'send_invite',
+  'meet_loop',
+  'life_graph_writeback',
+  'must not block normal conversation',
+  'Approval confirmation resumes the same checkpoint',
+  'If candidate search returns no real public candidates',
+]) {
+  if (!workflow.includes(phrase)) {
+    fail(`social-meetup-workflow.md missing ${phrase}`);
   }
 }
 
@@ -157,6 +201,84 @@ for (const [skillId, count] of skillCoverage.entries()) {
   }
 }
 
+const toolExampleLines = readRequired(toolExamplesFile)
+  .split(/\r?\n/)
+  .map((line) => line.trim())
+  .filter(Boolean);
+
+const seenToolExampleIds = new Set();
+const toolExampleSkillCoverage = new Map(
+  requiredSkills.map((skillId) => [skillId, 0]),
+);
+for (const [index, line] of toolExampleLines.entries()) {
+  let parsed;
+  try {
+    parsed = JSON.parse(line);
+  } catch (error) {
+    fail(`tool-examples.jsonl line ${index + 1} is not valid JSON: ${error.message}`);
+    continue;
+  }
+  if (!parsed.id || typeof parsed.id !== 'string') {
+    fail(`tool-examples.jsonl line ${index + 1} missing string id`);
+    continue;
+  }
+  if (seenToolExampleIds.has(parsed.id)) {
+    fail(`duplicate tool example id: ${parsed.id}`);
+  }
+  seenToolExampleIds.add(parsed.id);
+  if (!requiredSkills.includes(parsed.skillId)) {
+    fail(`${parsed.id} references unknown skillId ${parsed.skillId}`);
+  } else {
+    toolExampleSkillCoverage.set(
+      parsed.skillId,
+      (toolExampleSkillCoverage.get(parsed.skillId) ?? 0) + 1,
+    );
+  }
+  if (
+    !Array.isArray(parsed.expectedToolSequence) ||
+    parsed.expectedToolSequence.length === 0
+  ) {
+    fail(`${parsed.id} must include expectedToolSequence`);
+  }
+  if (!Array.isArray(parsed.expectedEvents)) {
+    fail(`${parsed.id} must include expectedEvents`);
+  }
+  if (!Array.isArray(parsed.expectedToolUi)) {
+    fail(`${parsed.id} must include expectedToolUi`);
+  }
+  if (!parsed.approvalPolicy || typeof parsed.approvalPolicy !== 'string') {
+    fail(`${parsed.id} must include approvalPolicy`);
+  }
+}
+
+for (const exampleId of requiredToolExampleIds) {
+  if (!seenToolExampleIds.has(exampleId)) {
+    fail(`missing required tool example: ${exampleId}`);
+  }
+}
+
+for (const [skillId, count] of toolExampleSkillCoverage.entries()) {
+  if (count === 0) {
+    fail(`skill has no tool example coverage: ${skillId}`);
+  }
+}
+
+const toolExamplesSource = fs.existsSync(toolExamplesFile)
+  ? fs.readFileSync(toolExamplesFile, 'utf8')
+  : '';
+for (const phrase of [
+  '"request_approval"',
+  '"approval.required"',
+  '"search_public_candidates"',
+  '"candidate_empty_result_fallback"',
+  '"mustNot":["fake_candidates","mock_people"]',
+  '"write_life_graph_outcome"',
+]) {
+  if (!toolExamplesSource.includes(phrase)) {
+    fail(`tool-examples.jsonl missing invariant ${phrase}`);
+  }
+}
+
 const evalSource = fs.existsSync(evalFile) ? fs.readFileSync(evalFile, 'utf8') : '';
 for (const phrase of [
   '"mustEmit":"approval.required"',
@@ -179,6 +301,7 @@ for (const phrase of [
   '--api-readiness',
   '--api-full',
   '--api-sse-abort',
+  '--report',
 ]) {
   if (!runnerSource.includes(phrase)) {
     fail(`run-agent-skill-evals.mjs missing ${phrase}`);
