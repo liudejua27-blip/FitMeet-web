@@ -1,5 +1,5 @@
 export function AgentMiniGatewayVisual() {
-  const nodes = ['OpenClaw', 'Codex', 'Hermes', 'QClaw'];
+  const nodes = ['Chat', 'Profile', 'Discover', 'Approval'];
 
   return (
     <div className="agent-mini-gateway" aria-hidden="true">

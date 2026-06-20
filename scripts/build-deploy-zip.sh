@@ -486,6 +486,7 @@ rsync -a "${ROOT_DIR}/" "${STAGE_DIR}/" \
   --exclude 'agent-reference-qa.png' \
   --exclude 'homepage-gsap-qa.png' \
   --exclude 'frontend/src/components/agent-workspace/CodexAntPet.tsx' \
+  --exclude 'frontend/src/components/agent/AgentConnectionCard.tsx' \
   --exclude 'frontend/src/components/agent-workspace/api/mockAgentAdapter.ts' \
   --exclude 'frontend/src/dev/' \
   --exclude 'frontend/src/dev/agent/mockAgentAdapter.ts' \
@@ -497,6 +498,7 @@ rsync -a "${ROOT_DIR}/" "${STAGE_DIR}/" \
   --exclude 'frontend/src/debug/agentPageModuleAudit.ts' \
   --exclude 'frontend/src/pages/DemoAgentSocialLoopPage.tsx' \
   --exclude 'frontend/src/pages/DemoInvestorPage.tsx' \
+  --exclude 'frontend/src/types/agent.ts' \
   --exclude 'frontend/src/components/agent-workspace/useAgentFlow.ts' \
   --exclude 'frontend/src/styles/agent-workspace.css' \
   --exclude 'frontend/src/styles/agent-gpt-copy-shell.css' \
@@ -744,7 +746,9 @@ fail_if_entry "nested zip files" '\.zip$'
 fail_if_entry "logs" '(^|/)logs/|\.log$'
 fail_if_entry "QA screenshots" 'agent-gsap-qa\.png|agent-reference-qa\.png|homepage-gsap-qa\.png|qa-gsap-round2/|artifacts/|docs/qa/|frontend/qa/'
 fail_if_entry "legacy Agent pet component" '^FitMeet-web/frontend/src/components/agent-workspace/CodexAntPet\.tsx$'
+fail_if_entry "legacy Agent connection card" '^FitMeet-web/frontend/src/components/agent/AgentConnectionCard\.tsx$'
 fail_if_entry "legacy Agent flow hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentFlow\.tsx?$'
+fail_if_entry "legacy Agent static connection types" '^FitMeet-web/frontend/src/types/agent\.ts$'
 fail_if_entry "dev-only mock Agent adapter" '^FitMeet-web/frontend/src/components/agent-workspace/api/mockAgentAdapter\.ts$'
 fail_if_entry "dev-only frontend source" '^FitMeet-web/frontend/src/dev/'
 fail_if_entry "dev-only mock Agent adapter" '^FitMeet-web/frontend/src/dev/agent/mockAgentAdapter\.ts$'

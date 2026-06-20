@@ -1,10 +1,20 @@
-import type {
-  AgentConnectionStatus,
-  AgentRiskStatus,
-  AgentTokenStatus,
-} from '@/types/agent';
-
-type BadgeValue = AgentConnectionStatus | AgentRiskStatus | AgentTokenStatus | 'Online' | 'Stable';
+type BadgeValue =
+  | 'Connected'
+  | 'Not Connected'
+  | 'Pending Approval'
+  | 'Disabled'
+  | 'Token Active'
+  | 'Token Expired'
+  | 'Not Generated'
+  | 'OAuth Required'
+  | 'Create Required'
+  | 'Low Risk'
+  | 'Medium Risk'
+  | 'High Risk'
+  | 'Needs Review'
+  | 'Unknown'
+  | 'Online'
+  | 'Stable';
 
 type AgentStatusBadgeProps = {
   value: BadgeValue;

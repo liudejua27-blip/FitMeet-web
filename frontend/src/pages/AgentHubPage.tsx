@@ -60,8 +60,8 @@ export const AgentHubPage = memo(function AgentHubPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [form, setForm] = useState<RegisterForm>({
-    agentName: 'openclaw',
-    agentDisplayName: 'OpenClaw',
+    agentName: 'external-agent',
+    agentDisplayName: 'External Agent',
     agentWebhookUrl: '',
     permissionLevel: 'basic',
     dailyActionLimit: 100,
@@ -117,7 +117,7 @@ export const AgentHubPage = memo(function AgentHubPage() {
   };
 
   const handleRevoke = async (id: number) => {
-    if (!window.confirm('确认撤销这个 Agent Token？撤销后 OpenClaw 将无法继续调用 FitMeet。')) return;
+    if (!window.confirm('确认撤销这个 Agent Token？撤销后对应 Agent 将无法继续调用 FitMeet。')) return;
     try {
       await api.request(`/agents/connections/${id}`, { method: 'DELETE' });
       setConnections((prev) => prev.filter((c) => c.id !== id));
@@ -129,7 +129,7 @@ export const AgentHubPage = memo(function AgentHubPage() {
   if (!isLoggedIn) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-24">
-        <p className="text-zinc-500">请先登录 FitMeet，然后为 OpenClaw 创建 Agent Token。</p>
+        <p className="text-zinc-500">请先登录 FitMeet，然后创建受限 Agent Token。</p>
         <button onClick={openLogin} className="rounded-xl bg-[#6B7A5A] px-6 py-2 text-sm text-white">
           登录
         </button>
@@ -146,7 +146,7 @@ export const AgentHubPage = memo(function AgentHubPage() {
               <div>
                 <h1 className="text-2xl font-light tracking-tight text-[#F4EFE6]">Agent Token</h1>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-[#8C8A6E]">
-                  给 OpenClaw、QClaw 或自定义 Agent 创建访问凭证。Token 让 FitMeet 知道 Agent 代表哪个用户、拥有哪些权限、调用记录归属到谁。
+                  给自托管 Agent、内部 worker 或受信任外部 Agent 创建访问凭证。Token 让 FitMeet 知道 Agent 代表哪个用户、拥有哪些权限、调用记录归属到谁。
                 </p>
                 <Link
                   to="/agent-control"
@@ -205,8 +205,8 @@ FITMEET_AGENT_TOKEN=${newToken}`}</code>
 
             {showForm && (
               <div className="mt-5 rounded-2xl border border-[#2a2a22] bg-[#111110] p-6">
-                <p className="text-sm font-medium text-[#E8E4DC]">创建 OpenClaw Token</p>
-                <p className="mt-1 text-xs text-[#696955]">推荐权限选择“辅助模式”：OpenClaw 可以提交需求，真正连接前仍由用户确认。</p>
+                <p className="text-sm font-medium text-[#E8E4DC]">创建 Agent Token</p>
+                <p className="mt-1 text-xs text-[#696955]">推荐权限选择“辅助模式”：Agent 可以提交需求和草稿，真正连接、邀请或发布前仍由用户确认。</p>
 
                 <div className="mt-5 grid gap-4 sm:grid-cols-2">
                   <Field label="Agent 类型">
@@ -215,7 +215,7 @@ FITMEET_AGENT_TOKEN=${newToken}`}</code>
                       onChange={(e) => setForm((f) => ({ ...f, agentName: e.target.value }))}
                       className="w-full rounded-xl border border-[#2a2a22] bg-[#0d0d0b] px-3 py-2 text-sm text-[#E8E4DC] outline-none focus:border-[#6B7A5A]"
                     >
-                      {['openclaw', 'codex', 'hermes', 'qclaw', 'custom'].map((n) => (
+                      {['external-agent', 'self-hosted-agent', 'workflow-agent', 'custom'].map((n) => (
                         <option key={n} value={n}>{n}</option>
                       ))}
                     </select>
@@ -225,7 +225,7 @@ FITMEET_AGENT_TOKEN=${newToken}`}</code>
                     <input
                       value={form.agentDisplayName}
                       onChange={(e) => setForm((f) => ({ ...f, agentDisplayName: e.target.value }))}
-                      placeholder="OpenClaw"
+                      placeholder="External Agent"
                       className="w-full rounded-xl border border-[#2a2a22] bg-[#0d0d0b] px-3 py-2 text-sm text-[#E8E4DC] placeholder-[#555550] outline-none focus:border-[#6B7A5A]"
                     />
                   </Field>
@@ -291,9 +291,9 @@ FITMEET_AGENT_TOKEN=${newToken}`}</code>
                   git clone https://github.com/LiuChong27/social-skills.git
                 </code>
               </Step>
-              <Step index={2}>在这里创建 OpenClaw Agent Token，并复制保存。</Step>
-              <Step index={3}>在 OpenClaw 本地配置 `FITMEET_API_BASE_URL` 和 `FITMEET_AGENT_TOKEN`。</Step>
-              <Step index={4}>让 OpenClaw 调用 `/api/agent/skills/manifest` 验证连接。</Step>
+              <Step index={2}>在这里创建受限 Agent Token，并复制保存。</Step>
+              <Step index={3}>在你的 Agent 运行环境配置 `FITMEET_API_BASE_URL` 和 `FITMEET_AGENT_TOKEN`。</Step>
+              <Step index={4}>让 Agent 调用 `/api/agent/skills/manifest` 验证连接。</Step>
             </div>
           </aside>
         </div>

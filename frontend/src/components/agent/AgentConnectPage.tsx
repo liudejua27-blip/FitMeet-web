@@ -1,9 +1,6 @@
 import { motion } from 'framer-motion';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { agentConnections } from '@/data/agentStaticContent';
-import type { AgentConnection } from '@/types/agent';
-import { AgentConnectionCard } from './AgentConnectionCard';
 import { AgentGatewayOverview } from './AgentGatewayOverview';
 import { AgentLiveControlPanel } from './AgentLiveControlPanel';
 import { AgentMiniGatewayVisual } from './AgentMiniGatewayVisual';
@@ -64,58 +61,6 @@ export function AgentConnectPage() {
 }
 
 function AgentConnectHome() {
-  const [agents, setAgents] = useState<AgentConnection[]>(agentConnections);
-  const [selectedAgentId, setSelectedAgentId] = useState(agentConnections[0]?.id ?? '');
-  const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
-  const [showCustomGuide, setShowCustomGuide] = useState(false);
-
-  const selectedAgent = useMemo(
-    () => agents.find((agent) => agent.id === selectedAgentId) ?? agents[0],
-    [agents, selectedAgentId],
-  );
-
-  const connectAgent = (agentId: string) => {
-    setAgents((currentAgents) =>
-      currentAgents.map((agent) =>
-        agent.id === agentId
-          ? {
-              ...agent,
-              status: 'Connected',
-              tokenStatus:
-                agent.provider === 'Custom' || agent.tokenStatus === 'Token Expired'
-                  ? 'Token Active'
-                  : agent.tokenStatus,
-              lastActiveAt: 'Just now',
-              riskStatus: agent.riskStatus === 'Unknown' ? 'Low Risk' : agent.riskStatus,
-            }
-          : agent,
-      ),
-    );
-    setSelectedAgentId(agentId);
-  };
-
-  const revokeAgent = (agentId: string) => {
-    if (confirmRevokeId !== agentId) {
-      setConfirmRevokeId(agentId);
-      return;
-    }
-
-    setAgents((currentAgents) =>
-      currentAgents.map((agent) =>
-        agent.id === agentId
-          ? {
-              ...agent,
-              status: 'Disabled',
-              tokenStatus: 'Token Expired',
-              lastActiveAt: 'Revoked just now',
-              riskStatus: 'Medium Risk',
-            }
-          : agent,
-      ),
-    );
-    setConfirmRevokeId(null);
-  };
-
   return (
     <>
       <section className="agent-connect-hero">
@@ -150,57 +95,49 @@ function AgentConnectHome() {
 
       <AgentLiveControlPanel />
 
-      <section className="agent-connection-section" aria-label="Supported Agent list">
+      <section className="agent-connection-section" aria-label="Agent Gateway production entry">
         <div className="agent-section-heading">
-          <span>SUPPORTED AGENTS</span>
-          <h2>支持接入的 Agent</h2>
+          <span>PRODUCTION ENTRY</span>
+          <h2>真实接入从 Token 和权限开始</h2>
         </div>
 
         <div className="agent-connection-layout">
           <div className="agent-connection-list">
-            {agents.map((agent) => (
-              <AgentConnectionCard
-                key={agent.id}
-                agent={agent}
-                selected={selectedAgent?.id === agent.id}
-                confirmRevoke={confirmRevokeId === agent.id}
-                onSelect={() => {
-                  setSelectedAgentId(agent.id);
-                  setShowCustomGuide(agent.provider === 'Custom');
-                }}
-                onConnect={() => connectAgent(agent.id)}
-                onRevoke={() => revokeAgent(agent.id)}
-                onCancelRevoke={() => setConfirmRevokeId(null)}
-                onShowCustomGuide={() => {
-                  setSelectedAgentId(agent.id);
-                  setShowCustomGuide(true);
-                }}
-              />
+            {gatewaySteps.map((step) => (
+              <article key={step.title} className="agent-connection-card">
+                <div className="agent-connection-card__halo" aria-hidden="true" />
+                <div className="agent-connection-card__header">
+                  <div className="agent-connection-card__identity">
+                    <span className="agent-connection-card__mark">{step.index}</span>
+                    <div>
+                      <h3>{step.title}</h3>
+                      <p>{step.subtitle}</p>
+                    </div>
+                  </div>
+                </div>
+                <p className="agent-connection-card__description">{step.description}</p>
+              </article>
             ))}
           </div>
 
           <aside className="agent-selected-panel" aria-label="Selected Agent control preview">
-            <span>SELECTED AGENT</span>
-            <h3>{selectedAgent?.name}</h3>
+            <span>NO DEMO CONNECTIONS</span>
+            <h3>不展示虚构 Agent 状态</h3>
             <p>
-              当前接入边界：{selectedAgent?.permissionMode}. 所有自动化行为都需要遵循 Human-led,
-              AI-assisted, permission-based 原则。
+              这里不再模拟 OpenClaw、Codex 或第三方 Agent 的连接状态。真实 Token、权限、审批和行为日志统一走后端 Agent Gateway。
             </p>
             <div className="agent-selected-panel__links">
-              <SmartNavLink to="/agent-control">权限设置</SmartNavLink>
-              <SmartNavLink to="/ai-profile">偏好画像</SmartNavLink>
-              <SmartNavLink to="/agent-activity">行为日志</SmartNavLink>
+              <SmartNavLink to="/agent-hub">创建 Agent Token</SmartNavLink>
+              <SmartNavLink to="/agent/settings">权限设置</SmartNavLink>
+              <SmartNavLink to="/agent-inbox">Agent 收件箱</SmartNavLink>
               <SiteLink to="/discover">发现</SiteLink>
             </div>
-            {showCustomGuide && (
-              <div className="agent-custom-guide">
-                <strong>Custom Agent 接入说明</strong>
-                <p>
-                  准备 Agent 名称、回调端点、权限范围与审核联系人。下一轮可以在这里扩展 API token
-                  创建、scope 选择和 webhook 校验流程。
-                </p>
-              </div>
-            )}
+            <div className="agent-custom-guide">
+              <strong>生产规则</strong>
+              <p>
+                任何外部或内部 Agent 只能在用户授权范围内读取 FitMeet 数据；发布约练、发送邀请、交换联系方式和公开位置都必须经过审批。
+              </p>
+            </div>
           </aside>
         </div>
       </section>
@@ -209,6 +146,30 @@ function AgentConnectHome() {
     </>
   );
 }
+
+const gatewaySteps = [
+  {
+    index: '01',
+    title: '创建受限 Token',
+    subtitle: 'Agent Hub',
+    description:
+      '在实名和权限边界满足后，由后端签发受限 Agent Token。Token 只展示一次，所有调用都进入审计。',
+  },
+  {
+    index: '02',
+    title: '配置权限与审批',
+    subtitle: 'Human approval first',
+    description:
+      '读取、草稿、候选搜索和高风险动作分开授权。邀请、加好友、公开位置和联系方式交换不能绕过用户确认。',
+  },
+  {
+    index: '03',
+    title: '查看真实行为日志',
+    subtitle: 'Traceable runtime',
+    description:
+      'Agent 调用、审批、失败补偿和 Meet Loop 推进都必须产生可追踪记录，避免前端本地状态伪装成真实能力。',
+  },
+] as const;
 
 function SmartNavLink({
   ariaCurrent,
