@@ -173,11 +173,15 @@ pnpm --dir "${ROOT_DIR}/frontend" exec vitest run \
   src/test/AgentRouteIsolation.test.ts \
   src/test/AgentWorkspacePage.test.tsx \
   src/test/assistantUploadProgress.test.tsx \
+  src/test/DiscoverClosure.test.ts \
   src/test/discoverContent.test.ts \
+  src/test/fitmeetCoreContract.test.ts \
   src/test/socialAgentApiCheckpointStream.test.ts \
   src/test/socialAgentApiReplay.test.ts \
   src/test/socialCodexThreadId.test.ts \
   src/test/buildAgentAssistantProps.test.ts \
+  src/test/toolFallbackRender.test.tsx \
+  src/test/toolUiActionCopy.test.ts \
   src/test/toolProcessModel.test.ts \
   src/test/toolUiSchema.test.ts \
   --testTimeout=20000 \
