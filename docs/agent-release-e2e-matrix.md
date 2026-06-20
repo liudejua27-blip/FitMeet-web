@@ -146,6 +146,9 @@ RUN_AGENT_SKILL_EVAL_API=readiness \
 RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true \
   scripts/agent-release-matrix.sh --skip-browser-qa --empty-candidate-smoke
 
+# Run the same empty-supply proof directly from the skill eval runner.
+node scripts/run-agent-skill-evals.mjs --api-empty-candidate
+
 # Full mutating chain plus SSE abort; run only with dedicated smoke credentials.
 AGENT_SMOKE_ALLOW_MUTATIONS=true \
 RUN_AGENT_SKILL_EVAL_API=all \

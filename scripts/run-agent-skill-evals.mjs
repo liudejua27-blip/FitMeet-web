@@ -14,6 +14,7 @@ const reportFile =
   reportArgIndex >= 0 ? process.argv[reportArgIndex + 1] : undefined;
 const supportedApiFlags = [
   '--api-readiness',
+  '--api-empty-candidate',
   '--api-full',
   '--api-sse-abort',
   '--api-all',
@@ -44,6 +45,10 @@ const apiModes = new Set(
 );
 const runApiReadiness =
   apiModes.has('readiness') || apiModes.has('smoke') || apiModes.has('all');
+const runApiEmptyCandidate =
+  apiModes.has('empty-candidate') ||
+  apiModes.has('empty') ||
+  apiModes.has('all');
 const runApiFull = apiModes.has('full') || apiModes.has('all');
 const runApiSseAbort =
   apiModes.has('sse-abort') ||
@@ -756,7 +761,7 @@ function runCommand(id, command, commandArgs, env = {}) {
 }
 
 function runApiScenarioAssertions() {
-  if (runApiReadiness || runApiFull) {
+  if (runApiReadiness || runApiEmptyCandidate || runApiFull) {
     runCommand(
       'api-preflight-readiness',
       path.join(root, 'scripts', 'agent-remote-smoke-preflight.sh'),
@@ -770,6 +775,17 @@ function runApiScenarioAssertions() {
         { AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES: 'true' },
       );
     }
+  }
+  if (runApiEmptyCandidate) {
+    runCommand(
+      'api-empty-candidate',
+      'pnpm',
+      ['--dir', 'backend', 'run', 'smoke:agent-opportunity'],
+      {
+        AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK: 'true',
+        AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES: 'true',
+      },
+    );
   }
   if (runApiFull) {
     runCommand(
@@ -870,6 +886,7 @@ function writeReport(status) {
     modes: {
       backend: runBackend,
       apiReadiness: runApiReadiness,
+      apiEmptyCandidate: runApiEmptyCandidate,
       apiFull: runApiFull,
       apiSseAbort: runApiSseAbort,
     },
@@ -933,5 +950,5 @@ if (failures.length > 0) {
 
 writeReport('passed');
 console.log(
-  `[OK] Agent skill eval runner passed: ${passes.length}/${cases.length} case(s), ${toolExamplePasses.length} tool example(s)${runBackend ? ' + backend assertions' : ''}${runApiReadiness || runApiFull || runApiSseAbort ? ' + API scenario smoke' : ''}`,
+  `[OK] Agent skill eval runner passed: ${passes.length}/${cases.length} case(s), ${toolExamplePasses.length} tool example(s)${runBackend ? ' + backend assertions' : ''}${runApiReadiness || runApiEmptyCandidate || runApiFull || runApiSseAbort ? ' + API scenario smoke' : ''}`,
 );
