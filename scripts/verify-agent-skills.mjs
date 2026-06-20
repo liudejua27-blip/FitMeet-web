@@ -124,6 +124,7 @@ for (const phrase of [
   'idempotencyKeyRequired',
   'approvalRequired',
   'dryRunRequired',
+  'CandidateEmptyStateCard',
   'Empty Result Rule',
 ]) {
   if (!contract.includes(phrase)) {
@@ -278,7 +279,8 @@ for (const phrase of [
   '"approval.required"',
   '"search_public_candidates"',
   '"candidate_empty_result_fallback"',
-  '"mustNot":["fake_candidates","mock_people"]',
+  '"expectedToolUi":["CandidateEmptyStateCard"]',
+  '"mustNot":["fake_candidates","mock_people","CandidateCards"]',
   '"write_life_graph_outcome"',
 ]) {
   if (!toolExamplesSource.includes(phrase)) {
@@ -293,6 +295,8 @@ for (const phrase of [
   '"correction_updates_candidate_preference_without_reasking_core_slots"',
   '"candidate_empty_safe_fallback"',
   '"mustNotFakeCandidates":true',
+  '"toolUiType":"CandidateEmptyStateCard"',
+  '"mustNotShow":["CandidateCards"]',
   '"sideEffectBeforeApproval":false',
   '"deepseek_quality_routing_not_downgraded"',
   '"deepseek_context_window_not_truncated"',

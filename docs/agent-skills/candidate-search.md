@@ -50,6 +50,9 @@ If no real candidates are found, say that clearly and offer:
 - change time window;
 - broaden activity or candidate preference.
 
+Render this as `CandidateEmptyStateCard`, not `CandidateCards`. Empty results
+are a recovery path, not a candidate list.
+
 ## Eval IDs
 
 - `candidate_empty_safe_fallback`

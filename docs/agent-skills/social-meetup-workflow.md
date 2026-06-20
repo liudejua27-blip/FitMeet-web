@@ -84,7 +84,7 @@ assistant response.
 ## Empty Candidate Fallback
 
 If candidate search returns no real public candidates, FitMeet must not invent people.
-It should offer safe next steps:
+It should render `CandidateEmptyStateCard` and offer safe next steps:
 
 - publish or keep the OpportunityCard in Discover;
 - broaden city or distance;

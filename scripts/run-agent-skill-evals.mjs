@@ -64,6 +64,8 @@ const sourceFiles = {
     'backend/src/agent-gateway/social-agent-deepseek-quality-boundary.spec.ts',
   fallbackSourceBoundarySpec:
     'backend/src/agent-gateway/social-agent-fallback-source-boundary.spec.ts',
+  fitmeetAlphaAgentSdkSpec:
+    'backend/src/agent-gateway/fitmeet-alpha-agent-sdk.service.spec.ts',
   agentRouteIsolationSpec: 'frontend/src/test/AgentRouteIsolation.test.ts',
   agentWorkspaceRuntimeSpec: 'frontend/src/test/agentWorkspaceRuntime.test.ts',
   toolFallbackRenderSpec: 'frontend/src/test/toolFallbackRender.test.tsx',
@@ -283,6 +285,10 @@ function validateToolExample(example) {
 
   if (example.id === 'candidate_empty_result_fallback') {
     expect(
+      example.expectedToolUi?.includes('CandidateEmptyStateCard'),
+      'empty candidate fallback must render CandidateEmptyStateCard',
+    );
+    expect(
       example.mustNot?.includes('fake_candidates') &&
         example.mustNot?.includes('mock_people'),
       'empty candidate fallback must forbid fake people',
@@ -456,6 +462,16 @@ const validators = {
 
   candidate_empty_safe_fallback(caseItem) {
     expectCase(caseItem, (item) => item.expected.mustNotFakeCandidates === true, 'must forbid fake candidates');
+    expectCase(
+      caseItem,
+      (item) => item.expected.toolUiType === 'CandidateEmptyStateCard',
+      'empty candidate fallback must render CandidateEmptyStateCard',
+    );
+    expectCase(
+      caseItem,
+      (item) => item.expected.mustNotShow?.includes('CandidateCards'),
+      'empty candidate fallback must not render CandidateCards',
+    );
     expectIncludes('candidatePresenter', [
       '当前没有找到符合条件的真实用户',
       '发布一个约练需求',
@@ -465,6 +481,17 @@ const validators = {
       "expect(result.candidates).toHaveLength(0)",
       "expect(result.message).toContain('发布')",
       "expect(JSON.stringify(result)).not.toContain('mock')",
+    ]);
+    expectIncludes('toolUiSchemaSpec', [
+      'social_match.empty',
+      'CandidateEmptyStateCard',
+      'normalizeCandidateEmptyStateView',
+    ]);
+    expectIncludes('fitmeetAlphaAgentSdkSpec', [
+      'builds a recovery card instead of fake candidates',
+      'candidate_empty_state',
+      'CandidateEmptyStateCard',
+      '不会用假候选凑数',
     ]);
   },
 

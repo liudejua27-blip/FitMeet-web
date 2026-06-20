@@ -45,6 +45,7 @@ empty candidate fallback, and release acceptance.
 - `SlotMemoryCard`
 - `OpportunityCard`
 - `CandidateCards`
+- `CandidateEmptyStateCard`
 - `ApprovalPanel`
 - `MeetLoopTimeline`
 - `LifeGraphDiffCard`

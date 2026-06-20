@@ -23,6 +23,7 @@ type FitMeetAgentToolContract = {
     | "SlotMemoryCard"
     | "OpportunityCard"
     | "CandidateCards"
+    | "CandidateEmptyStateCard"
     | "ApprovalPanel"
     | "MeetLoopTimeline"
     | "LifeGraphDiffCard"
@@ -61,6 +62,7 @@ Tools that return zero useful real results must include:
 - `emptyReason`;
 - concise user-facing message;
 - safe next actions;
+- `CandidateEmptyStateCard` with publish / broaden / time-change recovery paths;
 - no fake candidate/activity data.
 
 ## Approval Rule
