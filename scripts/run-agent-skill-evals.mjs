@@ -285,6 +285,24 @@ function validateToolExample(example) {
     );
   }
 
+  if (example.id === 'correction_updates_public_candidate_preference') {
+    expect(
+      example.expectedToolSequence.includes('update_candidate_preference'),
+      'correction example must update candidate preference',
+    );
+    for (const forbidden of [
+      'ask_activity_again',
+      'ask_time_window_again',
+      'ask_location_text_again',
+      'infer_private_sensitive_fields',
+    ]) {
+      expect(
+        example.mustNot?.includes(forbidden),
+        `correction example must forbid ${forbidden}`,
+      );
+    }
+  }
+
   if (example.id === 'life_graph_stable_fact_with_evidence') {
     expect(
       example.expectedToolSequence.includes('propose_life_graph_facts'),

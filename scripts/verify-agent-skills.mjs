@@ -41,6 +41,7 @@ const requiredEvalIds = [
   'profile_gate_new_user_minimum_questions',
   'ordinary_chat_not_blocked_by_profile_gate',
   'social_intent_extracts_slots_once',
+  'correction_updates_candidate_preference_without_reasking_core_slots',
   'twenty_turn_memory_no_repeat_questions',
   'opportunity_card_from_completed_slots',
   'missing_slot_blocks_card_generation',
@@ -65,6 +66,7 @@ const requiredToolExampleIds = [
   'profile_onboarding_minimum_gate',
   'ordinary_chat_stays_conversation',
   'social_slots_are_extracted_once',
+  'correction_updates_public_candidate_preference',
   'opportunity_card_from_slots',
   'discover_publish_checkpoint',
   'candidate_search_public_only',
@@ -283,6 +285,7 @@ const evalSource = fs.existsSync(evalFile) ? fs.readFileSync(evalFile, 'utf8') :
 for (const phrase of [
   '"mustEmit":"approval.required"',
   '"twenty_turn_memory_no_repeat_questions"',
+  '"correction_updates_candidate_preference_without_reasking_core_slots"',
   '"candidate_empty_safe_fallback"',
   '"mustNotFakeCandidates":true',
   '"sideEffectBeforeApproval":false',
@@ -295,6 +298,7 @@ for (const phrase of [
 const runnerSource = readRequired(runnerFile);
 for (const phrase of [
   'twenty_turn_memory_no_repeat_questions',
+  'correction_updates_candidate_preference_without_reasking_core_slots',
   'candidate_empty_safe_fallback',
   'meet_loop_full_state_machine',
   '--backend',
