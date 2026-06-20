@@ -64,6 +64,10 @@ const sourceFiles = {
     'backend/src/agent-gateway/social-agent-deepseek-quality-boundary.spec.ts',
   fallbackSourceBoundarySpec:
     'backend/src/agent-gateway/social-agent-fallback-source-boundary.spec.ts',
+  agentRouteIsolationSpec: 'frontend/src/test/AgentRouteIsolation.test.ts',
+  agentWorkspaceRuntimeSpec: 'frontend/src/test/agentWorkspaceRuntime.test.ts',
+  toolFallbackRenderSpec: 'frontend/src/test/toolFallbackRender.test.tsx',
+  agentAdapterSpec: 'frontend/src/test/agentAdapter.test.ts',
   inboxToolSpec:
     'backend/src/agent-gateway/social-agent-inbox-tool.service.spec.ts',
   lifeGraphGovernanceSpec:
@@ -602,6 +606,69 @@ const validators = {
       'does not stream fallback text as an LLM assistant response',
       'centralizes SocialAgentEventV2 assistant deltas and skips fallback chunks',
       "input.source === 'fallback'",
+    ]);
+  },
+
+  thread_append_no_duplicate_creation(caseItem) {
+    expectCase(
+      caseItem,
+      (item) => item.expected.singleActiveThread === true,
+      'same conversation should keep one active thread',
+    );
+    expectCase(
+      caseItem,
+      (item) => item.expected.createThreadOnlyOnExplicitNewChat === true,
+      'new thread creation must be explicit',
+    );
+    expectCase(
+      caseItem,
+      (item) => item.expected.mustNotCreateThreadsPerMessage === true,
+      'each message must not create a new thread',
+    );
+    expectIncludes('agentRouteIsolationSpec', [
+      'keeps message submission inside the active thread instead of creating a thread per message',
+      'threadId: canonicalActiveThreadId',
+      'socialAgentApi.createThread()',
+      'const startNewThread = async () =>',
+    ]);
+    expectIncludes('agentRouteIsolationSpec', [
+      'expect(submitRuntimeSource).not.toMatch(/createThread',
+      'expect(workspaceSource).not.toMatch(/createThread',
+    ]);
+  },
+
+  visible_process_overlay_not_timeline(caseItem) {
+    expectCase(
+      caseItem,
+      (item) => item.expected.displayMode === 'covering_status',
+      'visible process should default to a covering status',
+    );
+    expectCase(
+      caseItem,
+      (item) => item.expected.defaultVisibleCount === 1,
+      'visible process should show one latest status by default',
+    );
+    expectCase(
+      caseItem,
+      (item) => item.expected.mustNotDefaultToTimeline === true,
+      'visible process must not default to a long timeline',
+    );
+    expectIncludes('agentWorkspaceRuntimeSpec', [
+      'lets replay.summary replace old process nodes instead of accumulating a timeline',
+      'starts a submitted run with one GPT-style covering status instead of a preset timeline',
+      'displayMode: \'covering_status\'',
+      'updateModel: \'latest_state\'',
+      'defaultVisibleCount: 1',
+      'historyVisibility: \'collapsed\'',
+    ]);
+    expectIncludes('toolFallbackRenderSpec', [
+      'renders replay summaries as one covering status without opening a process timeline',
+      'assistant-ui-process-status-line',
+      'queryByText(\'查看过程\')).not.toBeInTheDocument',
+    ]);
+    expectIncludes('agentAdapterSpec', [
+      'maps SocialAgentEventV2 visible process events to one cover-style public progress row',
+      'tool_call_started|slot_filled|hydrate_context|planner|traceId|raw JSON|payload',
     ]);
   },
 };

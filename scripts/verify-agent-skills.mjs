@@ -63,6 +63,8 @@ const requiredEvalIds = [
   'deepseek_quality_routing_not_downgraded',
   'deepseek_context_window_not_truncated',
   'fallback_not_streamed_as_llm_answer',
+  'thread_append_no_duplicate_creation',
+  'visible_process_overlay_not_timeline',
 ];
 
 const requiredToolExampleIds = [
