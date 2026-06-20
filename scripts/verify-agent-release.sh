@@ -110,7 +110,19 @@ step "Run backend Agent route, stream, and acceptance checks"
 pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/config/production-env-readiness.spec.ts \
   src/agent-gateway/agent-control.controller.spec.ts \
+  src/agent-gateway/agent-loop.service.spec.ts \
+  src/agent-gateway/agent-l5-runtime.service.spec.ts \
+  src/agent-gateway/agent-l5-runtime.controller.spec.ts \
+  src/agent-gateway/agent-observability.service.spec.ts \
+  src/agent-gateway/agent-observability-alert-sink.service.spec.ts \
   src/agent-gateway/agent-run-checkpoint.service.spec.ts \
+  src/agent-gateway/agent-self-improve.service.spec.ts \
+  src/agent-gateway/fitmeet-agent-runtime.service.spec.ts \
+  src/agent-gateway/fitmeet-agent-tool-registry.service.spec.ts \
+  src/agent-gateway/fitmeet-alpha-agent-sdk.service.spec.ts \
+  src/agent-gateway/fitmeet-alpha-agent-topology.spec.ts \
+  src/agent-gateway/fitmeet-alpha-structured-intent.spec.ts \
+  src/agent-gateway/fitmeet-subagent-runtime.service.spec.ts \
   src/agent-gateway/social-agent-context-hydrator.service.spec.ts \
   src/agent-gateway/social-agent-context-window.spec.ts \
   src/agent-gateway/social-agent-context-window-boundary.spec.ts \
@@ -155,9 +167,11 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-reminder.service.spec.ts \
   src/agent-gateway/social-agent-thread-id.util.spec.ts \
   src/agent-gateway/social-agent-long-term-memory.service.spec.ts \
+  src/agent-gateway/social-agent-meet-loop.service.spec.ts \
   src/agent-gateway/social-agent-candidate-score-breakdown.spec.ts \
   src/agent-gateway/social-agent-candidate-pool.service.spec.ts \
   src/agent-gateway/social-agent-route-branch-boundary.spec.ts \
+  src/agent-gateway/social-agent-route-agent-loop-runner.service.spec.ts \
   src/agent-gateway/fitmeet-subagent-worker-command.contract.spec.ts \
   src/agent-gateway/fitmeet-subagent-worker-dispatcher.service.spec.ts \
   src/agent-gateway/fitmeet-subagent-worker-runtime.service.spec.ts \
@@ -169,6 +183,11 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-tool-executor.service.spec.ts \
   src/agent-gateway/social-agent-tool-json-model.service.spec.ts \
   src/agent-gateway/social-agent-tool-model.spec.ts \
+  src/agent-gateway/social-codex-approval-schema.service.spec.ts \
+  src/agent-gateway/social-codex-event-pipeline.service.spec.ts \
+  src/agent-gateway/social-codex-public-process-text.spec.ts \
+  src/agent-gateway/social-codex-run-summary.spec.ts \
+  src/agent-gateway/social-codex-runtime-model.spec.ts \
   --runInBand
 
 step "Typecheck frontend assistant-ui Agent shell"
