@@ -290,6 +290,20 @@ assert_file_contains "${LOG_DIR}/static-mock-import.err" \
 
 git reset --hard -q HEAD
 rm -f frontend/src/components/agent-workspace/api/prodMockLeak.ts
+cat > frontend/src/components/agent-workspace/prodDevImport.ts <<'EOF'
+import { testOnlyHelper } from '../../dev/agent/testOnlyHelper';
+export const prodDevImportLeak = testOnlyHelper;
+EOF
+if scripts/agent-release-worktree-audit.sh --review \
+  > "${LOG_DIR}/frontend-dev-import.out" \
+  2> "${LOG_DIR}/frontend-dev-import.err"; then
+  fail 'review audit unexpectedly allowed a frontend dev-only source import'
+fi
+assert_file_contains "${LOG_DIR}/frontend-dev-import.err" \
+  'Production frontend source must not import frontend/src/dev'
+
+git reset --hard -q HEAD
+rm -f frontend/src/components/agent-workspace/prodDevImport.ts
 cat > backend/src/agent-gateway/social-agent-intent-router.service.ts <<'EOF'
 export const contextTurnLimit = 8;
 EOF

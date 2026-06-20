@@ -272,6 +272,36 @@ if ((${#frontend_static_mock_import_entries[@]} > 0)); then
   fail 'Mock Agent adapter must remain behind explicit dynamic mock-mode loading so production cannot bundle the demo path.'
 fi
 
+frontend_dev_import_entries=()
+if [[ -d frontend/src ]]; then
+  while IFS= read -r match; do
+    [[ -z "${match}" ]] && continue
+    # The only allowed dev import in production source is the lazy mock adapter
+    # loader guarded by import.meta.env.DEV in createAgentAdapter.ts. Everything
+    # else would create another path for demo-only code to leak into /agent/chat.
+    if [[ "${match}" == *"frontend/src/components/agent-workspace/api/createAgentAdapter.ts:"* &&
+      "${match}" == *"import('../../../dev/agent/mockAgentAdapter')"* ]]; then
+      continue
+    fi
+    frontend_dev_import_entries+=("${match}")
+  done < <(
+    grep -RIn --exclude-dir=node_modules --exclude-dir=dist \
+      --exclude='*.test.ts' \
+      --exclude='*.test.tsx' \
+      --exclude='*.spec.ts' \
+      --exclude='*.spec.tsx' \
+      --include='*.ts' \
+      --include='*.tsx' \
+      -E "from ['\"][^'\"]*(\.\./)+dev/|import[[:space:]]*\\([[:space:]]*['\"][^'\"]*(\.\./)+dev/|from ['\"]src/dev/|import[[:space:]]*\\([[:space:]]*['\"]src/dev/" \
+      frontend/src 2>/dev/null | grep -vE '/test/|\.test\.|\.spec\.' || true
+  )
+fi
+if ((${#frontend_dev_import_entries[@]} > 0)); then
+  printf '\nDev-only frontend imports found outside the guarded Agent mock loader:\n' >&2
+  printf '  %s\n' "${frontend_dev_import_entries[@]}" >&2
+  fail 'Production frontend source must not import frontend/src/dev; keep dev-only adapters behind the approved lazy mock loader.'
+fi
+
 critical_agent_context_files=(
   "backend/src/agent-gateway/social-agent-intent-router.service.ts"
   "backend/src/agent-gateway/social-agent-brain.service.ts"
