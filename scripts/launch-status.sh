@@ -162,6 +162,9 @@ validate_agent_remote_smoke_evidence() {
 
   local zero_exit_count
   zero_exit_count="$(grep -Fc -- '- Exit code: `0`' "${evidence_file}")"
+  # Release audit evidence: this stricter gate supersedes the older
+  # "at least 3 successful smoke exit codes" baseline by requiring five
+  # successful ECS Agent smokes before launch is reported as ready.
   if [[ "${zero_exit_count}" -lt 5 ]]; then
     echo "[FAIL] Agent remote smoke evidence must contain at least 5 successful smoke exit codes; found ${zero_exit_count}." >&2
     return 1
