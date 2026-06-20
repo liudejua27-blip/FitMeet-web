@@ -153,6 +153,7 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-chat-llm-prompts.spec.ts \
   src/agent-gateway/social-agent-chat-brain-memory.presenter.spec.ts \
   src/agent-gateway/social-agent-chat-memory.presenter.spec.ts \
+  src/agent-gateway/social-agent-chat-final-response.presenter.spec.ts \
   src/agent-gateway/social-agent-chat-session-facade.service.spec.ts \
   src/agent-gateway/social-agent-chat-session.presenter.spec.ts \
   src/agent-gateway/social-agent-deepseek-resilience.spec.ts \
@@ -160,8 +161,14 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-fallback-source-boundary.spec.ts \
   src/agent-gateway/social-agent-final-response.service.spec.ts \
   src/agent-gateway/social-agent-planner.service.spec.ts \
+  src/agent-gateway/social-agent-brain-planner-normalization.spec.ts \
+  src/agent-gateway/social-agent-intent-normalization.spec.ts \
   src/agent-gateway/social-agent-intent-memory.presenter.spec.ts \
   src/agent-gateway/social-agent-memory-context.service.spec.ts \
+  src/agent-gateway/social-agent-route-context.service.spec.ts \
+  src/agent-gateway/social-agent-route-decision.service.spec.ts \
+  src/agent-gateway/social-agent-route-response.presenter.spec.ts \
+  src/agent-gateway/social-agent-current-task-summary.presenter.spec.ts \
   src/agent-gateway/social-agent-confirmation-policy.service.spec.ts \
   src/agent-gateway/social-agent-execution-pipeline.contract.spec.ts \
   src/agent-gateway/social-agent-loop-state.spec.ts \
@@ -186,6 +193,7 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-run-next-state.spec.ts \
   src/agent-gateway/social-agent-run-orchestrator.service.spec.ts \
   src/agent-gateway/social-agent-run-progress.tracker.spec.ts \
+  src/agent-gateway/social-agent-run-recommendation.service.spec.ts \
   src/agent-gateway/social-agent-run-state.service.spec.ts \
   src/agent-gateway/social-agent-state-machine.spec.ts \
   src/agent-gateway/social-agent-task-execution-state.spec.ts \
@@ -205,6 +213,7 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-card-action-router.service.spec.ts \
   src/agent-gateway/social-agent-candidate-action.service.spec.ts \
   src/agent-gateway/social-agent-candidate-command.service.spec.ts \
+  src/agent-gateway/social-agent-inbox-tool.service.spec.ts \
   src/agent-gateway/candidate-explanation.service.spec.ts \
   src/agent-gateway/social-agent-candidate-card.presenter.spec.ts \
   src/agent-gateway/social-agent-candidate-display-fields.spec.ts \
