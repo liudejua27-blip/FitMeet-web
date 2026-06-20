@@ -24,9 +24,9 @@ const STATUS_LABEL: Record<string, { text: string; tone: string }> = {
 
 const SOURCE_LABEL: Record<string, string> = {
   manual: '本人创建',
-  openclaw: 'OpenClaw Agent',
-  codex: 'Codex Agent',
-  claude: 'Claude Agent',
+  openclaw: '受信任外部 Agent',
+  codex: 'FitMeet Social Codex',
+  claude: '受信任外部 Agent',
   custom_agent: '自定义 Agent',
   public: '公开渠道',
 };

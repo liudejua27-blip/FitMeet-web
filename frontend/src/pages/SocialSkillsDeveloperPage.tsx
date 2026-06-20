@@ -16,7 +16,7 @@ const capabilities = [
 const setupSteps = [
   {
     title: 'Install social-skills',
-    body: 'social-skills 作为 OpenClaw 外部技能包维护，不进入 FitMeet 网站部署包。',
+    body: 'social-skills 作为 FitMeet 外部技能包维护，不进入网站部署包。',
     action: `git clone ${socialSkillsRepo}`,
   },
   {
@@ -64,7 +64,7 @@ export const SocialSkillsDeveloperPage = memo(function SocialSkillsDeveloperPage
             <span className="platform-label">SOCIAL-SKILLS</span>
             <h1>Developer skills for real-world agent tasks.</h1>
             <p>
-              social-skills connects OpenClaw, Custom Agents and external tools to FitMeet.
+              social-skills connects trusted external agents and tools to FitMeet.
               The package exposes social capabilities, while FitMeet keeps permissions,
               high-risk approval and audit logs inside the platform.
             </p>
@@ -154,7 +154,7 @@ function DeveloperSection({
 function StatusPanel() {
   return (
     <aside className="developer-status-panel">
-      <span>OPENCLAW STATUS</span>
+      <span>AGENT SKILL STATUS</span>
       <strong>Public developer preview</strong>
       <div>
         <StatusRow label="Agent Token" state="private" />

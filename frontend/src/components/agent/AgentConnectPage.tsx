@@ -124,7 +124,7 @@ function AgentConnectHome() {
             <span>NO DEMO CONNECTIONS</span>
             <h3>不展示虚构 Agent 状态</h3>
             <p>
-              这里不再模拟 OpenClaw、Codex 或第三方 Agent 的连接状态。真实 Token、权限、审批和行为日志统一走后端 Agent Gateway。
+              这里不再模拟任何第三方 Agent 的连接状态。真实 Token、权限、审批和行为日志统一走后端 Agent Gateway。
             </p>
             <div className="agent-selected-panel__links">
               <SmartNavLink to="/agent-hub">创建 Agent Token</SmartNavLink>

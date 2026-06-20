@@ -268,7 +268,7 @@ export const AgentControlCenterPage = memo(function AgentControlCenterPage() {
               Agent 权限控制台
             </h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[#8C8A6E]">
-              你是 Agent 的所有者。这里决定 OpenClaw / QClaw 能代表你做什么，
+              你是 Agent 的所有者。这里决定 FitMeet Agent、内部 worker 或受信任外部 Agent 能代表你做什么，
               以及哪些动作必须先由你点「同意」后才能执行。
             </p>
           </div>

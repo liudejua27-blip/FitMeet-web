@@ -51,7 +51,7 @@ const capabilities = [
 const aiProductLayers = [
   {
     title: 'AI 画像工作室',
-    desc: '让用户或 OpenClaw 用自然语言补全人物画像，DeepSeek 自动生成公开标签、私密偏好、敏感标签和匹配关键词。',
+    desc: '让用户或 FitMeet Agent 用自然语言补全人物画像，DeepSeek 自动生成公开标签、私密偏好、敏感标签和匹配关键词。',
     cta: '开始画像采集',
     href: '/ai-profile',
   },
@@ -62,8 +62,8 @@ const aiProductLayers = [
     href: '/agent-inbox',
   },
   {
-    title: 'OpenClaw 代理闭环',
-    desc: 'OpenClaw 通过 social-skills 询问主人、生成草稿、读取推荐；保存、联系和发消息都需要真人确认。',
+    title: 'Social Codex 代理闭环',
+    desc: 'FitMeet Agent 通过受控技能询问主人、生成草稿、读取推荐；保存、联系和发消息都需要真人确认。',
     cta: '配置 Social Skills',
     href: '/developers/social-skills',
   },
@@ -156,7 +156,7 @@ export const AiRealmPage = memo(function AiRealmPage() {
           </h2>
           <p className="mt-3 max-w-3xl text-sm leading-7 text-cream/70">
             FitMeet 会先让 AI 理解每个用户，再用可解释匹配把合适的人推到 Agent Inbox；
-            OpenClaw 可以参与采集，但所有高风险动作仍由真人确认。
+            受信任 Agent 可以参与采集，但所有高风险动作仍由真人确认。
           </p>
           <div className="mt-6 grid gap-4 lg:grid-cols-3">
             {aiProductLayers.map((layer, index) => (

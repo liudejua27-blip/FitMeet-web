@@ -40,8 +40,8 @@ const aiModuleLayers = [
     desc: '推荐不只给分数，还说明为什么推荐、有什么风险、下一步怎么做，并给出开场白草稿。',
   },
   {
-    title: 'OpenClaw 代理闭环',
-    desc: 'OpenClaw 通过 social-skills 访谈主人、生成草稿、读取推荐；保存和联系都必须真人确认。',
+    title: 'Social Codex 代理闭环',
+    desc: 'FitMeet Agent 通过受控技能访谈主人、生成草稿、读取推荐；保存和联系都必须真人确认。',
   },
 ];
 
@@ -929,7 +929,7 @@ export function AiProfileBuilderPage() {
                           className="mt-0.5 h-4 w-4 shrink-0 accent-[#c8ff80]"
                         />
                         <span className="text-xs font-bold leading-5 text-amber-100">
-                          我已确认这些敏感标签只用于私密匹配，不会在公开画像、推荐卡或 OpenClaw
+                          我已确认这些敏感标签只用于私密匹配，不会在公开画像、推荐卡或外部 Agent
                           公开读取接口中展示。
                         </span>
                       </label>

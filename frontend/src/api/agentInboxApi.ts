@@ -60,7 +60,7 @@ export interface AgentInboxEvent {
   createdAt?: string;
 }
 
-export interface OpenClawSetupStatus {
+export interface ExternalAgentSetupStatus {
   tokenConfigured: boolean;
   activeTokenCount: number;
   webhookConfigured: boolean;
@@ -217,9 +217,9 @@ export const agentInboxApi = {
     }>('/agents/profile-match/autopilot/run-once', { method: 'POST' }),
 
   profileMatchAutopilotStatus: () =>
-    api.requestProtected<OpenClawSetupStatus['subconsciousLoop']>('/agents/profile-match/autopilot/status'),
+    api.requestProtected<ExternalAgentSetupStatus['subconsciousLoop']>('/agents/profile-match/autopilot/status'),
 
-  openClawStatus: () => api.requestProtected<OpenClawSetupStatus>('/agents/openclaw/status'),
+  externalAgentStatus: () => api.requestProtected<ExternalAgentSetupStatus>('/agents/openclaw/status'),
 
   matchRequests: () => api.requestProtected<{ requests: MatchRequestItem[] }>('/match-requests'),
 

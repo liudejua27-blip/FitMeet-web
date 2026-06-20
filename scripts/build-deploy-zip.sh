@@ -767,6 +767,7 @@ fail_if_entry "legacy product motion showcase" '^FitMeet-web/frontend/src/compon
 fail_if_entry "legacy universe gateway data" '^FitMeet-web/frontend/src/data/(gateways|heroCopy)\.ts$'
 fail_if_entry "legacy universe card components" '^FitMeet-web/frontend/src/components/ui/(GatewayPortalCard|SectionHeading)\.tsx$'
 fail_if_entry "legacy universe Earth scene" '^FitMeet-web/frontend/src/components/three/EarthScene\.tsx$'
+fail_if_entry "legacy universe orbiting agent labels" '^FitMeet-web/frontend/src/components/three/OrbitingEntities\.tsx$'
 fail_if_entry "one-off legacy rewrite scripts" '^FitMeet-web/scripts/fix-(aimatch|loginmodal|meetmodal|postmodal)'
 
 step "Write checksum"
