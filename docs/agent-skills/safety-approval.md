@@ -39,6 +39,9 @@ Any of these actions:
 - User confirmation resumes the same checkpoint.
 - Rejection must not execute the side effect.
 - Retry and replay must not double-send or double-publish.
+- Admin/debug tools are not approval-upgradable from user-facing surfaces; they
+  stay behind RBAC debug controllers and must not appear in normal tool
+  registries.
 
 ## Eval IDs
 
@@ -46,3 +49,4 @@ Any of these actions:
 - `approval_reject_prevents_side_effect`
 - `approval_resume_is_idempotent`
 - `fallback_not_streamed_as_llm_answer`
+- `admin_debug_tools_hidden_from_user_runtime`

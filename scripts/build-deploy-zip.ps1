@@ -122,7 +122,8 @@ Assert-RequiredPath "docs/agent-skills/life-graph-memory.md"
 Assert-FileContains "scripts/run-agent-skill-evals.mjs" @(
   "twenty_turn_memory_no_repeat_questions",
   "candidate_empty_safe_fallback",
-  "correction_updates_candidate_preference_without_reasking_core_slots"
+  "correction_updates_candidate_preference_without_reasking_core_slots",
+  "admin_debug_tools_hidden_from_user_runtime"
 )
 Assert-FileContains "scripts/verify-agent-skills.mjs" @(
   "profile_onboarding_skill"
@@ -134,7 +135,8 @@ Assert-FileContains "docs/agent-skills/social-meetup-workflow.md" @(
 Assert-FileContains "docs/agent-skills/eval-cases.jsonl" @(
   "twenty_turn_memory_no_repeat_questions",
   "candidate_empty_safe_fallback",
-  "correction_updates_candidate_preference_without_reasking_core_slots"
+  "correction_updates_candidate_preference_without_reasking_core_slots",
+  "admin_debug_tools_hidden_from_user_runtime"
 )
 Assert-RequiredPath "backend/src/agent-gateway/agent-approval.service.spec.ts"
 Assert-RequiredPath "backend/src/agent-gateway/agent-approval-dispatcher.service.spec.ts"

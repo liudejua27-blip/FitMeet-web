@@ -65,6 +65,7 @@ const requiredEvalIds = [
   'fallback_not_streamed_as_llm_answer',
   'thread_append_no_duplicate_creation',
   'visible_process_overlay_not_timeline',
+  'admin_debug_tools_hidden_from_user_runtime',
 ];
 
 const requiredToolExampleIds = [
@@ -83,6 +84,7 @@ const requiredToolExampleIds = [
   'meet_loop_wait_reply_safe_skip',
   'meet_loop_review_writeback',
   'life_graph_stable_fact_with_evidence',
+  'admin_debug_tool_hidden_from_user_runtime',
 ];
 
 const errors = [];
@@ -282,6 +284,8 @@ for (const phrase of [
   '"expectedToolUi":["CandidateEmptyStateCard"]',
   '"mustNot":["fake_candidates","mock_people","CandidateCards"]',
   '"write_life_graph_outcome"',
+  '"reject_user_facing_admin_debug_tool"',
+  '"expose_admin_debug_registry"',
 ]) {
   if (!toolExamplesSource.includes(phrase)) {
     fail(`tool-examples.jsonl missing invariant ${phrase}`);
@@ -301,6 +305,7 @@ for (const phrase of [
   '"deepseek_quality_routing_not_downgraded"',
   '"deepseek_context_window_not_truncated"',
   '"fallback_not_streamed_as_llm_answer"',
+  '"admin_debug_tools_hidden_from_user_runtime"',
 ]) {
   if (!evalSource.includes(phrase)) {
     fail(`eval-cases.jsonl missing invariant ${phrase}`);
@@ -316,6 +321,7 @@ for (const phrase of [
   'deepseek_quality_routing_not_downgraded',
   'deepseek_context_window_not_truncated',
   'fallback_not_streamed_as_llm_answer',
+  'admin_debug_tools_hidden_from_user_runtime',
   '--backend',
   '--api-readiness',
   '--api-full',

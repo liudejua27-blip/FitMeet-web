@@ -77,10 +77,14 @@ const sourceFiles = {
     'backend/src/agent-gateway/social-agent-fallback-source-boundary.spec.ts',
   fitmeetAlphaAgentSdkSpec:
     'backend/src/agent-gateway/fitmeet-alpha-agent-sdk.service.spec.ts',
+  toolRegistryControllerSpec:
+    'backend/src/agent-gateway/fitmeet-agent-tool-registry.controller.spec.ts',
   agentRouteIsolationSpec: 'frontend/src/test/AgentRouteIsolation.test.ts',
   agentWorkspaceRuntimeSpec: 'frontend/src/test/agentWorkspaceRuntime.test.ts',
   toolFallbackRenderSpec: 'frontend/src/test/toolFallbackRender.test.tsx',
   agentAdapterSpec: 'frontend/src/test/agentAdapter.test.ts',
+  toolExecutorSpec:
+    'backend/src/agent-gateway/social-agent-tool-executor.service.spec.ts',
   inboxToolSpec:
     'backend/src/agent-gateway/social-agent-inbox-tool.service.spec.ts',
   lifeGraphGovernanceSpec:
@@ -709,6 +713,35 @@ const validators = {
       'tool_call_started|slot_filled|hydrate_context|planner|traceId|raw JSON|payload',
     ]);
   },
+
+  admin_debug_tools_hidden_from_user_runtime(caseItem) {
+    expectCase(
+      caseItem,
+      (item) => item.expected.hiddenFromUserRegistry === true,
+      'Admin/debug tools must be hidden from the user-facing registry',
+    );
+    expectCase(
+      caseItem,
+      (item) => item.expected.hiddenFromAgentRegistry === true,
+      'Admin/debug tools must be hidden from the agent-token registry',
+    );
+    expectCase(
+      caseItem,
+      (item) => item.expected.adhocExecutionForbidden === true,
+      'Admin/debug tools must be rejected from user-facing adhoc execution',
+    );
+    expectIncludes('toolRegistryControllerSpec', [
+      'hides admin debug tools from the user-facing registry manifest',
+      'hides admin debug tools from the agent-token registry manifest',
+      'get_candidate_pool_debug',
+      'FitMeetAgentToolCategory.AdminDebug',
+    ]);
+    expectIncludes('toolExecutorSpec', [
+      'blocks admin debug tools from user-facing adhoc task actions',
+      'Admin/debug tools cannot be executed from user-facing Agent task actions.',
+      'candidatePool.debugCandidatePool).not.toHaveBeenCalled',
+    ]);
+  },
 };
 
 function runCase(caseItem) {
@@ -731,6 +764,8 @@ function runBackendAssertions() {
     'src/agent-gateway/social-agent-context-window.spec.ts',
     'src/agent-gateway/social-agent-deepseek-quality-boundary.spec.ts',
     'src/agent-gateway/social-agent-fallback-source-boundary.spec.ts',
+    'src/agent-gateway/fitmeet-agent-tool-registry.controller.spec.ts',
+    'src/agent-gateway/social-agent-tool-executor.service.spec.ts',
   ];
   const result = spawnSync(
     'pnpm',

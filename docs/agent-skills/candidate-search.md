@@ -24,6 +24,8 @@ social/meet-up goal.
 - Raw contact information.
 - Unconsented precise location.
 - Mock/fallback candidates in production.
+- Admin/debug candidate-pool tools in user-facing or agent-token runtime
+  registries.
 
 ## Tools
 
@@ -57,3 +59,4 @@ are a recovery path, not a candidate list.
 
 - `candidate_empty_safe_fallback`
 - `candidate_search_no_mock_supply`
+- `admin_debug_tools_hidden_from_user_runtime`
