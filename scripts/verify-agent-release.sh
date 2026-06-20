@@ -59,6 +59,9 @@ step "Audit Agent release worktree cleanup boundaries"
 step "Self-test Agent release worktree audit"
 "${ROOT_DIR}/scripts/test-agent-release-worktree-audit.sh"
 
+step "Verify FitMeet Agent skill contracts and eval cases"
+node "${ROOT_DIR}/scripts/verify-agent-skills.mjs"
+
 step "Audit Agent assistant-ui release invariants"
 pnpm --dir "${ROOT_DIR}/frontend" run check:agent-chat-release
 
