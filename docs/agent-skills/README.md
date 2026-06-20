@@ -92,6 +92,17 @@ RUN_AGENT_SKILL_EVAL_API=20-turn-memory bash scripts/verify-agent-release.sh
 RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true bash scripts/verify-agent-release.sh
 ```
 
+When you need durable release evidence, set `AGENT_SMOKE_REPORT_FILE` on any
+real API smoke run. The backend smoke writes
+`fitmeet.agent-opportunity-smoke-report.v1` JSON with the passed Social Codex
+milestones, scenario knobs, and failure reason when a step breaks:
+
+```bash
+AGENT_SMOKE_REPORT_FILE=artifacts/agent-release-evidence/opportunity-smoke.json \
+RUN_AGENT_OPPORTUNITY_SMOKE=true \
+bash scripts/verify-agent-release.sh
+```
+
 `--api-readiness` runs the real Agent opportunity smoke in
 `AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true` mode. It checks ordinary-chat
 isolation, clarification, OpportunityCard readiness, and the correction-memory

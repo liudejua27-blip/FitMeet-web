@@ -362,8 +362,12 @@ Assert-FileContains "docs/agent-release-e2e-matrix.md" @(
   "REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true",
   "Opportunity readiness smoke",
   "Full opportunity smoke",
+  "Opportunity smoke report",
   "Ordinary chat does not trigger social UI",
   "Life Graph remains proposal-based"
+)
+Assert-FileContains "docs/agent-skills/README.md" @(
+  "AGENT_SMOKE_REPORT_FILE"
 )
 Assert-FileContains "scripts/agent-release-matrix.sh" @(
   "--opportunity-readiness-smoke",

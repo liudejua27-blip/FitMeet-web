@@ -315,6 +315,8 @@ require_file_contains "docs/agent-release-e2e-matrix.md" "Final Agent cutover st
 require_file_contains "docs/agent-release-e2e-matrix.md" "REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true"
 require_file_contains "docs/agent-release-e2e-matrix.md" "Opportunity readiness smoke"
 require_file_contains "docs/agent-release-e2e-matrix.md" "Full opportunity smoke"
+require_file_contains "docs/agent-release-e2e-matrix.md" "Opportunity smoke report"
+require_file_contains "docs/agent-skills/README.md" "AGENT_SMOKE_REPORT_FILE"
 require_file_contains "docs/agent-release-e2e-matrix.md" "Ordinary chat does not trigger social UI"
 require_file_contains "docs/agent-release-e2e-matrix.md" "Life Graph remains proposal-based"
 require_file_contains "scripts/agent-release-matrix.sh" "--opportunity-readiness-smoke"

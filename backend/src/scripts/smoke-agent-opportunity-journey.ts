@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+
 /**
  * Real API smoke for the product-grade FitMeet Agent opportunity journey.
  *
@@ -35,6 +38,8 @@
  *     supplied query is expected to have zero public candidates.
  *   AGENT_SMOKE_EMPTY_CANDIDATE_MESSAGE=<message> to override the default
  *     unlikely empty-supply query.
+ *   AGENT_SMOKE_REPORT_FILE=<path> to write a machine-readable JSON report of
+ *     the Social Codex milestones that passed during the smoke run.
  *
  * Recommended staging flow:
  *   pnpm --dir backend run seed:agent-smoke
@@ -45,6 +50,12 @@
  */
 
 type JsonRecord = Record<string, unknown>;
+
+type SmokeCheck = {
+  message: string;
+  milestoneId: string;
+  createdAt: string;
+};
 
 type SmokeResponse = {
   assistantMessage?: string;
@@ -83,8 +94,11 @@ const EMPTY_CANDIDATE_MESSAGE = nonEmpty(
   process.env.AGENT_SMOKE_EMPTY_CANDIDATE_MESSAGE,
   '我想今天凌晨三点在火星奥林帕斯山附近找公开资料里有冰潜和舞蹈双标签的人一起散步，只用真实公开可发现候选；如果没有真实候选，请不要编造。',
 );
+const SMOKE_REPORT_FILE = nonEmpty(process.env.AGENT_SMOKE_REPORT_FILE, '');
 
 let passCount = 0;
+const smokeStartedAt = new Date().toISOString();
+const smokeChecks: SmokeCheck[] = [];
 
 async function main() {
   assertRemoteIntent();
@@ -1535,7 +1549,79 @@ function parseSse(text: string) {
 
 function pass(message: string) {
   passCount += 1;
+  smokeChecks.push({
+    message,
+    milestoneId: inferSmokeMilestoneId(message),
+    createdAt: new Date().toISOString(),
+  });
   console.log(`[PASS] ${message}`);
+}
+
+function inferSmokeMilestoneId(message: string) {
+  const rules: Array<[RegExp, string]> = [
+    [/ordinary chat/i, 'conversation.intent-gate'],
+    [/emotional casual chat/i, 'conversation.supportive-no-social-execution'],
+    [/social advice/i, 'conversation.advice-no-candidate-search'],
+    [/correction-memory|candidate preference correction/i, 'memory.correction-context-preserved'],
+    [/20-turn/i, 'memory.twenty-turn-continuity'],
+    [/empty candidate|empty-candidate/i, 'candidate.empty-supply-fallback'],
+    [/vague social request/i, 'slot.clarification-before-search'],
+    [/clarified social request/i, 'opportunity.search-ready'],
+    [/readiness-only/i, 'opportunity.readiness-only'],
+    [/candidate\.generate_opener/i, 'approval.opener-required'],
+    [/opener\.reject/i, 'approval.opener-rejected'],
+    [/opener\.confirm_send/i, 'invite.confirmed-meet-loop'],
+    [/activity\.confirm_create creates/i, 'approval.activity-required'],
+    [/activity\.modify_time/i, 'meet-loop.reschedule-time'],
+    [/activity\.modify_location/i, 'meet-loop.reschedule-location'],
+    [/activity\.confirm_create confirms/i, 'meet-loop.activity-confirmed'],
+    [/activity\.check_in/i, 'meet-loop.check-in'],
+    [/activity\.complete/i, 'meet-loop.complete'],
+    [/review\.submit/i, 'life-graph.review-proposal'],
+    [/life_graph\.reject_update/i, 'life-graph.reject-update'],
+    [/life_graph\.accept_update/i, 'life-graph.accept-update'],
+    [/Social Codex trace eval passed/i, 'trace.eval-passed'],
+    [/skipped/i, 'scenario.skipped'],
+  ];
+  return (
+    rules.find(([pattern]) => pattern.test(message))?.[1] ??
+    `check.${String(passCount).padStart(2, '0')}`
+  );
+}
+
+function writeSmokeReport(status: 'passed' | 'failed', error?: unknown) {
+  if (!SMOKE_REPORT_FILE) return;
+
+  const target = resolve(process.cwd(), SMOKE_REPORT_FILE);
+  mkdirSync(dirname(target), { recursive: true });
+  const report = {
+    schemaVersion: 'fitmeet.agent-opportunity-smoke-report.v1',
+    status,
+    startedAt: smokeStartedAt,
+    finishedAt: new Date().toISOString(),
+    apiBaseUrl: API_BASE_URL,
+    mode: {
+      stopAfterOpportunities: STOP_AFTER_OPPORTUNITIES,
+      skipCorrectionMemory: SKIP_CORRECTION_MEMORY,
+      run20TurnMemory: RUN_20_TURN_MEMORY,
+      runEmptyCandidateFallback: RUN_EMPTY_CANDIDATE_FALLBACK,
+    },
+    summary: {
+      passCount,
+      checkCount: smokeChecks.length,
+      milestoneCount: new Set(smokeChecks.map((check) => check.milestoneId))
+        .size,
+    },
+    checks: smokeChecks,
+    error:
+      status === 'failed'
+        ? error instanceof Error
+          ? { message: error.message, name: error.name }
+          : { message: String(error) }
+        : undefined,
+  };
+  writeFileSync(target, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  console.log(`[agent-opportunity-smoke] report written: ${target}`);
 }
 
 function smokeKey(label: string) {
@@ -1643,9 +1729,14 @@ function safeJson(text: string): unknown {
   }
 }
 
-main().catch((error) => {
-  console.error(
-    `[agent-opportunity-smoke] ${error instanceof Error ? error.message : String(error)}`,
-  );
-  process.exit(1);
-});
+main()
+  .then(() => {
+    writeSmokeReport('passed');
+  })
+  .catch((error) => {
+    writeSmokeReport('failed', error);
+    console.error(
+      `[agent-opportunity-smoke] ${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.exit(1);
+  });
