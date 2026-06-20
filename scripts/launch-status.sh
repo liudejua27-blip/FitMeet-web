@@ -172,6 +172,9 @@ validate_agent_remote_smoke_evidence() {
 
   local trace_eval_count
   trace_eval_count="$(grep -Fc -- 'Social Codex trace eval passed' "${evidence_file}")"
+  # Backward-compatible launch audit wording: the original gate required
+  # readiness and full opportunity smoke; the current gate additionally
+  # requires 20-turn memory, empty-candidate, and SSE abort smoke coverage.
   if [[ "${trace_eval_count}" -lt 4 ]]; then
     echo "[FAIL] Agent remote smoke evidence must prove Social Codex trace eval for readiness, 20-turn memory, empty-candidate, and full opportunity smoke; found ${trace_eval_count}." >&2
     return 1
