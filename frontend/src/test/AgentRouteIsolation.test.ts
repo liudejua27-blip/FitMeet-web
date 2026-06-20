@@ -31,17 +31,16 @@ describe('Agent user route isolation', () => {
     );
   });
 
-  it('keeps internal demo pages behind the development-only route gate', () => {
+  it('removes internal demo pages from the production route graph', () => {
     const routeSource = readSource(join('routes', 'AppRoutes.tsx'));
 
-    expect(routeSource).toContain('const ENABLE_INTERNAL_DEMO_ROUTES = import.meta.env.DEV;');
-    expect(routeSource).toContain('const DemoAgentSocialLoopPage = ENABLE_INTERNAL_DEMO_ROUTES');
-    expect(routeSource).toContain('const DemoInvestorPage = ENABLE_INTERNAL_DEMO_ROUTES');
-    expect(routeSource).toMatch(
-      /ENABLE_INTERNAL_DEMO_ROUTES && DemoAgentSocialLoopPage && DemoInvestorPage/,
-    );
+    expect(routeSource).not.toMatch(/ENABLE_INTERNAL_DEMO_ROUTES/);
+    expect(routeSource).not.toMatch(/DemoAgentSocialLoopPage|DemoInvestorPage/);
+    expect(existsSync(join(srcRoot, 'pages', 'DemoAgentSocialLoopPage.tsx'))).toBe(false);
+    expect(existsSync(join(srcRoot, 'pages', 'DemoInvestorPage.tsx'))).toBe(false);
     expect(routeSource).toContain('<Route path="/internal/demo/*" element={<Navigate to="/" replace />} />');
-    expect(routeSource).not.toMatch(/path="\/internal\/demo\/agent-social-loop"[\s\S]*<PlatformPage/);
+    expect(routeSource).not.toMatch(/path="\/internal\/demo\/agent-social-loop"/);
+    expect(routeSource).not.toMatch(/path="\/internal\/demo\/investor"/);
   });
 
   it('removes the old user-facing and debug workbench files', () => {

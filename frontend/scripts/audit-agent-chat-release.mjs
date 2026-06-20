@@ -181,6 +181,8 @@ const forbiddenPresentFiles = [
   'frontend/src/debug/agent-workbench',
   'frontend/src/debug/agentTaskEvents.ts',
   'frontend/src/debug/agentPageModuleAudit.ts',
+  'frontend/src/pages/DemoAgentSocialLoopPage.tsx',
+  'frontend/src/pages/DemoInvestorPage.tsx',
   'frontend/src/components/agent-workspace/agentFlow.constants.ts',
   'frontend/src/components/agent-workspace/agentFlow.types.ts',
   'frontend/src/components/agent-workspace/useAgentFlow.ts',
@@ -226,6 +228,8 @@ const forbiddenSourcePatterns = [
   'agent-workspace--gpt',
   'agent-gpt-result-block',
   'SocialAgentConsolePage',
+  'DemoAgentSocialLoopPage',
+  'DemoInvestorPage',
   'agent-workbench',
   'AgentRunTrace',
   'life-modal',
@@ -245,6 +249,7 @@ const forbiddenSourcePatterns = [
 
 const allowedReferenceFiles = new Set([
   'frontend/scripts/audit-agent-chat-release.mjs',
+  'frontend/scripts/check-prod-build.mjs',
   'frontend/scripts/qa-agent-chat-shell.mjs',
   'frontend/scripts/qa-agent-chat-production.mjs',
   'frontend/src/test/AgentRouteIsolation.test.ts',
@@ -1470,9 +1475,6 @@ const requiredContentChecks = [
   {
     file: 'frontend/src/routes/AppRoutes.tsx',
     patterns: [
-      'const ENABLE_INTERNAL_DEMO_ROUTES = import.meta.env.DEV;',
-      'const DemoAgentSocialLoopPage = ENABLE_INTERNAL_DEMO_ROUTES',
-      'const DemoInvestorPage = ENABLE_INTERNAL_DEMO_ROUTES',
       '<Route path="/legacy-home" element={<Navigate to="/" replace />} />',
       '<Route path="/internal/demo/*" element={<Navigate to="/" replace />} />',
     ],

@@ -489,6 +489,8 @@ rsync -a "${ROOT_DIR}/" "${STAGE_DIR}/" \
   --exclude 'frontend/src/debug/agent-workbench' \
   --exclude 'frontend/src/debug/agentTaskEvents.ts' \
   --exclude 'frontend/src/debug/agentPageModuleAudit.ts' \
+  --exclude 'frontend/src/pages/DemoAgentSocialLoopPage.tsx' \
+  --exclude 'frontend/src/pages/DemoInvestorPage.tsx' \
   --exclude 'frontend/src/components/agent-workspace/useAgentFlow.ts' \
   --exclude 'frontend/src/styles/agent-workspace.css' \
   --exclude 'frontend/src/styles/agent-gpt-copy-shell.css' \
@@ -743,6 +745,7 @@ fail_if_entry "legacy Agent ant guide component" '^FitMeet-web/frontend/src/comp
 fail_if_entry "legacy Agent ant guide assets" '^FitMeet-web/frontend/src/assets/agent/ant-guide/'
 fail_if_entry "legacy Agent debug source" '^FitMeet-web/frontend/src/debug/'
 fail_if_entry "legacy Agent debug workbench" '^FitMeet-web/frontend/src/debug/(SocialAgentConsolePage\.tsx|agentTaskEvents\.ts|agentPageModuleAudit\.ts|agent-workbench/)'
+fail_if_entry "internal demo pages" '^FitMeet-web/frontend/src/pages/(DemoAgentSocialLoopPage|DemoInvestorPage)\.tsx$'
 fail_if_entry "legacy Agent workspace CSS" '^FitMeet-web/frontend/src/styles/agent-workspace\.css$'
 fail_if_entry "legacy Agent GPT shell CSS" '^FitMeet-web/frontend/src/styles/agent-gpt-copy-shell\.css$'
 fail_if_entry "legacy FitMeet assistant shell CSS" '^FitMeet-web/frontend/src/styles/fitmeet-assistant-ui\.css$'

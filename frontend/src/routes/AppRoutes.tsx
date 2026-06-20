@@ -5,8 +5,6 @@ import { ProtectedRoute } from '../components/ProtectedRoute';
 import { NotFoundPage } from '../pages/NotFoundPage';
 import { navigateToDiscoverWithScrollReset } from '../lib/scrollNavigation';
 
-const ENABLE_INTERNAL_DEMO_ROUTES = import.meta.env.DEV;
-
 const PlatformPage = lazy(() =>
   import('../pages/PlatformPage').then((m) => ({ default: m.PlatformPage })),
 );
@@ -75,18 +73,6 @@ const PublicIntentDetailPage = lazy(() =>
     default: m.PublicIntentDetailPage,
   })),
 );
-const DemoAgentSocialLoopPage = ENABLE_INTERNAL_DEMO_ROUTES
-  ? lazy(() =>
-      import('../pages/DemoAgentSocialLoopPage').then((m) => ({
-        default: m.DemoAgentSocialLoopPage,
-      })),
-    )
-  : null;
-const DemoInvestorPage = ENABLE_INTERNAL_DEMO_ROUTES
-  ? lazy(() =>
-      import('../pages/DemoInvestorPage').then((m) => ({ default: m.DemoInvestorPage })),
-    )
-  : null;
 const ProfilePage = lazy(() =>
   import('../pages/ProfilePage').then((m) => ({ default: m.ProfilePage })),
 );
@@ -299,14 +285,7 @@ export function AppRoutes() {
             </ProtectedRoute>
           }
         />
-        {ENABLE_INTERNAL_DEMO_ROUTES && DemoAgentSocialLoopPage && DemoInvestorPage ? (
-          <>
-            <Route path="/internal/demo/agent-social-loop" element={<DemoAgentSocialLoopPage />} />
-            <Route path="/internal/demo/investor" element={<DemoInvestorPage />} />
-          </>
-        ) : (
-          <Route path="/internal/demo/*" element={<Navigate to="/" replace />} />
-        )}
+        <Route path="/internal/demo/*" element={<Navigate to="/" replace />} />
         <Route path="/demo/*" element={<Navigate to="/demo" replace />} />
         <Route
           path="/profile"

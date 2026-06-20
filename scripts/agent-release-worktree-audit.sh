@@ -193,6 +193,8 @@ forbidden_legacy_paths=(
   "frontend/src/components/ai-elements"
   "frontend/src/debug/agent-workbench"
   "frontend/src/pages/SocialAgentConsolePage.tsx"
+  "frontend/src/pages/DemoAgentSocialLoopPage.tsx"
+  "frontend/src/pages/DemoInvestorPage.tsx"
   "frontend/src/pages/HomePage.tsx"
   "frontend/src/pages/HomePage.legacy.tsx"
   "frontend/src/components/hero"
@@ -237,7 +239,7 @@ if [[ -d frontend/src ]]; then
       --include='*.ts' \
       --include='*.tsx' \
       --include='*.css' \
-      -E 'agent-gpt-copy-shell|agent-workspace--gpt|agent-gpt-result-block|fitmeet-assistant-ui\.css|CodexAntPet|agent-workbench|SocialAgentConsolePage' \
+      -E 'agent-gpt-copy-shell|agent-workspace--gpt|agent-gpt-result-block|fitmeet-assistant-ui\.css|CodexAntPet|agent-workbench|SocialAgentConsolePage|DemoAgentSocialLoopPage|DemoInvestorPage' \
       frontend/src 2>/dev/null | grep -vE '/test/|\.test\.|\.spec\.' || true
   )
 fi
@@ -325,7 +327,7 @@ category_for_path() {
     backend/src/agent-gateway/*|backend/src/ai/*|backend/src/common/deepseek.util.ts|backend/src/common/deepseek.util.spec.ts|backend/src/openapi/fitmeet-core.openapi.ts|backend/src/scripts/smoke-agent-*|backend/src/scripts/prepare-agent-smoke-seed.ts|backend/tsconfig.json)
       printf 'agent-backend-core'
       ;;
-    frontend/src/components/agent-workspace/*|frontend/src/components/assistant-ui/*|frontend/src/components/ai-elements/*|frontend/src/components/agent-loop/AgentApprovalCard.tsx|frontend/src/components/agent/Agent*.tsx|frontend/src/components/agent/ant-guide/*|frontend/src/assets/agent/ant-guide/*|frontend/src/api/socialAgentApi.ts|frontend/src/api/socialAgentDebugApi.ts|frontend/src/lib/agentApprovalCopy.ts|frontend/src/lib/socialCodexProcessCopy.ts|frontend/src/pages/AgentControlCenterPage.tsx|frontend/src/global.css)
+    frontend/src/components/agent-workspace/*|frontend/src/components/assistant-ui/*|frontend/src/components/ai-elements/*|frontend/src/components/agent-loop/AgentApprovalCard.tsx|frontend/src/components/agent/Agent*.tsx|frontend/src/components/agent/ant-guide/*|frontend/src/assets/agent/ant-guide/*|frontend/src/api/socialAgentApi.ts|frontend/src/api/socialAgentDebugApi.ts|frontend/src/lib/agentApprovalCopy.ts|frontend/src/lib/socialCodexProcessCopy.ts|frontend/src/pages/AgentControlCenterPage.tsx|frontend/src/pages/DemoAgentSocialLoopPage.tsx|frontend/src/pages/DemoInvestorPage.tsx|frontend/src/global.css)
       printf 'agent-frontend-assistant-ui'
       ;;
     backend/src/match/*|backend/src/social-requests/*|frontend/src/api/socialRequestsApi.ts|frontend/src/pages/DiscoverPage.tsx|frontend/src/pages/AiProfileBuilderPage.tsx|frontend/src/pages/HomePage.tsx|frontend/src/pages/HomePage.legacy.tsx|frontend/src/components/hero/*|frontend/src/components/sections/*|frontend/src/components/showcase/*|frontend/src/components/three/EarthScene.tsx|frontend/src/components/ui/GatewayPortalCard.tsx|frontend/src/components/ui/SectionHeading.tsx|frontend/src/data/*|frontend/src/styles/visual-upgrades.css|frontend/src/test/DiscoverClosure.test.ts|frontend/src/test/discoverContent.test.ts|frontend/src/routes/AppRoutes.tsx|frontend/src/types/index.ts)
@@ -544,6 +546,8 @@ while IFS= read -r line; do
     frontend/src/debug/*|\
     frontend/src/debug/agent-workbench/*|\
     frontend/src/pages/SocialAgentConsolePage.tsx|\
+    frontend/src/pages/DemoAgentSocialLoopPage.tsx|\
+    frontend/src/pages/DemoInvestorPage.tsx|\
     frontend/src/styles/agent-workspace.css|\
     frontend/src/styles/agent-gpt-copy-shell.css|\
     frontend/src/styles/fitmeet-assistant-ui.css|\
