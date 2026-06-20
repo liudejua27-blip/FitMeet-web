@@ -148,6 +148,7 @@ forbidden_legacy_paths=(
   "frontend/src/components/agent-workspace/CodexAntPet.tsx"
   "frontend/src/components/agent/ant-guide"
   "frontend/src/assets/agent/ant-guide"
+  "frontend/src/components/ai-elements"
   "frontend/src/debug/agent-workbench"
   "frontend/src/pages/SocialAgentConsolePage.tsx"
   "frontend/src/styles/agent-workspace.css"
@@ -268,7 +269,7 @@ category_for_path() {
     backend/src/agent-gateway/*|backend/src/ai/*|backend/src/common/deepseek.util.ts|backend/src/common/deepseek.util.spec.ts|backend/src/openapi/fitmeet-core.openapi.ts|backend/src/scripts/smoke-agent-*|backend/src/scripts/prepare-agent-smoke-seed.ts|backend/tsconfig.json)
       printf 'agent-backend-core'
       ;;
-    frontend/src/components/agent-workspace/*|frontend/src/components/assistant-ui/*|frontend/src/components/agent-loop/AgentApprovalCard.tsx|frontend/src/components/agent/Agent*.tsx|frontend/src/components/agent/ant-guide/*|frontend/src/assets/agent/ant-guide/*|frontend/src/api/socialAgentApi.ts|frontend/src/api/socialAgentDebugApi.ts|frontend/src/lib/agentApprovalCopy.ts|frontend/src/lib/socialCodexProcessCopy.ts|frontend/src/pages/AgentControlCenterPage.tsx|frontend/src/global.css)
+    frontend/src/components/agent-workspace/*|frontend/src/components/assistant-ui/*|frontend/src/components/ai-elements/*|frontend/src/components/agent-loop/AgentApprovalCard.tsx|frontend/src/components/agent/Agent*.tsx|frontend/src/components/agent/ant-guide/*|frontend/src/assets/agent/ant-guide/*|frontend/src/api/socialAgentApi.ts|frontend/src/api/socialAgentDebugApi.ts|frontend/src/lib/agentApprovalCopy.ts|frontend/src/lib/socialCodexProcessCopy.ts|frontend/src/pages/AgentControlCenterPage.tsx|frontend/src/global.css)
       printf 'agent-frontend-assistant-ui'
       ;;
     backend/src/match/*|backend/src/social-requests/*|frontend/src/api/socialRequestsApi.ts|frontend/src/pages/DiscoverPage.tsx|frontend/src/pages/AiProfileBuilderPage.tsx|frontend/src/pages/HomePage.legacy.tsx|frontend/src/data/*|frontend/src/test/DiscoverClosure.test.ts|frontend/src/test/discoverContent.test.ts|frontend/src/routes/AppRoutes.tsx|frontend/src/types/index.ts)
@@ -483,6 +484,7 @@ while IFS= read -r line; do
     frontend/src/components/agent-workspace/CodexAntPet.tsx|\
     frontend/src/components/agent/ant-guide/*|\
     frontend/src/assets/agent/ant-guide/*|\
+    frontend/src/components/ai-elements/*|\
     frontend/src/debug/*|\
     frontend/src/debug/agent-workbench/*|\
     frontend/src/pages/SocialAgentConsolePage.tsx|\
@@ -499,7 +501,7 @@ while IFS= read -r line; do
     scripts/fix-loginmodal.mjs|\
     scripts/fix-meetmodal.mjs|\
     scripts/fix-postmodal.mjs)
-      if [[ "${status}" != D* && "${status}" != R* ]]; then
+      if [[ "${index_status}" != "D" && "${worktree_status}" != "D" && "${index_status}" != "R" && "${worktree_status}" != "R" ]]; then
         legacy_entries+=("${status} ${path}")
       fi
       ;;
