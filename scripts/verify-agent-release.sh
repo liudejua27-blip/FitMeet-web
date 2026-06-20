@@ -62,6 +62,13 @@ step "Self-test Agent release worktree audit"
 step "Verify FitMeet Agent skill contracts and eval cases"
 node "${ROOT_DIR}/scripts/verify-agent-skills.mjs"
 
+step "Run FitMeet Agent skill eval runner"
+if is_truthy "${RUN_AGENT_SKILL_EVAL_BACKEND:-}"; then
+  node "${ROOT_DIR}/scripts/run-agent-skill-evals.mjs" --backend
+else
+  node "${ROOT_DIR}/scripts/run-agent-skill-evals.mjs"
+fi
+
 step "Audit Agent assistant-ui release invariants"
 pnpm --dir "${ROOT_DIR}/frontend" run check:agent-chat-release
 

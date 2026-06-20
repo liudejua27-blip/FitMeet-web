@@ -277,7 +277,7 @@ category_for_path() {
     deploy/*|docker-compose.prod.yml|scripts/build-deploy-zip.*|scripts/ecs-*|scripts/verify-production.sh|scripts/verify-agent-goal-production.sh|scripts/verify-agent-release.sh|scripts/agent-release-matrix.sh|scripts/agent-release-worktree-audit.sh|backend/src/config/production-*|.env.example|backend/.env.example|frontend/.env.example)
       printf 'deploy-production'
       ;;
-    docs/*|README.md|frontend/FRONTEND_ACCEPTANCE_CHECKLIST.md|frontend/scripts/*|frontend/src/test/*|frontend/src/test/utils/*|scripts/agent-remote-smoke-*|scripts/fix-*|scripts/verify-agent-release.sh|scripts/verify-agent-skills.mjs|scripts/agent-release-matrix.sh|scripts/stage-agent-release-bucket.sh|scripts/test-agent-release-worktree-audit.sh)
+    docs/*|README.md|frontend/FRONTEND_ACCEPTANCE_CHECKLIST.md|frontend/scripts/*|frontend/src/test/*|frontend/src/test/utils/*|scripts/agent-remote-smoke-*|scripts/fix-*|scripts/verify-agent-release.sh|scripts/verify-agent-skills.mjs|scripts/run-agent-skill-evals.mjs|scripts/agent-release-matrix.sh|scripts/stage-agent-release-bucket.sh|scripts/test-agent-release-worktree-audit.sh)
       printf 'tests-docs'
       ;;
     *)

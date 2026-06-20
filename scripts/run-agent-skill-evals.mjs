@@ -1,0 +1,387 @@
+#!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import process from 'node:process';
+
+const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const evalFile = path.join(root, 'docs', 'agent-skills', 'eval-cases.jsonl');
+const args = new Set(process.argv.slice(2));
+const runBackend = args.has('--backend');
+const showDetails = args.has('--show-details');
+
+const sourceFiles = {
+  acceptance:
+    'backend/src/agent-gateway/social-agent-chat.acceptance.spec.ts',
+  candidatePresenter:
+    'backend/src/agent-gateway/social-agent-candidate-pool-result.presenter.ts',
+  candidatePresenterSpec:
+    'backend/src/agent-gateway/social-agent-candidate-pool-result.presenter.spec.ts',
+  inboxToolSpec:
+    'backend/src/agent-gateway/social-agent-inbox-tool.service.spec.ts',
+  lifeGraphGovernanceSpec:
+    'backend/src/agent-gateway/social-codex-life-graph-governance.service.spec.ts',
+  meetLoopSpec:
+    'backend/src/agent-gateway/social-agent-meet-loop.service.spec.ts',
+  opportunityClarificationSpec:
+    'backend/src/agent-gateway/social-agent-opportunity-clarification.spec.ts',
+  profileGateSpec:
+    'backend/src/agent-gateway/social-agent-profile-gate.service.spec.ts',
+  releaseVerify: 'scripts/verify-agent-release.sh',
+  smokeOpportunity: 'backend/src/scripts/smoke-agent-opportunity-journey.ts',
+  stateMachineSpec:
+    'backend/src/agent-gateway/social-agent-task-memory-state-machine.service.spec.ts',
+  toolUiSchemaSpec: 'frontend/src/test/toolUiSchema.test.ts',
+  traceEvalSpec:
+    'backend/src/agent-gateway/social-codex-trace-eval.service.spec.ts',
+};
+
+const sourceCache = new Map();
+const failures = [];
+const passes = [];
+
+function readSource(name) {
+  const file = sourceFiles[name];
+  if (!file) throw new Error(`Unknown source alias: ${name}`);
+  if (!sourceCache.has(file)) {
+    const absolute = path.join(root, file);
+    if (!fs.existsSync(absolute)) {
+      throw new Error(`Missing source evidence file: ${file}`);
+    }
+    sourceCache.set(file, fs.readFileSync(absolute, 'utf8'));
+  }
+  return sourceCache.get(file);
+}
+
+function expect(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function expectIncludes(sourceName, phrases) {
+  const source = readSource(sourceName);
+  for (const phrase of phrases) {
+    expect(
+      source.includes(phrase),
+      `${sourceFiles[sourceName]} missing evidence: ${phrase}`,
+    );
+  }
+}
+
+function expectCase(caseItem, predicate, message) {
+  expect(predicate(caseItem), `${caseItem.id}: ${message}`);
+}
+
+function parseEvalCases() {
+  const source = fs.readFileSync(evalFile, 'utf8');
+  return source
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      try {
+        return JSON.parse(line);
+      } catch (error) {
+        throw new Error(
+          `eval-cases.jsonl line ${index + 1} is invalid JSON: ${error.message}`,
+        );
+      }
+    });
+}
+
+function commonCaseChecks(caseItem) {
+  expectCase(
+    caseItem,
+    (item) => typeof item.id === 'string' && item.id.length > 0,
+    'missing id',
+  );
+  expectCase(
+    caseItem,
+    (item) => Array.isArray(item.skillIds) && item.skillIds.length > 0,
+    'missing skillIds',
+  );
+  expectCase(
+    caseItem,
+    (item) => item.expected && typeof item.expected === 'object',
+    'missing expected object',
+  );
+}
+
+const validators = {
+  ordinary_chat_no_social_tools(caseItem) {
+    expectCase(caseItem, (item) => item.expected.intent === 'conversation', 'must stay conversation');
+    expectCase(
+      caseItem,
+      (item) => item.expected.forbiddenTools?.includes('search_public_candidates'),
+      'must forbid candidate search',
+    );
+    expectIncludes('acceptance', [
+      'keeps twenty turns of ordinary chat without triggering social tools',
+      'executor.executeToolAction).not.toHaveBeenCalled',
+    ]);
+  },
+
+  profile_gate_new_user_minimum_questions(caseItem) {
+    expectCase(
+      caseItem,
+      (item) => item.expected.blockedActions?.includes('invite'),
+      'profile gate must block invite',
+    );
+    expectIncludes('profileGateSpec', [
+      'summarizes the minimum profile gate for the Agent entry screen',
+      'availability',
+      'publicAuthorization',
+      'keeps action execution gated by boundary and public authorization',
+    ]);
+  },
+
+  ordinary_chat_not_blocked_by_profile_gate(caseItem) {
+    expectCase(caseItem, (item) => item.expected.blockedByProfileGate === false, 'ordinary chat must not be blocked');
+    expectIncludes('acceptance', [
+      'keeps twenty turns of ordinary chat without triggering social tools',
+    ]);
+  },
+
+  social_intent_extracts_slots_once(caseItem) {
+    expectCase(
+      caseItem,
+      (item) => item.expected.mustNotAskAgain?.includes('location_text'),
+      'must protect location from repeat questions',
+    );
+    expectIncludes('stateMachineSpec', [
+      'does not ask again for answered slots on later turns',
+      'avoidRepeatingAnsweredQuestions',
+    ]);
+  },
+
+  twenty_turn_memory_no_repeat_questions(caseItem) {
+    expectCase(caseItem, (item) => item.turns?.length >= 20, 'must include at least 20 turns');
+    expectIncludes('stateMachineSpec', [
+      'keeps social task slots stable through a 20-turn continuation',
+      'doNotAskAgainFor',
+    ]);
+    expectIncludes('acceptance', [
+      'keeps twenty turns of ordinary chat without triggering social tools',
+    ]);
+  },
+
+  opportunity_card_from_completed_slots(caseItem) {
+    expectCase(caseItem, (item) => item.expected.toolUiType === 'OpportunityCard', 'must render OpportunityCard');
+    expectIncludes('toolUiSchemaSpec', [
+      "productComponentForSchemaType('social_match.activity')).toBe('OpportunityCard')",
+      'defaultOpportunityActionsForSchema',
+    ]);
+  },
+
+  missing_slot_blocks_card_generation(caseItem) {
+    expectCase(
+      caseItem,
+      (item) => item.expected.mustNotShow?.includes('OpportunityCard'),
+      'must block card until required slots are complete',
+    );
+    expectIncludes('opportunityClarificationSpec', [
+      'asks only for search-critical context before candidate discovery',
+      "clarification.complete).toBe(false)",
+    ]);
+  },
+
+  publish_to_discover_requires_approval(caseItem) {
+    expectCase(caseItem, (item) => item.expected.mustEmit === 'approval.required', 'publish must require approval');
+    expectCase(caseItem, (item) => item.expected.sideEffectBeforeApproval === false, 'publish must not execute before approval');
+    expectIncludes('traceEvalSpec', [
+      'approval_without_checkpoint',
+      'approval_without_dry_run_preview',
+      'high_risk_without_idempotency_key',
+    ]);
+  },
+
+  discover_card_has_real_detail_link(caseItem) {
+    expectCase(
+      caseItem,
+      (item) => item.expected.mustNotHref === '/discover?focusScene=',
+      'must forbid focusScene as the primary detail link',
+    );
+    expectIncludes('releaseVerify', [
+      'Run real API smoke for Agent opportunity readiness',
+      'RUN_AGENT_OPPORTUNITY_SMOKE',
+    ]);
+  },
+
+  candidate_empty_safe_fallback(caseItem) {
+    expectCase(caseItem, (item) => item.expected.mustNotFakeCandidates === true, 'must forbid fake candidates');
+    expectIncludes('candidatePresenter', [
+      '当前没有找到符合条件的真实用户',
+      '发布一个约练需求',
+      '放宽城市、时间、兴趣条件',
+    ]);
+    expectIncludes('candidatePresenterSpec', [
+      "expect(result.candidates).toHaveLength(0)",
+      "expect(result.message).toContain('发布')",
+      "expect(JSON.stringify(result)).not.toContain('mock')",
+    ]);
+  },
+
+  candidate_search_no_mock_supply(caseItem) {
+    expectCase(caseItem, (item) => item.expected.forbiddenSources?.includes('mock'), 'mock source must be forbidden');
+    expectIncludes('candidatePresenter', ['no_real_candidates']);
+  },
+
+  candidate_top_three_with_reasons(caseItem) {
+    expectCase(caseItem, (item) => item.expected.maxVisibleCandidates === 3, 'must cap visible candidates to 3');
+    expectIncludes('smokeOpportunity', [
+      'minCandidates: 3',
+      'candidate OpportunityCard',
+    ]);
+    expectIncludes('toolUiSchemaSpec', ['CandidateCards', 'OpportunityCard']);
+  },
+
+  candidate_preference_uses_public_fields_only(caseItem) {
+    expectCase(
+      caseItem,
+      (item) => item.expected.mustNotInferPrivateFields === true,
+      'private candidate inference must be forbidden',
+    );
+    expectIncludes('stateMachineSpec', [
+      'candidatePreferencePolicy',
+      '公开可发现资料',
+    ]);
+  },
+
+  invite_requires_approval_checkpoint(caseItem) {
+    expectCase(caseItem, (item) => item.expected.idempotencyKeyRequired === true, 'invite requires idempotency key');
+    expectIncludes('traceEvalSpec', [
+      'high-risk approvals to be resumable and dry-run previewed',
+      'idempotencyKey',
+    ]);
+  },
+
+  approval_reject_prevents_side_effect(caseItem) {
+    expectCase(caseItem, (item) => item.expected.executed === false, 'reject must prevent execution');
+    expectIncludes('smokeOpportunity', [
+      'opener.reject cancels the high-risk send without side effects',
+    ]);
+  },
+
+  approval_resume_is_idempotent(caseItem) {
+    expectCase(caseItem, (item) => item.expected.doubleSend === false, 'resume must not double send');
+    expectIncludes('traceEvalSpec', [
+      'requires high-risk side effects to wait for approved resume',
+      'approval.resolved',
+    ]);
+  },
+
+  opener_preview_without_side_effect(caseItem) {
+    expectCase(caseItem, (item) => item.expected.draftOnly === true && item.expected.sent === false, 'opener must be draft-only');
+    expectIncludes('smokeOpportunity', [
+      'candidate.generate_opener creates a send approval card',
+    ]);
+  },
+
+  send_invite_requires_confirmation(caseItem) {
+    expectCase(caseItem, (item) => item.expected.sentBeforeApproval === false, 'send invite cannot happen before approval');
+    expectIncludes('traceEvalSpec', ['send_candidate_message', 'approval.required']);
+  },
+
+  meet_loop_full_state_machine(caseItem) {
+    expectCase(caseItem, (item) => item.expected.states?.includes('life_graph_writeback'), 'meet loop must include writeback');
+    expectIncludes('meetLoopSpec', [
+      'runs the canonical card-action meet loop without ActivitiesService',
+      'lifeGraphUpdated: true',
+      'ActivityReviewedPositive',
+    ]);
+  },
+
+  waiting_reply_missing_connection_no_error_loop(caseItem) {
+    expectCase(caseItem, (item) => item.expected.workerErrorLoop === false, 'worker error loop must be impossible');
+    expectIncludes('inboxToolSpec', [
+      'reads owner inbox events without an agent connection when no conversation is scoped',
+      'requires an agent connection for conversation-scoped inbox reads',
+    ]);
+  },
+
+  stable_preference_saved_with_evidence(caseItem) {
+    expectCase(caseItem, (item) => item.expected.evidenceRequired === true, 'Life Graph facts require evidence');
+    expectIncludes('lifeGraphGovernanceSpec', [
+      'proposes governed stable facts with evidence and expiry',
+      'evidence.length',
+      'ttlDays',
+    ]);
+  },
+
+  one_off_noise_not_saved(caseItem) {
+    expectCase(caseItem, (item) => item.expected.mustNotSaveNoise === true, 'one-off noise must not be saved');
+    expectIncludes('lifeGraphGovernanceSpec', [
+      'does not write precise contact or address noise into Life Graph',
+      'shouldWriteFact',
+    ]);
+  },
+};
+
+function runCase(caseItem) {
+  commonCaseChecks(caseItem);
+  const validator = validators[caseItem.id];
+  expect(Boolean(validator), `${caseItem.id}: no eval runner validator registered`);
+  validator(caseItem);
+}
+
+function runBackendAssertions() {
+  const testTargets = [
+    'src/agent-gateway/social-agent-task-memory-state-machine.service.spec.ts',
+    'src/agent-gateway/social-agent-candidate-pool-result.presenter.spec.ts',
+    'src/agent-gateway/social-agent-meet-loop.service.spec.ts',
+    'src/agent-gateway/social-agent-opportunity-clarification.spec.ts',
+    'src/agent-gateway/social-agent-profile-gate.service.spec.ts',
+    'src/agent-gateway/social-codex-trace-eval.service.spec.ts',
+    'src/agent-gateway/social-agent-inbox-tool.service.spec.ts',
+  ];
+  const result = spawnSync(
+    'pnpm',
+    ['--dir', 'backend', 'exec', 'jest', ...testTargets, '--runInBand'],
+    {
+      cwd: root,
+      stdio: 'inherit',
+      env: process.env,
+    },
+  );
+  if (result.status !== 0) {
+    failures.push({
+      id: 'backend-jest',
+      message: `backend eval assertion specs failed with status ${result.status}`,
+    });
+  }
+}
+
+const cases = parseEvalCases();
+const seen = new Set();
+for (const caseItem of cases) {
+  if (seen.has(caseItem.id)) {
+    failures.push({ id: caseItem.id, message: 'duplicate eval id' });
+    continue;
+  }
+  seen.add(caseItem.id);
+  try {
+    runCase(caseItem);
+    passes.push(caseItem.id);
+    if (showDetails) console.log(`[PASS] ${caseItem.id}`);
+  } catch (error) {
+    failures.push({
+      id: caseItem.id,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+if (runBackend) runBackendAssertions();
+
+if (failures.length > 0) {
+  console.error(
+    `[FAIL] Agent skill eval runner failed: ${passes.length}/${cases.length} case(s) passed`,
+  );
+  for (const failure of failures) {
+    console.error(` - ${failure.id}: ${failure.message}`);
+  }
+  process.exit(1);
+}
+
+console.log(
+  `[OK] Agent skill eval runner passed: ${passes.length}/${cases.length} case(s)${runBackend ? ' + backend assertions' : ''}`,
+);

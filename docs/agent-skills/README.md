@@ -50,4 +50,11 @@ All tool outputs should follow [tool-contract.md](./tool-contract.md).
 
 The canonical local skill eval cases live in
 [eval-cases.jsonl](./eval-cases.jsonl). They are checked by
-`node scripts/verify-agent-skills.mjs`.
+`node scripts/verify-agent-skills.mjs` and executed by
+`node scripts/run-agent-skill-evals.mjs`.
+
+Use backend assertion mode before a serious release:
+
+```bash
+node scripts/run-agent-skill-evals.mjs --backend
+```

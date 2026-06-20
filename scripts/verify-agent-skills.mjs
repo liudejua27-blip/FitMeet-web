@@ -6,6 +6,7 @@ import process from 'node:process';
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const skillDir = path.join(root, 'docs', 'agent-skills');
 const evalFile = path.join(skillDir, 'eval-cases.jsonl');
+const runnerFile = path.join(root, 'scripts', 'run-agent-skill-evals.mjs');
 
 const requiredSkills = [
   'profile_onboarding_skill',
@@ -166,6 +167,18 @@ for (const phrase of [
 ]) {
   if (!evalSource.includes(phrase)) {
     fail(`eval-cases.jsonl missing invariant ${phrase}`);
+  }
+}
+
+const runnerSource = readRequired(runnerFile);
+for (const phrase of [
+  'twenty_turn_memory_no_repeat_questions',
+  'candidate_empty_safe_fallback',
+  'meet_loop_full_state_machine',
+  '--backend',
+]) {
+  if (!runnerSource.includes(phrase)) {
+    fail(`run-agent-skill-evals.mjs missing ${phrase}`);
   }
 }
 
