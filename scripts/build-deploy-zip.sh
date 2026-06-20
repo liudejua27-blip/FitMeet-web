@@ -148,6 +148,8 @@ require_path "scripts/ecs-host-preflight.sh"
 require_path "scripts/ecs-post-deploy-smoke.sh"
 require_path "scripts/verify-agent-goal-production.sh"
 require_path "scripts/verify-agent-release.sh"
+require_path "scripts/verify-agent-skills.mjs"
+require_path "scripts/run-agent-skill-evals.mjs"
 require_path "scripts/agent-release-matrix.sh"
 require_path "scripts/agent-release-worktree-audit.sh"
 require_path "scripts/stage-agent-release-bucket.sh"
@@ -158,6 +160,21 @@ require_path "frontend/scripts/qa-agent-chat-production.mjs"
 require_path "frontend/src/test/socialAgentApiReplay.test.ts"
 require_path "docs/agent-release-e2e-matrix.md"
 require_path "docs/social-codex-runtime.md"
+require_path "docs/agent-skills/README.md"
+require_path "docs/agent-skills/social-meetup-workflow.md"
+require_path "docs/agent-skills/tool-contract.md"
+require_path "docs/agent-skills/eval-cases.jsonl"
+require_path "docs/agent-skills/tool-examples.jsonl"
+require_path "docs/agent-skills/profile-onboarding.md"
+require_path "docs/agent-skills/social-intent-clarifier.md"
+require_path "docs/agent-skills/opportunity-card.md"
+require_path "docs/agent-skills/discover-publish.md"
+require_path "docs/agent-skills/candidate-search.md"
+require_path "docs/agent-skills/candidate-rank.md"
+require_path "docs/agent-skills/safety-approval.md"
+require_path "docs/agent-skills/invitation.md"
+require_path "docs/agent-skills/meet-loop.md"
+require_path "docs/agent-skills/life-graph-memory.md"
 
 require_path "backend/src/agent-gateway/social-agent-context-hydrator.service.ts"
 require_path "backend/src/agent-gateway/social-agent-context-hydrator.service.spec.ts"
@@ -304,6 +321,15 @@ require_file_contains "scripts/agent-release-matrix.sh" "--opportunity-readiness
 require_file_contains "scripts/agent-release-matrix.sh" "--opportunity-full-smoke"
 require_file_contains "scripts/agent-release-matrix.sh" "scripts/agent-release-worktree-audit.sh"
 require_file_contains "scripts/agent-release-matrix.sh" "scripts/verify-agent-release.sh"
+require_file_contains "scripts/verify-agent-release.sh" "scripts/verify-agent-skills.mjs"
+require_file_contains "scripts/verify-agent-release.sh" "scripts/run-agent-skill-evals.mjs"
+require_file_contains "scripts/run-agent-skill-evals.mjs" "twenty_turn_memory_no_repeat_questions"
+require_file_contains "scripts/run-agent-skill-evals.mjs" "candidate_empty_safe_fallback"
+require_file_contains "scripts/verify-agent-skills.mjs" "profile_onboarding_skill"
+require_file_contains "docs/agent-skills/social-meetup-workflow.md" "must not block normal conversation"
+require_file_contains "docs/agent-skills/social-meetup-workflow.md" "must not invent people"
+require_file_contains "docs/agent-skills/eval-cases.jsonl" "twenty_turn_memory_no_repeat_questions"
+require_file_contains "docs/agent-skills/eval-cases.jsonl" "candidate_empty_safe_fallback"
 require_file_contains "scripts/agent-remote-smoke-preflight.sh" "--readiness"
 require_file_contains "scripts/agent-remote-smoke-preflight.sh" "--full"
 require_file_contains "scripts/agent-remote-smoke-preflight.sh" "--sse-abort"
@@ -352,12 +378,10 @@ require_file_contains "deploy/agent-smoke.remote.env.example" "AGENT_SMOKE_ALLOW
 require_file_contains "deploy/agent-smoke.remote.env.example" "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true"
 require_file_contains "docs/deployment-aliyun-ecs.md" "preflight rejects"
 require_file_contains "docs/deployment-aliyun-ecs.md" "replace-with-dedicated-smoke-password"
-require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "partialBoundary"
 require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES"
 require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "readiness-only smoke stopped before high-risk card actions"
-require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "partial safety boundary still clarifies stranger/public-activity policy"
-require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "是否接受陌生人"
-require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "是否公开发起活动"
+require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "search-critical context without over-asking stranger/public policy"
+require_file_contains "backend/src/scripts/smoke-agent-opportunity-journey.ts" "assertNoPendingApproval('clarified search', clarified)"
 require_file_contains "scripts/verify-agent-release.sh" "RUN_AGENT_OPPORTUNITY_SMOKE accepts"
 require_file_contains "scripts/verify-agent-release.sh" "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true"
 require_file_contains "scripts/verify-agent-release.sh" "run_agent_smoke_preflight"
@@ -546,6 +570,8 @@ require_entry "scripts/ecs-workbench-install-plan.sh" '^FitMeet-web/scripts/ecs-
 require_entry "scripts/ecs-post-deploy-smoke.sh" '^FitMeet-web/scripts/ecs-post-deploy-smoke\.sh$'
 require_entry "scripts/verify-agent-goal-production.sh" '^FitMeet-web/scripts/verify-agent-goal-production\.sh$'
 require_entry "scripts/verify-agent-release.sh" '^FitMeet-web/scripts/verify-agent-release\.sh$'
+require_entry "scripts/verify-agent-skills.mjs" '^FitMeet-web/scripts/verify-agent-skills\.mjs$'
+require_entry "scripts/run-agent-skill-evals.mjs" '^FitMeet-web/scripts/run-agent-skill-evals\.mjs$'
 require_entry "scripts/agent-release-matrix.sh" '^FitMeet-web/scripts/agent-release-matrix\.sh$'
 require_entry "scripts/agent-release-worktree-audit.sh" '^FitMeet-web/scripts/agent-release-worktree-audit\.sh$'
 require_entry "scripts/agent-remote-smoke-preflight.sh" '^FitMeet-web/scripts/agent-remote-smoke-preflight\.sh$'
@@ -557,6 +583,21 @@ require_entry "scripts/vercel-prebuilt-deploy.sh" '^FitMeet-web/scripts/vercel-p
 require_entry "scripts/lib/toolchain.sh" '^FitMeet-web/scripts/lib/toolchain\.sh$'
 require_entry "docs/agent-release-e2e-matrix.md" '^FitMeet-web/docs/agent-release-e2e-matrix\.md$'
 require_entry "Social Codex runtime docs" '^FitMeet-web/docs/social-codex-runtime\.md$'
+require_entry "Agent skills README" '^FitMeet-web/docs/agent-skills/README\.md$'
+require_entry "Agent social meetup workflow skill" '^FitMeet-web/docs/agent-skills/social-meetup-workflow\.md$'
+require_entry "Agent skill tool contract" '^FitMeet-web/docs/agent-skills/tool-contract\.md$'
+require_entry "Agent skill eval cases" '^FitMeet-web/docs/agent-skills/eval-cases\.jsonl$'
+require_entry "Agent skill tool examples" '^FitMeet-web/docs/agent-skills/tool-examples\.jsonl$'
+require_entry "Agent profile onboarding skill" '^FitMeet-web/docs/agent-skills/profile-onboarding\.md$'
+require_entry "Agent social intent clarifier skill" '^FitMeet-web/docs/agent-skills/social-intent-clarifier\.md$'
+require_entry "Agent opportunity card skill" '^FitMeet-web/docs/agent-skills/opportunity-card\.md$'
+require_entry "Agent discover publish skill" '^FitMeet-web/docs/agent-skills/discover-publish\.md$'
+require_entry "Agent candidate search skill" '^FitMeet-web/docs/agent-skills/candidate-search\.md$'
+require_entry "Agent candidate rank skill" '^FitMeet-web/docs/agent-skills/candidate-rank\.md$'
+require_entry "Agent safety approval skill" '^FitMeet-web/docs/agent-skills/safety-approval\.md$'
+require_entry "Agent invitation skill" '^FitMeet-web/docs/agent-skills/invitation\.md$'
+require_entry "Agent meet loop skill" '^FitMeet-web/docs/agent-skills/meet-loop\.md$'
+require_entry "Agent Life Graph memory skill" '^FitMeet-web/docs/agent-skills/life-graph-memory\.md$'
 require_entry "docs/deployment-vercel-railway.md" '^FitMeet-web/docs/deployment-vercel-railway\.md$'
 require_entry "release metadata" '^FitMeet-web/release\.json$'
 

@@ -102,6 +102,38 @@ Invoke-Step "Build frontend" {
 
 Assert-RequiredPath "frontend/dist/index.html"
 Assert-RequiredPath "frontend/dist/assets"
+Assert-RequiredPath "scripts/verify-agent-skills.mjs"
+Assert-RequiredPath "scripts/run-agent-skill-evals.mjs"
+Assert-RequiredPath "docs/agent-skills/README.md"
+Assert-RequiredPath "docs/agent-skills/social-meetup-workflow.md"
+Assert-RequiredPath "docs/agent-skills/tool-contract.md"
+Assert-RequiredPath "docs/agent-skills/eval-cases.jsonl"
+Assert-RequiredPath "docs/agent-skills/tool-examples.jsonl"
+Assert-RequiredPath "docs/agent-skills/profile-onboarding.md"
+Assert-RequiredPath "docs/agent-skills/social-intent-clarifier.md"
+Assert-RequiredPath "docs/agent-skills/opportunity-card.md"
+Assert-RequiredPath "docs/agent-skills/discover-publish.md"
+Assert-RequiredPath "docs/agent-skills/candidate-search.md"
+Assert-RequiredPath "docs/agent-skills/candidate-rank.md"
+Assert-RequiredPath "docs/agent-skills/safety-approval.md"
+Assert-RequiredPath "docs/agent-skills/invitation.md"
+Assert-RequiredPath "docs/agent-skills/meet-loop.md"
+Assert-RequiredPath "docs/agent-skills/life-graph-memory.md"
+Assert-FileContains "scripts/run-agent-skill-evals.mjs" @(
+  "twenty_turn_memory_no_repeat_questions",
+  "candidate_empty_safe_fallback"
+)
+Assert-FileContains "scripts/verify-agent-skills.mjs" @(
+  "profile_onboarding_skill"
+)
+Assert-FileContains "docs/agent-skills/social-meetup-workflow.md" @(
+  "must not block normal conversation",
+  "must not invent people"
+)
+Assert-FileContains "docs/agent-skills/eval-cases.jsonl" @(
+  "twenty_turn_memory_no_repeat_questions",
+  "candidate_empty_safe_fallback"
+)
 Assert-RequiredPath "backend/src/agent-gateway/agent-approval.service.spec.ts"
 Assert-RequiredPath "backend/src/agent-gateway/agent-approval-dispatcher.service.spec.ts"
 Assert-RequiredPath "backend/src/agent-gateway/user-facing-agent-response.spec.ts"
@@ -409,12 +441,10 @@ Assert-FileContains "backend/src/scripts/smoke-agent-opportunity-journey.ts" @(
   "AGENT_SMOKE_INTENSITY",
   "assertMutationSmokeSafety",
   "looksLikeSmokeAccount",
-  "partialBoundary",
   "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES",
   "readiness-only smoke stopped before high-risk card actions",
-  "partial safety boundary still clarifies stranger/public-activity policy",
-  "是否接受陌生人",
-  "是否公开发起活动"
+  "search-critical context without over-asking stranger/public policy",
+  "assertNoPendingApproval('clarified search', clarified)"
 )
 Assert-FileContains "backend/src/scripts/smoke-agent-sse-abort.ts" @(
   "AGENT_SMOKE_ALLOW_NON_SMOKE_USER",
@@ -625,6 +655,8 @@ Invoke-Step "Scan deploy zip" {
     HasEcsPostDeploySmoke = [bool]($entries | Where-Object { $_ -match '(^|/)scripts/ecs-post-deploy-smoke\.sh$' })
     HasAgentGoalProductionVerify = [bool]($entries | Where-Object { $_ -match '(^|/)scripts/verify-agent-goal-production\.sh$' })
     HasAgentReleaseVerify = [bool]($entries | Where-Object { $_ -match '(^|/)scripts/verify-agent-release\.sh$' })
+    HasAgentSkillVerify = [bool]($entries | Where-Object { $_ -match '(^|/)scripts/verify-agent-skills\.mjs$' })
+    HasAgentSkillEvalRunner = [bool]($entries | Where-Object { $_ -match '(^|/)scripts/run-agent-skill-evals\.mjs$' })
     HasAgentReleaseMatrix = [bool]($entries | Where-Object { $_ -match '(^|/)scripts/agent-release-matrix\.sh$' })
     HasAgentReleaseWorktreeAudit = [bool]($entries | Where-Object { $_ -match '(^|/)scripts/agent-release-worktree-audit\.sh$' })
     HasAgentRemoteSmokePreflight = [bool]($entries | Where-Object { $_ -match '(^|/)scripts/agent-remote-smoke-preflight\.sh$' })
@@ -652,6 +684,21 @@ Invoke-Step "Scan deploy zip" {
     HasSocialCodexEventPipelineSpec = [bool]($entries | Where-Object { $_ -match '(^|/)backend/src/agent-gateway/social-codex-event-pipeline\.service\.spec\.ts$' })
     HasSocialCodexRuntimeModel = [bool]($entries | Where-Object { $_ -match '(^|/)backend/src/agent-gateway/social-codex-runtime-model\.ts$' })
     HasSocialCodexRuntimeModelSpec = [bool]($entries | Where-Object { $_ -match '(^|/)backend/src/agent-gateway/social-codex-runtime-model\.spec\.ts$' })
+    HasAgentSkillReadme = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/README\.md$' })
+    HasAgentSkillWorkflow = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/social-meetup-workflow\.md$' })
+    HasAgentSkillToolContract = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/tool-contract\.md$' })
+    HasAgentSkillEvalCases = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/eval-cases\.jsonl$' })
+    HasAgentSkillToolExamples = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/tool-examples\.jsonl$' })
+    HasAgentProfileOnboardingSkill = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/profile-onboarding\.md$' })
+    HasAgentSocialIntentSkill = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/social-intent-clarifier\.md$' })
+    HasAgentOpportunityCardSkill = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/opportunity-card\.md$' })
+    HasAgentDiscoverPublishSkill = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/discover-publish\.md$' })
+    HasAgentCandidateSearchSkill = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/candidate-search\.md$' })
+    HasAgentCandidateRankSkill = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/candidate-rank\.md$' })
+    HasAgentSafetyApprovalSkill = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/safety-approval\.md$' })
+    HasAgentInvitationSkill = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/invitation\.md$' })
+    HasAgentMeetLoopSkill = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/meet-loop\.md$' })
+    HasAgentLifeGraphMemorySkill = [bool]($entries | Where-Object { $_ -match '(^|/)docs/agent-skills/life-graph-memory\.md$' })
     HasFilledAgentRemoteSmokeEnv = [bool]($entries | Where-Object { $_ -match '(^|/)deploy/agent-smoke\.remote\.env$' })
     HasNginxSsl = [bool]($entries | Where-Object { $_ -match '(^|/)nginx/ssl(/|$)' })
     HasCompose = [bool]($entries | Where-Object { $_ -match '(^|/)docker-compose\.prod\.yml$' })
@@ -742,6 +789,8 @@ Invoke-Step "Scan deploy zip" {
     -not $scan.HasEcsPostDeploySmoke -or
     -not $scan.HasAgentGoalProductionVerify -or
     -not $scan.HasAgentReleaseVerify -or
+    -not $scan.HasAgentSkillVerify -or
+    -not $scan.HasAgentSkillEvalRunner -or
     -not $scan.HasAgentReleaseMatrix -or
     -not $scan.HasAgentReleaseWorktreeAudit -or
     -not $scan.HasAgentRemoteSmokePreflight -or
@@ -769,6 +818,21 @@ Invoke-Step "Scan deploy zip" {
     -not $scan.HasSocialCodexEventPipelineSpec -or
     -not $scan.HasSocialCodexRuntimeModel -or
     -not $scan.HasSocialCodexRuntimeModelSpec -or
+    -not $scan.HasAgentSkillReadme -or
+    -not $scan.HasAgentSkillWorkflow -or
+    -not $scan.HasAgentSkillToolContract -or
+    -not $scan.HasAgentSkillEvalCases -or
+    -not $scan.HasAgentSkillToolExamples -or
+    -not $scan.HasAgentProfileOnboardingSkill -or
+    -not $scan.HasAgentSocialIntentSkill -or
+    -not $scan.HasAgentOpportunityCardSkill -or
+    -not $scan.HasAgentDiscoverPublishSkill -or
+    -not $scan.HasAgentCandidateSearchSkill -or
+    -not $scan.HasAgentCandidateRankSkill -or
+    -not $scan.HasAgentSafetyApprovalSkill -or
+    -not $scan.HasAgentInvitationSkill -or
+    -not $scan.HasAgentMeetLoopSkill -or
+    -not $scan.HasAgentLifeGraphMemorySkill -or
     $scan.HasEnvFiles -or
     $scan.HasFilledAgentRemoteSmokeEnv -or
     $scan.HasZipFiles -or
