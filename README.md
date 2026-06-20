@@ -351,7 +351,7 @@ pnpm check:prod-env -- ../.env.production
 ```
 
 3. 确认 `JWT_SECRET`、数据库密码、Redis 密码、对象存储密钥、微信/短信/AI key 不使用默认值。
-4. 后端构建后运行 `pnpm migration:run:prod` 或等价迁移流程。
+4. ECS/Docker Compose 生产环境中，后端构建后使用 `./scripts/ecs-backend-pnpm.sh -- migration:run:prod` 或等价的容器内迁移流程；不要直接用 host `pnpm` 跑生产命令。
 5. 前端生产环境在 Vercel 推荐设置 `VITE_API_BASE_URL=/api`，并设置 `VITE_WS_BASE_URL=https://api.socialworld.world`。
 6. 配置反向代理，把 `/api` 转发到 Nest 服务，把 Web 静态资源指向对应构建产物。
 
@@ -360,7 +360,8 @@ pnpm check:prod-env -- ../.env.production
 ```bash
 ./scripts/release-preflight.sh --web-only
 cd backend && pnpm check:prod-env -- ../.env.production
-cd backend && pnpm migration:run:prod
+./scripts/ecs-backend-pnpm.sh -- migration:run:prod
+./scripts/ecs-backend-pnpm.sh -- db:check-critical-tables:prod
 docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
 ```
 

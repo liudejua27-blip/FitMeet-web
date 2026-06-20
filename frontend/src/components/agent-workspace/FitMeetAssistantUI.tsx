@@ -4,22 +4,18 @@ import {
   ExportedMessageRepository,
   WebSpeechDictationAdapter,
   useExternalStoreRuntime,
-  type AttachmentAdapter,
-  type PendingAttachment,
   type ThreadAssistantMessagePart,
   type ThreadMessageLike,
   type ThreadUserMessagePart,
 } from '@assistant-ui/react';
 import { type FormEvent, type ReactNode, useMemo } from 'react';
 
-import { uploadImageWithProgress, uploadVideoWithProgress } from '../../api/uploadApi';
 import type {
   FitMeetAlphaCard,
   FitMeetAgentThreadSummary,
   SocialAgentProfileGateStatus,
   SocialAgentReminderPreference,
   SocialAgentReminderPreferenceInput,
-  UserFacingAgentProgressKind,
   UserFacingAgentResponse,
 } from '../../api/socialAgentApi';
 import { AssistantShell } from '../assistant-ui/assistant-shell';
@@ -27,12 +23,13 @@ import {
   FitMeetToolUIActionsProvider,
   type FitMeetToolActionInput,
 } from '../assistant-ui/tool-ui-actions';
-import {
-  FITMEET_TOOL_UI_SCHEMA_VERSION,
-  normalizeAssistantCard,
-  type SchemaDrivenAssistantCard,
-} from '../assistant-ui/tool-ui-schema';
-import { uploadProgressStore } from '../assistant-ui/upload-progress-store';
+import { fitMeetAttachmentAdapter } from './fitMeetAttachmentAdapter';
+import type {
+  FitMeetAssistantAttachment,
+  FitMeetAssistantMessage,
+  FitMeetAssistantRecovery,
+  FitMeetAssistantStep,
+} from './FitMeetAssistantUI.types';
 
 if (typeof HTMLElement !== 'undefined' && !HTMLElement.prototype.scrollTo) {
   HTMLElement.prototype.scrollTo = function scrollToPolyfill() {
@@ -40,92 +37,7 @@ if (typeof HTMLElement !== 'undefined' && !HTMLElement.prototype.scrollTo) {
   };
 }
 
-export type FitMeetAssistantMessage = {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  attachments?: FitMeetAssistantAttachment[];
-  status?: 'streaming' | 'done' | 'error';
-  result?: UserFacingAgentResponse | null;
-  taskId?: number | null;
-  runId?: string | null;
-  traceId?: string | null;
-  feedback?: 'positive' | 'negative' | null;
-  feedbackStatus?: 'submitting' | 'submitted' | 'failed' | null;
-  feedbackErrorValue?: 'positive' | 'negative' | null;
-  showSocialResult?: boolean;
-  conversationIntent?: 'conversation' | 'social' | 'approval';
-  reminderId?: number | string | null;
-  reminderContext?: Record<string, unknown> | null;
-  resolvedApproval?: {
-    id: number | string | null;
-    decision: 'approved' | 'rejected';
-    summary?: string | null;
-  } | null;
-  branch?: {
-    groupId: string;
-    index: number;
-    count: number;
-    activeIndex?: number;
-    syncStatus?: 'idle' | 'syncing' | 'synced' | 'failed';
-  };
-};
-
-export type FitMeetAssistantAttachment = {
-  id: string;
-  type: 'image' | 'file';
-  name?: string;
-  contentType?: string;
-  content?: ThreadUserMessagePart[];
-};
-
-export type FitMeetAssistantStep = {
-  id: string;
-  label: string;
-  status: 'pending' | 'running' | 'success' | 'waiting' | 'error';
-  kind?: UserFacingAgentProgressKind;
-  processType?: string;
-  agentName?: string | null;
-  detail?: string;
-  metadata?: Record<string, unknown>;
-  snapshot?: {
-    schemaVersion: 'fitmeet.step-snapshot.v1';
-    observation?: string[];
-    critique?: string;
-    result?: string;
-  };
-};
-
-export type FitMeetAssistantRecovery = {
-  kind:
-    | 'failed'
-    | 'stopped'
-    | 'action_failed'
-    | 'checkpoint_failed'
-    | 'checkpoint_available'
-    | 'missing_info'
-    | 'unauthorized'
-    | 'safety';
-  title: string;
-  message: string;
-  prompt: string;
-  retryable: boolean;
-  checkpoint?: {
-    checkpointId: number | string;
-    stepId?: string | null;
-    action: 'resume' | 'retry' | 'replay' | 'fork';
-    steps?: Array<{
-      stepId: string;
-      label: string;
-      status: string | null;
-      retryable: boolean;
-      replayable: boolean;
-      forkable: boolean;
-    }>;
-  };
-};
-
-type FitMeetAssistantUIProps = {
+export type FitMeetAssistantUIProps = {
   messages: FitMeetAssistantMessage[];
   threads: FitMeetAgentThreadSummary[];
   threadsLoading: boolean;
@@ -195,38 +107,7 @@ type FitMeetAssistantRuntimeProviderProps = {
 };
 
 const ASSISTANT_STREAMING_PLACEHOLDER = '\u200b';
-
-const fitMeetAttachmentAdapter: AttachmentAdapter = {
-  accept: 'image/*,video/*',
-  async add({ file }) {
-    if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
-      throw new Error('当前聊天仅支持图片和视频附件。');
-    }
-    const id =
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? `fitmeet-upload-${crypto.randomUUID()}`
-        : `fitmeet-upload-${Date.now()}`;
-    uploadProgressStore.set(id, { status: 'queued', percent: 0 });
-    uploadProgressStore.registerRetry(id, () => startFitMeetAttachmentUpload(id, file));
-    void startFitMeetAttachmentUpload(id, file);
-    return {
-      id,
-      type: file.type.startsWith('image/') ? 'image' : 'file',
-      name: file.name,
-      contentType: file.type,
-      file,
-      status: { type: 'requires-action', reason: 'composer-send' },
-    } satisfies PendingAttachment;
-  },
-  async remove(attachment) {
-    forgetFitMeetAttachment(attachment.id);
-  },
-  async send(attachment) {
-    const file = attachment.file;
-    if (!file) throw new Error('附件文件不可用，请重新添加。');
-    return completeFitMeetAttachment(attachment);
-  },
-};
+const FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION = 'fitmeet.tool-ui.v1';
 
 const dictationAdapter =
   typeof window !== 'undefined' && WebSpeechDictationAdapter.isSupported()
@@ -236,114 +117,6 @@ const dictationAdapter =
         interimResults: true,
       })
     : undefined;
-
-const uploadedAttachmentContent = new Map<
-  string,
-  {
-    type: PendingAttachment['type'];
-    content: ThreadUserMessagePart[];
-  }
->();
-const uploadInFlight = new Map<string, Promise<void>>();
-
-function startFitMeetAttachmentUpload(id: string, file: File) {
-  const existing = uploadInFlight.get(id);
-  if (existing) return existing;
-  uploadProgressStore.set(id, { status: 'uploading', percent: 0 });
-  const uploadPromise = (async () => {
-    try {
-      if (file.type.startsWith('image/')) {
-        const uploaded = await uploadImageWithProgress(file, {
-          onProgress: (progress) =>
-            uploadProgressStore.set(id, {
-              status: 'uploading',
-              percent: progress.percent,
-            }),
-        });
-        uploadedAttachmentContent.set(id, {
-          type: 'image',
-          content: [
-            {
-              type: 'image',
-              image: uploaded.url,
-              filename: file.name,
-            },
-          ],
-        });
-        uploadProgressStore.set(id, { status: 'uploaded', percent: 100 });
-        return;
-      }
-      if (file.type.startsWith('video/')) {
-        const uploaded = await uploadVideoWithProgress(file, {
-          onProgress: (progress) =>
-            uploadProgressStore.set(id, {
-              status: 'uploading',
-              percent: progress.percent,
-            }),
-        });
-        uploadedAttachmentContent.set(id, {
-          type: 'file',
-          content: [
-            {
-              type: 'file',
-              data: uploaded.url,
-              filename: file.name,
-              mimeType: file.type,
-            },
-          ],
-        });
-        uploadProgressStore.set(id, { status: 'uploaded', percent: 100 });
-        return;
-      }
-      throw new Error('当前聊天仅支持图片和视频附件。');
-    } catch (error) {
-      uploadedAttachmentContent.delete(id);
-      uploadProgressStore.set(id, {
-        status: 'failed',
-        percent: null,
-        error: error instanceof Error ? error.message : '上传失败',
-      });
-    } finally {
-      uploadInFlight.delete(id);
-    }
-  })();
-  uploadInFlight.set(id, uploadPromise);
-  return uploadPromise;
-}
-
-async function completeFitMeetAttachment(attachment: PendingAttachment) {
-  const uploaded = uploadedAttachmentContent.get(attachment.id);
-  if (uploaded) {
-    return {
-      ...attachment,
-      type: uploaded.type,
-      status: { type: 'complete' as const },
-      content: uploaded.content,
-    };
-  }
-
-  const inFlight = uploadInFlight.get(attachment.id);
-  if (inFlight) await inFlight;
-
-  const afterUpload = uploadedAttachmentContent.get(attachment.id);
-  if (afterUpload) {
-    return {
-      ...attachment,
-      type: afterUpload.type,
-      status: { type: 'complete' as const },
-      content: afterUpload.content,
-    };
-  }
-
-  const snapshot = uploadProgressStore.get(attachment.id);
-  throw new Error(snapshot.error ?? '附件还没有上传完成。');
-}
-
-function forgetFitMeetAttachment(id: string) {
-  uploadedAttachmentContent.delete(id);
-  uploadInFlight.delete(id);
-  uploadProgressStore.remove(id);
-}
 
 function FitMeetAssistantRuntimeProvider({
   children,
@@ -483,6 +256,13 @@ export function FitMeetAssistantUI(props: FitMeetAssistantUIProps) {
       onRetryTool,
     ],
   );
+  const liveProcessStatus = useMemo(() => inlineVisibleProcessStatus(props.steps), [props.steps]);
+  const processStatusOwnedByMessage = useMemo(() => {
+    const lastIndex = props.messages.length - 1;
+    const lastMessage = props.messages[lastIndex];
+    if (!lastMessage) return false;
+    return shouldRenderProcessPart(lastMessage, lastIndex, props.messages, props.steps);
+  }, [props.messages, props.steps]);
 
   return (
     <FitMeetAssistantRuntimeProvider
@@ -508,6 +288,8 @@ export function FitMeetAssistantUI(props: FitMeetAssistantUIProps) {
           threadsLoading={props.threadsLoading}
           activeThreadId={props.activeThreadId}
           isRunning={props.isRunning}
+          liveProcessStatus={liveProcessStatus}
+          processStatusOwnedByMessage={processStatusOwnedByMessage}
           sessionRestoring={props.sessionRestoring}
           recovery={props.recovery}
           profileGate={props.profileGate}
@@ -545,7 +327,7 @@ function buildFitMeetMessageRepository(
   const branchActiveIndexes = new Map<string, number>();
 
   for (const message of messages) {
-    if (message.role === 'assistant' && message.branch?.groupId) {
+    if (message.role === 'assistant' && message.branchable !== false && message.branch?.groupId) {
       branchActiveIndexes.set(
         message.branch.groupId,
         message.branch.activeIndex ?? message.branch.count,
@@ -561,6 +343,14 @@ function buildFitMeetMessageRepository(
       parentId = previousHeadId;
       previousHeadId = message.id;
     } else if (message.role === 'assistant') {
+      if (message.branchable === false || message.surfaceKind === 'recovery') {
+        parentId = previousHeadId;
+        previousHeadId = message.id;
+        return {
+          parentId,
+          message: convertFitMeetMessage(message, index, messages, steps),
+        };
+      }
       const groupId = message.branch?.groupId ?? currentBranchGroupId;
       const branchParentId = groupId?.startsWith('branch-')
         ? groupId.slice('branch-'.length)
@@ -568,7 +358,7 @@ function buildFitMeetMessageRepository(
       parentId = message.branch && branchParentId ? branchParentId : previousHeadId;
       const activeIndex =
         message.branch && groupId
-          ? branchActiveIndexes.get(groupId) ?? message.branch.count
+          ? (branchActiveIndexes.get(groupId) ?? message.branch.count)
           : null;
       const isActiveBranch =
         !message.branch || !activeIndex || message.branch.index === activeIndex;
@@ -600,35 +390,49 @@ function convertFitMeetMessage(
     message.result && message.showSocialResult === true
       ? assistantCardsForResult(message.result)
       : [];
+  const visibleProcessSteps = compactAssistantProcessSteps(steps);
+  const processHistorySteps = compactAssistantProcessHistorySteps(steps);
+  const visibleProcessSummary = visibleProcessSummaryForMessage(
+    message,
+    visibleSummaryFromProcessStep(primaryVisibleProcessStep(visibleProcessSteps)),
+  );
   if (hasVisibleText) {
     content.push({ type: 'text', text: message.content });
   } else if (isStreamingAssistant) {
     content.push({ type: 'text', text: ASSISTANT_STREAMING_PLACEHOLDER });
   }
-  if (
-    shouldRenderProcessPart(message, index, messages, steps)
-  ) {
+  if (shouldRenderProcessPart(message, index, messages, steps)) {
     content.push({
       type: 'data',
       name: 'fitmeet-process',
       data: {
-        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaVersion: FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION,
         schemaType: 'agent.process',
         title: '正在处理',
         runtime: message.result?.runtime ?? null,
-        steps: steps
-          .filter((step) => step.status !== 'pending')
-          .map((step) => ({
-            id: step.id,
-            label: step.label,
-            status: step.status,
-            detail: step.detail,
-            kind: step.kind,
-            processType: step.processType,
-            agentName: step.agentName ?? undefined,
-            metadata: step.metadata,
-            snapshot: step.snapshot,
-          })),
+        visibleSummary: visibleProcessSummary,
+        steps: visibleProcessSteps.map((step) => ({
+          id: step.id,
+          label: step.label,
+          status: step.status,
+          detail: step.detail,
+          kind: step.kind,
+          processType: step.processType,
+          agentName: step.agentName ?? undefined,
+          metadata: step.metadata,
+          snapshot: step.snapshot,
+        })),
+        historySteps: processHistorySteps.map((step) => ({
+          id: step.id,
+          label: step.label,
+          status: step.status,
+          detail: step.detail,
+          kind: step.kind,
+          processType: step.processType,
+          agentName: step.agentName ?? undefined,
+          metadata: step.metadata,
+          snapshot: step.snapshot,
+        })),
       },
     });
   }
@@ -641,7 +445,7 @@ function convertFitMeetMessage(
       type: 'data',
       name: 'fitmeet-approval',
       data: {
-        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaVersion: FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION,
         schemaType: 'safety.approval',
         title: '需要确认',
         runtime: message.result.runtime ?? null,
@@ -661,7 +465,7 @@ function convertFitMeetMessage(
       type: 'data',
       name: 'fitmeet-cards',
       data: {
-        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaVersion: FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION,
         schemaType: 'agent.result_cards',
         title: '整理出的可用结果',
         runtime: message.result.runtime ?? null,
@@ -697,6 +501,7 @@ function convertFitMeetMessage(
         fitmeetMessageId: message.id,
         fitmeetTaskId: message.taskId,
         fitmeetTraceId: message.traceId,
+        fitmeetAssistantMessageSource: message.assistantMessageSource,
         fitmeetBranch: message.branch,
         fitmeetFeedback: message.feedback,
         fitmeetReminderId: message.reminderId,
@@ -723,6 +528,202 @@ function shouldRenderProcessPart(
   if (hasUserVisibleSocialCodexTrace(steps)) return true;
   if (message.conversationIntent !== 'conversation') return true;
   return hasResumableRuntime(message.result?.runtime);
+}
+
+function compactAssistantProcessSteps(steps: FitMeetAssistantStep[]) {
+  const visible = steps.filter((step) => step.status !== 'pending');
+  const latestApproval =
+    [...visible]
+      .reverse()
+      .find((step) => step.processType === 'approval' && step.status !== 'success') ?? null;
+  if (latestApproval) return [latestApproval];
+
+  const latestRunSummary = [...visible].reverse().find(isRunSummaryFitMeetStep) ?? null;
+  if (latestRunSummary) return [latestRunSummary];
+
+  const latestActive =
+    [...visible]
+      .reverse()
+      .find(
+        (step) => step.status === 'running' || step.status === 'waiting' || step.status === 'error',
+      ) ??
+    visible.at(-1) ??
+    null;
+  return latestActive ? [latestActive] : [];
+}
+
+function compactAssistantProcessHistorySteps(steps: FitMeetAssistantStep[]) {
+  const visible = steps.filter((step) => step.status !== 'pending');
+  const latestRunSummary = [...visible].reverse().find(isRunSummaryFitMeetStep) ?? null;
+  const latestApproval =
+    [...visible]
+      .reverse()
+      .find((step) => step.processType === 'approval' && step.status !== 'success') ?? null;
+  if (latestRunSummary && !latestApproval) {
+    return [];
+  }
+  if (visible.length <= 4) return visible;
+
+  const latestActive =
+    [...visible]
+      .reverse()
+      .find(
+        (step) => step.status === 'running' || step.status === 'waiting' || step.status === 'error',
+      ) ??
+    visible.at(-1) ??
+    null;
+  const deduped = new Map<string, FitMeetAssistantStep>();
+  if (latestActive) {
+    deduped.set(processStepKey(latestActive), latestActive);
+  }
+
+  for (const step of [...visible].reverse()) {
+    if (deduped.size >= 4) break;
+    if (latestActive && step.id === latestActive.id) continue;
+    if (step.status !== 'success') continue;
+    const key = processStepKey(step);
+    if (deduped.has(key)) continue;
+    deduped.set(key, step);
+  }
+
+  return Array.from(deduped.values());
+}
+
+function processStepKey(step: FitMeetAssistantStep) {
+  return [
+    step.processType ?? 'process',
+    step.kind ?? 'step',
+    step.label.replace(/\s+/g, ' ').trim(),
+    step.detail?.replace(/\s+/g, ' ').trim() ?? '',
+  ].join(':');
+}
+
+function isRunSummaryFitMeetStep(step: FitMeetAssistantStep) {
+  return step.processType === 'run_summary' || step.metadata?.processType === 'run_summary';
+}
+
+function primaryVisibleProcessStep(steps: FitMeetAssistantStep[]) {
+  return steps.find(isRunSummaryFitMeetStep) ?? steps[0] ?? null;
+}
+
+function visibleSummaryFromProcessStep(step: FitMeetAssistantStep | null) {
+  if (!step) return null;
+  const metadata = step.metadata ?? {};
+  const processType =
+    typeof metadata.processType === 'string' ? metadata.processType : step.processType;
+  const isActionableOrRecoverableProcess =
+    step.status === 'waiting' ||
+    step.status === 'error' ||
+    metadata.pendingApproval === true ||
+    processType === 'approval';
+  const shouldUseCoveringStatus =
+    metadata.displayMode === 'covering_status' ||
+    processType === 'run_summary' ||
+    processType === 'visible_process' ||
+    processType === 'slot_memory' ||
+    processType === 'candidate_search' ||
+    step.kind === 'status' ||
+    step.kind === 'analysis' ||
+    step.kind === 'tool';
+  const shouldCollapseHistory = shouldUseCoveringStatus && !isActionableOrRecoverableProcess;
+  return {
+    source:
+      typeof metadata.source === 'string'
+        ? metadata.source
+        : isRunSummaryFitMeetStep(step)
+          ? 'run.summary'
+          : 'visible_process.delta',
+    title: step.label,
+    detail: step.detail ?? null,
+    state:
+      step.status === 'success'
+        ? 'completed'
+        : step.status === 'error'
+          ? 'failed'
+          : step.status === 'waiting'
+            ? 'waiting'
+            : 'running',
+    currentStage: typeof metadata.currentStage === 'string' ? metadata.currentStage : null,
+    currentEventId: typeof metadata.currentEventId === 'string' ? metadata.currentEventId : null,
+    currentSeq: typeof metadata.currentSeq === 'number' ? metadata.currentSeq : null,
+    visibleStepCount:
+      typeof metadata.visibleStepCount === 'number' ? metadata.visibleStepCount : null,
+    expandable: metadata.expandable === true,
+    pendingApproval: metadata.pendingApproval === true,
+    candidateCount: typeof metadata.candidateCount === 'number' ? metadata.candidateCount : null,
+    activityCount: typeof metadata.activityCount === 'number' ? metadata.activityCount : null,
+    hasOpportunityCard: metadata.hasOpportunityCard === true,
+    savedMemory: metadata.savedMemory === true,
+    displayMode: shouldUseCoveringStatus ? 'covering_status' : null,
+    updateModel:
+      metadata.updateModel === 'latest_state' || shouldUseCoveringStatus ? 'latest_state' : null,
+    defaultVisibleCount:
+      typeof metadata.defaultVisibleCount === 'number'
+        ? metadata.defaultVisibleCount
+        : shouldUseCoveringStatus
+          ? 1
+          : null,
+    historyVisibility:
+      metadata.historyVisibility === 'collapsed' || shouldCollapseHistory ? 'collapsed' : null,
+  };
+}
+
+function visibleProcessSummaryForMessage(
+  message: FitMeetAssistantMessage,
+  summary: ReturnType<typeof visibleSummaryFromProcessStep>,
+) {
+  const pendingApproval = Boolean(message.result?.pendingConfirmations?.length);
+  if (pendingApproval) {
+    return {
+      ...summary,
+      source: summary?.source ?? 'result.pending_approval',
+      title: summary?.state === 'waiting' ? summary.title : '需要你确认这一步',
+      detail: summary?.detail ?? '我会等你选择后再继续，不会自动执行高风险动作。',
+      state: 'waiting' as const,
+      pendingApproval: true,
+      historyVisibility: null,
+    };
+  }
+
+  const runtime = message.result?.runtime;
+  const checkpointAction =
+    runtime && typeof runtime === 'object' && 'checkpointAction' in runtime
+      ? runtime.checkpointAction
+      : null;
+  if (checkpointAction === 'retry') {
+    return {
+      ...summary,
+      source: summary?.source ?? 'result.checkpoint',
+      title: '这一步没有完成',
+      detail:
+        summary?.detail ??
+        summary?.title ??
+        '可以从保存点重试，不会重复执行已确认的高风险动作。',
+      state: 'failed' as const,
+      historyVisibility: null,
+    };
+  }
+
+  return summary;
+}
+
+function inlineVisibleProcessStatus(steps: FitMeetAssistantStep[]) {
+  const visibleProcessSteps = compactAssistantProcessSteps(steps);
+  const step = primaryVisibleProcessStep(visibleProcessSteps);
+  if (!step) return null;
+  const summary = visibleSummaryFromProcessStep(step);
+  const title = stringFromUnknown(summary?.title) ?? stringFromUnknown(step.label);
+  const detail = stringFromUnknown(summary?.detail) ?? stringFromUnknown(step.detail);
+  const state = summary?.state;
+
+  if (state === 'waiting') {
+    return title || detail || '需要你确认这一步';
+  }
+  if (state === 'failed') {
+    return title || detail || '这一步没有处理好，可以重试';
+  }
+  if (title) return title;
+  return detail;
 }
 
 function hasUserVisibleSocialCodexTrace(steps: FitMeetAssistantStep[]) {
@@ -752,9 +753,9 @@ function isInitialConversationThinking(
   );
 }
 
-function toToolUICard(card: FitMeetAlphaCard): SchemaDrivenAssistantCard {
-  return normalizeAssistantCard({
-    schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+function toToolUICard(card: FitMeetAlphaCard): Record<string, unknown> {
+  return {
+    schemaVersion: FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION,
     id: card.id,
     type: card.type,
     schemaType: card.data.schemaType,
@@ -763,10 +764,10 @@ function toToolUICard(card: FitMeetAlphaCard): SchemaDrivenAssistantCard {
     status: card.status,
     data: card.data,
     actions: card.actions,
-  });
+  };
 }
 
-function assistantCardsForResult(result: UserFacingAgentResponse): SchemaDrivenAssistantCard[] {
+function assistantCardsForResult(result: UserFacingAgentResponse): Record<string, unknown>[] {
   const cards = result.cards.map(toToolUICard);
   const lifeGraphCard = lifeGraphWritebackProposalToCard(result.lifeGraphWritebackProposal);
   return lifeGraphCard ? [...cards, lifeGraphCard] : cards;
@@ -774,7 +775,7 @@ function assistantCardsForResult(result: UserFacingAgentResponse): SchemaDrivenA
 
 function lifeGraphWritebackProposalToCard(
   proposal: Record<string, unknown> | undefined,
-): SchemaDrivenAssistantCard | null {
+): Record<string, unknown> | null {
   if (!isRecord(proposal)) return null;
   const signals = Array.isArray(proposal.proposedSignals)
     ? proposal.proposedSignals.filter(isRecord)
@@ -795,17 +796,17 @@ function lifeGraphWritebackProposalToCard(
     stringFromUnknown(proposal.conversationId) ??
     'reply-writeback';
 
-  return normalizeAssistantCard({
+  return {
     id: `life-graph-writeback-${proposalId}`,
     type: 'profile_proposal',
-    schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+    schemaVersion: FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION,
     schemaType: 'life_graph.diff',
     title: '画像更新建议',
     body: stringFromUnknown(summarySignal?.value) ?? '我整理出一条可确认的互动信号。',
     status: 'waiting_confirmation',
     data: {
       schemaName: 'LifeGraphDiffCard',
-      schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+      schemaVersion: FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION,
       schemaType: 'life_graph.diff',
       writebackProposalId: proposalId,
       taskId: proposal.taskId,
@@ -860,7 +861,7 @@ function lifeGraphWritebackProposalToCard(
         },
       },
     ],
-  });
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -3,10 +3,6 @@ import {
   ApprovalRiskLevel,
   ApprovalType,
 } from './entities/agent-approval-request.entity';
-import type {
-  SocialAgentPendingActionMemo,
-  SocialAgentTaskMemory,
-} from './social-agent-memory.util';
 import type { SocialAgentPendingApprovalSnapshot } from './social-agent-chat.types';
 
 export function buildSocialAgentOpenerDraftApprovalInput(input: {
@@ -19,27 +15,14 @@ export function buildSocialAgentOpenerDraftApprovalInput(input: {
   relatedCandidateId: number | null;
   idempotencyKey?: string | null;
   safetyBoundary?: string | null;
-}): {
-  userId: number;
-  agentConnectionId: null;
-  agentTaskId: number;
-  type: ApprovalType.SendMessage;
-  actionType: 'send_candidate_message';
-  skillName: 'send_candidate_message';
-  payload: Record<string, unknown>;
-  summary: string;
-  riskLevel: ApprovalRiskLevel.Medium;
-  reason: string;
-  createdBy: 'agent';
-  relatedCandidateId: number | null;
-} {
+}) {
   return {
     userId: input.ownerUserId,
     agentConnectionId: null,
     agentTaskId: input.taskId,
     type: ApprovalType.SendMessage,
-    actionType: 'send_candidate_message',
-    skillName: 'send_candidate_message',
+    actionType: 'send_invite',
+    skillName: 'send_invite',
     payload: {
       source: 'agent_card_action',
       schemaAction: input.action,
@@ -69,7 +52,7 @@ export function buildSocialAgentOpenerDraftApprovalInput(input: {
       : '发送开场白给候选人',
     riskLevel: ApprovalRiskLevel.Medium,
     reason: 'FitMeet Agent 已生成开场白草稿，等待用户确认后再发送。',
-    createdBy: 'agent',
+    createdBy: 'agent' as const,
     relatedCandidateId: input.relatedCandidateId,
   };
 }
@@ -82,13 +65,7 @@ export function buildSocialAgentOpenerDraftState(input: {
   approvalId: number;
   pendingApproval: SocialAgentPendingApprovalSnapshot;
   at: string;
-}): {
-  pendingAction: SocialAgentPendingActionMemo;
-  cardActionDraft: Record<string, unknown>;
-  transitionPatch: Partial<SocialAgentTaskMemory['currentTask']>;
-  displayName: string;
-  assistantMessage: string;
-} {
+}) {
   return {
     pendingAction: {
       id: input.pendingApproval.id,

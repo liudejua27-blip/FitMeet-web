@@ -3,8 +3,12 @@ import { Injectable } from '@nestjs/common';
 import { AgentTask } from './entities/agent-task.entity';
 import { LifeGraphProposalDto } from '../life-graph/dto/life-graph.dto';
 import type { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
+import type { SocialAgentRouteMessageBody } from './social-agent-chat.types';
 import type { StreamEmit } from './social-agent-chat.types';
+import type { SocialAgentAssistantMessageSource } from './social-agent-chat.types';
+import type { SocialAgentHydratedContext } from './social-agent-context-hydrator.service';
 import type { LongTermMemorySnapshot } from './social-agent-long-term-memory.service';
+import type { SocialAgentMemoryContext } from './social-agent-memory-context.service';
 import { shouldUseSocialAgentLlmDirectReply } from './social-agent-route-response.presenter';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
@@ -13,10 +17,12 @@ import { SocialAgentRouteContextService } from './social-agent-route-context.ser
 type HandleRouteConversationTurnInput = {
   ownerUserId: number;
   task: AgentTask;
+  traceId?: string | null;
   message: string;
   route: SocialAgentIntentRouterResult;
   profile: Record<string, unknown> | null;
   longTermSnapshot: LongTermMemorySnapshot | null;
+  hydratedContext?: SocialAgentHydratedContext | null;
   brainToolResults: Array<Record<string, unknown>>;
   emit?: StreamEmit;
   signal?: AbortSignal | null;
@@ -30,6 +36,7 @@ type HandleRouteConversationTurnResult = {
   profileUpdated: boolean;
   profileUpdateProposal: LifeGraphProposalDto | null;
   assistantStreamed?: boolean;
+  assistantMessageSource?: SocialAgentAssistantMessageSource;
 };
 
 @Injectable()
@@ -50,7 +57,9 @@ export class SocialAgentRouteConversationTurnService {
         message: input.message,
         intent: input.route.intent,
         buildMemoryContext: (currentTask) =>
-          this.routeContext.buildMemoryContext(currentTask, null),
+          this.buildMemoryContext(currentTask, input),
+        buildTaskContext: (currentTask, memoryContext) =>
+          this.buildTaskContext(currentTask, input, memoryContext) ?? null,
         emit: input.emit,
         signal: input.signal,
       });
@@ -70,21 +79,28 @@ export class SocialAgentRouteConversationTurnService {
         profileUpdated: handled.profileUpdated,
         profileUpdateProposal: handled.profileUpdateProposal ?? null,
         assistantStreamed: handled.assistantStreamed,
+        assistantMessageSource: handled.assistantMessageSource,
       };
     }
 
     if (shouldUseSocialAgentLlmDirectReply(input.route)) {
       let assistantStreamed = false;
-      const assistantMessage = await this.chatLlm.generateConversationalAnswer({
+      const memoryContext = this.buildMemoryContext(input.task, input);
+      const taskContext = this.buildTaskContext(
+        input.task,
+        input,
+        memoryContext,
+      );
+      const answer = await this.chatLlm.generateConversationalAnswerWithSource({
         message: input.message,
+        ...(input.traceId ? { traceId: input.traceId } : {}),
         route: input.route,
         profile: input.profile,
         task: input.task,
         longTermSnapshot: input.longTermSnapshot,
-        memoryContext: this.routeContext.buildMemoryContext(
-          input.task,
-          input.longTermSnapshot,
-        ),
+        memoryContext,
+        ...(taskContext ? { taskContext } : {}),
+        conversationHistory: input.hydratedContext?.recentMessages ?? null,
         toolResults: input.brainToolResults,
         onDelta: input.emit
           ? async (delta) => {
@@ -111,7 +127,8 @@ export class SocialAgentRouteConversationTurnService {
       return {
         handled: true,
         task: input.task,
-        assistantMessage,
+        assistantMessage: answer.text,
+        assistantMessageSource: assistantStreamed ? 'llm' : answer.source,
         assistantStreamed,
         savedContext: false,
         profileUpdated: false,
@@ -136,5 +153,39 @@ export class SocialAgentRouteConversationTurnService {
       route.intent === 'profile_enrichment_request' ||
       route.intent === 'correction_or_clarification'
     );
+  }
+
+  private buildMemoryContext(
+    task: AgentTask,
+    input: Pick<
+      HandleRouteConversationTurnInput,
+      'longTermSnapshot' | 'hydratedContext'
+    >,
+  ) {
+    return input.hydratedContext
+      ? this.routeContext.buildMemoryContext(
+          task,
+          input.longTermSnapshot,
+          input.hydratedContext,
+        )
+      : this.routeContext.buildMemoryContext(task, input.longTermSnapshot);
+  }
+
+  private buildTaskContext(
+    task: AgentTask,
+    input: Pick<
+      HandleRouteConversationTurnInput,
+      'message' | 'longTermSnapshot' | 'hydratedContext'
+    >,
+    memoryContext: SocialAgentMemoryContext | null,
+  ): Record<string, unknown> | undefined {
+    if (!input.hydratedContext) return undefined;
+    return this.routeContext.buildTaskContext({
+      task,
+      body: { message: input.message } as SocialAgentRouteMessageBody,
+      longTermSnapshot: input.longTermSnapshot,
+      memoryContext,
+      hydratedContext: input.hydratedContext,
+    });
   }
 }

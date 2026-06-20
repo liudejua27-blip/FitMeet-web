@@ -123,6 +123,9 @@ export class AgentSessionAssemblerService {
         role: 'assistant',
         content: finalAssistantMessage,
         createdAt: this.isoDate(input.task.updatedAt),
+        ...(input.result?.assistantMessageSource
+          ? { assistantMessageSource: input.result.assistantMessageSource }
+          : {}),
       });
     }
 
@@ -199,9 +202,17 @@ export class AgentSessionAssemblerService {
   ): Record<string, Record<string, unknown>> {
     const memory = this.isRecord(task.memory) ? task.memory : {};
     const shortTerm = this.isRecord(memory.shortTerm) ? memory.shortTerm : {};
-    const actions = this.isRecord(shortTerm.candidateActions)
-      ? shortTerm.candidateActions
+    const taskMemory = this.isRecord(memory.taskMemory)
+      ? memory.taskMemory
       : {};
+    const actions = this.mergeCandidateActionSources(
+      taskMemory.candidateState,
+      taskMemory.candidateActions,
+      memory.candidateState,
+      memory.candidateActions,
+      shortTerm.candidateState,
+      shortTerm.candidateActions,
+    );
     const out: Record<string, Record<string, unknown>> = {};
     for (const [key, value] of Object.entries(actions)) {
       if (!this.isRecord(value)) continue;
@@ -252,6 +263,12 @@ export class AgentSessionAssemblerService {
       : kindRaw === 'risk'
         ? 'risk'
         : undefined;
+    const assistantMessageSource =
+      role === 'assistant'
+        ? this.assistantMessageSource(
+            turn.assistantMessageSource ?? turn.messageSource ?? turn.source,
+          )
+        : undefined;
     return {
       id:
         cleanDisplayText(turn.id, '') ||
@@ -260,6 +277,7 @@ export class AgentSessionAssemblerService {
       kind,
       content,
       createdAt: cleanDisplayText(turn.at ?? turn.createdAt, '') || null,
+      ...(assistantMessageSource ? { assistantMessageSource } : {}),
       ...(activityResults.length > 0 ? { activityResults } : {}),
       ...(pendingApproval ? { pendingApproval } : {}),
     };
@@ -290,6 +308,17 @@ export class AgentSessionAssemblerService {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
   }
 
+  private mergeCandidateActionSources(
+    ...sources: unknown[]
+  ): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    for (const source of sources) {
+      if (!this.isRecord(source)) continue;
+      Object.assign(out, source);
+    }
+    return out;
+  }
+
   private number(value: unknown): number | null {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
     if (typeof value === 'string' && value.trim()) {
@@ -297,5 +326,11 @@ export class AgentSessionAssemblerService {
       return Number.isFinite(parsed) ? parsed : null;
     }
     return null;
+  }
+
+  private assistantMessageSource(
+    value: unknown,
+  ): 'llm' | 'fallback' | undefined {
+    return value === 'llm' || value === 'fallback' ? value : undefined;
   }
 }

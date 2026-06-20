@@ -407,8 +407,37 @@ export function AiProfileBuilderPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center bg-[#0d0d0b] text-[#d7f8b7]">
-        AI 画像工作室加载中...
+      <div
+        className="min-h-screen bg-[#0d0d0b] px-4 py-8 text-[#f6efe5] sm:px-6 lg:px-8"
+        data-testid="ai-profile-loading-skeleton"
+      >
+        <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <section className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
+            <div className="h-3 w-40 animate-pulse rounded-full bg-[#c8ff80]/30" />
+            <div className="mt-4 h-9 w-full max-w-xl animate-pulse rounded-full bg-white/10" />
+            <div className="mt-3 h-4 w-full max-w-2xl animate-pulse rounded-full bg-white/10" />
+            <div className="mt-2 h-4 w-2/3 animate-pulse rounded-full bg-white/10" />
+            <div className="mt-6 grid gap-3 md:grid-cols-3">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <div key={index} className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+                  <div className="h-4 w-24 animate-pulse rounded-full bg-white/10" />
+                  <div className="mt-3 h-3 w-full animate-pulse rounded-full bg-white/10" />
+                  <div className="mt-2 h-3 w-4/5 animate-pulse rounded-full bg-white/10" />
+                </div>
+              ))}
+            </div>
+          </section>
+          <aside className="rounded-lg border border-[#c8ff80]/20 bg-[#c8ff80]/5 p-5">
+            <div className="h-3 w-24 animate-pulse rounded-full bg-[#c8ff80]/30" />
+            <div className="mt-5 h-12 w-28 animate-pulse rounded-full bg-[#c8ff80]/25" />
+            <div className="mt-6 h-2 w-full animate-pulse rounded-full bg-white/10" />
+            <div className="mt-5 space-y-3">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div key={index} className="h-10 animate-pulse rounded-lg bg-white/[0.06]" />
+              ))}
+            </div>
+          </aside>
+        </div>
       </div>
     );
   }

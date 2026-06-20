@@ -53,12 +53,13 @@ body {
 [data-testid='assistant-ui-composer'] *::selection,
 [data-testid='assistant-ui-message'] ::selection,
 [data-testid='assistant-ui-message'] *::selection {
-  background: rgba(0, 115, 230, 0.16);
+  background: rgba(0, 115, 230, 0.1);
   color: #0d0d0d;
   text-shadow: none;
 }
 
 [data-testid='assistant-ui-selection-toolbar'] {
+  --assistant-selection-toolbar-offset-y: 96px;
   max-width: min(20rem, calc(100vw - 2rem));
   pointer-events: auto;
   z-index: 80;

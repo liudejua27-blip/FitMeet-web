@@ -46,7 +46,7 @@ function makeQueryBuilder() {
 }
 
 describe('AgentGatewayService public social intents', () => {
-  it('defaults the public hall feed to active public intents only', async () => {
+  it('defaults the public hall feed to discoverable public intents', async () => {
     const queryBuilder = makeQueryBuilder();
     const service = makeService({
       createQueryBuilder: jest.fn(() => queryBuilder),
@@ -58,12 +58,21 @@ describe('AgentGatewayService public social intents', () => {
       mode: 'public',
     });
     expect(queryBuilder.andWhere).toHaveBeenCalledWith(
-      'intent.status = :status',
+      'intent.status IN (:...statuses)',
       {
-        status: SocialRequestStatus.Active,
+        statuses: [
+          SocialRequestStatus.Active,
+          SocialRequestStatus.Matched,
+          SocialRequestStatus.Searching,
+        ],
       },
     );
-    expect(result.metadata.filters.status).toBe(SocialRequestStatus.Active);
+    expect(result.metadata.filters.status).toBe('discoverable');
+    expect(result.metadata.filters.statuses).toEqual([
+      SocialRequestStatus.Active,
+      SocialRequestStatus.Matched,
+      SocialRequestStatus.Searching,
+    ]);
   });
 
   it('keeps the public mode guard when an explicit public status is requested', async () => {

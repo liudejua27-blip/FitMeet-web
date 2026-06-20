@@ -208,6 +208,74 @@ describe('SocialAgentMessageToolService', () => {
     });
   });
 
+  it('sends explicitly approved replies as the user when no agent is bound', async () => {
+    const { service, messages, confirmationPolicy } = makeService();
+    confirmationPolicy.canRunAsConfirmedUserAction.mockReturnValue(true);
+    messages.sendMessage.mockResolvedValue({
+      id: 'reply_2',
+      conversationId: 'conv_1',
+      senderId: 1,
+      senderType: 'user',
+    });
+
+    const result = await service.replyMessage(
+      makeTask({
+        agentConnectionId: null,
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      }),
+      {
+        conversationId: 'conv_1',
+        targetUserId: 2,
+        text: '可以，我来确认一下。',
+        approvalId: 501,
+      },
+      'reply_step',
+    );
+
+    expect(messages.sendAgentReply).not.toHaveBeenCalled();
+    expect(messages.sendMessage).toHaveBeenCalledWith(
+      'conv_1',
+      1,
+      '可以，我来确认一下。',
+      expect.objectContaining({
+        senderType: 'user',
+        senderAgentId: null,
+        agentConnectionId: null,
+        ownerUserId: 1,
+        actorUserId: 1,
+        source: 'user',
+      }),
+    );
+    expect(result.loopUpdates).toMatchObject({
+      conversationId: 'conv_1',
+      targetUserId: 2,
+      lastMessageId: 'reply_2',
+      lastAgentMessageId: 'reply_2',
+      sourceTool: SocialAgentToolName.ReplyMessage,
+    });
+    expect(result.sentMessage).toMatchObject({
+      id: 'reply_2',
+      conversationId: 'conv_1',
+      targetUserId: 2,
+      toolName: SocialAgentToolName.ReplyMessage,
+      stepId: 'reply_step',
+    });
+  });
+
+  it('rejects unconfirmed replies when no agent is bound', async () => {
+    const { service, messages } = makeService();
+
+    await expect(
+      service.replyMessage(
+        makeTask({ agentConnectionId: null }),
+        { conversationId: 'conv_1', targetUserId: 2, text: 'hello' },
+        'reply_step',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(messages.sendAgentReply).not.toHaveBeenCalled();
+    expect(messages.sendMessage).not.toHaveBeenCalled();
+  });
+
   it('rejects empty messages and replies without a conversation', async () => {
     const { service } = makeService();
 

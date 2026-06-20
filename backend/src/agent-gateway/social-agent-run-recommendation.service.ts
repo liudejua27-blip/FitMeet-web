@@ -39,10 +39,19 @@ import type {
 } from './social-agent-run-progress.tracker';
 import { SocialAgentToolName } from './social-agent-tool-executor.service';
 import {
+  SOCIAL_AGENT_TASK_MEMORY_MESSAGE_LIMIT,
   appendShortTermMemoryItem,
+  readSocialAgentTaskMemory,
   rememberSocialAgentShortTerm,
+  writeSocialAgentTaskMemory,
 } from './social-agent-memory.util';
 import { recommendationLoopToolsForSocialExecution } from './social-agent-execution-pipeline.contract';
+import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
+import {
+  SocialAgentContextHydratorService,
+  type SocialAgentHydratedContext,
+} from './social-agent-context-hydrator.service';
+import { buildSocialAgentKnownTaskSlotConstraints } from './social-agent-task-slot-constraints.presenter';
 
 @Injectable()
 export class SocialAgentRunRecommendationService {
@@ -63,6 +72,10 @@ export class SocialAgentRunRecommendationService {
     private readonly realtime?: RealtimeEventService,
     @Optional()
     private readonly agentLoop?: AgentLoopService,
+    @Optional()
+    private readonly longTermMemory?: SocialAgentLongTermMemoryService,
+    @Optional()
+    private readonly contextHydrator?: SocialAgentContextHydratorService,
   ) {}
 
   async run(input: {
@@ -104,22 +117,34 @@ export class SocialAgentRunRecommendationService {
       ownerUserId: input.ownerUserId,
       permissionMode: input.permissionMode,
     });
+    const longTermSnapshot = await this.readLongTermSnapshot(input.ownerUserId);
+    const hydratedContext = await this.hydrateRecommendationContext({
+      ownerUserId: input.ownerUserId,
+      task,
+    });
+    this.applyHydratedContextToTaskMemory(task, hydratedContext, input.goal);
+    const executionGoal = this.resolveRecommendationExecutionGoal(
+      task,
+      input.goal,
+    );
     const loopExecution = await loopService.execute({
       taskId: task.id,
-      goal: input.goal,
+      goal: executionGoal,
       agent: 'FitMeet Main Agent',
       plan: {
         reason:
           'Initial recommendation run executes only through AgentLoop tools.',
-        tools: recommendationTools.map(({ agent, toolName, covers, input }) => ({
-          agent,
-          toolName,
-          requiresApproval: false,
-          input: {
-            ...input,
-            pipelineSteps: covers,
-          },
-        })),
+        tools: recommendationTools.map(
+          ({ agent, toolName, covers, input }) => ({
+            agent,
+            toolName,
+            requiresApproval: false,
+            input: {
+              ...input,
+              pipelineSteps: covers,
+            },
+          }),
+        ),
       },
       maxToolCalls: 6,
       maxRetries: 0,
@@ -142,7 +167,8 @@ export class SocialAgentRunRecommendationService {
             '正在理解你的社交需求',
             AgentTaskEventType.GoalUnderstood,
             {
-              goal: input.goal,
+              goal: executionGoal,
+              userMessage: input.goal,
               permissionMode: input.permissionMode,
             },
           );
@@ -178,10 +204,10 @@ export class SocialAgentRunRecommendationService {
 
           const planResult = await this.planner.planExistingTask(task);
           await progress.completeStep(
-            'deepseek',
+            'plan',
             planResult.source === 'fallback'
-              ? '正在使用本地策略生成匹配意图'
-              : '正在调用 DeepSeek 生成匹配意图',
+              ? '正在根据当前信息整理匹配方向'
+              : '正在整理你的匹配意图',
             AgentTaskEventType.PlanGenerated,
             {
               planSource: planResult.source,
@@ -211,7 +237,7 @@ export class SocialAgentRunRecommendationService {
           );
           const draftResult = await this.draftSearch.generateDraftWithTool(
             task,
-            input.goal,
+            executionGoal,
           );
           await progress.recordTool(
             'fitmeet_create_social_intent',
@@ -233,6 +259,11 @@ export class SocialAgentRunRecommendationService {
             task.id,
             input.ownerUserId,
           );
+          this.restoreHydratedContextOnTask(
+            task,
+            hydratedContext,
+            input.goal,
+          );
           draft = buildSocialAgentRequestDraft({
             agentTaskId: task.id,
             draft: draftResult.draft,
@@ -244,6 +275,11 @@ export class SocialAgentRunRecommendationService {
           task = await this.taskLifecycle.assertTaskOwner(
             task.id,
             input.ownerUserId,
+          );
+          this.restoreHydratedContextOnTask(
+            task,
+            hydratedContext,
+            input.goal,
           );
           draftPublication = await this.draftSearch.autoPublishDraftIfAllowed(
             task,
@@ -353,6 +389,11 @@ export class SocialAgentRunRecommendationService {
             task.id,
             input.ownerUserId,
           );
+          this.restoreHydratedContextOnTask(
+            task,
+            hydratedContext,
+            input.goal,
+          );
           await progress.completeStep(
             'search',
             '正在检索附近候选人',
@@ -460,6 +501,12 @@ export class SocialAgentRunRecommendationService {
               'Recommendation observations missing before final answer.',
             );
           }
+          const finalTaskContext = this.routeContext.buildTaskContext({
+            task,
+            body: { message: input.goal },
+            longTermSnapshot,
+            hydratedContext,
+          });
           result =
             await this.recommendationResults.completeRecommendationResult({
               ownerUserId: input.ownerUserId,
@@ -476,7 +523,12 @@ export class SocialAgentRunRecommendationService {
               signal: input.signal,
               alphaTurn: input.alphaTurn,
               buildMemoryContext: (currentTask) =>
-                this.routeContext.buildMemoryContext(currentTask, null),
+                this.routeContext.buildMemoryContext(
+                  currentTask,
+                  longTermSnapshot,
+                  hydratedContext,
+                ),
+              taskContext: finalTaskContext,
               toEventDto: (event) => this.toEventDto(event),
             });
           return {
@@ -501,6 +553,250 @@ export class SocialAgentRunRecommendationService {
     return { task, result: finalResult };
   }
 
+  private async hydrateRecommendationContext(input: {
+    ownerUserId: number;
+    task: AgentTask;
+  }): Promise<SocialAgentHydratedContext | null> {
+    if (!this.contextHydrator) return null;
+    return this.contextHydrator
+      .hydrateContext({
+        userId: input.ownerUserId,
+        taskId: input.task.id,
+        threadId: `agent-task:${input.task.id}`,
+      })
+      .catch((error) => {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'social_agent.recommendation_context_hydration_failed',
+            taskId: input.task.id,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return null;
+      });
+  }
+
+  private applyHydratedContextToTaskMemory(
+    task: AgentTask,
+    hydrated: SocialAgentHydratedContext | null,
+    goal: string,
+  ) {
+    if (!hydrated) return;
+    const taskMemory = readSocialAgentTaskMemory(task);
+    const currentGoal = this.resolveCurrentGoalForTaskMemory(
+      goal,
+      hydrated.taskMemory?.currentGoal,
+    );
+    if (currentGoal) taskMemory.currentGoal = currentGoal;
+    if (hydrated.taskMemory?.currentTask) {
+      const objective = this.resolveCurrentGoalForTaskMemory(
+        goal,
+        hydrated.taskMemory.currentTask.objective ||
+          taskMemory.currentTask.objective ||
+          hydrated.taskMemory?.currentGoal,
+      );
+      taskMemory.currentTask = {
+        ...taskMemory.currentTask,
+        ...hydrated.taskMemory.currentTask,
+        objective:
+          objective ||
+          hydrated.taskMemory.currentTask.objective ||
+          taskMemory.currentTask.objective,
+      };
+    } else if (goal.trim()) {
+      taskMemory.currentTask = {
+        ...taskMemory.currentTask,
+        objective:
+          taskMemory.currentTask.objective || goal.trim().slice(0, 240),
+      };
+    }
+    if (hydrated.candidateActions) {
+      taskMemory.candidateState = {
+        ...taskMemory.candidateState,
+        ...hydrated.candidateActions,
+      };
+    }
+    if (Array.isArray(hydrated.pendingApprovals)) {
+      taskMemory.pendingActions = hydrated.pendingApprovals;
+    }
+    const recentUserMessages =
+      this.recentUserMessagesFromHydratedContext(hydrated);
+    const knownTaskSlotConstraints =
+      hydrated.knownTaskSlotConstraints ??
+      buildSocialAgentKnownTaskSlotConstraints(hydrated.taskSlots);
+    if (knownTaskSlotConstraints) {
+      taskMemory.knownTaskSlotConstraints = knownTaskSlotConstraints;
+    }
+    if (recentUserMessages.length > 0) {
+      taskMemory.lastUserMessages = [
+        ...taskMemory.lastUserMessages,
+        ...recentUserMessages,
+      ]
+        .filter((item, index, list) => {
+          const key = `${item.text}:${item.at}`;
+          return (
+            list.findIndex(
+              (candidate) => `${candidate.text}:${candidate.at}` === key,
+            ) === index
+          );
+        })
+        .slice(-SOCIAL_AGENT_TASK_MEMORY_MESSAGE_LIMIT);
+    }
+    writeSocialAgentTaskMemory(task, taskMemory);
+    if (Object.keys(hydrated.taskSlots ?? {}).length > 0) {
+      const memory = this.isRecord(task.memory) ? task.memory : {};
+      task.memory = {
+        ...memory,
+        taskSlots: hydrated.taskSlots,
+        taskSlotSummary: this.publicSlotSummary(hydrated.taskSlots),
+        knownTaskSlotConstraints,
+      };
+    }
+  }
+
+  private restoreHydratedContextOnTask(
+    task: AgentTask,
+    hydrated: SocialAgentHydratedContext | null,
+    userGoal: string,
+  ): void {
+    if (!hydrated) return;
+    this.applyHydratedContextToTaskMemory(task, hydrated, userGoal);
+  }
+
+  private resolveRecommendationExecutionGoal(
+    task: AgentTask,
+    userGoal: string,
+  ): string {
+    const userMessage = this.safeString(userGoal).slice(0, 240);
+    const taskMemory = readSocialAgentTaskMemory(task);
+    const rememberedGoal = this.safeString(
+      taskMemory.currentGoal ||
+        taskMemory.currentTask.objective ||
+        task.goal ||
+        '',
+    ).slice(0, 240);
+    const slotSummary = this.executionSlotSummary(task);
+    const candidatePreference = slotSummary.candidate_preference;
+
+    if (Object.keys(slotSummary).length === 0) {
+      return userMessage || rememberedGoal;
+    }
+
+    const lines = [
+      '当前社交/约练任务执行上下文。',
+      userMessage ? `用户最新输入：${userMessage}` : null,
+      rememberedGoal && rememberedGoal !== userMessage
+        ? `当前任务目标：${rememberedGoal}`
+        : null,
+      `已确认信息：${this.humanSlotSummary(slotSummary)}`,
+      candidatePreference
+        ? '候选偏好仅能基于公开可发现资料和用户自愿公开标签使用，不能读取或推断隐私字段。'
+        : null,
+      '请基于已确认信息继续推进，不要重复追问已确认字段；如果需要执行发布、加好友、发送邀请、公开精确位置或交换联系方式，必须先请求用户确认。',
+    ].filter((line): line is string => Boolean(line));
+
+    return lines.join('\n').slice(0, 1200);
+  }
+
+  private executionSlotSummary(task: AgentTask): Record<string, string> {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const taskMemory = readSocialAgentTaskMemory(task);
+    const directSummary = this.isRecord(memory.taskSlotSummary)
+      ? memory.taskSlotSummary
+      : this.isRecord(taskMemory.taskSlotSummary)
+        ? taskMemory.taskSlotSummary
+        : {};
+    const taskSlots = this.isRecord(memory.taskSlots)
+      ? memory.taskSlots
+      : this.isRecord(taskMemory.taskSlots)
+        ? taskMemory.taskSlots
+        : {};
+    const out: Record<string, string> = {};
+    for (const [key, rawValue] of Object.entries(directSummary)) {
+      const value = this.safeString(rawValue);
+      if (value) out[key] = value.slice(0, 120);
+    }
+    for (const [key, rawSlot] of Object.entries(taskSlots)) {
+      if (!this.isRecord(rawSlot)) continue;
+      if (!this.isExecutionSlotUsable(key, rawSlot)) continue;
+      const value = this.safeString(rawSlot.value);
+      if (value) out[key] = value.slice(0, 120);
+    }
+    return out;
+  }
+
+  private isExecutionSlotUsable(
+    key: string,
+    slot: Record<string, unknown>,
+  ): boolean {
+    const state = this.safeString(slot.state);
+    if ((key === 'geo_area' || key === 'intensity') && state === 'inferred') {
+      return Boolean(this.safeString(slot.value));
+    }
+    return (
+      state === 'answered' ||
+      state === 'confirmed' ||
+      state === 'completed' ||
+      state === 'modified'
+    );
+  }
+
+  private humanSlotSummary(slots: Record<string, string>): string {
+    const labels: Record<string, string> = {
+      activity: '活动',
+      time_window: '时间',
+      location_text: '地点',
+      geo_area: '区域',
+      intensity: '强度',
+      visibility: '公开范围',
+      safety_boundary: '安全边界',
+      invite_tone: '邀请语气',
+      candidate_preference: '候选偏好',
+    };
+    return Object.entries(slots)
+      .map(([key, value]) => `${labels[key] ?? key}=${value}`)
+      .join('；');
+  }
+
+  private resolveCurrentGoalForTaskMemory(
+    goal: string,
+    hydratedGoal: string | null | undefined,
+  ): string {
+    const nextGoal = goal.trim();
+    const previousGoal =
+      typeof hydratedGoal === 'string' ? hydratedGoal.trim() : '';
+    if (this.isSubstantiveUserGoal(nextGoal)) return nextGoal.slice(0, 240);
+    return (previousGoal || nextGoal).slice(0, 240);
+  }
+
+  private isSubstantiveUserGoal(goal: string): boolean {
+    if (!goal.trim()) return false;
+    return /(今晚|今天|明天|后天|周末|下午|晚上|早上|上午|中午|凌晨|青岛|大学|校区|附近|崂山|市南|市北|散步|跑步|健身|羽毛球|篮球|足球|网球|骑行|徒步|咖啡|拍照|爬山|露营|游泳|瑜伽|女生|男生|舞蹈|公开标签|同校|同城|公共场所|低强度|高强度|先站内聊|不交换联系方式|只接受公共场所)/i.test(
+      goal,
+    );
+  }
+
+  private recentUserMessagesFromHydratedContext(
+    hydrated: SocialAgentHydratedContext,
+  ) {
+    return hydrated.recentMessages
+      .map((turn) => {
+        const role = this.safeString(turn.role);
+        const text = this.safeString(turn.text ?? turn.content);
+        if (role !== 'user' || !text) return null;
+        return {
+          text: text.slice(0, 240),
+          intent: 'hydrated_context',
+          at:
+            this.safeString(turn.at ?? turn.createdAt) ||
+            new Date(0).toISOString(),
+        };
+      })
+      .filter((item): item is { text: string; intent: string; at: string } =>
+        Boolean(item),
+      );
+  }
+
   private async readProfileSummary(
     ownerUserId: number,
   ): Promise<Record<string, unknown> | null> {
@@ -516,6 +812,18 @@ export class SocialAgentRunRecommendationService {
     } catch {
       return null;
     }
+  }
+
+  private async readLongTermSnapshot(ownerUserId: number) {
+    if (!this.longTermMemory) return null;
+    return this.longTermMemory.readSnapshot(ownerUserId).catch((error) => {
+      this.logger.warn(
+        `Social Agent recommendation long-term memory read failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    });
   }
 
   private async writeEvent(
@@ -584,6 +892,24 @@ export class SocialAgentRunRecommendationService {
     const text = cleanDisplayText(value, '');
     if (text.length <= max) return text;
     return `${text.slice(0, Math.max(0, max - 1))}…`;
+  }
+
+  private safeString(value: unknown): string {
+    return cleanDisplayText(value, '').trim();
+  }
+
+  private publicSlotSummary(slots: SocialAgentHydratedContext['taskSlots']) {
+    const out: Record<string, string> = {};
+    for (const [key, item] of Object.entries(slots)) {
+      if (!this.isRecord(item)) continue;
+      const value = this.safeString(item.value);
+      if (value) out[key] = value;
+    }
+    return out;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private modeLabel(mode: AgentTaskPermissionMode): string {

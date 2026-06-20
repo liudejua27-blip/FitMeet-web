@@ -203,6 +203,165 @@ describe('toUserFacingAgentResponse', () => {
     expect(serialized).not.toContain('social_match');
   });
 
+  it('keeps assistant source only when the model or fallback source is explicit', () => {
+    const llmResponse = toUserFacingAgentResponse(
+      {
+        intent: 'casual_chat',
+        confidence: 1,
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+        shouldSearch: false,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'conversational_answer',
+        source: 'rules',
+        action: 'answer',
+        savedContext: false,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: null,
+        taskId: 102,
+        assistantMessage: '这是模型生成的回复。',
+        assistantMessageSource: 'llm',
+        cards: [],
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      },
+      AgentTaskPermissionMode.Confirm,
+    );
+
+    expect(llmResponse.assistantMessageSource).toBe('llm');
+
+    const unknownSourceResponse = toUserFacingAgentResponse(
+      {
+        intent: 'casual_chat',
+        confidence: 1,
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+        shouldSearch: false,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'conversational_answer',
+        source: 'rules',
+        action: 'answer',
+        savedContext: false,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: null,
+        taskId: 103,
+        assistantMessage: '这是旧数据恢复的回复。',
+        cards: [],
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      },
+      AgentTaskPermissionMode.Confirm,
+    );
+
+    expect(Object.prototype.hasOwnProperty.call(
+      unknownSourceResponse,
+      'assistantMessageSource',
+    )).toBe(false);
+  });
+
+  it('turns suppressed fallback recovery copy into a structured recovery notice', () => {
+    const response = toUserFacingAgentResponse(
+      {
+        intent: 'casual_chat',
+        confidence: 1,
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+        shouldSearch: false,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'conversational_answer',
+        source: 'rules',
+        action: 'answer',
+        savedContext: false,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: null,
+        taskId: 104,
+        assistantMessage: '这次处理时间有点久。我已经保留当前对话，你可以稍后再试。',
+        assistantMessageSource: 'fallback',
+        cards: [],
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      },
+      AgentTaskPermissionMode.Confirm,
+    );
+
+    expect(response.assistantMessage).toBe('');
+    expect(response.assistantMessageSource).toBe('fallback');
+    expect(response.recoveryNotice).toMatchObject({
+      kind: 'timeout',
+      title: '这次处理时间有点久',
+      retryable: true,
+      source: 'stream_error',
+    });
+    expect(JSON.stringify(response)).not.toContain('稍后再试');
+  });
+
+  it('does not create a failed recovery notice when a suppressed fallback carries pending approval', () => {
+    const response = toUserFacingAgentResponse(
+      {
+        intent: 'social_search',
+        confidence: 1,
+        entities: {
+          city: '青岛',
+          activityType: 'walking',
+          targetGender: '',
+          timePreference: '今晚',
+          locationPreference: '青岛大学附近',
+        },
+        shouldSearch: true,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'search_candidates',
+        source: 'rules',
+        action: 'queue_search',
+        savedContext: true,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: null,
+        taskId: 105,
+        assistantMessage: '我可以继续上次的话题，也可以重新开始。',
+        assistantMessageSource: 'fallback',
+        cards: [],
+        pendingApproval: {
+          id: 55,
+          type: ApprovalType.PostPublish,
+          actionType: 'publish_social_request',
+          summary: '发布约练卡到发现',
+          riskLevel: ApprovalRiskLevel.Medium,
+          payload: {},
+          expiresAt: null,
+        },
+        permissionMode: AgentTaskPermissionMode.Confirm,
+      },
+      AgentTaskPermissionMode.Confirm,
+    );
+
+    expect(response.assistantMessage).toBe('');
+    expect(response.pendingConfirmations).toHaveLength(1);
+    expect(response.recoveryNotice).toBeUndefined();
+  });
+
   it('keeps generic assistant-ui cards while stripping internal debug fields', () => {
     const response = toUserFacingAgentResponse(
       {

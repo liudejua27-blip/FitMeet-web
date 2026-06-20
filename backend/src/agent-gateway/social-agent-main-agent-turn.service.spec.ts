@@ -64,7 +64,10 @@ function makeDecision(
   };
 }
 
-function makeHarness(alphaTurn?: FitMeetAlphaTurnDecision) {
+function makeHarness(
+  alphaTurn?: FitMeetAlphaTurnDecision,
+  overrides: { contextHydrator?: Record<string, unknown> | null } = {},
+) {
   const savedEvents: Array<Record<string, unknown>> = [];
   const taskRepo = {
     save: jest.fn((task: AgentTask) => Promise.resolve(task)),
@@ -112,6 +115,8 @@ function makeHarness(alphaTurn?: FitMeetAlphaTurnDecision) {
   const service = new SocialAgentMainAgentTurnService(
     turnResults as never,
     alphaAgent as never,
+    undefined,
+    overrides.contextHydrator as never,
   );
   return {
     alphaAgent,
@@ -150,6 +155,153 @@ describe('SocialAgentMainAgentTurnService', () => {
       }),
     );
     expect(taskRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('hydrates task memory into Alpha Agent context before route decisions', async () => {
+    const contextHydrator = {
+      hydrateContext: jest.fn().mockResolvedValue({
+        recentMessages: [
+          { role: 'user', text: '今晚青岛大学散步，找女生舞蹈生' },
+        ],
+        taskMemory: {
+          currentGoal: '今晚青岛大学散步',
+          pendingActions: [],
+        },
+        taskSlots: {
+          time_window: { value: '今晚', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+          activity: { value: '散步', state: 'completed' },
+          candidate_preference: {
+            value: '女生、舞蹈相关',
+            state: 'answered',
+          },
+        },
+        taskSlotSummary: {
+          时间: '今晚',
+          地点: '青岛大学附近',
+          活动: '散步',
+          候选偏好: '女生、舞蹈相关',
+        },
+        knownTaskSlotConstraints: {
+          treatAsHardConstraints: true,
+          knownSlots: [
+            {
+              key: 'time_window',
+              label: '时间',
+              value: '今晚',
+              state: 'completed',
+              confirmation: 'user_confirmed',
+            },
+            {
+              key: 'location_text',
+              label: '地点',
+              value: '青岛大学附近',
+              state: 'completed',
+              confirmation: 'user_confirmed',
+            },
+            {
+              key: 'activity',
+              label: '活动',
+              value: '散步',
+              state: 'completed',
+              confirmation: 'user_confirmed',
+            },
+            {
+              key: 'candidate_preference',
+              label: '候选偏好',
+              value: '女生、舞蹈相关',
+              state: 'answered',
+              confirmation: 'user_confirmed',
+            },
+          ],
+          doNotAskAgainFor: [
+            'time_window',
+            'location_text',
+            'activity',
+            'candidate_preference',
+          ],
+          userVisibleSummary:
+            '时间：今晚；地点：青岛大学附近；活动：散步；候选偏好：女生、舞蹈相关',
+          candidatePreferencePolicy:
+            'candidate_preference 只能用于公开可发现资料、公开标签或用户自愿公开信息，不能推断隐私。',
+          instruction:
+            'planner/router/Brain/subagent 必须基于 knownSlots 继续推进；除非用户主动修改，否则不得重复询问 doNotAskAgainFor 中的字段。',
+        },
+        pendingApprovals: [],
+        candidateActions: { recommendedIds: [12] },
+        lifeGraphSummary: { preferences: { intensity: '低强度' } },
+        lifeGraphGovernanceSummary: {
+          total: 2,
+          autoSaveCount: 1,
+          confirmationRequiredCount: 0,
+          blockedCount: 0,
+          sensitiveCount: 0,
+          expiringFactKeys: [],
+        },
+      }),
+    };
+    const { alphaAgent, service } = makeHarness(
+      makeDecision({ structuredIntent: { requiresSearch: true } }),
+      { contextHydrator },
+    );
+    const task = makeTask();
+
+    await service.handleRouteTurn({
+      ownerUserId: 7,
+      task,
+      message: '可以，帮我找人',
+      hasCandidates: true,
+      startedAt: Date.now(),
+    });
+
+    expect(contextHydrator.hydrateContext).toHaveBeenCalledWith({
+      userId: 7,
+      taskId: 101,
+      threadId: 'agent-task:101',
+    });
+    expect(alphaAgent.prepareTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          hasCandidates: true,
+          taskSlots: expect.objectContaining({
+            time_window: expect.objectContaining({ value: '今晚' }),
+            location_text: expect.objectContaining({
+              value: '青岛大学附近',
+            }),
+            activity: expect.objectContaining({ value: '散步' }),
+            candidate_preference: expect.objectContaining({
+              value: '女生、舞蹈相关',
+            }),
+          }),
+          taskSlotSummary: expect.objectContaining({
+            时间: '今晚',
+            地点: '青岛大学附近',
+            活动: '散步',
+            候选偏好: '女生、舞蹈相关',
+          }),
+          knownTaskSlotConstraints: expect.objectContaining({
+            treatAsHardConstraints: true,
+            doNotAskAgainFor: expect.arrayContaining([
+              'time_window',
+              'location_text',
+              'activity',
+              'candidate_preference',
+            ]),
+            candidatePreferencePolicy: expect.stringContaining(
+              '公开可发现资料',
+            ),
+            instruction: expect.stringContaining('不得重复询问'),
+          }),
+          lifeGraphGovernanceSummary: expect.objectContaining({
+            autoSaveCount: 1,
+          }),
+          recentMessages: expect.arrayContaining([
+            expect.objectContaining({ text: '今晚青岛大学散步，找女生舞蹈生' }),
+          ]),
+          pendingApprovals: [],
+        }),
+      }),
+    );
   });
 
   it('passes through the Main Agent decision when run turns continue normally', async () => {

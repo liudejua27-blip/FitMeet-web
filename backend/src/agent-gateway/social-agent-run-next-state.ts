@@ -13,23 +13,13 @@ export function socialAgentRunNextReadReplyState(input: {
   retryable?: boolean | null;
 }): SocialAgentRunNextTaskState {
   if (input.skippedCode && input.retryable === false) {
-    return {
-      status: AgentTaskStatus.Failed,
-      statusReason: input.skippedCode,
-    };
+    return runNextState(AgentTaskStatus.Failed, input.skippedCode);
   }
-  return {
-    status: AgentTaskStatus.WaitingReply,
-    statusReason:
-      input.newMessageCount === 0 ? 'no_new_reply' : 'reply_read_failed',
-  };
+  return runNextState(AgentTaskStatus.WaitingReply, input.newMessageCount === 0 ? 'no_new_reply' : 'reply_read_failed');
 }
 
 export function socialAgentRunNextSummaryFailedState(): SocialAgentRunNextTaskState {
-  return {
-    status: AgentTaskStatus.WaitingReply,
-    statusReason: 'reply_summary_failed',
-  };
+  return runNextState(AgentTaskStatus.WaitingReply, 'reply_summary_failed');
 }
 
 export function socialAgentRunNextDecisionState(input: {
@@ -37,16 +27,10 @@ export function socialAgentRunNextDecisionState(input: {
   hasExecutableTool: boolean;
 }): SocialAgentRunNextTaskState | null {
   if (input.nextAction === 'stop') {
-    return {
-      status: AgentTaskStatus.WaitingReply,
-      statusReason: 'next_action_stop',
-    };
+    return runNextState(AgentTaskStatus.WaitingReply, 'next_action_stop');
   }
   if (!input.hasExecutableTool) {
-    return {
-      status: AgentTaskStatus.WaitingReply,
-      statusReason: 'next_action_not_executable',
-    };
+    return runNextState(AgentTaskStatus.WaitingReply, 'next_action_not_executable');
   }
   return null;
 }
@@ -55,12 +39,10 @@ export function socialAgentRunNextActionState(input: {
   actionStatus: SocialAgentToolCallRecord['status'];
 }): SocialAgentRunNextTaskState {
   return input.actionStatus === 'succeeded'
-    ? {
-        status: AgentTaskStatus.WaitingReply,
-        statusReason: 'next_action_executed_waiting_reply',
-      }
-    : {
-        status: AgentTaskStatus.WaitingResult,
-        statusReason: 'next_action_needs_attention',
-      };
+    ? runNextState(AgentTaskStatus.WaitingReply, 'next_action_executed_waiting_reply')
+    : runNextState(AgentTaskStatus.WaitingResult, 'next_action_needs_attention');
+}
+
+function runNextState(status: AgentTaskStatus, statusReason: string): SocialAgentRunNextTaskState {
+  return { status, statusReason };
 }

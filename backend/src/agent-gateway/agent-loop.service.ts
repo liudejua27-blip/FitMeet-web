@@ -13,6 +13,7 @@ import { AgentObservabilityService } from './agent-observability.service';
 
 type AgentLoopToolRunner = (input: {
   runId: string;
+  traceId: string;
   taskId: number | null;
   agent: FitMeetAlphaAgentName;
   toolName: string;
@@ -222,10 +223,14 @@ export class AgentLoopService {
       traceId: loop.traceId,
       runId: loop.runId,
       taskId: loop.taskId,
-      status: loop.status === 'failed' ? 'failed' : 'completed',
+      status: requiresApproval
+        ? 'approval_required'
+        : loop.status === 'failed' || sawToolFailure
+          ? 'failed'
+          : 'completed',
       latencyMs: Date.now() - startedAt,
       failureReason:
-        loop.status === 'failed'
+        loop.status === 'failed' || sawToolFailure
           ? this.safeText(loop.finalObservation?.error) || 'unknown'
           : null,
     });
@@ -510,9 +515,12 @@ export class AgentLoopService {
   }
 
   private isSafeInternalPlanningTool(tool: AgentLoopToolPlan): boolean {
+    if (tool.requiresApproval !== false) return false;
     return (
-      tool.requiresApproval === false &&
-      /^recommendation_/.test(tool.toolName)
+      /^recommendation_/.test(tool.toolName) ||
+      /^route_.*_turn$/.test(tool.toolName) ||
+      tool.toolName === 'candidate_confirmation_check' ||
+      tool.toolName === 'main_agent_prepare_turn'
     );
   }
 
@@ -566,6 +574,7 @@ export class AgentLoopService {
         const observation = await this.withTimeout(
           input.input.runner({
             runId: input.loop.runId,
+            traceId: input.loop.traceId,
             taskId: input.loop.taskId,
             agent: input.tool.agent,
             toolName: input.tool.toolName,

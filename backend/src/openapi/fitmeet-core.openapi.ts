@@ -1933,6 +1933,130 @@ export const fitMeetCoreOpenApi = {
         },
       },
     },
+    '/social-agent/tasks/{taskId}/events/eval': {
+      get: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentEvaluateTaskEvents',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Social Codex trace evaluation for persisted task events',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: [
+                    'taskId',
+                    'eventCount',
+                    'socialCodexEventCount',
+                    'pass',
+                    'issues',
+                  ],
+                  additionalProperties: true,
+                  properties: {
+                    taskId: { type: 'integer' },
+                    eventCount: { type: 'integer' },
+                    socialCodexEventCount: { type: 'integer' },
+                    pass: { type: 'boolean' },
+                    issues: {
+                      type: 'array',
+                      items: { type: 'object', additionalProperties: true },
+                    },
+                    regressionChecks: {
+                      type: 'array',
+                      items: { type: 'object', additionalProperties: true },
+                    },
+                    replayCase: {
+                      type: 'object',
+                      additionalProperties: true,
+                    },
+                    runs: {
+                      type: 'array',
+                      items: { type: 'object', additionalProperties: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
+    '/social-agent/tasks/{taskId}/events/replay': {
+      get: {
+        tags: ['social-agent-chat'],
+        operationId: 'socialAgentReplayTaskEvents',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'taskId',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
+          {
+            name: 'afterSeq',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer' },
+          },
+          {
+            name: 'afterEventId',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'includeDebug',
+            in: 'query',
+            required: false,
+            schema: { type: 'boolean' },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Replay package for persisted Social Codex task events with trace eval',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['taskId', 'events', 'eval'],
+                  additionalProperties: true,
+                  properties: {
+                    taskId: { type: 'integer' },
+                    threadId: { type: 'string', nullable: true },
+                    latestRunId: { type: 'string', nullable: true },
+                    nextSeq: { type: 'integer' },
+                    events: {
+                      type: 'array',
+                      items: { type: 'object', additionalProperties: true },
+                    },
+                    eval: {
+                      type: 'object',
+                      additionalProperties: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Error' },
+          '404': { $ref: '#/components/responses/Error' },
+        },
+      },
+    },
     '/social-agent/tasks/{taskId}/replan': {
       post: {
         tags: ['social-agent-chat'],

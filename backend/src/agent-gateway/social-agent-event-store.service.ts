@@ -9,11 +9,24 @@ import {
   AgentTaskEventType,
 } from './entities/agent-task.entity';
 import { sanitizeForDisplay } from '../common/display-text.util';
+import {
+  summarizeSocialCodexRun,
+  type SocialCodexRunSummary,
+} from './social-codex-run-summary';
+import {
+  sanitizeSocialCodexProcessDetail,
+  sanitizeSocialCodexProcessTitle,
+} from './social-codex-public-process-text';
 import type {
   SocialAgentEventV2,
+  SocialAgentEventV2DisplayState,
   SocialAgentEventV2Visibility,
 } from './social-agent-event-v2.types';
-import { parseSocialAgentThreadTaskId } from './social-agent-thread-id.util';
+import { sanitizeSocialAgentUserVisiblePayload } from './social-agent-user-visible-payload';
+import {
+  normalizeTaskBoundSocialAgentEvent,
+  parseSocialAgentThreadTaskId,
+} from './social-agent-thread-id.util';
 
 export type SocialCodexReplayOptions = {
   afterSeq?: number | null;
@@ -32,6 +45,7 @@ export type SocialCodexReplayPackage = {
   lastEventId: string | null;
   terminalType: 'run.completed' | 'run.failed' | null;
   pendingApproval: boolean;
+  summary: SocialCodexRunSummary;
   events: SocialAgentEventV2[];
 };
 
@@ -106,10 +120,16 @@ export class SocialAgentEventStore {
       take: Math.max(1, Math.min(options.take ?? 1000, 2000)),
     });
     const events = rows
-      .map((event) => event.payload?.socialAgentEventV2)
+      .map((event) =>
+        normalizeTaskBoundSocialAgentEvent(
+          event.payload?.socialAgentEventV2,
+          event.taskId,
+        ),
+      )
       .filter((event): event is SocialAgentEventV2 =>
         this.isSocialAgentEventV2(event),
       )
+      .map((event) => this.sanitizeReplayEvent(event))
       .filter((event) => this.isReplayVisible(event.visibility, options));
     return this.filterReplayCursor(events, options);
   }
@@ -125,7 +145,6 @@ export class SocialAgentEventStore {
       afterEventId: null,
     });
     const events = this.filterReplayCursor(allEvents, options);
-    const last = events.at(-1) ?? null;
     const terminalEvent = [...allEvents]
       .reverse()
       .find(
@@ -135,27 +154,44 @@ export class SocialAgentEventStore {
       terminalEvent?.type === 'run.completed' || terminalEvent?.type === 'run.failed'
         ? terminalEvent.type
         : null;
+    const summary = summarizeSocialCodexRun(allEvents);
+    const replayEvents = this.attachReplaySummaryToTerminalEvent(
+      events,
+      terminalEvent?.eventId ?? null,
+      summary,
+    );
+    const lastReplayEvent = replayEvents.at(-1) ?? null;
     return {
       taskId,
-      threadId: last?.threadId ?? allEvents.at(-1)?.threadId ?? null,
-      runId: last?.runId ?? allEvents.at(-1)?.runId ?? null,
+      threadId: lastReplayEvent?.threadId ?? allEvents.at(-1)?.threadId ?? null,
+      runId: lastReplayEvent?.runId ?? allEvents.at(-1)?.runId ?? null,
       eventCount: allEvents.length,
-      returnedCount: events.length,
-      lastSeq: last?.seq ?? null,
-      lastEventId: last?.eventId ?? null,
+      returnedCount: replayEvents.length,
+      lastSeq: lastReplayEvent?.seq ?? null,
+      lastEventId: lastReplayEvent?.eventId ?? null,
       terminalType,
-      pendingApproval: allEvents.some((event, index) => {
-        if (event.type !== 'approval.required') return false;
-        return !allEvents
-          .slice(index + 1)
-          .some(
-            (candidate) =>
-              candidate.type === 'approval.resolved' &&
-              this.sameApprovalIdentity(event, candidate),
-          );
-      }),
-      events,
+      pendingApproval: summary.pendingApproval,
+      summary,
+      events: replayEvents,
     };
+  }
+
+  private attachReplaySummaryToTerminalEvent(
+    events: SocialAgentEventV2[],
+    terminalEventId: string | null,
+    summary: SocialCodexRunSummary,
+  ): SocialAgentEventV2[] {
+    if (!terminalEventId) return events;
+    return events.map((event) => {
+      if (event.eventId !== terminalEventId) return event;
+      return {
+        ...event,
+        payload: {
+          ...(event.payload ?? {}),
+          summary,
+        },
+      };
+    });
   }
 
   async listEventsByThread(threadId: string | number) {
@@ -171,6 +207,7 @@ export class SocialAgentEventStore {
       .filter((event): event is SocialAgentEventV2 =>
         this.isSocialAgentEventV2(event),
       )
+      .map((event) => this.sanitizeReplayEvent(event))
       .at(-1);
   }
 
@@ -220,6 +257,62 @@ export class SocialAgentEventStore {
     return true;
   }
 
+  private sanitizeReplayEvent(event: SocialAgentEventV2): SocialAgentEventV2 {
+    if (event.visibility !== 'user_visible') return event;
+    const candidateCount = this.numberPayloadValue(
+      event.payload,
+      'candidateCount',
+    );
+    const activityCount = this.numberPayloadValue(
+      event.payload,
+      'activityCount',
+    );
+    const state = this.displayState(event.display?.state);
+    const context = {
+      type: event.type,
+      stage: event.stage,
+      state,
+      candidateCount,
+      activityCount,
+    };
+    const detail = sanitizeSocialCodexProcessDetail(
+      event.display?.detail,
+      context,
+    );
+    const display = event.display
+      ? {
+          title: sanitizeSocialCodexProcessTitle(event.display.title, context),
+          ...(detail ? { detail } : {}),
+          state,
+        }
+      : undefined;
+    return {
+      ...event,
+      ...(display ? { display } : { display: undefined }),
+      payload: sanitizeSocialAgentUserVisiblePayload(event.type, event.payload),
+    };
+  }
+
+  private displayState(
+    value: SocialAgentEventV2DisplayState | undefined,
+  ): SocialAgentEventV2DisplayState {
+    return value === 'done' ||
+      value === 'waiting' ||
+      value === 'failed' ||
+      value === 'running'
+      ? value
+      : 'running';
+  }
+
+  private numberPayloadValue(
+    payload: Record<string, unknown> | undefined,
+    key: string,
+  ): number | null {
+    if (!payload) return null;
+    const value = payload[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  }
+
   private filterReplayCursor(
     events: SocialAgentEventV2[],
     options: SocialCodexReplayOptions,
@@ -234,35 +327,5 @@ export class SocialAgentEventStore {
       return events.filter((event) => event.seq > Number(options.afterSeq));
     }
     return events;
-  }
-
-  private sameApprovalIdentity(
-    required: SocialAgentEventV2,
-    resolved: SocialAgentEventV2,
-  ): boolean {
-    const requiredKey = this.approvalIdentity(required);
-    const resolvedKey = this.approvalIdentity(resolved);
-    return Boolean(requiredKey && resolvedKey && requiredKey === resolvedKey);
-  }
-
-  private approvalIdentity(event: SocialAgentEventV2): string | null {
-    const payload = this.isRecord(event.payload) ? event.payload : {};
-    const approvalId = this.scalar(payload.approvalId);
-    if (approvalId) return `approval:${approvalId}`;
-    const checkpointId =
-      this.scalar(payload.checkpointId) ??
-      (this.isRecord(payload.resumeCursor)
-        ? this.scalar(payload.resumeCursor.checkpointId)
-        : null);
-    if (checkpointId) return `checkpoint:${checkpointId}`;
-    const actionType = this.scalar(payload.actionType);
-    if (actionType) return `action:${actionType}`;
-    return null;
-  }
-
-  private scalar(value: unknown): string | null {
-    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-    if (typeof value === 'string' && value.trim()) return value.trim();
-    return null;
   }
 }

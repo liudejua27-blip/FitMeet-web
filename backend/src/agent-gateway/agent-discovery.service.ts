@@ -29,28 +29,12 @@ import {
   AgentActionStatus,
   AgentActionType,
 } from './entities/agent-action-log.entity';
-import { canAutoExecute } from './agent-autonomy.policy';
 import { AgentWebhookService } from './agent-webhook.service';
 import { AgentApprovalService } from './agent-approval.service';
 import {
   ApprovalRiskLevel,
   ApprovalType,
 } from './entities/agent-approval-request.entity';
-
-/** Daily cap for agent-to-agent auto messages, by source agent autonomy. */
-function dailyA2ACapFor(level: AgentAutonomyLevel): number {
-  switch (level) {
-    case AgentAutonomyLevel.Open:
-      return 100;
-    case AgentAutonomyLevel.Normal:
-      return 20;
-    case AgentAutonomyLevel.Assisted:
-    default:
-      // Assisted agents cannot auto-send; the user (JWT path) can still
-      // manually send messages, which bypass this cap.
-      return 0;
-  }
-}
 
 export interface SearchAgentsOpts {
   q?: string;
@@ -137,89 +121,60 @@ export class AgentDiscoveryService {
       }
 
       // Rule 7: agent-initiated send_message requires explicit approval.
-      const allowed = canAutoExecute(
-        'send_message',
-        source.autonomyLevel,
-        'low',
-      );
-      if (!allowed) {
-        const approval = await this.approvals.create({
-          userId: requestUserId,
-          agentConnectionId: source.agentConnectionId ?? null,
-          type:
-            target.ownerUserId == null
-              ? ApprovalType.Custom
-              : ApprovalType.SendMessage,
-          actionType: 'send_message',
-          skillName: 'agent_discovery.send_message',
-          payload: {
-            fromAgentId: source.id,
+      // Keep outbound social messaging independent from generic autonomy
+      // policy so future policy relaxations cannot bypass user confirmation.
+      const approval = await this.approvals.create({
+        userId: requestUserId,
+        agentConnectionId: source.agentConnectionId ?? null,
+        type:
+          target.ownerUserId == null
+            ? ApprovalType.Custom
+            : ApprovalType.SendMessage,
+        actionType: 'send_message',
+        skillName: 'agent_discovery.send_message',
+        payload: {
+          fromAgentId: source.id,
+          targetAgentId,
+          targetUserId: target.ownerUserId ?? null,
+          toUserId: target.ownerUserId ?? null,
+          content: text,
+          messageType: 'text',
+          metadata: {
+            source: 'agent_discovery',
+            a2a: true,
             targetAgentId,
-            targetUserId: target.ownerUserId ?? null,
-            toUserId: target.ownerUserId ?? null,
-            content: text,
-            messageType: 'text',
-            metadata: {
-              source: 'agent_discovery',
-              a2a: true,
-              targetAgentId,
-              sourceAgentId: source.id,
-            },
+            sourceAgentId: source.id,
           },
-          summary: `发送 Agent 代发消息给 ${target.agentName ?? `Agent #${targetAgentId}`}`,
-          riskLevel: ApprovalRiskLevel.Medium,
-          reason:
-            'Agent 代发消息属于外联动作，必须由用户确认后才能继续。',
-          createdBy: 'agent',
-        });
-        await this.actionLogs.logAgentAction({
-          ownerUserId: requestUserId,
-          agentId: source.agentConnectionId ?? null,
-          actionType: AgentActionType.SendMessage,
-          actionStatus: AgentActionStatus.PendingApproval,
-          riskLevel: AgentActionRiskLevel.Low,
-          targetAgentId,
-          targetUserId: target.ownerUserId ?? null,
-          reason: 'a2a_requires_approval',
-          payload: {
-            approvalId: approval.id,
-            fromAgentId: source.id,
-            preview: text.slice(0, 80),
-          },
-        });
-        return {
-          status: 'pending_approval' as const,
+        },
+        summary: `发送 Agent 代发消息给 ${target.agentName ?? `Agent #${targetAgentId}`}`,
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason: 'Agent 代发消息属于外联动作，必须由用户确认后才能继续。',
+        createdBy: 'agent',
+      });
+      await this.actionLogs.logAgentAction({
+        ownerUserId: requestUserId,
+        agentId: source.agentConnectionId ?? null,
+        actionType: AgentActionType.SendMessage,
+        actionStatus: AgentActionStatus.PendingApproval,
+        riskLevel: AgentActionRiskLevel.Low,
+        targetAgentId,
+        targetUserId: target.ownerUserId ?? null,
+        reason: 'a2a_requires_approval',
+        payload: {
           approvalId: approval.id,
-          reason: 'autonomy_level_requires_approval',
-        };
-      }
-
-      // Rule 5: daily cap.
-      const todayCount = await this.countTodayA2AMessages(requestUserId);
-      const cap = dailyA2ACapFor(source.autonomyLevel);
-      if (todayCount >= cap) {
-        await this.actionLogs.logAgentAction({
-          ownerUserId: requestUserId,
-          agentId: source.agentConnectionId ?? null,
-          actionType: AgentActionType.SendMessage,
-          actionStatus: AgentActionStatus.Rejected,
-          targetAgentId,
-          targetUserId: target.ownerUserId ?? null,
-          reason: 'daily_a2a_cap_reached',
-          payload: { todayCount, cap },
-        });
-        return {
-          status: 'rate_limited' as const,
-          dailyCap: cap,
-          todayCount,
-        };
-      }
+          fromAgentId: source.id,
+          preview: text.slice(0, 80),
+        },
+      });
+      return {
+        status: 'pending_approval' as const,
+        approvalId: approval.id,
+        reason: 'autonomy_level_requires_approval',
+      };
     }
 
     if (target.ownerUserId === null) {
       const targetConnectionId = target.agentConnectionId ?? target.id;
-      const sourceConnectionId =
-        source?.agentConnectionId ?? source?.id ?? null;
       const { conversationId } = await this.messages.startAgentConversation(
         requestUserId,
         targetConnectionId,
@@ -229,10 +184,10 @@ export class AgentDiscoveryService {
         requestUserId,
         text,
         {
-          source: source ? 'ai_delegate' : 'user',
-          senderType: source ? 'agent' : 'user',
+          source: 'user',
+          senderType: 'user',
           receiverType: 'agent',
-          senderAgentId: sourceConnectionId,
+          senderAgentId: null,
           receiverAgentId: targetConnectionId,
           agentConnectionId: targetConnectionId,
           ownerUserId: target.ownerUserId ?? requestUserId,
@@ -243,26 +198,20 @@ export class AgentDiscoveryService {
             targetAgentId: target.id,
             targetAgentConnectionId: targetConnectionId,
             targetType: 'agent',
-            ...(source
-              ? {
-                  sourceAgentId: source.id,
-                  sourceAgentConnectionId: sourceConnectionId,
-                }
-              : {}),
           },
         },
       );
 
       await this.actionLogs.logAgentAction({
         ownerUserId: requestUserId,
-        agentId: source?.agentConnectionId ?? null,
+        agentId: null,
         actionType: AgentActionType.SendMessage,
         actionStatus: AgentActionStatus.Executed,
         riskLevel: AgentActionRiskLevel.Low,
         targetAgentId: target.id,
         targetUserId: null,
         payload: {
-          fromAgentId: source?.id ?? null,
+          fromAgentId: null,
           conversationId,
           messageId: message.id,
           preview: text.slice(0, 80),
@@ -275,7 +224,7 @@ export class AgentDiscoveryService {
         messageId: message.id,
         targetAgentId: target.id,
         fromUserId: requestUserId,
-        fromAgentId: source?.id ?? null,
+        fromAgentId: null,
         preview: text.slice(0, 120),
       });
 
@@ -288,7 +237,6 @@ export class AgentDiscoveryService {
     }
 
     const targetConnectionId = target.agentConnectionId ?? target.id;
-    const sourceConnectionId = source?.agentConnectionId ?? source?.id ?? null;
     const { conversationId } = await this.messages.startConversation(
       requestUserId,
       target.ownerUserId,
@@ -308,10 +256,10 @@ export class AgentDiscoveryService {
       requestUserId,
       text,
       {
-        source: source ? 'ai_delegate' : 'user',
-        senderType: source ? 'agent' : 'user',
+        source: 'user',
+        senderType: 'user',
         receiverType: 'agent',
-        senderAgentId: sourceConnectionId,
+        senderAgentId: null,
         receiverAgentId: targetConnectionId,
         agentConnectionId: targetConnectionId,
         ownerUserId: target.ownerUserId,
@@ -321,12 +269,6 @@ export class AgentDiscoveryService {
           a2a: true,
           targetAgentId: target.id,
           targetAgentConnectionId: targetConnectionId,
-          ...(source
-            ? {
-                sourceAgentId: source.id,
-                sourceAgentConnectionId: sourceConnectionId,
-              }
-            : {}),
         },
       },
     );
@@ -334,14 +276,14 @@ export class AgentDiscoveryService {
     // Rule 4: AgentActionLog for every A2A message.
     await this.actionLogs.logAgentAction({
       ownerUserId: requestUserId,
-      agentId: source?.agentConnectionId ?? null,
+      agentId: null,
       actionType: AgentActionType.SendMessage,
       actionStatus: AgentActionStatus.Executed,
       riskLevel: AgentActionRiskLevel.Low,
       targetAgentId: target.id,
       targetUserId: target.ownerUserId,
       payload: {
-        fromAgentId: source?.id ?? null,
+        fromAgentId: null,
         conversationId,
         messageId: message.id,
         preview: text.slice(0, 80),
@@ -353,7 +295,7 @@ export class AgentDiscoveryService {
       messageId: message.id,
       targetAgentId: target.id,
       fromUserId: requestUserId,
-      fromAgentId: source?.id ?? null,
+      fromAgentId: null,
       preview: text.slice(0, 120),
     });
 
@@ -937,62 +879,58 @@ export class AgentDiscoveryService {
         throw new ForbiddenException('Source agent is not active');
       }
 
-      const action = dto.activityId ? 'invite_activity' : 'add_friend';
-      const allowed = canAutoExecute(action, source.autonomyLevel, 'low');
-      if (!allowed) {
-        const approval = await this.approvals.create({
-          userId: requestUserId,
-          agentConnectionId: source.agentConnectionId ?? null,
-          type: dto.activityId
-            ? ApprovalType.Custom
-            : ApprovalType.ContactRequest,
-          actionType: action,
-          skillName: 'agent_discovery.invite_agent',
-          payload: {
-            fromAgentId: source.id,
-            targetAgentId,
-            targetUserId: target.ownerUserId ?? null,
-            activityId: dto.activityId ?? null,
-            note: dto.note ?? '',
-          },
-          summary: dto.activityId
-            ? `邀请 ${target.agentName ?? `Agent #${targetAgentId}`} 参加活动`
-            : `连接 ${target.agentName ?? `Agent #${targetAgentId}`}`,
-          riskLevel: ApprovalRiskLevel.Medium,
-          reason:
-            'Agent 代发邀请或连接候选属于高风险社交动作，必须由用户确认。',
-          createdBy: 'agent',
-          relatedActivityId: dto.activityId ?? null,
-        });
-        await this.actionLogs.logAgentAction({
-          ownerUserId: requestUserId,
-          agentId: source.agentConnectionId ?? null,
-          actionType: dto.activityId
-            ? AgentActionType.InviteActivity
-            : AgentActionType.AddFriend,
-          actionStatus: AgentActionStatus.PendingApproval,
-          riskLevel: AgentActionRiskLevel.Low,
+      const action = dto.activityId ? 'invite_activity' : 'connect_candidate';
+      // Agent-initiated invites / contact requests are always approval-gated.
+      const approval = await this.approvals.create({
+        userId: requestUserId,
+        agentConnectionId: source.agentConnectionId ?? null,
+        type: dto.activityId ? ApprovalType.Custom : ApprovalType.ContactRequest,
+        actionType: action,
+        skillName: 'agent_discovery.invite_agent',
+        payload: {
+          fromAgentId: source.id,
           targetAgentId,
           targetUserId: target.ownerUserId ?? null,
-          relatedActivityId: dto.activityId ?? null,
-          reason: 'a2a_invite_requires_approval',
-          payload: {
-            approvalId: approval.id,
-            fromAgentId: source.id,
-            note: dto.note,
-          },
-        });
-        return {
-          status: 'pending_approval' as const,
+          activityId: dto.activityId ?? null,
+          note: dto.note ?? '',
+        },
+        summary: dto.activityId
+          ? `邀请 ${target.agentName ?? `Agent #${targetAgentId}`} 参加活动`
+          : `连接 ${target.agentName ?? `Agent #${targetAgentId}`}`,
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason:
+          'Agent 代发邀请或连接候选属于高风险社交动作，必须由用户确认。',
+        createdBy: 'agent',
+        relatedActivityId: dto.activityId ?? null,
+      });
+      await this.actionLogs.logAgentAction({
+        ownerUserId: requestUserId,
+        agentId: source.agentConnectionId ?? null,
+        actionType: dto.activityId
+          ? AgentActionType.InviteActivity
+          : AgentActionType.AddFriend,
+        actionStatus: AgentActionStatus.PendingApproval,
+        riskLevel: AgentActionRiskLevel.Low,
+        targetAgentId,
+        targetUserId: target.ownerUserId ?? null,
+        relatedActivityId: dto.activityId ?? null,
+        reason: 'a2a_invite_requires_approval',
+        payload: {
           approvalId: approval.id,
-          reason: 'autonomy_level_requires_approval',
-        };
-      }
+          fromAgentId: source.id,
+          note: dto.note,
+        },
+      });
+      return {
+        status: 'pending_approval' as const,
+        approvalId: approval.id,
+        reason: 'autonomy_level_requires_approval',
+      };
     }
 
     await this.actionLogs.logAgentAction({
       ownerUserId: requestUserId,
-      agentId: source?.agentConnectionId ?? null,
+      agentId: null,
       actionType: dto.activityId
         ? AgentActionType.InviteActivity
         : AgentActionType.AddFriend,
@@ -1002,7 +940,7 @@ export class AgentDiscoveryService {
       targetUserId: target.ownerUserId ?? null,
       relatedActivityId: dto.activityId ?? null,
       payload: {
-        fromAgentId: source?.id ?? null,
+        fromAgentId: null,
         note: dto.note,
       },
     });
@@ -1135,18 +1073,4 @@ export class AgentDiscoveryService {
     return source;
   }
 
-  private async countTodayA2AMessages(ownerUserId: number): Promise<number> {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
-    return this.actionLogRepo
-      .createQueryBuilder('log')
-      .where('log.ownerUserId = :uid', { uid: ownerUserId })
-      .andWhere('log.actionType = :t', { t: AgentActionType.SendMessage })
-      .andWhere('log.actionStatus = :s', { s: AgentActionStatus.Executed })
-      .andWhere('log.targetAgentId IS NOT NULL')
-      .andWhere('log.createdAt BETWEEN :start AND :end', { start, end })
-      .getCount();
-  }
 }

@@ -1,8 +1,10 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 import { sanitizeCity } from '../common/city.util';
 import { SocialProfileService } from '../users/social-profile.service';
 import { AgentTask } from './entities/agent-task.entity';
+import { socialAgentContextTurnLimit } from './social-agent-context-window';
 import {
   SocialAgentBrainService,
   type SocialAgentBrainTurnDecision,
@@ -22,15 +24,26 @@ import type { SocialAgentMemoryContext } from './social-agent-memory-context.ser
 import { SocialAgentMessageLogService } from './social-agent-message-log.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
+import {
+  SocialAgentContextHydratorService,
+  type SocialAgentHydratedContext,
+} from './social-agent-context-hydrator.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
-import { enforceSocialIntentGate } from './social-agent-social-intent-gate';
+import { SocialAgentTaskMemoryStateMachineService } from './social-agent-task-memory-state-machine.service';
+import { buildSocialAgentKnownTaskSlotConstraints } from './social-agent-task-slot-constraints.presenter';
+import {
+  enforceSocialIntentGate,
+  hasExplicitSocialExecutionIntent,
+  isSocialExecutionIntent,
+} from './social-agent-social-intent-gate';
 
 type PrepareRouteDecisionInput = {
   ownerUserId: number;
   task: AgentTask;
   body: SocialAgentRouteMessageBody;
   message: string;
+  signal?: AbortSignal | null;
 };
 
 type PrepareRouteDecisionResult = {
@@ -57,6 +70,11 @@ export class SocialAgentRouteDecisionService {
     private readonly taskLifecycle: SocialAgentTaskLifecycleService,
     private readonly routeContext: SocialAgentRouteContextService,
     @Optional() private readonly brain?: SocialAgentBrainService,
+    @Optional() private readonly config?: ConfigService,
+    @Optional()
+    private readonly contextHydrator?: SocialAgentContextHydratorService,
+    @Optional()
+    private readonly taskSlots?: SocialAgentTaskMemoryStateMachineService,
   ) {}
 
   async prepare(
@@ -69,28 +87,46 @@ export class SocialAgentRouteDecisionService {
       this.readLongTermSnapshot(ownerUserId),
     ]);
     const task = freshTask;
+    if (this.shouldApplyCurrentMessageToTaskSlots(body, message)) {
+      this.applyCurrentMessageToTaskSlots(task, message);
+    }
+    const hydratedContext = this.withLatestTaskSlots(
+      await this.hydrateRuntimeContext({
+        ownerUserId,
+        task,
+        body,
+      }),
+      task,
+    );
     const memoryContext = this.routeContext.buildMemoryContext(
       task,
       longTermSnapshot,
+      hydratedContext,
     );
+    const conversationHistory =
+      this.nonEmptyRecordArray(hydratedContext?.recentMessages) ??
+      this.conversationHistory(task);
     const taskContext = this.routeContext.buildTaskContext({
       task,
       body,
       longTermSnapshot,
       memoryContext,
+      hydratedContext,
     });
     let route = await this.intentRouter.route({
       message,
       taskContext,
       profile: profile ?? {},
-      conversationHistory: readSocialAgentConversationHistory(task),
+      conversationHistory,
+      signal: input.signal,
     });
     route = enforceSocialIntentGate(
       {
         message,
         taskContext,
         profile: profile ?? {},
-        conversationHistory: readSocialAgentConversationHistory(task),
+        conversationHistory,
+        conversationIntent: this.conversationIntent(body),
       },
       route,
     );
@@ -102,6 +138,9 @@ export class SocialAgentRouteDecisionService {
       body,
       longTermSnapshot,
       memoryContext,
+      taskContext,
+      conversationHistory,
+      signal: input.signal,
     });
     if (brainDecision) {
       route = enforceSocialIntentGate(
@@ -109,11 +148,13 @@ export class SocialAgentRouteDecisionService {
           message,
           taskContext,
           profile: profile ?? {},
-          conversationHistory: readSocialAgentConversationHistory(task),
+          conversationHistory,
+          conversationIntent: this.conversationIntent(body),
         },
         brainDecision.route,
       );
       brainDecision.route = route;
+      this.sanitizeBrainToolsAfterIntentGate(brainDecision);
       rememberSocialAgentConversationBrainDecision(task, brainDecision);
       if (brainDecision.conversationMode === 'profile_correction') {
         this.profileEnrichment.recordProfileMisunderstanding(
@@ -147,6 +188,26 @@ export class SocialAgentRouteDecisionService {
     };
   }
 
+  private conversationIntent(
+    body: SocialAgentRouteMessageBody,
+  ): NonNullable<SocialAgentRouteMessageBody['conversationIntent']> | null {
+    return body.clientContext?.conversationIntent ?? body.conversationIntent ?? null;
+  }
+
+  private shouldApplyCurrentMessageToTaskSlots(
+    body: SocialAgentRouteMessageBody,
+    message: string,
+  ): boolean {
+    const conversationIntent = this.conversationIntent(body);
+    if (
+      conversationIntent === 'conversation' &&
+      !hasExplicitSocialExecutionIntent(message)
+    ) {
+      return false;
+    }
+    return true;
+  }
+
   private async planBrainTurn(input: {
     message: string;
     route: SocialAgentIntentRouterResult;
@@ -155,20 +216,134 @@ export class SocialAgentRouteDecisionService {
     body: SocialAgentRouteMessageBody;
     longTermSnapshot: LongTermMemorySnapshot | null;
     memoryContext: SocialAgentMemoryContext | null;
+    taskContext: Record<string, unknown>;
+    conversationHistory: Array<Record<string, unknown>>;
+    signal?: AbortSignal | null;
   }): Promise<SocialAgentBrainTurnDecision | undefined> {
     return this.brain?.planTurn({
       message: input.message,
       route: input.route,
       profile: input.profile ?? {},
-      taskContext: this.routeContext.buildTaskContext({
-        task: input.task,
-        body: input.body,
-        longTermSnapshot: input.longTermSnapshot,
-        memoryContext: input.memoryContext,
-      }),
-      conversationHistory: readSocialAgentConversationHistory(input.task),
+      taskContext: input.taskContext,
+      conversationHistory: input.conversationHistory,
       memoryContext: input.memoryContext ?? undefined,
+      signal: input.signal,
     });
+  }
+
+  private sanitizeBrainToolsAfterIntentGate(
+    decision: SocialAgentBrainTurnDecision,
+  ): void {
+    if (isSocialExecutionIntent(decision.route.intent)) return;
+    const readOnlyTools = decision.tools.filter((tool) =>
+      this.isSafeBrainReadTool(tool.name),
+    );
+    decision.tools = readOnlyTools;
+    decision.shouldExecuteTool = readOnlyTools.length > 0;
+    if (
+      decision.conversationMode === 'search' ||
+      decision.conversationMode === 'action'
+    ) {
+      decision.conversationMode = 'answer';
+    }
+  }
+
+  private isSafeBrainReadTool(toolName: string): boolean {
+    return [
+      'get_user_profile',
+      'read_life_graph',
+      'get_conversation_history',
+      'get_conversation_messages',
+      'get_candidate_detail',
+    ].includes(toolName);
+  }
+
+  private async hydrateRuntimeContext(input: {
+    ownerUserId: number;
+    task: AgentTask;
+    body: SocialAgentRouteMessageBody;
+  }): Promise<SocialAgentHydratedContext | null> {
+    if (!this.contextHydrator) return null;
+    try {
+      return await this.contextHydrator.hydrateContext({
+        userId: input.ownerUserId,
+        taskId: input.task.id,
+        threadId: input.body.clientContext?.threadId ?? input.task.id,
+      });
+    } catch (error) {
+      this.metrics.recordError('context_hydration_failed');
+      this.logger.warn(
+        JSON.stringify({
+          event: 'social_agent.context_hydration.failed',
+          ownerUserId: input.ownerUserId,
+          taskId: input.task.id,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return null;
+    }
+  }
+
+  private applyCurrentMessageToTaskSlots(task: AgentTask, message: string): void {
+    const slots =
+      this.taskSlots ?? new SocialAgentTaskMemoryStateMachineService();
+    try {
+      slots.applyUserMessage(task, message);
+    } catch (error) {
+      this.metrics.recordError('task_slot_memory_apply_failed');
+      this.logger.warn(
+        JSON.stringify({
+          event: 'social_agent.task_slots.apply_failed',
+          taskId: task.id,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  }
+
+  private withLatestTaskSlots(
+    hydratedContext: SocialAgentHydratedContext | null,
+    task: AgentTask,
+  ): SocialAgentHydratedContext | null {
+    if (!hydratedContext) return null;
+    const slots =
+      this.taskSlots ?? new SocialAgentTaskMemoryStateMachineService();
+    const taskSlots = slots.readSlots(task);
+    const taskSlotSummary = slots.publicSlotSummary(taskSlots);
+    const knownTaskSlotConstraints =
+      buildSocialAgentKnownTaskSlotConstraints(taskSlots);
+    if (Object.keys(taskSlots).length === 0) return hydratedContext;
+    return {
+      ...hydratedContext,
+      taskSlots,
+      taskSlotSummary,
+      knownTaskSlotConstraints,
+      taskMemory: hydratedContext.taskMemory
+        ? {
+            ...hydratedContext.taskMemory,
+            taskSlots,
+            taskSlotSummary,
+            knownTaskSlotConstraints,
+          }
+        : hydratedContext.taskMemory,
+    };
+  }
+
+  private conversationHistory(task: AgentTask): Array<Record<string, unknown>> {
+    return readSocialAgentConversationHistory(
+      task,
+      socialAgentContextTurnLimit(this.config),
+    );
+  }
+
+  private nonEmptyRecordArray(
+    value: unknown,
+  ): Array<Record<string, unknown>> | null {
+    if (!Array.isArray(value)) return null;
+    const records = value.filter((item): item is Record<string, unknown> =>
+      Boolean(item && typeof item === 'object' && !Array.isArray(item)),
+    );
+    return records.length > 0 ? records : null;
   }
 
   private async recordRouteAndMemory(input: {

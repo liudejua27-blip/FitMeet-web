@@ -79,7 +79,7 @@ export function ChatGPTComposer({ requiresAuth, onLogin }: ChatGPTComposerProps)
 
   return (
     <ComposerPrimitive.Root
-      className="group/composer mx-auto flex w-full max-w-3xl flex-col rounded-[26px] border border-[#d9d9e3] bg-white px-2 py-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.035)] transition-[border-color,box-shadow] duration-150 hover:border-[#cfcfd8] focus-within:border-[#c8c8d0] focus-within:shadow-[0_2px_8px_rgba(0,0,0,0.055)]"
+      className="group/composer mx-auto flex w-full max-w-3xl flex-col rounded-[28px] border border-[#e5e5e5] bg-white px-2 py-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.035)] transition-[border-color,box-shadow] duration-150 hover:border-[#d7d7d7] focus-within:border-[#d0d0d0] focus-within:shadow-[0_2px_8px_rgba(0,0,0,0.055)]"
       data-testid="assistant-ui-composer"
       data-ui-model="assistant-ui-chatgpt-composer"
       data-visual-density="compact"
@@ -88,6 +88,8 @@ export function ChatGPTComposer({ requiresAuth, onLogin }: ChatGPTComposerProps)
       data-attachment-model="message-part"
       data-border-tone="subtle"
       data-focus-ring="subtle"
+      data-composer-radius="28px"
+      data-focus-ring-model="chatgpt-subtle"
       data-keyboard-safe-area="enabled"
       data-upload-gate={hasAttachmentGate ? uploadSummary.status : 'idle'}
       data-upload-count={uploadSummary.totalCount}
@@ -102,7 +104,7 @@ export function ChatGPTComposer({ requiresAuth, onLogin }: ChatGPTComposerProps)
     >
       <ComposerPrimitive.AttachmentDropzone
         disabled={requiresAuth}
-        className="relative rounded-[22px] transition-colors data-[dragging=true]:bg-black/[0.025]"
+        className="relative rounded-[26px] transition-colors data-[dragging=true]:bg-black/[0.025]"
         data-testid="assistant-ui-attachment-dropzone"
         data-dropzone-state={requiresAuth ? 'disabled' : 'ready'}
         aria-label="拖放图片或视频到这里"
@@ -120,11 +122,11 @@ export function ChatGPTComposer({ requiresAuth, onLogin }: ChatGPTComposerProps)
           aria-describedby={uploadStatusId}
           data-testid="assistant-ui-composer-input"
           data-input-model="single-composer"
-          className="max-h-40 min-h-8 w-full resize-none bg-transparent px-3 pt-1.5 text-[16px] leading-6 text-[#0d0d0d] outline-none placeholder:text-[#8e8e8e]"
+          className="max-h-40 min-h-8 w-full resize-none bg-transparent px-3 pt-0.5 text-[16px] leading-6 text-[#0d0d0d] outline-none placeholder:text-[#8e8e8e]"
         />
         <ComposerDictationPreview />
         <div
-          className="flex items-center justify-between gap-2 px-1 pt-0.5"
+          className="flex items-center justify-between gap-2 px-1 pt-0"
           data-testid="assistant-ui-composer-toolbar"
           data-toolbar-model="minimal"
           data-permission-entry="none"
@@ -137,7 +139,7 @@ export function ChatGPTComposer({ requiresAuth, onLogin }: ChatGPTComposerProps)
             <ComposerPrimitive.AddAttachment asChild>
               <TooltipIconButton
                 tooltip={requiresAuth ? '登录后添加图片或视频' : '添加图片或视频'}
-                className="size-8 rounded-full text-[#5d5d5d] hover:bg-black/[0.05]"
+                className="size-8 rounded-full text-[#6b6b6b] hover:bg-black/[0.045] hover:text-[#0d0d0d]"
                 disabled={requiresAuth}
               >
                 <Plus className="h-4 w-4" aria-hidden="true" />

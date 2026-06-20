@@ -1,9 +1,11 @@
 import type { AgentTask } from './entities/agent-task.entity';
+import { selectSocialAgentContextWindow } from './social-agent-context-window';
 
 export function buildSocialAgentCurrentTaskSummary(input: {
   task: AgentTask;
   memory: unknown;
   isRecord: (value: unknown) => value is Record<string, unknown>;
+  contextLimit?: number;
 }): Record<string, unknown> {
   const { task, memory, isRecord } = input;
   return {
@@ -14,10 +16,8 @@ export function buildSocialAgentCurrentTaskSummary(input: {
     statusReason: task.statusReason,
     permissionMode: task.permissionMode,
     riskLevel: task.riskLevel,
-    plan: Array.isArray(task.plan) ? task.plan.slice(-10) : [],
-    recentToolCalls: Array.isArray(task.toolCalls)
-      ? task.toolCalls.slice(-10)
-      : [],
+    plan: contextWindow(task.plan, input.contextLimit),
+    recentToolCalls: contextWindow(task.toolCalls, input.contextLimit),
     result: isRecord(task.result) ? task.result : {},
     memory,
   };
@@ -27,8 +27,9 @@ export function shouldPersistSocialAgentCurrentTaskSummary(input: {
   request: Record<string, unknown>;
   bool: (value: unknown) => boolean | undefined;
 }): boolean {
-  return (
-    input.bool(input.request.persistLongTerm ?? input.request.writeLongTerm) ===
-    true
-  );
+  return input.bool(input.request.persistLongTerm ?? input.request.writeLongTerm) === true;
+}
+
+function contextWindow(value: unknown, limit?: number): unknown[] {
+  return Array.isArray(value) ? selectSocialAgentContextWindow(value, limit) : [];
 }

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { AgentTaskPermissionMode } from './entities/agent-task.entity';
+import { socialCodexThreadIdForTask } from './social-codex-runtime-model';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
 import { inferSocialAgentThreadTitle } from './social-agent-thread-title.util';
 
@@ -30,7 +31,7 @@ export class SocialAgentThreadSessionManager {
   }
 
   bindThreadToTask(threadId: string | number, taskId: number) {
-    return { threadId: `agent-task:${taskId}`, taskId };
+    return { threadId: socialCodexThreadIdForTask(taskId), taskId };
   }
 
   async resolveActiveThreadForMessage(input: {

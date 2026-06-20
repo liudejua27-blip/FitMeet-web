@@ -1231,7 +1231,7 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     permissionMode: [...ALL_PERMISSION_MODES],
     executorToolName: 'get_candidate_pool_debug',
     runtimeStatus: 'implemented',
-    plannerEnabled: true,
+    plannerEnabled: false,
     dataScope: 'owner_debug_summary_only',
     sideEffects: [],
   },

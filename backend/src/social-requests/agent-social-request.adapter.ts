@@ -234,6 +234,7 @@ export class AgentSocialRequestAdapter {
     dto: LegacyCreateSocialRequestDto,
   ): NewCreateSocialRequestDto {
     const type = this.inferType(dto.requestType, dto.description);
+    const metadata = this.legacyMetadata(dto, type);
     return {
       type,
       title: dto.title ?? this.autoTitle(type, dto.description),
@@ -254,8 +255,63 @@ export class AgentSocialRequestAdapter {
           : dto.visibility === 'private'
             ? SocialRequestVisibility.Private
             : SocialRequestVisibility.MatchedOnly,
+      metadata,
       // status defaults to Matching inside the service
     };
+  }
+
+  private legacyMetadata(
+    dto: LegacyCreateSocialRequestDto,
+    type: SocialRequestType,
+  ): Record<string, unknown> {
+    const taskSlotSummary: Record<string, string> = {};
+    const completedSlots: string[] = [];
+    const addSlot = (key: string, value: unknown) => {
+      const text = this.cleanMetadataText(value);
+      if (!text) return;
+      taskSlotSummary[key] = text;
+      completedSlots.push(key);
+    };
+
+    addSlot('activity', dto.requestType || type);
+    addSlot('time_window', dto.timePreference);
+    addSlot('location_text', dto.loc);
+    addSlot('geo_area', dto.city);
+
+    const metadata: Record<string, unknown> = {
+      legacyAgentRequest: true,
+      originalRequestType: this.cleanMetadataText(dto.requestType) || type,
+    };
+    const timePreference = this.cleanMetadataText(dto.timePreference);
+    if (timePreference) metadata.timePreference = timePreference;
+    const locationPreference = this.cleanMetadataText(dto.loc);
+    if (locationPreference) {
+      metadata.locationPreference = locationPreference;
+      metadata.nearbyArea = locationPreference;
+    }
+    const city = sanitizeCity(dto.city);
+    if (city) metadata.city = city;
+    if (dto.visibility) metadata.visibility = dto.visibility;
+    if (typeof dto.verifiedOnly === 'boolean') {
+      metadata.verifiedOnly = dto.verifiedOnly;
+    }
+    if (Array.isArray(dto.interests) && dto.interests.length > 0) {
+      metadata.interestTags = dto.interests.filter(Boolean).slice(0, 20);
+    }
+    if (Object.keys(taskSlotSummary).length > 0) {
+      metadata.taskSlotSummary = taskSlotSummary;
+      metadata.knownTaskSlotConstraints = {
+        source: 'legacy_agent_social_request',
+        doNotAskAgainFor: completedSlots,
+        taskSlotsAreHardConstraints: true,
+      };
+    }
+    return metadata;
+  }
+
+  private cleanMetadataText(value: unknown): string {
+    if (typeof value !== 'string') return '';
+    return value.replace(/\s+/g, ' ').trim().slice(0, 200);
   }
 
   private inferType(
@@ -297,10 +353,17 @@ export class AgentSocialRequestAdapter {
     r: UserSocialRequest,
     candidates?: MatchedCandidateView[],
   ) {
+    const metadata = this.metadataRecord(r.metadata);
     const candidateUserIds =
       candidates?.map((c) => c.userId) ??
-      (r.metadata?.candidateUserIds as number[] | undefined) ??
+      (metadata.candidateUserIds as number[] | undefined) ??
       [];
+    const locationPreference =
+      this.cleanMetadataText(metadata.locationPreference) ||
+      this.cleanMetadataText(metadata.nearbyArea);
+    const timePreference =
+      this.formatTimePreference(r.timeStart, r.timeEnd) ||
+      this.cleanMetadataText(metadata.timePreference);
     return {
       id: r.id,
       userId: r.userId,
@@ -309,11 +372,11 @@ export class AgentSocialRequestAdapter {
       title: r.title,
       description: r.description,
       city: r.city,
-      loc: '',
+      loc: locationPreference,
       lat: r.lat,
       lng: r.lng,
       radiusKm: r.radiusKm,
-      timePreference: this.formatTimePreference(r.timeStart, r.timeEnd),
+      timePreference,
       visibility:
         r.visibility === SocialRequestVisibility.Public
           ? 'public'
@@ -332,6 +395,12 @@ export class AgentSocialRequestAdapter {
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     };
+  }
+
+  private metadataRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
   }
 
   private toLegacyCandidate(c: MatchedCandidateView) {
@@ -359,6 +428,19 @@ export class AgentSocialRequestAdapter {
       risk: c.risk,
       suggestedMessage: c.suggestedMessage,
       candidateRecordId: c.candidateRecordId,
+      reasonerSource: c.reasonerSource,
+      reasoningConfidence: c.reasoningConfidence,
+      reasoningDegraded: c.reasoningDegraded,
+      reasoningRetryable: c.reasoningRetryable,
+      degraded: c.reasoningDegraded,
+      retryable: c.reasoningRetryable,
+      matchReasoner: {
+        source: c.reasonerSource,
+        confidence: c.reasoningConfidence,
+        degraded: c.reasoningDegraded,
+        retryable: c.reasoningRetryable,
+        degradationReason: c.degradationReason ?? null,
+      },
     };
   }
 

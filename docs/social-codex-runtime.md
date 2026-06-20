@@ -278,7 +278,10 @@ The eval result also includes named regression checks so QA, CI, and future
 self-improve runs can fail on product invariants instead of only raw issues:
 
 - `visible_process_trace`: social/task runs must show a user-visible process
-  timeline instead of leaving the user staring at waiting dots.
+  status instead of leaving the user staring at waiting dots. The product UI
+  should render the latest `replay.summary` / visible process event as one
+  replaceable status line, with detailed evidence collapsed until the user
+  opens "查看过程".
 - `thread_task_run_binding`: replayable events must keep stable thread/run ids
   so one message does not create a new sidebar thread.
 - `memory_slot_state_machine`: slot completion must not repeat the same
@@ -311,7 +314,9 @@ The replay package includes `threadId`, `runId`, `lastSeq`, `lastEventId`, `term
 assistant-ui renders:
 
 - assistant text deltas as normal assistant text
-- `visible_process.delta`, tool events, slot events, and memory events as a lightweight process timeline
+- `visible_process.delta`, tool events, slot events, and memory events as one
+  lightweight covering status by default; older steps are audit evidence inside
+  the collapsed "查看过程" area
 - opportunity cards, candidate cards, and approvals as Tool UI message parts
 
 The frontend must show:
@@ -327,7 +332,7 @@ The frontend must not show internal names such as `hydrate_context`, `tool_call_
 
 ## Why Visible Process, Not Raw Chain-of-Thought
 
-Raw chain-of-thought can expose private reasoning, internal policies, model uncertainty, and implementation details. FitMeet only shows a concise visible process trace: what the Agent is doing, what user-provided information it recorded, which safe external action is pending, and what can be resumed. This gives GPT/Codex-like transparency without exposing hidden reasoning.
+Raw chain-of-thought can expose private reasoning, internal policies, model uncertainty, and implementation details. FitMeet only shows a concise visible process summary: what the Agent is doing, what user-provided information it recorded, which safe external action is pending, and what can be resumed. The default surface is a single replaceable status, not a long process log. This gives GPT/Codex-like transparency without exposing hidden reasoning.
 
 ## First Product Loop
 

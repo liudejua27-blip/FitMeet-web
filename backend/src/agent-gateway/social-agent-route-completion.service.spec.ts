@@ -3,7 +3,12 @@ import {
   AgentTaskPermissionMode,
   AgentTaskStatus,
 } from './entities/agent-task.entity';
+import {
+  ApprovalRiskLevel,
+  ApprovalType,
+} from './entities/agent-approval-request.entity';
 import type { SocialAgentAsyncRunSnapshot } from './social-agent-chat.types';
+import { SocialAgentEventV2Service } from './social-agent-event-v2.service';
 import type { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
 import { SocialAgentRouteCompletionService } from './social-agent-route-completion.service';
 
@@ -67,22 +72,33 @@ function makeHarness() {
     recordAction: jest.fn(),
     recordQueuedRun: jest.fn(),
   };
+  const eventStore = {
+    appendEvent: jest.fn().mockResolvedValue(undefined),
+  };
+  const selfImprove = {
+    recordOnlineReplayFromRoute: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new SocialAgentRouteCompletionService(
     messageLog as never,
     metrics as never,
+    selfImprove as never,
+    new SocialAgentEventV2Service(),
+    eventStore as never,
   );
-  return { messageLog, metrics, service };
+  return { eventStore, messageLog, metrics, selfImprove, service };
 }
 
 describe('SocialAgentRouteCompletionService', () => {
   it('records a regular route result with assistant log and latency metrics', async () => {
-    const { messageLog, metrics, service } = makeHarness();
+    const { eventStore, messageLog, metrics, selfImprove, service } =
+      makeHarness();
     const task = makeTask();
 
     const result = await service.complete({
       task,
       route: makeRoute(),
       assistantMessage: '已记住你的偏好。',
+      assistantMessageSource: 'fallback',
       savedContext: true,
       profileUpdated: true,
       queuedRun: null,
@@ -97,6 +113,7 @@ describe('SocialAgentRouteCompletionService', () => {
       action: 'save_context',
       taskId: 101,
       assistantMessage: '已记住你的偏好。',
+      assistantMessageSource: 'fallback',
       savedContext: true,
       profileUpdated: true,
       shouldQueueRun: false,
@@ -111,14 +128,219 @@ describe('SocialAgentRouteCompletionService', () => {
       '已记住你的偏好。',
       result,
     );
+    expect(eventStore.appendEvent).toHaveBeenCalledTimes(4);
+    expect(eventStore.appendEvent).toHaveBeenNthCalledWith(
+      1,
+      task,
+      expect.objectContaining({
+        type: 'run.started',
+        threadId: 'agent-task:101',
+        taskId: 101,
+        display: expect.objectContaining({
+          title: '正在理解你的需求',
+          state: 'done',
+        }),
+      }),
+    );
+    expect(eventStore.appendEvent).toHaveBeenNthCalledWith(
+      3,
+      task,
+      expect.objectContaining({
+        type: 'assistant.delta',
+        payload: expect.objectContaining({
+          messagePreview: '已记住你的偏好。',
+        }),
+      }),
+    );
+    expect(eventStore.appendEvent).toHaveBeenNthCalledWith(
+      4,
+      task,
+      expect.objectContaining({
+        type: 'run.completed',
+        display: expect.objectContaining({
+          title: '这一步处理完成',
+          state: 'done',
+        }),
+        payload: expect.objectContaining({
+          summary: expect.objectContaining({
+            title: '已整理画像变化建议',
+            state: 'completed',
+            displayMode: 'covering_status',
+            updateModel: 'latest_state',
+            defaultVisibleCount: 1,
+            historyVisibility: 'collapsed',
+          }),
+        }),
+      }),
+    );
     expect(metrics.observeRouteLatency).toHaveBeenCalledWith(
       expect.any(Number),
+    );
+    expect(selfImprove.recordOnlineReplayFromRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        taskId: 101,
+        userMessage: '找跑步搭子',
+        assistantMessage: '已记住你的偏好。',
+      }),
+    );
+  });
+
+  it('can defer assistant memory for streaming route responses', async () => {
+    const { eventStore, messageLog, metrics, selfImprove, service } =
+      makeHarness();
+    const task = makeTask();
+
+    const result = await service.complete({
+      task,
+      route: makeRoute(),
+      assistantMessage: '旧的中间回复。',
+      assistantMessageSource: 'fallback',
+      savedContext: true,
+      profileUpdated: false,
+      queuedRun: null,
+      runMode: null,
+      pendingApproval: null,
+      activityResults: [],
+      profileUpdateProposal: null,
+      startedAt: Date.now() - 30,
+      deferAssistantMessageLog: true,
+    });
+
+    expect(result.assistantMessage).toBe('旧的中间回复。');
+    expect(metrics.recordAction).toHaveBeenCalledWith('save_context');
+    expect(messageLog.recordAssistantMessage).not.toHaveBeenCalled();
+    expect(eventStore.appendEvent).not.toHaveBeenCalled();
+    expect(selfImprove.recordOnlineReplayFromRoute).not.toHaveBeenCalled();
+  });
+
+  it('records non-streaming approval events as resumable lifecycle nodes', async () => {
+    const { eventStore, service } = makeHarness();
+    const task = makeTask();
+
+    await service.complete({
+      task,
+      route: makeRoute({
+        intent: 'action_request',
+        shouldUpdateProfile: false,
+        shouldExecuteAction: true,
+        replyStrategy: 'execute_action',
+      }),
+      assistantMessage: '发送邀请前需要你确认。',
+      savedContext: true,
+      profileUpdated: false,
+      queuedRun: null,
+      runMode: null,
+      pendingApproval: {
+        id: 55,
+        type: ApprovalType.PostPublish,
+        actionType: 'publish_social_request',
+        summary: '发布青岛大学散步约练卡到发现',
+        riskLevel: ApprovalRiskLevel.Medium,
+        payload: {
+          socialRequestId: 301,
+          checkpointId: 777,
+        },
+        expiresAt: null,
+      },
+      activityResults: [],
+      profileUpdateProposal: null,
+      runtime: {
+        checkpointId: 777,
+        canResume: true,
+        canReplay: true,
+        canFork: true,
+        resumeCursor: {
+          threadId: 'agent-task:101',
+          checkpointId: 777,
+          action: 'resume',
+          stepId: 'approval-55',
+        },
+        sideEffectPolicy: {
+          idempotencyKey: 'social_codex:publish_social_request:task:101',
+          sideEffectsBeforeResume: 'idempotent_only',
+          duplicatePolicy: 'reuse_idempotency_key',
+        },
+      },
+      startedAt: Date.now() - 20,
+    });
+
+    expect(eventStore.appendEvent).toHaveBeenCalledWith(
+      task,
+      expect.objectContaining({
+        type: 'approval.required',
+        stage: 'approval',
+        display: expect.objectContaining({
+          state: 'waiting',
+        }),
+        payload: expect.objectContaining({
+          approvalId: 55,
+          checkpointId: 777,
+          actionType: 'publish_social_request',
+          resumePolicy: 'confirm_then_resume_same_run',
+          resumeCursor: expect.objectContaining({
+            threadId: 'agent-task:101',
+            checkpointId: 777,
+            action: 'resume',
+            stepId: 'approval-55',
+          }),
+          sideEffectPolicy: expect.objectContaining({
+            sideEffectsBeforeResume: 'idempotent_only',
+            duplicatePolicy: 'reuse_idempotency_key',
+          }),
+        }),
+      }),
+    );
+    expect(eventStore.appendEvent).toHaveBeenLastCalledWith(
+      task,
+      expect.objectContaining({
+        type: 'run.completed',
+        stage: 'approval',
+        display: expect.objectContaining({
+          state: 'waiting',
+        }),
+        payload: expect.objectContaining({
+          approvalId: 55,
+          checkpointId: 777,
+          actionType: 'publish_social_request',
+          resumeCursor: expect.objectContaining({
+            checkpointId: 777,
+          }),
+          summary: expect.objectContaining({
+            title: '这一步需要你确认',
+            state: 'waiting',
+            displayMode: 'covering_status',
+            pendingApproval: true,
+          }),
+        }),
+      }),
     );
   });
 
   it('marks follow-up queued runs as replan actions and records queued mode metrics', async () => {
-    const { messageLog, metrics, service } = makeHarness();
-    const task = makeTask();
+    const { eventStore, messageLog, metrics, service } = makeHarness();
+    const task = makeTask({
+      memory: {
+        taskSlots: {
+          time_window: {
+            value: '今天晚上',
+            state: 'completed',
+          },
+          activity: {
+            value: '散步',
+            state: 'completed',
+          },
+          location_text: {
+            value: '青岛大学附近',
+            state: 'completed',
+          },
+          candidate_preference: {
+            value: '公开资料里有舞蹈相关标签的人优先',
+            state: 'answered',
+          },
+        },
+      },
+    });
     const queuedRun = makeQueuedRun({ runId: 'follow-up-run' });
 
     const result = await service.complete({
@@ -154,6 +376,85 @@ describe('SocialAgentRouteCompletionService', () => {
       '我会基于现有候选继续处理。',
       result,
     );
+    expect(eventStore.appendEvent).toHaveBeenLastCalledWith(
+      task,
+      expect.objectContaining({
+        type: 'candidate_search.started',
+        stage: 'search_candidates',
+        display: expect.objectContaining({
+          title: '正在按最新偏好重新筛选候选人',
+          state: 'running',
+        }),
+        payload: expect.objectContaining({
+          queuedRunId: 'follow-up-run',
+          runMode: 'follow_up',
+          action: 'queue_replan',
+          confirmedContext: expect.arrayContaining([
+            '时间：今天晚上',
+            '活动：散步',
+            '地点：青岛大学附近',
+            '候选偏好：公开资料里有舞蹈相关标签的人优先',
+          ]),
+          instruction: '基于已确认信息继续，不重复追问。',
+        }),
+      }),
+    );
+  });
+
+  it('does not write generic recovery fallback copy into replay assistant delta events', async () => {
+    const { eventStore, messageLog, selfImprove, service } = makeHarness();
+    const task = makeTask();
+
+    const result = await service.complete({
+      task,
+      route: makeRoute({
+        intent: 'casual_chat',
+        shouldUpdateProfile: false,
+        replyStrategy: 'direct_reply',
+      }),
+      assistantMessage:
+        'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。',
+      assistantMessageSource: 'fallback',
+      savedContext: false,
+      profileUpdated: false,
+      queuedRun: null,
+      runMode: null,
+      pendingApproval: null,
+      activityResults: [],
+      profileUpdateProposal: null,
+      startedAt: Date.now() - 20,
+    });
+
+    expect(messageLog.recordAssistantMessage).toHaveBeenCalledWith(
+      task,
+      'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。',
+      result,
+    );
+    expect(eventStore.appendEvent).toHaveBeenCalledTimes(3);
+    expect(eventStore.appendEvent).not.toHaveBeenCalledWith(
+      task,
+      expect.objectContaining({
+        type: 'assistant.delta',
+      }),
+    );
+    expect(eventStore.appendEvent).toHaveBeenLastCalledWith(
+      task,
+      expect.objectContaining({
+        type: 'run.completed',
+        display: expect.objectContaining({
+          title: '这一步处理完成',
+          state: 'done',
+        }),
+        payload: expect.objectContaining({
+          summary: expect.objectContaining({
+            title: '已理解你的需求',
+            state: 'completed',
+            displayMode: 'covering_status',
+          }),
+        }),
+      }),
+    );
+    expect(selfImprove.recordOnlineReplayFromRoute).not.toHaveBeenCalled();
   });
 
   it('converts activity search results into assistant-ui activity opportunity cards', async () => {

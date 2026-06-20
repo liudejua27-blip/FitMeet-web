@@ -13,6 +13,7 @@ describe('social agent route turn state', () => {
       queuedRun: null,
       runMode: null,
       assistantMessage: 'fallback',
+      assistantMessageSource: 'fallback',
       activityResults: [],
       profileUpdateProposal: null,
       assistantStreamed: false,
@@ -32,6 +33,7 @@ describe('social agent route turn state', () => {
       }),
     ).toMatchObject({
       assistantMessage: 'fallback',
+      assistantMessageSource: 'fallback',
       savedContext: true,
       profileUpdated: true,
     });
@@ -42,6 +44,7 @@ describe('social agent route turn state', () => {
       createSocialAgentRouteTurnState('fallback'),
       {
         assistantMessage: 'conversation',
+        assistantMessageSource: 'llm',
         savedContext: true,
         profileUpdated: true,
         profileUpdateProposal: null,
@@ -58,6 +61,7 @@ describe('social agent route turn state', () => {
       }),
     ).toMatchObject({
       assistantMessage: 'profile',
+      assistantMessageSource: 'llm',
       savedContext: true,
       profileUpdated: false,
       profileUpdateProposal: proposal,

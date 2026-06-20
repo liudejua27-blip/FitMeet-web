@@ -6,13 +6,13 @@ import * as dataService from '../services/dataService';
 import { getMeetDistanceMeters } from '../lib/distance';
 import { getBrowserLocation } from '../lib/location';
 import type { Coordinates } from '../lib/amap';
-import { filterDisplayableMeets, filterDisplayablePosts } from '../data/mockContent';
+import { filterDisplayableMeets, filterDisplayablePosts } from '../data/discoverContent';
 import { getSportLabel, normalizeSportGroup } from '../data/taxonomy';
 import { useAuthStore, useNotificationStore } from '../stores';
 import type { Meet, Post, PublicSocialIntent } from '../types';
 
 type DiscoverMeet = Meet & {
-  sourceKind?: 'meet' | 'publicIntent' | 'fallback';
+  sourceKind?: 'meet' | 'publicIntent';
   publicIntentId?: string;
   linkedSocialRequestId?: number | null;
   detailHref?: string;
@@ -44,105 +44,6 @@ const sportFilters: SportFilter[] = [
   { id: 'cycling', label: '骑行', icon: '🚴' },
 ];
 
-const fallbackMeets: Meet[] = [
-  {
-    id: -1,
-    title: '今晚 8 点海边慢跑',
-    type: 'run',
-    sport: 'run',
-    username: '林一舟',
-    color: '#22c55e',
-    colorBg: '#102116',
-    time: '今晚 20:00',
-    loc: '五四广场 · 海边步道',
-    city: '青岛',
-    dist: '3.0km',
-    price: '免费',
-    slots: 3,
-    maxSlots: 6,
-    level: '轻松',
-    desc: '低压力慢跑，先站内聊，公共路线集合。',
-    status: 'active',
-    participants: ['林', '舟', '跑'],
-    cert: true,
-    rating: 4.6,
-    meetCount: 12,
-    mock: true,
-  },
-  {
-    id: -2,
-    title: '周末力量训练搭子',
-    type: 'gym',
-    sport: 'gym',
-    username: 'Running Jason',
-    color: '#f97316',
-    colorBg: '#24170f',
-    time: '周六 10:30',
-    loc: '力美健身中心（万象城店）',
-    city: '青岛',
-    dist: '1.2km',
-    price: 'AA',
-    slots: 2,
-    maxSlots: 4,
-    level: '中等',
-    desc: '一起练深蹲和卧推，强度可商量。',
-    status: 'matched',
-    participants: ['R', 'J'],
-    cert: true,
-    rating: 4.35,
-    meetCount: 8,
-    mock: true,
-  },
-  {
-    id: -3,
-    title: '饭后散步聊天',
-    type: 'walk',
-    sport: 'run',
-    username: '瑜伽小鹿',
-    color: '#7c9cff',
-    colorBg: '#11172a',
-    time: '今晚 19:30',
-    loc: '奥帆中心 · 情人坝',
-    city: '青岛',
-    dist: '1.8km',
-    price: '免费',
-    slots: 1,
-    maxSlots: 3,
-    level: '轻松',
-    desc: '不赶路，适合低压力认识新朋友。',
-    status: 'pending',
-    participants: ['鹿'],
-    cert: true,
-    rating: 4.05,
-    meetCount: 5,
-    mock: true,
-  },
-  {
-    id: -4,
-    title: '今晚上瑜伽课',
-    type: 'yoga',
-    sport: 'yoga',
-    username: '力量女孩',
-    color: '#22c55e',
-    colorBg: '#0f2418',
-    time: '今晚 21:00',
-    loc: '珑瑜伽馆（市南店）',
-    city: '青岛',
-    dist: '2.5km',
-    price: '团课',
-    slots: 2,
-    maxSlots: 5,
-    level: '入门',
-    desc: '室内瑜伽课，女生友好，结束后可一起喝水聊天。',
-    status: 'active',
-    participants: ['力', '量'],
-    cert: true,
-    rating: 4.5,
-    meetCount: 9,
-    mock: true,
-  },
-];
-
 export const DiscoverPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -163,8 +64,6 @@ export const DiscoverPage = () => {
   const [isLocating, setIsLocating] = useState(false);
   const { isLoggedIn, openLogin } = useAuthStore();
   const { addNotification } = useNotificationStore();
-  const allowFallbackDiscoverData =
-    import.meta.env.DEV || import.meta.env.VITE_ENABLE_DISCOVER_FALLBACK === 'true';
 
   const loadDiscover = useCallback(async () => {
     setLoading(true);
@@ -181,16 +80,17 @@ export const DiscoverPage = () => {
         loadPublicDiscoverIntents(),
       ]);
       setMeets(
-        filterDisplayableMeets(meetData).map((meet) => ({
-          ...meet,
-          sourceKind: meet.mock ? 'fallback' : 'meet',
-          detailHref:
-            meet.activityId && meet.activityId > 0
-              ? `/activity/${meet.activityId}`
-              : meet.id > 0
-                ? `/meet/${meet.id}`
-                : undefined,
-        })),
+        filterDisplayableMeets(meetData)
+          .map((meet) => ({
+            ...meet,
+            sourceKind: 'meet',
+            detailHref:
+              meet.activityId && meet.activityId > 0
+                ? `/activity/${meet.activityId}`
+                : meet.id > 0
+                  ? `/meet/${meet.id}`
+                  : undefined,
+          })),
       );
       setPosts(filterDisplayablePosts(feedData));
       setPublicIntents(intentData.filter((intent) => intent.status !== 'cancelled'));
@@ -220,18 +120,7 @@ export const DiscoverPage = () => {
 
   const displayMeets = useMemo(() => {
     const intentMeets = publicIntents.map(publicIntentToDiscoverMeet);
-    const source = [...intentMeets, ...meets];
-    const fallbackSource = fallbackMeets.map((meet) => ({
-      ...meet,
-      sourceKind: 'fallback' as const,
-      detailHref:
-        meet.id < 0
-          ? `/agent/chat?scene=${encodeURIComponent(meet.title)}`
-          : undefined,
-    }));
-    const effectiveSource =
-      source.length > 0 ? source : allowFallbackDiscoverData ? fallbackSource : [];
-    let data = effectiveSource;
+    let data = [...intentMeets, ...meets];
     if (activeSport !== 'all') {
       data = data.filter((meet) => normalizeSportGroup(meet.type || meet.sport) === activeSport);
     }
@@ -247,7 +136,7 @@ export const DiscoverPage = () => {
       data = [...data].sort((a, b) => matchScore(b) - matchScore(a));
     }
     return data;
-  }, [activeSport, activeTab, allowFallbackDiscoverData, meets, publicIntents]);
+  }, [activeSport, activeTab, meets, publicIntents]);
 
   useEffect(() => {
     if (!focusScene) {
@@ -290,15 +179,15 @@ export const DiscoverPage = () => {
       color: meet.color,
       title: index === 0 ? '附近有新的生活场景' : meet.title,
       body: index === 0 ? `${getSportLabel(meet.sport)} · ${formatMeetTime(meet)}` : liveBody(meet),
-      time: `${(index + 1) * 2}分钟前`,
+      time: formatRelativePublishedTime(meet.createdAt, '刚刚更新'),
     }));
-    const postItems = posts.slice(0, 3).map((post, index) => ({
+    const postItems = posts.slice(0, 3).map((post) => ({
       id: `post-${post.id}`,
       avatar: post.username.slice(0, 1),
       color: post.color,
       title: post.title || post.username,
       body: post.type === 'meet' ? '发布了场景邀请' : '更新了训练动态',
-      time: `${(index + 4) * 2}分钟前`,
+      time: formatRelativePublishedTime(post.createdAt, '刚刚更新'),
     }));
     return [...meetItems, ...postItems].slice(0, 6);
   }, [displayMeets, posts]);
@@ -313,8 +202,7 @@ export const DiscoverPage = () => {
         userId: meet.userId,
         name: publicDisplayName(meet.username, index),
         sport: getSportLabel(meet.sport),
-        age: 24 + index + (meet.id > 0 ? meet.id % 4 : 0),
-        distance: meet.dist || `${(0.8 + index * 0.4).toFixed(1)}km`,
+        distance: meet.dist || '附近',
         avatar: (meet.username || 'F').slice(0, 1),
         color: meet.color,
         href: `/user/${meet.userId}`,
@@ -323,6 +211,13 @@ export const DiscoverPage = () => {
   );
 
   const spotlightMeets = useMemo(() => displayMeets.slice(0, 3), [displayMeets]);
+  const realScenarioCount = useMemo(
+    () =>
+      publicIntents.length +
+      meets.length +
+      posts.length,
+    [meets, posts.length, publicIntents.length],
+  );
 
   const handleUseLocation = useCallback(() => {
     setIsLocating(true);
@@ -344,7 +239,7 @@ export const DiscoverPage = () => {
       }
       if (joinedMeets.includes(meet.id)) return;
       try {
-        if (!meet.mock && meet.id > 0) await dataService.joinMeet(meet.id);
+        if (meet.id > 0) await dataService.joinMeet(meet.id);
         setJoinedMeets((current) => [...current, meet.id]);
         addNotification({
           type: 'meet',
@@ -354,7 +249,7 @@ export const DiscoverPage = () => {
           text: `你已申请加入「${meet.title}」，等待发起人确认。`,
           time: '刚刚',
         });
-        if (!meet.mock) await loadDiscover();
+        await loadDiscover();
       } catch {
         setError('加入失败，请稍后重试。');
       }
@@ -564,11 +459,9 @@ export const DiscoverPage = () => {
                     </span>
                     <span>
                       <strong>{person.name}</strong>
-                      <small>
-                        {person.sport} · {person.age} 岁
-                      </small>
+                      <small>{person.sport} · {person.distance}</small>
                     </span>
-                    <em>{person.distance}</em>
+                    <em>详情</em>
                   </button>
                 )) : (
                   <p className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm leading-6 text-[#9a9487]">
@@ -597,7 +490,11 @@ export const DiscoverPage = () => {
                 发布场景 <span>→</span>
               </button>
               <div>
-                <span>128 人本周已发布真实生活场景</span>
+                <span>
+                  {realScenarioCount > 0
+                    ? `${realScenarioCount} 个真实生活场景正在展示`
+                    : '等待第一张真实生活场景'}
+                </span>
               </div>
             </section>
           </aside>
@@ -926,6 +823,21 @@ function liveBody(meet: Meet) {
   if (meet.status === 'matched') return '正在匹配中';
   if (meet.slots > 0) return `有 ${meet.slots} 人加入`;
   return '有 1 人报名';
+}
+
+function formatRelativePublishedTime(value: string | undefined, fallback: string) {
+  if (!value) return fallback;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return fallback;
+  const diffMs = Date.now() - timestamp;
+  if (diffMs < 0) return '刚刚更新';
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (diffMs < minute) return '刚刚更新';
+  if (diffMs < hour) return `${Math.max(1, Math.floor(diffMs / minute))}分钟前`;
+  if (diffMs < day) return `${Math.floor(diffMs / hour)}小时前`;
+  return `${Math.floor(diffMs / day)}天前`;
 }
 
 function sportIcon(sport: string) {

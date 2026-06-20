@@ -84,6 +84,149 @@ describe('social-agent-route-response.presenter', () => {
     expect(actionReply).toContain('现在还没有候选人');
   });
 
+  it('uses completed task slots in social-search copy instead of a generic route template', () => {
+    const task = {
+      id: 101,
+      memory: {
+        taskSlots: {
+          time_window: {
+            value: '今天晚上',
+            state: 'completed',
+            source: 'user_message',
+          },
+          activity: {
+            value: '散步',
+            state: 'completed',
+            source: 'user_message',
+          },
+          location_text: {
+            value: '青岛大学附近',
+            state: 'completed',
+            source: 'user_message',
+          },
+          candidate_preference: {
+            value: '公开资料里有舞蹈相关标签的女生',
+            state: 'answered',
+            source: 'user_message',
+          },
+        },
+      },
+    } as unknown as AgentTask;
+
+    const reply = socialAgentAssistantMessageForRoute({
+      route: route({
+        intent: 'social_search',
+        replyStrategy: 'search_candidates',
+        shouldSearch: true,
+      }),
+      task,
+      message: '可以，帮我找人',
+    });
+
+    expect(reply).toContain('已确认的');
+    expect(reply).toContain('时间：今天晚上');
+    expect(reply).toContain('活动：散步');
+    expect(reply).toContain('地点：青岛大学附近');
+    expect(reply).toContain('候选偏好：公开资料里有舞蹈相关标签的女生');
+    expect(reply).toContain('公开可发现');
+    expect(reply).not.toContain('找搭子或候选人');
+  });
+
+  it('uses taskMemory slots in social-search copy after session restore', () => {
+    const task = {
+      id: 101,
+      memory: {
+        taskMemory: {
+          taskSlots: {
+            time_window: {
+              value: '今天晚上',
+              state: 'completed',
+              source: 'user_message',
+            },
+            activity: {
+              value: '散步',
+              state: 'completed',
+              source: 'user_message',
+            },
+            location_text: {
+              value: '青岛大学附近',
+              state: 'completed',
+              source: 'user_message',
+            },
+            candidate_preference: {
+              value: '公开资料里有舞蹈相关标签的女生',
+              state: 'answered',
+              source: 'user_message',
+            },
+          },
+        },
+      },
+    } as unknown as AgentTask;
+
+    const reply = socialAgentAssistantMessageForRoute({
+      route: route({
+        intent: 'social_search',
+        replyStrategy: 'search_candidates',
+        shouldSearch: true,
+      }),
+      task,
+      message: '可以，帮我找人',
+    });
+
+    expect(reply).toContain('已确认的');
+    expect(reply).toContain('时间：今天晚上');
+    expect(reply).toContain('活动：散步');
+    expect(reply).toContain('地点：青岛大学附近');
+    expect(reply).toContain('候选偏好：公开资料里有舞蹈相关标签的女生');
+    expect(reply).not.toContain('找搭子或候选人');
+  });
+
+  it('uses known task slot constraints when restored slots are not duplicated at the top level', () => {
+    const task = {
+      id: 101,
+      memory: {
+        taskMemory: {
+          knownTaskSlotConstraints: {
+            treatAsHardConstraints: true,
+            knownSlots: [
+              { key: 'time_window', label: '时间', value: '今天晚上' },
+              { key: 'activity', label: '活动', value: '散步' },
+              { key: 'location_text', label: '地点', value: '青岛大学附近' },
+              {
+                key: 'candidate_preference',
+                label: '候选偏好',
+                value: '公开资料里有舞蹈相关标签的女生',
+              },
+            ],
+            doNotAskAgainFor: [
+              'time_window',
+              'activity',
+              'location_text',
+              'candidate_preference',
+            ],
+          },
+        },
+      },
+    } as unknown as AgentTask;
+
+    const reply = socialAgentAssistantMessageForRoute({
+      route: route({
+        intent: 'social_search',
+        replyStrategy: 'search_candidates',
+        shouldSearch: true,
+      }),
+      task,
+      message: '继续',
+    });
+
+    expect(reply).toContain('已确认的');
+    expect(reply).toContain('时间：今天晚上');
+    expect(reply).toContain('活动：散步');
+    expect(reply).toContain('地点：青岛大学附近');
+    expect(reply).toContain('候选偏好：公开资料里有舞蹈相关标签的女生');
+    expect(reply).not.toContain('找搭子或候选人');
+  });
+
   it('answers fitness math routes without triggering tools or memory writes', () => {
     const paceReply = socialAgentAssistantMessageForRoute({
       route: route({ intent: 'fitness_math' }),
@@ -166,5 +309,90 @@ describe('social-agent-route-response.presenter', () => {
         (question) => `安全版：${question}`,
       ),
     ).toBe('安全版：你更想今晚还是周末？');
+  });
+
+  it('does not let generic Alpha clarification override completed task slots', () => {
+    const alphaTurn = {
+      structuredIntent: {
+        requiresSearch: false,
+        readiness: 'clarify',
+        clarifyingQuestion: '你更想今晚附近试试，还是周末下午找个时间？',
+      },
+    } as unknown as FitMeetAlphaTurnDecision;
+    const task = {
+      id: 108,
+      memory: {
+        taskMemory: {
+          taskSlots: {
+            time_window: {
+              value: '今天晚上',
+              state: 'completed',
+              source: 'user_message',
+            },
+            activity: {
+              value: '散步',
+              state: 'completed',
+              source: 'user_message',
+            },
+            location_text: {
+              value: '青岛大学附近',
+              state: 'completed',
+              source: 'user_message',
+            },
+            candidate_preference: {
+              value: '公开资料里有舞蹈相关标签的女生',
+              state: 'answered',
+              source: 'user_message',
+            },
+          },
+        },
+      },
+    } as unknown as AgentTask;
+
+    expect(socialAgentAlphaNeedsClarification(alphaTurn, task)).toBe(false);
+  });
+
+  it('uses task memory for Alpha clarification fallback instead of old time choices', () => {
+    const alphaTurn = {
+      structuredIntent: {
+        requiresSearch: false,
+        readiness: 'clarify',
+        clarifyingQuestion: '',
+      },
+    } as unknown as FitMeetAlphaTurnDecision;
+    const task = {
+      id: 109,
+      memory: {
+        taskMemory: {
+          taskSlots: {
+            time_window: {
+              value: '今天晚上',
+              state: 'completed',
+              source: 'user_message',
+            },
+            activity: {
+              value: '散步',
+              state: 'completed',
+              source: 'user_message',
+            },
+            location_text: {
+              value: '青岛大学附近',
+              state: 'completed',
+              source: 'user_message',
+            },
+          },
+        },
+      },
+    } as unknown as AgentTask;
+
+    const reply = socialAgentAlphaClarifyingMessage(alphaTurn, undefined, task);
+
+    expect(reply).toContain('我已记住');
+    expect(reply).toContain('时间：今天晚上');
+    expect(reply).toContain('活动：散步');
+    expect(reply).toContain('地点：青岛大学附近');
+    expect(reply).toContain('继续筛选');
+    expect(reply).not.toContain('今晚附近试试');
+    expect(reply).not.toContain('周末下午找个时间');
   });
 });

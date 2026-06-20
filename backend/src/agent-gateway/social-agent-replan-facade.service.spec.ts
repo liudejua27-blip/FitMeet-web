@@ -199,6 +199,7 @@ describe('SocialAgentReplanFacadeService', () => {
         reason: 'user_follow_up',
       },
       runId: 'sar_facade_1',
+      signal: null,
       visibleStepLabel: expect.any(Function),
     });
     const executeInput = replanRuns.execute.mock.calls[0][0] as {

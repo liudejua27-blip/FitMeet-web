@@ -210,6 +210,7 @@ export function buildSocialAgentCandidateDetailCard(input: {
   const safetyBoundary =
     cleanDisplayText(candidate.safetyBoundary ?? candidate.boundary, '') ||
     '这只是公开可发现资料下的安全机会；发送邀请、加好友或线下见面前都需要你确认。';
+  const reasoningQuality = candidateReasoningQuality(candidate);
   const opportunity = {
     id: `opportunity:${input.taskId}:candidate:${targetUserId ?? candidateRecordId ?? 'detail'}`,
     type: 'person',
@@ -247,19 +248,25 @@ export function buildSocialAgentCandidateDetailCard(input: {
     explanationSteps: stringArray(candidate.explanationSteps).slice(0, 3),
     trustSignals: stringArray(candidate.trustSignals ?? candidate.consentSignals),
     coldStartSignals: stringArray(candidate.coldStartSignals),
+    reasonerSource: reasoningQuality.reasonerSource,
+    reasoningConfidence: reasoningQuality.reasoningConfidence,
+    reasoningDegraded: reasoningQuality.reasoningDegraded,
+    reasoningRetryable: reasoningQuality.reasoningRetryable,
+    matchReasoner: reasoningQuality.matchReasoner,
     suggestedOpener,
     recommendedNextAction:
       '先查看详情和边界，再生成开场白；只有你确认后，我才会发送邀请。',
     safetyBoundary,
     confirmedContext: ['公开可发现资料', '低风险站内沟通', '发送前确认'],
   };
+  const safeCandidate = candidateActionSnapshot(candidate);
   const basePayload = {
     taskId: input.taskId,
     targetUserId,
     candidateUserId: targetUserId,
     candidateRecordId,
     socialRequestId,
-    candidate,
+    candidate: safeCandidate,
     suggestedOpener,
     safetyBoundary,
   };
@@ -1190,6 +1197,137 @@ function number(value: unknown): number | null {
         ? Number(value)
         : NaN;
   return Number.isFinite(next) && next > 0 ? next : null;
+}
+
+function candidateReasoningQuality(candidate: Record<string, unknown>): {
+  reasonerSource?: 'deepseek' | 'fallback';
+  reasoningConfidence?: number;
+  reasoningDegraded?: boolean;
+  reasoningRetryable?: boolean;
+  matchReasoner?: {
+    source?: 'deepseek' | 'fallback';
+    confidence?: number;
+    degraded?: boolean;
+    retryable?: boolean;
+    degradationReason?: 'empty_response' | 'model_unavailable';
+  };
+} {
+  const nested = record(candidate.matchReasoner ?? candidate.candidateExplanation);
+  const reasonerSource = reasonerSourceValue(
+    candidate.reasonerSource ??
+      candidate.explanationSource ??
+      nested.source ??
+      nested.reasonerSource,
+  );
+  const reasoningConfidence =
+    optionalNumber(candidate.reasoningConfidence) ??
+    optionalNumber(nested.confidence);
+  const reasoningDegraded =
+    optionalBoolean(candidate.reasoningDegraded) ??
+    optionalBoolean(candidate.degraded) ??
+    optionalBoolean(nested.degraded);
+  const reasoningRetryable =
+    optionalBoolean(candidate.reasoningRetryable) ??
+    optionalBoolean(candidate.retryable) ??
+    optionalBoolean(nested.retryable);
+  const degradationReason = publicDegradationReason(
+    candidate.degradationReason ?? nested.degradationReason,
+  );
+  const hasReasoner =
+    reasonerSource ||
+    reasoningConfidence !== undefined ||
+    reasoningDegraded !== undefined ||
+    reasoningRetryable !== undefined ||
+    degradationReason;
+  return {
+    reasonerSource,
+    reasoningConfidence,
+    reasoningDegraded,
+    reasoningRetryable,
+    matchReasoner: hasReasoner
+      ? {
+          source: reasonerSource,
+          confidence: reasoningConfidence,
+          degraded: reasoningDegraded,
+          retryable: reasoningRetryable,
+          degradationReason,
+        }
+      : undefined,
+  };
+}
+
+function candidateActionSnapshot(candidate: Record<string, unknown>) {
+  const reasoningQuality = candidateReasoningQuality(candidate);
+  return {
+    targetUserId: candidate.targetUserId ?? candidate.candidateUserId ?? candidate.userId,
+    candidateUserId: candidate.candidateUserId ?? candidate.userId,
+    userId: candidate.userId,
+    candidateRecordId: candidate.candidateRecordId ?? null,
+    socialRequestId: candidate.socialRequestId ?? null,
+    publicIntentId: candidate.publicIntentId ?? null,
+    activityId: candidate.activityId ?? null,
+    displayName:
+      cleanDisplayText(candidate.displayName, '') ||
+      cleanDisplayText(candidate.nickname, '') ||
+      cleanDisplayText(candidate.name, '') ||
+      '候选人',
+    avatarUrl: cleanDisplayText(candidate.avatarUrl ?? candidate.imageUrl, '') || null,
+    city: cleanDisplayText(candidate.city, '') || null,
+    score: candidate.score ?? candidate.matchScore ?? null,
+    matchScore: candidate.matchScore ?? candidate.score ?? null,
+    commonTags: stringArray(candidate.commonTags).slice(0, 6),
+    matchReasons: stringArray(candidate.matchReasons ?? candidate.reasons).slice(0, 6),
+    suggestedOpener:
+      cleanDisplayText(
+        candidate.suggestedOpener ??
+          candidate.suggestedMessage ??
+          candidate.opener ??
+          candidate.message,
+        '',
+      ) || null,
+    recommendationConsent:
+      Object.keys(record(candidate.recommendationConsent)).length > 0
+        ? record(candidate.recommendationConsent)
+        : null,
+    reasonerSource: reasoningQuality.reasonerSource,
+    reasoningConfidence: reasoningQuality.reasoningConfidence,
+    reasoningDegraded: reasoningQuality.reasoningDegraded,
+    reasoningRetryable: reasoningQuality.reasoningRetryable,
+    matchReasoner: reasoningQuality.matchReasoner,
+  };
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function reasonerSourceValue(value: unknown): 'deepseek' | 'fallback' | undefined {
+  return value === 'deepseek' || value === 'fallback' ? value : undefined;
+}
+
+function optionalBoolean(value: unknown): boolean | undefined {
+  if (value === true) return true;
+  if (value === false) return false;
+  return undefined;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim()
+        ? Number(value)
+        : NaN;
+  return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : undefined;
+}
+
+function publicDegradationReason(
+  value: unknown,
+): 'empty_response' | 'model_unavailable' | undefined {
+  if (value === 'empty_response') return 'empty_response';
+  return value ? 'model_unavailable' : undefined;
 }
 
 export function createSocialAgentActivityDtoFromPayload(input: {

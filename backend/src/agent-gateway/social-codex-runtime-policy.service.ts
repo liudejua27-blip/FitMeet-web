@@ -16,6 +16,8 @@ export type SocialCodexActionType =
   | 'reveal_precise_location'
   | 'update_sensitive_profile'
   | 'connect_candidate'
+  | 'join_activity'
+  | 'offline_meeting'
   | 'life_graph_writeback'
   | 'payment';
 
@@ -64,6 +66,8 @@ const HIGH_RISK_ACTIONS = new Set<SocialCodexActionType>([
   'reveal_precise_location',
   'update_sensitive_profile',
   'connect_candidate',
+  'join_activity',
+  'offline_meeting',
   'payment',
 ]);
 
@@ -89,6 +93,8 @@ const ACTION_BY_TOOL: Partial<
   [SocialAgentToolName.AddFriend]: 'connect_candidate',
   [SocialAgentToolName.CreateActivity]: 'publish_social_request',
   [SocialAgentToolName.InviteActivity]: 'send_invite',
+  [SocialAgentToolName.JoinActivity]: 'join_activity',
+  [SocialAgentToolName.OfflineMeeting]: 'offline_meeting',
   [SocialAgentToolName.ShareLocation]: 'reveal_precise_location',
   [SocialAgentToolName.Payment]: 'payment',
   [SocialAgentToolName.UpdateAiProfileFromAnswers]: 'update_sensitive_profile',
@@ -105,11 +111,12 @@ export class SocialCodexRuntimePolicyService {
     payload?: Record<string, unknown> | null;
     userConfirmed?: boolean | null;
   }): SocialCodexPolicyDecision {
+    const payload = input.payload ?? {};
     const actionType = this.resolveActionType(
       input.actionType ?? input.actionName,
       input.toolName,
+      payload,
     );
-    const payload = input.payload ?? {};
     const reasons: string[] = [];
     const containsContact = this.containsContact(payload);
     const containsPreciseLocation = this.containsPreciseLocation(payload);
@@ -287,6 +294,8 @@ export class SocialCodexRuntimePolicyService {
     if (actionType === 'send_invite') return '邀请发送草稿';
     if (actionType === 'send_message') return '消息发送草稿';
     if (actionType === 'connect_candidate') return '加好友请求草稿';
+    if (actionType === 'join_activity') return '活动参与确认预览';
+    if (actionType === 'offline_meeting') return '线下见面确认预览';
     if (actionType === 'exchange_contact') return '联系方式交换预览';
     if (actionType === 'reveal_precise_location') return '位置公开预览';
     if (actionType === 'update_sensitive_profile') return '画像更新预览';
@@ -298,8 +307,15 @@ export class SocialCodexRuntimePolicyService {
   private resolveActionType(
     value: unknown,
     toolName: SocialAgentToolName | string | null | undefined,
+    payload: Record<string, unknown> = {},
   ): SocialCodexActionType {
     if (this.isActionType(value)) return value;
+    if (
+      toolName === SocialAgentToolName.CreateSocialRequest &&
+      this.isPublishSocialRequestPayload(payload)
+    ) {
+      return 'publish_social_request';
+    }
     if (this.isToolName(toolName)) {
       return ACTION_BY_TOOL[toolName] ?? 'summarize_intent';
     }
@@ -315,6 +331,34 @@ export class SocialCodexRuntimePolicyService {
     if (/candidate|match|search|候选|匹配/.test(text))
       return 'search_public_candidates';
     return 'summarize_intent';
+  }
+
+  private isPublishSocialRequestPayload(
+    payload: Record<string, unknown>,
+  ): boolean {
+    const mode = cleanDisplayText(
+      payload.mode ??
+        payload.intent ??
+        payload.visibility ??
+        payload.audience ??
+        payload.discoverability,
+      '',
+    ).toLowerCase();
+    return (
+      this.truthy(payload.publish) ||
+      this.truthy(payload.isPublic) ||
+      this.truthy(payload.public) ||
+      this.truthy(payload.publiclyVisible) ||
+      this.truthy(payload.syncPublicIntent) ||
+      this.truthy(payload.discoverable) ||
+      this.truthy(payload.publicIntentEnabled) ||
+      mode === 'publish' ||
+      mode === 'public' ||
+      mode === 'everyone' ||
+      mode === 'discoverable' ||
+      mode === 'public_discoverable' ||
+      mode === 'recommendable'
+    );
   }
 
   private isActionType(value: unknown): value is SocialCodexActionType {
@@ -333,6 +377,8 @@ export class SocialCodexRuntimePolicyService {
         'reveal_precise_location',
         'update_sensitive_profile',
         'connect_candidate',
+        'join_activity',
+        'offline_meeting',
         'life_graph_writeback',
         'payment',
       ].includes(value)
@@ -344,6 +390,15 @@ export class SocialCodexRuntimePolicyService {
       typeof value === 'string' &&
       Object.values(SocialAgentToolName).includes(value as SocialAgentToolName)
     );
+  }
+
+  private truthy(value: unknown): boolean {
+    if (value === true) return true;
+    const text =
+      typeof value === 'string' && value.trim()
+        ? value.trim().toLowerCase()
+        : '';
+    return text === 'true' || text === '1' || text === 'yes' || text === 'public';
   }
 
   private containsContact(payload: Record<string, unknown>): boolean {
@@ -360,7 +415,7 @@ export class SocialCodexRuntimePolicyService {
   private containsPreciseLocation(payload: Record<string, unknown>): boolean {
     return Object.entries(payload).some(([key, value]) => {
       if (
-        /(exactLocation|preciseLocation|address|lat|lng|longitude|latitude)/i.test(
+        /^(exactLocation|preciseLocation|address|lat|lng|longitude|latitude)$/i.test(
           key,
         )
       ) {
@@ -397,7 +452,11 @@ export class SocialCodexRuntimePolicyService {
     if (
       this.hasScalar(payload.connectionId) ||
       this.hasScalar(payload.conversationId) ||
-      this.hasScalar(payload.agentConnectionId)
+      this.hasScalar(payload.agentConnectionId) ||
+      this.hasScalar(payload.candidateRecordId) ||
+      this.hasScalar(payload.socialRequestId) ||
+      this.hasScalar(payload.publicIntentId) ||
+      this.hasScalar(payload.activityId)
     ) {
       return true;
     }

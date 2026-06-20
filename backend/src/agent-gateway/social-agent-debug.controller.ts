@@ -11,6 +11,8 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 
+import { AdminRbacGuard } from '../admin-rbac/admin-rbac.guard';
+import { RequireAdminPermission } from '../admin-rbac/admin-rbac.decorator';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
 import type { CandidatePoolIntent } from './social-agent-candidate-pool.service';
 import { SocialAgentChatService } from './social-agent-chat.service';
@@ -27,7 +29,8 @@ type RouteMessageDebugBody = {
 };
 
 @Controller('social-agent/debug')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), AdminRbacGuard)
+@RequireAdminPermission('agent:l5:read')
 export class SocialAgentDebugController {
   constructor(
     private readonly candidatePool: SocialAgentCandidatePoolService,
@@ -50,6 +53,7 @@ export class SocialAgentDebugController {
 
   @Post('route-message')
   @HttpCode(200)
+  @RequireAdminPermission('agent:l5:write')
   async routeMessageDebug(
     @Req() req: FitMeetRequest,
     @Body() body: RouteMessageDebugBody,

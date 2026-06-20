@@ -13,7 +13,10 @@ production cutover.
 - Backend runs the NestJS API behind Nginx or an Aliyun reverse proxy.
 - PostgreSQL, MongoDB, Redis, and object storage must be staging resources, not
   local development services.
-- `/agent` must run with `VITE_AGENT_ADAPTER=real`.
+- `/agent` production builds default to the real adapter through `PROD` /
+  `MODE=production`; `VITE_AGENT_ADAPTER=real` remains an optional explicit
+  override, and `VITE_AGENT_ADAPTER=mock` is only for intentional local QA or
+  unit tests.
 
 If staging uses the ECS same-origin topology instead, use:
 
@@ -47,12 +50,14 @@ DEEPSEEK_API_KEY=<staging-key>
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_CHAT_MODEL=deepseek-v4-pro
 DEEPSEEK_FAST_MODEL=deepseek-v4-flash
-DEEPSEEK_MODEL=deepseek-v4-flash
-DEEPSEEK_TIMEOUT_MS=12000
-SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS=12000
-SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS=3500
-SOCIAL_AGENT_CHAT_FIRST_CHUNK_TIMEOUT_MS=3500
-SOCIAL_AGENT_FINAL_RESPONSE_FIRST_CHUNK_TIMEOUT_MS=3500
+DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_TIMEOUT_MS=30000
+SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS=30000
+SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS=20000
+SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS=30000
+SOCIAL_AGENT_CHAT_FIRST_CHUNK_TIMEOUT_MS=20000
+SOCIAL_AGENT_FINAL_RESPONSE_TIMEOUT_MS=30000
+SOCIAL_AGENT_FINAL_RESPONSE_FIRST_CHUNK_TIMEOUT_MS=20000
 SOCIAL_AGENT_DEEPSEEK_THINKING=disabled
 AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL=<staging-alert-webhook>
 AGENT_OBSERVABILITY_ALERT_WEBHOOK_TOKEN=<staging-alert-token>
@@ -80,16 +85,24 @@ OSS_PUBLIC_BASE_URL=https://<staging-media-domain>
 Build the staging frontend with:
 
 ```bash
-VITE_AGENT_ADAPTER=real
 VITE_API_BASE_URL=https://staging-api.socialworld.world/api
 ```
 
 If Web and API are same-origin on ECS:
 
 ```bash
-VITE_AGENT_ADAPTER=real
 VITE_API_BASE_URL=/api
 ```
+
+Optional explicit adapter override:
+
+```bash
+VITE_AGENT_ADAPTER=real
+```
+
+Do not set `VITE_AGENT_ADAPTER=mock` for staging or production. Mock mode is
+only for local QA/test runs where the backend Social Agent API is intentionally
+absent.
 
 ## Backend Deploy Checklist
 
@@ -245,14 +258,12 @@ Run this in the staging Web build:
    今晚想找人一起喝咖啡，不想太尴尬
    ```
 
-5. Confirm AntGuide lifecycle:
-   - `analyzing_intent` -> thinking
-   - `searching_candidates` / `ranking_matches` -> discovering
-   - candidate card result -> recommending
-   - `checking_safety` -> reminding, when safety applies
-   - `waiting_confirmation` -> confirming
-   - action success -> success
-6. Confirm candidate cards render and do not expose `traceId`, stack traces, raw
+5. Confirm assistant-ui visible process behavior:
+   - The first response appears as a lightweight status such as `正在理解你的需求…`, not an empty waiting placeholder.
+   - `SocialAgentEventV2` / replay summary renders as one cover-style status by default.
+   - Detailed process evidence is collapsed until opened.
+   - No old AntGuide, Codex pet, workspace shell, or page-level task panel appears in `/agent`.
+6. Confirm candidate cards render as assistant-ui message parts and do not expose `traceId`, stack traces, raw
    tool calls, or model internals.
 7. Click "生成开场白".
 8. Click "发送邀请" or a confirmation action.
@@ -354,7 +365,10 @@ configuration.
 
 ## DeepSeek Latency Gate
 
-普通聊天和最终回答默认走 `deepseek-v4-flash` + `thinking=disabled`。只有确实需要复杂推理时，才通过这些 env 对单个 use case 打开：
+普通聊天、最终回答、planner 和 subagent worker 默认必须走 release-quality
+`deepseek-v4-pro` 路径；`deepseek-v4-flash` 只保留给明确标记的 fast /
+非推理通道。只有确实需要复杂推理时，才通过这些 env 对单个 use case
+打开 thinking：
 
 ```bash
 SOCIAL_AGENT_FINAL_RESPONSE_THINKING=enabled
@@ -479,7 +493,7 @@ Fill this after running against the real staging domain.
 | CORS allows only staging Web  | Not verified                | Browser + rejected-origin curl             |
 | `/api/health`                 | Not verified                | `curl -fsS .../api/health`                 |
 | `/api/ready`                  | Not verified                | `curl -fsS .../api/ready`                  |
-| Frontend real adapter         | Not verified                | Built with `VITE_AGENT_ADAPTER=real`       |
+| Frontend real adapter         | Not verified                | Production build defaults to real; explicit `VITE_AGENT_ADAPTER=real` is still acceptable |
 | `/agent` full path            | Not verified                | Browser smoke                              |
 | SSE through proxy             | Config prepared             | Needs staging `curl -N` evidence           |
 | Session restore               | Not verified                | Refresh `/agent`; inspect `GET /session`   |
@@ -494,7 +508,7 @@ Fill this after running against the real staging domain.
 ## Current Local Repository Status
 
 - Backend `/api/health` and `/api/ready` endpoints exist.
-- Frontend real adapter expects `VITE_AGENT_ADAPTER=real`.
+- Frontend production builds default to the real adapter via `PROD` / `MODE=production`; use `VITE_AGENT_ADAPTER=mock` only for intentional local QA.
 - Social Agent endpoints required for run, action, and restore exist in the
   OpenAPI contract and runtime routes.
 - Nginx has a dedicated no-buffering proxy location for Social Agent SSE.

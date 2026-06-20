@@ -50,6 +50,31 @@ const OPTIONAL_DEEPSEEK_MODEL_KEYS = [
   'AGENT_PLANNER_MODEL',
   'AGENT_EXTRACTOR_MODEL',
   'AGENT_CARD_MODEL',
+  'AGENT_SAFETY_MODEL',
+];
+
+const RELEASE_QUALITY_MODEL_OVERRIDE_KEYS = [
+  'AGENT_CASUAL_CHAT_MODEL',
+  'AGENT_FINAL_RESPONSE_MODEL',
+  'AGENT_PLANNER_MODEL',
+  'AGENT_EXTRACTOR_MODEL',
+  'AGENT_CARD_MODEL',
+  'AGENT_SAFETY_MODEL',
+];
+
+const RELEASE_QUALITY_REASONING_MODEL_KEYS = [
+  'DEEPSEEK_MODEL',
+  'DEEPSEEK_CHAT_MODEL',
+  ...RELEASE_QUALITY_MODEL_OVERRIDE_KEYS,
+];
+
+const OPTIONAL_DEEPSEEK_RETRY_OVERRIDE_KEYS = [
+  'SOCIAL_AGENT_INTENT_RETRY_ATTEMPTS',
+  'SOCIAL_AGENT_BRAIN_RETRY_ATTEMPTS',
+  'SOCIAL_AGENT_PLANNER_RETRY_ATTEMPTS',
+  'SOCIAL_AGENT_FINAL_RESPONSE_RETRY_ATTEMPTS',
+  'SOCIAL_AGENT_TOOL_JSON_RETRY_ATTEMPTS',
+  'MATCH_REASONER_RETRY_ATTEMPTS',
 ];
 
 const RELEASE_READY_SUBAGENT_WORKER_MODES = new Set([
@@ -108,6 +133,7 @@ export function buildProductionEnvReport(env: EnvMap): ProductionEnvReport {
   checkObjectStorage(env, error);
   checkUploadTempDir(env, error);
   checkAgentModel(env, error);
+  checkAgentIntelligencePolicy(env, error);
   checkKafka(env, error);
   checkSubagentWorker(env, error, warning);
   checkObservabilityAlerts(env, error, warning);
@@ -353,6 +379,102 @@ function checkAgentModel(
   }
 }
 
+function checkAgentIntelligencePolicy(
+  env: EnvMap,
+  error: (key: string, message: string) => void,
+): void {
+  if (env.SOCIAL_AGENT_MODEL_ROUTING_MODE !== 'quality') {
+    error(
+      'SOCIAL_AGENT_MODEL_ROUTING_MODE',
+      'must be quality so planner, conversation, and final response lanes do not silently downgrade model capability.',
+    );
+  }
+  if (env.SOCIAL_AGENT_INTENT_ROUTER_MODE !== 'llm_first') {
+    error(
+      'SOCIAL_AGENT_INTENT_ROUTER_MODE',
+      'must be llm_first for release-quality intent routing; rules-only fallback is not production-grade.',
+    );
+  }
+  rejectFalseToggle(
+    env,
+    'SOCIAL_AGENT_INTENT_LLM',
+    'must not be false in production; disabling LLM intent routing makes the Agent fall back to brittle rules.',
+    error,
+  );
+  rejectFalseToggle(
+    env,
+    'SOCIAL_AGENT_BRAIN_LLM_PLANNER',
+    'must not be false in production; disabling the LLM planner prevents DeepSeek from using full context, tools, and memory.',
+    error,
+  );
+  requireMinimumInt(env, 'SOCIAL_AGENT_CONTEXT_TURN_LIMIT', 80, error);
+  requireMinimumInt(env, 'SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS', 30000, error);
+  requireMinimumInt(
+    env,
+    'SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS',
+    20000,
+    error,
+  );
+  requireMinimumInt(env, 'SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS', 30000, error);
+  requireMinimumInt(
+    env,
+    'SOCIAL_AGENT_CHAT_FIRST_CHUNK_TIMEOUT_MS',
+    20000,
+    error,
+  );
+  requireMinimumInt(
+    env,
+    'SOCIAL_AGENT_FINAL_RESPONSE_TIMEOUT_MS',
+    30000,
+    error,
+  );
+  requireMinimumInt(
+    env,
+    'SOCIAL_AGENT_FINAL_RESPONSE_FIRST_CHUNK_TIMEOUT_MS',
+    20000,
+    error,
+  );
+  requireMinimumInt(env, 'SOCIAL_AGENT_FINAL_RESPONSE_MAX_TOKENS', 900, error);
+  requireMinimumInt(env, 'SOCIAL_AGENT_PLANNER_TIMEOUT_MS', 25000, error);
+  requireMinimumInt(env, 'SOCIAL_AGENT_INTENT_TIMEOUT_MS', 25000, error);
+  requireMinimumInt(env, 'SOCIAL_AGENT_DEEPSEEK_RETRY_ATTEMPTS', 2, error);
+  for (const key of OPTIONAL_DEEPSEEK_RETRY_OVERRIDE_KEYS) {
+    requireOptionalMinimumInt(env, key, 2, error);
+  }
+  for (const key of RELEASE_QUALITY_MODEL_OVERRIDE_KEYS) {
+    if (
+      hasConfiguredValue(env.DEEPSEEK_CHAT_MODEL) &&
+      hasConfiguredValue(env[key]) &&
+      env[key] !== env.DEEPSEEK_CHAT_MODEL
+    ) {
+      error(
+        key,
+        'must match DEEPSEEK_CHAT_MODEL in quality mode; weaker per-lane overrides silently downgrade DeepSeek reasoning before the Agent can use tools, memory, and context.',
+      );
+    }
+  }
+  for (const key of RELEASE_QUALITY_REASONING_MODEL_KEYS) {
+    if (hasConfiguredValue(env[key]) && isFastDeepSeekModel(env[key])) {
+      error(
+        key,
+        'must use a reasoning-quality DeepSeek model such as deepseek-v4-pro; flash/fast/lite models are only allowed for explicitly fast, non-reasoning lanes.',
+      );
+    }
+  }
+}
+
+function rejectFalseToggle(
+  env: EnvMap,
+  key: string,
+  message: string,
+  error: (key: string, message: string) => void,
+): void {
+  const value = `${env[key] ?? ''}`.trim().toLowerCase();
+  if (value === 'false' || value === '0' || value === 'off' || value === 'no') {
+    error(key, message);
+  }
+}
+
 function checkDeepSeekModelValue(
   env: EnvMap,
   key: string,
@@ -370,6 +492,10 @@ function checkDeepSeekModelValue(
       'must use a current explicit DeepSeek V4 model id such as deepseek-v4-pro or deepseek-v4-flash; legacy aliases deepseek-v4, deepseek-chat, and deepseek-reasoner are not production-safe.',
     );
   }
+}
+
+function isFastDeepSeekModel(value: string): boolean {
+  return /(^|[-_])(flash|fast|lite)([-_]|$)/i.test(value.trim());
 }
 
 function checkKafka(
@@ -403,6 +529,7 @@ function checkSubagentWorker(
   requirePositiveInt(env, 'FITMEET_SUBAGENT_WORKER_TIMEOUT_MS', error);
   requirePositiveInt(env, 'FITMEET_SUBAGENT_WORKER_HEARTBEAT_MS', error);
   requirePositiveInt(env, 'FITMEET_SUBAGENT_WORKER_HEALTH_MAX_AGE_MS', error);
+  checkSubagentWorkerModelOverrides(env, error);
 
   const queues = `${env.FITMEET_SUBAGENT_WORKER_QUEUE ?? ''}`
     .split(',')
@@ -413,6 +540,24 @@ function checkSubagentWorker(
       'FITMEET_SUBAGENT_WORKER_QUEUE',
       'custom queue list should include Life Graph, Social Match, Meet Loop, and Math worker queues unless this is an intentional partial rollout.',
     );
+  }
+}
+
+function checkSubagentWorkerModelOverrides(
+  env: EnvMap,
+  error: (key: string, message: string) => void,
+): void {
+  const workerModelKeys = Object.keys(env)
+    .filter((key) => /^FITMEET_[A-Z0-9_]+_WORKER_MODEL$/.test(key))
+    .sort();
+  for (const key of workerModelKeys) {
+    checkDeepSeekModelValue(env, key, error);
+    if (hasConfiguredValue(env[key]) && isFastDeepSeekModel(env[key])) {
+      error(
+        key,
+        'must use a reasoning-quality DeepSeek model such as deepseek-v4-pro; subagent workers participate in planning, matching, memory, and approval flows, so flash/fast/lite worker overrides are not release-ready.',
+      );
+    }
   }
 }
 
@@ -472,6 +617,36 @@ function requirePositiveInt(
   const value = Number(env[key]);
   if (!Number.isInteger(value) || value <= 0) {
     error(key, 'must be a positive integer.');
+  }
+}
+
+function requireMinimumInt(
+  env: EnvMap,
+  key: string,
+  min: number,
+  error: (key: string, message: string) => void,
+): void {
+  requireConfigured(env, key, error);
+  if (!hasConfiguredValue(env[key])) return;
+  const value = Number(env[key]);
+  if (!Number.isInteger(value) || value < min) {
+    error(key, `must be an integer greater than or equal to ${min}.`);
+  }
+}
+
+function requireOptionalMinimumInt(
+  env: EnvMap,
+  key: string,
+  min: number,
+  error: (key: string, message: string) => void,
+): void {
+  if (!hasConfiguredValue(env[key])) return;
+  const value = Number(env[key]);
+  if (!Number.isInteger(value) || value < min) {
+    error(
+      key,
+      `must be omitted or an integer greater than or equal to ${min}.`,
+    );
   }
 }
 

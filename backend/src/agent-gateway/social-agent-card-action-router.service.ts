@@ -96,6 +96,7 @@ export class SocialAgentCardActionRouterService {
         ownerUserId,
         taskId,
         body,
+        { signal: options?.signal ?? null },
       );
     }
 
@@ -162,6 +163,7 @@ export class SocialAgentCardActionRouterService {
         message: messageForSocialAgentSchemaAction(action),
         hasCandidates: true,
         idempotencyKey: body.idempotencyKey ?? null,
+        clientContext: this.clientContextForCardAction(body, taskId),
       },
       emit,
       options,
@@ -207,5 +209,16 @@ export class SocialAgentCardActionRouterService {
       return 'Social Match Agent' as const;
     }
     return 'FitMeet Main Agent' as const;
+  }
+
+  private clientContextForCardAction(
+    body: SocialAgentCardActionBody,
+    taskId: number,
+  ): SocialAgentRouteMessageBody['clientContext'] {
+    return {
+      ...(body.clientContext ?? {}),
+      threadId: body.clientContext?.threadId ?? `agent-task:${taskId}`,
+      source: body.clientContext?.source ?? 'card_action',
+    };
   }
 }

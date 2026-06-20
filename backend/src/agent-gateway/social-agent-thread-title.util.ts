@@ -1,4 +1,5 @@
 import { cleanDisplayText } from '../common/display-text.util';
+import { explicitlyRejectsSocialExecution } from './social-agent-social-intent-gate';
 
 const GENERIC_THREAD_TITLE_PATTERNS = [
   /^FitMeet Social Agent 聊天任务$/i,
@@ -31,6 +32,9 @@ export function inferSocialAgentThreadTitle(input: {
   if (isGenericUserPrompt(text)) return '普通聊天：功能咨询';
 
   const compact = text.replace(/\s+/g, ' ').replace(/[。！？!?]+$/g, '').trim();
+  if (shouldUseOrdinaryChatTitle(compact)) {
+    return ordinaryChatTitle(compact);
+  }
   const location = locationLabel(compact);
   const activity = activityLabel(compact);
   const time = timeLabel(compact);
@@ -42,7 +46,7 @@ export function inferSocialAgentThreadTitle(input: {
     return `${location ?? ''}认识新朋友`.slice(0, 40);
   }
 
-  return `普通聊天：${compact.slice(0, 16)}`.slice(0, 40);
+  return ordinaryChatTitle(compact);
 }
 
 function isGenericUserPrompt(text: string) {
@@ -85,4 +89,18 @@ function activityLabel(text: string) {
   if (/瑜伽/.test(text)) return '瑜伽搭子';
   if (/活动|参加/.test(text)) return '活动机会';
   return null;
+}
+
+function shouldUseOrdinaryChatTitle(text: string) {
+  if (explicitlyRejectsSocialExecution(text)) return true;
+  return /(训练恢复|恢复训练|训练安排|拉伸|放松|伤后恢复|休息日|恢复建议)/i.test(
+    text,
+  );
+}
+
+function ordinaryChatTitle(text: string) {
+  if (/训练恢复|恢复训练|训练安排|恢复建议/i.test(text)) {
+    return '普通聊天：训练恢复建议';
+  }
+  return `普通聊天：${text.slice(0, 16)}`.slice(0, 40);
 }

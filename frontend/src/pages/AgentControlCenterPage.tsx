@@ -11,6 +11,7 @@ import { useAuthStore } from '../stores';
 import * as api from '../api/client';
 import { ApiError } from '../api/client';
 import { agentApprovalsApi } from '../api/agentApprovalsApi';
+import { agentApprovalEffectText } from '../lib/agentApprovalCopy';
 
 // ── Types kept narrow & local: this page owns the schema ─────────────
 type AgentMode = 'assisted' | 'basic' | 'normal' | 'standard' | 'open';
@@ -464,7 +465,7 @@ function ApprovalCard({
             </p>
           )}
           <p className="mt-1 text-xs leading-5 text-[#8C8A6E]">
-            审批后会执行：{describeApprovalEffect(actionVerb)}
+            审批后会执行：{agentApprovalEffectText(actionVerb)}
           </p>
           {(targetName || targetUserId || candidateSnapshot) && (
             <div className="mt-2 rounded-lg border border-[#2a2a22] bg-[#0A0A09] px-3 py-2 text-xs leading-5 text-[#A9A595]">
@@ -513,20 +514,6 @@ function ApprovalCard({
       </footer>
     </article>
   );
-}
-
-function describeApprovalEffect(actionType: string): string {
-  switch (actionType) {
-    case 'send_invite':
-    case 'send_message':
-      return '发送站内邀约消息，并推进候选人与需求状态';
-    case 'add_friend':
-      return '关注/添加该候选人为好友';
-    case 'create_activity':
-      return '创建活动邀约并邀请候选人参与';
-    default:
-      return actionType;
-  }
 }
 
 // ── Permissions panel ───────────────────────────────────────────────

@@ -6,14 +6,32 @@ import { cleanDisplayText } from '../common/display-text.util';
 import { normalizeDeepSeekIntentRouterResult } from './social-agent-intent-normalization';
 import { hasSocialAgentImmediateSearchRequest } from './social-agent-profile-search-boundary';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
-import { SocialAgentModelRouterService } from './social-agent-model-router.service';
+import {
+  SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+  SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS,
+  selectSocialAgentConfiguredModel,
+  SocialAgentModelRouterService,
+} from './social-agent-model-router.service';
+import {
+  selectSocialAgentContextWindow,
+  socialAgentContextTurnLimit,
+} from './social-agent-context-window';
 import {
   enforceSocialIntentGate,
+  explicitlyRejectsSocialExecution,
+  hasExistingSocialExecutionContext,
   hasExplicitSocialExecutionIntent,
   isConversationOnlySocialMention,
   isSocialAdviceQuestion,
 } from './social-agent-social-intent-gate';
 import { isAwaitingSocialOpportunityClarification } from './social-agent-opportunity-clarification';
+import {
+  isRetryableSocialAgentDeepSeekFailure,
+  socialAgentDeepSeekFailureReason,
+  socialAgentDeepSeekRetryAttempts,
+} from './social-agent-deepseek-resilience';
+import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
+import { callDeepSeekChatCompletion } from '../common/deepseek.util';
 
 export type SocialAgentIntentType =
   | 'casual_chat'
@@ -53,6 +71,7 @@ export interface SocialAgentIntentRouterInput {
   taskContext?: Record<string, unknown>;
   profile?: Record<string, unknown>;
   conversationHistory?: Array<Record<string, unknown>>;
+  signal?: AbortSignal | null;
 }
 
 export interface SocialAgentIntentRouterResult {
@@ -67,6 +86,11 @@ export interface SocialAgentIntentRouterResult {
   source: 'rules' | 'deepseek';
 }
 
+type SocialAgentDeepSeekMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+};
+
 @Injectable()
 export class SocialAgentIntentRouterService {
   private readonly logger = new Logger(SocialAgentIntentRouterService.name);
@@ -75,19 +99,51 @@ export class SocialAgentIntentRouterService {
     private readonly config: ConfigService,
     @Optional() private readonly metrics?: SocialAgentMetricsService,
     @Optional() private readonly modelRouter?: SocialAgentModelRouterService,
+    @Optional()
+    private readonly deepSeek?: SocialAgentChatDeepSeekClientService,
   ) {}
 
   async route(
     input: SocialAgentIntentRouterInput,
   ): Promise<SocialAgentIntentRouterResult> {
+    if (input.signal?.aborted) throw new Error('client_aborted');
     const message = cleanDisplayText(input.message, '').trim();
     const normalizedInput = { ...input, message };
     const fallback = this.routeByRules(normalizedInput);
-    if (!this.shouldTryDeepSeek(message, fallback)) return fallback;
+    if (!this.shouldTryDeepSeek(message)) return fallback;
 
     const startedAt = Date.now();
     try {
-      const enhanced = await this.callDeepSeekRouter(input, fallback);
+      const maxAttempts = socialAgentDeepSeekRetryAttempts(this.config, {
+        specificKey: 'SOCIAL_AGENT_INTENT_RETRY_ATTEMPTS',
+      });
+      let enhanced: SocialAgentIntentRouterResult | null = null;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          enhanced = await this.callDeepSeekRouter(normalizedInput, fallback);
+          break;
+        } catch (error) {
+          const reason = socialAgentDeepSeekFailureReason(error);
+          if (
+            attempt < maxAttempts &&
+            isRetryableSocialAgentDeepSeekFailure(reason, {
+              includeTimeoutFailures: true,
+              includeJsonFormatErrors: true,
+            })
+          ) {
+            this.logger.warn(
+              JSON.stringify({
+                event: 'social_agent.intent_router.deepseek_retrying',
+                reason,
+                attempt,
+                maxAttempts,
+              }),
+            );
+            continue;
+          }
+          throw error;
+        }
+      }
       this.metrics?.recordLatency(
         'deepseek_intent_route',
         Date.now() - startedAt,
@@ -102,7 +158,8 @@ export class SocialAgentIntentRouterService {
         'deepseek_intent_route',
         Date.now() - startedAt,
       );
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason = socialAgentDeepSeekFailureReason(error);
+      if (reason === 'client_aborted') throw error;
       const stage =
         reason === 'deepseek_timeout' ? 'deepseek_timeout' : 'deepseek_error';
       this.metrics?.recordFallback(stage);
@@ -166,6 +223,26 @@ export class SocialAgentIntentRouterService {
     const isCorrection = this.isCorrectionOrClarification(message);
     const asksFitnessMath = this.isFitnessMathQuestion(message);
 
+    if (
+      isCorrection &&
+      this.isSocialContinuationCorrection(input, {
+        wantsSocialSearch,
+        wantsCandidateFilterRefinement,
+        awaitingOpportunityClarification,
+      })
+    ) {
+      return this.result(
+        hasTask || hasCandidates ? 'candidate_followup' : 'social_search',
+        0.91,
+        entities,
+        {
+          shouldSearch: true,
+          shouldReplan: hasTask || hasCandidates,
+          replyStrategy: 'search_candidates',
+        },
+      );
+    }
+
     if (isCorrection) {
       return this.result('correction_or_clarification', 0.92, entities, {
         replyStrategy: 'conversational_answer',
@@ -178,13 +255,36 @@ export class SocialAgentIntentRouterService {
       });
     }
 
+    if (explicitlyRejectsSocialExecution(message)) {
+      return this.result('casual_chat', 0.93, entities, {
+        replyStrategy: 'conversational_answer',
+      });
+    }
+
     if (awaitingOpportunityClarification) {
       if (
         /(取消|先不找|不找了|不用找|暂停|算了)/i.test(text) ||
+        explicitlyRejectsSocialExecution(message) ||
         isConversationOnlySocialMention(message) ||
         isSocialAdviceQuestion(message)
       ) {
         return this.result('casual_chat', 0.9, entities, {
+          replyStrategy: 'conversational_answer',
+        });
+      }
+      if (this.isPendingOpportunityClarificationMetaQuestion(message)) {
+        return this.result('workflow_help', 0.9, entities, {
+          replyStrategy: 'conversational_answer',
+        });
+      }
+      if (
+        !wantsSocialSearch &&
+        !wantsActivitySearch &&
+        !wantsCandidateFilterRefinement &&
+        !this.hasOpportunityClarificationAnswer(message, entities) &&
+        !this.isOpportunityClarificationContinueCommand(message)
+      ) {
+        return this.result('casual_chat', 0.88, entities, {
           replyStrategy: 'conversational_answer',
         });
       }
@@ -359,6 +459,46 @@ export class SocialAgentIntentRouterService {
     );
   }
 
+  private isPendingOpportunityClarificationMetaQuestion(
+    message: string,
+  ): boolean {
+    const text = cleanDisplayText(message, '').trim().toLowerCase();
+    if (!text) return false;
+    if (hasExplicitSocialExecutionIntent(text)) return false;
+    return /(为什么|为啥|干嘛|一定要|必须要|为什么要问|为什么需要|需要.*(什么|这些|信息)|这些信息.*(干嘛|做什么|有什么用)|你没懂|懂没懂|没懂我的意思|什么意思|解释一下|说清楚)/i.test(
+      text,
+    );
+  }
+
+  private isOpportunityClarificationContinueCommand(message: string): boolean {
+    const text = cleanDisplayText(message, '').trim().toLowerCase();
+    if (!text) return false;
+    if (explicitlyRejectsSocialExecution(text)) return false;
+    return /(可以|好的|好|行|继续|就这样|按这个|按刚才|开始|现在).{0,12}(找|搜|匹配|推荐|候选|搭子|人|活动)|^(可以|好的|好|行|继续)$|继续.{0,12}(刚才|上面).{0,12}(找|搜|匹配|推荐)/i.test(
+      text,
+    );
+  }
+
+  private hasOpportunityClarificationAnswer(
+    message: string,
+    entities: SocialAgentIntentEntities,
+  ): boolean {
+    const text = cleanDisplayText(message, '').trim().toLowerCase();
+    if (!text) return false;
+    if (
+      entities.city ||
+      entities.activityType ||
+      entities.targetGender ||
+      entities.timePreference ||
+      entities.locationPreference
+    ) {
+      return true;
+    }
+    return /(公共场所|公开场所|站内聊|先聊天|别自动发|不要自动发|低强度|轻松|强度|慢跑|散步|跑步|羽毛球|篮球|户外|咖啡|今晚|今天晚上|周末|附近|同校|舞蹈|舞蹈生|女生|男生)/i.test(
+      text,
+    );
+  }
+
   private isProductHelpQuestion(message: string): boolean {
     const text = cleanDisplayText(message, '').trim().toLowerCase();
     if (!text) return false;
@@ -431,8 +571,39 @@ export class SocialAgentIntentRouterService {
   private isCorrectionOrClarification(message: string): boolean {
     const text = cleanDisplayText(message, '').trim().toLowerCase();
     if (!text) return false;
-    return /(不是不是|不是.*搜索|不是.*找人|上面不是|上面是.*画像|刚才.*画像|我的意思是|你理解错|理解错了|不是这个意思)/i.test(
+    return /(不是不是|不是.*搜索|不是.*找人|上面不是|上面是.*画像|刚才.*画像|我的意思是|我说的是|你懂没懂我的意思|没懂我的意思|你理解错|理解错了|不是这个意思)/i.test(
       text,
+    );
+  }
+
+  private isSocialContinuationCorrection(
+    input: SocialAgentIntentRouterInput,
+    options: {
+      wantsSocialSearch: boolean;
+      wantsCandidateFilterRefinement: boolean;
+      awaitingOpportunityClarification: boolean;
+    },
+  ): boolean {
+    const text = cleanDisplayText(input.message, '').trim().toLowerCase();
+    if (!text) return false;
+    if (this.isProfileEnrichmentRequest(text)) return false;
+    if (
+      /(上面|刚才).{0,12}(画像|人物画像|ai画像)|不是.{0,8}搜索|不是.{0,8}找人/i.test(
+        text,
+      )
+    ) {
+      return false;
+    }
+    const hasSocialContext =
+      hasExistingSocialExecutionContext(input) ||
+      options.awaitingOpportunityClarification;
+    const hasConcreteSocialCriteria =
+      /(找|搜索|推荐|匹配|候选|搭子|女生|男生|舞蹈|舞蹈生|同校|青岛大学|大学|散步|跑步|羽毛球|篮球|户外|今晚|今天晚上|明天|周末|附近)/i.test(
+        text,
+      );
+    return (
+      (options.wantsSocialSearch || options.wantsCandidateFilterRefinement) &&
+      (hasSocialContext || hasConcreteSocialCriteria)
     );
   }
 
@@ -501,17 +672,21 @@ export class SocialAgentIntentRouterService {
       /(青岛|北京|上海|深圳|广州|杭州|南京|成都|武汉|西安|重庆|苏州|厦门|天津|长沙|郑州|济南|宁波|合肥)/,
     );
     const activityMatch = message.match(
-      /(拍照|跑步|羽毛球|瑜伽|健身|咖啡|徒步|骑行|篮球|足球|网球|游泳|约练|撸铁|普拉提|飞盘|户外|训练|低压力社交|认识新朋友|新朋友)/,
+      /(拍照|跑步|慢跑|散步|羽毛球|瑜伽|健身|咖啡|徒步|爬山|骑行|篮球|足球|网球|游泳|约练|撸铁|普拉提|飞盘|户外|训练|低压力社交|认识新朋友|新朋友|city\s*walk|citywalk)/i,
     );
     const timeMatch = message.match(
-      /(今晚|明天|后天|周末|工作日|上午|中午|下午|晚上|夜间|早上|午后)/,
+      /(今天晚上|今天下午|今天上午|今天中午|今晚|明天(?:上午|下午|晚上)?|后天(?:上午|下午|晚上)?|周末(?:上午|中午|下午|晚上)?|周六(?:上午|下午|晚上)?|周日(?:上午|下午|晚上)?|工作日晚上|下班后|上午|中午|下午|晚上|夜间|早上|午后)/,
     );
     const locationMatch = message.match(
-      /(附近|同城|身边|周边|近一点|更近|市南|市北|崂山|黄岛|西海岸|李沧|城阳)/,
+      /((?:崂山区|市南区|市北区|李沧区|黄岛区|西海岸|城阳区|青岛大学|五四广场|奥帆中心|大学城)(?:附近|周边)?|附近|同城|身边|周边|近一点|更近|市南|市北|崂山|黄岛|李沧|城阳)/,
     );
-    const targetGender = /(女生|女性|小姐姐)/.test(message)
+    const targetGender = /(女生|女孩|女孩子|女性|小姐姐|女同学|女大学生|女舞蹈生)/.test(
+      message,
+    )
       ? '女生'
-      : /(男生|男性|小哥哥)/.test(message)
+      : /(男生|男孩|男孩子|男性|小哥哥|男同学|男大学生|男舞蹈生)/.test(
+            message,
+          )
         ? '男生'
         : '';
     return {
@@ -523,14 +698,19 @@ export class SocialAgentIntentRouterService {
     };
   }
 
-  private shouldTryDeepSeek(
-    message: string,
-    fallback: SocialAgentIntentRouterResult,
-  ): boolean {
-    if (!message || fallback.confidence >= 0.9) return false;
-    if (this.config.get<string>('SOCIAL_AGENT_INTENT_LLM') === 'false')
-      return false;
-    return Boolean(this.config.get<string>('DEEPSEEK_API_KEY'));
+  private shouldTryDeepSeek(message: string): boolean {
+    if (!message) return false;
+    const legacyToggle =
+      `${this.config.get<string>('SOCIAL_AGENT_INTENT_LLM') ?? ''}`
+        .trim()
+        .toLowerCase();
+    const mode = this.intentRouterMode();
+    if (legacyToggle === 'false' || mode === 'rules_only') return false;
+    if (!this.config.get<string>('DEEPSEEK_API_KEY')) return false;
+    // Even in legacy "hybrid" mode, DeepSeek remains the primary semantic
+    // judge. Rules are a fallback and safety clamp, not a high-confidence
+    // shortcut that can strip context from short follow-up turns.
+    return true;
   }
 
   private async callDeepSeekRouter(
@@ -539,78 +719,40 @@ export class SocialAgentIntentRouterService {
   ): Promise<SocialAgentIntentRouterResult | null> {
     const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
     if (!apiKey) return null;
-    const baseUrl =
-      this.config.get<string>('DEEPSEEK_BASE_URL') ||
-      'https://api.deepseek.com';
     const useCase = 'planner' as const;
+    const messages = this.deepSeekRouterMessages(input, fallback);
+    if (this.deepSeek) {
+      const content = await this.deepSeek.complete({
+        useCase,
+        taskId: this.taskIdFromTaskContext(input.taskContext),
+        intent: fallback.intent,
+        fallbackTemperature: 0.15,
+        responseFormat: { type: 'json_object' },
+        retryAttempts: socialAgentDeepSeekRetryAttempts(this.config, {
+          specificKey: 'SOCIAL_AGENT_INTENT_RETRY_ATTEMPTS',
+        }),
+        messages,
+        signal: input.signal,
+      });
+      if (!content) return null;
+      const parsed = JSON.parse(content) as Record<string, unknown>;
+      return normalizeDeepSeekIntentRouterResult(parsed, fallback);
+    }
     const model = this.modelFor(useCase);
     const startedAt = Date.now();
-    const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.deepSeekTimeoutMs(useCase),
-    );
     try {
-      const response = await fetch(
-        `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
-        {
-          method: 'POST',
-          signal: controller.signal,
-          headers: {
-            'content-type': 'application/json',
-            authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            temperature: this.modelRouter?.getTemperature(useCase) ?? 0.15,
-            response_format: { type: 'json_object' },
-            messages: [
-              {
-                role: 'system',
-                content: [
-                  '你是 FitMeet Social Agent 的意图路由器，只输出 JSON。',
-                  'intent 只能是 casual_chat, product_help, workflow_help, profile_enrichment, profile_enrichment_request, correction_or_clarification, profile_update, social_search, activity_search, candidate_followup, action_request, safety_or_boundary, fitness_math, unknown。',
-                  'replyStrategy 只能是 conversational_answer, append_context, search_candidates, search_activities, execute_action, ask_clarifying_question。',
-                  'product_help 用于解释 FitMeet 产品、人物画像、匹配逻辑、权限模式、隐私边界、Agent 能力和 DeepSeek/API 问题。',
-                  'profile_update 只有用户明确提供自己的城市、兴趣、可约时间、想认识的人或不接受的行为时使用；“人物画像是什么”“你可以帮我完善人物画像吗”不是 profile_update。',
-                  'workflow_help 用于回答先完善画像还是直接发布需求、下一步怎么做、怎么开始约练、怎么参加活动、怎么加好友、怎么发邀请等流程问题。',
-                  '用户问“怎么找人/怎么参加活动/怎么加好友/怎么发邀请/流程是什么”是在咨询流程，不是立即执行搜索或动作。',
-                  'profile_enrichment 用于用户提供画像事实，即使里面有“想找xxx”，也不要直接搜索；先抽取画像并询问是否开始搜索。',
-                  'profile_enrichment_request/correction_or_clarification 用于用户要求把刚才信息写入画像或纠正“上面是画像不是搜索”。',
-                  'product_help、workflow_help、profile_enrichment、profile_enrichment_request、correction_or_clarification、fitness_math、casual_chat、unknown 必须 replyStrategy=conversational_answer，且 shouldSearch=false、shouldExecuteAction=false。',
-                  '只有明确找人/搭子/活动/换一批/更近时 shouldSearch=true。普通聊天、产品解释、画像问答、安全边界、unknown 必须 shouldSearch=false。',
-                  '动作请求只进入确认流程，不直接执行数据库动作。',
-                ].join('\n'),
-              },
-              {
-                role: 'user',
-                content: JSON.stringify({
-                  message: input.message,
-                  taskContext: input.taskContext ?? {},
-                  profile: input.profile ?? {},
-                  conversationHistory: (input.conversationHistory ?? []).slice(
-                    -8,
-                  ),
-                  fallback,
-                }),
-              },
-            ],
-          }),
-        },
-      );
-      if (!response.ok) {
-        this.logModelCall({
-          useCase,
-          model,
-          intent: fallback.intent,
-          latencyMs: Date.now() - startedAt,
-          success: false,
-          reason: `DeepSeek HTTP ${response.status}`,
-        });
-        throw new Error(`DeepSeek HTTP ${response.status}`);
-      }
-      const payload = (await response.json()) as Record<string, unknown>;
-      const content = this.readDeepSeekContent(payload);
+      const content = await callDeepSeekChatCompletion({
+        apiKey,
+        baseUrl: this.config.get<string>('DEEPSEEK_BASE_URL'),
+        model,
+        temperature: this.modelRouter?.getTemperature(useCase) ?? 0.15,
+        responseFormat: { type: 'json_object' },
+        retryAttempts: 1,
+        messages,
+        signal: input.signal ?? null,
+        timeoutMs: this.deepSeekTimeoutMs(useCase),
+        timeoutMessage: 'deepseek_timeout',
+      });
       const parsed = JSON.parse(content) as Record<string, unknown>;
       const result = normalizeDeepSeekIntentRouterResult(parsed, fallback);
       this.logModelCall({
@@ -622,30 +764,162 @@ export class SocialAgentIntentRouterService {
       });
       return result;
     } catch (error) {
+      const reason = socialAgentDeepSeekFailureReason(error);
       this.logModelCall({
         useCase,
         model,
         intent: fallback.intent,
         latencyMs: Date.now() - startedAt,
         success: false,
-        reason: this.isAbortError(error)
-          ? 'deepseek_timeout'
-          : error instanceof Error
-            ? error.message
-            : String(error),
+        reason,
       });
-      if (this.isAbortError(error)) throw new Error('deepseek_timeout');
       throw error;
-    } finally {
-      clearTimeout(timeout);
     }
   }
 
-  private readDeepSeekContent(payload: Record<string, unknown>): string {
-    const choices = Array.isArray(payload.choices) ? payload.choices : [];
-    const first = this.isRecord(choices[0]) ? choices[0] : {};
-    const message = this.isRecord(first.message) ? first.message : {};
-    return cleanDisplayText(message.content, '').trim();
+  private deepSeekRouterMessages(
+    input: SocialAgentIntentRouterInput,
+    fallback: SocialAgentIntentRouterResult,
+  ): SocialAgentDeepSeekMessage[] {
+    return [
+      {
+        role: 'system',
+        content: [
+          '你是 FitMeet Social Agent 的意图路由器，只输出 JSON。',
+          'intent 只能是 casual_chat, product_help, workflow_help, profile_enrichment, profile_enrichment_request, correction_or_clarification, profile_update, social_search, activity_search, candidate_followup, action_request, safety_or_boundary, fitness_math, unknown。',
+          'replyStrategy 只能是 conversational_answer, append_context, search_candidates, search_activities, execute_action, ask_clarifying_question。',
+          'product_help 用于解释 FitMeet 产品、人物画像、匹配逻辑、权限模式、隐私边界、Agent 能力和 DeepSeek/API 问题。',
+          'profile_update 只有用户明确提供自己的城市、兴趣、可约时间、想认识的人或不接受的行为时使用；“人物画像是什么”“你可以帮我完善人物画像吗”不是 profile_update。',
+          'workflow_help 用于回答先完善画像还是直接发布需求、下一步怎么做、怎么开始约练、怎么参加活动、怎么加好友、怎么发邀请等流程问题。',
+          '用户问“怎么找人/怎么参加活动/怎么加好友/怎么发邀请/流程是什么”是在咨询流程，不是立即执行搜索或动作。',
+          'profile_enrichment 用于用户提供画像事实，即使里面有“想找xxx”，也不要直接搜索；先抽取画像并询问是否开始搜索。',
+          'profile_enrichment_request/correction_or_clarification 用于用户要求把刚才信息写入画像或纠正“上面是画像不是搜索”。',
+          '如果已有社交/约练任务，用户说“我的意思是/你理解错了”并补充时间、地点、候选偏好或活动类型，这是继续筛选候选，不是普通纠错；应输出 social_search 或 candidate_followup。',
+          'knownTaskSlots 可能包含用户已确认字段，也可能包含 inferred_context 推断上下文；只有 routingConstraints.doNotRepeatQuestionsForSlots 里的字段才是用户已回答/已确认/已完成的硬约束，不得重复追问。knownContextSlots 只用于理解上下文，不能替代必要澄清。',
+          'candidate_preference 只能用于公开可发现资料、用户自愿公开标签或用户明确授权的筛选，不得推断隐私字段。',
+          'product_help、workflow_help、profile_enrichment、profile_enrichment_request、correction_or_clarification、fitness_math、casual_chat、unknown 必须 replyStrategy=conversational_answer，且 shouldSearch=false、shouldExecuteAction=false。',
+          '只有明确找人/搭子/活动/换一批/更近时 shouldSearch=true。普通聊天、产品解释、画像问答、安全边界、unknown 必须 shouldSearch=false。',
+          '动作请求只进入确认流程，不直接执行数据库动作。',
+        ].join('\n'),
+      },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          message: input.message,
+          taskContext: input.taskContext ?? {},
+          knownTaskSlots: this.knownTaskSlots(input.taskContext),
+          routingConstraints: this.routingConstraintsForTaskContext(
+            input.taskContext,
+          ),
+          profile: input.profile ?? {},
+          conversationHistory: selectSocialAgentContextWindow(
+            input.conversationHistory,
+            socialAgentContextTurnLimit(this.config),
+          ),
+          fallback,
+        }),
+      },
+    ];
+  }
+
+  private knownTaskSlots(
+    taskContext?: Record<string, unknown>,
+  ): Record<string, string> {
+    const slots = this.taskSlotRecord(taskContext);
+    const allowedStates = new Set([
+      'answered',
+      'confirmed',
+      'completed',
+      'modified',
+      'inferred',
+    ]);
+    return this.taskSlotValues(slots, allowedStates);
+  }
+
+  private userConfirmedTaskSlotKeys(
+    taskContext?: Record<string, unknown>,
+  ): string[] {
+    const slots = this.taskSlotRecord(taskContext);
+    const userConfirmedStates = new Set([
+      'answered',
+      'confirmed',
+      'completed',
+      'modified',
+    ]);
+    return Object.keys(this.taskSlotValues(slots, userConfirmedStates));
+  }
+
+  private taskSlotRecord(
+    taskContext?: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const context = this.isRecord(taskContext) ? taskContext : {};
+    const taskMemory = this.isRecord(context.taskMemory)
+      ? context.taskMemory
+      : {};
+    const topLevelSlots = this.isRecord(context.taskSlots)
+      ? context.taskSlots
+      : null;
+    const memorySlots = this.isRecord(taskMemory.taskSlots)
+      ? taskMemory.taskSlots
+      : null;
+    return topLevelSlots ?? memorySlots ?? {};
+  }
+
+  private taskSlotValues(
+    slots: Record<string, unknown>,
+    allowedStates: Set<string>,
+  ): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const key of [
+      'activity',
+      'time_window',
+      'location_text',
+      'geo_area',
+      'intensity',
+      'visibility',
+      'safety_boundary',
+      'invite_tone',
+      'candidate_preference',
+    ]) {
+      const raw = slots[key];
+      const slot = this.isRecord(raw) ? raw : {};
+      const state = cleanDisplayText(slot.state, '');
+      if (state && !allowedStates.has(state)) continue;
+      const value = cleanDisplayText(slot.value ?? raw, '');
+      if (value) out[key] = value;
+    }
+    return out;
+  }
+
+  private routingConstraintsForTaskContext(
+    taskContext?: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const knownTaskSlots = this.knownTaskSlots(taskContext);
+    const knownSlotKeys = Object.keys(knownTaskSlots);
+    const userConfirmedSlotKeys = this.userConfirmedTaskSlotKeys(taskContext);
+    return {
+      treatKnownTaskSlotsAsAnswered: userConfirmedSlotKeys.length > 0,
+      knownContextSlots: knownSlotKeys,
+      doNotRepeatQuestionsForSlots: userConfirmedSlotKeys,
+      candidatePreferenceScope:
+        'public_discoverable_profiles_and_user_consented_public_tags_only',
+      inferredSlotsAreContextOnly: true,
+      highRiskActionsRequireApproval: [
+        'publish_social_request',
+        'send_invite',
+        'exchange_contact',
+        'reveal_precise_location',
+        'connect_candidate',
+      ],
+    };
+  }
+
+  private taskIdFromTaskContext(
+    taskContext?: Record<string, unknown>,
+  ): number | null {
+    const context = this.isRecord(taskContext) ? taskContext : {};
+    const value = Number(context.taskId ?? context.id);
+    return Number.isInteger(value) && value > 0 ? value : null;
   }
 
   private hasCandidateFilterRefinement(message: string): boolean {
@@ -663,21 +937,47 @@ export class SocialAgentIntentRouterService {
   private modelFor(useCase: 'planner'): string {
     if (this.modelRouter) return this.modelRouter.getModel(useCase);
     return (
-      this.config.get<string>('AGENT_PLANNER_MODEL') ||
-      this.config.get<string>('DEEPSEEK_FAST_MODEL') ||
-      this.config.get<string>('DEEPSEEK_MODEL') ||
-      'deepseek-v4-flash'
+      this.configuredModel(this.config.get<string>('AGENT_PLANNER_MODEL')) ||
+      this.configuredModel(this.config.get<string>('DEEPSEEK_CHAT_MODEL')) ||
+      SOCIAL_AGENT_DEFAULT_REASONING_MODEL
     );
+  }
+
+  private configuredModel(value?: string | null): string | null {
+    return selectSocialAgentConfiguredModel(value, {
+      allowFast: false,
+    });
   }
 
   private deepSeekTimeoutMs(useCase?: 'planner'): number {
     if (useCase && this.modelRouter)
       return this.modelRouter.getTimeout(useCase);
     const configured = Number(
-      this.config.get<string>('SOCIAL_AGENT_INTENT_TIMEOUT_MS') ?? '2500',
+      this.config.get<string>('SOCIAL_AGENT_INTENT_TIMEOUT_MS') ??
+        this.config.get<string>('SOCIAL_AGENT_PLANNER_TIMEOUT_MS') ??
+        this.config.get<string>('SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS') ??
+        this.config.get<string>('DEEPSEEK_TIMEOUT_MS') ??
+        `${SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS}`,
     );
-    if (!Number.isFinite(configured) || configured <= 0) return 2500;
-    return Math.min(configured, 2500);
+    if (!Number.isFinite(configured) || configured <= 0) {
+      return SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS;
+    }
+    return Math.min(
+      Math.max(configured, SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS),
+      60_000,
+    );
+  }
+
+  private intentRouterMode(): 'hybrid' | 'llm_first' | 'rules_only' {
+    const value =
+      `${this.config.get<string>('SOCIAL_AGENT_INTENT_ROUTER_MODE') ?? ''}`
+        .trim()
+        .toLowerCase();
+    if (!value) return 'llm_first';
+    if (value === 'hybrid') return 'hybrid';
+    if (value === 'llm_first' || value === 'llm-first') return 'llm_first';
+    if (value === 'rules_only' || value === 'rules-only') return 'rules_only';
+    return 'llm_first';
   }
 
   private logModelCall(input: {
@@ -700,10 +1000,6 @@ export class SocialAgentIntentRouterService {
         ...(input.reason ? { reason: input.reason } : {}),
       }),
     );
-  }
-
-  private isAbortError(error: unknown): boolean {
-    return error instanceof Error && error.name === 'AbortError';
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { auditAgentPageModules } from '../debug/agentPageModuleAudit';
+import { auditAgentPageModules } from './utils/agentPageModuleAudit';
 
 describe('auditAgentPageModules', () => {
   it('returns missing modules from page code and a functional prompt', () => {

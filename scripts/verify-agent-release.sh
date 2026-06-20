@@ -53,6 +53,12 @@ run_agent_smoke_preflight() {
     --api-base-url "$(agent_smoke_api_base_url)"
 }
 
+step "Audit Agent release worktree cleanup boundaries"
+"${ROOT_DIR}/scripts/agent-release-worktree-audit.sh"
+
+step "Self-test Agent release worktree audit"
+"${ROOT_DIR}/scripts/test-agent-release-worktree-audit.sh"
+
 step "Audit Agent assistant-ui release invariants"
 pnpm --dir "${ROOT_DIR}/frontend" run check:agent-chat-release
 
@@ -64,9 +70,12 @@ pnpm --dir "${ROOT_DIR}/backend" run seed:agent-smoke:dry-run
 
 step "Run backend Agent route, stream, and acceptance checks"
 pnpm --dir "${ROOT_DIR}/backend" exec jest \
+  src/config/production-env-readiness.spec.ts \
   src/agent-gateway/agent-control.controller.spec.ts \
   src/agent-gateway/agent-run-checkpoint.service.spec.ts \
   src/agent-gateway/social-agent-context-hydrator.service.spec.ts \
+  src/agent-gateway/social-agent-context-window.spec.ts \
+  src/agent-gateway/social-agent-context-window-boundary.spec.ts \
   src/agent-gateway/social-agent-event-store.service.spec.ts \
   src/agent-gateway/social-agent-event-v2.service.spec.ts \
   src/agent-gateway/social-agent-task-memory-state-machine.service.spec.ts \
@@ -75,15 +84,43 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-codex-life-graph-governance.service.spec.ts \
   src/agent-gateway/social-codex-trace-eval.service.spec.ts \
   src/agent-gateway/social-codex-runtime-policy.service.spec.ts \
+  src/agent-gateway/agent-approval.service.spec.ts \
+  src/agent-gateway/agent-approval-dispatcher.service.spec.ts \
+  src/agent-gateway/user-facing-agent-response.spec.ts \
+  src/agent-gateway/social-agent-approval-tool.presenter.spec.ts \
+  src/agent-gateway/social-agent-candidate-action-approval.presenter.spec.ts \
   src/agent-gateway/social-agent-chat.acceptance.spec.ts \
+  src/agent-gateway/social-agent-brain.service.spec.ts \
   src/agent-gateway/social-agent-intent-router.service.spec.ts \
   src/agent-gateway/social-agent-chat.controller.spec.ts \
+  src/agent-gateway/social-agent-chat-llm.service.spec.ts \
+  src/agent-gateway/social-agent-chat-llm-prompts.spec.ts \
+  src/agent-gateway/social-agent-chat-memory.presenter.spec.ts \
+  src/agent-gateway/social-agent-deepseek-resilience.spec.ts \
+  src/agent-gateway/social-agent-deepseek-quality-boundary.spec.ts \
+  src/agent-gateway/social-agent-fallback-source-boundary.spec.ts \
+  src/agent-gateway/social-agent-final-response.service.spec.ts \
+  src/agent-gateway/social-agent-planner.service.spec.ts \
   src/agent-gateway/social-agent-route-search-turn.service.spec.ts \
+  src/agent-gateway/social-agent-model-router.service.spec.ts \
+  src/agent-gateway/match-reasoner.service.spec.ts \
   src/agent-gateway/social-agent-reminder.service.spec.ts \
+  src/agent-gateway/social-agent-thread-id.util.spec.ts \
   src/agent-gateway/social-agent-long-term-memory.service.spec.ts \
+  src/agent-gateway/social-agent-candidate-score-breakdown.spec.ts \
   src/agent-gateway/social-agent-candidate-pool.service.spec.ts \
+  src/agent-gateway/social-agent-route-branch-boundary.spec.ts \
+  src/agent-gateway/fitmeet-subagent-worker-command.contract.spec.ts \
+  src/agent-gateway/fitmeet-subagent-worker-dispatcher.service.spec.ts \
+  src/agent-gateway/fitmeet-subagent-worker-runtime.service.spec.ts \
+  src/agent-gateway/fitmeet-subagent-worker.service.spec.ts \
+  src/agent-gateway/subagent-worker.cli.spec.ts \
+  src/agent-gateway/subagent-worker-queue.service.spec.ts \
   src/agent-gateway/social-agent-tool-policy.spec.ts \
   src/agent-gateway/social-agent-tool-execution-policy.service.spec.ts \
+  src/agent-gateway/social-agent-tool-executor.service.spec.ts \
+  src/agent-gateway/social-agent-tool-json-model.service.spec.ts \
+  src/agent-gateway/social-agent-tool-model.spec.ts \
   --runInBand
 
 step "Typecheck frontend assistant-ui Agent shell"
@@ -92,10 +129,15 @@ pnpm --dir "${ROOT_DIR}/frontend" exec tsc -b
 step "Run frontend assistant-ui Agent unit checks"
 pnpm --dir "${ROOT_DIR}/frontend" exec vitest run \
   src/test/agentAdapter.test.ts \
+  src/test/agentWorkspaceRuntime.test.ts \
+  src/test/AgentPageModuleAudit.test.ts \
+  src/test/AgentRouteIsolation.test.ts \
   src/test/AgentWorkspacePage.test.tsx \
   src/test/assistantUploadProgress.test.tsx \
+  src/test/discoverContent.test.ts \
   src/test/socialAgentApiCheckpointStream.test.ts \
   src/test/socialAgentApiReplay.test.ts \
+  src/test/toolProcessModel.test.ts \
   src/test/toolUiSchema.test.ts \
   --testTimeout=20000 \
   --reporter=default
@@ -128,10 +170,11 @@ fi
 
 if [ "${RUN_AGENT_SSE_ABORT_SMOKE}" = "true" ]; then
   step "Run real API smoke for Agent SSE abort"
+  step "Run real API smoke for Agent SSE visibility and abort"
   run_agent_smoke_preflight sse-abort
   pnpm --dir "${ROOT_DIR}/backend" run smoke:agent-sse-abort
 else
-  step "Skip real API smoke for Agent SSE abort"
+  step "Skip real API smoke for Agent SSE visibility and abort"
 fi
 
 printf '\n[DONE] Agent release verification passed\n'

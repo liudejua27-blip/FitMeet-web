@@ -1,5 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 
+import { cleanDisplayText } from '../common/display-text.util';
 import {
   readSocialAgentConversationBrainDecision,
   readSocialAgentCurrentAgentState,
@@ -39,14 +40,17 @@ export class SocialAgentActivitySearchService {
     route: SocialAgentIntentRouterResult;
     message: string;
     buildMemoryContext: (task: AgentTask) => unknown;
+    taskContext?: Record<string, unknown>;
   }): Promise<{
     activityResults: SocialAgentActivityResult[];
     assistantMessage: string;
   }> {
     const activityResults = await this.searchActivityResults(
       input.ownerUserId,
+      input.task,
       input.route,
       input.message,
+      input.taskContext,
     );
     this.metrics.recordActivitySearch(
       activityResults.length > 0,
@@ -62,6 +66,12 @@ export class SocialAgentActivitySearchService {
         matchScore: activity.matchScore,
       })),
       candidateCount: activityResults.length,
+      emptyReason:
+        activityResults.length === 0 ? 'no_real_candidates' : null,
+      nextStep:
+        activityResults.length > 0
+          ? '等待用户选择活动或继续筛选'
+          : '换城市、时间或活动类型，或确认发布约练卡到发现',
     });
     transitionSocialAgentState(input.task, 'activity_search_returned', {
       objective: 'activity_search',
@@ -81,7 +91,7 @@ export class SocialAgentActivitySearchService {
     const fallbackReply =
       activityResults.length > 0
         ? `已为你找到 ${activityResults.length} 条公开约练/活动意向，先放在下方卡片里。如果都不合适，告诉我"再找几条"或换个时间/活动，我再补搜候选人。`
-        : '当前没有找到符合条件的真实活动或公开约练卡片，可以换个城市、时间或活动类型再试。';
+        : '当前没有找到符合条件的真实活动或公开约练卡片。我不会编造活动；你可以换个城市、时间或活动类型再试，也可以确认发布约练卡到发现，让合适的人主动回应。';
     const assistantMessage = await this.generateActivitySearchAssistantMessage({
       task: input.task,
       message: input.message,
@@ -89,22 +99,27 @@ export class SocialAgentActivitySearchService {
       activityResults,
       fallbackReply,
       buildMemoryContext: input.buildMemoryContext,
+      taskContext: input.taskContext,
     });
     return { activityResults, assistantMessage };
   }
 
   private async searchActivityResults(
     ownerUserId: number,
+    task: AgentTask,
     route: SocialAgentIntentRouterResult,
     message: string,
+    taskContext?: Record<string, unknown>,
   ): Promise<SocialAgentActivityResult[]> {
     try {
+      const criteria = resolveActivitySearchCriteria(task, route, taskContext);
       const result = await this.candidatePool.searchActivity({
         ownerUserId,
-        city: route.entities.city,
-        activityType: route.entities.activityType,
-        locationPreference: route.entities.locationPreference,
-        timePreference: route.entities.timePreference,
+        taskId: task.id,
+        city: criteria.city,
+        activityType: criteria.activityType,
+        locationPreference: criteria.locationPreference,
+        timePreference: criteria.timePreference,
         rawText: message,
         limit: 5,
       });
@@ -146,6 +161,7 @@ export class SocialAgentActivitySearchService {
     activityResults: SocialAgentActivityResult[];
     fallbackReply: string;
     buildMemoryContext: (task: AgentTask) => unknown;
+    taskContext?: Record<string, unknown>;
   }): Promise<string> {
     if (!this.finalResponses) return input.fallbackReply;
     return this.finalResponses.generate({
@@ -153,12 +169,15 @@ export class SocialAgentActivitySearchService {
       intent: input.route.intent,
       route: input.route as unknown as Record<string, unknown>,
       agentState: readSocialAgentCurrentAgentState(input.task),
-      conversationHistory: buildSocialAgentLlmConversationHistory(input.task),
+      conversationHistory:
+        readConversationHistoryFromTaskContext(input.taskContext) ??
+        buildSocialAgentLlmConversationHistory(input.task),
       memoryContext: input.buildMemoryContext(input.task) as Record<
         string,
         unknown
       >,
-      taskContext: summarizeSocialAgentTaskMemoryForLlm(input.task),
+      taskContext:
+        input.taskContext ?? summarizeSocialAgentTaskMemoryForLlm(input.task),
       plannerDecision: readSocialAgentConversationBrainDecision(input.task),
       toolResults: [
         {
@@ -215,4 +234,156 @@ export class SocialAgentActivitySearchService {
       recordSocialAgentRecommendedCandidates(task, ownerIds);
     }
   }
+}
+
+function resolveActivitySearchCriteria(
+  task: AgentTask,
+  route: SocialAgentIntentRouterResult,
+  taskContext?: Record<string, unknown>,
+): {
+  city: string;
+  activityType: string;
+  locationPreference: string;
+  timePreference: string;
+} {
+  const slots = {
+    ...readActivitySearchTaskSlotValues(task),
+    ...readActivitySearchTaskContextSlotValues(taskContext),
+  };
+  const locationPreference =
+    cleanDisplayText(route.entities.locationPreference, '') ||
+    slots.location_text ||
+    '';
+  return {
+    city:
+      cleanDisplayText(route.entities.city, '') ||
+      inferActivitySearchCity(slots.geo_area || locationPreference),
+    activityType:
+      cleanDisplayText(route.entities.activityType, '') || slots.activity || '',
+    locationPreference,
+    timePreference:
+      cleanDisplayText(route.entities.timePreference, '') ||
+      slots.time_window ||
+      '',
+  };
+}
+
+function readConversationHistoryFromTaskContext(
+  taskContext?: Record<string, unknown>,
+): Array<Record<string, unknown>> | null {
+  const history = taskContext?.conversationHistory ?? taskContext?.recentMessages;
+  if (!Array.isArray(history)) return null;
+  const records = history.filter((item): item is Record<string, unknown> =>
+    isRecord(item),
+  );
+  return records.length > 0 ? records : null;
+}
+
+function readActivitySearchTaskContextSlotValues(
+  taskContext?: Record<string, unknown>,
+): Record<string, string> {
+  const directSlots = readActivitySlotValuesFromRecord(
+    isRecord(taskContext?.taskSlots) ? taskContext.taskSlots : {},
+  );
+  const constraints = isRecord(taskContext?.knownTaskSlotConstraints)
+    ? taskContext.knownTaskSlotConstraints
+    : {};
+  return {
+    ...readActivitySlotValuesFromKnownConstraints(constraints),
+    ...directSlots,
+  };
+}
+
+function readActivitySearchTaskSlotValues(task: AgentTask): Record<string, string> {
+  const memory = readSocialAgentTaskMemory(task);
+  const taskSlots = isRecord(memory.taskSlots) ? memory.taskSlots : {};
+  return {
+    ...readActivitySlotValuesFromRecord(taskSlots),
+    ...readActivitySlotValuesFromKnownConstraints(
+      isRecord(memory.knownTaskSlotConstraints)
+        ? memory.knownTaskSlotConstraints
+        : {},
+    ),
+  };
+}
+
+function readActivitySlotValuesFromRecord(
+  taskSlots: Record<string, unknown>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, slot] of Object.entries(taskSlots)) {
+    if (!isRecord(slot)) continue;
+    if (!isActivitySearchSlotUsable(key, slot)) continue;
+    const value = cleanDisplayText(slot.value, '');
+    if (value) out[key] = value;
+  }
+  return out;
+}
+
+function readActivitySlotValuesFromKnownConstraints(
+  constraints: Record<string, unknown>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const knownSlots = Array.isArray(constraints['knownSlots'])
+    ? constraints['knownSlots']
+    : [];
+  const doNotAskAgainFor = Array.isArray(constraints['doNotAskAgainFor'])
+    ? new Set(
+        constraints['doNotAskAgainFor']
+          .map((key) => cleanDisplayText(key, ''))
+          .filter(Boolean),
+      )
+    : new Set<string>();
+  for (const rawSlot of knownSlots) {
+    if (!isRecord(rawSlot)) continue;
+    const key = cleanDisplayText(rawSlot.key, '');
+    if (!key || out[key]) continue;
+    const value = cleanDisplayText(rawSlot.value, '');
+    if (!value) continue;
+    const state = cleanDisplayText(rawSlot.state, '');
+    if (
+      !doNotAskAgainFor.has(key) &&
+      !['answered', 'confirmed', 'completed', 'modified'].includes(state)
+    ) {
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+function isActivitySearchSlotUsable(
+  key: string,
+  slot: Record<string, unknown>,
+): boolean {
+  const value = cleanDisplayText(slot.value, '');
+  if (!value) return false;
+  const state = cleanDisplayText(slot.state, '');
+  const source = cleanDisplayText(slot.source, '');
+  if (state === 'missing') return false;
+  if (key === 'geo_area') return true;
+  if (
+    (key === 'activity' || key === 'time_window' || key === 'location_text') &&
+    (state === 'inferred' || source === 'inferred')
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function inferActivitySearchCity(value: string): string {
+  const text = cleanDisplayText(value, '');
+  if (!text) return '';
+  if (
+    /(青岛|崂山区|市南区|市北区|李沧区|黄岛区|青岛大学|五四广场|奥帆中心|石老人|浮山|麦岛|台东|栈桥)/.test(
+      text,
+    )
+  ) {
+    return '青岛';
+  }
+  return text;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }

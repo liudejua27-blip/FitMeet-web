@@ -1,19 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { UserFacingAgentResponse } from '../api/socialAgentApi';
+import type { SocialAgentEventV2, UserFacingAgentResponse } from '../api/socialAgentApi';
 import {
-  createMockAgentAdapter,
   createRealAgentAdapter,
   isRealAgentMode,
+  mapUserFacingAgentStreamEvent,
   mapAgentError,
-  mapLifecycleToFlow,
   resolveAgentAdapterMode,
   type AgentStreamEvent,
 } from '../components/agent-workspace/api';
+import { createMockAgentAdapter } from '../components/agent-workspace/api/mockAgentAdapter';
 
 describe('Agent adapter layer', () => {
   it('keeps production on the real adapter even when mock env flags are misconfigured', () => {
-    expect(resolveAgentAdapterMode({} as ImportMetaEnv)).toBe('mock');
+    expect(resolveAgentAdapterMode({} as ImportMetaEnv)).toBe('real');
     expect(resolveAgentAdapterMode({ PROD: true } as unknown as ImportMetaEnv)).toBe('real');
+    expect(resolveAgentAdapterMode({ MODE: 'production' } as unknown as ImportMetaEnv)).toBe(
+      'real',
+    );
     expect(
       resolveAgentAdapterMode({
         PROD: true,
@@ -55,8 +58,18 @@ describe('Agent adapter layer', () => {
     const response = await run;
 
     expect(response.response.cards[0]?.title).toBe('咖啡轻聊搭子');
-    expect(events.map((event) => event.type)).toContain('status');
     expect(events.map((event) => event.type)).toContain('progress');
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'progress',
+        id: 'social-codex:summary',
+        lifecycle: 'analyzing_intent',
+        metadata: expect.objectContaining({
+          displayMode: 'covering_status',
+          sourceProtocol: 'mock_agent_stream',
+        }),
+      }),
+    );
     expect(events.map((event) => ('lifecycle' in event ? event.lifecycle : null))).toContain(
       'searching_candidates',
     );
@@ -152,29 +165,7 @@ describe('Agent adapter layer', () => {
     expect(
       events.some((event) => 'lightStatus' in event && event.lightStatus === '正在筛选合适的人'),
     ).toBe(false);
-  });
-
-  it('maps lifecycle values to AntGuide state and target', () => {
-    expect(mapLifecycleToFlow('analyzing_intent')).toMatchObject({
-      antState: 'thinking',
-      antTarget: 'input',
-    });
-    expect(mapLifecycleToFlow('received')).toMatchObject({
-      antState: 'thinking',
-      antTarget: 'input',
-    });
-    expect(mapLifecycleToFlow('searching_candidates')).toMatchObject({
-      antState: 'discovering',
-      antTarget: 'recommendation',
-    });
-    expect(mapLifecycleToFlow('checking_safety')).toMatchObject({
-      antState: 'reminding',
-      antTarget: 'safetyCard',
-    });
-    expect(mapLifecycleToFlow('waiting_confirmation')).toMatchObject({
-      antState: 'confirming',
-      antTarget: 'confirmButton',
-    });
+    expect(events.some((event) => event.type === 'status')).toBe(false);
   });
 
   it('maps AgentError codes to user-facing copy', () => {
@@ -189,6 +180,41 @@ describe('Agent adapter layer', () => {
     expect(mapAgentError(new Error('safety blocked'))).toMatchObject({
       code: 'SAFETY_BLOCKED',
       lifecycle: 'checking_safety',
+    });
+    expect(
+      mapAgentError(
+        Object.assign(new Error('模型响应还没返回'), {
+          code: 'NETWORK_ERROR',
+          statusCode: 504,
+        }),
+      ),
+    ).toMatchObject({
+      code: 'NETWORK_ERROR',
+      retryable: true,
+      statusCode: 504,
+    });
+  });
+
+  it('keeps structured stream recovery notices when mapping AgentError', () => {
+    const error = Object.assign(new Error('FitMeet Agent 暂时没有顺利完成'), {
+      recoveryNotice: {
+        kind: 'timeout' as const,
+        title: '这次处理时间有点久',
+        message: '我已经保留当前对话。你可以重试，或者继续告诉我下一步。',
+        retryable: true,
+        source: 'stream_error' as const,
+      },
+    });
+
+    expect(mapAgentError(error)).toMatchObject({
+      code: 'SERVER_ERROR',
+      title: '这次处理时间有点久',
+      message: '我已经保留当前对话。你可以重试，或者继续告诉我下一步。',
+      retryable: true,
+      recoveryNotice: {
+        kind: 'timeout',
+        source: 'stream_error',
+      },
     });
   });
 
@@ -237,6 +263,7 @@ describe('Agent adapter layer', () => {
       runUserFacingStream: vi.fn().mockRejectedValue(new Error('network down')),
       handleMessage: vi.fn().mockResolvedValue(mockResponse()),
       performAction: vi.fn().mockResolvedValue(mockResponse()),
+      performActionStream: vi.fn().mockResolvedValue(mockResponse()),
       restoreSession: vi.fn().mockResolvedValue(null),
     };
     const adapter = createRealAgentAdapter(apiClient);
@@ -256,12 +283,262 @@ describe('Agent adapter layer', () => {
     expect(apiClient.handleMessage).not.toHaveBeenCalled();
   });
 
+  it('treats direct stream error events as recovery errors instead of UI events', async () => {
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockImplementation(async (_request, onEvent) => {
+        onEvent({
+          type: 'error',
+          code: 'NETWORK_ERROR',
+          message: '流式连接中断',
+          retryable: true,
+          recoveryNotice: {
+            kind: 'interrupted',
+            title: '刚才连接中断了',
+            message: '我已经保留当前对话，可以继续处理。',
+            retryable: true,
+            source: 'stream_error',
+          },
+        });
+        return mockResponse();
+      }),
+      handleMessage: vi.fn().mockResolvedValue(mockResponse()),
+      performAction: vi.fn().mockResolvedValue(mockResponse()),
+      performActionStream: vi.fn().mockResolvedValue(mockResponse()),
+      restoreSession: vi.fn().mockResolvedValue(null),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+    const events: AgentStreamEvent[] = [];
+
+    await expect(
+      adapter.run(
+        {
+          goal: '今晚青岛大学附近散步',
+          permissionMode: 'limited_auto',
+          idempotencyKey: 'run-direct-error-event',
+        },
+        { onEvent: (event) => events.push(event) },
+      ),
+    ).rejects.toMatchObject({
+      code: 'NETWORK_ERROR',
+      title: '刚才连接中断了',
+      recoveryNotice: expect.objectContaining({
+        source: 'stream_error',
+      }),
+    });
+
+    expect(events).toEqual([]);
+    expect(apiClient.handleMessage).not.toHaveBeenCalled();
+  });
+
+  it('uses the ordinary message stream for conversation turns without an active task', async () => {
+    const streamed = { ...mockResponse(), assistantMessage: '这是普通聊天回复。' };
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockResolvedValue(streamed),
+      handleMessageStream: vi.fn().mockImplementation(async (_request, onEvent) => {
+        onEvent({
+          type: 'assistant_delta',
+          messageId: 'normal-message-1',
+          delta: '这是普通聊天回复。',
+        });
+        return streamed;
+      }),
+      handleMessage: vi.fn().mockResolvedValue(streamed),
+      performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
+      restoreSession: vi.fn().mockResolvedValue(null),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+    const events: AgentStreamEvent[] = [];
+
+    await adapter.run(
+      {
+        goal: '帮我解释一下渐进式超负荷',
+        permissionMode: 'limited_auto',
+        idempotencyKey: 'run-normal-chat',
+        conversationIntent: 'conversation',
+        clientContext: { source: 'web', threadId: 'thread-normal' },
+      },
+      { onEvent: (event) => events.push(event) },
+    );
+
+    expect(apiClient.handleMessageStream).toHaveBeenCalledWith(
+      {
+        message: '帮我解释一下渐进式超负荷',
+        taskId: undefined,
+        idempotencyKey: 'run-normal-chat',
+        conversationIntent: 'conversation',
+        clientContext: {
+          source: 'web',
+          threadId: 'thread-normal',
+          conversationIntent: 'conversation',
+        },
+      },
+      expect.any(Function),
+      undefined,
+    );
+    expect(apiClient.runUserFacingStream).not.toHaveBeenCalled();
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'assistant_delta',
+        messageId: 'normal-message-1',
+        delta: '这是普通聊天回复。',
+      }),
+    ]);
+  });
+
+  it('keeps social turns on the user-facing run stream', async () => {
+    const streamed = mockResponse();
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockResolvedValue(streamed),
+      handleMessageStream: vi.fn().mockResolvedValue(streamed),
+      handleMessage: vi.fn().mockResolvedValue(streamed),
+      performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
+      restoreSession: vi.fn().mockResolvedValue(null),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+
+    await adapter.run(
+      {
+        goal: '我想今晚在青岛大学找人散步',
+        permissionMode: 'limited_auto',
+        idempotencyKey: 'run-social-chat',
+        conversationIntent: 'social',
+      },
+      { onEvent: vi.fn() },
+    );
+
+    expect(apiClient.runUserFacingStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        goal: '我想今晚在青岛大学找人散步',
+        conversationIntent: 'social',
+        idempotencyKey: 'run-social-chat',
+      }),
+      expect.any(Function),
+      undefined,
+    );
+    expect(apiClient.handleMessageStream).not.toHaveBeenCalled();
+  });
+
+  it('uses task message stream for ordinary conversation inside an active task', async () => {
+    const streamed = mockResponse();
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockResolvedValue(streamed),
+      handleMessageStream: vi.fn().mockResolvedValue(streamed),
+      handleMessage: vi.fn().mockResolvedValue(streamed),
+      performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
+      restoreSession: vi.fn().mockResolvedValue(null),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+
+    await adapter.run(
+      {
+        goal: '继续刚才的约练任务',
+        permissionMode: 'limited_auto',
+        taskId: 77,
+        idempotencyKey: 'run-task-followup',
+        conversationIntent: 'conversation',
+      },
+      { onEvent: vi.fn() },
+    );
+
+    expect(apiClient.handleMessageStream).toHaveBeenCalledWith(
+      {
+        message: '继续刚才的约练任务',
+        taskId: 77,
+        idempotencyKey: 'run-task-followup',
+        conversationIntent: 'conversation',
+        clientContext: undefined,
+      },
+      expect.any(Function),
+      undefined,
+    );
+    expect(apiClient.runUserFacingStream).not.toHaveBeenCalled();
+  });
+
+  it('derives the task id from a canonical thread id before sending a follow-up', async () => {
+    const streamed = mockResponse();
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockResolvedValue(streamed),
+      handleMessageStream: vi.fn().mockResolvedValue(streamed),
+      handleMessage: vi.fn().mockResolvedValue(streamed),
+      performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
+      restoreSession: vi.fn().mockResolvedValue(null),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+
+    await adapter.run(
+      {
+        goal: '继续刚才青岛大学散步的约练任务',
+        permissionMode: 'limited_auto',
+        taskId: null,
+        idempotencyKey: 'run-thread-bound-followup',
+        conversationIntent: 'conversation',
+        clientContext: { source: 'web', threadId: 'agent-task:77' },
+      },
+      { onEvent: vi.fn() },
+    );
+
+    expect(apiClient.handleMessageStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: '继续刚才青岛大学散步的约练任务',
+        taskId: 77,
+        clientContext: expect.objectContaining({
+          threadId: 'agent-task:77',
+          conversationIntent: 'conversation',
+        }),
+      }),
+      expect.any(Function),
+      undefined,
+    );
+    expect(apiClient.runUserFacingStream).not.toHaveBeenCalled();
+  });
+
+  it('keeps active social task execution on the user-facing run stream', async () => {
+    const streamed = mockResponse();
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockResolvedValue(streamed),
+      handleMessageStream: vi.fn().mockResolvedValue(streamed),
+      handleMessage: vi.fn().mockResolvedValue(streamed),
+      performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
+      restoreSession: vi.fn().mockResolvedValue(null),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+
+    await adapter.run(
+      {
+        goal: '可以，继续帮我找人',
+        permissionMode: 'limited_auto',
+        taskId: 77,
+        idempotencyKey: 'run-task-social-followup',
+        conversationIntent: 'social',
+      },
+      { onEvent: vi.fn() },
+    );
+
+    expect(apiClient.runUserFacingStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        goal: '可以，继续帮我找人',
+        taskId: 77,
+        conversationIntent: 'social',
+        idempotencyKey: 'run-task-social-followup',
+      }),
+      expect.any(Function),
+      undefined,
+    );
+    expect(apiClient.handleMessageStream).not.toHaveBeenCalled();
+  });
+
   it('recovers an interrupted real stream from the session endpoint when a task exists', async () => {
     const restored = mockResponse();
     const apiClient = {
       runUserFacingStream: vi.fn().mockRejectedValue(new Error('network down')),
       handleMessage: vi.fn().mockResolvedValue(mockResponse()),
       performAction: vi.fn().mockResolvedValue(mockResponse()),
+      performActionStream: vi.fn().mockResolvedValue(mockResponse()),
       restoreSession: vi.fn().mockResolvedValue({
         hasSession: true,
         activeTaskId: 77,
@@ -289,7 +566,7 @@ describe('Agent adapter layer', () => {
     expect(events.at(-1)).toMatchObject({ type: 'result', result: restored });
   });
 
-  it('preserves explicit SSE lifecycle values from the real adapter', async () => {
+  it('folds legacy status events into the Social Codex covering summary', async () => {
     const streamed = mockResponse();
     const apiClient = {
       runUserFacingStream: vi.fn().mockImplementation(async (_request, onEvent) => {
@@ -302,6 +579,7 @@ describe('Agent adapter layer', () => {
       }),
       handleMessage: vi.fn().mockResolvedValue(streamed),
       performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
       restoreSession: vi.fn().mockResolvedValue(null),
     };
     const adapter = createRealAgentAdapter(apiClient);
@@ -317,8 +595,23 @@ describe('Agent adapter layer', () => {
     );
 
     expect(events[0]).toMatchObject({
-      type: 'status',
+      type: 'progress',
+      id: 'social-codex:summary',
+      kind: 'status',
+      title: '正在读取你的偏好',
+      state: 'running',
       lifecycle: 'reading_life_graph',
+      metadata: expect.objectContaining({
+        processType: 'run_summary',
+        originalProcessType: 'legacy_status',
+        sourceProtocol: 'legacy_agent_stream',
+        taskId: null,
+        threadId: null,
+        displayMode: 'covering_status',
+        updateModel: 'latest_state',
+        defaultVisibleCount: 1,
+        historyVisibility: 'collapsed',
+      }),
     });
   });
 
@@ -341,6 +634,7 @@ describe('Agent adapter layer', () => {
       }),
       handleMessage: vi.fn().mockResolvedValue(streamed),
       performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
       restoreSession: vi.fn().mockResolvedValue(null),
     };
     const adapter = createRealAgentAdapter(apiClient);
@@ -390,6 +684,7 @@ describe('Agent adapter layer', () => {
       }),
       handleMessage: vi.fn().mockResolvedValue(streamed),
       performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
       restoreSession: vi.fn().mockResolvedValue(null),
     };
     const adapter = createRealAgentAdapter(apiClient);
@@ -416,7 +711,310 @@ describe('Agent adapter layer', () => {
     ]);
   });
 
-  it('preserves step-level tool identities from real stream events', async () => {
+  it('preserves fallback source on SocialAgentEventV2 assistant deltas', async () => {
+    const streamed = {
+      ...mockResponse(),
+      assistantMessageSource: 'fallback' as const,
+    };
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockImplementation(async (_request, onEvent) => {
+        onEvent({
+          type: 'assistant.delta',
+          eventId: 'run-v2-fallback-delta:1',
+          seq: 1,
+          createdAt: '2026-06-17T00:00:00.000Z',
+          userId: '7',
+          threadId: '202',
+          taskId: 202,
+          runId: 'run-v2-fallback-delta',
+          stage: 'detect_social_intent',
+          visibility: 'user_visible',
+          messageId: 'm-v2-fallback',
+          payload: {
+            delta: '我已经保留当前对话，可以继续处理。',
+            source: 'fallback',
+          },
+        });
+        return streamed;
+      }),
+      handleMessage: vi.fn().mockResolvedValue(streamed),
+      performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
+      restoreSession: vi.fn().mockResolvedValue(null),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+    const events: AgentStreamEvent[] = [];
+
+    await adapter.run(
+      {
+        goal: '今晚青岛大学附近散步',
+        permissionMode: 'limited_auto',
+        idempotencyKey: 'run-v2-fallback-delta',
+      },
+      { onEvent: (event) => events.push(event) },
+    );
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'assistant_delta',
+        messageId: 'm-v2-fallback',
+        delta: '我已经保留当前对话，可以继续处理。',
+        source: 'fallback',
+      }),
+    ]);
+  });
+
+  it('deduplicates dual-protocol assistant deltas emitted for compatibility', async () => {
+    const streamed = mockResponse();
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockImplementation(async (_request, onEvent) => {
+        onEvent({
+          type: 'assistant_delta',
+          messageId: 'm-dual',
+          delta: '我会先理解你的需求。',
+          source: 'llm',
+        });
+        onEvent({
+          type: 'assistant.delta',
+          eventId: 'run-v2-dual-delta:1',
+          seq: 1,
+          createdAt: '2026-06-17T00:00:00.000Z',
+          userId: '7',
+          threadId: '202',
+          taskId: 202,
+          runId: 'run-v2-dual-delta',
+          stage: 'detect_social_intent',
+          visibility: 'user_visible',
+          messageId: 'm-dual',
+          payload: {
+            delta: '我会先理解你的需求。',
+            source: 'llm',
+          },
+        });
+        onEvent({
+          type: 'assistant_delta',
+          messageId: 'm-dual',
+          delta: '然后继续处理。',
+          source: 'llm',
+        });
+        onEvent({
+          type: 'assistant.delta',
+          eventId: 'run-v2-dual-delta:2',
+          seq: 2,
+          createdAt: '2026-06-17T00:00:00.000Z',
+          userId: '7',
+          threadId: '202',
+          taskId: 202,
+          runId: 'run-v2-dual-delta',
+          stage: 'detect_social_intent',
+          visibility: 'user_visible',
+          messageId: 'm-dual',
+          payload: {
+            delta: '然后继续处理。',
+            source: 'llm',
+          },
+        });
+        return streamed;
+      }),
+      handleMessage: vi.fn().mockResolvedValue(streamed),
+      performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
+      restoreSession: vi.fn().mockResolvedValue(null),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+    const events: AgentStreamEvent[] = [];
+
+    await adapter.run(
+      {
+        goal: '今晚青岛大学附近散步',
+        permissionMode: 'limited_auto',
+        idempotencyKey: 'run-v2-dual-delta',
+      },
+      { onEvent: (event) => events.push(event) },
+    );
+
+    expect(
+      events
+        .filter((event): event is Extract<AgentStreamEvent, { type: 'assistant_delta' }> =>
+          event.type === 'assistant_delta',
+        )
+        .map((event) => event.delta),
+    ).toEqual(['我会先理解你的需求。', '然后继续处理。']);
+  });
+
+  it('uses the V2 assistant delta payload messageId when old events miss the envelope messageId', async () => {
+    const streamed = mockResponse();
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockImplementation(async (_request, onEvent) => {
+        onEvent({
+          type: 'assistant.delta',
+          eventId: 'run-v2-payload-message:1',
+          seq: 1,
+          createdAt: '2026-06-17T00:00:00.000Z',
+          userId: '7',
+          threadId: '202',
+          taskId: 202,
+          runId: 'run-v2-payload-message',
+          stage: 'detect_social_intent',
+          visibility: 'user_visible',
+          payload: {
+            delta: '我会继续沿着这段会话处理。',
+            messageId: 'm-v2-payload-only',
+            source: 'llm',
+          },
+        });
+        return streamed;
+      }),
+      handleMessage: vi.fn().mockResolvedValue(streamed),
+      performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
+      restoreSession: vi.fn().mockResolvedValue(null),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+    const events: AgentStreamEvent[] = [];
+
+    await adapter.run(
+      {
+        goal: '继续刚才的约练任务',
+        permissionMode: 'limited_auto',
+        idempotencyKey: 'run-v2-payload-message',
+      },
+      { onEvent: (event) => events.push(event) },
+    );
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'assistant_delta',
+        messageId: 'm-v2-payload-only',
+        delta: '我会继续沿着这段会话处理。',
+        source: 'llm',
+      }),
+    ]);
+  });
+
+  it('sanitizes SocialAgentEventV2 display text before it reaches process UI', async () => {
+    const streamed = mockResponse();
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockImplementation(async (_request, onEvent) => {
+        onEvent({
+          type: 'visible_process.delta',
+          eventId: 'run-v2-sanitize:1',
+          seq: 1,
+          createdAt: '2026-06-17T00:00:00.000Z',
+          userId: '7',
+          threadId: '202',
+          taskId: 202,
+          runId: 'run-v2-sanitize',
+          stage: 'search_candidates',
+          visibility: 'user_visible',
+          display: {
+            title: 'route_search_turn',
+            detail: 'hydrate_context',
+            state: 'running',
+          },
+        });
+        onEvent({
+          type: 'tool.started',
+          eventId: 'run-v2-sanitize:2',
+          seq: 2,
+          createdAt: '2026-06-17T00:00:01.000Z',
+          userId: '7',
+          threadId: '202',
+          taskId: 202,
+          runId: 'run-v2-sanitize',
+          stage: 'search_candidates',
+          visibility: 'user_visible',
+          display: {
+            title: '正在调用 tool_call_started',
+            detail: 'hydrate_context planner payload traceId',
+            state: 'running',
+          },
+        });
+        onEvent({
+          type: 'candidate_search.started',
+          eventId: 'run-v2-sanitize:3',
+          seq: 3,
+          createdAt: '2026-06-17T00:00:02.000Z',
+          userId: '7',
+          threadId: '202',
+          taskId: 202,
+          runId: 'run-v2-sanitize',
+          stage: 'search_candidates',
+          visibility: 'user_visible',
+          display: {
+            title: '正在理解你的需求',
+            detail: '我们已经理解你的需求，下一步处理',
+            state: 'running',
+          },
+        });
+        return streamed;
+      }),
+      handleMessage: vi.fn().mockResolvedValue(streamed),
+      performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
+      restoreSession: vi.fn().mockResolvedValue(null),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+    const events: AgentStreamEvent[] = [];
+
+    await adapter.run(
+      {
+        goal: '周末下午，散步，崂山区青岛大学',
+        permissionMode: 'limited_auto',
+        idempotencyKey: 'run-v2-sanitize',
+      },
+      { onEvent: (event) => events.push(event) },
+    );
+
+    const progressEvents = events.filter((event) => event.type === 'progress');
+    expect(progressEvents).toEqual([
+      expect.objectContaining({
+        id: 'social-codex:summary',
+        title: '正在筛选公开可发现的人',
+        detail: '正在读取你的偏好',
+        metadata: expect.objectContaining({
+          processType: 'run_summary',
+          source: 'social_agent_event_v2',
+          displayMode: 'covering_status',
+          updateModel: 'latest_state',
+          defaultVisibleCount: 1,
+          historyVisibility: 'collapsed',
+        }),
+      }),
+      expect.objectContaining({
+        id: 'social-codex:summary',
+        title: '正在筛选公开可发现的人',
+        detail: '只使用公开可发现的信息，联系对方前仍需要你确认。',
+        metadata: expect.objectContaining({
+          processType: 'run_summary',
+          source: 'social_agent_event_v2',
+          displayMode: 'covering_status',
+          updateModel: 'latest_state',
+          defaultVisibleCount: 1,
+          historyVisibility: 'collapsed',
+        }),
+      }),
+      expect.objectContaining({
+        id: 'social-codex:summary',
+        title: '正在筛选公开可发现的人',
+        detail: '只使用公开可发现的信息，联系对方前仍需要你确认。',
+        metadata: expect.objectContaining({
+          processType: 'run_summary',
+          originalProcessType: 'candidate_search',
+          stageLabel: '查找候选',
+          displayMode: 'covering_status',
+          updateModel: 'latest_state',
+          defaultVisibleCount: 1,
+          historyVisibility: 'collapsed',
+        }),
+      }),
+    ]);
+    expect(JSON.stringify(progressEvents)).not.toMatch(
+      /route_search_turn|hydrate_context|tool_call_started|planner|payload|traceId/i,
+    );
+  });
+
+  it('collapses legacy tool stream events into one cover-style process row while preserving identities', async () => {
     const streamed = mockResponse();
     const apiClient = {
       runUserFacingStream: vi.fn().mockImplementation(async (_request, onEvent) => {
@@ -450,10 +1048,25 @@ describe('Agent adapter layer', () => {
           detail: '正在筛选合适的人',
           status: 'done',
         });
+        onEvent({
+          type: 'progress',
+          lifecycle: 'searching_candidates',
+          id: 'rank.candidates:2',
+          kind: 'tool',
+          title: '正在处理这一步',
+          detail: '正在筛选合适的人',
+          state: 'done',
+          metadata: {
+            stepId: 'rank.candidates:2',
+            agentName: 'Social Match Agent',
+            toolName: 'social_match_search_turn',
+          },
+        });
         return streamed;
       }),
       handleMessage: vi.fn().mockResolvedValue(streamed),
       performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
       restoreSession: vi.fn().mockResolvedValue(null),
     };
     const adapter = createRealAgentAdapter(apiClient);
@@ -469,12 +1082,26 @@ describe('Agent adapter layer', () => {
     );
 
     const progressEvents = events.filter((event) => event.type === 'progress');
-    expect(progressEvents).toHaveLength(3);
+    expect(progressEvents).toHaveLength(4);
     expect(progressEvents.map((event) => event.id)).toEqual([
-      'rank.candidates:2',
-      'rank.candidates:2',
-      'rank.candidates:2',
+      'social-codex:summary',
+      'social-codex:summary',
+      'social-codex:summary',
+      'social-codex:summary',
     ]);
+    expect(progressEvents.map((event) => event.title)).toEqual([
+      '正在筛选合适的人',
+      '正在筛选公开可发现的人',
+      '已筛选公开可发现的人',
+      '已筛选公开可发现的人',
+    ]);
+    expect(progressEvents.every((event) => event.kind === 'status')).toBe(true);
+    expect(
+      progressEvents.every((event) => event.metadata?.processType === 'run_summary'),
+    ).toBe(true);
+    expect(
+      progressEvents.every((event) => event.metadata?.sourceProtocol === 'legacy_agent_stream'),
+    ).toBe(true);
     expect(progressEvents.every((event) => event.metadata?.stepId === 'rank.candidates:2')).toBe(
       true,
     );
@@ -486,7 +1113,195 @@ describe('Agent adapter layer', () => {
     ).toBe(true);
   });
 
-  it('maps SocialAgentEventV2 visible process events to public progress rows', async () => {
+  it('collapses legacy progress events with explicit processType into the cover status row', async () => {
+    const streamed = mockResponse();
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockImplementation(async (_request, onEvent) => {
+        onEvent({
+          type: 'progress',
+          lifecycle: 'analyzing_intent',
+          id: 'slots:time-location',
+          kind: 'status',
+          title: 'slot_filled',
+          detail: '已记录：周末下午、散步、青岛大学附近',
+          state: 'done',
+          metadata: {
+            processType: 'slot_memory',
+            stepId: 'slots:time-location',
+            agentName: 'Life Graph Agent',
+            toolName: 'extract_social_slots',
+          },
+        });
+        onEvent({
+          type: 'progress',
+          lifecycle: 'searching_candidates',
+          id: 'candidate-search',
+          kind: 'tool',
+          title: 'tool_call_started',
+          detail: 'candidate search planner payload',
+          state: 'running',
+          metadata: {
+            processType: 'candidate_search',
+            stepId: 'candidate-search',
+            agentName: 'Social Match Agent',
+            toolName: 'search_public_candidates',
+          },
+        });
+        return streamed;
+      }),
+      handleMessage: vi.fn().mockResolvedValue(streamed),
+      performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
+      restoreSession: vi.fn().mockResolvedValue(null),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+    const events: AgentStreamEvent[] = [];
+
+    await adapter.run(
+      {
+        goal: '周末下午，散步，青岛大学附近，帮我找人',
+        permissionMode: 'limited_auto',
+        idempotencyKey: 'run-legacy-explicit-process',
+      },
+      { onEvent: (event) => events.push(event) },
+    );
+
+    const progressEvents = events.filter((event) => event.type === 'progress');
+    expect(progressEvents).toHaveLength(2);
+    expect(progressEvents.map((event) => event.id)).toEqual([
+      'social-codex:summary',
+      'social-codex:summary',
+    ]);
+    expect(
+      progressEvents.every((event) => event.metadata?.processType === 'run_summary'),
+    ).toBe(true);
+    expect(progressEvents.map((event) => event.metadata?.originalProcessType)).toEqual([
+      'slot_memory',
+      'candidate_search',
+    ]);
+    expect(progressEvents[0]).toEqual(
+      expect.objectContaining({
+        title: '已记住你刚补充的信息',
+        detail: '已记录：周末下午、散步、青岛大学附近',
+        state: 'done',
+      }),
+    );
+    expect(progressEvents[1]).toEqual(
+      expect.objectContaining({
+        title: '正在筛选公开可发现的人',
+        detail: undefined,
+        state: 'running',
+      }),
+    );
+    expect(JSON.stringify(progressEvents)).not.toMatch(
+      /tool_call_started|slot_filled|planner|payload/i,
+    );
+  });
+
+  it('maps every user-visible SocialAgentEventV2 type into assistant-ui consumable events', () => {
+    const eventTypes: SocialAgentEventV2['type'][] = [
+      'run.started',
+      'visible_process.delta',
+      'assistant.delta',
+      'tool.started',
+      'tool.progress',
+      'tool.done',
+      'slot.filled',
+      'slot.completed',
+      'memory.saved',
+      'opportunity_card.created',
+      'candidate_search.started',
+      'candidate_search.done',
+      'safety_check.done',
+      'approval.required',
+      'approval.resolved',
+      'run.completed',
+      'run.failed',
+    ];
+
+    const mapped = eventTypes.map((type, index) => {
+      const event: SocialAgentEventV2 = {
+        type,
+        eventId: `v2-contract-${index + 1}`,
+        seq: index + 1,
+        createdAt: '2026-06-17T00:00:00.000Z',
+        userId: '7',
+        threadId: 'agent-thread-1',
+        taskId: 202,
+        runId: 'run-v2-contract',
+        messageId: type === 'assistant.delta' ? 'assistant-v2-contract' : undefined,
+        stage:
+          type === 'candidate_search.started' || type === 'candidate_search.done'
+            ? 'search_candidates'
+            : type.startsWith('slot.')
+              ? 'slot_filling'
+              : type.startsWith('approval.')
+                ? 'approval'
+                : type === 'opportunity_card.created'
+                  ? 'create_opportunity_card'
+                  : type === 'safety_check.done'
+                    ? 'safety_filter'
+                    : 'hydrate_context',
+        visibility: 'user_visible',
+        display: {
+          title: '正在整理当前进展',
+          detail: '会用产品语言说明，不展示内部执行细节。',
+          state:
+            type === 'approval.required'
+              ? 'waiting'
+              : type === 'run.failed'
+                ? 'failed'
+                : type.endsWith('.done') ||
+                    type === 'slot.completed' ||
+                    type === 'memory.saved' ||
+                    type === 'opportunity_card.created' ||
+                    type === 'safety_check.done' ||
+                    type === 'approval.resolved' ||
+                    type === 'run.completed'
+                  ? 'done'
+                  : 'running',
+        },
+        payload: {
+          delta: type === 'assistant.delta' ? '我会继续处理。' : undefined,
+          source: type === 'assistant.delta' ? 'llm' : undefined,
+          slots:
+            type === 'slot.filled' || type === 'slot.completed'
+              ? {
+                  time_window: '周末下午',
+                  activity: '散步',
+                }
+              : undefined,
+          candidateCount: type === 'candidate_search.done' ? 3 : undefined,
+          approvalId: type === 'approval.required' ? 'approval-202' : undefined,
+          actionType: type === 'approval.required' ? 'send_invite' : undefined,
+          factCount: type === 'memory.saved' ? 2 : undefined,
+        },
+      };
+      return mapUserFacingAgentStreamEvent(event);
+    });
+
+    expect(mapped).toHaveLength(eventTypes.length);
+    expect(mapped.every(Boolean)).toBe(true);
+    expect(mapped.find((event) => event?.type === 'assistant_delta')).toEqual(
+      expect.objectContaining({
+        type: 'assistant_delta',
+        delta: '我会继续处理。',
+        source: 'llm',
+      }),
+    );
+    expect(
+      mapped
+        .filter((event): event is Extract<AgentStreamEvent, { type: 'progress' }> =>
+          event?.type === 'progress',
+        )
+        .map((event) => event.metadata?.sourceProtocol),
+    ).toEqual(expect.arrayContaining(['social_agent_event_v2']));
+    expect(JSON.stringify(mapped)).not.toMatch(
+      /tool_call_started|slot_filled|hydrate_context|planner|traceId|raw JSON|payload/i,
+    );
+  });
+
+  it('maps SocialAgentEventV2 visible process events to one cover-style public progress row', async () => {
     const streamed = mockResponse();
     const apiClient = {
       runUserFacingStream: vi.fn().mockImplementation(async (_request, onEvent) => {
@@ -574,6 +1389,7 @@ describe('Agent adapter layer', () => {
       }),
       handleMessage: vi.fn().mockResolvedValue(streamed),
       performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
       restoreSession: vi.fn().mockResolvedValue(null),
     };
     const adapter = createRealAgentAdapter(apiClient);
@@ -590,53 +1406,233 @@ describe('Agent adapter layer', () => {
 
     expect(response.taskId).toBe(202);
     const progressEvents = events.filter((event) => event.type === 'progress');
+    expect(progressEvents.map((event) => event.id)).toEqual([
+      'social-codex:summary',
+      'social-codex:summary',
+      'social-codex:summary',
+      'social-codex:summary',
+    ]);
     expect(progressEvents).toEqual([
       expect.objectContaining({
+        id: 'social-codex:summary',
         title: '正在读取你的偏好',
         lifecycle: 'reading_life_graph',
         state: 'running',
         metadata: expect.objectContaining({
           eventId: 'run-1:1',
           seq: 1,
+          threadId: '202',
           taskId: 202,
-          processType: 'visible_process',
+          processType: 'run_summary',
+          originalProcessType: 'visible_process',
+          sourceProtocol: 'social_agent_event_v2',
           stageLabel: '读取上下文',
           displayState: 'running',
         }),
       }),
       expect.objectContaining({
-        title: '已记录你的关键信息',
+        id: 'social-codex:summary',
+        title: '已确认：周末下午、散步、青岛大学附近',
         lifecycle: 'analyzing_intent',
         state: 'done',
-        detail: '周末下午、散步、青岛大学附近',
+        detail: undefined,
         metadata: expect.objectContaining({
-          processType: 'slot_memory',
+          processType: 'run_summary',
+          originalProcessType: 'slot_memory',
           stageLabel: '补齐信息',
         }),
       }),
       expect.objectContaining({
+        id: 'social-codex:summary',
         title: '正在筛选公开可发现的人',
-        detail: undefined,
+        detail: '只使用公开可发现的信息，联系对方前仍需要你确认。',
         lifecycle: 'searching_candidates',
         state: 'running',
         metadata: expect.objectContaining({
-          processType: 'tool_progress',
+          processType: 'run_summary',
+          originalProcessType: 'tool_progress',
           stageLabel: '查找候选',
         }),
       }),
       expect.objectContaining({
-        title: '找到合适机会',
+        id: 'social-codex:summary',
+        title: '已筛选公开可发现的人',
         detail: '找到 3 个公开可发现的人或活动。',
         lifecycle: 'searching_candidates',
         state: 'done',
         metadata: expect.objectContaining({
           candidateCount: 3,
-          processType: 'candidate_search',
+          processType: 'run_summary',
+          originalProcessType: 'candidate_search',
         }),
       }),
     ]);
     expect(JSON.stringify(progressEvents)).not.toMatch(/tool_call_started/);
     expect(JSON.stringify(progressEvents)).not.toMatch(/"runId"|"payload"|hydrate_context|planner/);
+  });
+
+  it('prefers replay.summary payload as the single cover-style process state', async () => {
+    const streamed = mockResponse();
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockImplementation(async (_request, onEvent) => {
+        onEvent({
+          type: 'run.completed',
+          eventId: 'run-2:9',
+          seq: 9,
+          createdAt: '2026-06-17T00:00:09.000Z',
+          userId: '7',
+          threadId: '202',
+          taskId: 202,
+          runId: 'run-2',
+          stage: 'life_graph_writeback',
+          visibility: 'user_visible',
+          display: {
+            title: '这一步处理完成',
+            detail: '泛化完成文案不应该覆盖摘要。',
+            state: 'done',
+          },
+          payload: {
+            summary: {
+              state: 'waiting',
+              title: '发送邀请前需要你确认',
+              detail: '确认前不会触达对方。',
+              displayMode: 'covering_status',
+              updateModel: 'latest_state',
+              defaultVisibleCount: 1,
+              historyVisibility: 'collapsed',
+              currentStage: 'approval',
+              currentEventId: 'approval-1',
+              currentSeq: 8,
+              pendingApproval: true,
+              candidateCount: 3,
+              activityCount: null,
+              hasOpportunityCard: true,
+              savedMemory: true,
+              visibleStepCount: 5,
+              expandable: true,
+            },
+          },
+        });
+        return streamed;
+      }),
+      handleMessage: vi.fn().mockResolvedValue(streamed),
+      performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
+      restoreSession: vi.fn().mockResolvedValue(null),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+    const events: AgentStreamEvent[] = [];
+
+    await adapter.run(
+      {
+        goal: '帮我发送邀请',
+        permissionMode: 'limited_auto',
+        idempotencyKey: 'run-v2-replay-summary',
+      },
+      { onEvent: (event) => events.push(event) },
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual(
+      expect.objectContaining({
+        type: 'progress',
+        id: 'social-codex:summary',
+        title: '发送邀请前需要你确认',
+        detail: '确认前不会触达对方。',
+        state: 'waiting',
+        metadata: expect.objectContaining({
+          source: 'replay.summary',
+          sourceProtocol: 'social_agent_event_v2',
+          processType: 'run_summary',
+          displayMode: 'covering_status',
+          updateModel: 'latest_state',
+          defaultVisibleCount: 1,
+          historyVisibility: 'collapsed',
+          currentStage: 'approval',
+          currentEventId: 'approval-1',
+          currentSeq: 8,
+          visibleStepCount: 5,
+          expandable: true,
+          pendingApproval: true,
+          candidateCount: 3,
+          hasOpportunityCard: true,
+          savedMemory: true,
+        }),
+      }),
+    );
+  });
+
+  it('keeps ordinary SocialAgentEventV2 process summaries from escalating into social intent', async () => {
+    const streamed = mockResponse();
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockImplementation(async (_request, onEvent) => {
+        onEvent({
+          type: 'visible_process.delta',
+          eventId: 'ordinary-v2:1',
+          seq: 1,
+          createdAt: '2026-06-17T00:00:00.000Z',
+          userId: '7',
+          threadId: 'thread-ordinary',
+          taskId: null,
+          runId: 'ordinary-v2',
+          stage: 'detect_social_intent',
+          visibility: 'user_visible',
+          display: {
+            title: '正在整理回复',
+            state: 'running',
+          },
+        });
+        onEvent({
+          type: 'visible_process.delta',
+          eventId: 'ordinary-v2:2',
+          seq: 2,
+          createdAt: '2026-06-17T00:00:01.000Z',
+          userId: '7',
+          threadId: 'thread-ordinary',
+          taskId: null,
+          runId: 'ordinary-v2',
+          stage: 'search_candidates',
+          visibility: 'user_visible',
+          display: {
+            title: '正在筛选公开可发现的人',
+            state: 'running',
+          },
+        });
+        return streamed;
+      }),
+      handleMessage: vi.fn().mockResolvedValue(streamed),
+      performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
+      restoreSession: vi.fn().mockResolvedValue(null),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+    const events: AgentStreamEvent[] = [];
+
+    await adapter.run(
+      {
+        goal: '先普通聊一下，然后再找人',
+        permissionMode: 'limited_auto',
+        idempotencyKey: 'ordinary-v2',
+      },
+      { onEvent: (event) => events.push(event) },
+    );
+
+    const progressEvents = events.filter((event) => event.type === 'progress');
+    expect(progressEvents).toHaveLength(2);
+    expect(progressEvents[0].metadata).toEqual(
+      expect.objectContaining({
+        processType: 'run_summary',
+        originalProcessType: 'visible_process',
+        surfaceIntent: 'conversation',
+      }),
+    );
+    expect(progressEvents[1].metadata).toEqual(
+      expect.objectContaining({
+        processType: 'run_summary',
+        originalProcessType: 'visible_process',
+        surfaceIntent: 'social',
+      }),
+    );
   });
 
   it('filters debug-only and internal SocialAgentEventV2 events before they reach the UI', async () => {
@@ -702,6 +1698,7 @@ describe('Agent adapter layer', () => {
       }),
       handleMessage: vi.fn().mockResolvedValue(streamed),
       performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
       restoreSession: vi.fn().mockResolvedValue(null),
     };
     const adapter = createRealAgentAdapter(apiClient);
@@ -723,7 +1720,8 @@ describe('Agent adapter layer', () => {
         title: '正在读取你的偏好',
         metadata: expect.objectContaining({
           eventId: 'run-filter:3',
-          processType: 'visible_process',
+          processType: 'run_summary',
+          originalProcessType: 'visible_process',
         }),
       }),
     );
@@ -780,6 +1778,7 @@ describe('Agent adapter layer', () => {
       }),
       handleMessage: vi.fn().mockResolvedValue(streamed),
       performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
       restoreSession: vi.fn().mockResolvedValue(null),
     };
     const adapter = createRealAgentAdapter(apiClient);
@@ -798,19 +1797,96 @@ describe('Agent adapter layer', () => {
     expect(progressEvents[0]).toEqual(
       expect.objectContaining({
         title: '正在检查安全边界',
-        detail: undefined,
+        detail: '涉及位置、联系方式和陌生人连接时会继续征得确认。',
       }),
     );
     expect(progressEvents[1]).toEqual(
       expect.objectContaining({
-        title: '已记录你的关键信息',
-        detail: '已确认：周末下午、散步、公共场所优先',
+        title: '已确认：周末下午、散步、公共场所优先',
+        detail: undefined,
         metadata: expect.objectContaining({
           slotSummary: '周末下午、散步、公共场所优先',
         }),
       }),
     );
     expect(JSON.stringify(progressEvents)).not.toMatch(/amap|36\.062123|120\.389456|坐标|地图链接/);
+  });
+
+  it('surfaces known task slot constraints as a lightweight remembered-state summary', async () => {
+    const streamed = mockResponse();
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockImplementation(async (_request, onEvent) => {
+        onEvent({
+          type: 'slot.completed',
+          eventId: 'run-known-slots:1',
+          seq: 1,
+          createdAt: '2026-06-17T00:00:00.000Z',
+          userId: '7',
+          threadId: '202',
+          taskId: 202,
+          runId: 'run-known-slots',
+          stage: 'slot_filling',
+          visibility: 'user_visible',
+          display: {
+            title: '已记录你的关键信息',
+            state: 'done',
+          },
+          payload: {
+            knownTaskSlotConstraints: {
+              treatAsHardConstraints: true,
+              knownSlots: [
+                { key: 'time_window', label: '时间', value: '今天晚上' },
+                { key: 'activity', label: '活动', value: '散步' },
+                { key: 'location_text', label: '地点', value: '青岛大学附近' },
+                {
+                  key: 'candidate_preference',
+                  label: '候选偏好',
+                  value: '公开资料带舞蹈相关标签的人优先',
+                },
+              ],
+              doNotAskAgainFor: ['time_window', 'activity', 'location_text'],
+              instruction: 'planner internal hard constraint',
+            },
+          },
+        });
+        return streamed;
+      }),
+      handleMessage: vi.fn().mockResolvedValue(streamed),
+      performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
+      restoreSession: vi.fn().mockResolvedValue(null),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+    const events: AgentStreamEvent[] = [];
+
+    await adapter.run(
+      {
+        goal: '今天晚上，青岛大学附近，找公开资料有舞蹈标签的人散步',
+        permissionMode: 'limited_auto',
+        idempotencyKey: 'run-v2-known-slots',
+      },
+      { onEvent: (event) => events.push(event) },
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual(
+      expect.objectContaining({
+        type: 'progress',
+        id: 'social-codex:summary',
+        title: '已确认：今天晚上、散步、青岛大学附近、公开资料带舞蹈相关标签的人优先',
+        detail: undefined,
+        state: 'done',
+        metadata: expect.objectContaining({
+          processType: 'run_summary',
+          originalProcessType: 'slot_memory',
+          slotSummary: '今天晚上、散步、青岛大学附近、公开资料带舞蹈相关标签的人优先',
+          displayMode: 'covering_status',
+        }),
+      }),
+    );
+    expect(JSON.stringify(events)).not.toMatch(
+      /knownTaskSlotConstraints|doNotAskAgainFor|hard constraint|planner internal|instruction/i,
+    );
   });
 
   it('maps sanitized Life Graph fact summaries without requiring raw proposals', async () => {
@@ -853,6 +1929,7 @@ describe('Agent adapter layer', () => {
       }),
       handleMessage: vi.fn().mockResolvedValue(streamed),
       performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
       restoreSession: vi.fn().mockResolvedValue(null),
     };
     const adapter = createRealAgentAdapter(apiClient);
@@ -868,13 +1945,15 @@ describe('Agent adapter layer', () => {
     );
 
     const memory = events.find(
-      (event) => event.type === 'progress' && event.metadata?.processType === 'memory',
+      (event) => event.type === 'progress' && event.metadata?.originalProcessType === 'memory',
     );
     expect(memory).toEqual(
       expect.objectContaining({
         detail: '已整理：常见活动偏好：散步；首次见面安全边界：公共场所优先',
         metadata: expect.objectContaining({
           lifeGraphFactCount: 2,
+          processType: 'run_summary',
+          originalProcessType: 'memory',
           taskId: 202,
         }),
       }),
@@ -932,6 +2011,7 @@ describe('Agent adapter layer', () => {
       }),
       handleMessage: vi.fn().mockResolvedValue(streamed),
       performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
       restoreSession: vi.fn().mockResolvedValue(null),
     };
     const adapter = createRealAgentAdapter(apiClient);
@@ -1007,6 +2087,7 @@ describe('Agent adapter layer', () => {
       }),
       handleMessage: vi.fn().mockResolvedValue(streamed),
       performAction: vi.fn().mockResolvedValue(streamed),
+      performActionStream: vi.fn().mockResolvedValue(streamed),
       restoreSession: vi.fn().mockResolvedValue(null),
     };
     const adapter = createRealAgentAdapter(apiClient);
@@ -1049,6 +2130,7 @@ describe('Agent adapter layer', () => {
       runUserFacingStream: vi.fn().mockResolvedValue(restored),
       handleMessage: vi.fn().mockResolvedValue(restored),
       performAction: vi.fn().mockResolvedValue(restored),
+      performActionStream: vi.fn().mockResolvedValue(restored),
       restoreSession: vi.fn().mockResolvedValue({
         hasSession: true,
         activeTaskId: 42,
@@ -1068,6 +2150,85 @@ describe('Agent adapter layer', () => {
       taskId: 42,
       response: restored,
     });
+  });
+
+  it('does not invent a generic assistant reply when restoring cards without text', async () => {
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockResolvedValue(mockResponse()),
+      handleMessage: vi.fn().mockResolvedValue(mockResponse()),
+      performAction: vi.fn().mockResolvedValue(mockResponse()),
+      performActionStream: vi.fn().mockResolvedValue(mockResponse()),
+      restoreSession: vi.fn().mockResolvedValue({
+        hasSession: true,
+        activeTaskId: 73,
+        task: { id: 73, permissionMode: 'limited_auto' },
+        messages: [],
+        result: {
+          lightStatus: '等待你确认',
+          permissionMode: 'limited_auto',
+          cards: [
+            {
+              id: 'approval-card',
+              type: 'approval_card',
+              title: '发送邀请前需要确认',
+              body: '确认前不会联系对方。',
+              status: 'pending',
+              data: { taskId: 73 },
+              actions: [],
+            },
+          ],
+          safeStatus: {
+            blocked: false,
+            level: 'medium',
+            boundaryNotes: [],
+            requiredConfirmations: ['发送邀请'],
+          },
+          pendingConfirmations: [],
+        },
+      }),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+
+    const response = await adapter.restoreSession(73);
+
+    expect(response).toMatchObject({
+      lifecycle: 'checking_safety',
+      taskId: 73,
+      response: expect.objectContaining({
+        assistantMessage: '',
+        lightStatus: '正在检查安全边界',
+        cards: [
+          expect.objectContaining({
+            id: 'approval-card',
+            title: '发送邀请前需要确认',
+          }),
+        ],
+      }),
+    });
+    expect(JSON.stringify(response)).not.toContain('我已经恢复了上一次 Agent 会话');
+  });
+
+  it('does not resurrect an empty or failed task session with an automatic continuation message', async () => {
+    const restored = mockResponse();
+    const apiClient = {
+      runUserFacingStream: vi.fn().mockResolvedValue(restored),
+      handleMessage: vi.fn().mockResolvedValue(restored),
+      performAction: vi.fn().mockResolvedValue(restored),
+      performActionStream: vi.fn().mockResolvedValue(restored),
+      restoreSession: vi.fn().mockResolvedValue({
+        hasSession: false,
+        activeTaskId: null,
+        task: null,
+        messages: [],
+        result: null,
+      }),
+    };
+    const adapter = createRealAgentAdapter(apiClient);
+
+    await expect(adapter.restoreSession(68)).resolves.toBeNull();
+
+    expect(apiClient.restoreSession).toHaveBeenCalledWith(68);
+    expect(apiClient.handleMessage).not.toHaveBeenCalled();
   });
 });
 

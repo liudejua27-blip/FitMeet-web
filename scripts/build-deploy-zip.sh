@@ -11,6 +11,7 @@ TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fitmeet-ecs-deploy.XXXXXX")"
 STAGE_DIR="${TMP_DIR}/FitMeet-web"
 RUN_BACKEND_DOCKER_BUILD_CHECK="${RUN_BACKEND_DOCKER_BUILD_CHECK:-true}"
 RUN_AGENT_RELEASE_VERIFY="${RUN_AGENT_RELEASE_VERIFY:-true}"
+RUN_AGENT_RELEASE_WORKTREE_AUDIT="${RUN_AGENT_RELEASE_WORKTREE_AUDIT:-true}"
 RELEASE_COMMIT="$(git -C "${ROOT_DIR}" rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')"
 RELEASE_BUILT_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 RELEASE_SOURCE="deploy_zip"
@@ -64,6 +65,14 @@ mkdir -p "${OUTPUT_DIR}"
 rm -f "${OUTPUT}"
 rm -f "${CHECKSUM_OUTPUT}"
 rm -f "${INSTALLER_OUTPUT}"
+
+if [ "${RUN_AGENT_RELEASE_WORKTREE_AUDIT}" = "true" ]; then
+  step "Audit release worktree is clean"
+  "${ROOT_DIR}/scripts/agent-release-worktree-audit.sh" --strict
+else
+  step "Skip release worktree strict audit"
+  echo "[WARN] RUN_AGENT_RELEASE_WORKTREE_AUDIT=${RUN_AGENT_RELEASE_WORKTREE_AUDIT}. Do not use this skip for production ECS packages." >&2
+fi
 
 step "Install frontend dependencies"
 pnpm --dir "${ROOT_DIR}/frontend" install --frozen-lockfile
@@ -134,10 +143,15 @@ require_path "scripts/ecs-install-release.sh"
 require_path "scripts/ecs-release-diagnose.sh"
 require_path "scripts/ecs-upload-release.sh"
 require_path "scripts/ecs-workbench-install-plan.sh"
+require_path "scripts/ecs-backend-pnpm.sh"
 require_path "scripts/ecs-host-preflight.sh"
 require_path "scripts/ecs-post-deploy-smoke.sh"
+require_path "scripts/verify-agent-goal-production.sh"
 require_path "scripts/verify-agent-release.sh"
 require_path "scripts/agent-release-matrix.sh"
+require_path "scripts/agent-release-worktree-audit.sh"
+require_path "scripts/stage-agent-release-bucket.sh"
+require_path "scripts/test-agent-release-worktree-audit.sh"
 require_path "scripts/agent-remote-smoke-preflight.sh"
 require_path "scripts/agent-remote-smoke-evidence.sh"
 require_path "frontend/scripts/qa-agent-chat-production.mjs"
@@ -147,6 +161,9 @@ require_path "docs/social-codex-runtime.md"
 
 require_path "backend/src/agent-gateway/social-agent-context-hydrator.service.ts"
 require_path "backend/src/agent-gateway/social-agent-context-hydrator.service.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-context-window.ts"
+require_path "backend/src/agent-gateway/social-agent-context-window.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-context-window-boundary.spec.ts"
 require_path "backend/src/agent-gateway/social-agent-event-store.service.ts"
 require_path "backend/src/agent-gateway/social-agent-event-store.service.spec.ts"
 require_path "backend/src/agent-gateway/social-agent-event-v2.service.ts"
@@ -157,14 +174,69 @@ require_path "backend/src/agent-gateway/social-agent-task-memory-state-machine.s
 require_path "backend/src/agent-gateway/social-agent-thread-id.util.ts"
 require_path "backend/src/agent-gateway/social-agent-thread-session-manager.service.ts"
 require_path "backend/src/agent-gateway/social-agent-thread-session-manager.service.spec.ts"
+require_path "backend/src/agent-gateway/social-codex-approval-schema.service.ts"
+require_path "backend/src/agent-gateway/social-codex-approval-schema.service.spec.ts"
+require_path "backend/src/agent-gateway/social-codex-event-pipeline.service.ts"
+require_path "backend/src/agent-gateway/social-codex-event-pipeline.service.spec.ts"
 require_path "backend/src/agent-gateway/social-codex-life-graph-governance.service.ts"
 require_path "backend/src/agent-gateway/social-codex-life-graph-governance.service.spec.ts"
 require_path "backend/src/agent-gateway/social-codex-runtime-policy.service.ts"
 require_path "backend/src/agent-gateway/social-codex-runtime-policy.service.spec.ts"
+require_path "backend/src/agent-gateway/social-codex-runtime-model.ts"
+require_path "backend/src/agent-gateway/social-codex-runtime-model.spec.ts"
 require_path "backend/src/agent-gateway/social-codex-trace-eval.service.ts"
 require_path "backend/src/agent-gateway/social-codex-trace-eval.service.spec.ts"
+require_path "backend/src/agent-gateway/agent-approval.service.spec.ts"
+require_path "backend/src/agent-gateway/agent-approval-dispatcher.service.spec.ts"
+require_path "backend/src/agent-gateway/user-facing-agent-response.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-approval-tool.presenter.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-candidate-action-approval.presenter.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-candidate-score-breakdown-rules.ts"
+require_path "backend/src/agent-gateway/social-agent-brain.service.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-intent-router.service.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-chat-llm.service.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-chat-llm-prompts.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-chat-memory.presenter.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-deepseek-resilience.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-deepseek-quality-boundary.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-final-response.service.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-model-router.service.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-planner.service.spec.ts"
+require_path "backend/src/agent-gateway/match-reasoner.service.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-route-branch-boundary.spec.ts"
+require_path "backend/src/agent-gateway/social-agent-fallback-source-boundary.spec.ts"
+require_path "backend/src/agent-gateway/fitmeet-subagent-worker-command.contract.spec.ts"
+require_path "backend/src/agent-gateway/fitmeet-subagent-worker-dispatcher.service.spec.ts"
+require_path "backend/src/agent-gateway/fitmeet-subagent-worker-runtime.service.spec.ts"
+require_path "backend/src/agent-gateway/fitmeet-subagent-worker.service.spec.ts"
+require_path "backend/src/agent-gateway/subagent-worker.cli.spec.ts"
+require_path "backend/src/agent-gateway/subagent-worker-queue.service.spec.ts"
 
 require_path "frontend/src/components/agent-workspace/FitMeetAssistantUI.tsx"
+require_path "frontend/src/components/agent-workspace/FitMeetAssistantUI.types.ts"
+require_path "frontend/src/components/agent-workspace/agentWorkspaceRuntime.ts"
+require_path "frontend/src/components/agent-workspace/agentReminderRouteState.ts"
+require_path "frontend/src/components/agent-workspace/api/realAgentAdapter.ts"
+require_path "frontend/src/components/agent-workspace/fitMeetAttachmentAdapter.ts"
+require_path "frontend/src/components/agent-workspace/useAgentAdapterRuntime.ts"
+require_path "frontend/src/components/agent-workspace/socialAgentThreadStore.ts"
+require_path "frontend/src/components/agent-workspace/socialCodexThreadId.ts"
+require_path "frontend/src/components/agent-workspace/useAgentApprovalDispatchMessages.ts"
+require_path "frontend/src/components/agent-workspace/useAgentApprovalRuntime.ts"
+require_path "frontend/src/components/agent-workspace/useAgentCardActionRuntime.ts"
+require_path "frontend/src/components/agent-workspace/useAgentCheckpointRuntime.ts"
+require_path "frontend/src/components/agent-workspace/useAgentFeedbackRuntime.ts"
+require_path "frontend/src/components/agent-workspace/useAgentFinalResultRuntime.ts"
+require_path "frontend/src/components/agent-workspace/useAgentMessageStream.ts"
+require_path "frontend/src/components/agent-workspace/useAgentReminderRuntime.ts"
+require_path "frontend/src/components/agent-workspace/useAgentRuntimeActions.ts"
+require_path "frontend/src/components/agent-workspace/useAgentSessionRestore.ts"
+require_path "frontend/src/components/agent-workspace/useAgentStreamingRun.ts"
+require_path "frontend/src/components/agent-workspace/useAgentStreamEventHandler.ts"
+require_path "frontend/src/components/agent-workspace/useAgentSubmitRuntime.ts"
+require_path "frontend/src/components/agent-workspace/useAgentThreadBranches.ts"
+require_path "frontend/src/components/agent-workspace/useAgentThreadRuntime.ts"
+require_path "frontend/src/components/agent-workspace/useAgentWorkspaceRoute.ts"
 require_path "frontend/src/components/assistant-ui/action-bar.tsx"
 require_path "frontend/src/components/assistant-ui/assistant-shell.tsx"
 require_path "frontend/src/components/assistant-ui/attachment.tsx"
@@ -172,18 +244,48 @@ require_path "frontend/src/components/assistant-ui/branch-picker.tsx"
 require_path "frontend/src/components/assistant-ui/composer-action-mode.ts"
 require_path "frontend/src/components/assistant-ui/composer.tsx"
 require_path "frontend/src/components/assistant-ui/markdown-text.tsx"
+require_path "frontend/src/components/assistant-ui/message-runtime-context.tsx"
 require_path "frontend/src/components/assistant-ui/message.tsx"
+require_path "frontend/src/components/assistant-ui/public-process-text.ts"
 require_path "frontend/src/components/assistant-ui/thinking-dots.tsx"
 require_path "frontend/src/components/assistant-ui/thread-list.tsx"
 require_path "frontend/src/components/assistant-ui/thread.tsx"
+require_path "frontend/src/components/assistant-ui/tool-card-actions.tsx"
+require_path "frontend/src/components/assistant-ui/tool-card-collection.tsx"
+require_path "frontend/src/components/assistant-ui/tool-card-shared.tsx"
+require_path "frontend/src/components/assistant-ui/tool-process-model.ts"
 require_path "frontend/src/components/assistant-ui/tool-fallback.tsx"
+require_path "frontend/src/components/assistant-ui/tool-generic-card.tsx"
+require_path "frontend/src/components/assistant-ui/tool-ui-action-copy.ts"
 require_path "frontend/src/components/assistant-ui/tool-ui-actions.tsx"
 require_path "frontend/src/components/assistant-ui/tool-ui-schema.ts"
 require_path "frontend/src/components/assistant-ui/tooltip-icon-button.tsx"
 require_path "frontend/src/components/assistant-ui/upload-progress-store.ts"
+require_path "frontend/src/lib/socialCodexProcessCopy.ts"
+require_path "frontend/src/test/AgentWorkspacePage.test.tsx"
+require_path "frontend/src/test/agentAdapter.test.ts"
+require_path "frontend/src/test/agentWorkspaceRuntime.test.ts"
+require_path "frontend/src/test/toolProcessModel.test.ts"
+require_path "frontend/src/test/toolUiActionCopy.test.ts"
+
+require_file_contains "frontend/src/components/agent-workspace/FitMeetAssistantUI.tsx" "compactAssistantProcessSteps"
+require_file_contains "frontend/src/components/agent-workspace/FitMeetAssistantUI.tsx" "isRunSummaryFitMeetStep"
+require_file_contains "frontend/src/components/agent-workspace/FitMeetAssistantUI.tsx" "visibleSummaryFromProcessStep"
+require_file_contains "frontend/src/components/agent-workspace/useAgentSessionRestore.ts" "progressEventFromReplaySummary"
+require_file_contains "frontend/src/components/agent-workspace/useAgentSessionRestore.ts" "source: 'replay.summary'"
+require_file_contains "frontend/src/components/agent-workspace/agentWorkspaceRuntime.ts" "processType === 'run_summary'"
+require_file_contains "frontend/src/components/assistant-ui/tool-fallback.tsx" "data-process-rendering=\"covering-status\""
+require_file_contains "frontend/src/components/assistant-ui/tool-fallback.tsx" "data-process-mainline=\"latest-visible-summary\""
+require_file_contains "frontend/src/components/assistant-ui/tool-fallback.tsx" "data-process-default-visible-count=\"1\""
+require_file_contains "frontend/src/components/assistant-ui/tool-process-model.ts" "source === 'replay.summary'"
+require_file_contains "frontend/src/test/AgentWorkspacePage.test.tsx" "restores replay.summary even when replay events are trimmed"
+require_file_contains "frontend/src/test/AgentWorkspacePage.test.tsx" "data-process-summary-source', 'replay.summary'"
+require_file_contains "frontend/src/test/agentWorkspaceRuntime.test.ts" "lets replay.summary replace old process nodes instead of accumulating a timeline"
+require_file_contains "frontend/src/test/toolProcessModel.test.ts" "older payloads omit displayMode"
 
 require_file_contains "docs/agent-release-e2e-matrix.md" "FitMeet Agent Release E2E Matrix"
 require_file_contains "docs/agent-release-e2e-matrix.md" "scripts/agent-release-matrix.sh"
+require_file_contains "docs/agent-release-e2e-matrix.md" "scripts/agent-release-worktree-audit.sh"
 require_file_contains "docs/agent-release-e2e-matrix.md" "Remote smoke safety preflight"
 require_file_contains "docs/agent-release-e2e-matrix.md" "Remote smoke env template"
 require_file_contains "docs/agent-release-e2e-matrix.md" "deploy/agent-smoke.remote.env.example"
@@ -200,6 +302,7 @@ require_file_contains "docs/agent-release-e2e-matrix.md" "Ordinary chat does not
 require_file_contains "docs/agent-release-e2e-matrix.md" "Life Graph remains proposal-based"
 require_file_contains "scripts/agent-release-matrix.sh" "--opportunity-readiness-smoke"
 require_file_contains "scripts/agent-release-matrix.sh" "--opportunity-full-smoke"
+require_file_contains "scripts/agent-release-matrix.sh" "scripts/agent-release-worktree-audit.sh"
 require_file_contains "scripts/agent-release-matrix.sh" "scripts/verify-agent-release.sh"
 require_file_contains "scripts/agent-remote-smoke-preflight.sh" "--readiness"
 require_file_contains "scripts/agent-remote-smoke-preflight.sh" "--full"
@@ -223,8 +326,16 @@ require_file_contains "frontend/scripts/qa-agent-chat-production.mjs" "EXPECTED_
 require_file_contains "frontend/scripts/qa-agent-chat-production.mjs" "ecs-release-diagnose.sh"
 require_file_contains "frontend/scripts/qa-agent-chat-production.mjs" "release.commit"
 require_file_contains "frontend/scripts/qa-agent-chat-production.mjs" "ordinary chat unexpectedly rendered social UI"
+require_file_contains "frontend/scripts/qa-agent-chat-production.mjs" "assertAgentSessionApi"
+require_file_contains "frontend/scripts/qa-agent-chat-production.mjs" "task_conversation_unbound"
+require_file_contains "frontend/scripts/qa-agent-chat-production.mjs" "ordinary chat thread title was socialized"
 require_file_contains "frontend/scripts/qa-agent-chat-production.mjs" "social intent did not clarify or render opportunities"
 require_file_contains "frontend/scripts/qa-agent-chat-production.mjs" "[redacted-email]"
+require_file_contains "scripts/verify-production.sh" "Authenticated Social Agent session restored a task_conversation_unbound legacy task"
+require_file_contains "scripts/verify-production.sh" "Authenticated Social Agent session restored failed activeTaskId"
+require_file_contains "scripts/verify-agent-goal-production.sh" "Discover page still contains fake 128-person production copy"
+require_file_contains "scripts/verify-agent-goal-production.sh" "/public/social-intents returned 0 discoverable items"
+require_file_contains "scripts/verify-agent-goal-production.sh" "qa:agent-chat:production"
 require_file_contains "scripts/launch-status.sh" "VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY"
 require_file_contains "scripts/launch-status.sh" "--validate-agent-remote-smoke-evidence-only"
 require_file_contains "scripts/launch-status.sh" "secret_assignment_pattern"
@@ -252,6 +363,8 @@ require_file_contains "scripts/verify-agent-release.sh" "AGENT_SMOKE_STOP_AFTER_
 require_file_contains "scripts/verify-agent-release.sh" "run_agent_smoke_preflight"
 require_file_contains "scripts/verify-agent-release.sh" "scripts/agent-remote-smoke-preflight.sh"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-context-hydrator.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-context-window.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-context-window-boundary.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-event-store.service.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-event-v2.service.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-task-memory-state-machine.service.spec.ts"
@@ -259,8 +372,40 @@ require_file_contains "scripts/verify-agent-release.sh" "social-agent-thread-ses
 require_file_contains "scripts/verify-agent-release.sh" "social-codex-life-graph-governance.service.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-codex-trace-eval.service.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-codex-runtime-policy.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "agent-approval.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "agent-approval-dispatcher.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "user-facing-agent-response.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-approval-tool.presenter.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-candidate-action-approval.presenter.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-candidate-score-breakdown.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-brain.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-intent-router.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-chat-llm.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-chat-llm-prompts.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-chat-memory.presenter.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-deepseek-resilience.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-deepseek-quality-boundary.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-final-response.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-model-router.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-planner.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "match-reasoner.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-route-branch-boundary.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-fallback-source-boundary.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "fitmeet-subagent-worker-command.contract.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "fitmeet-subagent-worker-dispatcher.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "fitmeet-subagent-worker-runtime.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "fitmeet-subagent-worker.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "subagent-worker.cli.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "subagent-worker-queue.service.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-tool-execution-policy.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-tool-executor.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-tool-json-model.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-tool-model.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "agentAdapter.test.ts"
+require_file_contains "scripts/verify-agent-release.sh" "agentWorkspaceRuntime.test.ts"
+require_file_contains "scripts/verify-agent-release.sh" "AgentWorkspacePage.test.tsx"
 require_file_contains "scripts/verify-agent-release.sh" "socialAgentApiReplay.test.ts"
+require_file_contains "scripts/verify-agent-release.sh" "toolProcessModel.test.ts"
 require_file_contains "scripts/ecs-post-deploy-smoke.sh" "--run-agent-opportunity-readiness-smoke"
 require_file_contains "scripts/ecs-post-deploy-smoke.sh" "RUN_AGENT_OPPORTUNITY_SMOKE=readiness"
 require_file_contains "scripts/ecs-post-deploy-smoke.sh" "run_agent_remote_preflight"
@@ -309,12 +454,20 @@ rsync -a "${ROOT_DIR}/" "${STAGE_DIR}/" \
   --exclude 'agent-reference-qa.png' \
   --exclude 'homepage-gsap-qa.png' \
   --exclude 'frontend/src/components/agent-workspace/CodexAntPet.tsx' \
+  --exclude 'frontend/src/debug/' \
   --exclude 'frontend/src/debug/SocialAgentConsolePage.tsx' \
   --exclude 'frontend/src/debug/agent-workbench' \
   --exclude 'frontend/src/debug/agentTaskEvents.ts' \
+  --exclude 'frontend/src/debug/agentPageModuleAudit.ts' \
+  --exclude 'frontend/src/components/agent-workspace/useAgentFlow.ts' \
   --exclude 'frontend/src/styles/agent-workspace.css' \
   --exclude 'frontend/src/styles/agent-gpt-copy-shell.css' \
   --exclude 'frontend/src/styles/fitmeet-assistant-ui.css' \
+  --exclude 'scripts/fix-aimatch.mjs' \
+  --exclude 'scripts/fix-aimatch.ps1' \
+  --exclude 'scripts/fix-loginmodal*.mjs' \
+  --exclude 'scripts/fix-meetmodal.mjs' \
+  --exclude 'scripts/fix-postmodal.mjs' \
   --exclude 'nginx/ssl/' \
   --exclude 'backend/public/uploads/' \
   --exclude 'frontend/output/' \
@@ -391,8 +544,10 @@ require_entry "scripts/ecs-install-release.sh" '^FitMeet-web/scripts/ecs-install
 require_entry "scripts/ecs-upload-release.sh" '^FitMeet-web/scripts/ecs-upload-release\.sh$'
 require_entry "scripts/ecs-workbench-install-plan.sh" '^FitMeet-web/scripts/ecs-workbench-install-plan\.sh$'
 require_entry "scripts/ecs-post-deploy-smoke.sh" '^FitMeet-web/scripts/ecs-post-deploy-smoke\.sh$'
+require_entry "scripts/verify-agent-goal-production.sh" '^FitMeet-web/scripts/verify-agent-goal-production\.sh$'
 require_entry "scripts/verify-agent-release.sh" '^FitMeet-web/scripts/verify-agent-release\.sh$'
 require_entry "scripts/agent-release-matrix.sh" '^FitMeet-web/scripts/agent-release-matrix\.sh$'
+require_entry "scripts/agent-release-worktree-audit.sh" '^FitMeet-web/scripts/agent-release-worktree-audit\.sh$'
 require_entry "scripts/agent-remote-smoke-preflight.sh" '^FitMeet-web/scripts/agent-remote-smoke-preflight\.sh$'
 require_entry "scripts/agent-remote-smoke-evidence.sh" '^FitMeet-web/scripts/agent-remote-smoke-evidence\.sh$'
 require_entry "scripts/cloud-platform-preflight.sh" '^FitMeet-web/scripts/cloud-platform-preflight\.sh$'
@@ -407,6 +562,9 @@ require_entry "release metadata" '^FitMeet-web/release\.json$'
 
 require_entry "Social Codex context hydrator" '^FitMeet-web/backend/src/agent-gateway/social-agent-context-hydrator\.service\.ts$'
 require_entry "Social Codex context hydrator spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-context-hydrator\.service\.spec\.ts$'
+require_entry "Social Codex context window helper" '^FitMeet-web/backend/src/agent-gateway/social-agent-context-window\.ts$'
+require_entry "Social Codex context window spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-context-window\.spec\.ts$'
+require_entry "Social Codex context window boundary spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-context-window-boundary\.spec\.ts$'
 require_entry "Social Codex event store" '^FitMeet-web/backend/src/agent-gateway/social-agent-event-store\.service\.ts$'
 require_entry "Social Codex event store spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-event-store\.service\.spec\.ts$'
 require_entry "Social Codex event V2 service" '^FitMeet-web/backend/src/agent-gateway/social-agent-event-v2\.service\.ts$'
@@ -417,34 +575,106 @@ require_entry "Social Codex slot state machine spec" '^FitMeet-web/backend/src/a
 require_entry "Social Codex thread id util" '^FitMeet-web/backend/src/agent-gateway/social-agent-thread-id\.util\.ts$'
 require_entry "Social Codex thread session manager" '^FitMeet-web/backend/src/agent-gateway/social-agent-thread-session-manager\.service\.ts$'
 require_entry "Social Codex thread session manager spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-thread-session-manager\.service\.spec\.ts$'
+require_entry "Social Codex approval schema" '^FitMeet-web/backend/src/agent-gateway/social-codex-approval-schema\.service\.ts$'
+require_entry "Social Codex approval schema spec" '^FitMeet-web/backend/src/agent-gateway/social-codex-approval-schema\.service\.spec\.ts$'
+require_entry "Social Codex event pipeline" '^FitMeet-web/backend/src/agent-gateway/social-codex-event-pipeline\.service\.ts$'
+require_entry "Social Codex event pipeline spec" '^FitMeet-web/backend/src/agent-gateway/social-codex-event-pipeline\.service\.spec\.ts$'
 require_entry "Social Codex Life Graph governance" '^FitMeet-web/backend/src/agent-gateway/social-codex-life-graph-governance\.service\.ts$'
 require_entry "Social Codex Life Graph governance spec" '^FitMeet-web/backend/src/agent-gateway/social-codex-life-graph-governance\.service\.spec\.ts$'
 require_entry "Social Codex runtime policy" '^FitMeet-web/backend/src/agent-gateway/social-codex-runtime-policy\.service\.ts$'
 require_entry "Social Codex runtime policy spec" '^FitMeet-web/backend/src/agent-gateway/social-codex-runtime-policy\.service\.spec\.ts$'
+require_entry "Social Codex runtime model" '^FitMeet-web/backend/src/agent-gateway/social-codex-runtime-model\.ts$'
+require_entry "Social Codex runtime model spec" '^FitMeet-web/backend/src/agent-gateway/social-codex-runtime-model\.spec\.ts$'
 require_entry "Social Codex trace eval" '^FitMeet-web/backend/src/agent-gateway/social-codex-trace-eval\.service\.ts$'
 require_entry "Social Codex trace eval spec" '^FitMeet-web/backend/src/agent-gateway/social-codex-trace-eval\.service\.spec\.ts$'
+require_entry "Agent approval service spec" '^FitMeet-web/backend/src/agent-gateway/agent-approval\.service\.spec\.ts$'
+require_entry "Agent approval dispatcher spec" '^FitMeet-web/backend/src/agent-gateway/agent-approval-dispatcher\.service\.spec\.ts$'
+require_entry "User-facing Agent response spec" '^FitMeet-web/backend/src/agent-gateway/user-facing-agent-response\.spec\.ts$'
+require_entry "Social Agent approval Tool UI presenter spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-approval-tool\.presenter\.spec\.ts$'
+require_entry "Social Agent candidate action approval presenter spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-candidate-action-approval\.presenter\.spec\.ts$'
+require_entry "Social Codex candidate score rules" '^FitMeet-web/backend/src/agent-gateway/social-agent-candidate-score-breakdown-rules\.ts$'
+require_entry "Social Agent Brain DeepSeek spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-brain\.service\.spec\.ts$'
+require_entry "Social Agent intent router DeepSeek spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-intent-router\.service\.spec\.ts$'
+require_entry "Social Agent chat LLM spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-chat-llm\.service\.spec\.ts$'
+require_entry "Social Agent LLM prompt memory spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-chat-llm-prompts\.spec\.ts$'
+require_entry "Social Agent chat memory presenter spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-chat-memory\.presenter\.spec\.ts$'
+require_entry "Social Agent DeepSeek resilience spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-deepseek-resilience\.spec\.ts$'
+require_entry "Social Agent DeepSeek quality boundary spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-deepseek-quality-boundary\.spec\.ts$'
+require_entry "Social Agent final response DeepSeek spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-final-response\.service\.spec\.ts$'
+require_entry "Social Agent model router spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-model-router\.service\.spec\.ts$'
+require_entry "Social Agent planner DeepSeek spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-planner\.service\.spec\.ts$'
+require_entry "Social Agent match reasoner DeepSeek spec" '^FitMeet-web/backend/src/agent-gateway/match-reasoner\.service\.spec\.ts$'
+require_entry "Social Codex route branch boundary spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-route-branch-boundary\.spec\.ts$'
+require_entry "Social Codex fallback source boundary spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-fallback-source-boundary\.spec\.ts$'
+require_entry "FitMeet subagent worker command contract spec" '^FitMeet-web/backend/src/agent-gateway/fitmeet-subagent-worker-command\.contract\.spec\.ts$'
+require_entry "FitMeet subagent worker dispatcher spec" '^FitMeet-web/backend/src/agent-gateway/fitmeet-subagent-worker-dispatcher\.service\.spec\.ts$'
+require_entry "FitMeet subagent worker runtime spec" '^FitMeet-web/backend/src/agent-gateway/fitmeet-subagent-worker-runtime\.service\.spec\.ts$'
+require_entry "FitMeet subagent worker service spec" '^FitMeet-web/backend/src/agent-gateway/fitmeet-subagent-worker\.service\.spec\.ts$'
+require_entry "FitMeet subagent worker CLI spec" '^FitMeet-web/backend/src/agent-gateway/subagent-worker\.cli\.spec\.ts$'
+require_entry "FitMeet subagent worker queue spec" '^FitMeet-web/backend/src/agent-gateway/subagent-worker-queue\.service\.spec\.ts$'
+require_entry "Social Agent tool executor spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-tool-executor\.service\.spec\.ts$'
+require_entry "Social Agent tool JSON model spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-tool-json-model\.service\.spec\.ts$'
+require_entry "Social Agent tool model spec" '^FitMeet-web/backend/src/agent-gateway/social-agent-tool-model\.spec\.ts$'
 
 require_entry "Agent assistant-ui release audit" '^FitMeet-web/frontend/scripts/audit-agent-chat-release\.mjs$'
 require_entry "Agent assistant-ui browser QA" '^FitMeet-web/frontend/scripts/qa-agent-chat-shell\.mjs$'
 require_entry "Agent production browser QA" '^FitMeet-web/frontend/scripts/qa-agent-chat-production\.mjs$'
 require_entry "Social Codex replay API test" '^FitMeet-web/frontend/src/test/socialAgentApiReplay\.test\.ts$'
+require_entry "Agent workspace page process test" '^FitMeet-web/frontend/src/test/AgentWorkspacePage\.test\.tsx$'
+require_entry "Agent stream adapter process test" '^FitMeet-web/frontend/src/test/agentAdapter\.test\.ts$'
+require_entry "Agent workspace runtime process test" '^FitMeet-web/frontend/src/test/agentWorkspaceRuntime\.test\.ts$'
+require_entry "assistant-ui process model test" '^FitMeet-web/frontend/src/test/toolProcessModel\.test\.ts$'
 require_entry "FitMeet assistant-ui transport adapter" '^FitMeet-web/frontend/src/components/agent-workspace/FitMeetAssistantUI\.tsx$'
+require_entry "FitMeet assistant-ui transport types" '^FitMeet-web/frontend/src/components/agent-workspace/FitMeetAssistantUI\.types\.ts$'
+require_entry "Agent workspace runtime" '^FitMeet-web/frontend/src/components/agent-workspace/agentWorkspaceRuntime\.ts$'
+require_entry "Agent reminder route state" '^FitMeet-web/frontend/src/components/agent-workspace/agentReminderRouteState\.ts$'
+require_entry "Agent real stream adapter" '^FitMeet-web/frontend/src/components/agent-workspace/api/realAgentAdapter\.ts$'
+require_entry "Agent attachment adapter" '^FitMeet-web/frontend/src/components/agent-workspace/fitMeetAttachmentAdapter\.ts$'
+require_entry "Agent adapter runtime hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentAdapterRuntime\.ts$'
+require_entry "Agent thread store" '^FitMeet-web/frontend/src/components/agent-workspace/socialAgentThreadStore\.ts$'
+require_entry "Social Codex thread id helper" '^FitMeet-web/frontend/src/components/agent-workspace/socialCodexThreadId\.ts$'
+require_entry "Agent approval dispatch message hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentApprovalDispatchMessages\.ts$'
+require_entry "Agent approval runtime hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentApprovalRuntime\.ts$'
+require_entry "Agent card action runtime hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentCardActionRuntime\.ts$'
+require_entry "Agent checkpoint runtime hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentCheckpointRuntime\.ts$'
+require_entry "Agent feedback runtime hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentFeedbackRuntime\.ts$'
+require_entry "Agent final result runtime hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentFinalResultRuntime\.ts$'
+require_entry "Agent message stream hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentMessageStream\.ts$'
+require_entry "Agent reminder runtime hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentReminderRuntime\.ts$'
+require_entry "Agent runtime actions hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentRuntimeActions\.ts$'
+require_entry "Agent session restore hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentSessionRestore\.ts$'
+require_entry "Agent streaming run hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentStreamingRun\.ts$'
+require_entry "Agent stream event handler hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentStreamEventHandler\.ts$'
+require_entry "Agent submit runtime hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentSubmitRuntime\.ts$'
+require_entry "Agent thread branches hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentThreadBranches\.ts$'
+require_entry "Agent thread runtime hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentThreadRuntime\.ts$'
+require_entry "Agent workspace route hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentWorkspaceRoute\.ts$'
 require_entry "assistant-ui shell component" '^FitMeet-web/frontend/src/components/assistant-ui/assistant-shell\.tsx$'
 require_entry "assistant-ui thread component" '^FitMeet-web/frontend/src/components/assistant-ui/thread\.tsx$'
 require_entry "assistant-ui composer component" '^FitMeet-web/frontend/src/components/assistant-ui/composer\.tsx$'
 require_entry "assistant-ui composer action mode" '^FitMeet-web/frontend/src/components/assistant-ui/composer-action-mode\.ts$'
 require_entry "assistant-ui attachment component" '^FitMeet-web/frontend/src/components/assistant-ui/attachment\.tsx$'
 require_entry "assistant-ui message component" '^FitMeet-web/frontend/src/components/assistant-ui/message\.tsx$'
+require_entry "assistant-ui message runtime context" '^FitMeet-web/frontend/src/components/assistant-ui/message-runtime-context\.tsx$'
+require_entry "assistant-ui public process text sanitizer" '^FitMeet-web/frontend/src/components/assistant-ui/public-process-text\.ts$'
 require_entry "assistant-ui thread list component" '^FitMeet-web/frontend/src/components/assistant-ui/thread-list\.tsx$'
 require_entry "assistant-ui action bar component" '^FitMeet-web/frontend/src/components/assistant-ui/action-bar\.tsx$'
 require_entry "assistant-ui branch picker component" '^FitMeet-web/frontend/src/components/assistant-ui/branch-picker\.tsx$'
 require_entry "assistant-ui Tool UI fallback" '^FitMeet-web/frontend/src/components/assistant-ui/tool-fallback\.tsx$'
+require_entry "assistant-ui Tool UI card actions" '^FitMeet-web/frontend/src/components/assistant-ui/tool-card-actions\.tsx$'
+require_entry "assistant-ui Tool UI card collection" '^FitMeet-web/frontend/src/components/assistant-ui/tool-card-collection\.tsx$'
+require_entry "assistant-ui Tool UI card shared primitives" '^FitMeet-web/frontend/src/components/assistant-ui/tool-card-shared\.tsx$'
+require_entry "assistant-ui process model" '^FitMeet-web/frontend/src/components/assistant-ui/tool-process-model\.ts$'
+require_entry "assistant-ui generic Tool UI card" '^FitMeet-web/frontend/src/components/assistant-ui/tool-generic-card\.tsx$'
+require_entry "assistant-ui Tool UI action copy" '^FitMeet-web/frontend/src/components/assistant-ui/tool-ui-action-copy\.ts$'
 require_entry "assistant-ui Tool UI actions" '^FitMeet-web/frontend/src/components/assistant-ui/tool-ui-actions\.tsx$'
 require_entry "assistant-ui Tool UI schema" '^FitMeet-web/frontend/src/components/assistant-ui/tool-ui-schema\.ts$'
 require_entry "assistant-ui markdown renderer" '^FitMeet-web/frontend/src/components/assistant-ui/markdown-text\.tsx$'
 require_entry "assistant-ui thinking dots" '^FitMeet-web/frontend/src/components/assistant-ui/thinking-dots\.tsx$'
 require_entry "assistant-ui tooltip icon button" '^FitMeet-web/frontend/src/components/assistant-ui/tooltip-icon-button\.tsx$'
 require_entry "assistant-ui upload progress store" '^FitMeet-web/frontend/src/components/assistant-ui/upload-progress-store\.ts$'
+require_entry "Social Codex public process copy helper" '^FitMeet-web/frontend/src/lib/socialCodexProcessCopy\.ts$'
+require_entry "Tool UI action copy test" '^FitMeet-web/frontend/src/test/toolUiActionCopy\.test\.ts$'
 
 fail_if_entry "git metadata" '(^|/)\.git/'
 fail_if_entry "Vercel project metadata" '(^|/)\.vercel/'
@@ -459,10 +689,15 @@ fail_if_entry "nested zip files" '\.zip$'
 fail_if_entry "logs" '(^|/)logs/|\.log$'
 fail_if_entry "QA screenshots" 'agent-gsap-qa\.png|agent-reference-qa\.png|homepage-gsap-qa\.png|qa-gsap-round2/|artifacts/|docs/qa/|frontend/qa/'
 fail_if_entry "legacy Agent pet component" '^FitMeet-web/frontend/src/components/agent-workspace/CodexAntPet\.tsx$'
-fail_if_entry "legacy Agent debug workbench" '^FitMeet-web/frontend/src/debug/(SocialAgentConsolePage\.tsx|agentTaskEvents\.ts|agent-workbench/)'
+fail_if_entry "legacy Agent flow hook" '^FitMeet-web/frontend/src/components/agent-workspace/useAgentFlow\.tsx?$'
+fail_if_entry "legacy Agent ant guide component" '^FitMeet-web/frontend/src/components/agent/ant-guide/'
+fail_if_entry "legacy Agent ant guide assets" '^FitMeet-web/frontend/src/assets/agent/ant-guide/'
+fail_if_entry "legacy Agent debug source" '^FitMeet-web/frontend/src/debug/'
+fail_if_entry "legacy Agent debug workbench" '^FitMeet-web/frontend/src/debug/(SocialAgentConsolePage\.tsx|agentTaskEvents\.ts|agentPageModuleAudit\.ts|agent-workbench/)'
 fail_if_entry "legacy Agent workspace CSS" '^FitMeet-web/frontend/src/styles/agent-workspace\.css$'
 fail_if_entry "legacy Agent GPT shell CSS" '^FitMeet-web/frontend/src/styles/agent-gpt-copy-shell\.css$'
 fail_if_entry "legacy FitMeet assistant shell CSS" '^FitMeet-web/frontend/src/styles/fitmeet-assistant-ui\.css$'
+fail_if_entry "one-off legacy rewrite scripts" '^FitMeet-web/scripts/fix-(aimatch|loginmodal|meetmodal|postmodal)'
 
 step "Write checksum"
 if command -v sha256sum >/dev/null 2>&1; then

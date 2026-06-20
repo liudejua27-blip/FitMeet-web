@@ -102,6 +102,7 @@ describe('SocialAgentActivitySearchService', () => {
     expect(candidatePool.searchActivity).toHaveBeenCalledWith(
       expect.objectContaining({
         ownerUserId: 7,
+        taskId: 101,
         city: '青岛',
         activityType: 'running',
         locationPreference: '青岛大学',
@@ -137,6 +138,263 @@ describe('SocialAgentActivitySearchService', () => {
     });
   });
 
+  it('uses restored taskMemory slots when route entities are empty', async () => {
+    const candidatePool = {
+      searchActivity: jest.fn().mockResolvedValue({
+        activityResults: [],
+      }),
+    };
+    const metrics = {
+      recordActivitySearch: jest.fn(),
+      recordError: jest.fn(),
+    };
+    const service = new SocialAgentActivitySearchService(
+      candidatePool as never,
+      metrics as never,
+    );
+    const task = makeTask({
+      memory: {
+        taskMemory: {
+          taskSlots: {
+            geo_area: {
+              key: 'geo_area',
+              value: '崂山区',
+              state: 'inferred',
+              source: 'location_parser',
+            },
+            activity: {
+              key: 'activity',
+              value: '散步',
+              state: 'completed',
+              source: 'user_message',
+            },
+            time_window: {
+              key: 'time_window',
+              value: '今天晚上',
+              state: 'completed',
+              source: 'user_message',
+            },
+            location_text: {
+              key: 'location_text',
+              value: '青岛大学附近',
+              state: 'completed',
+              source: 'user_message',
+            },
+          },
+        },
+      },
+    });
+
+    await service.handleActivitySearch({
+      ownerUserId: 7,
+      task,
+      route: {
+        ...makeActivityRoute(),
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+      },
+      message: '可以，帮我看看活动',
+      buildMemoryContext: () => null,
+    });
+
+    expect(candidatePool.searchActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        taskId: 101,
+        city: '青岛',
+        activityType: '散步',
+        locationPreference: '青岛大学附近',
+        timePreference: '今天晚上',
+        limit: 5,
+      }),
+    );
+  });
+
+  it('uses known task slot constraints for restored activity search criteria', async () => {
+    const candidatePool = {
+      searchActivity: jest.fn().mockResolvedValue({
+        activityResults: [],
+      }),
+    };
+    const metrics = {
+      recordActivitySearch: jest.fn(),
+      recordError: jest.fn(),
+    };
+    const service = new SocialAgentActivitySearchService(
+      candidatePool as never,
+      metrics as never,
+    );
+    const task = makeTask({
+      memory: {
+        taskMemory: {
+          knownTaskSlotConstraints: {
+            treatAsHardConstraints: true,
+            knownSlots: [
+              { key: 'geo_area', label: '区域', value: '崂山区' },
+              { key: 'activity', label: '活动', value: '散步' },
+              { key: 'time_window', label: '时间', value: '今天晚上' },
+              { key: 'location_text', label: '地点', value: '青岛大学附近' },
+            ],
+            doNotAskAgainFor: [
+              'geo_area',
+              'activity',
+              'time_window',
+              'location_text',
+            ],
+          },
+        },
+      },
+    });
+
+    await service.handleActivitySearch({
+      ownerUserId: 7,
+      task,
+      route: {
+        ...makeActivityRoute(),
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+      },
+      message: '继续找活动',
+      buildMemoryContext: () => null,
+    });
+
+    expect(candidatePool.searchActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        city: '青岛',
+        activityType: '散步',
+        locationPreference: '青岛大学附近',
+        timePreference: '今天晚上',
+      }),
+    );
+  });
+
+  it('uses hydrated task context for activity criteria and final LLM reply context', async () => {
+    const candidatePool = {
+      searchActivity: jest.fn().mockResolvedValue({
+        activityResults: [
+          {
+            id: 'public-intent-901',
+            source: 'public_intent',
+            isRealData: true,
+            activityId: null,
+            publicIntentId: 901,
+            title: '青岛大学附近散步',
+            description: '今晚低强度散步。',
+            city: '青岛',
+            loc: '青岛大学',
+            requestType: 'walking',
+            interestTags: ['散步'],
+            timePreference: '今天晚上',
+            ownerUserId: 29,
+            status: 'open',
+            createdAt: '2026-06-01T12:00:00.000Z',
+            matchScore: 88,
+            matchReasons: ['时间匹配', '地点匹配'],
+          },
+        ],
+      }),
+    };
+    const metrics = {
+      recordActivitySearch: jest.fn(),
+      recordError: jest.fn(),
+    };
+    const finalResponses = {
+      generate: jest.fn().mockResolvedValue('我按刚才的信息找到了 1 个公开机会。'),
+    };
+    const service = new SocialAgentActivitySearchService(
+      candidatePool as never,
+      metrics as never,
+      finalResponses as never,
+    );
+    const taskContext = {
+      conversationHistory: [
+        {
+          role: 'user',
+          text: '今天晚上，青岛大学附近，散步，优先舞蹈相关标签',
+        },
+        {
+          role: 'assistant',
+          text: '已记住时间、地点、活动和候选偏好。',
+        },
+      ],
+      taskSlots: {
+        time_window: { value: '今天晚上', state: 'completed' },
+        location_text: { value: '青岛大学附近', state: 'completed' },
+        activity: { value: '散步', state: 'completed' },
+        candidate_preference: {
+          value: '公开资料含舞蹈相关标签优先',
+          state: 'answered',
+        },
+      },
+      knownTaskSlotConstraints: {
+        treatAsHardConstraints: true,
+        knownSlots: [
+          { key: 'time_window', label: '时间', value: '今天晚上' },
+          { key: 'location_text', label: '地点', value: '青岛大学附近' },
+          { key: 'activity', label: '活动', value: '散步' },
+          {
+            key: 'candidate_preference',
+            label: '候选偏好',
+            value: '公开资料含舞蹈相关标签优先',
+          },
+        ],
+        doNotAskAgainFor: [
+          'time_window',
+          'location_text',
+          'activity',
+          'candidate_preference',
+        ],
+      },
+    };
+
+    const result = await service.handleActivitySearch({
+      ownerUserId: 7,
+      task: makeTask(),
+      route: {
+        ...makeActivityRoute(),
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+      },
+      message: '可以，帮我找人',
+      buildMemoryContext: () => ({ memory: 'hydrated' }),
+      taskContext,
+    });
+
+    expect(candidatePool.searchActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        city: '青岛',
+        activityType: '散步',
+        locationPreference: '青岛大学附近',
+        timePreference: '今天晚上',
+      }),
+    );
+    expect(finalResponses.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationHistory: taskContext.conversationHistory,
+        taskContext,
+        memoryContext: { memory: 'hydrated' },
+      }),
+    );
+    expect(result.assistantMessage).toBe(
+      '我按刚才的信息找到了 1 个公开机会。',
+    );
+  });
+
   it('returns an empty activity response when the candidate pool fails', async () => {
     const candidatePool = {
       searchActivity: jest.fn().mockRejectedValue(new Error('db offline')),
@@ -162,5 +420,49 @@ describe('SocialAgentActivitySearchService', () => {
     expect(metrics.recordActivitySearch).toHaveBeenCalledWith(false, 0);
     expect(result.activityResults).toEqual([]);
     expect(result.assistantMessage).toContain('当前没有找到符合条件');
+    expect(result.assistantMessage).toContain('不会编造活动');
+    expect(result.assistantMessage).toContain('发布约练卡到发现');
+  });
+
+  it('records empty activity search state for the next turn', async () => {
+    const candidatePool = {
+      searchActivity: jest.fn().mockResolvedValue({ activityResults: [] }),
+    };
+    const metrics = {
+      recordActivitySearch: jest.fn(),
+      recordError: jest.fn(),
+    };
+    const service = new SocialAgentActivitySearchService(
+      candidatePool as never,
+      metrics as never,
+    );
+    const task = makeTask();
+
+    const result = await service.handleActivitySearch({
+      ownerUserId: 7,
+      task,
+      route: makeActivityRoute(),
+      message: '今晚青岛大学附近有什么散步活动',
+      buildMemoryContext: () => null,
+    });
+
+    expect(result.activityResults).toEqual([]);
+    expect(task.memory).toMatchObject({
+      shortTerm: {
+        hasSearched: true,
+        lastSearchIntent: 'activity_search',
+        lastSearchCandidateCount: 0,
+        lastSearchEmptyReason: 'no_real_candidates',
+        lastSearchNextStep:
+          '换城市、时间或活动类型，或确认发布约练卡到发现',
+      },
+      taskMemory: {
+        currentTask: {
+          state: 'showing_candidates',
+          stateReason: 'activity_search_returned',
+          waitingFor: 'search_refinement',
+        },
+      },
+    });
   });
 });

@@ -72,6 +72,12 @@ describe('AgentLoopService', () => {
     expect(runner).toHaveBeenCalledTimes(2);
     expect(result.loop.status).toBe('completed');
     expect(result.loop.traceId).toMatch(/^agent:/);
+    expect(runner.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        runId: result.loop.runId,
+        traceId: result.loop.traceId,
+      }),
+    );
     expect(result.loop.toolBudget).toEqual(
       expect.objectContaining({ maxToolCalls: 1, usedToolCalls: 1 }),
     );
@@ -136,6 +142,7 @@ describe('AgentLoopService', () => {
     );
     expect(observability.snapshot().counters).toEqual(
       expect.objectContaining({
+        'agent_run.approval_required': 1,
         'approval.blocked': 1,
         'tool.blocked': 1,
       }),

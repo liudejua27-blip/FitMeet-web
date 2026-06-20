@@ -148,6 +148,7 @@ function makeHarness(
     approvals?: AgentApprovalRequest[];
     approvalsReject?: boolean;
     checkpoint?: ReturnType<typeof makeCheckpoint> | null;
+    contextTurnLimit?: number;
     events?: AgentTaskEvent[];
     task?: AgentTask | null;
   } = {},
@@ -186,6 +187,15 @@ function makeHarness(
     runState,
     assembler,
     checkpoints as never,
+    options.contextTurnLimit
+      ? ({
+          get: jest.fn((key: string) =>
+            key === 'SOCIAL_AGENT_CONTEXT_TURN_LIMIT'
+              ? String(options.contextTurnLimit)
+              : undefined,
+          ),
+        } as never)
+      : undefined,
   );
   return { approvals, checkpoints, eventRepo, service, task, taskRepo };
 }
@@ -206,6 +216,96 @@ describe('SocialAgentSessionRestoreService', () => {
         order: { updatedAt: 'DESC' },
       }),
     );
+    const query = taskRepo.findOne.mock.calls[0]?.[0] as {
+      where?: { status?: { _value?: AgentTaskStatus[] } };
+    };
+    expect(query.where?.status?._value).toEqual(
+      expect.arrayContaining([
+        AgentTaskStatus.AwaitingConfirmation,
+        AgentTaskStatus.WaitingResult,
+        AgentTaskStatus.WaitingReply,
+      ]),
+    );
+    expect(query.where?.status?._value).toEqual(
+      expect.not.arrayContaining([
+        AgentTaskStatus.AwaitingFeedback,
+        AgentTaskStatus.Succeeded,
+        AgentTaskStatus.Failed,
+      ]),
+    );
+    const taskTypeQuery = taskRepo.findOne.mock.calls[0]?.[0] as {
+      where?: { taskType?: { _value?: string[] } };
+    };
+    expect(taskTypeQuery.where?.taskType?._value).toEqual(
+      expect.arrayContaining(['social_agent_chat', 'social_search']),
+    );
+    expect(taskTypeQuery.where?.taskType?._value).not.toEqual(
+      expect.arrayContaining(['social_agent_demo']),
+    );
+  });
+
+  it('does not restore failed unbound legacy tasks into the chat shell', async () => {
+    const legacyTask = makeTask({
+      status: AgentTaskStatus.Failed,
+      statusReason: 'task_conversation_unbound',
+    });
+    const { service } = makeHarness({ task: legacyTask });
+
+    const snapshot = await service.buildSessionSnapshot({
+      ownerUserId: 7,
+      task: legacyTask,
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(snapshot).toMatchObject({
+      hasSession: false,
+      activeTaskId: null,
+      result: null,
+      messages: [],
+    });
+  });
+
+  it('does not restore legacy waiting-reply tasks without an agent connection', async () => {
+    const legacyTask = makeTask({
+      agentConnectionId: null,
+      status: AgentTaskStatus.WaitingReply,
+      statusReason: 'next_action_executed_waiting_reply',
+    });
+    const { service } = makeHarness({ task: legacyTask });
+
+    const snapshot = await service.buildSessionSnapshot({
+      ownerUserId: 7,
+      task: legacyTask,
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(snapshot).toMatchObject({
+      hasSession: false,
+      activeTaskId: null,
+      result: null,
+      messages: [],
+    });
+  });
+
+  it('does not restore stale feedback-only tasks into the chat shell', async () => {
+    const staleTask = makeTask({
+      status: AgentTaskStatus.AwaitingFeedback,
+      statusReason: 'main_agent_waiting_for_clarification',
+    });
+    const { service } = makeHarness({ task: staleTask });
+
+    const snapshot = await service.buildSessionSnapshot({
+      ownerUserId: 7,
+      task: staleTask,
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(snapshot).toMatchObject({
+      hasSession: false,
+      activeTaskId: null,
+      result: null,
+      messages: [],
+    });
   });
 
   it('builds a restorable session snapshot from events, approvals, and latest run', async () => {
@@ -253,6 +353,156 @@ describe('SocialAgentSessionRestoreService', () => {
     expect(approvals.getPendingForTask).toHaveBeenCalledWith(7, 101);
   });
 
+  it('keeps assistant message source metadata on restored conversation turns', async () => {
+    const task = makeTask({
+      memory: {
+        socialAgentConversation: {
+          turns: [
+            {
+              id: 'turn_user_1',
+              role: 'user',
+              content: '继续刚才的约练',
+              at: '2026-06-05T00:00:00.000Z',
+            },
+            {
+              id: 'turn_assistant_fallback',
+              role: 'assistant',
+              content: '我会保守处理这一步。',
+              assistantMessageSource: 'fallback',
+              at: '2026-06-05T00:01:00.000Z',
+            },
+          ],
+        },
+      },
+    });
+    const { service } = makeHarness({ approvals: [], task });
+
+    const snapshot = await service.buildSessionSnapshot({
+      ownerUserId: 7,
+      task,
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(
+      snapshot.messages.find(
+        (message) => message.id === 'turn_assistant_fallback',
+      ),
+    ).toMatchObject({
+      role: 'assistant',
+      assistantMessageSource: 'fallback',
+    });
+  });
+
+  it('keeps assistant message source metadata on restored latest result messages', async () => {
+    const task = makeTask();
+    task.result = withSocialAgentStoredRun({}, {
+      taskId: task.id,
+      runId: 'sar_restore_fallback',
+      status: 'completed',
+      phase: 'completed',
+      message: '已完成',
+      visibleSteps: [],
+      queuedAt: '2026-06-05T00:00:00.000Z',
+      startedAt: '2026-06-05T00:01:00.000Z',
+      updatedAt: '2026-06-05T00:03:00.000Z',
+      completedAt: '2026-06-05T00:03:00.000Z',
+      failedAt: null,
+      pollAfterMs: 1500,
+      error: null,
+      replan: null,
+      result: {
+        taskId: task.id,
+        status: task.status,
+        visibleSteps: [],
+        assistantMessage: '我会先保守保留这次处理结果。',
+        assistantMessageSource: 'fallback',
+        socialRequestDraft: null,
+        candidates: [],
+        approvalRequiredActions: [],
+        events: [],
+      },
+    });
+    const { service } = makeHarness({ approvals: [], events: [], task });
+
+    const snapshot = await service.buildSessionSnapshot({
+      ownerUserId: 7,
+      task,
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(snapshot.messages.at(-1)).toMatchObject({
+      id: `task_${task.id}_latest_result`,
+      role: 'assistant',
+      assistantMessageSource: 'fallback',
+    });
+  });
+
+  it('restores chat messages with the configured unified context window', async () => {
+    const conversation = Array.from({ length: 88 }, (_, index) => ({
+      id: `turn_user_${index + 1}`,
+      role: 'user',
+      text: `第 ${index + 1} 条上下文`,
+      at: `2026-06-05T00:${String(index % 60).padStart(2, '0')}:00.000Z`,
+    }));
+    const task = makeTask({
+      memory: {
+        socialAgentConversation: { turns: conversation },
+      },
+    });
+    const { service } = makeHarness({
+      approvals: [],
+      contextTurnLimit: 80,
+      task,
+    });
+
+    const snapshot = await service.buildSessionSnapshot({
+      ownerUserId: 7,
+      task,
+      visibleStepLabel: (_, label) => label,
+    });
+
+    const restoredUserMessages = snapshot.messages
+      .filter((message) => message.role === 'user')
+      .map((message) => message.content);
+    expect(restoredUserMessages).toHaveLength(79);
+    expect(restoredUserMessages[0]).toBe('第 10 条上下文');
+    expect(restoredUserMessages.at(-1)).toBe('第 88 条上下文');
+    expect(restoredUserMessages).not.toContain('第 9 条上下文');
+  });
+
+  it('does not regress to a short restore window when legacy env config asks for 8 turns', async () => {
+    const conversation = Array.from({ length: 95 }, (_, index) => ({
+      id: `turn_user_${index + 1}`,
+      role: 'user',
+      text: `第 ${index + 1} 条上下文`,
+      at: `2026-06-05T01:${String(index % 60).padStart(2, '0')}:00.000Z`,
+    }));
+    const task = makeTask({
+      memory: {
+        socialAgentConversation: { turns: conversation },
+      },
+    });
+    const { service } = makeHarness({
+      approvals: [],
+      contextTurnLimit: 8,
+      task,
+    });
+
+    const snapshot = await service.buildSessionSnapshot({
+      ownerUserId: 7,
+      task,
+      visibleStepLabel: (_, label) => label,
+    });
+
+    const restoredUserMessages = snapshot.messages
+      .filter((message) => message.role === 'user')
+      .map((message) => message.content);
+    expect(restoredUserMessages).toHaveLength(79);
+    expect(restoredUserMessages[0]).toBe('第 17 条上下文');
+    expect(restoredUserMessages.at(-1)).toBe('第 95 条上下文');
+    expect(restoredUserMessages).not.toContain('第 16 条上下文');
+  });
+
   it('builds timeline messages and preserves candidate action state', async () => {
     const { service } = makeHarness({
       events: [makeEvent(), makeApprovalDecisionEvent()],
@@ -285,6 +535,49 @@ describe('SocialAgentSessionRestoreService', () => {
           text: '用户已批准：发送第一条消息',
         }),
       ]),
+    );
+  });
+
+  it('restores candidate actions from canonical task memory aliases', async () => {
+    const task = makeTask({
+      memory: {
+        taskMemory: {
+          candidateActions: {
+            22: {
+              targetUserId: 22,
+              status: 'saved',
+              note: '用户想先保留这位候选人',
+            },
+          },
+          candidateState: {
+            29: {
+              targetUserId: 29,
+              status: 'skipped',
+              note: '用户明确跳过这位候选人',
+            },
+          },
+        },
+      },
+    });
+    const { service } = makeHarness({ approvals: [], task });
+
+    const timeline = await service.buildTaskTimeline({
+      ownerUserId: 7,
+      task,
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(timeline.candidateActions).toEqual(
+      expect.objectContaining({
+        22: expect.objectContaining({
+          targetUserId: 22,
+          status: 'saved',
+        }),
+        29: expect.objectContaining({
+          targetUserId: 29,
+          status: 'skipped',
+        }),
+      }),
     );
   });
 
@@ -351,6 +644,51 @@ describe('SocialAgentSessionRestoreService', () => {
         ...makeCheckpoint(),
         resumePrompt:
           '从已保存的步骤继续：正在等待你确认。原始目标：你有什么功能',
+      },
+      events: [],
+      task,
+    });
+
+    const snapshot = await service.buildSessionSnapshot({
+      ownerUserId: 7,
+      task,
+      visibleStepLabel: (_, label) => label,
+    });
+
+    expect(snapshot).toMatchObject({
+      hasSession: false,
+      activeTaskId: null,
+      result: null,
+      messages: [],
+    });
+  });
+
+  it('silences ordinary product-help checkpoint sessions from latest restore', async () => {
+    const task = makeTask({
+      goal: '为什么我的记忆没了，怎么使用这个 Agent',
+      status: AgentTaskStatus.WaitingReply,
+      memory: {
+        socialAgentChat: {
+          conversation: [
+            {
+              id: 'turn_user_help',
+              role: 'user',
+              content: '为什么我的记忆没了，怎么使用这个 Agent',
+              at: '2026-06-05T00:00:00.000Z',
+            },
+          ],
+        },
+      },
+      result: {},
+    });
+    task.result = {};
+    const { service } = makeHarness({
+      approvals: [],
+      approvalsReject: false,
+      checkpoint: {
+        ...makeCheckpoint(),
+        resumePrompt:
+          '从已保存的步骤继续：正在等待你确认。原始目标：为什么我的记忆没了，怎么使用这个 Agent',
       },
       events: [],
       task,

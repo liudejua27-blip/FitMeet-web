@@ -40,7 +40,7 @@ function route(
 }
 
 describe('social opportunity clarification', () => {
-  it('blocks vague social discovery until safety-critical context is clarified', () => {
+  it('asks only for search-critical context before candidate discovery', () => {
     const currentTask = task();
 
     const clarification = evaluateSocialOpportunityClarification({
@@ -50,20 +50,11 @@ describe('social opportunity clarification', () => {
     });
 
     expect(clarification.complete).toBe(false);
-    expect(clarification.missing).toEqual([
-      'city',
-      'time',
-      'intensity',
-      'relationshipGoal',
-      'boundary',
-      'strangerPolicy',
-      'publicActivity',
-    ]);
-    expect(clarification.assistantMessage).toContain('为了只推荐安全、合适的机会');
+    expect(clarification.missing).toEqual(['city', 'time']);
     expect(clarification.assistantMessage).toContain('城市/大致区域');
-    expect(clarification.assistantMessage).toContain('想认识的人或关系目标');
-    expect(clarification.assistantMessage).toContain('是否接受陌生人');
-    expect(clarification.assistantMessage).toContain('是否公开发起活动');
+    expect(clarification.assistantMessage).toContain('时间');
+    expect(clarification.assistantMessage).not.toContain('是否接受陌生人');
+    expect(clarification.assistantMessage).not.toContain('是否公开发起活动');
     expect(readSocialAgentTaskMemory(currentTask).currentTask).toMatchObject({
       awaitingSearchConfirmation: true,
       waitingFor: 'opportunity_clarification',
@@ -72,7 +63,7 @@ describe('social opportunity clarification', () => {
     });
   });
 
-  it('keeps a generic social goal blocked until the candidate preference is clear', () => {
+  it('allows a generic activity companion goal when search-critical fields are clear', () => {
     const currentTask = task();
 
     const clarification = evaluateSocialOpportunityClarification({
@@ -186,7 +177,25 @@ describe('social opportunity clarification', () => {
     expect(clarification.searchGoal).toContain('公共场所');
   });
 
-  it('keeps city/time/activity requests blocked until stranger and public-activity policy are explicit', () => {
+  it('does not repeat time/location/activity when the user already gave a dance-student walking need', () => {
+    const currentTask = task();
+
+    const clarification = evaluateSocialOpportunityClarification({
+      task: currentTask,
+      route: route(),
+      message: '我想在青岛大学，今天晚上，找个女舞蹈生散步。',
+    });
+
+    expect(clarification.complete).toBe(true);
+    expect(clarification.missing).toEqual([]);
+    expect(clarification.searchGoal).toContain('青岛');
+    expect(clarification.searchGoal).toContain('青岛大学');
+    expect(clarification.searchGoal).toContain('今天晚上');
+    expect(clarification.searchGoal).toContain('散步');
+    expect(clarification.searchGoal).toContain('女生、舞蹈相关');
+  });
+
+  it('does not hold candidate discovery for publish or stranger policy fields', () => {
     const currentTask = task();
 
     const clarification = evaluateSocialOpportunityClarification({
@@ -195,28 +204,12 @@ describe('social opportunity clarification', () => {
       message: '青岛周末下午找个轻松跑步搭子，只在公共场所，先站内聊',
     });
 
-    expect(clarification.complete).toBe(false);
-    expect(clarification.missing).toEqual([
-      'strangerPolicy',
-      'publicActivity',
-    ]);
-    expect(clarification.assistantMessage).toContain('是否接受陌生人');
-    expect(clarification.assistantMessage).toContain('是否公开发起活动');
-    expect(clarification.assistantMessage).toContain(
-      '还差 是否接受陌生人、是否公开发起活动',
-    );
-    expect(clarification.assistantMessage).not.toContain(
-      '还差 城市/大致区域',
-    );
-    expect(clarification.assistantMessage).not.toContain('还差 时间');
-    expect(clarification.assistantMessage).not.toContain(
-      '还差 运动或见面场景',
-    );
-    expect(readSocialAgentTaskMemory(currentTask).currentTask).toMatchObject({
-      awaitingSearchConfirmation: true,
-      waitingFor: 'opportunity_clarification',
-      shouldSearchNow: false,
-    });
+    expect(clarification.complete).toBe(true);
+    expect(clarification.missing).toEqual([]);
+    expect(clarification.searchGoal).toContain('青岛');
+    expect(clarification.searchGoal).toContain('周末');
+    expect(clarification.searchGoal).toContain('跑步');
+    expect(clarification.searchGoal).toContain('公共场所');
   });
 
   it('does not repeat the full clarification example on follow-up turns', () => {
@@ -234,25 +227,15 @@ describe('social opportunity clarification', () => {
       message: '青岛周末下午，轻松跑步，只在公共场所，先站内聊',
     });
 
-    expect(followUp.complete).toBe(false);
-    expect(followUp.missing).toEqual([
-      'relationshipGoal',
-      'strangerPolicy',
-      'publicActivity',
-    ]);
-    expect(followUp.assistantMessage).toContain('现在只差');
-    expect(followUp.assistantMessage).toContain('是否接受陌生人');
-    expect(followUp.assistantMessage).toContain('是否公开发起活动');
-    expect(followUp.assistantMessage).not.toContain('你可以一句话补齐，比如');
+    expect(followUp.complete).toBe(true);
+    expect(followUp.missing).toEqual([]);
     expect(followUp.assistantMessage).not.toContain('城市/大致区域');
+    expect(followUp.assistantMessage).not.toMatch(/还差[^。]*时间/);
+    expect(followUp.assistantMessage).not.toMatch(/只差[^。]*时间/);
     expect(followUp.assistantMessage).not.toContain('运动或见面场景');
     expect(readSocialAgentTaskMemory(currentTask).currentTask).toMatchObject({
-      clarificationTurns: 2,
-      clarificationMissingFields: [
-        'relationshipGoal',
-        'strangerPolicy',
-        'publicActivity',
-      ],
+      clarificationTurns: 1,
+      clarificationMissingFields: ['city', 'time'],
     });
   });
 
@@ -331,7 +314,8 @@ describe('social opportunity clarification', () => {
       message: '可以，帮我找人',
     });
 
-    expect(clarification.complete).toBe(false);
+    expect(clarification.complete).toBe(true);
+    expect(clarification.missing).toEqual([]);
     expect(clarification.missing).not.toEqual(
       expect.arrayContaining(['city', 'time', 'activity', 'intensity', 'boundary', 'publicActivity']),
     );
@@ -343,6 +327,111 @@ describe('social opportunity clarification', () => {
     expect(clarification.searchGoal).toContain('周末下午');
     expect(clarification.searchGoal).toContain('散步');
     expect(clarification.searchGoal).toContain('青岛大学附近');
+  });
+
+  it('uses taskMemory-only completed slots so restored sessions do not repeat answered fields', () => {
+    const currentTask = task({
+      memory: {
+        taskMemory: {
+          currentGoal: '今晚青岛大学附近散步，优先舞蹈相关标签',
+          taskSlots: {
+            activity: {
+              key: 'activity',
+              value: '散步',
+              state: 'completed',
+              source: 'user_message',
+            },
+            time_window: {
+              key: 'time_window',
+              value: '今天晚上',
+              state: 'completed',
+              source: 'user_message',
+            },
+            location_text: {
+              key: 'location_text',
+              value: '青岛大学附近',
+              state: 'completed',
+              source: 'user_message',
+            },
+            candidate_preference: {
+              key: 'candidate_preference',
+              value: '公开资料里有舞蹈相关标签的女生',
+              state: 'answered',
+              source: 'user_message',
+            },
+          },
+          currentTask: {
+            awaitingSearchConfirmation: true,
+            waitingFor: 'opportunity_clarification',
+            clarificationTurns: 1,
+            clarificationAskedFields: ['city', 'time', 'activity'],
+          },
+        },
+      },
+    });
+
+    const clarification = evaluateSocialOpportunityClarification({
+      task: currentTask,
+      route: route(),
+      message: '可以，帮我找人',
+    });
+
+    expect(clarification.complete).toBe(true);
+    expect(clarification.missing).toEqual([]);
+    expect(clarification.assistantMessage).not.toContain('城市/大致区域');
+    expect(clarification.assistantMessage).not.toContain('时间');
+    expect(clarification.assistantMessage).not.toContain('运动或见面场景');
+    expect(clarification.searchGoal).toContain('今天晚上');
+    expect(clarification.searchGoal).toContain('散步');
+    expect(clarification.searchGoal).toContain('青岛大学附近');
+    expect(clarification.searchGoal).toContain('舞蹈相关标签');
+  });
+
+  it('uses taskContext known slot constraints so hydrated route runs do not repeat answered fields', () => {
+    const currentTask = task();
+
+    const clarification = evaluateSocialOpportunityClarification({
+      task: currentTask,
+      route: route(),
+      message: '可以，帮我找人',
+      taskContext: {
+        taskMemory: {
+          knownTaskSlotConstraints: {
+            treatAsHardConstraints: true,
+            knownSlots: [
+              { key: 'activity', label: '活动', value: '散步' },
+              { key: 'time_window', label: '时间', value: '今天晚上' },
+              {
+                key: 'location_text',
+                label: '地点',
+                value: '青岛大学附近',
+              },
+              {
+                key: 'candidate_preference',
+                label: '候选偏好',
+                value: '公开资料里有舞蹈相关标签的女生',
+              },
+            ],
+            doNotAskAgainFor: [
+              'activity',
+              'time_window',
+              'location_text',
+              'candidate_preference',
+            ],
+          },
+        },
+      },
+    });
+
+    expect(clarification.complete).toBe(true);
+    expect(clarification.missing).toEqual([]);
+    expect(clarification.assistantMessage).not.toContain('城市/大致区域');
+    expect(clarification.assistantMessage).not.toContain('时间');
+    expect(clarification.assistantMessage).not.toContain('运动或见面场景');
+    expect(clarification.searchGoal).toContain('今天晚上');
+    expect(clarification.searchGoal).toContain('散步');
+    expect(clarification.searchGoal).toContain('青岛大学附近');
+    expect(clarification.searchGoal).toContain('舞蹈相关标签');
   });
 
   it('does not treat inferred required slots as user-confirmed answers', () => {
@@ -396,7 +485,10 @@ describe('social opportunity clarification', () => {
 
     expect(clarification.complete).toBe(false);
     expect(clarification.missing).toEqual(
-      expect.arrayContaining(['time', 'activity']),
+      expect.arrayContaining([
+        'time',
+        'activity',
+      ]),
     );
     expect(clarification.missing).not.toContain('city');
     expect(clarification.assistantMessage).toContain('时间');

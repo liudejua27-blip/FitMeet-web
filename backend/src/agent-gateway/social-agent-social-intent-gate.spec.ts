@@ -1,5 +1,7 @@
 import {
   enforceSocialIntentGate,
+  hasExplicitCandidateMessageConfirmationIntent,
+  hasExistingSocialActionContext,
   hasExplicitSocialExecutionIntent,
   isConversationOnlySocialMention,
   shouldAllowSocialExecution,
@@ -27,15 +29,18 @@ describe('social agent social intent gate', () => {
     '帮我找一下设置入口在哪里',
     '给我找一下隐私政策说明',
     '我想找客服问问账号问题',
-  ])('keeps capability and workflow questions out of social execution: %s', (message) => {
-    expect(hasExplicitSocialExecutionIntent(message)).toBe(false);
-    expect(
-      shouldAllowSocialExecution({
-        message,
-        intent: 'activity_search',
-      }),
-    ).toBe(false);
-  });
+  ])(
+    'keeps capability and workflow questions out of social execution: %s',
+    (message) => {
+      expect(hasExplicitSocialExecutionIntent(message)).toBe(false);
+      expect(
+        shouldAllowSocialExecution({
+          message,
+          intent: 'activity_search',
+        }),
+      ).toBe(false);
+    },
+  );
 
   it.each([
     '周末有没有羽毛球活动，帮我看看',
@@ -68,6 +73,145 @@ describe('social agent social intent gate', () => {
         taskContext: { hasCandidates: true },
       }),
     ).toBe(true);
+  });
+
+  it('uses conversation intent to block implicit social continuation from stale context', () => {
+    expect(
+      shouldAllowSocialExecution({
+        message: '为什么我的记忆没了？',
+        intent: 'candidate_followup',
+        taskContext: { hasCandidates: true, hasSearchContext: true },
+        conversationIntent: 'conversation',
+      }),
+    ).toBe(false);
+
+    const route = enforceSocialIntentGate(
+      {
+        message: '为什么我的记忆没了？',
+        taskContext: { hasCandidates: true, hasSearchContext: true },
+        conversationIntent: 'conversation',
+      },
+      {
+        intent: 'candidate_followup',
+        confidence: 0.91,
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+        shouldSearch: true,
+        shouldReplan: true,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'search_candidates',
+        source: 'deepseek',
+      } satisfies SocialAgentIntentRouterResult,
+    );
+
+    expect(route).toMatchObject({
+      intent: 'casual_chat',
+      shouldSearch: false,
+      shouldExecuteAction: false,
+      replyStrategy: 'conversational_answer',
+    });
+  });
+
+  it('does not let conversation intent suppress an explicit user request to find people', () => {
+    expect(
+      shouldAllowSocialExecution({
+        message: '今天晚上青岛大学附近散步，帮我找人',
+        intent: 'social_search',
+        conversationIntent: 'conversation',
+      }),
+    ).toBe(true);
+  });
+
+  it('allows short follow-up social search only when an existing task context is active', () => {
+    expect(
+      shouldAllowSocialExecution({
+        message: '可以',
+        intent: 'social_search',
+      }),
+    ).toBe(false);
+    expect(
+      shouldAllowSocialExecution({
+        message: '可以',
+        intent: 'social_search',
+        taskContext: { hasSearchContext: true },
+      }),
+    ).toBe(true);
+    expect(
+      shouldAllowSocialExecution({
+        message: '可以，继续帮我看看活动',
+        intent: 'activity_search',
+        taskContext: { hasSearchContext: true },
+      }),
+    ).toBe(true);
+  });
+
+  it('requires existing candidate, approval, or social task context before side-effect actions can run', () => {
+    expect(
+      hasExistingSocialActionContext({
+        taskContext: { hasCandidates: false, hasSearchContext: false },
+      }),
+    ).toBe(false);
+    expect(
+      shouldAllowSocialExecution({
+        message: '帮我发给这个人',
+        intent: 'action_request',
+      }),
+    ).toBe(false);
+    expect(
+      shouldAllowSocialExecution({
+        message: '帮我发给这个人',
+        intent: 'action_request',
+        taskContext: { hasCandidates: true },
+      }),
+    ).toBe(true);
+    expect(
+      shouldAllowSocialExecution({
+        message: '确认发布',
+        intent: 'action_request',
+        taskContext: {
+          pendingApprovals: [{ id: 88, actionType: 'publish_social_request' }],
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it('keeps explicit opt-out and conversation-only messages from continuing task search', () => {
+    expect(
+      shouldAllowSocialExecution({
+        message: '先不要推荐人，我只是问一个普通问题',
+        intent: 'social_search',
+        taskContext: { hasSearchContext: true },
+      }),
+    ).toBe(false);
+    expect(
+      shouldAllowSocialExecution({
+        message: '我现在不想交友，只想聊聊今天的压力',
+        intent: 'social_search',
+        taskContext: { hasCandidates: true },
+      }),
+    ).toBe(false);
+  });
+
+  it('separates candidate message confirmation from follow-up and discovery copy', () => {
+    expect(hasExplicitCandidateMessageConfirmationIntent('确认发送')).toBe(
+      true,
+    );
+    expect(hasExplicitCandidateMessageConfirmationIntent('可以发送')).toBe(
+      true,
+    );
+    expect(
+      hasExplicitCandidateMessageConfirmationIntent('为什么需要确认？'),
+    ).toBe(false);
+    expect(
+      hasExplicitCandidateMessageConfirmationIntent('可以，帮我找人'),
+    ).toBe(false);
+    expect(hasExplicitCandidateMessageConfirmationIntent('还不发')).toBe(false);
   });
 
   it('normalizes allowed social search routes so complete requests can queue search', () => {
@@ -108,26 +252,23 @@ describe('social agent social intent gate', () => {
 
     expect(isConversationOnlySocialMention(message)).toBe(true);
     expect(
-      enforceSocialIntentGate(
-        { message },
-        {
-          intent: 'social_search',
-          confidence: 0.91,
-          entities: {
-            city: '',
-            activityType: '',
-            targetGender: '',
-            timePreference: '',
-            locationPreference: '',
-          },
-          shouldSearch: true,
-          shouldReplan: true,
-          shouldUpdateProfile: false,
-          shouldExecuteAction: false,
-          replyStrategy: 'search_candidates',
-          source: 'deepseek',
-        } satisfies SocialAgentIntentRouterResult,
-      ),
+      enforceSocialIntentGate({ message }, {
+        intent: 'social_search',
+        confidence: 0.91,
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+        shouldSearch: true,
+        shouldReplan: true,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'search_candidates',
+        source: 'deepseek',
+      } satisfies SocialAgentIntentRouterResult),
     ).toMatchObject({
       intent: 'casual_chat',
       shouldSearch: false,

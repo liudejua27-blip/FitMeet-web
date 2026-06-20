@@ -1,7 +1,9 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 import { cleanDisplayText } from '../common/display-text.util';
 import { AgentTask } from './entities/agent-task.entity';
+import { socialAgentContextTurnLimit } from './social-agent-context-window';
 import { hasSocialAgentSearchContext } from './social-agent-candidate-context.presenter';
 import { readSocialAgentStoredCandidateSummaries } from './social-agent-chat-session.presenter';
 import type { SocialAgentRouteMessageBody } from './social-agent-chat.types';
@@ -11,8 +13,12 @@ import {
   SocialAgentMemoryContext,
   SocialAgentMemoryContextService,
 } from './social-agent-memory-context.service';
-import { readSocialAgentConversationHistory } from './social-agent-chat-memory.presenter';
-import { readSocialAgentTaskMemory } from './social-agent-memory.util';
+import {
+  readSocialAgentConversationHistory,
+  summarizeSocialAgentTaskMemoryForLlm,
+} from './social-agent-chat-memory.presenter';
+import type { SocialAgentHydratedContext } from './social-agent-context-hydrator.service';
+import { buildSocialAgentKnownTaskSlotConstraints } from './social-agent-task-slot-constraints.presenter';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentRagService } from './social-agent-rag.service';
 
@@ -25,6 +31,7 @@ export class SocialAgentRouteContextService {
     private readonly rag: SocialAgentRagService,
     @Optional()
     private readonly memoryContext?: SocialAgentMemoryContextService,
+    @Optional() private readonly config?: ConfigService,
   ) {}
 
   buildTaskContext(input: {
@@ -32,18 +39,92 @@ export class SocialAgentRouteContextService {
     body: SocialAgentRouteMessageBody;
     longTermSnapshot?: LongTermMemorySnapshot | null;
     memoryContext?: SocialAgentMemoryContext | null;
+    hydratedContext?: SocialAgentHydratedContext | null;
   }): Record<string, unknown> {
+    const hydrated = input.hydratedContext ?? null;
     const candidates = readSocialAgentStoredCandidateSummaries(input.task);
     const result = this.isRecord(input.task.result) ? input.task.result : {};
     const chatRun = this.isRecord(result.chatRun) ? result.chatRun : {};
     const hasSearchContext = hasSocialAgentSearchContext(input.task);
-    const taskMemory = readSocialAgentTaskMemory(input.task);
+    const taskMemory = summarizeSocialAgentTaskMemoryForLlm(input.task);
+    const taskSlots =
+      this.nonEmptyRecord(hydrated?.taskSlots) ??
+      this.nonEmptyRecord(taskMemory.taskSlots) ??
+      hydrated?.taskSlots ??
+      taskMemory.taskSlots;
+    const knownTaskSlotConstraints =
+      this.nonEmptyKnownTaskSlotConstraints(
+        hydrated?.knownTaskSlotConstraints,
+      ) ??
+      this.nonEmptyKnownTaskSlotConstraints(
+        taskMemory.knownTaskSlotConstraints,
+      ) ??
+      buildSocialAgentKnownTaskSlotConstraints(
+        this.isRecord(taskSlots) ? taskSlots : null,
+      );
+    const recentMessages =
+      this.nonEmptyRecordArray(hydrated?.recentMessages) ??
+      readSocialAgentConversationHistory(
+        input.task,
+        socialAgentContextTurnLimit(this.config),
+      );
+    const taskSlotSummary =
+      this.nonEmptyRecord(hydrated?.taskSlotSummary) ??
+      this.nonEmptyRecord(taskMemory.taskSlotSummary) ??
+      hydrated?.taskSlotSummary ??
+      taskMemory.taskSlotSummary;
+    const pendingApprovals =
+      this.nonEmptyArray(hydrated?.pendingApprovals) ??
+      this.nonEmptyArray(taskMemory.pendingApprovals) ??
+      this.nonEmptyArray(taskMemory.pendingActions) ??
+      hydrated?.pendingApprovals ??
+      taskMemory.pendingApprovals ??
+      taskMemory.pendingActions;
+    const candidateActions =
+      this.nonEmptyRecord(hydrated?.candidateActions) ??
+      this.nonEmptyRecord(taskMemory.candidateActions) ??
+      this.nonEmptyRecord(taskMemory.candidateState) ??
+      hydrated?.candidateActions ??
+      taskMemory.candidateActions ??
+      taskMemory.candidateState;
     return {
       taskId: input.task.id,
       taskType: input.task.taskType,
       status: input.task.status,
-      agentState: taskMemory.currentTask.state,
+      agentState: this.stringValue(
+        this.isRecord(taskMemory.currentTask)
+          ? taskMemory.currentTask.state
+          : null,
+      ),
+      currentGoal: taskMemory.currentGoal,
       currentTask: taskMemory.currentTask,
+      taskMemory,
+      taskSlots,
+      taskSlotSummary,
+      knownTaskSlotConstraints,
+      preferences: taskMemory.preferences,
+      boundaries: taskMemory.boundaries,
+      activeEntities: taskMemory.activeEntities,
+      recentMessages,
+      conversationHistory: recentMessages,
+      threadId: hydrated?.threadId ?? null,
+      hydratedTaskId: hydrated?.taskId ?? input.task.id,
+      lifeGraphSummary:
+        this.nonEmptyRecord(hydrated?.lifeGraphSummary) ??
+        this.nonEmptyRecord(taskMemory.lifeGraphSummary) ??
+        hydrated?.lifeGraphSummary ??
+        null,
+      lifeGraphGovernanceSummary: hydrated?.lifeGraphGovernanceSummary ?? null,
+      lifeGraphFactDisplaySummaries:
+        hydrated?.lifeGraphFactDisplaySummaries ?? [],
+      pendingApprovals,
+      candidateActions,
+      candidateState: taskMemory.candidateState,
+      activityState: taskMemory.activityState,
+      pendingActions: taskMemory.pendingActions,
+      stableProfileFacts: taskMemory.stableProfileFacts,
+      lastUserMessages: taskMemory.lastUserMessages,
+      lastSearch: taskMemory.lastSearch,
       goal: input.task.goal,
       hasSearchContext,
       hasCandidates: input.body.hasCandidates === true || candidates.length > 0,
@@ -69,11 +150,18 @@ export class SocialAgentRouteContextService {
   buildMemoryContext(
     task: AgentTask,
     longTermSnapshot: LongTermMemorySnapshot | null,
+    hydratedContext?: SocialAgentHydratedContext | null,
   ): SocialAgentMemoryContext | null {
+    const conversationHistory =
+      this.nonEmptyRecordArray(hydratedContext?.recentMessages) ??
+      readSocialAgentConversationHistory(
+        task,
+        socialAgentContextTurnLimit(this.config),
+      );
     return (
       this.memoryContext?.build({
         task,
-        conversationHistory: readSocialAgentConversationHistory(task),
+        conversationHistory,
         longTermSnapshot,
       }) ?? null
     );
@@ -131,5 +219,52 @@ export class SocialAgentRouteContextService {
     const text = cleanDisplayText(value, '');
     const num = Number(text || value);
     return Number.isFinite(num) && num > 0 ? num : null;
+  }
+
+  private stringValue(value: unknown): string {
+    return cleanDisplayText(value, '');
+  }
+
+  private nonEmptyKnownTaskSlotConstraints(
+    value: unknown,
+  ): Record<string, unknown> | null {
+    if (!this.isRecord(value)) return null;
+    const knownSlots = Array.isArray(value.knownSlots) ? value.knownSlots : [];
+    const doNotAskAgainFor = Array.isArray(value.doNotAskAgainFor)
+      ? value.doNotAskAgainFor
+      : [];
+    const userVisibleSummary = cleanDisplayText(value.userVisibleSummary, '');
+    return knownSlots.length || doNotAskAgainFor.length || userVisibleSummary
+      ? value
+      : null;
+  }
+
+  private nonEmptyRecord(value: unknown): Record<string, unknown> | null {
+    if (!this.isRecord(value)) return null;
+    return this.hasSubstantiveValue(value) ? value : null;
+  }
+
+  private nonEmptyArray<T = unknown>(value: unknown): T[] | null {
+    return Array.isArray(value) && value.length > 0 ? (value as T[]) : null;
+  }
+
+  private nonEmptyRecordArray(
+    value: unknown,
+  ): Array<Record<string, unknown>> | null {
+    if (!Array.isArray(value)) return null;
+    const records = value.filter((item): item is Record<string, unknown> =>
+      this.isRecord(item),
+    );
+    return records.length > 0 ? records : null;
+  }
+
+  private hasSubstantiveValue(value: unknown): boolean {
+    if (Array.isArray(value)) return value.length > 0;
+    if (this.isRecord(value)) {
+      return Object.keys(value).some((key) =>
+        this.hasSubstantiveValue(value[key]),
+      );
+    }
+    return cleanDisplayText(value, '') !== '';
   }
 }

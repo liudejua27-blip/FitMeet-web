@@ -4,14 +4,14 @@ Last updated: 2026-06-09
 
 ## Scope
 
-This audit covers the FitMeet Agent web page, the `AgentAdapter` layer, and backend Social Agent session storage before moving `/agent` from mock flow to real API usage.
+This audit covers the FitMeet Agent web page, the `AgentAdapter` layer, and backend Social Agent session storage after moving `/agent` to real API usage in production.
 
 ## Current Status
 
 - `/agent` uses `AgentAdapter` so mock and real implementations are isolated.
 - Development defaults to `mock`; production now defaults to `real`.
-- `frontend/.env.production` explicitly sets `VITE_AGENT_ADAPTER=real`.
-- `/agent` restores the latest backend Agent session when `VITE_AGENT_ADAPTER=real` and the user is logged in.
+- Production builds resolve to the real adapter when `import.meta.env.PROD` or `import.meta.env.MODE === 'production'`; `VITE_AGENT_ADAPTER=real` remains an explicit override, not a required safety rail.
+- `/agent` restores the latest backend Agent session in real mode when the user is logged in.
 - Restored sessions use the backend `activeTaskId` as the canonical task id for follow-up messages.
 - New conversation clears the current frontend task state and skips one automatic restore so it does not immediately reopen the last task.
 
@@ -43,8 +43,7 @@ These are backed by PostgreSQL entities and are suitable for real API integratio
 
 Allowed mock usage:
 
-- `mockAgentAdapter` for local development without a backend.
-- `/internal/demo/ant-guide` and AntGuide visual demos.
+- `mockAgentAdapter` for local development or unit tests without a backend.
 - Unit tests that explicitly call `createMockAgentAdapter`.
 
 Not allowed for staging/production:
@@ -55,7 +54,7 @@ Not allowed for staging/production:
 
 ## Audit Findings
 
-1. Fixed: production adapter fallback now resolves to `real` when `import.meta.env.PROD` is true.
+1. Fixed: production adapter fallback now resolves to `real` when `import.meta.env.PROD` is true or `import.meta.env.MODE === 'production'`.
 2. Fixed: `/agent` now calls `restoreSession()` in real mode for logged-in users.
 3. Fixed: restored session `activeTaskId` is preserved and reused on follow-up `run()` calls.
 4. Fixed: clicking "新对话" clears the active task and prevents immediate latest-session restore.

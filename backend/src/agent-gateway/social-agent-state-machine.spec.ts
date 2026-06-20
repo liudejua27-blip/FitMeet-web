@@ -64,7 +64,7 @@ describe('Social Agent state machine', () => {
     );
   });
 
-  it('uses error_recovery for user corrections and empty search refinement', () => {
+  it('uses error_recovery for corrections but keeps empty search as a normal refinement state', () => {
     const task = makeTask();
 
     transitionSocialAgentState(task, 'user_correction', {
@@ -78,7 +78,10 @@ describe('Social Agent state machine', () => {
       waitingFor: 'search_refinement',
     });
     expect(readSocialAgentTaskMemory(task).currentTask.state).toBe(
-      'error_recovery',
+      'showing_candidates',
+    );
+    expect(readSocialAgentTaskMemory(task).currentTask.waitingFor).toBe(
+      'search_refinement',
     );
   });
 });

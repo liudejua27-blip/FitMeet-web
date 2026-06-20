@@ -8,10 +8,19 @@ export type AgentAutoActionType =
   | 'recommend_candidate'
   | 'auto_match'
   | 'generate_invite'
+  | 'publish_social_request'
+  | 'send_invite'
+  | 'send_candidate_message'
   | 'send_message'
   | 'add_friend'
+  | 'connect_candidate'
   | 'contact_exchange'
+  | 'exchange_contact'
+  | 'reveal_precise_location'
+  | 'update_sensitive_profile'
+  | 'life_graph_writeback'
   | 'invite_activity'
+  | 'invite_candidate'
   | 'create_activity'
   | 'create_activity_draft'
   | 'offline_meeting'
@@ -62,10 +71,19 @@ const OPEN_AUTO_ACTIONS = new Set<AgentAutoActionType>([
 ]);
 
 const HIGH_RISK_CONFIRMATION_ACTIONS = new Set<AgentAutoActionType>([
+  'publish_social_request',
+  'send_invite',
+  'send_candidate_message',
   'send_message',
   'add_friend',
+  'connect_candidate',
   'contact_exchange',
+  'exchange_contact',
+  'reveal_precise_location',
+  'update_sensitive_profile',
+  'life_graph_writeback',
   'invite_activity',
+  'invite_candidate',
   'create_activity',
   'offline_meeting',
   'payment',

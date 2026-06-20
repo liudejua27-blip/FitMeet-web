@@ -48,6 +48,10 @@ export type SocialAgentConversationToolResult = {
   taskEvent?: SocialAgentConversationToolTaskEvent;
 };
 
+type SocialAgentConversationToolOptions = {
+  signal?: AbortSignal | null;
+};
+
 @Injectable()
 export class SocialAgentConversationToolService {
   constructor(
@@ -84,8 +88,8 @@ export class SocialAgentConversationToolService {
           : [];
     const messages = toSocialAgentMessageArray(rawMessages);
     const effectiveConversationId =
-      conversationId ?? messages.find((message) => message.conversationId)
-        ?.conversationId;
+      conversationId ??
+      messages.find((message) => message.conversationId)?.conversationId;
     if (!effectiveConversationId) {
       return this.skippedReadResult(
         task,
@@ -218,6 +222,7 @@ export class SocialAgentConversationToolService {
   async summarizeReply(
     task: AgentTask,
     input: Record<string, unknown>,
+    options: SocialAgentConversationToolOptions = {},
   ): Promise<SocialAgentConversationToolResult> {
     const loop = this.taskMemory.socialLoopMemory(task);
     const messages = toSocialAgentMessageArray(
@@ -232,6 +237,7 @@ export class SocialAgentConversationToolService {
       prompt: buildSocialAgentReplySummaryPrompt(task, messages),
       fallback: () => buildFallbackSocialAgentReplySummary(messages),
       taskId: task.id,
+      signal: options.signal ?? null,
     });
     await this.persistReplySummaryState({ task, messages, summary });
 

@@ -97,8 +97,9 @@ describe('SocialAgentRouteSearchTurnService', () => {
     });
     expect(result.assistantMessage).toContain('城市/大致区域');
     expect(result.assistantMessage).toContain('时间');
-    expect(result.assistantMessage).toContain('运动强度');
-    expect(result.assistantMessage).toContain('社交边界');
+    expect(result.assistantMessage).toContain(
+      '安全边界和是否发布到发现，会在真正发送邀请或公开前再让你确认',
+    );
     expect(activitySearch.handleActivitySearch).not.toHaveBeenCalled();
   });
 
@@ -106,6 +107,12 @@ describe('SocialAgentRouteSearchTurnService', () => {
     const { activitySearch, service } = makeHarness();
     const task = makeTask();
     const buildMemoryContext = jest.fn().mockReturnValue({ summary: 'memory' });
+    const taskContext = {
+      taskSlots: {
+        activity: { value: '跑步', state: 'completed' },
+        location_text: { value: '青岛大学附近', state: 'completed' },
+      },
+    };
 
     const result = await service.handle({
       ownerUserId: 7,
@@ -126,6 +133,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
       replanAndRefresh: jest.fn(),
       queueInitialSearchForTask: jest.fn(),
       buildMemoryContext,
+      taskContext,
     });
 
     expect(result).toMatchObject({
@@ -142,16 +150,148 @@ describe('SocialAgentRouteSearchTurnService', () => {
         message:
           '青岛周末下午，青岛大学附近，轻松跑步，只在公共场所，先站内聊，接受陌生人，可以公开发起活动，找周末晨跑活动（已确认：青岛、青岛大学附近、周末下午、跑步、轻松/低压力、公共场所、先站内沟通、接受陌生人、可公开发起活动）',
         buildMemoryContext,
+        taskContext,
       }),
     );
   });
 
-  it('answers social search with Life Graph clarification before queueing search', async () => {
+  it('does not repeat activity search after an empty activity result without changed criteria', async () => {
+    const { activitySearch, service } = makeHarness();
+    const task = makeTask({
+      memory: {
+        taskSlots: {
+          activity: {
+            key: 'activity',
+            value: '散步',
+            state: 'completed',
+            source: 'user_message',
+          },
+          time_window: {
+            key: 'time_window',
+            value: '今天晚上',
+            state: 'completed',
+            source: 'user_message',
+          },
+          location_text: {
+            key: 'location_text',
+            value: '青岛大学附近',
+            state: 'completed',
+            source: 'user_message',
+          },
+        },
+        shortTerm: {
+          hasSearched: true,
+          lastSearchIntent: 'activity_search',
+          lastSearchCandidateCount: 0,
+          lastSearchEmptyReason: 'no_real_candidates',
+          lastSearchNextStep:
+            '换城市、时间或活动类型，或确认发布约练卡到发现',
+        },
+      },
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        intent: 'activity_search',
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+        replyStrategy: 'search_activities',
+      }),
+      message: '继续找活动',
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask: jest.fn(),
+      buildMemoryContext: jest.fn(),
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      queuedRun: null,
+      runMode: null,
+      savedContext: true,
+    });
+    expect(result.assistantMessage).toContain('没有找到真实、公开可发现');
+    expect(result.assistantMessage).toContain('活动或公开约练卡片');
+    expect(result.assistantMessage).toContain('避免重复空搜');
+    expect(activitySearch.handleActivitySearch).not.toHaveBeenCalled();
+  });
+
+  it('allows activity search after empty results when the user changes criteria', async () => {
+    const { activitySearch, service } = makeHarness();
+    const task = makeTask({
+      memory: {
+        taskSlots: {
+          activity: {
+            key: 'activity',
+            value: '散步',
+            state: 'completed',
+            source: 'user_message',
+          },
+          time_window: {
+            key: 'time_window',
+            value: '今天晚上',
+            state: 'completed',
+            source: 'user_message',
+          },
+          location_text: {
+            key: 'location_text',
+            value: '青岛大学附近',
+            state: 'completed',
+            source: 'user_message',
+          },
+        },
+        shortTerm: {
+          hasSearched: true,
+          lastSearchIntent: 'activity_search',
+          lastSearchCandidateCount: 0,
+          lastSearchEmptyReason: 'no_real_candidates',
+          lastSearchNextStep:
+            '换城市、时间或活动类型，或确认发布约练卡到发现',
+        },
+      },
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        intent: 'activity_search',
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+        replyStrategy: 'search_activities',
+      }),
+      message: '那改到周末下午，范围扩大一点',
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask: jest.fn(),
+      buildMemoryContext: jest.fn(),
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      activityResults: [{ id: 'activity-1', title: '周末晨跑' }],
+    });
+    expect(activitySearch.handleActivitySearch).toHaveBeenCalled();
+  });
+
+  it('ignores stale Life Graph clarification when search-critical fields are already confirmed', async () => {
     const { profileEnrichment, service } = makeHarness();
     profileEnrichment.lifeGraphSearchClarification.mockResolvedValue(
       '先补充一下你的可约时间，我再开始找。',
     );
-    const queueInitialSearchForTask = jest.fn();
+    const queueInitialSearchForTask = jest
+      .fn()
+      .mockResolvedValue({ status: 'queued', taskId: 101 });
 
     const result = await service.handle({
       ownerUserId: 7,
@@ -166,7 +306,38 @@ describe('SocialAgentRouteSearchTurnService', () => {
 
     expect(result).toMatchObject({
       handled: true,
-      assistantMessage: '先补充一下你的可约时间，我再开始找。',
+      savedContext: false,
+      queuedRun: { status: 'queued', taskId: 101 },
+      runMode: 'initial',
+    });
+    expect(result.assistantMessage).toBeUndefined();
+    expect(queueInitialSearchForTask).toHaveBeenCalledTimes(1);
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain('周末下午');
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain('跑步');
+  });
+
+  it('keeps non-stale Life Graph safety clarification before queueing search', async () => {
+    const { profileEnrichment, service } = makeHarness();
+    profileEnrichment.lifeGraphSearchClarification.mockResolvedValue(
+      '为了安全，我需要先确认：第一次见面是否只接受公共场所、是否先站内沟通？',
+    );
+    const queueInitialSearchForTask = jest.fn();
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task: makeTask(),
+      route: makeRoute(),
+      message:
+        '帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人',
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask,
+      buildMemoryContext: jest.fn(),
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      assistantMessage:
+        '为了安全，我需要先确认：第一次见面是否只接受公共场所、是否先站内沟通？',
       savedContext: true,
       queuedRun: null,
       runMode: null,
@@ -205,7 +376,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
     expect(queueInitialSearchForTask).not.toHaveBeenCalled();
   });
 
-  it('asks for city, time, intensity and boundary before starting candidate search', async () => {
+  it('asks for search-critical context before starting candidate search', async () => {
     const { service } = makeHarness();
     const queueInitialSearchForTask = jest.fn();
 
@@ -235,8 +406,12 @@ describe('SocialAgentRouteSearchTurnService', () => {
     });
     expect(result.assistantMessage).toContain('城市/大致区域');
     expect(result.assistantMessage).toContain('时间');
-    expect(result.assistantMessage).toContain('运动强度');
-    expect(result.assistantMessage).toContain('社交边界');
+    expect(result.assistantMessage).toContain(
+      '安全边界和是否发布到发现，会在真正发送邀请或公开前再让你确认',
+    );
+    expect(result.assistantMessage).not.toContain('是否接受陌生人');
+    expect(result.assistantMessage).not.toContain('是否公开发起活动');
+    expect(result.assistantMessage).not.toContain('运动强度');
     expect(queueInitialSearchForTask).not.toHaveBeenCalled();
   });
 
@@ -271,12 +446,13 @@ describe('SocialAgentRouteSearchTurnService', () => {
     expect(result.assistantMessage).toContain('城市/大致区域');
     expect(result.assistantMessage).toContain('时间');
     expect(result.assistantMessage).toContain('场景：新朋友');
-    expect(result.assistantMessage).toContain('运动强度');
-    expect(result.assistantMessage).toContain('社交边界');
+    expect(result.assistantMessage).not.toContain('是否接受陌生人');
+    expect(result.assistantMessage).not.toContain('是否公开发起活动');
+    expect(result.assistantMessage).not.toContain('运动强度');
     expect(queueInitialSearchForTask).not.toHaveBeenCalled();
   });
 
-  it('asks about stranger and public-activity boundaries for vague low-pressure social requests', async () => {
+  it('asks for city and time for vague low-pressure social requests', async () => {
     const { service } = makeHarness();
     const queueInitialSearchForTask = jest.fn();
 
@@ -304,13 +480,15 @@ describe('SocialAgentRouteSearchTurnService', () => {
       queuedRun: null,
       runMode: null,
     });
-    expect(result.assistantMessage).toContain('是否接受陌生人');
-    expect(result.assistantMessage).toContain('是否公开发起活动');
+    expect(result.assistantMessage).toContain('城市/大致区域');
+    expect(result.assistantMessage).toContain('时间');
+    expect(result.assistantMessage).not.toContain('是否接受陌生人');
+    expect(result.assistantMessage).not.toContain('是否公开发起活动');
     expect(queueInitialSearchForTask).not.toHaveBeenCalled();
   });
 
   it('continues queued candidate search after the user answers opportunity clarification', async () => {
-    const { service } = makeHarness();
+    const { profileEnrichment, service } = makeHarness();
     const task = makeTask();
     const queueInitialSearchForTask = jest
       .fn()
@@ -372,13 +550,24 @@ describe('SocialAgentRouteSearchTurnService', () => {
       expect.stringContaining(
         '青岛周末下午，轻松跑步，想认识同城周末有空、愿意先运动再慢慢熟悉的人，只在公共场所，先站内聊，接受陌生人，可以公开发起活动',
       ),
+      { signal: null },
     );
     expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain(
       '已确认：青岛、周末下午、跑步、轻松/低压力、同城周末有空、愿意先运动再慢慢熟悉',
     );
+    expect(profileEnrichment.lifeGraphSearchClarification).toHaveBeenCalledWith(
+      7,
+      expect.stringContaining(
+        '青岛周末下午，轻松跑步，想认识同城周末有空、愿意先运动再慢慢熟悉的人，只在公共场所，先站内聊，接受陌生人，可以公开发起活动',
+      ),
+    );
+    expect(profileEnrichment.lifeGraphSearchClarification).toHaveBeenCalledWith(
+      7,
+      expect.stringContaining('已确认'),
+    );
   });
 
-  it('keeps clarifying when stranger and public-activity boundaries are missing', async () => {
+  it('does not hold candidate search until stranger and public-activity policy are known', async () => {
     const { service } = makeHarness();
     const task = makeTask();
     const queueInitialSearchForTask = jest
@@ -405,12 +594,15 @@ describe('SocialAgentRouteSearchTurnService', () => {
 
     expect(result).toMatchObject({
       handled: true,
-      queuedRun: null,
-      runMode: null,
+      savedContext: false,
+      queuedRun: { status: 'queued', taskId: 101 },
+      runMode: 'initial',
     });
-    expect(result.assistantMessage).toContain('是否接受陌生人');
-    expect(result.assistantMessage).toContain('是否公开发起活动');
-    expect(queueInitialSearchForTask).not.toHaveBeenCalled();
+    expect(result.assistantMessage).toBeUndefined();
+    expect(queueInitialSearchForTask).toHaveBeenCalledTimes(1);
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).toContain('公共场所');
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).not.toContain('接受陌生人');
+    expect(queueInitialSearchForTask.mock.calls[0]?.[2]).not.toContain('可公开发起活动');
   });
 
   it('treats stranger and public-activity answers as completed opportunity boundaries', async () => {
@@ -511,7 +703,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
       runMode: 'initial',
     });
     const searchGoal = queueInitialSearchForTask.mock.calls[0]?.[2] ?? '';
-    expect(searchGoal).toContain('已确认：青岛、周末、跑步、轻松/低压力');
+    expect(searchGoal).toContain('已确认：青岛、周末下午、跑步、轻松/低压力');
     expect(searchGoal).toContain('同城周末有空');
     expect(searchGoal).toContain('公共场所');
     expect(searchGoal).toContain('先站内沟通');
@@ -547,8 +739,255 @@ describe('SocialAgentRouteSearchTurnService', () => {
       7,
       task,
       '帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人，公共场所先站内聊，接受陌生人，可以公开发起活动（已确认：青岛、周末、跑步、轻松/低压力、同城周末有空、先运动再慢慢熟悉、公共场所、先站内沟通、接受陌生人、可公开发起活动）',
+      { signal: null },
     );
     expect(replanAndRefresh).not.toHaveBeenCalled();
+  });
+
+  it('does not repeat the same search after an empty real-candidate result without changed criteria', async () => {
+    const { service } = makeHarness();
+    const task = makeTask({
+      memory: {
+        taskSlots: {
+          activity: {
+            key: 'activity',
+            value: '散步',
+            state: 'completed',
+            source: 'user_message',
+          },
+          time_window: {
+            key: 'time_window',
+            value: '今天晚上',
+            state: 'completed',
+            source: 'user_message',
+          },
+          location_text: {
+            key: 'location_text',
+            value: '青岛大学附近',
+            state: 'completed',
+            source: 'user_message',
+          },
+        },
+        shortTerm: {
+          hasSearched: true,
+          lastSearchIntent: 'social_search',
+          lastSearchCandidateCount: 0,
+          lastSearchEmptyReason: 'no_real_candidates',
+          lastSearchNextStep: '放宽条件、换时间范围，或确认发布约练卡到发现',
+        },
+      },
+    });
+    const replanAndRefresh = jest.fn();
+    const queueInitialSearchForTask = jest.fn();
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+      }),
+      message: '可以，帮我找人',
+      replanAndRefresh,
+      queueInitialSearchForTask,
+      buildMemoryContext: jest.fn(),
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      queuedRun: null,
+      runMode: null,
+      savedContext: true,
+    });
+    expect(result.assistantMessage).toContain('没有找到真实、公开可发现');
+    expect(result.assistantMessage).toContain('避免重复空搜');
+    expect(result.assistantMessage).toContain('发布到发现');
+    expect(queueInitialSearchForTask).not.toHaveBeenCalled();
+    expect(replanAndRefresh).not.toHaveBeenCalled();
+  });
+
+  it('allows a new search after empty results when the user changes or broadens criteria', async () => {
+    const { service } = makeHarness();
+    const task = makeTask({
+      memory: {
+        taskSlots: {
+          activity: {
+            key: 'activity',
+            value: '散步',
+            state: 'completed',
+            source: 'user_message',
+          },
+          time_window: {
+            key: 'time_window',
+            value: '今天晚上',
+            state: 'completed',
+            source: 'user_message',
+          },
+          location_text: {
+            key: 'location_text',
+            value: '青岛大学附近',
+            state: 'completed',
+            source: 'user_message',
+          },
+        },
+        shortTerm: {
+          hasSearched: true,
+          lastSearchIntent: 'social_search',
+          lastSearchCandidateCount: 0,
+          lastSearchEmptyReason: 'no_real_candidates',
+          lastSearchNextStep: '放宽条件、换时间范围，或确认发布约练卡到发现',
+        },
+      },
+    });
+    const queueInitialSearchForTask = jest
+      .fn()
+      .mockResolvedValue({ runId: 'run-broadened' });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+      }),
+      message: '那扩大到 10 公里，舞蹈标签也可以放宽',
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask,
+      buildMemoryContext: jest.fn(),
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      queuedRun: { runId: 'run-broadened' },
+      runMode: 'initial',
+    });
+    expect(queueInitialSearchForTask).toHaveBeenCalled();
+  });
+
+  it('does not replan candidate follow-up after an empty result unless criteria changed', async () => {
+    const { service } = makeHarness();
+    const task = makeTask({
+      memory: {
+        taskSlots: {
+          activity: {
+            key: 'activity',
+            value: '散步',
+            state: 'completed',
+            source: 'user_message',
+          },
+          time_window: {
+            key: 'time_window',
+            value: '今天晚上',
+            state: 'completed',
+            source: 'user_message',
+          },
+          location_text: {
+            key: 'location_text',
+            value: '青岛大学附近',
+            state: 'completed',
+            source: 'user_message',
+          },
+        },
+        shortTerm: {
+          hasSearched: true,
+          lastSearchIntent: 'social_search',
+          lastSearchCandidateCount: 0,
+          lastSearchEmptyReason: 'no_real_candidates',
+          lastSearchNextStep: '放宽条件、换时间范围，或确认发布约练卡到发现',
+        },
+      },
+      result: {
+        chatRun: {
+          candidateCount: 0,
+          socialRequestId: 301,
+          socialRequestDraft: { title: '今晚青岛大学散步' },
+        },
+      },
+    });
+    const replanAndRefresh = jest.fn();
+    const queueInitialSearchForTask = jest.fn();
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        intent: 'candidate_followup',
+        shouldSearch: true,
+        shouldReplan: true,
+        replyStrategy: 'search_candidates',
+      }),
+      message: '可以，继续帮我找',
+      replanAndRefresh,
+      queueInitialSearchForTask,
+      buildMemoryContext: jest.fn(),
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      queuedRun: null,
+      runMode: null,
+      savedContext: true,
+    });
+    expect(result.assistantMessage).toContain('避免重复空搜');
+    expect(replanAndRefresh).not.toHaveBeenCalled();
+    expect(queueInitialSearchForTask).not.toHaveBeenCalled();
+  });
+
+  it('allows candidate follow-up replan after empty results when criteria are broadened', async () => {
+    const { service } = makeHarness();
+    const task = makeTask({
+      memory: {
+        shortTerm: {
+          hasSearched: true,
+          lastSearchIntent: 'social_search',
+          lastSearchCandidateCount: 0,
+          lastSearchEmptyReason: 'no_real_candidates',
+          lastSearchNextStep: '放宽条件、换时间范围，或确认发布约练卡到发现',
+        },
+      },
+      result: {
+        chatRun: {
+          candidateCount: 0,
+          socialRequestId: 301,
+          socialRequestDraft: { title: '今晚青岛大学散步' },
+        },
+      },
+    });
+    const replanAndRefresh = jest
+      .fn()
+      .mockResolvedValue({ runId: 'run-follow-up-broadened' });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        intent: 'candidate_followup',
+        shouldSearch: true,
+        shouldReplan: true,
+        replyStrategy: 'search_candidates',
+      }),
+      message: '那就放宽到 10 公里，时间也可以换成周末下午',
+      replanAndRefresh,
+      queueInitialSearchForTask: jest.fn(),
+      buildMemoryContext: jest.fn(),
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      queuedRun: { runId: 'run-follow-up-broadened' },
+      runMode: 'follow_up',
+    });
+    expect(replanAndRefresh).toHaveBeenCalled();
   });
 
   it('queues a follow-up replan when candidate follow-up has search context', async () => {
@@ -581,11 +1020,215 @@ describe('SocialAgentRouteSearchTurnService', () => {
       queuedRun: { runId: 'run-follow-up' },
       runMode: 'follow_up',
     });
-    expect(replanAndRefresh).toHaveBeenCalledWith(7, 101, {
-      userMessage: '换成周末下午的人',
-      reason: 'user_follow_up',
-    });
+    expect(replanAndRefresh).toHaveBeenCalledWith(
+      7,
+      101,
+      {
+        userMessage: '换成周末下午的人（已确认：青岛、周末、跑步）',
+        reason: 'user_follow_up',
+      },
+      { signal: null },
+    );
     expect(queueInitialSearchForTask).not.toHaveBeenCalled();
+  });
+
+  it('preserves completed slots and candidate preference on short follow-up search turns', async () => {
+    const { service } = makeHarness();
+    const task = makeTask({
+      memory: {
+        taskSlots: {
+          activity: {
+            key: 'activity',
+            value: '散步',
+            state: 'completed',
+            source: 'user_message',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+            completedAt: '2026-06-17T00:00:00.000Z',
+          },
+          time_window: {
+            key: 'time_window',
+            value: '今天晚上',
+            state: 'completed',
+            source: 'user_message',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+            completedAt: '2026-06-17T00:00:00.000Z',
+          },
+          location_text: {
+            key: 'location_text',
+            value: '青岛大学附近',
+            state: 'completed',
+            source: 'user_message',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+            completedAt: '2026-06-17T00:00:00.000Z',
+          },
+          candidate_preference: {
+            key: 'candidate_preference',
+            value: '女生、舞蹈相关公开标签优先',
+            state: 'answered',
+            source: 'user_message',
+            updatedAt: '2026-06-17T00:00:00.000Z',
+          },
+        },
+      },
+      result: { chatRun: { candidateCount: 1 } },
+    });
+    const replanAndRefresh = jest
+      .fn()
+      .mockResolvedValue({ runId: 'run-follow-up' });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        intent: 'candidate_followup',
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+        shouldSearch: true,
+        shouldReplan: true,
+        replyStrategy: 'search_candidates',
+      }),
+      message: '可以，帮我找人',
+      replanAndRefresh,
+      queueInitialSearchForTask: jest.fn(),
+      buildMemoryContext: jest.fn(),
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      queuedRun: { runId: 'run-follow-up' },
+      runMode: 'follow_up',
+    });
+    const userMessage = replanAndRefresh.mock.calls[0]?.[2]?.userMessage ?? '';
+    expect(userMessage).toContain('可以，帮我找人');
+    expect(userMessage).toContain('今天晚上');
+    expect(userMessage).toContain('青岛大学附近');
+    expect(userMessage).toContain('散步');
+    expect(userMessage).toContain('女生、舞蹈相关公开标签优先');
+  });
+
+  it('uses restored taskMemory slots for first search without forcing a replan', async () => {
+    const { service } = makeHarness();
+    const task = makeTask({
+      memory: {
+        taskMemory: {
+          currentGoal: '今晚青岛大学附近散步，优先舞蹈相关公开标签',
+          taskSlots: {
+            activity: {
+              key: 'activity',
+              value: '散步',
+              state: 'completed',
+              source: 'user_message',
+            },
+            time_window: {
+              key: 'time_window',
+              value: '今天晚上',
+              state: 'completed',
+              source: 'user_message',
+            },
+            location_text: {
+              key: 'location_text',
+              value: '青岛大学附近',
+              state: 'completed',
+              source: 'user_message',
+            },
+            candidate_preference: {
+              key: 'candidate_preference',
+              value: '女生、舞蹈相关公开标签优先',
+              state: 'answered',
+              source: 'user_message',
+            },
+          },
+        },
+      },
+    });
+    const replanAndRefresh = jest
+      .fn()
+      .mockResolvedValue({ runId: 'run-follow-up' });
+    const queueInitialSearchForTask = jest
+      .fn()
+      .mockResolvedValue({ runId: 'run-initial' });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        intent: 'candidate_followup',
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+        shouldSearch: true,
+        shouldReplan: true,
+        replyStrategy: 'search_candidates',
+      }),
+      message: '可以，帮我找人',
+      replanAndRefresh,
+      queueInitialSearchForTask,
+      buildMemoryContext: jest.fn(),
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      queuedRun: { runId: 'run-initial' },
+      runMode: 'initial',
+    });
+    expect(replanAndRefresh).not.toHaveBeenCalled();
+    const userMessage =
+      queueInitialSearchForTask.mock.calls[0]?.[2] ?? '';
+    expect(userMessage).toContain('可以，帮我找人');
+    expect(userMessage).toContain('今天晚上');
+    expect(userMessage).toContain('青岛大学附近');
+    expect(userMessage).toContain('散步');
+    expect(userMessage).toContain('女生、舞蹈相关公开标签优先');
+  });
+
+  it('does not treat inferred-only taskMemory slots as enough search context', async () => {
+    const { service } = makeHarness();
+    const task = makeTask({
+      memory: {
+        taskMemory: {
+          taskSlots: {
+            activity: { value: '散步', state: 'inferred' },
+            time_window: { value: '今天晚上', state: 'inferred' },
+            location_text: { value: '青岛大学附近', state: 'inferred' },
+          },
+        },
+      },
+    });
+    const replanAndRefresh = jest.fn();
+    const queueInitialSearchForTask = jest
+      .fn()
+      .mockResolvedValue({ runId: 'run-initial' });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute({
+        intent: 'candidate_followup',
+        shouldSearch: true,
+        shouldReplan: true,
+        replyStrategy: 'search_candidates',
+      }),
+      message: '继续找',
+      replanAndRefresh,
+      queueInitialSearchForTask,
+      buildMemoryContext: jest.fn(),
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      queuedRun: { runId: 'run-initial' },
+      runMode: 'initial',
+    });
+    expect(replanAndRefresh).not.toHaveBeenCalled();
   });
 
   it('answers candidate follow-up questions without starting a run', async () => {

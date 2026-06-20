@@ -23,6 +23,7 @@ green checks.
 | Gate                         | Command                                                                                                                                                                      | Evidence                                                                                                                                                       |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Unified Agent release matrix | `scripts/agent-release-matrix.sh`                                                                                                                                            | Runs the static audit, backend checks, frontend checks, browser QA, and optional real smoke gates from one entrypoint.                                         |
+| Worktree cleanup audit       | Review: `scripts/agent-release-worktree-audit.sh --review` or `AGENT_RELEASE_AUDIT_OUT_DIR=/tmp/fitmeet-agent-release scripts/agent-release-worktree-audit.sh --review`; final gate: `scripts/agent-release-worktree-audit.sh --strict` | Groups dirty files into `agent-backend-core`, `agent-frontend-assistant-ui`, `discover-profile-closure`, `deploy-production`, and `tests-docs`, writes optional `*.paths.txt` / `*.status.txt` commit-splitting manifests, blocks untracked source files, generated artifacts, and non-deleted legacy Agent files, and uses `--strict` to require a clean worktree after the five release commits are split. |
 | Static release audit         | `pnpm --dir frontend run check:agent-chat-release`                                                                                                                           | Assistant-ui files tracked, old Agent shell/pet absent, release scripts include Agent smoke gates, and production build checks enforce Agent chunk splitting. |
 | Frontend typecheck           | `pnpm --dir frontend exec tsc -b`                                                                                                                                            | `/agent/chat` assistant-ui components and API adapters compile together.                                                                                       |
 | Backend typecheck            | `pnpm --dir backend exec tsc --noEmit`                                                                                                                                       | AgentLoop, checkpoint, smoke, controller, and presenter surfaces compile together.                                                                             |
@@ -39,6 +40,27 @@ green checks.
 | ECS post-deploy readiness    | `scripts/ecs-post-deploy-smoke.sh --prepare-agent-smoke-seed --run-agent-opportunity-readiness-smoke --scan-compose-logs`                                                    | Production API health, readiness, Agent opportunity readiness, and backend/worker log scan pass.                                                               |
 | ECS post-deploy full smoke   | `AGENT_SMOKE_ALLOW_MUTATIONS=true scripts/ecs-post-deploy-smoke.sh --prepare-agent-smoke-seed --run-agent-opportunity-smoke --run-agent-sse-abort-smoke --scan-compose-logs` | Dedicated smoke users prove full mutating chain and SSE abort against the deployed API.                                                                        |
 | Final Agent cutover status   | `REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true AGENT_REMOTE_SMOKE_EVIDENCE_FILE=<evidence.md> scripts/launch-status.sh --topology ecs --skip-ios-testflight-check`                 | Launch status fails unless the redacted ECS evidence file proves readiness, full opportunity, SSE abort, and zero-exit post-deploy smoke.                       |
+
+When `AGENT_RELEASE_AUDIT_OUT_DIR` is set, the worktree cleanup audit also
+writes executable `stage-<category>.sh` helpers next to each `*.paths.txt` and
+`*.status.txt` manifest, plus a `COMMIT_PLAN.md` with the five-bucket order and
+suggested commit subjects. Use these helpers only after reviewing the generated
+path list; they stage exactly one release bucket with `git add -A
+--pathspec-from-file`, which keeps deletions/renames and the five release commits inspectable instead
+of turning the dirty worktree into one opaque change. Use `--review` while
+splitting those commits, then run `--strict` immediately before packaging so
+mixed staged/unstaged files, old Agent artifacts, generated evidence, and
+uncommitted release source cannot silently enter or disappear from the ECS zip.
+You can also run `scripts/stage-agent-release-bucket.sh <bucket> --out-dir
+/tmp/fitmeet-agent-release` to regenerate the manifest and stage one reviewed
+bucket from the repo root.
+The ECS package builders call the same strict audit by default. Only set
+`RUN_AGENT_RELEASE_WORKTREE_AUDIT=false` for a local non-production package when
+you are intentionally inspecting build output before commit splitting; do not
+use that skip for a production ECS upload. `scripts/verify-agent-release.sh`
+also runs `scripts/test-agent-release-worktree-audit.sh`, which exercises the
+audit in a temporary git repository so rename/delete pathspecs and legacy-file
+guards remain covered by an executable regression check.
 
 ## Product Scenarios
 

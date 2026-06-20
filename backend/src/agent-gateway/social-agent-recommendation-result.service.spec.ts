@@ -301,6 +301,64 @@ describe('SocialAgentRecommendationResultService', () => {
     ]);
   });
 
+  it('uses hydrated taskContext for final recommendation LLM replies', async () => {
+    const { finalResponses, service, task } = makeHarness();
+    const taskContext = {
+      conversationHistory: [
+        {
+          role: 'user',
+          text: '今天晚上青岛大学附近散步，优先舞蹈相关公开标签',
+        },
+        {
+          role: 'assistant',
+          text: '我已经记住时间、地点、活动和候选偏好。',
+        },
+      ],
+      taskSlots: {
+        time_window: { value: '今天晚上', state: 'completed' },
+        location_text: { value: '青岛大学附近', state: 'completed' },
+        activity: { value: '散步', state: 'completed' },
+        candidate_preference: {
+          value: '公开资料含舞蹈相关标签优先',
+          state: 'answered',
+        },
+      },
+      knownTaskSlotConstraints: {
+        treatAsHardConstraints: true,
+        doNotAskAgainFor: [
+          'time_window',
+          'location_text',
+          'activity',
+          'candidate_preference',
+        ],
+      },
+      pendingApprovals: [{ actionType: 'send_invite' }],
+      candidateActions: { savedIds: [22], rejectedIds: [19] },
+    };
+
+    await service.completeRecommendationResult({
+      ownerUserId: 7,
+      task,
+      visibleSteps: [],
+      draft: makeDraft(),
+      candidates: [makeCandidate()],
+      searchResult: makeSearchResult(),
+      statusReason: 'recommendations_ready_waiting_user_confirmation',
+      buildMemoryContext: () => ({ memory: 'hydrated' }),
+      taskContext,
+      toEventDto: (event) => ({ id: event.id }),
+    });
+
+    expect(finalResponses.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationHistory: taskContext.conversationHistory,
+        memoryContext: { memory: 'hydrated' },
+        taskContext,
+      }),
+      expect.any(Object),
+    );
+  });
+
   it('uses the recommendation fallback when final response service is absent', async () => {
     const { service, task } = makeHarness();
     Reflect.set(service, 'finalResponses', undefined);
@@ -318,5 +376,98 @@ describe('SocialAgentRecommendationResultService', () => {
     });
 
     expect(result.assistantMessage).toContain('小林');
+  });
+
+  it('uses a product fallback instead of raw tool text for empty candidate results', async () => {
+    const { service, task } = makeHarness();
+    Reflect.set(service, 'finalResponses', undefined);
+    const draft = {
+      ...makeDraft(),
+      activityType: 'walking',
+      interestTags: ['散步', '舞蹈'],
+      metadata: {
+        timePreference: '今天晚上',
+        locationPreference: '青岛大学附近',
+        candidatePreference: '公开资料含舞蹈相关标签优先',
+      },
+    } as SocialAgentRequestDraft;
+
+    const result = await service.completeRecommendationResult({
+      ownerUserId: 7,
+      task,
+      visibleSteps: [],
+      draft,
+      candidates: [],
+      searchResult: makeSearchResult({
+        candidates: [],
+        emptyReason: 'no_real_candidates',
+        message: 'no_real_candidates: pool=0 debug raw_tool_output',
+        debugReasons: { accepted: 0 } as never,
+      }),
+      statusReason: 'empty_candidates_waiting_user_refinement',
+      buildMemoryContext: () => ({}),
+      toEventDto: (event) => ({ id: event.id }),
+    });
+
+    expect(result.assistantMessage).toContain('真实、公开可发现');
+    expect(result.assistantMessage).toContain('今天晚上');
+    expect(result.assistantMessage).toContain('青岛大学附近');
+    expect(result.assistantMessage).toContain('舞蹈');
+    expect(result.assistantMessage).toContain('发布到发现');
+    expect(result.assistantMessage).not.toContain('pool=0');
+    expect(result.assistantMessage).not.toContain('debug');
+    expect(result.assistantMessage).not.toContain('raw_tool_output');
+    expect(task.memory).toMatchObject({
+      shortTerm: {
+        hasSearched: true,
+        lastSearchIntent: 'social_search',
+        lastSearchCandidateCount: 0,
+        lastSearchEmptyReason: 'no_real_candidates',
+        lastSearchNextStep: '放宽条件、换时间范围，或确认发布约练卡到发现',
+      },
+    });
+  });
+
+  it('constrains final response generation with the product empty-candidate fallback', async () => {
+    const { finalResponses, service, task } = makeHarness();
+    const draft = {
+      ...makeDraft(),
+      activityType: 'walking',
+      metadata: {
+        timePreference: '周末下午',
+        locationPreference: '崂山区',
+      },
+    } as SocialAgentRequestDraft;
+
+    await service.completeRecommendationResult({
+      ownerUserId: 7,
+      task,
+      visibleSteps: [],
+      draft,
+      candidates: [],
+      searchResult: makeSearchResult({
+        candidates: [],
+        emptyReason: 'no_real_candidates',
+        message: 'no_real_candidates: pool=0 debug raw_tool_output',
+        debugReasons: { accepted: 0 } as never,
+      }),
+      statusReason: 'empty_candidates_waiting_user_refinement',
+      buildMemoryContext: () => ({}),
+      toEventDto: (event) => ({ id: event.id }),
+    });
+
+    const [request] = finalResponses.generate.mock.calls[0];
+    expect(request).toEqual(
+      expect.objectContaining({
+        fallbackReply: expect.stringContaining('真实、公开可发现'),
+        responseGoal:
+          '自然说明当前没有找到真实候选人，并给出放宽条件、补充信息或发布需求的下一步。',
+      }),
+    );
+    expect(request.fallbackReply).toContain('周末下午');
+    expect(request.fallbackReply).toContain('崂山区');
+    expect(request.fallbackReply).not.toContain('pool=0');
+    expect(request.fallbackReply).not.toContain('debug');
+    expect(request.fallbackReply).not.toContain('raw_tool_output');
   });
 });

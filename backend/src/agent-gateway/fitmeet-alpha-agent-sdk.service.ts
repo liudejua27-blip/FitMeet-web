@@ -51,6 +51,7 @@ export class FitMeetAlphaAgentSdkService {
     input: FitMeetAlphaTurnInput,
   ): Promise<FitMeetAlphaTurnDecision> {
     const message = cleanDisplayText(input.message, '').trim();
+    const turnContext = input.context ?? {};
     const traceId = this.createTraceId(input.ownerUserId, input.taskId);
     const safety = this.evaluateSafety(message);
     const sdkEnabled = this.isSdkEnabled();
@@ -91,22 +92,18 @@ export class FitMeetAlphaAgentSdkService {
     }
 
     if (!sdkEnabled) {
+      const localIntent = enforceFitMeetAlphaStructuredIntentHandoff(
+        this.ruleStructuredIntent(message, turnContext),
+      );
       return {
         traceId,
         safety,
         agentTrace: {
           ...agentTrace,
-          ...this.traceSubagents(
-            enforceFitMeetAlphaStructuredIntentHandoff(
-              this.ruleStructuredIntent(message),
-            ),
-            message,
-          ),
+          ...this.traceSubagents(localIntent, message),
         },
         cards: [],
-        structuredIntent: enforceFitMeetAlphaStructuredIntentHandoff(
-          this.ruleStructuredIntent(message),
-        ),
+        structuredIntent: localIntent,
       };
     }
 
@@ -131,7 +128,7 @@ export class FitMeetAlphaAgentSdkService {
         output: result.finalOutput,
         fallbackMessage: message,
         fallbackIntent: (fallbackMessage) =>
-          this.ruleStructuredIntent(fallbackMessage),
+          this.ruleStructuredIntent(fallbackMessage, turnContext),
       });
       return {
         traceId,
@@ -160,10 +157,13 @@ export class FitMeetAlphaAgentSdkService {
             ...agentTrace.guardrails,
             { name: 'openai-agents-sdk-run', status: 'skipped' },
           ],
-          ...this.traceSubagents(this.ruleStructuredIntent(message), message),
+          ...this.traceSubagents(
+            this.ruleStructuredIntent(message, turnContext),
+            message,
+          ),
         },
         cards: [],
-        structuredIntent: this.ruleStructuredIntent(message),
+        structuredIntent: this.ruleStructuredIntent(message, turnContext),
       };
     }
   }
@@ -859,8 +859,10 @@ export class FitMeetAlphaAgentSdkService {
         'Parse a FitMeet user message into the Beta social agent intent contract.',
       parameters: z.object({
         userMessage: z.string(),
+        context: z.record(z.string(), z.unknown()).nullable(),
       }),
-      execute: ({ userMessage }) => this.ruleStructuredIntent(userMessage),
+      execute: ({ userMessage, context }) =>
+        this.ruleStructuredIntent(userMessage, context ?? undefined),
     });
 
     const lifeGraphAgent = new Agent({
@@ -1018,18 +1020,46 @@ export class FitMeetAlphaAgentSdkService {
     };
   }
 
-  private ruleStructuredIntent(message: string): Record<string, unknown> {
+  private ruleStructuredIntent(
+    message: string,
+    context: Record<string, unknown> = {},
+  ): Record<string, unknown> {
     const text = cleanDisplayText(message, '').toLowerCase();
-    const activityType = this.extractActivityType(text);
-    const timePreference = this.extractTimePreference(text);
-    const locationText = this.extractLocationText(text);
-    const targetPeople = this.extractTargetPeople(text);
-    const relationshipGoal = this.extractRelationshipGoal(text);
+    const taskSlots = this.contextTaskSlotValues(context);
+    const candidatePreference = taskSlots.candidate_preference;
+    const activityType =
+      this.extractActivityType(text) || taskSlots.activity || '';
+    const timePreference =
+      this.extractTimePreference(text) || taskSlots.time_window || '';
+    const locationText =
+      this.extractLocationText(text) ||
+      taskSlots.location_text ||
+      taskSlots.geo_area ||
+      '';
+    const extractedTargetPeople = this.extractTargetPeople(text);
+    const targetPeople =
+      extractedTargetPeople !== '合适的人'
+        ? extractedTargetPeople
+        : candidatePreference
+          ? `符合偏好的人（${candidatePreference}）`
+          : extractedTargetPeople;
+    const extractedRelationshipGoal = this.extractRelationshipGoal(text);
+    const relationshipGoal =
+      extractedRelationshipGoal !== '真实社交连接' || !candidatePreference
+        ? extractedRelationshipGoal
+        : `按候选偏好找人：${candidatePreference}`;
+    const wantsPersonMatch = this.hasExplicitPersonSearchIntent({
+      text,
+      targetPeople,
+      relationshipGoal,
+      candidatePreference,
+    });
     const missingInformation = this.missingInformationFor({
       text,
       activityType,
       timePreference,
       locationText,
+      safetyBoundary: taskSlots.safety_boundary,
     });
     const requiredConstraints = this.requiredConstraintsFor({
       activityType,
@@ -1037,7 +1067,10 @@ export class FitMeetAlphaAgentSdkService {
       locationText,
       relationshipGoal,
     });
-    const optionalPreferences = this.optionalPreferencesFor(text);
+    const optionalPreferences = this.uniqueStrings([
+      ...this.contextualOptionalPreferences(taskSlots),
+      ...this.optionalPreferencesFor(text),
+    ]);
     const agentPlan = this.agentPlanFor(missingInformation);
     const ambiguous = this.ambiguousLowPressureIntent({
       text,
@@ -1189,7 +1222,7 @@ export class FitMeetAlphaAgentSdkService {
         requiresConfirmation: false,
       };
     }
-    if (/本周|活动|约练|加入|周末/.test(text)) {
+    if (this.isActivityRecommendationIntent(text) && !wantsPersonMatch) {
       return {
         intent: 'recommend_weekly_activity',
         nextAgent: 'social_match',
@@ -1444,20 +1477,105 @@ export class FitMeetAlphaAgentSdkService {
     return '真实社交连接';
   }
 
+  private isActivityRecommendationIntent(text: string): boolean {
+    if (/(活动|约练|加入)/.test(text)) return true;
+    if (/(本周|这周|周末).*(活动|约练|场|局|报名|参加|加入)/.test(text)) {
+      return true;
+    }
+    return false;
+  }
+
+  private hasExplicitPersonSearchIntent(input: {
+    text: string;
+    targetPeople: string;
+    relationshipGoal: string;
+    candidatePreference: string;
+  }): boolean {
+    if (input.candidatePreference) return true;
+    if (
+      /(找|认识|推荐|匹配|约|帮我).*?(人|女生|男生|朋友|搭子|同伴|伙伴|候选|舞蹈|跑步|散步)/.test(
+        input.text,
+      )
+    ) {
+      return true;
+    }
+    if (/(女生|男生|舞蹈生|搭子|朋友|候选人)/.test(input.text)) {
+      return true;
+    }
+    return (
+      input.targetPeople !== '合适的人' ||
+      input.relationshipGoal !== '真实社交连接'
+    );
+  }
+
   private missingInformationFor(input: {
     text: string;
     activityType: string;
     timePreference: string;
     locationText: string;
+    safetyBoundary?: string;
   }): string[] {
     const missing: string[] = [];
     if (!input.activityType) missing.push('活动类型');
     if (!input.timePreference) missing.push('期望时间');
     if (!input.locationText) missing.push('活动区域');
-    if (!/距离|公里|km|附近|同城/.test(input.text)) missing.push('可接受距离');
-    if (!/公共|人多|安全|边界|不接受|只接受/.test(input.text))
+    if (!input.locationText && !/距离|公里|km|附近|同城/.test(input.text))
+      missing.push('可接受距离');
+    if (
+      !input.safetyBoundary &&
+      !/公共|人多|安全|边界|不接受|只接受/.test(input.text)
+    )
       missing.push('首次见面边界');
     return missing;
+  }
+
+  private contextTaskSlotValues(
+    context?: Record<string, unknown>,
+  ): Record<string, string> {
+    const root = this.record(context);
+    const taskMemory = this.record(root.taskMemory);
+    const slots = this.record(root.taskSlots ?? taskMemory.taskSlots);
+    const allowedStates = new Set([
+      'answered',
+      'confirmed',
+      'completed',
+      'modified',
+      'inferred',
+    ]);
+    const output: Record<string, string> = {};
+    for (const key of [
+      'activity',
+      'time_window',
+      'location_text',
+      'geo_area',
+      'intensity',
+      'visibility',
+      'safety_boundary',
+      'invite_tone',
+      'candidate_preference',
+    ]) {
+      const raw = slots[key];
+      const slot = this.record(raw);
+      const state = this.text(slot.state);
+      if (state && !allowedStates.has(state)) continue;
+      const value = this.text(slot.value) || this.text(raw);
+      if (value) output[key] = value;
+    }
+    return output;
+  }
+
+  private contextualOptionalPreferences(
+    taskSlots: Record<string, string>,
+  ): string[] {
+    return [
+      taskSlots.candidate_preference
+        ? `候选偏好：${taskSlots.candidate_preference}`
+        : '',
+      taskSlots.intensity ? `活动强度：${taskSlots.intensity}` : '',
+      taskSlots.safety_boundary ? `安全边界：${taskSlots.safety_boundary}` : '',
+      taskSlots.visibility ? `公开方式：${taskSlots.visibility}` : '',
+      taskSlots.invite_tone ? `邀请语气：${taskSlots.invite_tone}` : '',
+    ].filter(Boolean);
   }
 
   private requiredConstraintsFor(input: {

@@ -103,13 +103,16 @@ describe('SocialAgentRouteActionTurnService', () => {
       task,
       message: '帮我给她发个开场白',
       route: makeRoute(),
+      runtimeContext: null,
     });
     expect(result.pendingApproval).toMatchObject({
       id: 88,
       actionType: 'send_candidate_message',
     });
-    expect(result.assistantMessage).toContain('确认后我再发送');
-    expect(result.assistantMessage).toContain('待确认动作 #88 已创建');
+    expect(result.assistantMessage).toContain('确认前我不会发送');
+    expect(result.assistantMessage).toContain('取消也不会联系对方');
+    expect(result.assistantMessage).not.toContain('待确认动作');
+    expect(result.assistantMessage).not.toContain('#88');
     expect(metrics.recordApproval).toHaveBeenCalledWith('send_message');
     expect(task.memory).toMatchObject({
       taskMemory: {
@@ -119,6 +122,84 @@ describe('SocialAgentRouteActionTurnService', () => {
             type: 'send_message',
             actionType: 'send_candidate_message',
             riskLevel: 'medium',
+          }),
+        ],
+      },
+    });
+  });
+
+  it('passes hydrated runtime context into approval creation and stores non-sensitive telemetry', async () => {
+    const { candidateActions, service } = makeHarness();
+    const task = makeTask();
+    const runtimeContext = {
+      taskContext: {
+        taskSlotSummary: '今天晚上 · 青岛大学附近 · 散步',
+        taskSlots: {
+          time_window: { value: '今天晚上', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+          activity: { value: '散步', state: 'completed' },
+        },
+      },
+      hydratedContext: {
+        userId: 7,
+        threadId: 'agent-task:101',
+        taskId: 101,
+        recentMessages: [
+          { role: 'user', content: '今晚青岛大学附近散步' },
+        ],
+        taskMemory: null,
+        taskSlots: {
+          time_window: { value: '今天晚上', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+          activity: { value: '散步', state: 'completed' },
+        },
+        lifeGraphFactProposals: [],
+        lifeGraphFactDisplaySummaries: [],
+        lifeGraphGovernanceSummary: {
+          total: 0,
+          autoSaveCount: 0,
+          confirmationRequiredCount: 0,
+          blockedCount: 0,
+          sensitiveCount: 0,
+          expiringFactKeys: [],
+        },
+        lifeGraphSummary: { preferences: { intensity: '低强度' } },
+        pendingApprovals: [{ id: 'approval-existing' }],
+        candidateActions: { saved: ['candidate-1'] },
+      } as never,
+      profile: { publicName: 'FitMeet' },
+      longTermSnapshot: { preferences: { intensity: '低强度' } },
+      brainToolResults: [{ toolName: 'candidate_confirmation_check' }],
+      resumeContext: { resumeMode: 'resume_after_approval' },
+    };
+
+    await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute(),
+      message: '帮我给她发个开场白',
+      assistantMessage: '可以，我会先等你确认。',
+      runtimeContext,
+    });
+
+    expect(candidateActions.createActionApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeContext,
+      }),
+    );
+    expect(task.memory).toMatchObject({
+      taskMemory: {
+        pendingActions: [
+          expect.objectContaining({
+            runtimeContext: {
+              hasTaskContext: true,
+              hasHydratedContext: true,
+              hasProfileContext: true,
+              hasLongTermMemoryContext: true,
+              brainToolResultCount: 1,
+              hasResumeContext: true,
+              pendingApprovalCount: 1,
+            },
           }),
         ],
       },

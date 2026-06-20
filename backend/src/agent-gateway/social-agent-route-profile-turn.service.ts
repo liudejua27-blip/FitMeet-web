@@ -21,6 +21,8 @@ import type {
   SocialAgentIntentRouterResult,
   SocialAgentIntentType,
 } from './social-agent-intent-router.service';
+import type { SocialAgentHydratedContext } from './social-agent-context-hydrator.service';
+import { selectSocialAgentContextWindow } from './social-agent-context-window';
 import { appendSocialAgentConversationTurn } from './social-agent-chat-memory.presenter';
 import {
   rememberSocialAgentCurrentTask,
@@ -35,6 +37,8 @@ type HandleRouteProfileTurnInput = {
   task: AgentTask;
   message: string;
   route: SocialAgentIntentRouterResult;
+  hydratedContext?: SocialAgentHydratedContext | null;
+  signal?: AbortSignal | null;
 };
 
 type HandleRouteProfileTurnResult = {
@@ -65,6 +69,7 @@ export class SocialAgentRouteProfileTurnService {
   async handle(
     input: HandleRouteProfileTurnInput,
   ): Promise<HandleRouteProfileTurnResult> {
+    this.assertNotAborted(input.signal);
     const { ownerUserId, message, route } = input;
     const { task } = input;
     if (
@@ -86,11 +91,16 @@ export class SocialAgentRouteProfileTurnService {
     let assistantMessage: string | undefined;
 
     if (this.lifeGraph) {
+      this.assertNotAborted(input.signal);
       const proposal = await this.lifeGraph.extractFromChat(ownerUserId, {
         message,
         taskId: task.id,
-        context: { intent: route.intent },
+        context: this.buildLifeGraphExtractionContext(
+          route.intent,
+          input.hydratedContext,
+        ),
       });
+      this.assertNotAborted(input.signal);
       if (proposal.proposedFields.length > 0) {
         profileUpdateProposal = proposal;
         assistantMessage =
@@ -109,13 +119,16 @@ export class SocialAgentRouteProfileTurnService {
     }
 
     if (!profileUpdateProposal) {
+      this.assertNotAborted(input.signal);
       await this.rememberRoutedMessage(task, message, route.intent);
       savedContext = true;
-      profileUpdated = await this.saveIntentToProfile(
-        ownerUserId,
-        route.intent,
-        message,
-      );
+      this.assertNotAborted(input.signal);
+      const profileKey = profileKeyForSocialAgentIntent(route.intent, message);
+      const deferSensitiveProfilePersistence =
+        this.shouldDeferSensitiveProfilePersistence(route.intent, profileKey);
+      profileUpdated = deferSensitiveProfilePersistence
+        ? false
+        : await this.saveIntentToProfile(ownerUserId, profileKey, message);
       assistantMessage = buildSocialAgentProfileSavedNextStepReply({
         intent: route.intent,
         message,
@@ -123,14 +136,20 @@ export class SocialAgentRouteProfileTurnService {
       });
       rememberSocialAgentCurrentTask(task, {
         objective: 'profile_enrichment',
-        nextStep: '等待用户选择继续补齐画像边界，或确认现在开始搜索',
+        nextStep: deferSensitiveProfilePersistence
+          ? '等待用户确认是否保存这条画像/安全边界'
+          : '等待用户选择继续补齐画像边界，或确认现在开始搜索',
         shouldSearchNow: false,
         profileSaved: profileUpdated,
         awaitingSearchConfirmation: true,
-        waitingFor: 'availability_boundaries_or_search_confirmation',
+        waitingFor: deferSensitiveProfilePersistence
+          ? 'life_graph_profile_confirmation'
+          : 'availability_boundaries_or_search_confirmation',
         lastCompletedStep: profileUpdated
           ? 'profile_saved'
-          : 'profile_context_saved',
+          : deferSensitiveProfilePersistence
+            ? 'profile_context_saved_pending_confirmation'
+            : 'profile_context_saved',
       });
       await this.taskRepo.save(task);
     }
@@ -143,6 +162,10 @@ export class SocialAgentRouteProfileTurnService {
       profileUpdated,
       profileUpdateProposal,
     };
+  }
+
+  private assertNotAborted(signal?: AbortSignal | null): void {
+    if (signal?.aborted) throw new Error('Subagent worker job cancelled.');
   }
 
   private async rememberRoutedMessage(
@@ -188,10 +211,9 @@ export class SocialAgentRouteProfileTurnService {
 
   private async saveIntentToProfile(
     ownerUserId: number,
-    intent: SocialAgentIntentType,
+    key: string | null,
     message: string,
   ): Promise<boolean> {
-    const key = profileKeyForSocialAgentIntent(intent, message);
     if (!key) return false;
     try {
       await this.socialProfiles.saveAnswer(ownerUserId, key, message);
@@ -201,13 +223,20 @@ export class SocialAgentRouteProfileTurnService {
         JSON.stringify({
           event: 'social_agent.profile_update_failed',
           ownerUserId,
-          intent,
           key,
           message: error instanceof Error ? error.message : String(error),
         }),
       );
       return false;
     }
+  }
+
+  private shouldDeferSensitiveProfilePersistence(
+    intent: SocialAgentIntentType,
+    key: string | null,
+  ): boolean {
+    if (intent === 'safety_or_boundary') return true;
+    return key === 'privacyBoundary' || key === 'avoidTraits';
   }
 
   private async writeEvent(
@@ -245,5 +274,75 @@ export class SocialAgentRouteProfileTurnService {
     const text = cleanDisplayText(value, '');
     if (text.length <= max) return text;
     return `${text.slice(0, Math.max(0, max - 1))}…`;
+  }
+
+  private buildLifeGraphExtractionContext(
+    intent: SocialAgentIntentType,
+    hydratedContext?: SocialAgentHydratedContext | null,
+  ): Record<string, unknown> {
+    if (!hydratedContext) return { intent };
+    return {
+      intent,
+      threadId: this.safeContextText(hydratedContext.threadId, 96),
+      taskId: hydratedContext.taskId,
+      taskSlots: this.summarizeTaskSlots(hydratedContext.taskSlots),
+      lifeGraphSummary: sanitizeForDisplay(
+        hydratedContext.lifeGraphSummary ?? {},
+      ),
+      pendingApprovalCount: hydratedContext.pendingApprovals.length,
+      candidateActions: sanitizeForDisplay(
+        hydratedContext.candidateActions ?? {},
+      ),
+      recentMessages: selectSocialAgentContextWindow(
+        hydratedContext.recentMessages,
+      )
+        .map((message) => this.summarizeRecentMessage(message))
+        .filter(Boolean),
+    };
+  }
+
+  private summarizeRecentMessage(
+    message: Record<string, unknown>,
+  ): Record<string, string> | null {
+    const role = cleanDisplayText(message.role, '').slice(0, 32);
+    const text = cleanDisplayText(
+      message.text ?? message.content ?? message.message,
+      '',
+    )
+      .trim()
+      .slice(0, 240);
+    if (!role && !text) return null;
+    return {
+      ...(role ? { role } : {}),
+      ...(text ? { text } : {}),
+    };
+  }
+
+  private summarizeTaskSlots(
+    taskSlots: SocialAgentHydratedContext['taskSlots'],
+  ): Record<string, unknown> {
+    return Object.fromEntries(
+      Object.entries(taskSlots as Record<string, unknown>).map(
+        ([key, value]) => {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            return [key, this.safeContextText(value, 240)];
+          }
+          const slot = value as Record<string, unknown>;
+          return [
+            key,
+            {
+              ...(slot.state ? { state: this.safeContextText(slot.state, 40) } : {}),
+              ...(slot.value
+                ? { value: this.safeContextText(slot.value, 240) }
+                : {}),
+            },
+          ];
+        },
+      ),
+    );
+  }
+
+  private safeContextText(value: unknown, max: number): string {
+    return cleanDisplayText(value, '').trim().slice(0, max);
   }
 }

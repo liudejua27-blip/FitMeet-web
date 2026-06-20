@@ -53,13 +53,13 @@ function makeRichMemoryTask(): AgentTask {
   const task = makeTask();
   task.memory = {
     socialAgentConversation: {
-      turns: Array.from({ length: 48 }, (_, index) => ({
+      turns: Array.from({ length: 88 }, (_, index) => ({
         role: index % 2 === 0 ? 'user' : 'assistant',
         text:
           index === 47
             ? '我的电话是15253005312，微信是 wxid_secret，地点 36.123456,120.654321'
             : `第 ${index + 1} 条上下文`,
-        at: `2026-06-17T00:${String(index).padStart(2, '0')}:00.000Z`,
+        at: `2026-06-17T00:${String(index % 60).padStart(2, '0')}:00.000Z`,
       })),
     },
     taskSlots: {
@@ -144,6 +144,25 @@ describe('SocialAgentContextHydratorService', () => {
     });
 
     expect(context.taskSlots.activity?.value).toBe('散步');
+    expect(context.taskSlotSummary).toMatchObject({
+      活动: '散步',
+      时间: '周末下午',
+    });
+    expect(context.knownTaskSlotConstraints).toEqual(
+      expect.objectContaining({
+        treatAsHardConstraints: true,
+        doNotAskAgainFor: expect.arrayContaining(['activity', 'time_window']),
+        userVisibleSummary: expect.stringContaining('活动：散步'),
+        instruction: expect.stringContaining('不得重复询问'),
+      }),
+    );
+    expect(context.taskMemory?.taskSlots).toMatchObject(context.taskSlots);
+    expect(context.taskMemory?.taskSlotSummary).toMatchObject(
+      context.taskSlotSummary,
+    );
+    expect(context.taskMemory?.knownTaskSlotConstraints).toEqual(
+      context.knownTaskSlotConstraints,
+    );
     expect(context.lifeGraphFactProposals).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -197,7 +216,218 @@ describe('SocialAgentContextHydratorService', () => {
 
     expect(assertTaskOwner).toHaveBeenCalledWith(44, 7);
     expect(context.taskId).toBe(44);
+    expect(context.threadId).toBe('agent-task:44');
     expect(context.taskSlots.activity?.value).toBe('散步');
+  });
+
+  it('normalizes numeric task thread ids into the canonical Social Codex shape', async () => {
+    const task = makeTask();
+    const assertTaskOwner = jest.fn().mockResolvedValue(task);
+    const service = new SocialAgentContextHydratorService(
+      {
+        assertTaskOwner,
+      } as never,
+      new SocialAgentTaskMemoryStateMachineService(),
+      undefined,
+      new SocialCodexLifeGraphGovernanceService(),
+    );
+
+    const context = await service.hydrateContext({
+      userId: 7,
+      threadId: 44,
+    });
+
+    expect(assertTaskOwner).toHaveBeenCalledWith(44, 7);
+    expect(context.taskId).toBe(44);
+    expect(context.threadId).toBe('agent-task:44');
+  });
+
+  it('falls back to the active conversation thread when no explicit task id is provided', async () => {
+    const task = makeRichMemoryTask();
+    task.id = 88;
+    task.taskType = 'social_agent_chat';
+    const findActiveConversationTask = jest.fn().mockResolvedValue(task);
+    const assertTaskOwner = jest.fn();
+    const service = new SocialAgentContextHydratorService(
+      {
+        assertTaskOwner,
+        findActiveConversationTask,
+      } as never,
+      new SocialAgentTaskMemoryStateMachineService(),
+      undefined,
+      new SocialCodexLifeGraphGovernanceService(),
+    );
+
+    const context = await service.hydrateContext({
+      userId: 7,
+    });
+
+    expect(context.taskId).toBe(88);
+    expect(context.threadId).toBe('agent-task:88');
+
+    expect(findActiveConversationTask).toHaveBeenCalledWith(7);
+    expect(assertTaskOwner).not.toHaveBeenCalled();
+    expect(context.recentMessages).toHaveLength(80);
+    expect(context.taskSlots.activity?.value).toBe('散步');
+    expect(context.knownTaskSlotConstraints).toEqual(
+      expect.objectContaining({
+        doNotAskAgainFor: expect.arrayContaining([
+          'activity',
+          'location_text',
+        ]),
+      }),
+    );
+    expect(context.taskMemory?.taskSlots).toMatchObject(context.taskSlots);
+    expect(context.taskMemory?.taskSlotSummary).toMatchObject(
+      context.taskSlotSummary,
+    );
+    expect(context.taskMemory?.knownTaskSlotConstraints).toEqual(
+      context.knownTaskSlotConstraints,
+    );
+    expect(context.candidateActions).toMatchObject({
+      recommendedIds: [1, 2, 3],
+      savedIds: [2],
+    });
+  });
+
+  it('hydrates detailed candidate actions and pending approvals without degrading to ids only', async () => {
+    const task = makeRichMemoryTask();
+    task.memory = {
+      ...(task.memory as Record<string, unknown>),
+      shortTerm: {
+        candidateActions: {
+          '42': {
+            status: 'saved',
+            targetUserId: 42,
+            reason: '用户想先保留这位候选人',
+          },
+          '43': {
+            status: 'skipped',
+            targetUserId: 43,
+            reason: '用户不想重复看到这个候选人',
+          },
+        },
+      },
+      taskMemory: {
+        ...((task.memory as Record<string, unknown>).taskMemory as Record<
+          string,
+          unknown
+        >),
+        pendingApprovals: [
+          {
+            id: 88,
+            type: 'approval_required',
+            actionType: 'send_invite',
+            summary: '给候选人发送今晚青岛大学散步邀请',
+            riskLevel: 'medium',
+            at: '2026-06-17T00:00:00.000Z',
+          },
+        ],
+      },
+    };
+    const service = new SocialAgentContextHydratorService(
+      {
+        assertTaskOwner: jest.fn().mockResolvedValue(task),
+      } as never,
+      new SocialAgentTaskMemoryStateMachineService(),
+      undefined,
+      new SocialCodexLifeGraphGovernanceService(),
+    );
+
+    const context = await service.hydrateContext({
+      userId: 7,
+      taskId: 44,
+      threadId: 'agent-task:44',
+    });
+
+    expect(context.candidateActions).toMatchObject({
+      '42': {
+        status: 'saved',
+        targetUserId: 42,
+        reason: '用户想先保留这位候选人',
+      },
+      '43': {
+        status: 'skipped',
+        targetUserId: 43,
+      },
+    });
+    expect(context.taskMemory).toMatchObject({
+      candidateActions: expect.objectContaining({
+        '42': expect.objectContaining({ status: 'saved' }),
+      }),
+      pendingApprovals: [
+        expect.objectContaining({
+          id: 88,
+          actionType: 'send_invite',
+        }),
+      ],
+    });
+    expect(context.pendingApprovals).toEqual([
+      expect.objectContaining({
+        id: 88,
+        actionType: 'send_invite',
+      }),
+    ]);
+  });
+
+  it('does not let empty pending or candidate containers erase stored task state', async () => {
+    const task = makeRichMemoryTask();
+    task.memory = {
+      ...(task.memory as Record<string, unknown>),
+      shortTerm: {
+        candidateActions: {},
+        pendingApprovals: [],
+      },
+      candidateActions: {},
+      pendingApprovals: [],
+      taskMemory: {
+        ...((task.memory as Record<string, unknown>).taskMemory as Record<
+          string,
+          unknown
+        >),
+        candidateActions: {},
+        pendingApprovals: [],
+      },
+    };
+    const service = new SocialAgentContextHydratorService(
+      {
+        assertTaskOwner: jest.fn().mockResolvedValue(task),
+      } as never,
+      new SocialAgentTaskMemoryStateMachineService(),
+      undefined,
+      new SocialCodexLifeGraphGovernanceService(),
+    );
+
+    const context = await service.hydrateContext({
+      userId: 7,
+      taskId: 44,
+      threadId: 'agent-task:44',
+    });
+
+    expect(context.candidateActions).toMatchObject({
+      recommendedIds: [1, 2, 3],
+      savedIds: [2],
+      rejectedIds: [3],
+    });
+    expect(context.pendingApprovals).toEqual([
+      expect.objectContaining({
+        id: 8,
+        actionType: 'send_invite',
+        riskLevel: 'high',
+      }),
+    ]);
+    expect(context.taskMemory).toMatchObject({
+      candidateActions: expect.objectContaining({
+        recommendedIds: [1, 2, 3],
+        savedIds: [2],
+      }),
+      pendingApprovals: [
+        expect.objectContaining({
+          id: 8,
+          actionType: 'send_invite',
+        }),
+      ],
+    });
   });
 
   it('hydrates 20 rounds of context while redacting contact and precise location data', async () => {
@@ -253,7 +483,7 @@ describe('SocialAgentContextHydratorService', () => {
       threadId: 'agent-task:44',
     });
 
-    expect(context.recentMessages).toHaveLength(40);
+    expect(context.recentMessages).toHaveLength(80);
     expect(context.recentMessages[0]).toMatchObject({
       text: '第 9 条上下文',
     });
@@ -265,5 +495,33 @@ describe('SocialAgentContextHydratorService', () => {
     expect(serialized).not.toContain('青岛大学宿舍3号楼');
     expect(serialized).toContain('青岛大学附近');
     expect(serialized).toContain('[REDACTED');
+  });
+
+  it('uses the same configured context window as the router and brain', async () => {
+    const task = makeRichMemoryTask();
+    const service = new SocialAgentContextHydratorService(
+      {
+        assertTaskOwner: jest.fn().mockResolvedValue(task),
+      } as never,
+      new SocialAgentTaskMemoryStateMachineService(),
+      undefined,
+      new SocialCodexLifeGraphGovernanceService(),
+      {
+        get: jest.fn((key: string) =>
+          key === 'SOCIAL_AGENT_CONTEXT_TURN_LIMIT' ? '40' : undefined,
+        ),
+      } as never,
+    );
+
+    const context = await service.hydrateContext({
+      userId: 7,
+      taskId: 44,
+      threadId: 'agent-task:44',
+    });
+
+    expect(context.recentMessages).toHaveLength(80);
+    expect(context.recentMessages[0]).toMatchObject({
+      text: '第 9 条上下文',
+    });
   });
 });

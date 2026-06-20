@@ -189,7 +189,12 @@ function makeHarness(
       callOrder.push('ai');
       return {
         score: 86,
-        scoreBreakdown: { ...input.scoreBreakdown, aiSecondPass: 4 },
+        scoreBreakdown: {
+          ...input.scoreBreakdown,
+          aiSecondPass: 4,
+          aiReasoningConfidence: 82,
+          aiReasoningDegraded: 0,
+        },
         matchedSignals: ['running', '晚上'],
         publicReason: '共同跑步且时间偏好接近。',
         privateReason: '候选来自 MatchService 规则评分，AI 只负责解释。',
@@ -197,7 +202,11 @@ function makeHarness(
         riskWarnings: ['先站内沟通。'],
         suggestedOpener: '你好，看到你也喜欢跑步，方便先在 FitMeet 聊聊吗？',
         nextAction: 'owner_confirmation_required',
-        reasonerSource: 'fallback',
+        reasonerSource: 'deepseek',
+        reasonerConfidence: 0.82,
+        reasoningDegraded: false,
+        reasoningRetryable: false,
+        degradationReason: null,
       };
     }),
   };
@@ -272,7 +281,14 @@ describe('MatchService social request matching', () => {
         trustworthiness: expect.any(Number),
         safetyRisk: expect.any(Number),
         aiSecondPass: 4,
+        aiReasoningConfidence: 82,
+        aiReasoningDegraded: 0,
       }),
+      reasonerSource: 'deepseek',
+      reasoningConfidence: 0.82,
+      reasoningDegraded: false,
+      reasoningRetryable: false,
+      degradationReason: null,
       matchedSignals: ['running', '晚上'],
       publicReason: expect.stringContaining('跑步'),
       privateReason: expect.stringContaining('规则评分'),

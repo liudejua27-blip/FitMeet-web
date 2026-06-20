@@ -1,4 +1,5 @@
 import { Injectable, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -21,10 +22,12 @@ import {
   rememberSocialAgentConversationBrainToolResult,
 } from './social-agent-chat-brain-memory.presenter';
 import { readSocialAgentConversationHistory } from './social-agent-chat-memory.presenter';
+import { socialAgentContextTurnLimit } from './social-agent-context-window';
 import type { SocialAgentBrainTurnDecision } from './social-agent-brain.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import type {
   ExtractedProfileFields,
+  SocialAgentAssistantMessageSource,
   StreamEmit,
 } from './social-agent-chat.types';
 import type { SocialAgentMemoryContext } from './social-agent-memory-context.service';
@@ -41,6 +44,10 @@ import { SocialAgentMetricsService } from './social-agent-metrics.service';
 type MemoryContextBuilder = (
   task: AgentTask,
 ) => SocialAgentMemoryContext | null;
+type TaskContextBuilder = (
+  task: AgentTask,
+  memoryContext: SocialAgentMemoryContext | null,
+) => Record<string, unknown> | null;
 
 @Injectable()
 export class SocialAgentProfileEnrichmentService {
@@ -52,6 +59,8 @@ export class SocialAgentProfileEnrichmentService {
     private readonly metrics: SocialAgentMetricsService,
     @Optional()
     private readonly lifeGraph?: LifeGraphService,
+    @Optional()
+    private readonly config?: ConfigService,
   ) {}
 
   async handleTurn(input: {
@@ -60,6 +69,7 @@ export class SocialAgentProfileEnrichmentService {
     message: string;
     intent: SocialAgentIntentType;
     buildMemoryContext: MemoryContextBuilder;
+    buildTaskContext?: TaskContextBuilder;
     emit?: StreamEmit;
     signal?: AbortSignal | null;
   }): Promise<{
@@ -69,6 +79,7 @@ export class SocialAgentProfileEnrichmentService {
     profileUpdateProposal?: LifeGraphProposalDto | null;
     task: AgentTask;
     assistantStreamed?: boolean;
+    assistantMessageSource?: SocialAgentAssistantMessageSource;
   }> {
     const { ownerUserId, task, message, intent, buildMemoryContext } = input;
 
@@ -182,32 +193,39 @@ export class SocialAgentProfileEnrichmentService {
       });
       await this.taskRepo.save(task);
       const fallbackReply = this.profileUpdatedReply(mergedProfile, output);
+      const memoryContext = buildMemoryContext(task);
+      const taskContext =
+        input.buildTaskContext?.(task, memoryContext) ?? null;
       let assistantStreamed = false;
+      const answer = await this.chatLlm.generateAgentBrainReplyWithSource({
+        message,
+        task,
+        intent,
+        mode: 'profile_updated',
+        extractedProfile: mergedProfile,
+        sourceMessage,
+        toolOutput: output,
+        fallbackReply,
+        memoryContext,
+        ...(taskContext ? { taskContext } : {}),
+        conversationHistory: memoryContext?.shortTerm?.recentTurns ?? null,
+        onDelta: input.emit
+          ? async (delta) => {
+              if (!delta) return;
+              assistantStreamed = true;
+              await input.emit?.({
+                type: 'assistant_delta',
+                messageId: `agent-message:${task.id}`,
+                delta,
+                source: 'llm',
+              });
+            }
+          : undefined,
+        signal: input.signal,
+      });
       return {
-        assistantMessage: await this.chatLlm.generateAgentBrainReply({
-          message,
-          task,
-          intent,
-          mode: 'profile_updated',
-          extractedProfile: mergedProfile,
-          sourceMessage,
-          toolOutput: output,
-          fallbackReply,
-          memoryContext: buildMemoryContext(task),
-          onDelta: input.emit
-            ? async (delta) => {
-                if (!delta) return;
-                assistantStreamed = true;
-                await input.emit?.({
-                  type: 'assistant_delta',
-                  messageId: `agent-message:${task.id}`,
-                  delta,
-                  source: 'llm',
-                });
-              }
-            : undefined,
-          signal: input.signal,
-        }),
+        assistantMessage: answer.text,
+        assistantMessageSource: assistantStreamed ? 'llm' : answer.source,
         savedContext: true,
         profileUpdated: call.status === 'succeeded',
         profileUpdateProposal: null,
@@ -231,34 +249,40 @@ export class SocialAgentProfileEnrichmentService {
     });
     transitionSocialAgentState(task, 'profile_detected');
     await this.taskRepo.save(task);
+    const memoryContext = buildMemoryContext(task);
+    const taskContext = input.buildTaskContext?.(task, memoryContext) ?? null;
     let assistantStreamed = false;
+    const answer = await this.chatLlm.generateAgentBrainReplyWithSource({
+      message,
+      task,
+      intent,
+      mode:
+        intent === 'correction_or_clarification'
+          ? 'profile_correction'
+          : 'profile_extraction',
+      extractedProfile: mergedProfile,
+      sourceMessage,
+      fallbackReply,
+      memoryContext,
+      ...(taskContext ? { taskContext } : {}),
+      conversationHistory: memoryContext?.shortTerm?.recentTurns ?? null,
+      onDelta: input.emit
+        ? async (delta) => {
+            if (!delta) return;
+            assistantStreamed = true;
+            await input.emit?.({
+              type: 'assistant_delta',
+              messageId: `agent-message:${task.id}`,
+              delta,
+              source: 'llm',
+            });
+          }
+        : undefined,
+      signal: input.signal,
+    });
     return {
-      assistantMessage: await this.chatLlm.generateAgentBrainReply({
-        message,
-        task,
-        intent,
-        mode:
-          intent === 'correction_or_clarification'
-            ? 'profile_correction'
-            : 'profile_extraction',
-        extractedProfile: mergedProfile,
-        sourceMessage,
-        fallbackReply,
-        memoryContext: buildMemoryContext(task),
-        onDelta: input.emit
-          ? async (delta) => {
-              if (!delta) return;
-              assistantStreamed = true;
-              await input.emit?.({
-                type: 'assistant_delta',
-                messageId: `agent-message:${task.id}`,
-                delta,
-                source: 'llm',
-              });
-            }
-          : undefined,
-        signal: input.signal,
-      }),
+      assistantMessage: answer.text,
+      assistantMessageSource: assistantStreamed ? 'llm' : answer.source,
       savedContext: true,
       profileUpdated: false,
       profileUpdateProposal: null,
@@ -323,15 +347,6 @@ export class SocialAgentProfileEnrichmentService {
     ) {
       missing.push('方便的时间');
     }
-    if (!this.hasOpportunityIntensity(normalizedMessage, signals)) {
-      missing.push('运动强度');
-    }
-    if (
-      !this.hasOpportunityBoundary(normalizedMessage, extractedProfile, signals)
-    ) {
-      missing.push('社交边界');
-    }
-
     if (missing.length === 0) return null;
     const missingText = missing.slice(0, 4).join('、');
     return [
@@ -504,11 +519,13 @@ export class SocialAgentProfileEnrichmentService {
     currentMessage: string,
   ): string | null {
     const current = cleanDisplayText(currentMessage, '');
-    const userTurns = readSocialAgentConversationHistory(task)
+    const userTurns = readSocialAgentConversationHistory(
+      task,
+      socialAgentContextTurnLimit(this.config),
+    )
       .filter((turn) => cleanDisplayText(turn.role, '') === 'user')
       .map((turn) => cleanDisplayText(turn.text ?? turn.content, ''))
       .filter((text) => text && text !== current)
-      .slice(-5)
       .reverse();
     return (
       userTurns.find(
@@ -617,6 +634,7 @@ export class SocialAgentProfileEnrichmentService {
   private isConversationBrainReadTool(toolName: string): boolean {
     return [
       'get_user_profile',
+      'get_conversation_history',
       'get_conversation_messages',
       'get_candidate_detail',
     ].includes(cleanDisplayText(toolName, ''));
@@ -628,6 +646,7 @@ export class SocialAgentProfileEnrichmentService {
     switch (cleanDisplayText(toolName, '')) {
       case 'get_user_profile':
         return SocialAgentToolName.GetMyProfile;
+      case 'get_conversation_history':
       case 'get_conversation_messages':
         return SocialAgentToolName.ReadTaskConversationMessages;
       case 'get_candidate_detail':
@@ -755,45 +774,6 @@ export class SocialAgentProfileEnrichmentService {
         'weekendAvailability',
         'timePreference',
         'preferredTime',
-      ]),
-    );
-  }
-
-  private hasOpportunityIntensity(
-    message: string,
-    signals: Record<string, unknown> | null,
-  ): boolean {
-    return Boolean(
-      /(轻松|低强度|中等|高强度|慢跑|快走|新手|入门|进阶|休闲|恢复|配速|强度|\d+\s*(?:km|公里|千米)|半马|全马|力量|拉伸)/i.test(
-        message,
-      ) ||
-      this.hasAnyNamedValue(signals, [
-        'intensity',
-        'trainingIntensity',
-        'fitnessLevel',
-        'pace',
-        'distance',
-      ]),
-    );
-  }
-
-  private hasOpportunityBoundary(
-    message: string,
-    extractedProfile: ExtractedProfileFields,
-    signals: Record<string, unknown> | null,
-  ): boolean {
-    return Boolean(
-      extractedProfile.privacyBoundary ||
-      extractedProfile.rejectRules ||
-      /(公共场所|公开地点|先线上|先聊|站内|不加微信|不交换|不透露|白天|边界|安全|女生|男生|同性|多人|不单独|不喝酒|AA|精确位置)/.test(
-        message,
-      ) ||
-      this.hasAnyNamedValue(signals, [
-        'publicPlaceOnly',
-        'privacyBoundary',
-        'rejectRules',
-        'socialBoundary',
-        'safetyBoundary',
       ]),
     );
   }

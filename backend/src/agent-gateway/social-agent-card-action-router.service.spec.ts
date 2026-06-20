@@ -37,7 +37,8 @@ function routeResult(
   };
 }
 
-function makeHarness() {
+function makeHarness(options: { runRunner?: boolean } = {}) {
+  const runRunner = options.runRunner ?? true;
   const candidateActions = {
     confirmOpenerSendFromCardAction: jest.fn(),
     rejectOpenerSendFromCardAction: jest.fn(),
@@ -56,8 +57,10 @@ function makeHarness() {
   const agentLoop = {
     execute: jest.fn(async (input: Record<string, unknown>) => {
       executeCalls.push(input);
-      const runner = input.runner as () => Promise<Record<string, unknown>>;
-      await runner();
+      if (runRunner) {
+        const runner = input.runner as () => Promise<Record<string, unknown>>;
+        await runner();
+      }
       return {
         loop: {
           runId: 'loop:101:test',
@@ -149,8 +152,7 @@ describe('SocialAgentCardActionRouterService', () => {
     meetLoop.performActivityAction.mockResolvedValueOnce(
       routeResult({
         action: 'reply',
-        assistantMessage:
-          '我已恢复到上次保存的邀约进度。下一步仍需要你确认。',
+        assistantMessage: '我已恢复到上次保存的邀约进度。下一步仍需要你确认。',
         cards: [
           {
             id: 'meet-loop-resume',
@@ -229,7 +231,9 @@ describe('SocialAgentCardActionRouterService', () => {
     }
 
     expect(handleMessage).not.toHaveBeenCalled();
-    expect(candidateActions.connectCandidateFromCardAction).toHaveBeenCalledWith(
+    expect(
+      candidateActions.connectCandidateFromCardAction,
+    ).toHaveBeenCalledWith(
       7,
       101,
       expect.objectContaining({ action: 'candidate.connect' }),
@@ -296,5 +300,132 @@ describe('SocialAgentCardActionRouterService', () => {
       });
       expect(item.expectedHandler).toHaveBeenCalled();
     }
+  });
+
+  it('keeps fallback card actions bound to the active thread context', async () => {
+    const { handleMessage, service } = makeHarness();
+
+    await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'candidate.more_context' as never,
+        idempotencyKey: 'card-fallback-1',
+        clientContext: {
+          threadId: 'agent-task:101',
+          timezone: 'Asia/Shanghai',
+          locale: 'zh-CN',
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        hasCandidates: true,
+        idempotencyKey: 'card-fallback-1',
+        clientContext: expect.objectContaining({
+          threadId: 'agent-task:101',
+          source: 'card_action',
+          timezone: 'Asia/Shanghai',
+          locale: 'zh-CN',
+        }),
+      }),
+      undefined,
+      undefined,
+    );
+  });
+
+  it('does not dispatch fallback card actions when AgentLoop does not execute the tool runner', async () => {
+    const {
+      candidateActions,
+      executeCalls,
+      handleMessage,
+      lifeGraphActions,
+      meetLoop,
+      service,
+    } = makeHarness({ runRunner: false });
+
+    await expect(
+      service.perform({
+        ownerUserId: 7,
+        taskId: 101,
+        body: {
+          action: 'candidate.more_context' as never,
+          idempotencyKey: 'card-fallback-loop-boundary',
+          clientContext: { threadId: 'agent-task:101' },
+        },
+        handleMessage,
+      }),
+    ).rejects.toThrow('Card action AgentLoop completed without result.');
+
+    expect(executeCalls[0]).toMatchObject({
+      taskId: 101,
+      goal: 'card_action:candidate.more_context',
+      plan: {
+        reason: 'Card actions dispatch only through AgentLoop.',
+        tools: [
+          {
+            agent: 'Social Match Agent',
+            toolName: 'card_action_dispatch',
+            input: expect.objectContaining({
+              action: 'candidate.more_context',
+              taskId: 101,
+            }),
+          },
+        ],
+      },
+      maxToolCalls: 1,
+      maxRetries: 0,
+    });
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(
+      candidateActions.performCandidatePreferenceAction,
+    ).not.toHaveBeenCalled();
+    expect(candidateActions.connectCandidateFromCardAction).not.toHaveBeenCalled();
+    expect(meetLoop.performActivityAction).not.toHaveBeenCalled();
+    expect(lifeGraphActions.performUpdateAction).not.toHaveBeenCalled();
+  });
+
+  it('forwards card action abort signals into opener confirmation actions', async () => {
+    const { candidateActions, executeCalls, handleMessage, service } =
+      makeHarness();
+    const abortController = new AbortController();
+    candidateActions.confirmOpenerSendFromCardAction.mockResolvedValue(
+      routeResult({
+        action: 'await_confirmation',
+        assistantMessage: '发送前需要你确认。',
+      }),
+    );
+
+    await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'opener.confirm_send' as never,
+        payload: {
+          candidateUserId: 22,
+          message: '你好，要不要一起散步？',
+        },
+      },
+      handleMessage,
+      options: { signal: abortController.signal },
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(executeCalls[0]).toEqual(
+      expect.objectContaining({
+        signal: abortController.signal,
+      }),
+    );
+    expect(
+      candidateActions.confirmOpenerSendFromCardAction,
+    ).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'opener.confirm_send' }),
+      { signal: abortController.signal },
+    );
   });
 });

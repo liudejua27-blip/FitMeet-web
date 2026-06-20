@@ -17,6 +17,7 @@ import {
   AgentSkillPatchStatus,
 } from './entities/agent-self-improve.entity';
 import { AgentL5RuntimeService } from './agent-l5-runtime.service';
+import { shouldStreamFallbackAssistantText } from './social-agent-chat-stream.presenter';
 
 export interface RecordAgentQualityFailureInput {
   taskId: number;
@@ -613,6 +614,7 @@ export class AgentSelfImproveService {
     result?: Record<string, unknown>;
   }): Promise<AgentEvalCase | null> {
     if (!this.l5Runtime) return null;
+    if (!shouldStreamFallbackAssistantText(input.assistantMessage)) return null;
     const assistantMessage = this.preview(input.assistantMessage);
     const evalCase = await this.evalCaseRepo.save(
       this.evalCaseRepo.create({

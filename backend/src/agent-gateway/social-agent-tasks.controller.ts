@@ -40,9 +40,11 @@ import {
 import { SocialAgentChatService } from './social-agent-chat.service';
 import { rememberSocialAgentShortTerm } from './social-agent-memory.util';
 import { AgentLoopService } from './agent-loop.service';
+import { summarizeSocialCodexRun } from './social-codex-run-summary';
 import { SocialCodexTraceEvalService } from './social-codex-trace-eval.service';
 import type { SocialAgentEventV2 } from './social-agent-event-v2.types';
 import { SocialAgentEventStore } from './social-agent-event-store.service';
+import { normalizeTaskBoundSocialAgentEvent } from './social-agent-thread-id.util';
 import {
   cleanDisplayText,
   sanitizeForDisplay,
@@ -68,6 +70,11 @@ type ReplanBody = {
   userMessage?: string | null;
   failure?: SocialAgentPlanFailureContext | null;
 };
+
+const DEFAULT_SOCIAL_AGENT_TASK_TYPE = 'social_agent_chat';
+const DEFAULT_SOCIAL_AGENT_TASK_TITLE = '新对话';
+const DEFAULT_SOCIAL_AGENT_TASK_GOAL = '继续当前对话';
+const SOCIAL_AGENT_TASK_API_SOURCE = 'social_agent_tasks_api';
 
 @Controller('social-agent/tasks')
 @UseGuards(AuthGuard('jwt'))
@@ -110,19 +117,19 @@ export class SocialAgentTasksController {
     );
     const goal =
       cleanDisplayText(optionalString(body.goal), '') ||
-      '帮我找青岛今晚一起跑步的人。';
+      DEFAULT_SOCIAL_AGENT_TASK_GOAL;
     const task = await this.taskRepo.save(
       this.taskRepo.create({
         ownerUserId: req.user.id,
         agentConnectionId,
-        taskType: optionalString(body.taskType) || 'social_agent_demo',
+        taskType: optionalString(body.taskType) || DEFAULT_SOCIAL_AGENT_TASK_TYPE,
         title:
           cleanDisplayText(optionalString(body.title), '') ||
-          'Social Agent 演示任务',
+          DEFAULT_SOCIAL_AGENT_TASK_TITLE,
         goal,
         input: sanitizeForDisplay({
           ...(isRecord(body.input) ? body.input : {}),
-          source: 'social_agent_console',
+          source: SOCIAL_AGENT_TASK_API_SOURCE,
         }) as Record<string, unknown>,
         plan: [],
         toolCalls: [],
@@ -577,7 +584,12 @@ export class SocialAgentTasksController {
       take: 1000,
     });
     const allEvents = rows
-      .map((event) => event.payload?.socialAgentEventV2)
+      .map((event) =>
+        normalizeTaskBoundSocialAgentEvent(
+          event.payload?.socialAgentEventV2,
+          event.taskId,
+        ),
+      )
       .filter((event): event is SocialAgentEventV2 =>
         this.isSocialAgentEventV2(event),
       )
@@ -587,25 +599,50 @@ export class SocialAgentTasksController {
           (event.visibility === 'debug_only' && options.includeDebug === true),
       );
     const events = this.filterReplayCursor(allEvents, options);
-    const last = events.at(-1) ?? null;
-    const terminalType =
-      [...allEvents]
-        .reverse()
-        .find(
-          (event) => event.type === 'run.completed' || event.type === 'run.failed',
-        )?.type ?? null;
+    const terminalEvent = [...allEvents]
+      .reverse()
+      .find(
+        (event) => event.type === 'run.completed' || event.type === 'run.failed',
+      ) ?? null;
+    const terminalType = terminalEvent?.type ?? null;
+    const summary = summarizeSocialCodexRun(allEvents);
+    const replayEvents = this.attachReplaySummaryToTerminalEvent(
+      events,
+      terminalEvent?.eventId ?? null,
+      summary,
+    );
+    const lastReplayEvent = replayEvents.at(-1) ?? null;
     return {
       taskId,
-      threadId: last?.threadId ?? allEvents.at(-1)?.threadId ?? null,
-      runId: last?.runId ?? allEvents.at(-1)?.runId ?? null,
+      threadId: lastReplayEvent?.threadId ?? allEvents.at(-1)?.threadId ?? null,
+      runId: lastReplayEvent?.runId ?? allEvents.at(-1)?.runId ?? null,
       eventCount: allEvents.length,
-      returnedCount: events.length,
-      lastSeq: last?.seq ?? null,
-      lastEventId: last?.eventId ?? null,
+      returnedCount: replayEvents.length,
+      lastSeq: lastReplayEvent?.seq ?? null,
+      lastEventId: lastReplayEvent?.eventId ?? null,
       terminalType,
-      pendingApproval: this.hasPendingApproval(allEvents),
-      events,
+      pendingApproval: summary.pendingApproval,
+      summary,
+      events: replayEvents,
     };
+  }
+
+  private attachReplaySummaryToTerminalEvent(
+    events: SocialAgentEventV2[],
+    terminalEventId: string | null,
+    summary: ReturnType<typeof summarizeSocialCodexRun>,
+  ): SocialAgentEventV2[] {
+    if (!terminalEventId) return events;
+    return events.map((event) => {
+      if (event.eventId !== terminalEventId) return event;
+      return {
+        ...event,
+        payload: {
+          ...(event.payload ?? {}),
+          summary,
+        },
+      };
+    });
   }
 
   private filterReplayCursor(
@@ -622,49 +659,6 @@ export class SocialAgentTasksController {
       return events.filter((event) => event.seq > Number(options.afterSeq));
     }
     return events;
-  }
-
-  private hasPendingApproval(events: SocialAgentEventV2[]) {
-    return events.some((event, index) => {
-      if (event.type !== 'approval.required') return false;
-      return !events
-        .slice(index + 1)
-        .some(
-          (candidate) =>
-            candidate.type === 'approval.resolved' &&
-            this.sameApprovalIdentity(event, candidate),
-        );
-    });
-  }
-
-  private sameApprovalIdentity(
-    required: SocialAgentEventV2,
-    resolved: SocialAgentEventV2,
-  ): boolean {
-    const requiredKey = this.approvalIdentity(required);
-    const resolvedKey = this.approvalIdentity(resolved);
-    return Boolean(requiredKey && resolvedKey && requiredKey === resolvedKey);
-  }
-
-  private approvalIdentity(event: SocialAgentEventV2): string | null {
-    const payload = isRecord(event.payload) ? event.payload : {};
-    const approvalId = this.stringOrNumber(payload.approvalId);
-    if (approvalId) return `approval:${approvalId}`;
-    const checkpointId =
-      this.stringOrNumber(payload.checkpointId) ??
-      (isRecord(payload.resumeCursor)
-        ? this.stringOrNumber(payload.resumeCursor.checkpointId)
-        : null);
-    if (checkpointId) return `checkpoint:${checkpointId}`;
-    const actionType = this.stringOrNumber(payload.actionType);
-    if (actionType) return `action:${actionType}`;
-    return null;
-  }
-
-  private stringOrNumber(value: unknown): string | null {
-    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-    if (typeof value === 'string' && value.trim()) return value.trim();
-    return null;
   }
 }
 

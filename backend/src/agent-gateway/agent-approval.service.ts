@@ -402,7 +402,7 @@ export class AgentApprovalService {
     }
     if (
       raw.includes('life_graph.accept_update') ||
-      /\b(confirm_profile_update|memory_write|write_memory|long_term_memory|profile_update)\b/.test(
+      /\b(confirm_profile_update|life_graph_writeback|memory_write|write_memory|long_term_memory|profile_update)\b/.test(
         raw,
       )
     ) {
@@ -441,9 +441,23 @@ export class AgentApprovalService {
         reason: 'contact_request_requires_explicit_approval',
       };
     }
+    if (/\b(exchange_contact|contact_exchange)\b/.test(raw)) {
+      return {
+        riskLevel: ApprovalRiskLevel.High,
+        reason: 'contact_exchange_requires_explicit_approval',
+      };
+    }
+    if (/\b(reveal_precise_location|share_precise_location)\b/.test(raw)) {
+      return {
+        riskLevel: ApprovalRiskLevel.High,
+        reason: 'precise_location_high_risk',
+      };
+    }
     if (
       raw.includes('opener.confirm_send') ||
-      /\b(send_message|send_candidate_message|reply_message)\b/.test(raw)
+      /\b(send_message|send_candidate_message|send_invite|invite_candidate|reply_message)\b/.test(
+        raw,
+      )
     ) {
       return {
         riskLevel: ApprovalRiskLevel.Medium,
@@ -505,7 +519,7 @@ export class AgentApprovalService {
       case ApprovalType.Payment:
         return 'payment';
       case ApprovalType.PostPublish:
-        return 'generate_suggestion';
+        return 'publish_social_request';
       default:
         return 'generate_suggestion';
     }
@@ -583,15 +597,19 @@ export class AgentApprovalService {
     const ttl = input.ttlMs ?? 24 * 60 * 60 * 1000;
     const payloadAgentTaskId = numberOrNull(input.payload.agentTaskId);
     const agentTaskId = input.agentTaskId ?? payloadAgentTaskId;
-    const payload = this.withSocialCodexApprovalPayload(input, agentTaskId);
+    const actionType = input.actionType ?? this.toAutoActionType(input.type);
+    const payload = this.withSocialCodexApprovalPayload(
+      { ...input, actionType },
+      agentTaskId,
+    );
     const saved = await this.repo.save(
       this.repo.create({
         userId: input.userId,
         agentConnectionId: input.agentConnectionId,
         agentTaskId,
         type: input.type,
-        actionType: input.actionType ?? input.type,
-        skillName: input.skillName ?? input.type,
+        actionType,
+        skillName: input.skillName ?? actionType,
         payload,
         summary: input.summary,
         reason: input.reason ?? input.rationale ?? '',
@@ -648,7 +666,7 @@ export class AgentApprovalService {
     },
     agentTaskId: number | null | undefined,
   ): Record<string, unknown> {
-    const actionType = input.actionType ?? input.type;
+    const actionType = input.actionType ?? this.toAutoActionType(input.type);
     const idempotencyKey =
       stringOrNull(input.payload.idempotencyKey) ??
       stringOrNull(input.payload.resumeIdempotencyKey) ??

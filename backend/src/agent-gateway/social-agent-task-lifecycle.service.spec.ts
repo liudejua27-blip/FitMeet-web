@@ -205,6 +205,43 @@ describe('SocialAgentTaskLifecycleService', () => {
     expect(eventRepo.save).not.toHaveBeenCalled();
   });
 
+  it('refreshes a generic explicit new thread title from the first useful message', async () => {
+    const existing = makeTask({
+      id: 202,
+      ownerUserId: 7,
+      title: '新对话',
+      goal: '',
+      input: { source: 'social_agent_chat' },
+      status: AgentTaskStatus.AwaitingFeedback,
+    });
+    const { service, taskRepo, eventRepo } = makeHarness(existing);
+
+    const task = await service.ensureConversationTask(
+      7,
+      null,
+      '周末下午，散步，崂山区青岛大学',
+      'first-message-idempotency',
+      'agent-task:202',
+    );
+
+    expect(taskRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 202,
+        title: '周末青岛大学散步搭子',
+        goal: '周末下午，散步，崂山区青岛大学',
+        input: expect.objectContaining({
+          source: 'social_agent_chat',
+          firstMessage: '周末下午，散步，崂山区青岛大学',
+        }),
+      }),
+    );
+    expect(task).toMatchObject({
+      id: 202,
+      title: '周末青岛大学散步搭子',
+    });
+    expect(eventRepo.save).not.toHaveBeenCalled();
+  });
+
   it('reuses the latest active conversation when the client omits thread id', async () => {
     const existing = makeTask({
       id: 202,

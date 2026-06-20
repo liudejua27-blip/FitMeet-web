@@ -231,6 +231,76 @@ describe('SocialAgentAutopilotService', () => {
     expect(summary.taskResults).toEqual([]);
   });
 
+  it('does not retry an old waiting-reply task after run-next marks it terminal', async () => {
+    const { service, taskRepo, requestRepo, messages, executor } =
+      makeService();
+    const oldTask = makeTask({
+      agentConnectionId: null,
+      status: AgentTaskStatus.WaitingReply,
+      memory: { socialLoop: {} },
+    });
+    taskRepo.find.mockResolvedValue([oldTask]);
+    taskRepo.findOne.mockResolvedValue(oldTask);
+    requestRepo.find.mockResolvedValue([]);
+    messages.getRecentAgentConversationSignals.mockResolvedValue([]);
+    executor.runNext.mockImplementation(async () => {
+      oldTask.status = AgentTaskStatus.Failed;
+      oldTask.statusReason = 'task_conversation_unbound';
+      oldTask.error = {
+        code: 'task_conversation_unbound',
+        retryable: false,
+      };
+      oldTask.completedAt = new Date();
+      return {
+        taskId: oldTask.id,
+        status: AgentTaskStatus.Failed,
+        executedSteps: 1,
+        succeededSteps: 1,
+        failedSteps: 0,
+        blockedSteps: 0,
+        handledReply: false,
+        decision: null,
+        toolCalls: [
+          {
+            toolName: SocialAgentToolName.ReadTaskConversationMessages,
+            status: 'succeeded',
+            output: {
+              status: 'skipped',
+              code: 'task_conversation_unbound',
+              retryable: false,
+            },
+          },
+        ],
+      };
+    });
+
+    const first = await service.runOnce('manual', 1);
+    const second = await service.runOnce('manual', 1);
+
+    expect(executor.runNext).toHaveBeenCalledTimes(1);
+    expect(first).toMatchObject({
+      processedTasks: 1,
+      handledReplies: 0,
+      errors: 0,
+      taskResults: [
+        {
+          taskId: oldTask.id,
+          status: AgentTaskStatus.Failed,
+          executedSteps: 1,
+          handledReply: false,
+          actionsExecuted: 0,
+        },
+      ],
+    });
+    expect(second).toMatchObject({
+      processedTasks: 0,
+      handledReplies: 0,
+      actionsExecuted: 0,
+      errors: 0,
+      taskResults: [],
+    });
+  });
+
   it('creates and plans a task for a recent social request', async () => {
     const {
       service,

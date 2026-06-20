@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { agentConnections } from '@/data/agentMockData';
+import { agentConnections } from '@/data/agentStaticContent';
 import type { AgentConnection } from '@/types/agent';
 import { AgentConnectionCard } from './AgentConnectionCard';
 import { AgentGatewayOverview } from './AgentGatewayOverview';

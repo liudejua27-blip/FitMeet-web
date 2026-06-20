@@ -146,6 +146,11 @@ describe('SocialAgentThreadSessionManager', () => {
     expect(service.generateThreadTitleFromIntent('你有什么功能')).toBe(
       '普通聊天：功能咨询',
     );
+    expect(
+      service.generateThreadTitleFromIntent(
+        '请用两句话帮我安排今天的训练恢复，不要帮我找人，也不要推荐活动。',
+      ),
+    ).toBe('普通聊天：训练恢复建议');
   });
 
   it('replaces timestamp-like legacy FitMeet titles with the first useful intent', () => {

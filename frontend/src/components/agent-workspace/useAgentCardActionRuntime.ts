@@ -1,0 +1,343 @@
+import { useCallback, type MutableRefObject } from 'react';
+
+import type {
+  FitMeetAgentCardExecutableAction,
+  FitMeetAgentSchemaAction,
+  UserFacingAgentResponse,
+} from '../../api/socialAgentApi';
+import type {
+  ToolUISchemaAction,
+} from '../assistant-ui/tool-ui-schema';
+import { toolUISchemaActionFromUnknown } from '../assistant-ui/tool-ui-schema';
+import type { FitMeetAssistantRecovery } from './FitMeetAssistantUI.types';
+import {
+  type AgentAdapter,
+  type AgentError,
+  type AgentStreamEvent,
+  mapAgentError,
+} from './api';
+import type {
+  AgentConversationIntent,
+  Step,
+} from './socialAgentThreadStore';
+
+type SetState<T> = (value: T | ((current: T) => T)) => void;
+
+type CardActionInput = {
+  taskId?: number | string | null;
+  action?: string | null;
+  schemaAction?: string | null;
+  payload?: Record<string, unknown>;
+};
+
+type UseAgentCardActionRuntimeInput = {
+  isRunning: boolean;
+  activeTaskId: number | null;
+  currentGoal: string;
+  agentAdapter: AgentAdapter;
+  actionSteps: Step[];
+  finishedRef: MutableRefObject<boolean>;
+  stopRequestedRef: MutableRefObject<boolean>;
+  runConversationIntentRef: MutableRefObject<AgentConversationIntent>;
+  setRecovery: SetState<FitMeetAssistantRecovery | null>;
+  setIsRunning: SetState<boolean>;
+  setSteps: SetState<Step[]>;
+  setActiveTaskId: SetState<number | null>;
+  beginAbortableRun: (controller: AbortController) => void;
+  finishAbortableRun: () => void;
+  appendStreamingAssistant: (taskId: number | null, intent: AgentConversationIntent) => void;
+  handleAgentStreamEvent: (event: AgentStreamEvent) => void;
+  finishUserFacing: (response: UserFacingAgentResponse) => void;
+  settleStreamingAssistantAfterInterruption: () => void;
+  refreshThreads: () => Promise<void> | void;
+  isAbortError: (error: unknown) => boolean;
+  createRecoveryFromError: (error: AgentError, prompt: string) => FitMeetAssistantRecovery;
+};
+
+export function useAgentCardActionRuntime({
+  isRunning,
+  activeTaskId,
+  currentGoal,
+  agentAdapter,
+  actionSteps,
+  finishedRef,
+  stopRequestedRef,
+  runConversationIntentRef,
+  setRecovery,
+  setIsRunning,
+  setSteps,
+  setActiveTaskId,
+  beginAbortableRun,
+  finishAbortableRun,
+  appendStreamingAssistant,
+  handleAgentStreamEvent,
+  finishUserFacing,
+  settleStreamingAssistantAfterInterruption,
+  refreshThreads,
+  isAbortError,
+  createRecoveryFromError,
+}: UseAgentCardActionRuntimeInput) {
+  const runCardActionStream = useCallback(
+    async (input?: CardActionInput) => {
+      if (isRunning) throw new Error('上一轮还在生成，请先停止或等待它完成。');
+      const taskId = numberFromUnknown(input?.taskId) ?? activeTaskId;
+      if (!taskId) throw new Error('当前卡片缺少任务上下文，不能继续执行。');
+      const action = schemaActionFromToolInput(input?.schemaAction);
+      if (!action) throw new Error('当前卡片动作暂时不可执行。');
+
+      runConversationIntentRef.current =
+        action === 'opener.confirm_send' || action === 'activity.confirm_create'
+          ? 'approval'
+          : 'social';
+      setRecovery(null);
+      setIsRunning(true);
+      setSteps(
+        actionSteps.map((step, index) => ({
+          ...step,
+          status: index === 0 ? 'running' : 'pending',
+        })),
+      );
+
+      let appendedActionResultMessage = shouldAppendActionResultMessage(action);
+      if (appendedActionResultMessage) {
+        appendStreamingAssistant(taskId, runConversationIntentRef.current);
+      }
+
+      const controller = new AbortController();
+      beginAbortableRun(controller);
+      try {
+        const finalResult = await agentAdapter.performAction(
+          taskId,
+          {
+            action,
+            payload: input?.payload ?? {},
+            idempotencyKey: idempotencyKeyForCardAction(taskId, action, input?.payload),
+          },
+          {
+            onEvent: (event) => {
+              if (event.type === 'result') {
+                const shouldAppendResult = shouldAppendCardActionResultMessage(
+                  action,
+                  event.result,
+                );
+                if (!shouldAppendResult) return;
+                if (!appendedActionResultMessage) {
+                  appendStreamingAssistant(taskId, runConversationIntentRef.current);
+                  appendedActionResultMessage = true;
+                }
+              }
+              handleAgentStreamEvent(cardActionStreamEvent(action, event));
+            },
+            signal: controller.signal,
+          },
+        );
+        setActiveTaskId(finalResult.taskId ?? taskId);
+        if (!finishedRef.current) {
+          if (shouldAppendCardActionResultMessage(action, finalResult.response)) {
+            if (!appendedActionResultMessage) {
+              appendStreamingAssistant(taskId, runConversationIntentRef.current);
+            }
+            finishUserFacing({
+              ...finalResult.response,
+              assistantMessage: assistantMessageForCardAction(action, finalResult.response),
+            });
+          } else {
+            finishedRef.current = true;
+            setSteps((current) =>
+              current.map((step) =>
+                step.status === 'running' || step.status === 'pending'
+                  ? { ...step, status: 'success' }
+                  : step,
+              ),
+            );
+          }
+        }
+        void refreshThreads();
+      } catch (error) {
+        const stopped = stopRequestedRef.current || isAbortError(error);
+        if (stopped) {
+          settleStreamingAssistantAfterInterruption();
+        } else {
+          setRecovery(createRecoveryFromError(mapAgentError(error), currentGoal));
+        }
+        setSteps((current) =>
+          current.map((step) =>
+            step.status === 'running' ? { ...step, status: stopped ? 'pending' : 'error' } : step,
+          ),
+        );
+        if (!stopped) throw error;
+      } finally {
+        setIsRunning(false);
+        finishAbortableRun();
+      }
+    },
+    [
+      actionSteps,
+      activeTaskId,
+      agentAdapter,
+      appendStreamingAssistant,
+      beginAbortableRun,
+      createRecoveryFromError,
+      currentGoal,
+      finishAbortableRun,
+      finishUserFacing,
+      finishedRef,
+      handleAgentStreamEvent,
+      isAbortError,
+      isRunning,
+      refreshThreads,
+      runConversationIntentRef,
+      setActiveTaskId,
+      setIsRunning,
+      setRecovery,
+      setSteps,
+      settleStreamingAssistantAfterInterruption,
+      stopRequestedRef,
+    ],
+  );
+
+  return { runCardActionStream };
+}
+
+function schemaActionFromToolInput(
+  value: string | null | undefined,
+): FitMeetAgentCardExecutableAction | null {
+  const normalized = toolUISchemaActionFromUnknown(value);
+  if (!normalized) return null;
+  if (isExecutableToolUISchemaAction(normalized)) return normalized;
+  return null;
+}
+
+function isExecutableToolUISchemaAction(
+  value: ToolUISchemaAction,
+): value is Extract<FitMeetAgentSchemaAction, ToolUISchemaAction> {
+  return (
+    value === 'candidate.like' ||
+    value === 'candidate.skip' ||
+    value === 'candidate.more_like_this' ||
+    value === 'candidate.view_detail' ||
+    value === 'candidate.connect' ||
+    value === 'candidate.generate_opener' ||
+    value === 'opener.confirm_send' ||
+    value === 'opener.regenerate' ||
+    value === 'opener.reject' ||
+    value === 'activity.confirm_create' ||
+    value === 'activity.modify_time' ||
+    value === 'activity.modify_location' ||
+    value === 'activity.check_in' ||
+    value === 'activity.complete' ||
+    value === 'activity.upload_proof' ||
+    value === 'activity.view_detail' ||
+    value === 'review.submit' ||
+    value === 'life_graph.accept_update' ||
+    value === 'life_graph.reject_update' ||
+    value === 'meet_loop.resume' ||
+    value === 'meet_loop.reschedule'
+  );
+}
+
+function shouldAppendActionResultMessage(action: FitMeetAgentCardExecutableAction) {
+  return (
+    action === 'candidate.connect' ||
+    action === 'opener.confirm_send' ||
+    action === 'opener.reject' ||
+    action === 'activity.confirm_create'
+  );
+}
+
+function shouldAppendCardActionResultMessage(
+  action: FitMeetAgentCardExecutableAction,
+  response: UserFacingAgentResponse,
+) {
+  if (shouldAppendActionResultMessage(action)) return true;
+  if (action === 'candidate.view_detail' || action === 'activity.view_detail') {
+    return response.cards.length > 0 || Boolean(response.assistantMessage.trim());
+  }
+  if (action !== 'candidate.generate_opener' && action !== 'opener.regenerate') {
+    return false;
+  }
+  if (response.cards.length > 0 || response.assistantMessage.trim()) return true;
+  return response.cards.some(
+    (card) => card.type === 'opener_approval' || card.schemaType === 'safety.approval',
+  );
+}
+
+function idempotencyKeyForCardAction(
+  taskId: number,
+  action: FitMeetAgentCardExecutableAction,
+  payload: Record<string, unknown> | undefined,
+) {
+  const explicit = stringFromUnknown(payload?.idempotencyKey);
+  if (explicit) return explicit;
+  const stableTarget =
+    stringFromUnknown(payload?.approvalId) ||
+    stringFromUnknown(payload?.candidateId) ||
+    stringFromUnknown(payload?.candidateRecordId) ||
+    stringFromUnknown(payload?.targetUserId) ||
+    stringFromUnknown(payload?.activityId) ||
+    stringFromUnknown(payload?.cardId) ||
+    stringFromUnknown(payload?.message).slice(0, 48) ||
+    'card';
+  return `agent-card-action:${taskId}:${action}:${stableIdempotencyFragment(stableTarget)}`;
+}
+
+function stableIdempotencyFragment(value: string) {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9:_-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  return normalized || 'card';
+}
+
+const CARD_ACTION_ASSISTANT_MESSAGES: Partial<Record<FitMeetAgentCardExecutableAction, string>> = {
+  'candidate.connect': '已准备邀请请求，真正触达前仍会经过确认。',
+  'opener.confirm_send': '已进入发送确认流程，发送结果会继续回到这段对话。',
+  'opener.reject': '已取消这次发送，未联系对方。',
+  'activity.confirm_create': '已准备活动发起流程，发布前仍会保留确认边界。',
+  'activity.modify_time': '已准备时间调整方案，真正改动前仍会等你确认。',
+  'activity.modify_location': '已准备地点调整方案，真正改动前仍会等你确认。',
+  'activity.check_in': '已记录到达状态，后续会继续跟进活动完成情况。',
+  'activity.complete': '已记录活动完成，下一步可以留下简短评价。',
+  'activity.upload_proof': '已进入证明上传流程，上传内容会按隐私规则处理。',
+  'review.submit': '已提交这次评价，后续会用于改进推荐和约练闭环。',
+  'meet_loop.resume': '已从约练进展继续推进，新的状态会回到消息流。',
+  'meet_loop.reschedule': '已准备改期流程，改动前会继续征得确认。',
+};
+
+function assistantMessageForCardAction(
+  action: FitMeetAgentCardExecutableAction,
+  response: UserFacingAgentResponse,
+) {
+  return CARD_ACTION_ASSISTANT_MESSAGES[action] ?? response.assistantMessage;
+}
+
+function cardActionStreamEvent(
+  action: FitMeetAgentCardExecutableAction,
+  event: AgentStreamEvent,
+): AgentStreamEvent {
+  if (event.type !== 'result') return event;
+  return {
+    ...event,
+    result: {
+      ...event.result,
+      assistantMessage: assistantMessageForCardAction(action, event.result),
+    },
+  };
+}
+
+function stringFromUnknown(value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function numberFromUnknown(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}

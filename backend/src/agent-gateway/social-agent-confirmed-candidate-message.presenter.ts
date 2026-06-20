@@ -40,8 +40,7 @@ export function buildSocialAgentConfirmedCandidateMessageState(input: {
     },
     transitionPatch: {
       objective: 'candidate_messaging',
-      nextStep:
-        '等待候选人回复；继续发消息、发起约练或连接前仍会再次确认。',
+      nextStep: '等待候选人回复',
       shouldSearchNow: false,
       awaitingSearchConfirmation: false,
       waitingFor: 'candidate_reply',

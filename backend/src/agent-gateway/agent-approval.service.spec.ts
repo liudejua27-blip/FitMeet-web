@@ -12,6 +12,7 @@ import {
   AgentTaskEventActor,
   AgentTaskEventType,
 } from './entities/agent-task.entity';
+import type { AgentAutoActionType } from './agent-autonomy.policy';
 
 function makeSettings(overrides: Partial<AgentSettings> = {}): AgentSettings {
   return {
@@ -129,7 +130,13 @@ describe('AgentApprovalService classify', () => {
     const cases: Array<{
       label: string;
       type: ApprovalType;
-      actionType?: 'send_message' | 'add_friend' | 'create_activity' | 'payment' | 'generate_suggestion';
+      actionType?:
+        | 'send_message'
+        | 'add_friend'
+        | 'create_activity'
+        | 'payment'
+        | 'generate_suggestion'
+        | 'publish_social_request';
       payload: Record<string, unknown>;
       riskLevel: ApprovalRiskLevel;
       reason: string;
@@ -354,6 +361,88 @@ describe('AgentApprovalService classify', () => {
       );
     }
   });
+
+  it('keeps direct Social Codex action types behind approval with semantic reasons', () => {
+    const cases: Array<{
+      actionType: AgentAutoActionType;
+      riskLevel: ApprovalRiskLevel;
+      reason: string;
+    }> = [
+      {
+        actionType: 'send_invite',
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason: 'message_send_requires_explicit_approval',
+      },
+      {
+        actionType: 'connect_candidate',
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason: 'contact_request_requires_explicit_approval',
+      },
+      {
+        actionType: 'exchange_contact',
+        riskLevel: ApprovalRiskLevel.High,
+        reason: 'contact_exchange_requires_explicit_approval',
+      },
+      {
+        actionType: 'reveal_precise_location',
+        riskLevel: ApprovalRiskLevel.High,
+        reason: 'precise_location_high_risk',
+      },
+      {
+        actionType: 'update_sensitive_profile',
+        riskLevel: ApprovalRiskLevel.High,
+        reason: 'sensitive_profile_write_requires_explicit_approval',
+      },
+      {
+        actionType: 'life_graph_writeback',
+        riskLevel: ApprovalRiskLevel.Medium,
+        reason: 'life_graph_memory_write_requires_explicit_approval',
+      },
+    ];
+
+    for (const item of cases) {
+      const result = makeService().classify({
+        type: ApprovalType.Custom,
+        actionType: item.actionType,
+        payload: { actionType: item.actionType },
+        settings: makeSettings({ mode: AgentSettingsMode.Open }),
+      });
+
+      expect(result.requiresApproval).toBe(true);
+      expect(result.riskLevel).toBe(item.riskLevel);
+      expect(result.reasons).toEqual(
+        expect.arrayContaining([
+          'approval_required_by_permission_engine',
+          item.reason,
+        ]),
+      );
+      expect(result.reasons).not.toEqual(
+        expect.arrayContaining([
+          `open_requires_pending_${item.actionType}`,
+        ]),
+      );
+    }
+  });
+
+  it('classifies public publish as a publish_social_request side effect by default', () => {
+    const result = makeService().classify({
+      type: ApprovalType.PostPublish,
+      payload: { socialRequestId: 77, title: '周末青岛大学散步搭子' },
+      settings: makeSettings({ mode: AgentSettingsMode.Open }),
+    });
+
+    expect(result.requiresApproval).toBe(true);
+    expect(result.riskLevel).toBe(ApprovalRiskLevel.Medium);
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        'approval_required_by_permission_engine',
+        'public_publish_requires_explicit_approval',
+      ]),
+    );
+    expect(result.reasons).not.toContain(
+      'open_requires_pending_generate_suggestion',
+    );
+  });
 });
 
 describe('AgentApprovalService Social Codex approval payload', () => {
@@ -443,6 +532,65 @@ describe('AgentApprovalService Social Codex approval payload', () => {
           approvalId: 77,
           agentTaskId: 101,
           actionType: 'send_candidate_message',
+        }),
+      }),
+    );
+  });
+
+  it('stores PostPublish approvals with publish_social_request semantics by default', async () => {
+    const repo = {
+      create: jest.fn((input) => input),
+      save: jest.fn((input) =>
+        Promise.resolve({
+          id: 88,
+          status: ApprovalStatus.Pending,
+          expiresAt: input.expiresAt,
+          ...input,
+        }),
+      ),
+    };
+    const realtime = { emitToUser: jest.fn() };
+    const service = new AgentApprovalService(
+      repo as never,
+      {} as never,
+      { emitToConnection: jest.fn() } as never,
+      realtime as never,
+    );
+
+    const approval = await service.create({
+      userId: 1,
+      agentConnectionId: null,
+      agentTaskId: 202,
+      type: ApprovalType.PostPublish,
+      payload: {
+        socialRequestId: 303,
+        title: '周末青岛大学散步搭子',
+      },
+      summary: '发布约练卡到发现',
+      riskLevel: ApprovalRiskLevel.Medium,
+      reason: 'public_publish_requires_explicit_approval',
+    });
+
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionType: 'publish_social_request',
+        skillName: 'publish_social_request',
+        payload: expect.objectContaining({
+          idempotencyKey: 'approval:202:publish_social_request:303',
+          dryRunPreview: expect.objectContaining({
+            title: '发布到发现前预览',
+            actionType: 'publish_social_request',
+            dataBoundary: '会过滤联系方式、精确住址和敏感画像字段。',
+          }),
+        }),
+      }),
+    );
+    expect(approval.actionType).toBe('publish_social_request');
+    expect(realtime.emitToUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'agent:approval_required',
+        payload: expect.objectContaining({
+          actionType: 'publish_social_request',
         }),
       }),
     );

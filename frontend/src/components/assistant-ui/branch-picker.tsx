@@ -2,7 +2,7 @@ import { BranchPickerPrimitive, useAuiState } from '@assistant-ui/react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { MouseEvent } from 'react';
 
-import type { FitMeetAssistantMessage } from '../agent-workspace/FitMeetAssistantUI';
+import type { FitMeetAssistantMessage } from '../agent-workspace/FitMeetAssistantUI.types';
 import { TooltipIconButton } from './tooltip-icon-button';
 
 type ChatGPTBranchPickerProps = {

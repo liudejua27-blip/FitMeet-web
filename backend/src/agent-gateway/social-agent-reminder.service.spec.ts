@@ -243,7 +243,7 @@ describe('SocialAgentReminderService', () => {
           route: '/agent/chat/21',
           reminderId: result.reminder?.id,
           taskId: 21,
-          threadId: '21',
+          threadId: 'agent-task:21',
           reminderContext: expect.objectContaining({
             reminderProtocol: 'fitmeet.agent.reminder.v1',
             scene: 'past_social_goal',

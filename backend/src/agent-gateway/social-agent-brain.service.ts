@@ -8,14 +8,37 @@ import {
   type SocialAgentLlmPlan,
 } from './social-agent-brain-planner-normalization';
 import {
+  normalizeSocialAgentContextTurn,
+  selectSocialAgentContextWindow,
+  socialAgentContextTurnLimit,
+} from './social-agent-context-window';
+import {
   SocialAgentIntentRouterResult,
   SocialAgentIntentType,
   SocialAgentReplyStrategy,
 } from './social-agent-intent-router.service';
 import { hasSocialAgentImmediateSearchRequest } from './social-agent-profile-search-boundary';
+import {
+  hasExistingSocialActionContext,
+  hasExistingSocialExecutionContext,
+  hasExplicitSocialExecutionIntent,
+  isSocialExecutionIntent,
+} from './social-agent-social-intent-gate';
 import { AgentTaskPermissionMode } from './entities/agent-task.entity';
 import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
-import { SocialAgentModelRouterService } from './social-agent-model-router.service';
+import {
+  SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+  SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS,
+  selectSocialAgentConfiguredModel,
+  SocialAgentModelRouterService,
+} from './social-agent-model-router.service';
+import {
+  isRetryableSocialAgentDeepSeekFailure,
+  socialAgentDeepSeekFailureReason,
+  socialAgentDeepSeekRetryAttempts,
+} from './social-agent-deepseek-resilience';
+import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
+import { callDeepSeekChatCompletion } from '../common/deepseek.util';
 
 export interface SocialAgentBrainTurnInput {
   message: string;
@@ -24,6 +47,7 @@ export interface SocialAgentBrainTurnInput {
   taskContext?: Record<string, unknown>;
   conversationHistory?: Array<Record<string, unknown>>;
   memoryContext?: unknown;
+  signal?: AbortSignal | null;
 }
 
 export interface SocialAgentBrainTurnDecision {
@@ -61,6 +85,11 @@ export interface SocialAgentBrainAvailableTool {
   returns: string[];
 }
 
+type SocialAgentDeepSeekMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+};
+
 @Injectable()
 export class SocialAgentBrainService {
   private readonly logger = new Logger(SocialAgentBrainService.name);
@@ -69,26 +98,63 @@ export class SocialAgentBrainService {
     @Optional() private readonly config?: ConfigService,
     @Optional() private readonly toolRegistry?: FitMeetAgentToolRegistryService,
     @Optional() private readonly modelRouter?: SocialAgentModelRouterService,
+    @Optional()
+    private readonly deepSeek?: SocialAgentChatDeepSeekClientService,
   ) {}
 
   async planTurn(
     input: SocialAgentBrainTurnInput,
   ): Promise<SocialAgentBrainTurnDecision> {
+    if (input.signal?.aborted) throw new Error('client_aborted');
     const fallback = this.reviewTurn(input);
     if (!this.shouldUseLlmPlanner(input.message)) return fallback;
 
     try {
-      const plan = await this.callDeepSeekPlanner(input, fallback);
-      if (!plan) return fallback;
+      const maxAttempts = socialAgentDeepSeekRetryAttempts(this.config, {
+        specificKey: 'SOCIAL_AGENT_BRAIN_RETRY_ATTEMPTS',
+      });
+      let plan: SocialAgentLlmPlan | null = null;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          plan = await this.callDeepSeekPlanner(input, fallback, maxAttempts);
+          break;
+        } catch (error) {
+          const reason = socialAgentDeepSeekFailureReason(error);
+          if (
+            attempt < maxAttempts &&
+            isRetryableSocialAgentDeepSeekFailure(reason, {
+              includeJsonFormatErrors: true,
+              includeTimeoutFailures: true,
+            })
+          ) {
+            this.logger.warn(
+              JSON.stringify({
+                event: 'social_agent.brain_planner.retrying',
+                reason,
+                attempt,
+                maxAttempts,
+              }),
+            );
+            continue;
+          }
+          throw error;
+        }
+      }
+      if (!plan)
+        return this.degradedPlannerDecision(input, fallback, 'empty_plan');
       return this.applyLlmPlan(input, fallback, plan);
     } catch (error) {
+      if (error instanceof Error && error.message === 'client_aborted') {
+        throw error;
+      }
+      const reason = socialAgentDeepSeekFailureReason(error);
       this.logger.warn(
         JSON.stringify({
           event: 'social_agent.brain_planner.failed',
-          message: error instanceof Error ? error.message : String(error),
+          message: reason,
         }),
       );
-      return fallback;
+      return this.degradedPlannerDecision(input, fallback, reason);
     }
   }
 
@@ -96,6 +162,29 @@ export class SocialAgentBrainService {
     const message = cleanDisplayText(input.message, '').trim();
     const route = input.route;
     const notes: string[] = [];
+
+    if (this.isSocialContinuationCorrection(message, input)) {
+      notes.push('social_search_repair_detected');
+      const intent =
+        route.intent === 'candidate_followup' ||
+        hasExistingSocialExecutionContext(input)
+          ? 'candidate_followup'
+          : 'social_search';
+      return this.decision(
+        this.overrideRoute(route, intent, {
+          replyStrategy: 'search_candidates',
+          shouldSearch: true,
+          shouldReplan: intent === 'candidate_followup',
+          shouldUpdateProfile: false,
+          shouldExecuteAction: false,
+          confidence: Math.max(route.confidence, 0.91),
+        }),
+        'search',
+        notes,
+        false,
+        true,
+      );
+    }
 
     if (this.isCorrectionOrClarification(message)) {
       notes.push('user_repair_detected');
@@ -190,12 +279,33 @@ export class SocialAgentBrainService {
 
     if (
       route.intent === 'social_search' ||
-      route.intent === 'activity_search'
+      route.intent === 'activity_search' ||
+      route.intent === 'candidate_followup'
     ) {
       return this.decision(route, 'search', notes, false, route.shouldSearch);
     }
 
     if (route.intent === 'action_request') {
+      if (!hasExistingSocialActionContext(input)) {
+        return this.decision(
+          this.overrideRoute(route, 'action_request', {
+            replyStrategy: 'ask_clarifying_question',
+            shouldSearch: false,
+            shouldReplan: false,
+            shouldUpdateProfile: false,
+            shouldExecuteAction: false,
+            confidence: Math.max(route.confidence, 0.86),
+          }),
+          'clarify',
+          [...notes, 'action_context_missing'],
+          true,
+          false,
+          {
+            responseGoal:
+              '先确认用户指的是哪个候选人、哪张约练卡或哪个待审批动作；没有明确对象前不得执行副作用。',
+          },
+        );
+      }
       return this.decision(
         route,
         'action',
@@ -241,88 +351,181 @@ export class SocialAgentBrainService {
     };
   }
 
+  private degradedPlannerDecision(
+    input: SocialAgentBrainTurnInput,
+    fallback: SocialAgentBrainTurnDecision,
+    reason: string,
+  ): SocialAgentBrainTurnDecision {
+    const degradedNotes = [
+      ...new Set([
+        ...fallback.notes,
+        'llm_planner_degraded',
+        `llm_planner_degraded:${reason}`,
+      ]),
+    ];
+
+    if (
+      fallback.conversationMode === 'search' &&
+      (fallback.route.shouldSearch || fallback.route.shouldReplan)
+    ) {
+      return this.decision(
+        this.overrideRoute(input.route, fallback.route.intent, {
+          replyStrategy: fallback.route.replyStrategy,
+          shouldSearch: fallback.route.shouldSearch,
+          shouldReplan: fallback.route.shouldReplan,
+          shouldUpdateProfile: false,
+          shouldExecuteAction: false,
+          confidence: Math.max(input.route.confidence, fallback.route.confidence),
+        }),
+        'search',
+        [...degradedNotes, 'rules_fallback_preserved_for_search'],
+        false,
+        true,
+        {
+          plannerSource: 'rules',
+          userIntent: fallback.route.intent,
+          reason:
+            'Planner did not return a reliable search plan; preserved the validated social search route and hydrated task context.',
+          responseGoal:
+            '继续使用已保存的时间、地点、活动和候选偏好推进搜索；不要重复追问已完成字段，并说明当前使用的是安全降级路径。',
+          needUserConfirmation: false,
+          tools: fallback.tools,
+        },
+      );
+    }
+
+    if (
+      fallback.conversationMode === 'action' &&
+      fallback.route.shouldExecuteAction &&
+      hasExistingSocialActionContext(input)
+    ) {
+      return this.decision(
+        this.overrideRoute(input.route, fallback.route.intent, {
+          replyStrategy: fallback.route.replyStrategy,
+          shouldSearch: false,
+          shouldReplan: false,
+          shouldUpdateProfile: false,
+          shouldExecuteAction: true,
+          confidence: Math.max(input.route.confidence, fallback.route.confidence),
+        }),
+        'action',
+        [...degradedNotes, 'rules_fallback_preserved_for_approval_action'],
+        true,
+        true,
+        {
+          plannerSource: 'rules',
+          userIntent: fallback.route.intent,
+          reason:
+            'Planner did not return a reliable action plan; preserved the explicit action route but kept it behind approval.',
+          responseGoal:
+            '展示将要执行的动作并请求用户确认；确认前不得发送邀请、连接候选人、公开位置或执行任何副作用。',
+          needUserConfirmation: true,
+          tools: fallback.tools,
+        },
+      );
+    }
+
+    const route = this.overrideRoute(input.route, fallback.route.intent, {
+      replyStrategy: 'conversational_answer',
+      shouldSearch: false,
+      shouldReplan: false,
+      shouldUpdateProfile: false,
+      shouldExecuteAction: false,
+      confidence: Math.max(input.route.confidence, 0.86),
+    });
+
+    return this.decision(
+      route,
+      'answer',
+      degradedNotes,
+      false,
+      false,
+      {
+        plannerSource: 'rules',
+        userIntent: fallback.route.intent,
+        reason:
+          'Planner did not return a reliable plan; preserved context instead of executing rule-based tools.',
+        responseGoal:
+          '先承认已保留用户刚才的上下文，说明当前没有继续执行搜索或动作，并邀请用户重试或继续补充。',
+        needUserConfirmation: false,
+        tools: [],
+      },
+    );
+  }
+
   private shouldUseLlmPlanner(message: string): boolean {
     if (!cleanDisplayText(message, '').trim()) return false;
-    if (
-      this.config?.get<string>('SOCIAL_AGENT_BRAIN_LLM_PLANNER') === 'false'
-    ) {
+    if (this.brainPlannerRulesOnlyMode()) {
       return false;
     }
     return Boolean(this.config?.get<string>('DEEPSEEK_API_KEY'));
   }
 
+  private brainPlannerRulesOnlyMode(): boolean {
+    const mode =
+      `${this.config?.get<string>('SOCIAL_AGENT_MODEL_ROUTING_MODE') ?? ''}`
+        .trim()
+        .toLowerCase();
+    const legacyToggle =
+      `${this.config?.get<string>('SOCIAL_AGENT_BRAIN_LLM_PLANNER') ?? ''}`
+        .trim()
+        .toLowerCase();
+    if (mode === 'rules_only' || mode === 'rules-only') return true;
+    if (legacyToggle === 'rules_only' || legacyToggle === 'rules-only') {
+      return true;
+    }
+    if (legacyToggle === 'false') {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'social_agent.brain_planner.legacy_disable_ignored',
+          message:
+            'SOCIAL_AGENT_BRAIN_LLM_PLANNER=false is ignored; use SOCIAL_AGENT_MODEL_ROUTING_MODE=rules_only for an explicit rules-only runtime.',
+        }),
+      );
+    }
+    return false;
+  }
+
   private async callDeepSeekPlanner(
     input: SocialAgentBrainTurnInput,
     fallback: SocialAgentBrainTurnDecision,
+    retryAttempts: number,
   ): Promise<SocialAgentLlmPlan | null> {
     const apiKey = this.config?.get<string>('DEEPSEEK_API_KEY');
     if (!apiKey) return null;
-    const baseUrl =
-      this.config?.get<string>('DEEPSEEK_BASE_URL') ||
-      'https://api.deepseek.com';
     const useCase = 'planner' as const;
+    const messages = this.deepSeekPlannerMessages(input, fallback);
+    if (this.deepSeek) {
+      const content = await this.deepSeek.complete({
+        useCase,
+        taskId: this.taskIdFromTaskContext(input.taskContext),
+        intent: fallback.route.intent,
+        fallbackTemperature: 0.15,
+        responseFormat: { type: 'json_object' },
+        retryAttempts,
+        messages,
+        signal: input.signal,
+      });
+      if (!content) return null;
+      return normalizeSocialAgentBrainLlmPlan(
+        JSON.parse(content) as Record<string, unknown>,
+      );
+    }
     const model = this.modelFor(useCase);
     const startedAt = Date.now();
-    const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.plannerTimeoutMs(useCase),
-    );
     try {
-      const response = await fetch(
-        `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`,
-        {
-          method: 'POST',
-          signal: controller.signal,
-          headers: {
-            'content-type': 'application/json',
-            authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            temperature: this.modelRouter?.getTemperature(useCase) ?? 0.15,
-            response_format: { type: 'json_object' },
-            messages: [
-              { role: 'system', content: this.plannerSystemPrompt() },
-              {
-                role: 'user',
-                content: JSON.stringify({
-                  userMessage: input.message,
-                  availableTools: this.availableTools(),
-                  routerRoute: input.route,
-                  ruleBrainFallback: {
-                    intent: fallback.route.intent,
-                    conversationMode: fallback.conversationMode,
-                    notes: fallback.notes,
-                  },
-                  profile: input.profile ?? {},
-                  taskContext: input.taskContext ?? {},
-                  memoryContext: input.memoryContext ?? null,
-                  conversationHistory: (input.conversationHistory ?? [])
-                    .slice(-10)
-                    .map((turn) => ({
-                      role: cleanDisplayText(turn.role, ''),
-                      text: cleanDisplayText(turn.text ?? turn.content, ''),
-                    })),
-                }),
-              },
-            ],
-          }),
-        },
-      );
-      if (!response.ok) {
-        this.logModelCall({
-          useCase,
-          model,
-          intent: fallback.route.intent,
-          latencyMs: Date.now() - startedAt,
-          success: false,
-          reason: `DeepSeek HTTP ${response.status}`,
-        });
-        throw new Error(`DeepSeek HTTP ${response.status}`);
-      }
-      const payload = (await response.json()) as Record<string, unknown>;
-      const content = this.readDeepSeekContent(payload);
+      const content = await callDeepSeekChatCompletion({
+        apiKey,
+        baseUrl: this.config?.get<string>('DEEPSEEK_BASE_URL'),
+        model,
+        temperature: this.modelRouter?.getTemperature(useCase) ?? 0.15,
+        responseFormat: { type: 'json_object' },
+        retryAttempts: 1,
+        messages,
+        signal: input.signal ?? null,
+        timeoutMs: this.plannerTimeoutMs(useCase),
+        timeoutMessage: 'deepseek_timeout',
+      });
       const plan = normalizeSocialAgentBrainLlmPlan(
         JSON.parse(content) as Record<string, unknown>,
       );
@@ -335,25 +538,16 @@ export class SocialAgentBrainService {
       });
       return plan;
     } catch (error) {
+      const reason = socialAgentDeepSeekFailureReason(error);
       this.logModelCall({
         useCase,
         model,
         intent: fallback.route.intent,
         latencyMs: Date.now() - startedAt,
         success: false,
-        reason:
-          error instanceof Error && error.name === 'AbortError'
-            ? 'deepseek_timeout'
-            : error instanceof Error
-              ? error.message
-              : String(error),
+        reason,
       });
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error('deepseek_timeout');
-      }
       throw error;
-    } finally {
-      clearTimeout(timeout);
     }
   }
 
@@ -364,7 +558,11 @@ export class SocialAgentBrainService {
       '你会收到 availableTools。只能从 availableTools.name 中选择工具；如果已有上下文足够回答，就不要调用工具。',
       '允许的 userIntent: product_help, workflow_help, casual_chat, profile_enrichment, profile_enrichment_request, correction_or_clarification, social_search, activity_search, candidate_followup, action_request, safety_or_boundary, fitness_math, unknown。',
       '如果用户主要提供个人画像，即使包含“想找同校女生/想认识某类人”，也优先 profile_enrichment；不要立即 social_search，除非用户明确说“现在帮我找/搜索/推荐”。',
-      '如果用户说“不是不是/我的意思是/上面是画像”，必须 correction_or_clarification。',
+      '如果用户说“不是不是/我的意思是/上面是画像”，通常是 correction_or_clarification；但如果已有社交/约练任务，且用户是在补充候选偏好、时间、地点或活动类型，应继续 social_search/candidate_followup。',
+      '你会收到 knownTaskSlots 和 plannerConstraints。knownTaskSlots 可能包含用户已确认字段，也可能包含 inferred_context 推断上下文；只有 plannerConstraints.doNotRepeatQuestionsForSlots 里的字段才是用户已回答/已确认/已完成的硬约束，不得重复追问。knownContextSlots 只用于理解上下文，不能替代必要澄清。',
+      '你会收到 taskContext.candidateActions/candidateState。它们记录已推荐、保存、跳过、喜欢、已邀请的候选人；不要重复推荐用户已跳过的人，继续尊重已保存/已邀请状态。',
+      '你会收到 taskContext.pendingApprovals/pendingActions。它们是等待用户确认的动作；存在待确认发布、连接、发邀请、发消息时，必须先让用户确认、修改或取消，不能绕过审批继续执行副作用。',
+      'candidate_preference 只能用于公开可发现资料、用户自愿公开标签或用户明确授权的筛选，不得推断隐私字段。',
       '如果用户说“调用工具/保存/写入/完善 AI 画像”，可以计划 update_profile_from_agent_context。',
       '如果不确定，needUserConfirmation=true，并把 responseGoal 设为追问澄清。',
       '动作型工具例如 send_message_to_candidate、connect_candidate、create_activity 必须 needUserConfirmation=true，不能假装已经执行。',
@@ -372,6 +570,39 @@ export class SocialAgentBrainService {
       'JSON schema: {"intent":"profile_enrichment","reason":"...","state":"profile_building","shouldCallTools":false,"toolCalls":[{"name":"update_profile_from_agent_context","arguments":{}}],"needUserConfirmation":false,"responseGoal":"..."}',
       '兼容字段：userIntent 等同 intent；shouldCallTool 等同 shouldCallTools；tools 等同 toolCalls。',
     ].join('\n');
+  }
+
+  private deepSeekPlannerMessages(
+    input: SocialAgentBrainTurnInput,
+    fallback: SocialAgentBrainTurnDecision,
+  ): SocialAgentDeepSeekMessage[] {
+    return [
+      { role: 'system', content: this.plannerSystemPrompt() },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          userMessage: input.message,
+          availableTools: this.availableTools(),
+          routerRoute: input.route,
+          ruleBrainFallback: {
+            intent: fallback.route.intent,
+            conversationMode: fallback.conversationMode,
+            notes: fallback.notes,
+          },
+          profile: input.profile ?? {},
+          taskContext: input.taskContext ?? {},
+          knownTaskSlots: this.knownTaskSlots(input.taskContext),
+          plannerConstraints: this.plannerConstraintsForTaskContext(
+            input.taskContext,
+          ),
+          memoryContext: input.memoryContext ?? null,
+          conversationHistory: selectSocialAgentContextWindow(
+            input.conversationHistory,
+            socialAgentContextTurnLimit(this.config),
+          ).map(normalizeSocialAgentContextTurn),
+        }),
+      },
+    ];
   }
 
   availableTools(): SocialAgentBrainAvailableTool[] {
@@ -484,6 +715,156 @@ export class SocialAgentBrainService {
     ];
   }
 
+  private knownTaskSlots(
+    taskContext?: Record<string, unknown>,
+  ): Record<string, string> {
+    const slotRecord = this.taskSlotRecord(taskContext);
+    const allowedStates = new Set([
+      'answered',
+      'confirmed',
+      'completed',
+      'modified',
+      'inferred',
+    ]);
+    return {
+      ...this.knownConstraintSlotValues(taskContext),
+      ...this.taskSlotValues(slotRecord, allowedStates),
+    };
+  }
+
+  private userConfirmedTaskSlotKeys(
+    taskContext?: Record<string, unknown>,
+  ): string[] {
+    const slotRecord = this.taskSlotRecord(taskContext);
+    const userConfirmedStates = new Set([
+      'answered',
+      'confirmed',
+      'completed',
+      'modified',
+    ]);
+    return [
+      ...new Set([
+        ...this.knownConstraintDoNotAskAgainKeys(taskContext),
+        ...Object.keys(this.taskSlotValues(slotRecord, userConfirmedStates)),
+      ]),
+    ];
+  }
+
+  private taskSlotRecord(
+    taskContext?: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const context = this.isRecord(taskContext) ? taskContext : {};
+    const taskMemory = this.isRecord(context.taskMemory)
+      ? context.taskMemory
+      : {};
+    const slots = this.isRecord(context.taskSlots ?? taskMemory.taskSlots)
+      ? (context.taskSlots ?? taskMemory.taskSlots)
+      : {};
+    return this.isRecord(slots) ? slots : {};
+  }
+
+  private knownTaskSlotConstraints(
+    taskContext?: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const context = this.isRecord(taskContext) ? taskContext : {};
+    const taskMemory = this.isRecord(context.taskMemory)
+      ? context.taskMemory
+      : {};
+    const constraints = this.isRecord(context.knownTaskSlotConstraints)
+      ? context.knownTaskSlotConstraints
+      : this.isRecord(taskMemory.knownTaskSlotConstraints)
+        ? taskMemory.knownTaskSlotConstraints
+        : {};
+    return constraints;
+  }
+
+  private knownConstraintSlotValues(
+    taskContext?: Record<string, unknown>,
+  ): Record<string, string> {
+    const constraints = this.knownTaskSlotConstraints(taskContext);
+    const knownSlots = Array.isArray(constraints.knownSlots)
+      ? constraints.knownSlots
+      : [];
+    const output: Record<string, string> = {};
+    for (const rawSlot of knownSlots) {
+      if (!this.isRecord(rawSlot)) continue;
+      const key = cleanDisplayText(rawSlot.key, '');
+      const value = cleanDisplayText(rawSlot.value, '');
+      if (!key || !value) continue;
+      output[key] = value;
+    }
+    return output;
+  }
+
+  private knownConstraintDoNotAskAgainKeys(
+    taskContext?: Record<string, unknown>,
+  ): string[] {
+    const constraints = this.knownTaskSlotConstraints(taskContext);
+    return Array.isArray(constraints.doNotAskAgainFor)
+      ? constraints.doNotAskAgainFor
+          .map((key) => cleanDisplayText(key, ''))
+          .filter(Boolean)
+      : [];
+  }
+
+  private taskSlotValues(
+    slotRecord: Record<string, unknown>,
+    allowedStates: Set<string>,
+  ): Record<string, string> {
+    const output: Record<string, string> = {};
+    for (const key of [
+      'activity',
+      'time_window',
+      'location_text',
+      'geo_area',
+      'intensity',
+      'visibility',
+      'safety_boundary',
+      'invite_tone',
+      'candidate_preference',
+    ]) {
+      const raw = slotRecord[key];
+      const slot = this.isRecord(raw) ? raw : {};
+      const state = cleanDisplayText(slot.state, '');
+      if (state && !allowedStates.has(state)) continue;
+      const value = cleanDisplayText(slot.value ?? raw, '');
+      if (value) output[key] = value;
+    }
+    return output;
+  }
+
+  private plannerConstraintsForTaskContext(
+    taskContext?: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const knownSlots = this.knownTaskSlots(taskContext);
+    const knownSlotKeys = Object.keys(knownSlots);
+    const userConfirmedSlotKeys = this.userConfirmedTaskSlotKeys(taskContext);
+    return {
+      treatKnownTaskSlotsAsAnswered: userConfirmedSlotKeys.length > 0,
+      knownContextSlots: knownSlotKeys,
+      doNotRepeatQuestionsForSlots: userConfirmedSlotKeys,
+      candidatePreferenceScope:
+        'public_discoverable_profiles_and_user_consented_public_tags_only',
+      inferredSlotsAreContextOnly: true,
+      highRiskActionsRequireApproval: [
+        'publish_social_request',
+        'send_invite',
+        'exchange_contact',
+        'reveal_precise_location',
+        'update_sensitive_profile',
+        'connect_candidate',
+      ],
+    };
+  }
+
+  private taskIdFromTaskContext(
+    taskContext?: Record<string, unknown>,
+  ): number | null {
+    const context = this.isRecord(taskContext) ? taskContext : {};
+    const value = Number(context.taskId ?? context.id);
+    return Number.isInteger(value) && value > 0 ? value : null;
+  }
+
   private applyLlmPlan(
     input: SocialAgentBrainTurnInput,
     fallback: SocialAgentBrainTurnDecision,
@@ -496,6 +877,7 @@ export class SocialAgentBrainService {
     const userIntent = this.safetyClampIntent(
       plan.userIntent,
       ruleSafety.route.intent,
+      input,
     );
     const tools = normalizeSocialAgentBrainPlannedTools({
       tools: plan.tools,
@@ -510,7 +892,9 @@ export class SocialAgentBrainService {
         input.route.replyStrategy,
       ),
       shouldSearch:
-        userIntent === 'social_search' || userIntent === 'activity_search',
+        userIntent === 'social_search' ||
+        userIntent === 'activity_search' ||
+        userIntent === 'candidate_followup',
       shouldUpdateProfile:
         userIntent === 'profile_enrichment' ||
         userIntent === 'profile_enrichment_request' ||
@@ -540,7 +924,30 @@ export class SocialAgentBrainService {
   private safetyClampIntent(
     planned: SocialAgentIntentType,
     ruleIntent: SocialAgentIntentType,
+    input: SocialAgentBrainTurnInput,
   ): SocialAgentIntentType {
+    const plannedSocialExecution =
+      planned === 'social_search' ||
+      planned === 'activity_search' ||
+      planned === 'candidate_followup';
+    if (planned === 'action_request') {
+      return hasExistingSocialActionContext(input)
+        ? planned
+        : ruleIntent === 'action_request'
+          ? 'unknown'
+          : ruleIntent;
+    }
+    if (
+      plannedSocialExecution &&
+      (input.route.shouldSearch === true ||
+        hasExplicitSocialExecutionIntent(input.message) ||
+        hasExistingSocialExecutionContext(input))
+    ) {
+      return planned;
+    }
+    if (plannedSocialExecution) {
+      return isSocialExecutionIntent(ruleIntent) ? 'casual_chat' : ruleIntent;
+    }
     if (
       ruleIntent === 'correction_or_clarification' ||
       ruleIntent === 'profile_enrichment' ||
@@ -568,37 +975,48 @@ export class SocialAgentBrainService {
     if (intent === 'profile_enrichment') return 'profile_enrichment';
     if (intent === 'profile_enrichment_request') return 'profile_enrichment';
     if (intent === 'correction_or_clarification') return 'profile_correction';
-    if (intent === 'social_search' || intent === 'activity_search')
+    if (
+      intent === 'social_search' ||
+      intent === 'activity_search' ||
+      intent === 'candidate_followup'
+    )
       return 'search';
     if (intent === 'action_request') return 'action';
     return 'answer';
   }
 
-  private readDeepSeekContent(payload: Record<string, unknown>): string {
-    const choices = Array.isArray(payload.choices) ? payload.choices : [];
-    const first = this.isRecord(choices[0]) ? choices[0] : {};
-    const message = this.isRecord(first.message) ? first.message : {};
-    return cleanDisplayText(message.content, '').trim();
-  }
-
   private modelFor(useCase: 'planner'): string {
     if (this.modelRouter) return this.modelRouter.getModel(useCase);
     return (
-      this.config?.get<string>('AGENT_PLANNER_MODEL') ||
-      this.config?.get<string>('DEEPSEEK_FAST_MODEL') ||
-      this.config?.get<string>('DEEPSEEK_MODEL') ||
-      'deepseek-v4-flash'
+      this.configuredModel(this.config?.get<string>('AGENT_PLANNER_MODEL')) ||
+      this.configuredModel(this.config?.get<string>('DEEPSEEK_CHAT_MODEL')) ||
+      SOCIAL_AGENT_DEFAULT_REASONING_MODEL
     );
+  }
+
+  private configuredModel(value?: string | null): string | null {
+    return selectSocialAgentConfiguredModel(value, {
+      allowFast: false,
+    });
   }
 
   private plannerTimeoutMs(useCase?: 'planner'): number {
     if (useCase && this.modelRouter)
       return this.modelRouter.getTimeout(useCase);
     const configured = Number(
-      this.config?.get<string>('SOCIAL_AGENT_BRAIN_LLM_TIMEOUT_MS') ?? '5000',
+      this.config?.get<string>('SOCIAL_AGENT_BRAIN_LLM_TIMEOUT_MS') ??
+        this.config?.get<string>('SOCIAL_AGENT_PLANNER_TIMEOUT_MS') ??
+        this.config?.get<string>('SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS') ??
+        this.config?.get<string>('DEEPSEEK_TIMEOUT_MS') ??
+        `${SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS}`,
     );
-    if (!Number.isFinite(configured) || configured <= 0) return 5000;
-    return Math.min(configured, 8000);
+    if (!Number.isFinite(configured) || configured <= 0) {
+      return SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS;
+    }
+    return Math.min(
+      Math.max(configured, SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS),
+      60_000,
+    );
   }
 
   private logModelCall(input: {
@@ -641,11 +1059,15 @@ export class SocialAgentBrainService {
       intent,
       replyStrategy,
       shouldSearch:
-        intent === 'social_search' || intent === 'activity_search'
+        intent === 'social_search' ||
+        intent === 'activity_search' ||
+        intent === 'candidate_followup'
           ? (overrides.shouldSearch ?? route.shouldSearch)
           : false,
       shouldReplan:
-        intent === 'social_search' || intent === 'activity_search'
+        intent === 'social_search' ||
+        intent === 'activity_search' ||
+        intent === 'candidate_followup'
           ? (overrides.shouldReplan ?? route.shouldReplan)
           : false,
       shouldExecuteAction:
@@ -673,14 +1095,38 @@ export class SocialAgentBrainService {
     }
     if (intent === 'social_search') return 'search_candidates';
     if (intent === 'activity_search') return 'search_activities';
+    if (intent === 'candidate_followup') return 'search_candidates';
     if (intent === 'action_request') return 'execute_action';
     return fallback;
   }
 
   private isCorrectionOrClarification(message: string): boolean {
-    return /(不是不是|不是这个意思|我的意思是|你理解错了|刚才不是.*搜索|上面.*画像|上面.*人物画像|那是我的画像|不是要搜索)/i.test(
+    return /(不是不是|不是这个意思|我的意思是|我说的是|你懂没懂我的意思|没懂我的意思|你理解错了|你理解错|刚才不是.*搜索|上面.*画像|上面.*人物画像|那是我的画像|不是要搜索)/i.test(
       message,
     );
+  }
+
+  private isSocialContinuationCorrection(
+    message: string,
+    input: SocialAgentBrainTurnInput,
+  ): boolean {
+    const text = cleanDisplayText(message, '').trim().toLowerCase();
+    if (!this.isCorrectionOrClarification(text)) return false;
+    if (this.isProfileEnrichmentRequest(text)) return false;
+    if (
+      /(上面|刚才).{0,12}(画像|人物画像|ai画像)|不是.{0,8}搜索|不是.{0,8}找人/i.test(
+        text,
+      )
+    ) {
+      return false;
+    }
+    const hasSocialContext = hasExistingSocialExecutionContext(input);
+    const hasSearchIntent = hasExplicitSocialExecutionIntent(text);
+    const hasConcreteSocialCriteria =
+      /(找|搜索|推荐|匹配|候选|搭子|女生|男生|舞蹈|舞蹈生|同校|青岛大学|大学|散步|跑步|羽毛球|篮球|户外|今晚|今天晚上|明天|周末|附近)/i.test(
+        text,
+      );
+    return hasSearchIntent || (hasSocialContext && hasConcreteSocialCriteria);
   }
 
   private isProfileEnrichmentRequest(message: string): boolean {

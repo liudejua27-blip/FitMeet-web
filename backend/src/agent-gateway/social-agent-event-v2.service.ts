@@ -14,16 +14,16 @@ export class SocialAgentEventV2Service {
     const runId = input.runId || this.runIdFor(input);
     const seq = (this.seqByRun.get(runId) ?? 0) + 1;
     this.seqByRun.set(runId, seq);
-    const threadId =
-      input.threadId != null && `${input.threadId}`.trim()
-        ? `${input.threadId}`.trim()
-        : input.taskId
-          ? String(input.taskId)
-          : `user-${input.userId}`;
     const taskId =
       typeof input.taskId === 'number' && Number.isFinite(input.taskId)
         ? input.taskId
-        : parseSocialAgentThreadTaskId(threadId);
+        : parseSocialAgentThreadTaskId(input.threadId);
+    const threadId =
+      taskId != null
+        ? `agent-task:${taskId}`
+        : input.threadId != null && `${input.threadId}`.trim()
+          ? `${input.threadId}`.trim()
+          : `user-${input.userId}`;
     const eventId = `${runId}:${seq}`;
     return {
       type: input.type,

@@ -202,8 +202,22 @@ describe('AiMatchReasonerService', () => {
 
     expect(result.score).toBe(72);
     expect(result.reasonerSource).toBe('fallback');
+    expect(result.reasoningDegraded).toBe(true);
+    expect(result.reasoningRetryable).toBe(true);
+    expect(result.degradationReason).toBe('model_unavailable');
+    expect(result.reasonerConfidence).toBeLessThanOrEqual(0.45);
     expect(result.publicReason).toContain('running');
     expect(result.suggestedOpener).toContain('FitMeet');
-    expect(result.scoreBreakdown).toMatchObject({ distance: 25, time: 20 });
+    expect(result.riskWarnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('智能推荐解释暂时不可用'),
+      ]),
+    );
+    expect(result.scoreBreakdown).toMatchObject({
+      distance: 25,
+      time: 20,
+      aiReasoningConfidence: 45,
+      aiReasoningDegraded: 1,
+    });
   });
 });

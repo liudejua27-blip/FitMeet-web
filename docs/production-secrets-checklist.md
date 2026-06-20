@@ -31,7 +31,7 @@ Required release values:
 - `DEEPSEEK_BASE_URL=https://api.deepseek.com`
 - `DEEPSEEK_CHAT_MODEL=deepseek-v4-pro`
 - `DEEPSEEK_FAST_MODEL=deepseek-v4-flash`
-- `DEEPSEEK_MODEL=deepseek-v4-flash`
+- `DEEPSEEK_MODEL=deepseek-v4-pro`
 - `AGENT_OBSERVABILITY_ALERTS_ENABLED=false` for first launch; set to `true`
   later when an external alert receiver is ready.
 - `AGENT_OBSERVABILITY_ALERT_WEBHOOK_URL` when alert delivery is enabled.

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { gatewayOverviewMetrics } from '@/data/agentMockData';
+import { gatewayOverviewMetrics } from '@/data/agentStaticContent';
 import { AgentStatusBadge } from './AgentStatusBadge';
 import * as api from '@/api/client';
 import { agentApprovalsApi } from '@/api/agentApprovalsApi';

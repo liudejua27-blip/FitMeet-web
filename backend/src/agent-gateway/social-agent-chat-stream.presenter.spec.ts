@@ -2,6 +2,7 @@ import {
   agentLoopStepStreamEvent,
   progressFromStep,
   toolCallStreamEvent,
+  userFacingStreamErrorEvent,
 } from './social-agent-chat-stream.presenter';
 
 describe('social-agent-chat-stream.presenter', () => {
@@ -96,5 +97,32 @@ describe('social-agent-chat-stream.presenter', () => {
       kind: 'analysis',
       title: '正在理解你的需求',
     });
+  });
+
+  it('does not expose internal backend errors in stream failure messages', () => {
+    const missingConnection = userFacingStreamErrorEvent(
+      new Error('BadRequestException: agentConnectionId is required'),
+    );
+    const missingTable = userFacingStreamErrorEvent(
+      new Error('QueryFailedError: relation "agent_tasks" does not exist'),
+    );
+    const foreignKey = userFacingStreamErrorEvent(
+      new Error(
+        'insert or update on table "agent_activity_logs" violates foreign key constraint "fk_agent_activity_logs_connection"',
+      ),
+    );
+
+    for (const event of [missingConnection, missingTable, foreignKey]) {
+      expect(event).toMatchObject({
+        type: 'error',
+        code: 'AGENT_STREAM_FAILED',
+        message:
+          'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。',
+        recoveryNotice: expect.objectContaining({
+          retryable: true,
+          source: 'stream_error',
+        }),
+      });
+    }
   });
 });

@@ -118,6 +118,7 @@ export class SocialAgentMainAgentTurnResultService {
       alphaTurn,
       (question, fallback) =>
         this.tonePolicy?.safeAssistantMessage(question, fallback) ?? '',
+      task,
     );
     task.status = AgentTaskStatus.AwaitingFeedback;
     task.statusReason = 'main_agent_waiting_for_clarification';
@@ -268,6 +269,7 @@ export class SocialAgentMainAgentTurnResultService {
         alphaTurn,
         (question, fallback) =>
           this.tonePolicy?.safeAssistantMessage(question, fallback) ?? '',
+        task,
       ),
       alphaTurn,
       events,

@@ -180,9 +180,16 @@ printf '\nNext server commands:\n'
 printf '  cd %s\n' "$TARGET_DIR"
 printf '  APP_DIR=%s ./scripts/ecs-host-preflight.sh\n' "$TARGET_DIR"
 printf '  APP_DIR=%s RUN_RELEASE_PREFLIGHT=false BUILD_FRONTEND=false RUN_DB_MIGRATIONS=true PUBLIC_BASE_URL=https://www.ourfitmeet.cn PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api ./scripts/deploy-production.sh\n' "$TARGET_DIR"
+printf '\nOne-off backend commands on ECS should run through the production container, not host pnpm:\n'
+printf '  ./scripts/ecs-backend-pnpm.sh -- uploads:check:prod\n'
+printf '  ./scripts/ecs-backend-pnpm.sh -- migration:run:prod\n'
+printf '  ./scripts/ecs-backend-pnpm.sh -- db:check-critical-tables:prod\n'
+printf '  AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true ./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod -- --allow-production\n'
 printf '\nPost-deploy release verification:\n'
 printf '  EXPECTED_RELEASE_COMMIT="$(node -e '"'"'const fs=require("fs");const r=JSON.parse(fs.readFileSync("release.json","utf8"));process.stdout.write(String(r.commit||"unknown"))'"'"')"\n'
+printf '  EXPECTED_RELEASE_BUILT_AT="$(node -e '"'"'const fs=require("fs");const r=JSON.parse(fs.readFileSync("release.json","utf8"));process.stdout.write(String(r.builtAt||""))'"'"')"\n'
 printf '  BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT="$EXPECTED_RELEASE_COMMIT" ./scripts/verify-production.sh\n'
+printf '  BASE_URL=https://www.ourfitmeet.cn API_BASE_URL=https://www.ourfitmeet.cn/api EXPECTED_RELEASE_COMMIT="$EXPECTED_RELEASE_COMMIT" EXPECTED_RELEASE_BUILT_AT="$EXPECTED_RELEASE_BUILT_AT" ./scripts/verify-agent-goal-production.sh\n'
 printf '  EXPECTED_RELEASE_COMMIT="$EXPECTED_RELEASE_COMMIT" PUBLIC_API_BASE_URL=https://www.ourfitmeet.cn/api ./scripts/ecs-release-diagnose.sh\n'
 printf '  curl -fsS https://www.ourfitmeet.cn/api/health\n'
 printf '\nIf /api/health does not show release.commit, the backend container is still running an old image.\n'

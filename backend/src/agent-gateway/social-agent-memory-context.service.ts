@@ -1,12 +1,21 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 import { cleanDisplayText } from '../common/display-text.util';
 import { AgentTask } from './entities/agent-task.entity';
+import { socialAgentContextTurnLimit } from './social-agent-context-window';
 import type {
   LongTermMemorySnapshot,
   LongTermPreferenceHistoryItem,
 } from './social-agent-long-term-memory.service';
-import { readSocialAgentTaskMemory } from './social-agent-memory.util';
+import {
+  readSocialAgentTaskMemory,
+  type SocialAgentCandidateState,
+} from './social-agent-memory.util';
+import {
+  buildSocialAgentKnownTaskSlotConstraints,
+  type SocialAgentKnownTaskSlotConstraints,
+} from './social-agent-task-slot-constraints.presenter';
 
 export interface SocialAgentMemoryContext {
   shortTerm: {
@@ -33,7 +42,13 @@ export interface SocialAgentMemoryContext {
     preferences: Record<string, unknown>;
     boundaries: Record<string, unknown>;
     stableProfileFacts: Record<string, unknown>;
+    candidateState: SocialAgentCandidateState;
+    candidateActions: SocialAgentCandidateState;
     pendingActions: Array<Record<string, unknown>>;
+    pendingApprovals: Array<Record<string, unknown>>;
+    taskSlots: Record<string, unknown>;
+    taskSlotSummary: Record<string, string>;
+    knownTaskSlotConstraints: SocialAgentKnownTaskSlotConstraints | null;
   };
   longTerm: {
     preferences: Record<string, unknown>;
@@ -57,11 +72,14 @@ export interface SocialAgentMemoryContext {
 
 @Injectable()
 export class SocialAgentMemoryContextService {
+  constructor(@Optional() private readonly config?: ConfigService) {}
+
   build(input: {
     task: AgentTask;
     conversationHistory: Array<Record<string, unknown>>;
     longTermSnapshot: LongTermMemorySnapshot | null;
   }): SocialAgentMemoryContext {
+    const contextLimit = socialAgentContextTurnLimit(this.config);
     const taskMemory = readSocialAgentTaskMemory(input.task);
     const shortTerm = this.isRecord(input.task.memory?.shortTerm)
       ? input.task.memory.shortTerm
@@ -69,12 +87,14 @@ export class SocialAgentMemoryContextService {
     const brain = this.isRecord(input.task.memory?.conversationBrain)
       ? input.task.memory.conversationBrain
       : {};
-    const recentTurns = input.conversationHistory.slice(-20).map((turn) => ({
-      role: cleanDisplayText(turn.role, ''),
-      text: cleanDisplayText(turn.text ?? turn.content, ''),
-      intent: cleanDisplayText(turn.intent, ''),
-      at: cleanDisplayText(turn.at, ''),
-    }));
+    const recentTurns = input.conversationHistory
+      .slice(-contextLimit)
+      .map((turn) => ({
+        role: cleanDisplayText(turn.role, ''),
+        text: cleanDisplayText(turn.text ?? turn.content, ''),
+        intent: cleanDisplayText(turn.intent, ''),
+        at: cleanDisplayText(turn.at, ''),
+      }));
     const lastToolResult = this.isRecord(brain.lastToolResult)
       ? brain.lastToolResult
       : null;
@@ -114,6 +134,11 @@ export class SocialAgentMemoryContextService {
                   typeof shortTerm.lastSearchCandidateCount === 'number'
                     ? shortTerm.lastSearchCandidateCount
                     : displayedCandidates.length,
+                emptyReason: cleanDisplayText(
+                  shortTerm.lastSearchEmptyReason,
+                  '',
+                ),
+                nextStep: cleanDisplayText(shortTerm.lastSearchNextStep, ''),
               }
             : null,
         candidateCount: candidateList.length || displayedCandidates.length,
@@ -127,13 +152,22 @@ export class SocialAgentMemoryContextService {
         preferences: taskMemory.preferences,
         boundaries: taskMemory.boundaries,
         stableProfileFacts: taskMemory.stableProfileFacts,
+        candidateState: taskMemory.candidateState,
+        candidateActions: taskMemory.candidateState,
         pendingActions: taskMemory.pendingActions,
+        pendingApprovals: taskMemory.pendingActions,
+        taskSlots: taskMemory.taskSlots ?? {},
+        taskSlotSummary: taskMemory.taskSlotSummary ?? {},
+        knownTaskSlotConstraints: buildSocialAgentKnownTaskSlotConstraints(
+          taskMemory.taskSlots,
+        ),
       },
       longTerm: input.longTermSnapshot
         ? {
             preferences: input.longTermSnapshot.preferences,
             recentPreferenceHistory: recentPreferenceHistory(
               input.longTermSnapshot.preferences.preferenceHistory,
+              contextLimit,
             ),
             boundaries: input.longTermSnapshot.boundaries,
             activityPreferences: input.longTermSnapshot.activityPreferences,
@@ -168,7 +202,29 @@ export class SocialAgentMemoryContextService {
     fallback: Array<Record<string, unknown>>,
   ): Array<Record<string, unknown>> {
     const stored = this.recordList(shortTerm.recentTurns);
-    return stored.length > 0 ? stored.slice(-20) : fallback;
+    const limit = socialAgentContextTurnLimit(this.config);
+    const merged: Array<Record<string, unknown>> = [];
+    const indexByKey = new Map<string, number>();
+    for (const turn of [...stored, ...fallback]) {
+      const normalized = {
+        role: cleanDisplayText(turn.role, ''),
+        text: cleanDisplayText(turn.text ?? turn.content, ''),
+        intent: cleanDisplayText(turn.intent, ''),
+        at: cleanDisplayText(turn.at, ''),
+      };
+      if (!normalized.role && !normalized.text) continue;
+      const key = normalized.at
+        ? `${normalized.role}:${normalized.text}:${normalized.at}`
+        : `${normalized.role}:${normalized.text}`;
+      const existingIndex = indexByKey.get(key);
+      if (existingIndex !== undefined) {
+        merged[existingIndex] = normalized;
+        continue;
+      }
+      indexByKey.set(key, merged.length);
+      merged.push(normalized);
+    }
+    return merged.slice(-limit);
   }
 
   private recordList(value: unknown): Array<Record<string, unknown>> {
@@ -210,10 +266,11 @@ export class SocialAgentMemoryContextService {
 
 function recentPreferenceHistory(
   history: LongTermPreferenceHistoryItem[],
+  limit: number,
 ): Array<Record<string, unknown>> {
   return history
     .filter((item) => item.confirmed)
-    .slice(-8)
+    .slice(-limit)
     .map((item) => ({
       field: displayPreferenceField(item.field),
       value: item.value,

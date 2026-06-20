@@ -64,6 +64,36 @@ describe('SocialAgentRouteTurnService', () => {
         subagentHandoffs: [],
       }),
     };
+    const agentLoop = {
+      execute: jest.fn(async (input) => {
+        const observation = await input.runner({
+          runId: 'loop_candidate',
+          traceId: 'trace_candidate',
+          taskId: task.id,
+          agent: 'Social Match Agent',
+          toolName: 'candidate_confirmation_check',
+          input: { taskId: task.id },
+          attempt: 1,
+        });
+        return {
+          loop: {
+            runId: 'loop_candidate',
+            traceId: 'trace_candidate',
+            taskId: task.id,
+            goal: input.goal,
+            status: 'completed',
+            steps: [],
+          },
+          observations: [observation],
+          answerBoundary: {
+            fromObservationsOnly: true,
+            requiresApproval: false,
+            canContinue: true,
+            status: 'ready',
+          },
+        };
+      }),
+    };
     const deps = {
       task,
       refreshedTask,
@@ -73,6 +103,7 @@ describe('SocialAgentRouteTurnService', () => {
       entrance,
       routeDecisions,
       routeLoopRunner,
+      agentLoop,
       ...overrides,
     };
     const service = new SocialAgentRouteTurnService(
@@ -81,6 +112,7 @@ describe('SocialAgentRouteTurnService', () => {
       deps.entrance as never,
       deps.routeDecisions as never,
       deps.routeLoopRunner as never,
+      deps.agentLoop as never,
     );
 
     return { service, deps };
@@ -116,6 +148,13 @@ describe('SocialAgentRouteTurnService', () => {
       assistantMessage: 'Candidate confirmed.',
     };
     const { service, deps } = makeService({
+      entrance: {
+        enter: jest.fn().mockResolvedValue({
+          message: '确认发送',
+          startedAt: '2026-06-07T01:00:00.000Z',
+          task: { id: 101, ownerUserId: 7, result: {} },
+        }),
+      },
       candidateConfirmations: {
         handle: jest.fn().mockResolvedValue({
           handled: true,
@@ -128,7 +167,7 @@ describe('SocialAgentRouteTurnService', () => {
     await expect(
       service.handleMessage({
         ownerUserId: 7,
-        body: { message: 'yes, that candidate' },
+        body: { message: '确认发送' },
         replanAndRefresh: jest.fn(),
         queueInitialSearchForTask: jest.fn(),
       }),
@@ -136,6 +175,98 @@ describe('SocialAgentRouteTurnService', () => {
 
     expect(deps.routeLoopRunner.run).not.toHaveBeenCalled();
     expect(deps.completions.complete).not.toHaveBeenCalled();
+  });
+
+  it('executes explicit candidate confirmation through AgentLoop even when route loop is skipped', async () => {
+    const candidateResult = {
+      action: 'reply',
+      assistantMessage: 'Candidate confirmed.',
+    };
+    const { service, deps } = makeService({
+      entrance: {
+        enter: jest.fn().mockResolvedValue({
+          message: '确认发送',
+          startedAt: '2026-06-07T01:00:00.000Z',
+          task: { id: 101, ownerUserId: 7, result: {} },
+        }),
+      },
+      candidateConfirmations: {
+        handle: jest.fn().mockResolvedValue({
+          handled: true,
+          result: candidateResult,
+          task: { id: 101, ownerUserId: 7 },
+        }),
+      },
+    });
+
+    await expect(
+      service.handleMessage({
+        ownerUserId: 7,
+        body: { message: '确认发送' },
+        replanAndRefresh: jest.fn(),
+        queueInitialSearchForTask: jest.fn(),
+      }),
+    ).resolves.toBe(candidateResult);
+
+    expect(deps.agentLoop.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        goal: '确认发送',
+        agent: 'FitMeet Main Agent',
+        plan: expect.objectContaining({
+          tools: [
+            expect.objectContaining({
+              agent: 'Social Match Agent',
+              toolName: 'candidate_confirmation_check',
+              input: expect.objectContaining({ taskId: 101 }),
+            }),
+          ],
+        }),
+        maxToolCalls: 1,
+        maxRetries: 0,
+      }),
+    );
+    expect(deps.candidateConfirmations.handle).toHaveBeenCalled();
+    expect(deps.routeLoopRunner.run).not.toHaveBeenCalled();
+    expect(deps.completions.complete).not.toHaveBeenCalled();
+  });
+
+  it('does not run candidate confirmation checks for non-confirmation follow-up messages', async () => {
+    const { service, deps } = makeService({
+      entrance: {
+        enter: jest.fn().mockResolvedValue({
+          message: '为什么需要确认？',
+          startedAt: '2026-06-07T01:00:00.000Z',
+          task: { id: 101, ownerUserId: 7, result: {} },
+        }),
+      },
+      routeDecisions: {
+        prepare: jest.fn().mockResolvedValue({
+          task: { id: 101, ownerUserId: 7, result: {} },
+          route: {
+            intent: 'action_request',
+            replyStrategy: 'execute_action',
+            shouldSearch: false,
+            shouldReplan: false,
+            shouldExecuteAction: true,
+            entities: {},
+          },
+          profile: { city: 'Qingdao' },
+          longTermSnapshot: null,
+          brainToolResults: [],
+        }),
+      },
+    });
+
+    await service.handleMessage({
+      ownerUserId: 7,
+      body: { message: '为什么需要确认？' },
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask: jest.fn(),
+    });
+
+    expect(deps.candidateConfirmations.handle).not.toHaveBeenCalled();
+    expect(deps.routeLoopRunner.run).toHaveBeenCalled();
   });
 
   it('passes route loop output to completion', async () => {
@@ -192,12 +323,62 @@ describe('SocialAgentRouteTurnService', () => {
     expect(deps.completions.complete).toHaveBeenCalledWith(
       expect.objectContaining({
         task: deps.refreshedTask,
+        assistantMessageSource: 'fallback',
         queuedRun,
         runMode: 'initial',
         savedContext: true,
         activityResults: [{ type: 'search', status: 'queued' }],
         subagentHandoffs: [{ agent: 'Social Match Agent' }],
         startedAt: '2026-06-07T01:00:00.000Z',
+      }),
+    );
+  });
+
+  it('does not let deterministic route branch copy masquerade as LLM output', async () => {
+    const { service, deps } = makeService({
+      routeLoopRunner: {
+        run: jest.fn().mockResolvedValue({
+          task: {
+            id: 101,
+            ownerUserId: 7,
+            result: {},
+          },
+          state: {
+            savedContext: true,
+            profileUpdated: false,
+            queuedRun: null,
+            runMode: null,
+            assistantMessage: '还需要补充活动时间。',
+            assistantMessageSource: 'fallback',
+            activityResults: [],
+            profileUpdateProposal: null,
+            assistantStreamed: false,
+            agentLoop: { runId: 'loop_1', steps: [] },
+            subagentHandoffs: [],
+          },
+          loop: { runId: 'loop_1', steps: [] },
+          actionTurn: {
+            handled: false,
+            assistantMessage: '还需要补充活动时间。',
+            pendingApproval: null,
+          },
+          subagentHandoffs: [],
+        }),
+      },
+    });
+
+    await service.handleMessage({
+      ownerUserId: 7,
+      body: { message: '找个散步搭子' },
+      replanAndRefresh: jest.fn(),
+      queueInitialSearchForTask: jest.fn(),
+    });
+
+    expect(deps.completions.complete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantMessage: '还需要补充活动时间。',
+        assistantMessageSource: 'fallback',
+        assistantStreamed: false,
       }),
     );
   });

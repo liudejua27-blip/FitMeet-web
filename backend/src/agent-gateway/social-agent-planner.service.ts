@@ -20,10 +20,32 @@ import {
   SocialAgentAction,
 } from './agent-permission.service';
 import { FitMeetAgentToolRegistryService } from './fitmeet-agent-tool-registry.service';
-import { SocialAgentModelRouterService } from './social-agent-model-router.service';
+import {
+  SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+  SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS,
+  selectSocialAgentConfiguredModel,
+  SocialAgentModelRouterService,
+} from './social-agent-model-router.service';
+import { socialAgentContextTurnLimit } from './social-agent-context-window';
+import {
+  readSocialAgentConversationHistory,
+  summarizeSocialAgentTaskMemoryForLlm,
+} from './social-agent-chat-memory.presenter';
+import {
+  isRetryableSocialAgentDeepSeekFailure,
+  socialAgentDeepSeekFailureReason,
+  socialAgentDeepSeekRetryAttempts,
+} from './social-agent-deepseek-resilience';
+import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
+import {
+  SocialAgentContextHydratorService,
+  type SocialAgentHydratedContext,
+} from './social-agent-context-hydrator.service';
+import { callDeepSeekChatCompletion } from '../common/deepseek.util';
+import { hasExplicitSocialExecutionIntent } from './social-agent-social-intent-gate';
 
 export type SocialAgentPlanSource = 'deepseek' | 'fallback';
-export type SocialAgentPlanStepStatus = 'planned' | 'replanned';
+export type SocialAgentPlanStepStatus = 'planned' | 'replanned' | 'skipped';
 export type SocialAgentPlanRiskLevel = 'low' | 'medium' | 'high';
 export type SocialAgentPlanReason =
   | 'initial'
@@ -43,8 +65,10 @@ export interface SocialAgentPlanFailureContext {
 export interface SocialAgentPlannerOptions {
   reason?: SocialAgentPlanReason;
   userMessage?: string | null;
+  refreshedGoal?: string | null;
   failure?: SocialAgentPlanFailureContext | null;
   maxReplanAttempts?: number;
+  signal?: AbortSignal | null;
 }
 
 export interface SocialAgentPlanStep extends Record<string, unknown> {
@@ -83,6 +107,10 @@ export class SocialAgentPlannerService {
     private readonly permissions: AgentPermissionService,
     private readonly toolRegistry: FitMeetAgentToolRegistryService,
     @Optional() private readonly modelRouter?: SocialAgentModelRouterService,
+    @Optional()
+    private readonly deepSeek?: SocialAgentChatDeepSeekClientService,
+    @Optional()
+    private readonly contextHydrator?: SocialAgentContextHydratorService,
   ) {}
 
   async planTask(
@@ -113,31 +141,35 @@ export class SocialAgentPlannerService {
     const permissionMode = task.permissionMode;
     const allowedActions = this.permissions.getAllowedActions(permissionMode);
     const reason = options.reason ?? 'initial';
-    const brainMemory = this.buildBrainMemory(task, reason, options);
+    const hydratedContext = await this.hydratePlannerContext(task);
+    const taskContext = this.plannerTaskContext(task, hydratedContext);
+    const brainMemory = this.buildBrainMemory(
+      task,
+      reason,
+      options,
+      hydratedContext,
+    );
     const isReplan = reason !== 'initial';
     let plan: SocialAgentPlanStep[] = [];
     let source: SocialAgentPlanSource = 'deepseek';
     let fallbackReason: string | null = null;
 
     try {
-      const responseText = await this.callDeepSeekPlan(
+      plan = await this.buildDeepSeekPlanWithRetry(
         task,
         allowedActions,
         brainMemory,
-      );
-      const parsed = this.parseJsonObject(responseText);
-      const rawSteps = this.readSteps(parsed);
-      plan = this.normalizeSteps(
-        rawSteps,
-        allowedActions,
+        taskContext,
         permissionMode,
         isReplan,
+        options.signal,
       );
       if (plan.length === 0) {
         fallbackReason = 'deepseek_plan_empty_after_permission_filter';
       }
     } catch (error) {
       fallbackReason = this.toFallbackReason(error);
+      if (fallbackReason === 'client_aborted') throw error;
       this.logger.warn(
         JSON.stringify({
           event: 'deepseek.call_failed',
@@ -158,6 +190,7 @@ export class SocialAgentPlannerService {
         allowedActions,
         fallbackReason,
         brainMemory,
+        taskContext,
         isReplan,
       );
     }
@@ -169,11 +202,13 @@ export class SocialAgentPlannerService {
           ownerUserId: task.ownerUserId,
           eventType: AgentTaskEventType.SocialAgentLlmTimeout,
           actor: AgentTaskEventActor.Agent,
-          summary: 'AI 分析超时，已使用规则匹配继续执行。',
+          summary: '分析时间较长，已保留上下文并生成安全恢复计划。',
           payload: {
             reason,
             timeoutMs: this.deepSeekTimeoutMs('planner'),
-            fallbackMessage: '已收到补充信息，当前先基于规则匹配继续搜索。',
+            fallbackMessage:
+              '分析时间较长，我已保留当前上下文；请重试或继续补充，我会从当前任务恢复。',
+            degradedPlan: true,
           },
         }),
       );
@@ -222,49 +257,144 @@ export class SocialAgentPlannerService {
     };
   }
 
+  private async buildDeepSeekPlanWithRetry(
+    task: AgentTask,
+    allowedActions: SocialAgentAction[],
+    brainMemory: Record<string, unknown>,
+    taskContext: Record<string, unknown>,
+    permissionMode: AgentTaskPermissionMode,
+    isReplan: boolean,
+    signal?: AbortSignal | null,
+  ): Promise<SocialAgentPlanStep[]> {
+    const maxAttempts = socialAgentDeepSeekRetryAttempts(this.config, {
+      specificKey: 'SOCIAL_AGENT_PLANNER_RETRY_ATTEMPTS',
+    });
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const responseText = await this.callDeepSeekPlan(
+          task,
+          allowedActions,
+          brainMemory,
+          taskContext,
+          maxAttempts,
+          signal,
+        );
+        const parsed = this.parseJsonObject(responseText);
+        const rawSteps = this.readSteps(parsed);
+        return this.normalizeSteps(
+          rawSteps,
+          allowedActions,
+          permissionMode,
+          isReplan,
+        );
+      } catch (error) {
+        lastError = error;
+        const reason = this.toFallbackReason(error);
+        if (
+          attempt < maxAttempts &&
+          isRetryableSocialAgentDeepSeekFailure(reason, {
+            includeJsonFormatErrors: true,
+          })
+        ) {
+          this.logger.warn(
+            JSON.stringify({
+              event: 'social_agent.planner.deepseek_retrying',
+              reason,
+              attempt,
+              maxAttempts,
+              taskId: task.id,
+            }),
+          );
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error('unknown_planner_error');
+  }
+
   private async callDeepSeekPlan(
     task: AgentTask,
     allowedActions: SocialAgentAction[],
     brainMemory: Record<string, unknown>,
+    taskContext: Record<string, unknown>,
+    retryAttempts: number,
+    signal?: AbortSignal | null,
   ): Promise<string> {
+    if (signal?.aborted) throw new Error('client_aborted');
     const apiKey = this.config.get<string>('DEEPSEEK_API_KEY');
     if (!apiKey) throw new Error('DEEPSEEK_API_KEY missing');
 
-    const baseUrl =
-      this.config.get<string>('DEEPSEEK_BASE_URL') ||
-      'https://api.deepseek.com';
     const useCase = 'planner' as const;
     const model = this.modelFor(useCase);
+    const messages = [
+      { role: 'system' as const, content: this.buildSystemPrompt() },
+      {
+        role: 'user' as const,
+        content: this.buildUserPrompt(
+          task,
+          allowedActions,
+          brainMemory,
+          taskContext,
+        ),
+      },
+    ];
+
+    if (this.deepSeek) {
+      const content = await this.deepSeek.complete({
+        useCase,
+        taskId: task.id,
+        intent: task.taskType,
+        fallbackTemperature: 0.15,
+        responseFormat: { type: 'json_object' },
+        retryAttempts,
+        messages,
+        signal,
+      });
+      if (!content?.trim()) throw new Error('DeepSeek returned empty plan');
+      return content;
+    }
+
     const startedAt = Date.now();
-    const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.deepSeekTimeoutMs(useCase),
-    );
-
-    let res: Response;
     try {
-      res = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
+      const content = await callDeepSeekChatCompletion({
+        apiKey,
+        baseUrl: this.config.get<string>('DEEPSEEK_BASE_URL'),
+        model,
+        temperature: this.modelRouter?.getTemperature(useCase) ?? 0.15,
+        responseFormat: { type: 'json_object' },
+        retryAttempts: 1,
+        messages,
+        signal,
+        timeoutMs: this.deepSeekTimeoutMs(useCase),
+        timeoutMessage: 'deepseek_timeout',
+      });
+      if (!content.trim()) {
+        this.logModelCall({
+          useCase,
           model,
-          temperature: this.modelRouter?.getTemperature(useCase) ?? 0.15,
-          response_format: { type: 'json_object' },
-          messages: [
-            { role: 'system', content: this.buildSystemPrompt() },
-            {
-              role: 'user',
-              content: this.buildUserPrompt(task, allowedActions, brainMemory),
-            },
-          ],
-        }),
+          taskId: task.id,
+          intent: task.taskType,
+          latencyMs: Date.now() - startedAt,
+          success: false,
+          reason: 'DeepSeek returned empty plan',
+        });
+        throw new Error('DeepSeek returned empty plan');
+      }
+      this.logModelCall({
+        useCase,
+        model,
+        taskId: task.id,
+        intent: task.taskType,
+        latencyMs: Date.now() - startedAt,
+        success: true,
       });
+      return content;
     } catch (error) {
+      const reason = socialAgentDeepSeekFailureReason(error);
       this.logModelCall({
         useCase,
         model,
@@ -272,52 +402,10 @@ export class SocialAgentPlannerService {
         intent: task.taskType,
         latencyMs: Date.now() - startedAt,
         success: false,
-        reason: error instanceof Error ? error.message : String(error),
+        reason,
       });
-      if (this.isAbortError(error)) throw new Error('deepseek_timeout');
       throw error;
-    } finally {
-      clearTimeout(timeout);
     }
-
-    if (!res.ok) {
-      this.logModelCall({
-        useCase,
-        model,
-        taskId: task.id,
-        intent: task.taskType,
-        latencyMs: Date.now() - startedAt,
-        success: false,
-        reason: `DeepSeek HTTP ${res.status}`,
-      });
-      throw new Error(`DeepSeek HTTP ${res.status}`);
-    }
-
-    const data = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
-    };
-    const content = data.choices?.[0]?.message?.content ?? '';
-    if (!content.trim()) {
-      this.logModelCall({
-        useCase,
-        model,
-        taskId: task.id,
-        intent: task.taskType,
-        latencyMs: Date.now() - startedAt,
-        success: false,
-        reason: 'DeepSeek returned empty plan',
-      });
-      throw new Error('DeepSeek returned empty plan');
-    }
-    this.logModelCall({
-      useCase,
-      model,
-      taskId: task.id,
-      intent: task.taskType,
-      latencyMs: Date.now() - startedAt,
-      success: true,
-    });
-    return content;
   }
 
   private buildSystemPrompt(): string {
@@ -336,7 +424,16 @@ export class SocialAgentPlannerService {
     task: AgentTask,
     allowedActions: SocialAgentAction[],
     brainMemory: Record<string, unknown>,
+    taskContext: Record<string, unknown>,
   ): string {
+    const contextLimit = this.plannerContextLimit();
+    const recentMessages = Array.isArray(taskContext.recentMessages)
+      ? taskContext.recentMessages
+          .filter((item): item is Record<string, unknown> =>
+            this.isRecord(item),
+          )
+          .slice(-contextLimit)
+      : [];
     return JSON.stringify({
       taskId: task.id,
       ownerUserId: task.ownerUserId,
@@ -348,15 +445,30 @@ export class SocialAgentPlannerService {
       taskType: task.taskType,
       title: task.title,
       input: task.input ?? {},
-      priorPlan: Array.isArray(task.plan) ? task.plan.slice(-8) : [],
+      taskContext,
+      conversationHistory: recentMessages,
+      memoryContract: {
+        recentMessagesAreAuthoritative: true,
+        taskSlotsAreHardConstraints: true,
+        lifeGraphSummaryIsLongTermPreferenceContext: true,
+        pendingApprovalsMustBeResolvedBeforeSideEffects: true,
+        candidateActionsMustNotBeRepeated: true,
+      },
+      priorPlan: Array.isArray(task.plan) ? task.plan.slice(-contextLimit) : [],
       recentToolCalls: Array.isArray(task.toolCalls)
-        ? task.toolCalls.slice(-8)
+        ? task.toolCalls.slice(-contextLimit)
         : [],
       brainMemory,
+      activeGoal:
+        this.optionalString(brainMemory.currentGoal) ||
+        this.optionalString(task.goal),
       replanningRules: [
         'If lastFailure exists, do not repeat the same failing tool unless there is a changed input or a safer alternative.',
         'For blocked high-risk actions, move to drafting, inbox, or user confirmation instead of forcing execution.',
         'Preserve the user goal and use the latest user follow-up as the strongest instruction.',
+        'Treat taskContext.taskSlots as hard constraints: answered, confirmed, completed, and modified slots are already known and must not be asked again.',
+        'Use candidate_preference only against public, user-consented profile fields or public tags; never infer private traits.',
+        'If required social slots are already complete, continue to the next safe action instead of planning another clarification question.',
       ],
       outputSchema: {
         steps: [
@@ -423,6 +535,7 @@ export class SocialAgentPlannerService {
         requiresUserConfirmation: this.requiresUserConfirmation(
           permissionMode,
           rawStep.requiresUserConfirmation,
+          action,
         ),
         riskLevel: this.normalizeRiskLevel(rawStep.riskLevel),
         toolName: this.optionalString(rawStep.toolName),
@@ -439,11 +552,24 @@ export class SocialAgentPlannerService {
     allowedActions: SocialAgentAction[],
     fallbackReason: string,
     brainMemory: Record<string, unknown> = {},
+    taskContext: Record<string, unknown> = this.plannerTaskContext(task),
     isReplan = false,
   ): SocialAgentPlanStep[] {
     const goal = `${task.goal} ${task.title}`;
+    const shouldDeferExecution =
+      this.shouldDeferModelFallbackExecution(fallbackReason);
+    const latestUserFollowUp = this.optionalString(
+      brainMemory.latestUserFollowUp,
+    );
     const preferred = this.withoutRecentlyFailedAction(
-      this.preferredFallbackActions(task.permissionMode, goal),
+      this.preferredFallbackActions(
+        task,
+        task.permissionMode,
+        goal,
+        fallbackReason,
+        latestUserFollowUp,
+        taskContext,
+      ),
       brainMemory.lastFailure,
     );
     return preferred
@@ -452,22 +578,35 @@ export class SocialAgentPlannerService {
         id: `${isReplan ? 'replan' : 'fallback'}_${index + 1}`,
         title: this.defaultTitleForAction(action),
         action,
-        status: (isReplan
-          ? 'replanned'
-          : 'planned') as SocialAgentPlanStepStatus,
+        status: shouldDeferExecution
+          ? 'skipped'
+          : ((isReplan ? 'replanned' : 'planned') as SocialAgentPlanStepStatus),
         requiresUserConfirmation: this.requiresUserConfirmation(
           task.permissionMode,
           undefined,
+          action,
         ),
         riskLevel: action === SocialAgentAction.Payment ? 'high' : 'low',
         toolName: null,
         input: {
           goal: task.goal,
           fallbackReason,
+          taskContext,
+          ...(shouldDeferExecution
+            ? {
+                executionDeferred: true,
+                recoveryMessage:
+                  '暂时没有得到可靠计划，已保留上下文；请重试或继续补充，我会从当前任务恢复。',
+              }
+            : {}),
         },
         rationale: isReplan
-          ? 'Fallback replan generated after a failed or blocked step.'
-          : 'Fallback plan generated without a valid DeepSeek JSON plan.',
+          ? shouldDeferExecution
+            ? 'Planner did not return a reliable replan; context was preserved instead of executing deterministic tools.'
+            : 'Fallback replan generated after a failed or blocked step.'
+          : shouldDeferExecution
+            ? 'Planner did not return a reliable plan; context was preserved instead of executing deterministic tools.'
+            : 'Fallback plan generated without a valid model plan.',
       }));
   }
 
@@ -475,6 +614,7 @@ export class SocialAgentPlannerService {
     task: AgentTask,
     reason: SocialAgentPlanReason,
     options: SocialAgentPlannerOptions,
+    hydratedContext: SocialAgentHydratedContext | null = null,
   ): Record<string, unknown> {
     const current = this.isRecord(task.memory?.brain) ? task.memory.brain : {};
     const now = new Date().toISOString();
@@ -496,6 +636,14 @@ export class SocialAgentPlannerService {
       : priorTurns;
     const inferredFailure =
       options.failure ?? this.failureFromTaskState(task) ?? null;
+    const refreshedGoal = this.optionalString(options.refreshedGoal);
+    const shortTerm = this.isRecord(task.memory?.shortTerm)
+      ? task.memory.shortTerm
+      : {};
+    const currentGoal =
+      refreshedGoal ||
+      this.optionalString(shortTerm.currentGoal) ||
+      this.optionalString(task.goal);
     const isReplan = reason !== 'initial';
     const priorAttempt =
       typeof current.replanAttempt === 'number' ? current.replanAttempt : 0;
@@ -503,15 +651,39 @@ export class SocialAgentPlannerService {
     const replanAttempt = isReplan
       ? Math.min(priorAttempt + 1, maxAttempts)
       : priorAttempt;
+    const contextLimit = this.plannerContextLimit();
+    const hydratedRecentMessages = Array.isArray(
+      hydratedContext?.recentMessages,
+    )
+      ? hydratedContext.recentMessages.slice(-contextLimit)
+      : [];
 
     return {
-      turns: nextTurn.slice(-20),
+      turns: nextTurn.slice(-contextLimit),
+      recentMessages: hydratedRecentMessages,
+      hydratedContext: hydratedContext
+        ? {
+            threadId: hydratedContext.threadId,
+            taskId: hydratedContext.taskId,
+            recentMessageCount: hydratedContext.recentMessages.length,
+            taskSlotSummary: hydratedContext.taskSlotSummary,
+            knownTaskSlotConstraints:
+              hydratedContext.knownTaskSlotConstraints,
+            lifeGraphSummary: hydratedContext.lifeGraphSummary,
+            pendingApprovals: hydratedContext.pendingApprovals,
+            candidateActions: hydratedContext.candidateActions,
+          }
+        : null,
+      currentGoal,
+      latestUserFollowUp:
+        this.optionalString(options.userMessage) ||
+        this.optionalString(shortTerm.latestUserFollowUp),
       lastFailure: inferredFailure,
       replanAttempt,
       maxReplanAttempts: maxAttempts,
       replanExhausted: isReplan && replanAttempt >= maxAttempts,
       previousPlanSummary: Array.isArray(task.plan)
-        ? task.plan.slice(-8).map((step) => ({
+        ? task.plan.slice(-contextLimit).map((step) => ({
             id: this.optionalString(step.id),
             action: this.optionalString(step.action),
             status: this.optionalString(step.status),
@@ -519,7 +691,7 @@ export class SocialAgentPlannerService {
           }))
         : [],
       previousToolSummary: Array.isArray(task.toolCalls)
-        ? task.toolCalls.slice(-8).map((call) => ({
+        ? task.toolCalls.slice(-contextLimit).map((call) => ({
             id: this.optionalString(call.id),
             stepId: this.optionalString(call.stepId),
             toolName: this.optionalString(call.toolName),
@@ -529,6 +701,88 @@ export class SocialAgentPlannerService {
         : [],
       updatedAt: now,
     };
+  }
+
+  private plannerTaskContext(
+    task: AgentTask,
+    hydratedContext: SocialAgentHydratedContext | null = null,
+  ): Record<string, unknown> {
+    const base = summarizeSocialAgentTaskMemoryForLlm(task);
+    const storedRecentMessages = readSocialAgentConversationHistory(
+      task,
+      this.plannerContextLimit(),
+    );
+    const baseWithConversation: Record<string, unknown> = {
+      ...base,
+      recentMessages: storedRecentMessages,
+      conversationHistory: storedRecentMessages,
+    };
+    if (!hydratedContext) return baseWithConversation;
+    const recentMessages =
+      this.nonEmptyRecordArray(hydratedContext.recentMessages) ??
+      storedRecentMessages;
+    return {
+      ...baseWithConversation,
+      recentMessages,
+      conversationHistory: recentMessages,
+      taskMemory:
+        this.nonEmptyRecord(hydratedContext.taskMemory) ??
+        baseWithConversation.taskMemory,
+      taskSlots:
+        this.nonEmptyRecord(hydratedContext.taskSlots) ??
+        this.nonEmptyRecord(baseWithConversation.taskSlots) ??
+        {},
+      taskSlotSummary:
+        this.nonEmptyRecord(hydratedContext.taskSlotSummary) ??
+        this.nonEmptyRecord(baseWithConversation.taskSlotSummary) ??
+        {},
+      knownTaskSlotConstraints:
+        this.nonEmptyRecord(hydratedContext.knownTaskSlotConstraints) ??
+        this.nonEmptyRecord(baseWithConversation.knownTaskSlotConstraints) ??
+        null,
+      lifeGraphSummary:
+        this.nonEmptyRecord(hydratedContext.lifeGraphSummary) ??
+        this.nonEmptyRecord(baseWithConversation.lifeGraphSummary),
+      lifeGraphFactDisplaySummaries:
+        this.nonEmptyArray(hydratedContext.lifeGraphFactDisplaySummaries) ??
+        baseWithConversation.lifeGraphFactDisplaySummaries,
+      lifeGraphGovernanceSummary: hydratedContext.lifeGraphGovernanceSummary,
+      pendingApprovals:
+        this.nonEmptyArray(hydratedContext.pendingApprovals) ??
+        this.nonEmptyArray(baseWithConversation.pendingApprovals) ??
+        [],
+      candidateActions:
+        this.nonEmptyRecord(hydratedContext.candidateActions) ??
+        this.nonEmptyRecord(baseWithConversation.candidateActions) ??
+        this.nonEmptyRecord(baseWithConversation.candidateState),
+    };
+  }
+
+  private async hydratePlannerContext(
+    task: AgentTask,
+  ): Promise<SocialAgentHydratedContext | null> {
+    if (!this.contextHydrator) return null;
+    return this.contextHydrator
+      .hydrateContext({
+        userId: task.ownerUserId,
+        taskId: task.id,
+        threadId: `agent-task:${task.id}`,
+      })
+      .catch((error) => {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'social_agent.planner_context_hydration_failed',
+            taskId: task.id,
+            ownerUserId: task.ownerUserId,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return null;
+      });
+  }
+
+  private plannerContextLimit(): number {
+    return socialAgentContextTurnLimit(this.config);
   }
 
   private failureFromTaskState(
@@ -576,9 +830,24 @@ export class SocialAgentPlannerService {
   }
 
   private preferredFallbackActions(
+    task: AgentTask,
     permissionMode: AgentTaskPermissionMode,
     goal: string,
+    fallbackReason: string,
+    latestUserMessage: string | null = null,
+    taskContext: Record<string, unknown> = this.plannerTaskContext(task),
   ): SocialAgentAction[] {
+    if (this.isModelFallbackReason(fallbackReason)) {
+      if (this.shouldDeferModelFallbackExecution(fallbackReason)) {
+        return [SocialAgentAction.GenerateContent];
+      }
+      return this.modelFallbackActions(
+        task,
+        goal,
+        latestUserMessage,
+        taskContext,
+      );
+    }
     if (permissionMode === AgentTaskPermissionMode.Assist) {
       return [SocialAgentAction.AddFriend, SocialAgentAction.SendMessage];
     }
@@ -608,12 +877,167 @@ export class SocialAgentPlannerService {
     return actions;
   }
 
+  private modelFallbackActions(
+    task: AgentTask,
+    goal: string,
+    latestUserMessage: string | null = null,
+    taskContext: Record<string, unknown> = this.plannerTaskContext(task),
+  ): SocialAgentAction[] {
+    const latestMessage = this.optionalString(latestUserMessage);
+    const allowSavedSearchContext =
+      !latestMessage ||
+      hasExplicitSocialExecutionIntent(latestMessage) ||
+      this.isFallbackSearchContinuation(latestMessage);
+    const searchIntentText = latestMessage ?? goal;
+    const evidence = this.modelFallbackSearchIntentEvidence(
+      task,
+      searchIntentText,
+      taskContext,
+      allowSavedSearchContext,
+    );
+    const shouldPreserveCandidateSearch =
+      (allowSavedSearchContext && this.hasSocialSearchIntent(evidence)) ||
+      (allowSavedSearchContext &&
+        this.contextSuggestsCandidateSearch(taskContext));
+    const actions: SocialAgentAction[] = [];
+    if (shouldPreserveCandidateSearch) {
+      actions.push(SocialAgentAction.SearchProfiles);
+    }
+    actions.push(SocialAgentAction.GenerateContent);
+    actions.push(SocialAgentAction.DraftMessage);
+    return actions;
+  }
+
+  private modelFallbackSearchIntentEvidence(
+    task: AgentTask,
+    goal: string,
+    taskContext: Record<string, unknown>,
+    includeSavedTaskContext = true,
+  ): string {
+    const currentTask = this.isRecord(taskContext.currentTask)
+      ? taskContext.currentTask
+      : {};
+    const savedContextEvidence = includeSavedTaskContext
+      ? [
+          task.taskType,
+          this.optionalString(taskContext.goal),
+          this.optionalString(taskContext.currentGoal),
+          this.optionalString(currentTask.objective),
+          this.optionalString(currentTask.nextStep),
+        ]
+      : [];
+    return [goal, ...savedContextEvidence]
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  private isFallbackSearchContinuation(message: string): boolean {
+    return /^(可以|好的|好|行|继续|开始|按这个|就这样|找吧|搜吧|推荐吧|继续找|帮我找|帮我搜)/i.test(
+      message.trim(),
+    );
+  }
+
+  private hasSocialSearchIntent(text: string): boolean {
+    return /(?:找|寻找|认识|搭子|约练|约跑|约球|散步|跑步|羽毛球|篮球|户外|活动|匹配|候选|推荐|同频|交友|朋友|舞蹈|舞蹈生|candidate|match|meet|social|buddy|partner|activity)/i.test(
+      text,
+    );
+  }
+
+  private contextSuggestsCandidateSearch(
+    taskContext: Record<string, unknown>,
+  ): boolean {
+    const currentTask = this.isRecord(taskContext.currentTask)
+      ? taskContext.currentTask
+      : {};
+    if (currentTask.shouldSearchNow === true) return true;
+    const nextStep = this.optionalString(currentTask.nextStep);
+    const state = this.optionalString(currentTask.state);
+    const objective = this.optionalString(currentTask.objective);
+    if (
+      /search|candidate|match|候选|匹配/i.test(
+        `${nextStep ?? ''} ${state ?? ''} ${objective ?? ''}`,
+      )
+    ) {
+      return true;
+    }
+    const taskSlotSummary = this.isRecord(taskContext.taskSlotSummary)
+      ? taskContext.taskSlotSummary
+      : {};
+    const taskSlots = this.isRecord(taskContext.taskSlots)
+      ? taskContext.taskSlots
+      : {};
+    const socialSearchSummaryLabels = new Set([
+      '活动',
+      '时间',
+      '地点',
+      '区域',
+      '候选偏好',
+    ]);
+    if (
+      Object.entries(taskSlotSummary).some(
+        ([label, value]) =>
+          socialSearchSummaryLabels.has(label) &&
+          Boolean(this.optionalString(value)),
+      )
+    ) {
+      return true;
+    }
+
+    const socialSearchSlotKeys = new Set([
+      'activity',
+      'time_window',
+      'location_text',
+      'geo_area',
+      'candidate_preference',
+    ]);
+    return Object.entries(taskSlots).some(([key, slot]) => {
+      if (!socialSearchSlotKeys.has(key)) return false;
+      if (!this.isRecord(slot)) return false;
+      const state = this.optionalString(slot.state);
+      return ['answered', 'confirmed', 'completed', 'modified'].includes(
+        state ?? '',
+      );
+    });
+  }
+
   private requiresUserConfirmation(
     permissionMode: AgentTaskPermissionMode,
     modelValue: unknown,
+    action?: SocialAgentAction,
   ): boolean {
+    if (action && this.isHighRiskAction(action)) return true;
     if (permissionMode === AgentTaskPermissionMode.LimitedAuto) return false;
     return typeof modelValue === 'boolean' ? modelValue : true;
+  }
+
+  private isModelFallbackReason(reason: string): boolean {
+    return (
+      reason === 'deepseek_timeout' ||
+      reason === 'deepseek_json_parse_failed' ||
+      reason === 'deepseek_plan_empty_after_permission_filter' ||
+      reason === 'DEEPSEEK_API_KEY missing' ||
+      /^DeepSeek HTTP/i.test(reason) ||
+      /DeepSeek returned empty plan|DeepSeek plan is not a JSON object/i.test(
+        reason,
+      )
+    );
+  }
+
+  private shouldDeferModelFallbackExecution(reason: string): boolean {
+    return (
+      this.isModelFallbackReason(reason) &&
+      reason !== 'DEEPSEEK_API_KEY missing'
+    );
+  }
+
+  private isHighRiskAction(action: SocialAgentAction): boolean {
+    return [
+      SocialAgentAction.AddFriend,
+      SocialAgentAction.SendMessage,
+      SocialAgentAction.SendInvite,
+      SocialAgentAction.OfflineMeet,
+      SocialAgentAction.Payment,
+    ].includes(action);
   }
 
   private normalizeRiskLevel(value: unknown): SocialAgentPlanRiskLevel {
@@ -653,41 +1077,72 @@ export class SocialAgentPlannerService {
     return typeof value === 'number' && Number.isFinite(value) ? value : 0;
   }
 
+  private nonEmptyRecord(
+    value: unknown,
+  ): Record<string, unknown> | undefined {
+    return this.isRecord(value) && Object.keys(value).length > 0
+      ? value
+      : undefined;
+  }
+
+  private nonEmptyArray<T = unknown>(value: unknown): T[] | undefined {
+    return Array.isArray(value) && value.length > 0
+      ? (value as T[])
+      : undefined;
+  }
+
+  private nonEmptyRecordArray(
+    value: unknown,
+  ): Array<Record<string, unknown>> | undefined {
+    if (!Array.isArray(value)) return undefined;
+    const records = value.filter((item): item is Record<string, unknown> =>
+      this.isRecord(item),
+    );
+    return records.length > 0 ? records : undefined;
+  }
+
   private isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private toFallbackReason(error: unknown): string {
-    if (this.isAbortError(error)) return 'deepseek_timeout';
-    if (error instanceof Error && error.message === 'deepseek_timeout') {
-      return 'deepseek_timeout';
+    if (error instanceof Error && error.message === 'client_aborted') {
+      return 'client_aborted';
     }
     if (error instanceof SyntaxError) return 'deepseek_json_parse_failed';
-    if (error instanceof Error) return error.message;
-    return 'unknown_planner_error';
+    return socialAgentDeepSeekFailureReason(error) || 'unknown_planner_error';
   }
 
   private modelFor(useCase: 'planner'): string {
     if (this.modelRouter) return this.modelRouter.getModel(useCase);
     return (
-      this.config.get<string>('AGENT_PLANNER_MODEL') ||
-      this.config.get<string>('DEEPSEEK_FAST_MODEL') ||
-      this.config.get<string>('DEEPSEEK_MODEL') ||
-      'deepseek-v4-flash'
+      this.configuredModel(this.config.get<string>('AGENT_PLANNER_MODEL')) ||
+      this.configuredModel(this.config.get<string>('DEEPSEEK_CHAT_MODEL')) ||
+      SOCIAL_AGENT_DEFAULT_REASONING_MODEL
     );
+  }
+
+  private configuredModel(value?: string | null): string | null {
+    return selectSocialAgentConfiguredModel(value, {
+      allowFast: false,
+    });
   }
 
   private deepSeekTimeoutMs(useCase?: 'planner'): number {
     if (useCase && this.modelRouter)
       return this.modelRouter.getTimeout(useCase);
     const configured = Number(
-      this.config.get<string>('SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS') ??
+      this.config.get<string>('SOCIAL_AGENT_PLANNER_TIMEOUT_MS') ??
+        this.config.get<string>('SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS') ??
         this.config.get<string>('DEEPSEEK_TIMEOUT_MS'),
     );
     if (Number.isFinite(configured) && configured > 0) {
-      return Math.min(configured, 15_000);
+      return Math.min(
+        Math.max(configured, SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS),
+        60_000,
+      );
     }
-    return 15_000;
+    return SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS;
   }
 
   private logModelCall(input: {
@@ -713,7 +1168,4 @@ export class SocialAgentPlannerService {
     );
   }
 
-  private isAbortError(error: unknown): boolean {
-    return error instanceof Error && error.name === 'AbortError';
-  }
 }

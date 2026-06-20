@@ -27,6 +27,7 @@ import { buildSocialAgentRunCompletionSnapshot } from './social-agent-run-comple
 import { TonePolicyService } from './response-quality/tone-policy.service';
 import { AgentSelfImproveService } from './agent-self-improve.service';
 import { AgentRunCheckpointService } from './agent-run-checkpoint.service';
+import { SocialAgentMessageLogService } from './social-agent-message-log.service';
 
 @Injectable()
 export class SocialAgentRunOrchestratorService {
@@ -44,6 +45,8 @@ export class SocialAgentRunOrchestratorService {
     private readonly selfImprove?: AgentSelfImproveService,
     @Optional()
     private readonly checkpoints?: AgentRunCheckpointService,
+    @Optional()
+    private readonly messageLog?: SocialAgentMessageLogService,
   ) {}
 
   async run(
@@ -66,13 +69,14 @@ export class SocialAgentRunOrchestratorService {
 
     let task = await this.taskLifecycle.ensureConversationTask(
       ownerUserId,
-      body.taskId ?? this.number(body.clientContext?.threadId),
+      body.taskId ?? parseSocialAgentThreadTaskId(body.clientContext?.threadId),
       goal,
       idempotencyKey || null,
       body.clientContext?.threadId ?? null,
     );
     task.permissionMode = permissionMode;
     if (!cleanDisplayText(task.goal, '').trim()) task.goal = goal;
+    await this.messageLog?.recordUserMessage(task, goal);
     await this.fitMeetRuntime?.attachTask(runtimeRun?.id, task.id);
     this.realtime?.emitAgentEvent(ownerUserId, 'agent:thinking', {
       taskId: task.id,
@@ -121,7 +125,16 @@ export class SocialAgentRunOrchestratorService {
       },
     });
     task = mainAgentRun.task;
-    if (mainAgentRun.result) return mainAgentRun.result;
+    if (mainAgentRun.result) {
+      if (!options.deferAssistantMessageLog) {
+        await this.messageLog?.recordAssistantRunMessage(
+          task,
+          mainAgentRun.result.assistantMessage,
+          mainAgentRun.result,
+        );
+      }
+      return mainAgentRun.result;
+    }
     const alphaTurn = mainAgentRun.alphaTurn;
 
     const recommendation = await this.runRecommendations.run({
@@ -182,6 +195,13 @@ export class SocialAgentRunOrchestratorService {
       assistantMessage: result.assistantMessage,
       resultPayload: completion.resultPayload,
     });
+    if (!options.deferAssistantMessageLog) {
+      await this.messageLog?.recordAssistantRunMessage(
+        task,
+        result.assistantMessage,
+        result,
+      );
+    }
     await this.selfImprove?.recordOnlineReplayFromRoute({
       ownerUserId,
       taskId: task.id,
@@ -226,7 +246,4 @@ export class SocialAgentRunOrchestratorService {
       : AgentTaskPermissionMode.Confirm;
   }
 
-  private number(value: unknown): number | null {
-    return parseSocialAgentThreadTaskId(value);
-  }
 }

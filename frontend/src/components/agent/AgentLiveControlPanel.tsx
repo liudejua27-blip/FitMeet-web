@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import * as api from '@/api/client';
 import { ApiError } from '@/api/client';
 import { agentApprovalsApi } from '@/api/agentApprovalsApi';
+import { agentApprovalEffectText } from '@/lib/agentApprovalCopy';
 import { useAuthStore } from '@/stores';
 import { AgentStatusBadge } from './AgentStatusBadge';
 
@@ -83,19 +84,7 @@ function friendlyError(e: unknown, fallback: string): string {
 }
 
 function describeApprovalEffect(actionType: string | undefined): string {
-  switch (actionType) {
-    case 'send_invite':
-    case 'send_message':
-      return '发送站内邀约消息并推进候选人状态';
-    case 'add_friend':
-      return '将该候选人加为好友';
-    case 'invite_activity':
-      return '向候选人发出活动邀请';
-    case 'create_activity':
-      return '创建活动并邀请候选人参与';
-    default:
-      return actionType || '执行该 Agent 行为';
-  }
+  return agentApprovalEffectText(actionType);
 }
 
 function pickString(obj: Record<string, unknown> | undefined, ...keys: string[]): string | null {

@@ -19,14 +19,16 @@ import {
   inferSocialAgentThreadTitle,
   isGenericSocialAgentThreadTitle,
 } from './social-agent-thread-title.util';
+import { socialCodexThreadIdForTask } from './social-codex-runtime-model';
 
 const CHAT_TASK_TYPES = [
   'social_agent',
   'social_agent_chat',
-  'social_agent_demo',
   'social_search',
   'activity_search',
 ];
+const GENERIC_RECOVERY_PREVIEW_RE =
+  /保留当前(?:对话|方向|上下文|需求)|稍后再试|暂时没有顺利完成|连接中断|连接恢复|处理时间有点久|可以稍后再试|我已经恢复了(?:上一次|这段|当前)|我可以继续上次的话题，也可以重新开始|从已保存的(?:步骤|工具步骤|Agent 状态)|继续刚才保存的 Agent 步骤|原始目标|已从刚才的确认点继续处理/;
 
 type BranchSnapshotInput = {
   activeBranchId?: string | null;
@@ -67,7 +69,9 @@ export class SocialAgentThreadService {
       take,
     });
     return {
-      threads: tasks.map((task) => this.toThreadDto(task)),
+      threads: tasks
+        .filter((task) => this.isDisplayableThreadTask(task))
+        .map((task) => this.toThreadDto(task)),
     };
   }
 
@@ -93,7 +97,7 @@ export class SocialAgentThreadService {
       threadId,
       ownerUserId,
     );
-    if (task.status === AgentTaskStatus.Cancelled) {
+    if (!this.isDisplayableThreadTask(task)) {
       throw new NotFoundException(`Social agent thread ${threadId} not found`);
     }
     const session = await this.sessionQueries.getTaskSession(
@@ -158,6 +162,7 @@ export class SocialAgentThreadService {
   private toThreadDto(task: AgentTask) {
     const goal = cleanDisplayText(task.goal, '');
     const firstMessage = this.firstMessageFromTask(task);
+    const threadId = socialCodexThreadIdForTask(task.id);
     const title = isGenericSocialAgentThreadTitle(task.title)
       ? inferSocialAgentThreadTitle({
           title: task.title,
@@ -166,11 +171,11 @@ export class SocialAgentThreadService {
         })
       : cleanDisplayText(task.title, '') || inferSocialAgentThreadTitle({ goal, firstMessage });
     return {
-      id: String(task.id),
-      threadId: task.id,
+      id: threadId,
+      threadId,
       taskId: task.id,
       title,
-      preview: goal || firstMessage || null,
+      preview: this.threadPreview(goal, firstMessage),
       status: task.status,
       goal,
       messageCount: this.messageCount(task),
@@ -185,9 +190,22 @@ export class SocialAgentThreadService {
     };
   }
 
+  private isDisplayableThreadTask(task: AgentTask): boolean {
+    if (task.status === AgentTaskStatus.Cancelled) return false;
+    return !(
+      task.status === AgentTaskStatus.Failed &&
+      cleanDisplayText(task.statusReason, '').trim() ===
+        'task_conversation_unbound'
+    );
+  }
+
   private messageCount(task: AgentTask): number {
     const memoryMessages = task.memory?.messages;
     if (Array.isArray(memoryMessages)) return memoryMessages.length;
+    const conversationTurns = this.turnArray(task.memory?.socialAgentConversation);
+    if (conversationTurns.length > 0) return conversationTurns.length;
+    const recentTurns = this.turnArray(task.memory?.shortTerm);
+    if (recentTurns.length > 0) return recentTurns.length;
     const resultMessages = task.result?.messages;
     if (Array.isArray(resultMessages)) return resultMessages.length;
     return 0;
@@ -213,7 +231,47 @@ export class SocialAgentThreadService {
             : '';
       return cleanDisplayText(text, '');
     }
+    const conversationText = this.firstUserTextFromTurns(
+      this.turnArray(task.memory?.socialAgentConversation),
+    );
+    if (conversationText) return conversationText;
+    const shortTermText = this.firstUserTextFromTurns(
+      this.turnArray(task.memory?.shortTerm),
+    );
+    if (shortTermText) return shortTermText;
     return '';
+  }
+
+  private turnArray(value: unknown): Array<Record<string, unknown>> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const turns =
+      (value as { turns?: unknown; recentTurns?: unknown }).turns ??
+      (value as { recentTurns?: unknown }).recentTurns;
+    return Array.isArray(turns)
+      ? turns.filter(
+          (turn): turn is Record<string, unknown> =>
+            Boolean(turn) && typeof turn === 'object' && !Array.isArray(turn),
+        )
+      : [];
+  }
+
+  private firstUserTextFromTurns(turns: Array<Record<string, unknown>>): string {
+    const userTurn = turns.find((turn) => turn.role === 'user');
+    const text =
+      typeof userTurn?.content === 'string'
+        ? userTurn.content
+        : typeof userTurn?.text === 'string'
+          ? userTurn.text
+          : '';
+    return cleanDisplayText(text, '');
+  }
+
+  private threadPreview(goal: string, firstMessage: string): string | null {
+    const cleanFirstMessage = cleanDisplayText(firstMessage, '');
+    if (cleanFirstMessage) return cleanFirstMessage;
+    const cleanGoal = cleanDisplayText(goal, '');
+    if (!cleanGoal || GENERIC_RECOVERY_PREVIEW_RE.test(cleanGoal)) return null;
+    return cleanGoal;
   }
 
   private readAssistantThreadMemory(

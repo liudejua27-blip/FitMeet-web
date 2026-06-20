@@ -1,9 +1,6 @@
 import type { Repository } from 'typeorm';
 
-import {
-  AgentTask,
-  AgentTaskEvent,
-} from './entities/agent-task.entity';
+import { AgentTask, AgentTaskEvent } from './entities/agent-task.entity';
 import { SocialAgentEventStore } from './social-agent-event-store.service';
 import type { SocialAgentEventV2 } from './social-agent-event-v2.types';
 
@@ -40,8 +37,9 @@ describe('SocialAgentEventStore', () => {
           payload: { socialAgentEventV2: item },
         }) as unknown as AgentTaskEvent,
     );
+    const findMock = jest.fn().mockResolvedValue(rows);
     const eventRepo = {
-      find: jest.fn().mockResolvedValue(rows),
+      find: findMock,
       save: jest.fn(),
       create: jest.fn((value) => value),
     } as unknown as Repository<AgentTaskEvent>;
@@ -51,6 +49,7 @@ describe('SocialAgentEventStore', () => {
     return {
       service: new SocialAgentEventStore(eventRepo, taskRepo),
       eventRepo,
+      findMock,
     };
   }
 
@@ -80,8 +79,27 @@ describe('SocialAgentEventStore', () => {
       lastEventId: 'run-1:4',
       terminalType: 'run.completed',
       pendingApproval: true,
+      summary: expect.objectContaining({
+        state: 'waiting',
+        pendingApproval: true,
+        title: '发送邀请前需要你确认',
+        currentStage: 'approval',
+        currentSeq: 3,
+        expandable: true,
+      }),
     });
     expect(replay.events.map((item) => item.seq)).toEqual([1, 2, 3, 4]);
+    expect(replay.events.at(-1)?.payload).toMatchObject({
+      summary: expect.objectContaining({
+        title: replay.summary.title,
+        state: replay.summary.state,
+        displayMode: 'covering_status',
+        updateModel: 'latest_state',
+        defaultVisibleCount: 1,
+        historyVisibility: 'collapsed',
+        pendingApproval: true,
+      }),
+    });
   });
 
   it('clears pending approval when approval.resolved is replayed later in the same run', async () => {
@@ -95,7 +113,11 @@ describe('SocialAgentEventStore', () => {
       event(3, 'approval.resolved', {
         stage: 'approval',
         display: { title: '已确认这一步', state: 'done' },
-        payload: { approvalId: 88, actionType: 'send_invite', decision: 'approved' },
+        payload: {
+          approvalId: 88,
+          actionType: 'send_invite',
+          decision: 'approved',
+        },
       }),
       event(4, 'run.completed'),
     ]);
@@ -137,7 +159,11 @@ describe('SocialAgentEventStore', () => {
         eventId: 'run-after-confirm:2',
         stage: 'approval',
         display: { title: '已确认这一步', state: 'done' },
-        payload: { approvalId: 88, actionType: 'send_invite', decision: 'approved' },
+        payload: {
+          approvalId: 88,
+          actionType: 'send_invite',
+          decision: 'approved',
+        },
       }),
       event(3, 'run.completed', {
         runId: 'run-after-confirm',
@@ -191,7 +217,10 @@ describe('SocialAgentEventStore', () => {
     ).resolves.toMatchObject({
       returnedCount: 2,
       lastSeq: 4,
-      events: [expect.objectContaining({ seq: 3 }), expect.objectContaining({ seq: 4 })],
+      events: [
+        expect.objectContaining({ seq: 3 }),
+        expect.objectContaining({ seq: 4 }),
+      ],
     });
     await expect(
       service.buildReplayPackage(44, 7, { afterEventId: 'run-1:3' }),
@@ -242,7 +271,10 @@ describe('SocialAgentEventStore', () => {
     await expect(service.buildReplayPackage(44, 7)).resolves.toMatchObject({
       eventCount: 2,
       returnedCount: 2,
-      events: [expect.objectContaining({ seq: 1 }), expect.objectContaining({ seq: 4 })],
+      events: [
+        expect.objectContaining({ seq: 1 }),
+        expect.objectContaining({ seq: 4 }),
+      ],
     });
     await expect(
       service.buildReplayPackage(44, 7, { includeDebug: true }),
@@ -257,8 +289,101 @@ describe('SocialAgentEventStore', () => {
     });
   });
 
+  it('sanitizes legacy replay events before returning them to the frontend', async () => {
+    const { service } = storeWithEvents([
+      event(1, 'candidate_search.done', {
+        stage: 'search_candidates',
+        display: {
+          title: 'tool_call_started planner traceId',
+          detail: 'raw JSON stack internal runtime',
+          state: 'done',
+        },
+        payload: {
+          candidateCount: 3,
+          activityCount: 1,
+          safeSummary: '公开资料里都提到了散步',
+          traceId: 'hidden-trace',
+          planner: { route: 'secret-plan' },
+          rawJson: { internal: true },
+          toolInput: { query: 'secret-query' },
+          phone: '15253005312',
+          latitude: 36.123456,
+          nested: {
+            publicSummary: '共同兴趣匹配',
+            systemPrompt: 'do not expose',
+          },
+          candidates: [
+            {
+              publicSummary: '喜欢低强度散步',
+              email: 'hidden@example.com',
+              sql: 'select * from users',
+            },
+          ],
+        },
+      }),
+    ]);
+
+    const replay = await service.buildReplayPackage(44, 7);
+    const replayEvent = replay.events[0];
+
+    expect(replayEvent).toMatchObject({
+      type: 'candidate_search.done',
+      display: {
+        title: '找到 3 个公开可发现的人',
+        detail: '只使用公开可发现的信息，联系对方前仍需要你确认。',
+        state: 'done',
+      },
+      payload: {
+        candidateCount: 3,
+        activityCount: 1,
+        safeSummary: '公开资料里都提到了散步',
+        nested: { publicSummary: '共同兴趣匹配' },
+        candidates: [{ publicSummary: '喜欢低强度散步' }],
+      },
+    });
+    expect(JSON.stringify(replay)).not.toMatch(
+      /tool_call_started|planner|traceId|raw JSON|stack|internal runtime|hidden-trace|secret-plan|secret-query|15253005312|36\.123456|hidden@example\.com|select \*/i,
+    );
+  });
+
+  it('normalizes legacy replay events that were persisted before a task id was bound', async () => {
+    const { service } = storeWithEvents([
+      event(1, 'run.started', {
+        taskId: null,
+        threadId: 'user-7',
+      }),
+      event(2, 'visible_process.delta', {
+        taskId: null,
+        threadId: 'user-7',
+        stage: 'hydrate_context',
+        display: { title: '正在读取你的偏好', state: 'running' },
+      }),
+      event(3, 'run.completed', {
+        taskId: 44,
+        threadId: 'agent-task:44',
+        display: { title: '这一步处理完成', state: 'done' },
+      }),
+    ]);
+
+    const replay = await service.buildReplayPackage(44, 7);
+
+    expect(replay.threadId).toBe('agent-task:44');
+    expect(replay.events[0]).toMatchObject({
+      taskId: 44,
+      threadId: 'agent-task:44',
+    });
+    expect(replay.events[1]).toMatchObject({
+      taskId: 44,
+      threadId: 'agent-task:44',
+    });
+    expect(replay.summary).toMatchObject({
+      title: '已理解你的需求',
+      currentSeq: 3,
+    });
+  });
+
   it('lists replay events from checkpoint-style thread ids', async () => {
-    const { service, eventRepo } = storeWithEvents([
+    const { service, findMock } = storeWithEvents([
       event(1, 'run.started'),
       event(2, 'slot.completed', { stage: 'slot_filling' }),
     ]);
@@ -266,7 +391,7 @@ describe('SocialAgentEventStore', () => {
     const rows = await service.listEventsByThread('agent-task:44');
 
     expect(rows).toHaveLength(2);
-    expect(eventRepo.find).toHaveBeenCalledWith(
+    expect(findMock).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { taskId: 44 },
       }),

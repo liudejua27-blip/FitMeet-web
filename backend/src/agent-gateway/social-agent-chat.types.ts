@@ -78,6 +78,20 @@ export interface SocialAgentChatCandidate {
   risk: { level: string; warnings: string[] };
   suggestedOpener?: string;
   suggestedMessage: string;
+  reasonerSource?: 'deepseek' | 'fallback';
+  reasoningConfidence?: number;
+  reasoningDegraded?: boolean;
+  reasoningRetryable?: boolean;
+  degradationReason?: string | null;
+  degraded?: boolean;
+  retryable?: boolean;
+  matchReasoner?: {
+    source?: 'deepseek' | 'fallback';
+    confidence?: number;
+    degraded?: boolean;
+    retryable?: boolean;
+    degradationReason?: string | null;
+  };
   candidateExplanation?: CandidateExplanation;
   emotionalInsight?: {
     fitReason: string;
@@ -94,6 +108,7 @@ export interface SocialAgentChatRunResult {
   status: AgentTaskStatus;
   visibleSteps: SocialAgentVisibleStep[];
   assistantMessage: string;
+  assistantMessageSource?: SocialAgentAssistantMessageSource;
   emptyReason?: 'no_real_candidates' | null;
   message?: string | null;
   debugReasons?: CandidatePoolDebugReasons | null;
@@ -184,6 +199,8 @@ export type SocialAgentChatStreamEvent =
     }
   | { type: 'error'; message: string };
 
+export type SocialAgentAssistantMessageSource = 'llm' | 'fallback';
+
 export type SocialAgentRequestDraft = NonNullable<
   SocialAgentChatRunResult['socialRequestDraft']
 >;
@@ -210,6 +227,7 @@ export type SocialAgentChatRunBody = {
     } | null;
     stepId?: string | null;
     sourceCheckpointId?: number | null;
+    approvalId?: number | null;
     sourceStepId?: string | null;
     sourceStep?: {
       stepId: string;
@@ -248,6 +266,7 @@ export type SocialAgentChatReplanRunBody = {
 
 export type SocialAgentRouteMessageBody = {
   message?: string | null;
+  conversationIntent?: 'conversation' | 'social' | 'approval' | null;
   taskId?: number | null;
   hasCandidates?: boolean;
   idempotencyKey?: string | null;
@@ -256,6 +275,7 @@ export type SocialAgentRouteMessageBody = {
     locale?: string | null;
     source?: string | null;
     threadId?: string | null;
+    conversationIntent?: 'conversation' | 'social' | 'approval' | null;
     checkpointId?: number | null;
     parentCheckpointId?: number | null;
     resumeCursor?: {
@@ -267,6 +287,7 @@ export type SocialAgentRouteMessageBody = {
     } | null;
     stepId?: string | null;
     sourceCheckpointId?: number | null;
+    approvalId?: number | null;
     sourceStepId?: string | null;
     sourceStep?: {
       stepId: string;
@@ -303,6 +324,7 @@ export type StreamEmit = (
 
 export type SocialAgentStreamOptions = {
   signal?: AbortSignal | null;
+  deferAssistantMessageLog?: boolean;
 };
 
 export type SocialAgentIntentAction =
@@ -327,6 +349,7 @@ export interface SocialAgentIntentRouteResult {
   action: SocialAgentIntentAction;
   taskId: number | null;
   assistantMessage: string;
+  assistantMessageSource?: SocialAgentAssistantMessageSource;
   savedContext: boolean;
   profileUpdated: boolean;
   shouldQueueRun: boolean;
@@ -386,6 +409,7 @@ export interface SocialAgentSessionMessage {
   kind?: 'text' | 'risk' | 'approval';
   content: string;
   createdAt: string | null;
+  assistantMessageSource?: SocialAgentAssistantMessageSource;
   activityResults?: SocialAgentActivityResult[];
   pendingApproval?: SocialAgentPendingApprovalSnapshot;
 }

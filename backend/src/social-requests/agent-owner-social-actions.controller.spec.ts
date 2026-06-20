@@ -40,6 +40,32 @@ function makeController() {
 }
 
 describe('AgentOwnerSocialActionsController approval gates', () => {
+  it('passes agent-token ai-draft taskContext into SocialRequestsService', async () => {
+    const harness = makeController();
+    const taskContext = {
+      taskSlots: {
+        activity: { value: '散步', state: 'completed' },
+        time_window: { value: '今天晚上', state: 'completed' },
+        location_text: { value: '青岛大学附近', state: 'completed' },
+      },
+    };
+
+    await harness.controller.aiDraft(harness.req as never, {
+      rawText: '可以，继续帮我找人',
+      taskContext,
+    });
+
+    expect(harness.socialRequests.aiDraft).toHaveBeenCalledWith(
+      7,
+      '可以，继续帮我找人',
+      expect.objectContaining({
+        agentId: 77,
+        source: 'agent_token_social_request_ai_draft',
+        taskContext,
+      }),
+    );
+  });
+
   it('turns agent-token public publish into a real approval request', async () => {
     const harness = makeController();
 

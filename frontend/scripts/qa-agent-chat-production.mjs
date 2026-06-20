@@ -68,6 +68,41 @@ const forbiddenRecoveryCopy = [
   /继续刚才保存的 Agent 步骤/,
 ];
 
+const forbiddenOrdinarySocialCopy = [
+  /推荐给你的人/,
+  /确认后发邀请/,
+  /发送邀请前需要你确认/,
+  /匹配整理/,
+  /匹配前还差/,
+  /需要补充人物画像/,
+  /需要补充的信息/,
+  /正在确认需要补充的信息/,
+  /等待你确认/,
+  /约练卡/,
+  /候选人/,
+  /发布到发现/,
+];
+
+const forbiddenOrdinaryThreadTitleCopy = [
+  /搭子/,
+  /约练/,
+  /找人/,
+  /推荐活动/,
+  /候选人/,
+  /公开发起/,
+];
+
+const forbiddenVisibleProcessInternals = [
+  /tool_call/i,
+  /traceId/i,
+  /planner/i,
+  /raw JSON/i,
+  /payload/i,
+  /runtime/i,
+  /hydrate_context/i,
+  /slot\.filled/i,
+];
+
 function isLocalTarget(url) {
   const parsed = new URL(url);
   return ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname);
@@ -97,6 +132,55 @@ async function login() {
   if (!parsed.access_token) {
     throw new Error('Login response did not include access_token.');
   }
+  return parsed;
+}
+
+function assertSessionDoesNotRestoreFailedTask(session) {
+  const body = JSON.stringify(session);
+  if (body.includes('task_conversation_unbound')) {
+    throw new Error('Social Agent session restored a task_conversation_unbound legacy task.');
+  }
+
+  const stack = [session];
+  while (stack.length > 0) {
+    const item = stack.pop();
+    if (!item || typeof item !== 'object') continue;
+    const status = typeof item.status === 'string' ? item.status.toLowerCase() : '';
+    const statusReason = typeof item.statusReason === 'string' ? item.statusReason : '';
+    const hasActiveTask =
+      item.activeTaskId !== undefined &&
+      item.activeTaskId !== null &&
+      String(item.activeTaskId).trim() !== '';
+    if (hasActiveTask && status === 'failed') {
+      throw new Error(`Social Agent session restored failed activeTaskId=${item.activeTaskId}.`);
+    }
+    if (hasActiveTask && statusReason === 'task_conversation_unbound') {
+      throw new Error(`Social Agent session restored unbound activeTaskId=${item.activeTaskId}.`);
+    }
+    for (const value of Object.values(item)) {
+      if (value && typeof value === 'object') stack.push(value);
+    }
+  }
+}
+
+async function assertAgentSessionApi(accessToken) {
+  const response = await fetch(`${apiBaseUrl}/social-agent/chat/session`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'User-Agent': 'FitMeetAgentProductionBrowserQA/1.0',
+    },
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`Social Agent session check failed with ${response.status}: ${redact(body).slice(0, 240)}`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new Error(`Social Agent session returned non-JSON response: ${redact(body).slice(0, 240)}`);
+  }
+  assertSessionDoesNotRestoreFailedTask(parsed);
   return parsed;
 }
 
@@ -181,14 +265,107 @@ async function newChat(page) {
   }
 }
 
-async function submitMessage(page, text) {
+async function submitMessage(page, text, { waitAfter = true } = {}) {
   const input = page.locator('[data-testid="assistant-ui-composer-input"]').first();
   await input.waitFor({ state: 'visible', timeout: 10_000 });
   await input.fill(text);
   await input.press('Enter').catch(async () => {
     await page.getByRole('button', { name: '发送' }).click();
   });
-  await page.waitForTimeout(500);
+  if (waitAfter) await page.waitForTimeout(500);
+}
+
+async function waitForCoveringProcessStatus(page, label) {
+  await page
+    .waitForFunction(
+      () => {
+        const inline = document.querySelector('[data-testid="assistant-ui-inline-thinking"]');
+        const processLine = document.querySelector('[data-testid="assistant-ui-process-status-line"]');
+        const tool = document.querySelector('[data-testid="assistant-ui-tool-ui"]');
+        return Boolean(inline || processLine || tool);
+      },
+      null,
+      { timeout: 10_000 },
+    )
+    .catch(async () => {
+      const body = await page.locator('body').innerText().catch(() => '');
+      throw new Error(`${label}: did not show a GPT-style visible process state within 10s. Body: ${body.slice(0, 700)}`);
+    });
+
+  const state = await page.evaluate(() => {
+    const inline = document.querySelector('[data-testid="assistant-ui-inline-thinking"]');
+    const processLine = document.querySelector('[data-testid="assistant-ui-process-status-line"]');
+    const tool = document.querySelector('[data-testid="assistant-ui-tool-ui"]');
+    const processSteps = Array.from(document.querySelectorAll('[data-testid="assistant-ui-process-step"]'));
+    const toolOpen = tool ? tool.hasAttribute('open') : null;
+    return {
+      text: (inline?.textContent || processLine?.textContent || tool?.textContent || '').trim(),
+      inline: inline
+        ? {
+            statusModel: inline.getAttribute('data-status-model'),
+            updateModel: inline.getAttribute('data-update-model'),
+            detailPolicy: inline.getAttribute('data-trace-detail-policy'),
+            finalAnswer: inline.getAttribute('data-final-answer'),
+          }
+        : null,
+      tool: tool
+        ? {
+            rendering: tool.getAttribute('data-process-rendering'),
+            mainline: tool.getAttribute('data-process-mainline'),
+            historyVisibility: tool.getAttribute('data-process-history-visibility'),
+            stepCount: tool.getAttribute('data-process-step-count'),
+            open: toolOpen,
+          }
+        : null,
+      processStepCount: processSteps.length,
+    };
+  });
+
+  if (!state.text) {
+    throw new Error(`${label}: visible process state rendered but had no readable text.`);
+  }
+
+  if (state.inline) {
+    if (state.inline.statusModel !== 'single-line-replaceable') {
+      throw new Error(`${label}: inline thinking must be a single replaceable status, got ${state.inline.statusModel}.`);
+    }
+    if (state.inline.updateModel !== 'replace-previous-status') {
+      throw new Error(`${label}: inline thinking must replace previous status, got ${state.inline.updateModel}.`);
+    }
+    if (state.inline.detailPolicy !== 'collapsed') {
+      throw new Error(`${label}: inline thinking details should stay collapsed, got ${state.inline.detailPolicy}.`);
+    }
+    if (state.inline.finalAnswer !== 'false') {
+      throw new Error(`${label}: visible process state should not be marked as final answer.`);
+    }
+  }
+
+  if (state.tool) {
+    if (state.tool.rendering !== 'covering-status') {
+      throw new Error(`${label}: tool process must render as covering status, got ${state.tool.rendering}.`);
+    }
+    if (state.tool.mainline !== 'latest-visible-summary') {
+      throw new Error(`${label}: tool process must use latest-visible-summary, got ${state.tool.mainline}.`);
+    }
+    if (state.tool.historyVisibility !== 'collapsed') {
+      throw new Error(`${label}: tool process history must default collapsed, got ${state.tool.historyVisibility}.`);
+    }
+    if (state.tool.stepCount && Number(state.tool.stepCount) > 1) {
+      throw new Error(`${label}: default process should expose only one latest status, got ${state.tool.stepCount}.`);
+    }
+  }
+
+  if (state.tool?.open === false && state.processStepCount > 0) {
+    throw new Error(`${label}: collapsed process leaked ${state.processStepCount} timeline steps.`);
+  }
+
+  for (const pattern of forbiddenVisibleProcessInternals) {
+    if (pattern.test(state.text)) {
+      throw new Error(`${label}: visible process leaked internal term matching ${pattern}.`);
+    }
+  }
+
+  return state;
 }
 
 async function waitForAssistantResponse(page, label) {
@@ -210,17 +387,23 @@ async function waitForAssistantResponse(page, label) {
 
 async function assertOrdinaryChat(page) {
   await newChat(page);
-  await submitMessage(page, '请用两句话帮我安排今天的训练恢复，不要帮我找人，也不要推荐活动。');
+  await submitMessage(page, '请用两句话帮我安排今天的训练恢复，不要帮我找人，也不要推荐活动。', {
+    waitAfter: false,
+  });
+  await waitForCoveringProcessStatus(page, 'ordinary chat early process');
   await waitForAssistantResponse(page, 'ordinary chat');
   for (const selector of forbiddenOrdinarySocialSelectors) {
     const count = await page.locator(selector).count();
     if (count > 0) throw new Error(`ordinary chat unexpectedly rendered social UI: ${selector}`);
   }
   const text = await page.locator('body').innerText();
-  if (/推荐给你的人|确认后发邀请|发送邀请前需要你确认/.test(text)) {
-    throw new Error('ordinary chat leaked social recommendation copy.');
+  for (const pattern of forbiddenOrdinarySocialCopy) {
+    if (pattern.test(text)) {
+      throw new Error(`ordinary chat leaked social process/profile copy matching ${pattern}.`);
+    }
   }
   await assertNoStaleRecoveryCopy(page, 'ordinary chat');
+  await assertOrdinaryThreadTitle(page);
 }
 
 async function assertSocialIntent(page) {
@@ -228,7 +411,9 @@ async function assertSocialIntent(page) {
   await submitMessage(
     page,
     '我想在青岛周末下午找一个轻松羽毛球搭子，只接受公开场所，先帮我看看合适机会。',
+    { waitAfter: false },
   );
+  await waitForCoveringProcessStatus(page, 'social intent early process');
   await page
     .waitForFunction(
       () => {
@@ -245,6 +430,28 @@ async function assertSocialIntent(page) {
       const body = await page.locator('body').innerText().catch(() => '');
       throw new Error(`social intent did not clarify or render opportunities. Body: ${body.slice(0, 800)}`);
     });
+}
+
+async function assertOrdinaryThreadTitle(page) {
+  const activeThread = page
+    .locator('[data-testid="assistant-ui-thread-list-items"] button[aria-current="page"]')
+    .first();
+  const activeVisible = await activeThread.isVisible().catch(() => false);
+  if (!activeVisible) return;
+
+  await page.waitForTimeout(1_000);
+  const rawText = (await activeThread.innerText().catch(() => '')).trim();
+  const title = rawText
+    .split('\n')
+    .map((part) => part.trim())
+    .find(Boolean);
+  if (!title || title === '新对话') return;
+
+  for (const pattern of forbiddenOrdinaryThreadTitleCopy) {
+    if (pattern.test(title)) {
+      throw new Error(`ordinary chat thread title was socialized: "${title}" matched ${pattern}.`);
+    }
+  }
 }
 
 async function assertAccountMenu(page, viewportName) {
@@ -290,6 +497,7 @@ async function main() {
   await mkdir(evidenceDir, { recursive: true });
   const release = await assertDeploymentRelease();
   const auth = await login();
+  await assertAgentSessionApi(auth.access_token);
   const browser = await chromium.launch({ headless: true });
   const lines = [
     '# FitMeet Agent Production Browser QA',
@@ -300,6 +508,7 @@ async function main() {
     `- Expected release commit: \`${expectedReleaseCommit || 'not-required'}\``,
     `- Release check: \`${release.status}\``,
     `- Release actual commit: \`${release.actual}\``,
+    '- Session API: `no failed or unbound active task`',
     `- Conversation checks: \`${runConversation}\``,
     '- Account: `[redacted-email]`',
     '',

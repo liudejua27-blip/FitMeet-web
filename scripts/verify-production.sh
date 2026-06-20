@@ -348,8 +348,34 @@ if (leaked) {
   console.error(`Authenticated Social Agent session leaked stale checkpoint copy: ${leaked}`);
   process.exit(1);
 }
+if (body.includes('task_conversation_unbound')) {
+  console.error('Authenticated Social Agent session restored a task_conversation_unbound legacy task.');
+  process.exit(1);
+}
+const stack = [doc];
+while (stack.length > 0) {
+  const item = stack.pop();
+  if (!item || typeof item !== 'object') continue;
+  const status = typeof item.status === 'string' ? item.status.toLowerCase() : '';
+  const statusReason = typeof item.statusReason === 'string' ? item.statusReason : '';
+  const hasActiveTask =
+    item.activeTaskId !== undefined &&
+    item.activeTaskId !== null &&
+    String(item.activeTaskId).trim() !== '';
+  if (hasActiveTask && status === 'failed') {
+    console.error(`Authenticated Social Agent session restored failed activeTaskId=${item.activeTaskId}.`);
+    process.exit(1);
+  }
+  if (hasActiveTask && statusReason === 'task_conversation_unbound') {
+    console.error(`Authenticated Social Agent session restored unbound activeTaskId=${item.activeTaskId}.`);
+    process.exit(1);
+  }
+  for (const value of Object.values(item)) {
+    if (value && typeof value === 'object') stack.push(value);
+  }
+}
 NODE
-  ok "Authenticated Social Agent session does not leak stale checkpoint recovery copy"
+  ok "Authenticated Social Agent session does not leak stale checkpoint recovery copy or failed/unbound active tasks"
 else
   skip "Authenticated Agent session UX check. Set VERIFY_USER_EMAIL and VERIFY_USER_PASSWORD."
 fi

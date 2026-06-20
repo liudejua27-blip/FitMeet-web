@@ -634,8 +634,8 @@ node scripts/realtime-1000-online-smoke.mjs
 - Passed: frontend `pnpm --dir frontend test -- fitmeetCoreContract.test.ts agentInboxApi.test.ts` after moving Web Agent inbox event poll/ack endpoints into the shared typed endpoint registry.
 - Passed: frontend `pnpm --dir frontend test -- fitmeetCoreContract.test.ts agentInboxApi.test.ts` after moving Web Agent profile-match review endpoints into the shared typed endpoint registry.
 - Passed: frontend `pnpm --dir frontend test -- fitmeetCoreContract.test.ts feedClient.test.ts` after moving Web public hall social-intent reads into the shared typed endpoint registry.
-- Passed: frontend `pnpm --dir frontend test -- mockContent.test.ts` on 2026-06-07; the full Vitest suite ran 14 files / 65 tests and guards that production feed/meet pages no longer use mock-named fallback helpers.
-- Passed: frontend `pnpm --dir frontend exec eslint src/data/mockContent.ts src/pages/MeetPage.tsx src/pages/DiscoverPage.tsx src/pages/FitMeetHallPage.tsx src/pages/HomePage.legacy.tsx src/test/mockContent.test.ts`.
+- Superseded: the former `mockContent.test.ts`/`mockContent.ts`/`HomePage.legacy.tsx` checks were retired after the Discover data layer moved to `discoverContent` and `/legacy-home` became a redirect-only compatibility alias.
+- Current guard: frontend `pnpm --dir frontend exec vitest run src/test/discoverContent.test.ts src/test/AgentRouteIsolation.test.ts`; this verifies production Discover data has no mock-named fallback helpers and the legacy-home alias cannot render a duplicate homepage.
 - Passed: frontend `pnpm --dir frontend build` after removing mock-named feed/meet fallback usage from production pages.
 - Passed: backend `pnpm --dir backend test -- auth.service.spec.ts`
 - Passed: backend `pnpm --dir backend test -- auth.service.spec.ts production-env-readiness.spec.ts`

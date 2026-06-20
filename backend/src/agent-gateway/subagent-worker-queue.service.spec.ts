@@ -229,6 +229,39 @@ describe('SubagentWorkerQueueService', () => {
     expect(failures.rows).toHaveLength(2);
   });
 
+  it('does not requeue non-retryable worker failures', async () => {
+    const { service, failures } = createService();
+    const job = await service.enqueue({
+      agentName: 'Social Match Agent',
+      queueName: 'fitmeet.subagent.social-match-agent',
+      payload: { malformed: true },
+      maxAttempts: 3,
+    });
+    await service.markRunning({
+      jobId: job.id,
+      workerId: 'worker-a',
+      timeoutMs: 1000,
+    });
+
+    const failed = await service.fail({
+      jobId: job.id,
+      workerId: 'worker-a',
+      error: new Error('Unsupported subagent worker payload.'),
+      retryable: false,
+      context: { reason: 'malformed_payload' },
+    });
+
+    expect(failed.status).toBe('failed');
+    expect(failed.attempts).toBe(1);
+    expect(failed.lastError).toBe('Unsupported subagent worker payload.');
+    expect(failures.rows).toEqual([
+      expect.objectContaining({
+        error: 'Unsupported subagent worker payload.',
+        context: { reason: 'malformed_payload' },
+      }),
+    ]);
+  });
+
   it('reclaims timed-out running jobs and cancels aborted waiters', async () => {
     const { service, jobs } = createService();
     const job = await service.enqueue({
@@ -255,5 +288,53 @@ describe('SubagentWorkerQueueService', () => {
     });
     await expect(waiter).rejects.toThrow('aborted');
     expect(jobs.rows[0].status).toBe('cancelled');
+    expect(jobs.rows[0].lastError).toBe('cancelled');
+  });
+
+  it('cancels jobs when result waiting times out', async () => {
+    const { service, jobs } = createService();
+    const job = await service.enqueue({
+      agentName: 'Social Match Agent',
+      queueName: 'fitmeet.subagent.social-match-agent',
+      payload: {},
+    });
+
+    await expect(
+      service.waitForCompletion(job.id, {
+        timeoutMs: 2,
+        pollMs: 1,
+      }),
+    ).rejects.toThrow(`Subagent worker job ${job.id} timed out`);
+
+    expect(jobs.rows[0].status).toBe('cancelled');
+    expect(jobs.rows[0].lastError).toBe('cancelled');
+  });
+
+  it('does not let late worker complete or fail override a cancelled job', async () => {
+    const { service, jobs, failures } = createService();
+    const job = await service.enqueue({
+      agentName: 'Meet Loop Agent',
+      queueName: 'fitmeet.subagent.meet-loop-agent',
+      payload: {},
+    });
+    await service.markRunning({
+      jobId: job.id,
+      workerId: 'worker-late',
+      timeoutMs: 1000,
+    });
+    await service.cancel(job.id);
+
+    const completed = await service.complete(job.id, { ok: true });
+    expect(completed.status).toBe('cancelled');
+    expect(jobs.rows[0].result).toBeUndefined();
+
+    const failed = await service.fail({
+      jobId: job.id,
+      workerId: 'worker-late',
+      error: new Error('late failure'),
+    });
+    expect(failed.status).toBe('cancelled');
+    expect(jobs.rows[0].lastError).toBe('cancelled');
+    expect(failures.rows).toHaveLength(0);
   });
 });

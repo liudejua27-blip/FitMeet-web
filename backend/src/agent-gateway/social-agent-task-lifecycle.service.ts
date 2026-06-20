@@ -95,9 +95,19 @@ export class SocialAgentTaskLifecycleService {
     idempotencyKeyInput?: string | null,
     threadIdInput?: string | number | null,
   ): Promise<AgentTask> {
-    if (taskId) return this.assertTaskOwner(taskId, ownerUserId);
+    if (taskId) {
+      return this.refreshGenericConversationTitle(
+        await this.assertTaskOwner(taskId, ownerUserId),
+        message,
+      );
+    }
     const threadId = this.positiveInt(threadIdInput);
-    if (threadId) return this.assertTaskOwner(threadId, ownerUserId);
+    if (threadId) {
+      return this.refreshGenericConversationTitle(
+        await this.assertTaskOwner(threadId, ownerUserId),
+        message,
+      );
+    }
     const agent = await this.resolveAgentConnection(ownerUserId, null);
     const idempotencyKey =
       cleanDisplayText(idempotencyKeyInput, '').trim() ||
@@ -107,7 +117,7 @@ export class SocialAgentTaskLifecycleService {
     const existing = await this.taskRepo.findOne({
       where: { ownerUserId, idempotencyKey },
     });
-    if (existing) return existing;
+    if (existing) return this.refreshGenericConversationTitle(existing, message);
     const activeThread = await this.taskRepo.findOne({
       where: {
         ownerUserId,
@@ -124,7 +134,9 @@ export class SocialAgentTaskLifecycleService {
       },
       order: { updatedAt: 'DESC' },
     });
-    if (activeThread) return activeThread;
+    if (activeThread) {
+      return this.refreshGenericConversationTitle(activeThread, message);
+    }
     const task = await this.taskRepo.save(
       this.taskRepo.create({
         ownerUserId,
@@ -157,6 +169,57 @@ export class SocialAgentTaskLifecycleService {
       },
     );
     return task;
+  }
+
+  private async refreshGenericConversationTitle(
+    task: AgentTask,
+    message: string,
+  ): Promise<AgentTask> {
+    if (task.taskType !== 'social_agent_chat') return task;
+    const cleanMessage = cleanDisplayText(message, '').trim();
+    if (!cleanMessage) return task;
+    const nextTitle = inferSocialAgentThreadTitle({
+      title: task.title,
+      firstMessage: cleanMessage,
+      goal: task.goal,
+    });
+    if (nextTitle === task.title) return task;
+    const existingInput =
+      task.input && typeof task.input === 'object' && !Array.isArray(task.input)
+        ? task.input
+        : {};
+    return this.taskRepo.save({
+      ...task,
+      title: nextTitle,
+      goal: cleanDisplayText(task.goal, '').trim() || cleanMessage,
+      input: {
+        ...existingInput,
+        firstMessage:
+          cleanDisplayText(existingInput.firstMessage, '').trim() ||
+          cleanMessage,
+      },
+    });
+  }
+
+  async findActiveConversationTask(
+    ownerUserId: number,
+  ): Promise<AgentTask | null> {
+    return this.taskRepo.findOne({
+      where: {
+        ownerUserId,
+        taskType: 'social_agent_chat',
+        status: In([
+          AgentTaskStatus.Pending,
+          AgentTaskStatus.Planning,
+          AgentTaskStatus.AwaitingConfirmation,
+          AgentTaskStatus.Executing,
+          AgentTaskStatus.WaitingResult,
+          AgentTaskStatus.WaitingReply,
+          AgentTaskStatus.AwaitingFeedback,
+        ]),
+      },
+      order: { updatedAt: 'DESC' },
+    });
   }
 
   async assertTaskOwner(

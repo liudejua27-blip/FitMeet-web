@@ -110,6 +110,25 @@ describe('SocialAgentInboxToolService', () => {
     });
   });
 
+  it('reads owner inbox events without an agent connection when no conversation is scoped', async () => {
+    const { service, messages } = makeService();
+    messages.getAgentInboxEventsForOwner.mockResolvedValue([{ id: 'evt_1' }]);
+
+    await expect(
+      service.readInbox(makeTask({ agentConnectionId: null }), {
+        unreadOnly: 'true',
+        eventType: 'social_agent.message.received',
+      }),
+    ).resolves.toEqual({ events: [{ id: 'evt_1' }] });
+
+    expect(messages.getAgentInboxEvents).not.toHaveBeenCalled();
+    expect(messages.getAgentInboxEventsForOwner).toHaveBeenCalledWith(1, {
+      limit: undefined,
+      unreadOnly: true,
+      eventType: 'social_agent.message.received',
+    });
+  });
+
   it('returns user conversations with optional limits', async () => {
     const { service, messages } = makeService();
     messages.getConversations.mockResolvedValue([

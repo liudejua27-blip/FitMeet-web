@@ -113,32 +113,13 @@ async function main() {
   assertTextIncludesAny(
     'vague social request clarification',
     vague.assistantMessage,
-    ['城市', '时间', '强度', '社交边界', '接受陌生人', '公开发起活动'],
+    ['城市', '时间', '强度', '社交边界'],
   );
   pass('vague social request clarifies before search');
 
-  const partialBoundary = await postMessageStream(token, {
+  const clarified = await postMessageStream(token, {
     message: `${SMOKE_CITY}${SMOKE_TIME}，${SMOKE_INTENSITY}${SMOKE_ACTIVITY}，只在公共场所，先站内聊，发送前确认`,
     taskId: vague.taskId,
-  });
-  assertNoOpportunityCards('partial boundary clarification', partialBoundary);
-  assertNoSocialExecutionArtifacts(
-    'partial boundary clarification',
-    partialBoundary,
-  );
-  assertNoPendingApproval('partial boundary clarification', partialBoundary);
-  assertTextIncludesAny(
-    'partial boundary clarification',
-    partialBoundary.assistantMessage,
-    ['是否接受陌生人', '是否公开发起活动'],
-  );
-  pass(
-    'partial safety boundary still clarifies stranger/public-activity policy',
-  );
-
-  const clarified = await postMessageStream(token, {
-    message: `${SMOKE_CITY}${SMOKE_TIME}，${SMOKE_INTENSITY}${SMOKE_ACTIVITY}，接受陌生人，可以公开发起活动，发送前确认`,
-    taskId: partialBoundary.taskId,
   });
   assertOpportunityCards(clarified, {
     minTotal: 3,
@@ -150,7 +131,9 @@ async function main() {
   assertCard(candidateCard, 'candidate OpportunityCard');
   assertCard(activityCard, 'activity OpportunityCard');
   assertNoPendingApproval('clarified search', clarified);
-  pass('clarified social request returns 3+ candidate/activity opportunities');
+  pass(
+    'clarified social request returns 3+ candidate/activity opportunities after search-critical context without over-asking stranger/public policy',
+  );
   if (STOP_AFTER_OPPORTUNITIES) {
     await assertTraceEvalPass(
       token,

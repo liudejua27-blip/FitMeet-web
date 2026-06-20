@@ -102,6 +102,17 @@ export type CandidateOpportunityView = {
   suggestedOpener: string | null;
   recommendedNextAction: string | null;
   safetyBoundary: string | null;
+  reasoningQuality: CandidateReasoningQualityView;
+};
+
+export type CandidateReasoningQualityView = {
+  degraded: boolean;
+  retryable: boolean;
+  source: string | null;
+  confidence: number | null;
+  label: string | null;
+  detail: string | null;
+  actionLabel: string | null;
 };
 
 export type CandidateRecommendationProtocolItemView = {
@@ -622,6 +633,60 @@ export function normalizeCandidateOpportunityView(
       publicDetail(card.data.safetyBoundary) ??
       publicDetail(card.data.safeBoundary) ??
       publicDetail(card.data.safetyLine),
+    reasoningQuality: candidateReasoningQuality(opportunity, card.data),
+  };
+}
+
+function candidateReasoningQuality(
+  primary: Record<string, unknown>,
+  fallback: Record<string, unknown>,
+): CandidateReasoningQualityView {
+  const reasoner = firstRecord(
+    primary.reasoner,
+    primary.matchReasoner,
+    primary.candidateExplanation,
+    primary.explanation,
+    fallback.reasoner,
+    fallback.matchReasoner,
+    fallback.candidateExplanation,
+    fallback.explanation,
+  );
+  const degraded =
+    publicBoolean(primary.degraded) ??
+    publicBoolean(primary.reasoningDegraded) ??
+    publicBoolean(fallback.degraded) ??
+    publicBoolean(fallback.reasoningDegraded) ??
+    publicBoolean(reasoner?.degraded) ??
+    false;
+  const retryable =
+    publicBoolean(primary.retryable) ??
+    publicBoolean(primary.reasoningRetryable) ??
+    publicBoolean(fallback.retryable) ??
+    publicBoolean(fallback.reasoningRetryable) ??
+    publicBoolean(reasoner?.retryable) ??
+    false;
+  const source =
+    publicString(primary.reasonerSource) ??
+    publicString(primary.explanationSource) ??
+    publicString(fallback.reasonerSource) ??
+    publicString(fallback.explanationSource) ??
+    publicString(reasoner?.source) ??
+    publicString(reasoner?.reasonerSource);
+  const confidence =
+    publicNumber(primary.reasoningConfidence) ??
+    publicNumber(fallback.reasoningConfidence) ??
+    publicNumber(reasoner?.confidence);
+
+  return {
+    degraded,
+    retryable,
+    source,
+    confidence,
+    label: degraded ? '我先用公开资料保守推荐' : null,
+    detail: degraded
+      ? '更细的个性化解释稍后可重试；发送邀请前仍会等你确认。'
+      : null,
+    actionLabel: degraded && retryable ? '可稍后重新生成推荐解释' : null,
   };
 }
 
@@ -1307,6 +1372,20 @@ function publicNumber(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+}
+
+function publicBoolean(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const text = value.trim().toLowerCase();
+    if (text === 'true') return true;
+    if (text === 'false') return false;
+  }
+  return null;
+}
+
+function firstRecord(...values: unknown[]): Record<string, unknown> | null {
+  return values.find(isRecord) ?? null;
 }
 
 function candidateDistanceLabel(

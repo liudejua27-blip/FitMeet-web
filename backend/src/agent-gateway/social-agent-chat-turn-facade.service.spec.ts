@@ -18,6 +18,93 @@ type CardActionInput = {
 };
 
 describe('SocialAgentChatTurnFacadeService', () => {
+  it('keeps routeMessage as a legacy alias for the same hydrated route turn path', async () => {
+    const routeTurns = {
+      handleMessage: jest
+        .fn()
+        .mockResolvedValue({ taskId: 202, assistantMessage: 'ok' }),
+    };
+    const turnCallbacks = {
+      forOwner: jest.fn().mockReturnValue({
+        replanAndRefresh: jest.fn(),
+        queueInitialSearchForTask: jest.fn(),
+      }),
+    };
+    const service = new SocialAgentChatTurnFacadeService(
+      routeTurns as never,
+      { perform: jest.fn() } as never,
+      turnCallbacks as never,
+    );
+
+    await expect(
+      service.routeMessage(7, {
+        message: '可以，继续刚才的约练任务',
+        taskId: 202,
+      }),
+    ).resolves.toMatchObject({ taskId: 202 });
+
+    expect(routeTurns.handleMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        body: {
+          message: '可以，继续刚才的约练任务',
+          taskId: 202,
+        },
+        emit: undefined,
+        signal: undefined,
+        streamOptions: {},
+      }),
+    );
+    expect(turnCallbacks.forOwner).toHaveBeenCalledWith(7);
+  });
+
+  it('keeps streamed messages on the same route turn path with abort and stream options', async () => {
+    const emit = jest.fn();
+    const signal = new AbortController().signal;
+    const routeTurns = {
+      handleMessage: jest
+        .fn()
+        .mockResolvedValue({ taskId: 303, assistantMessage: 'streamed' }),
+    };
+    const turnCallbacks = {
+      forOwner: jest.fn().mockReturnValue({
+        replanAndRefresh: jest.fn(),
+        queueInitialSearchForTask: jest.fn(),
+      }),
+    };
+    const service = new SocialAgentChatTurnFacadeService(
+      routeTurns as never,
+      { perform: jest.fn() } as never,
+      turnCallbacks as never,
+    );
+
+    await expect(
+      service.handleMessageStream(
+        7,
+        {
+          message: '周末下午继续找青岛大学附近散步搭子',
+          taskId: 303,
+        },
+        emit,
+        { signal, deferAssistantMessageLog: true },
+      ),
+    ).resolves.toMatchObject({ taskId: 303 });
+
+    expect(routeTurns.handleMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        body: {
+          message: '周末下午继续找青岛大学附近散步搭子',
+          taskId: 303,
+        },
+        emit,
+        signal,
+        streamOptions: { signal, deferAssistantMessageLog: true },
+      }),
+    );
+    expect(turnCallbacks.forOwner).toHaveBeenCalledWith(7);
+  });
+
   it('wires route turn callbacks to replan and initial search services', async () => {
     const callbacks = {
       replanAndRefresh: jest.fn().mockResolvedValue({ runId: 'run-1' }),

@@ -9,11 +9,12 @@ import {
 import { lazy, Suspense, useState } from 'react';
 
 import { cn } from '../../lib/utils';
-import type { FitMeetAssistantMessage } from '../agent-workspace/FitMeetAssistantUI';
+import type { FitMeetAssistantMessage } from '../agent-workspace/FitMeetAssistantUI.types';
 import { AssistantActionBar, UserMessageActionBar } from './action-bar';
 import { ChatGPTAttachment } from './attachment';
 import { ChatGPTBranchPicker } from './branch-picker';
 import { MarkdownTextPart } from './markdown-text';
+import { AssistantMessageRuntimeProvider } from './message-runtime-context';
 import { AssistantThinkingDots } from './thinking-dots';
 
 const LazyAssistantToolFallback = lazy(() =>
@@ -30,6 +31,7 @@ type AssistantMessageProps = {
   onFeedback?: (messageId: string, value: 'positive' | 'negative') => void;
   onDisableReminders?: () => Promise<void> | void;
   onDismissReminder?: (reminderId: number | string) => Promise<void> | void;
+  isLatestAssistantMessage?: boolean;
 };
 
 function normalizeMessageStatus(status: unknown) {
@@ -50,6 +52,7 @@ export function ChatGPTMessage({
   onFeedback,
   onDisableReminders,
   onDismissReminder,
+  isLatestAssistantMessage = true,
 }: AssistantMessageProps) {
   const role = useAuiState((state) => state.message.role);
   const id = useAuiState((state) => state.message.id);
@@ -77,6 +80,12 @@ export function ChatGPTMessage({
       feedbackErrorValue?: FitMeetAssistantMessage['feedbackErrorValue'];
     };
     return custom.feedbackErrorValue ?? null;
+  });
+  const assistantMessageSource = useAuiState((state) => {
+    const custom = state.message.metadata.custom as {
+      fitmeetAssistantMessageSource?: FitMeetAssistantMessage['assistantMessageSource'];
+    };
+    return custom.fitmeetAssistantMessageSource ?? null;
   });
   const feedback = useAuiState((state) => {
     const custom = state.message.metadata.custom as {
@@ -137,38 +146,40 @@ export function ChatGPTMessage({
   );
 
   return (
-    <MessagePrimitive.Root
-      className={cn(
-        'group relative mx-auto flex w-full max-w-3xl flex-col px-0',
-        isCompact ? 'py-0.5' : 'py-2.5',
-        role === 'user' ? 'items-end gap-1' : 'items-stretch',
-        '[content-visibility:auto] [contain-intrinsic-size:0_160px]',
-      )}
-      data-testid="assistant-ui-message"
-      role="article"
-      aria-label={role === 'user' ? '用户消息' : '助手消息'}
-      data-message-id={id}
-      data-fitmeet-message-id={fitmeetMessageId}
-      data-role={role}
-      data-message-status={status ?? 'unknown'}
-      data-feedback-status={role === 'assistant' ? (feedbackStatus ?? 'idle') : undefined}
-      data-density={density}
-      data-message-model="assistant-ui-message"
-      data-message-parts-model="assistant-ui-message-parts"
-      data-actionbar-placement={role === 'assistant' ? 'below-message' : 'inline-leading'}
-      data-surface={role === 'user' ? 'user-bubble' : 'assistant-prose'}
-      data-render-strategy="content-visibility"
-      data-reminder-protocol={role === 'assistant' ? reminderProtocol : undefined}
-      data-reminder-suggestion-only={
-        role === 'assistant' && reminderContext?.suggestionOnly === true ? 'true' : undefined
-      }
-      data-reminder-delivery={role === 'assistant' ? reminderDelivery : undefined}
-      data-reminder-external-delivery-disabled={
-        role === 'assistant' ? reminderExternalDeliveryDisabled : undefined
-      }
-      data-reminder-settings-route={role === 'assistant' ? reminderSettingsRoute : undefined}
-      data-reminder-opt-out-action={role === 'assistant' ? reminderOptOutAction : undefined}
-    >
+    <AssistantMessageRuntimeProvider value={{ isLatestAssistantMessage }}>
+      <MessagePrimitive.Root
+        className={cn(
+          'group relative mx-auto flex w-full max-w-3xl flex-col px-0',
+          isCompact ? 'py-0.5' : 'py-2',
+          role === 'user' ? 'items-end gap-1' : 'items-stretch',
+          '[content-visibility:auto] [contain-intrinsic-size:0_160px]',
+        )}
+        data-testid="assistant-ui-message"
+        role="article"
+        aria-label={role === 'user' ? '用户消息' : '助手消息'}
+        data-message-id={id}
+        data-fitmeet-message-id={fitmeetMessageId}
+        data-role={role}
+        data-message-status={status ?? 'unknown'}
+        data-feedback-status={role === 'assistant' ? (feedbackStatus ?? 'idle') : undefined}
+        data-message-source={role === 'assistant' ? (assistantMessageSource ?? 'unknown') : undefined}
+        data-density={density}
+        data-message-model="assistant-ui-message"
+        data-message-parts-model="assistant-ui-message-parts"
+        data-actionbar-placement={role === 'assistant' ? 'below-message' : 'inline-leading'}
+        data-surface={role === 'user' ? 'user-bubble' : 'assistant-prose'}
+        data-render-strategy="content-visibility"
+        data-reminder-protocol={role === 'assistant' ? reminderProtocol : undefined}
+        data-reminder-suggestion-only={
+          role === 'assistant' && reminderContext?.suggestionOnly === true ? 'true' : undefined
+        }
+        data-reminder-delivery={role === 'assistant' ? reminderDelivery : undefined}
+        data-reminder-external-delivery-disabled={
+          role === 'assistant' ? reminderExternalDeliveryDisabled : undefined
+        }
+        data-reminder-settings-route={role === 'assistant' ? reminderSettingsRoute : undefined}
+        data-reminder-opt-out-action={role === 'assistant' ? reminderOptOutAction : undefined}
+      >
       {role === 'user' ? (
         <div
           className="flex w-full max-w-[88%] flex-row flex-wrap justify-end gap-2 sm:max-w-[78%]"
@@ -188,12 +199,12 @@ export function ChatGPTMessage({
           className={cn(
             role === 'user'
               ? cn(
-                  'rounded-[22px] bg-[#f4f4f4] text-[15px] text-[#0d0d0d]',
+                  'rounded-[24px] bg-[#f4f4f4] text-[16px] text-[#0d0d0d]',
                   isCompact ? 'px-3.5 py-1.5 leading-6' : 'px-4 py-2 leading-6',
                 )
               : cn(
-                  'prose prose-sm max-w-none text-[15px] text-[#0d0d0d] prose-p:my-0 prose-li:my-0 prose-strong:text-[#0d0d0d]',
-                  isCompact ? 'leading-6' : 'leading-[1.7]',
+                  'prose prose-sm max-w-none text-[16px] text-[#0d0d0d] prose-p:my-0 prose-li:my-0 prose-strong:text-[#0d0d0d]',
+                  isCompact ? 'leading-6' : 'leading-7',
                 ),
           )}
           data-testid="assistant-ui-message-content"
@@ -252,7 +263,8 @@ export function ChatGPTMessage({
           ) : null}
         </div>
       ) : null}
-    </MessagePrimitive.Root>
+      </MessagePrimitive.Root>
+    </AssistantMessageRuntimeProvider>
   );
 }
 

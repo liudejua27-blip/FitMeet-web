@@ -34,6 +34,7 @@ export function evaluateSocialOpportunityClarification(input: {
   task: AgentTask;
   route: SocialAgentIntentRouterResult;
   message: string;
+  taskContext?: Record<string, unknown>;
 }): SocialAgentOpportunityClarification {
   mergeSocialAgentPreferences(input.task, input.message);
   mergeSocialAgentBoundaries(input.task, input.message);
@@ -42,14 +43,6 @@ export function evaluateSocialOpportunityClarification(input: {
   const missing = requiredFieldsForRoute(input.route).filter(
     (field) => !fields[field],
   );
-  if (
-    input.route.intent === 'social_search' &&
-    fields.relationshipGoal &&
-    !fields.candidatePreference &&
-    isGenericRelationshipGoal(fields.relationshipGoal)
-  ) {
-    missing.push('candidatePreference');
-  }
   const searchGoal = buildSearchGoal({
     message: input.message,
     currentGoal: memory.currentGoal,
@@ -105,32 +98,35 @@ export function evaluateSocialOpportunityClarification(input: {
   };
 }
 
+export function resolveSocialOpportunitySearchGoal(input: {
+  task: AgentTask;
+  route: SocialAgentIntentRouterResult;
+  message: string;
+  taskContext?: Record<string, unknown>;
+}): string {
+  mergeSocialAgentPreferences(input.task, input.message);
+  mergeSocialAgentBoundaries(input.task, input.message);
+  const memory = readSocialAgentTaskMemory(input.task);
+  const fields = resolveFields(input);
+  return buildSearchGoal({
+    message: input.message,
+    currentGoal: memory.currentGoal,
+    fields,
+  });
+}
+
 function requiredFieldsForRoute(
   route: SocialAgentIntentRouterResult,
 ): SocialAgentOpportunityClarificationField[] {
   const base: SocialAgentOpportunityClarificationField[] = [
     'city',
-    'location',
     'time',
     'activity',
-    'intensity',
-    'boundary',
-    'strangerPolicy',
-    'publicActivity',
   ];
   if (route.intent === 'social_search') {
-    return [
-      'city',
-      'time',
-      'activity',
-      'intensity',
-      'relationshipGoal',
-      'boundary',
-      'strangerPolicy',
-      'publicActivity',
-    ];
+    return base;
   }
-  return base.filter((field) => field !== 'location');
+  return base;
 }
 
 export function isAwaitingSocialOpportunityClarification(
@@ -149,12 +145,13 @@ function resolveFields(input: {
   task: AgentTask;
   route: SocialAgentIntentRouterResult;
   message: string;
+  taskContext?: Record<string, unknown>;
 }): FieldSnapshot {
   const memory = readSocialAgentTaskMemory(input.task);
   const entities = input.route.entities;
   const text = cleanDisplayText(input.message, '');
   const currentGoal = cleanDisplayText(memory.currentGoal, '');
-  const taskSlots = readTaskSlotValues(input.task);
+  const taskSlots = readTaskSlotValues(input.task, input.taskContext);
   const historyText = [
     currentGoal,
     ...memory.lastUserMessages.map((turn) => turn.text),
@@ -170,7 +167,12 @@ function resolveFields(input: {
       cleanDisplayText(entities.city, '') ||
       cleanDisplayText(memory.activeEntities.city, '') ||
       taskSlots.geo_area ||
-      extractCity(combined),
+      extractCity(
+        `${combined} ${taskSlots.location_text ?? ''} ${taskSlots.geo_area ?? ''}`,
+      ) ||
+      inferCityFromKnownArea(
+        `${taskSlots.location_text ?? ''} ${taskSlots.geo_area ?? ''}`,
+      ),
     time:
       cleanDisplayText(entities.timePreference, '') ||
       cleanDisplayText(memory.activeEntities.timePreference, '') ||
@@ -192,7 +194,7 @@ function resolveFields(input: {
       combined,
       memory.preferences,
       relationshipGoal,
-    ),
+    ) || taskSlots.candidate_preference,
     boundary:
       hasCommunicationBoundary(boundaries, combined) || boundaries.noAutoMessage
         ? boundarySummary(boundaries, combined)
@@ -206,17 +208,64 @@ function resolveFields(input: {
   };
 }
 
-function readTaskSlotValues(task: AgentTask): Record<string, string> {
-  const memory = isRecord(task.memory) ? task.memory : {};
-  const taskSlots = isRecord(memory.taskSlots) ? memory.taskSlots : {};
+function readTaskSlotValues(
+  task: AgentTask,
+  taskContext?: Record<string, unknown>,
+): Record<string, string> {
+  const memory = readSocialAgentTaskMemory(task);
   const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(taskSlots)) {
-    if (!isRecord(value)) continue;
-    if (!isTaskSlotUsableForClarification(key, value)) continue;
-    const text = cleanDisplayText(value.value, '');
+  appendTaskSlotValues(out, memory.taskSlots);
+  const context = isRecord(taskContext) ? taskContext : {};
+  const contextTaskMemory = isRecord(context.taskMemory)
+    ? context.taskMemory
+    : {};
+  appendTaskSlotValues(out, contextTaskMemory.taskSlots);
+  appendTaskSlotValues(out, context.taskSlots);
+  appendKnownConstraintSlotValues(out, memory.knownTaskSlotConstraints);
+  appendKnownConstraintSlotValues(out, contextTaskMemory.knownTaskSlotConstraints);
+  appendKnownConstraintSlotValues(out, context.knownTaskSlotConstraints);
+  return out;
+}
+
+function appendTaskSlotValues(out: Record<string, string>, value: unknown): void {
+  const taskSlots = isRecord(value) ? value : {};
+  for (const [key, slotValue] of Object.entries(taskSlots)) {
+    if (!isRecord(slotValue)) continue;
+    if (!isTaskSlotUsableForClarification(key, slotValue)) continue;
+    const text = cleanDisplayText(slotValue.value, '');
     if (text) out[key] = text;
   }
-  return out;
+}
+
+function appendKnownConstraintSlotValues(
+  out: Record<string, string>,
+  value: unknown,
+): void {
+  const constraints: Record<string, unknown> = isRecord(value) ? value : {};
+  const knownSlots = Array.isArray(constraints['knownSlots'])
+    ? constraints['knownSlots']
+    : [];
+  const doNotAskAgainFor = Array.isArray(constraints['doNotAskAgainFor'])
+    ? new Set(
+        constraints['doNotAskAgainFor']
+          .map((key) => cleanDisplayText(key, ''))
+          .filter(Boolean),
+      )
+    : new Set<string>();
+  for (const rawSlot of knownSlots) {
+    if (!isRecord(rawSlot)) continue;
+    const key = cleanDisplayText(rawSlot.key, '');
+    if (!key || out[key]) continue;
+    const state = cleanDisplayText(rawSlot.state, '');
+    if (
+      !doNotAskAgainFor.has(key) &&
+      !['answered', 'confirmed', 'completed', 'modified'].includes(state)
+    ) {
+      continue;
+    }
+    const text = cleanDisplayText(rawSlot.value, '');
+    if (text) out[key] = text;
+  }
 }
 
 function isTaskSlotUsableForClarification(
@@ -256,6 +305,15 @@ function buildSearchGoal(input: {
 }): string {
   const raw = cleanDisplayText(input.message, '');
   const currentGoal = cleanDisplayText(input.currentGoal, '');
+  const boundary = input.fields.boundary;
+  const strangerPolicy =
+    input.fields.strangerPolicy && !boundary.includes(input.fields.strangerPolicy)
+      ? input.fields.strangerPolicy
+      : '';
+  const publicActivity =
+    input.fields.publicActivity && !boundary.includes(input.fields.publicActivity)
+      ? input.fields.publicActivity
+      : '';
   const parts = Array.from(
     new Set(
       [
@@ -266,7 +324,9 @@ function buildSearchGoal(input: {
         input.fields.intensity,
         input.fields.relationshipGoal,
         input.fields.candidatePreference,
-        input.fields.boundary,
+        boundary,
+        strangerPolicy,
+        publicActivity,
       ].filter(Boolean),
     ),
   );
@@ -315,7 +375,7 @@ function buildClarifyingQuestion(input: {
         : `新增信息已记下，现在只差 ${allMissingText}`;
     return `${knownText}${prefix}。直接补这几项就可以；如果不确定，也可以说“由你按安全默认值处理”。`;
   }
-  return `${knownText}为了只推荐安全、合适的机会，还差 ${missingText}。你可以一句话补齐，比如“青岛周末下午，青岛大学附近，轻松跑步，想认识同城周末有空、先运动再慢慢熟悉的人，只在公共场所，先站内聊，接受陌生人，可以公开发起活动”。`;
+  return `${knownText}还差 ${missingText}。你可以直接一句话补齐；安全边界和是否发布到发现，会在真正发送邀请或公开前再让你确认。`;
 }
 
 function extractActivity(text: string): string {
@@ -332,9 +392,20 @@ function extractCity(text: string): string {
   return sanitizeCity(match?.[1] ?? '');
 }
 
+function inferCityFromKnownArea(text: string): string {
+  if (
+    /(崂山区|市南区|市北区|李沧区|黄岛区|青岛大学|五四广场|奥帆中心|石老人|浮山|麦岛|台东|栈桥)/.test(
+      text,
+    )
+  ) {
+    return '青岛';
+  }
+  return '';
+}
+
 function extractTime(text: string): string {
   const match = text.match(
-    /(今晚|明天|后天|周末|工作日|上午|中午|下午|晚上|早上|午后|周[一二三四五六日天]|星期[一二三四五六日天])/,
+    /(今天(?:上午|中午|下午|晚上)?|今晚|明天(?:上午|中午|下午|晚上)?|后天(?:上午|中午|下午|晚上)?|周末(?:上午|中午|下午|晚上)?|工作日晚上|工作日|上午|中午|下午|晚上|早上|午后|周[一二三四五六日天](?:上午|下午|晚上)?|星期[一二三四五六日天](?:上午|下午|晚上)?)/,
   );
   return cleanDisplayText(match?.[1], '');
 }
@@ -422,6 +493,13 @@ function candidatePreferenceSummary(
   preferences: ReturnType<typeof readSocialAgentTaskMemory>['preferences'],
   relationshipGoal: string,
 ): string {
+  if (
+    /(女舞蹈生|女生.{0,12}(舞蹈|跳舞|舞者)|女孩.{0,12}(舞蹈|跳舞|舞者)|舞蹈.{0,12}(女生|女孩|女性)|女大学生.{0,12}(舞蹈|跳舞|舞者))/i.test(
+      text,
+    )
+  ) {
+    return '女生、舞蹈相关';
+  }
   const explicitPreference = text.match(
     /(理想型是|偏好是|希望认识|想认识|更想认识|最好是|希望是)([^，。；.!?]{2,56})(的人|朋友|搭子|伙伴|对象)?/i,
   );

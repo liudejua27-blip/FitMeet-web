@@ -88,6 +88,7 @@ export class SocialAgentRecommendationResultService {
     signal?: AbortSignal | null;
     alphaTurn?: FitMeetAlphaTurnDecision;
     buildMemoryContext: (task: AgentTask) => unknown;
+    taskContext?: Record<string, unknown>;
     toEventDto: (event: AgentTaskEvent) => Record<string, unknown>;
   }): Promise<SocialAgentChatRunResult> {
     const {
@@ -103,7 +104,7 @@ export class SocialAgentRecommendationResultService {
     } = input;
     task.status = AgentTaskStatus.AwaitingConfirmation;
     task.statusReason = statusReason;
-    this.rememberShortTermCandidates(task, draft, candidates);
+    this.rememberShortTermCandidates(task, draft, candidates, searchResult);
     this.rememberShortTermStep(
       task,
       'awaiting_confirmation',
@@ -174,7 +175,11 @@ export class SocialAgentRecommendationResultService {
           .catch(() => null)
       : null;
     const fallbackAssistantMessage =
-      searchResult.message || buildRecommendationAssistantMessage(candidates);
+      this.buildRecommendationFallbackAssistantMessage({
+        draft,
+        candidates,
+        searchResult,
+      });
     let assistantStreamed = false;
     const streamAssistantDelta = async (delta: string) => {
       if (!delta) return;
@@ -197,6 +202,7 @@ export class SocialAgentRecommendationResultService {
           onDelta: emit ? streamAssistantDelta : undefined,
           signal: input.signal,
           buildMemoryContext: input.buildMemoryContext,
+          taskContext: input.taskContext,
         }),
         fallbackAssistantMessage,
       ) ?? fallbackAssistantMessage;
@@ -256,6 +262,7 @@ export class SocialAgentRecommendationResultService {
     onDelta?: (delta: string) => void | Promise<void>;
     signal?: AbortSignal | null;
     buildMemoryContext: (task: AgentTask) => unknown;
+    taskContext?: Record<string, unknown>;
   }): Promise<string> {
     if (!this.finalResponses) return input.fallbackReply;
     return this.finalResponses.generate(
@@ -263,12 +270,15 @@ export class SocialAgentRecommendationResultService {
         userMessage: cleanDisplayText(input.draft.rawText, input.task.goal),
         intent: 'candidate_search',
         agentState: readSocialAgentCurrentAgentState(input.task),
-        conversationHistory: buildSocialAgentLlmConversationHistory(input.task),
+        conversationHistory:
+          readConversationHistoryFromTaskContext(input.taskContext) ??
+          buildSocialAgentLlmConversationHistory(input.task),
         memoryContext: input.buildMemoryContext(input.task) as Record<
           string,
           unknown
         >,
-        taskContext: summarizeSocialAgentTaskMemoryForLlm(input.task),
+        taskContext:
+          input.taskContext ?? summarizeSocialAgentTaskMemoryForLlm(input.task),
         plannerDecision: readSocialAgentConversationBrainDecision(input.task),
         toolResults: [
           {
@@ -306,6 +316,55 @@ export class SocialAgentRecommendationResultService {
         signal: input.signal,
       },
     );
+  }
+
+  private buildRecommendationFallbackAssistantMessage(input: {
+    draft: SocialAgentRequestDraft;
+    candidates: SocialAgentChatCandidate[];
+    searchResult: SocialAgentCandidateSearchResult;
+  }): string {
+    if (input.candidates.length > 0) {
+      return (
+        input.searchResult.message ??
+        buildRecommendationAssistantMessage(input.candidates)
+      );
+    }
+    return this.buildEmptyCandidateFallbackMessage(
+      input.draft,
+      input.searchResult,
+    );
+  }
+
+  private buildEmptyCandidateFallbackMessage(
+    draft: SocialAgentRequestDraft,
+    searchResult: SocialAgentCandidateSearchResult,
+  ): string {
+    const criteria = this.describeSearchCriteria(draft);
+    const criteriaText =
+      criteria.length > 0
+        ? `我已经按「${criteria.join('、')}」查过一轮，`
+        : '我已经按你当前给出的条件查过一轮，';
+    const intro =
+      searchResult.emptyReason === 'no_real_candidates'
+        ? '这次没有找到真实、公开可发现且符合安全边界的候选人。'
+        : '这次还没有整理出可以直接推荐的候选人。';
+    return `${intro}${criteriaText}不会编造候选。你可以选择放宽候选偏好或范围、换一个时间，或者先把约练卡发布到发现，让合适的人主动回应。发送邀请或公开更具体的位置前，我仍会先让你确认。`;
+  }
+
+  private describeSearchCriteria(draft: SocialAgentRequestDraft): string[] {
+    const metadata = isRecord(draft.metadata) ? draft.metadata : {};
+    const criteria = [
+      draft.activityType,
+      metadata.timePreference,
+      metadata.locationPreference,
+      draft.city,
+      metadata.candidatePreference,
+      metadata.intensity,
+      ...(Array.isArray(draft.interestTags) ? draft.interestTags.slice(0, 3) : []),
+    ]
+      .map((value) => cleanDisplayText(value, ''))
+      .filter((value): value is string => value.length > 0);
+    return Array.from(new Set(criteria)).slice(0, 6);
   }
 
   private evaluateAgentQuality(result: SocialAgentChatRunResult): void {
@@ -356,6 +415,7 @@ export class SocialAgentRecommendationResultService {
     task: AgentTask,
     draft: SocialAgentRequestDraft,
     candidates: SocialAgentChatCandidate[],
+    searchResult: SocialAgentCandidateSearchResult,
   ): void {
     rememberSocialAgentShortTerm(task, {
       socialRequestId: draft.socialRequestId ?? null,
@@ -387,6 +447,11 @@ export class SocialAgentRecommendationResultService {
         status: candidate.status ?? null,
       })),
       candidateCount: candidates.length,
+      emptyReason: candidates.length === 0 ? searchResult.emptyReason : null,
+      nextStep:
+        candidates.length > 0
+          ? '等待用户选择候选人或确认下一步动作'
+          : '放宽条件、换时间范围，或确认发布约练卡到发现',
     });
     transitionSocialAgentState(task, 'candidates_returned', {
       objective: 'search',
@@ -459,4 +524,19 @@ export class SocialAgentRecommendationResultService {
     if (text.length <= max) return text;
     return `${text.slice(0, Math.max(0, max - 1))}…`;
   }
+}
+
+function readConversationHistoryFromTaskContext(
+  taskContext?: Record<string, unknown>,
+): Array<Record<string, unknown>> | null {
+  const history = taskContext?.conversationHistory ?? taskContext?.recentMessages;
+  if (!Array.isArray(history)) return null;
+  const records = history.filter((item): item is Record<string, unknown> =>
+    isRecord(item),
+  );
+  return records.length > 0 ? records : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }

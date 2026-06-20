@@ -10,7 +10,6 @@ const baseUrl = process.env.FITMEET_E2E_BASE_URL || process.env.PLAYWRIGHT_BASE_
 
 const entryRoutes = (process.env.FITMEET_DISCOVER_SMOKE_ROUTES || [
   '/',
-  '/legacy-home',
   '/sports',
   '/cities',
   '/agent-connect',
@@ -32,6 +31,14 @@ const aliasRoutes = [
   '/hall?tab=match',
   '/social-hall',
   '/agent-connect/social-hall',
+];
+
+const compatibilityAliasRoutes = [
+  {
+    route: '/legacy-home',
+    expectedPathname: '/',
+    label: 'legacy home alias',
+  },
 ];
 
 const toUrl = (route) => new URL(route, baseUrl).toString();
@@ -166,6 +173,25 @@ const testAliasRoute = async (page, route) => {
   console.log(`[discover-smoke] ${route}: alias resolved to /discover`);
 };
 
+const testCompatibilityAliasRoute = async (page, { route, expectedPathname, label }) => {
+  await page.goto(toUrl(route));
+  await waitForApp(page);
+  await page.waitForURL(
+    (url) => {
+      const current = url instanceof URL ? url : new URL(String(url));
+      return current.pathname === expectedPathname;
+    },
+    { timeout: 10_000 },
+  );
+  const scrollY = await page.evaluate(() => window.scrollY);
+  if (scrollY > 8) {
+    throw new Error(
+      `[discover-smoke] ${route}: ${label} did not reset scroll, scrollY=${scrollY}`,
+    );
+  }
+  console.log(`[discover-smoke] ${route}: ${label} resolved to ${expectedPathname}`);
+};
+
 let serverProcess;
 if (!hasExplicitBaseUrl) {
   serverProcess = await startLocalViteServer();
@@ -181,6 +207,10 @@ try {
 
   for (const route of aliasRoutes) {
     await testAliasRoute(page, route);
+  }
+
+  for (const alias of compatibilityAliasRoutes) {
+    await testCompatibilityAliasRoute(page, alias);
   }
 
   console.log(`[discover-smoke] PASS for ${baseUrl}`);

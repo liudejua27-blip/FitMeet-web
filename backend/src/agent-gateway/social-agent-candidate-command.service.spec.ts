@@ -190,4 +190,85 @@ describe('SocialAgentCandidateCommandService', () => {
       body,
     );
   });
+
+  it.each([
+    {
+      command: 'publish_draft',
+      run: (service: SocialAgentCandidateCommandService) =>
+        service.publishDraft(7, 101, {
+          socialRequestId: 301,
+          type: SocialRequestType.RunningPartner,
+          rawText: '今晚青岛轻松跑步',
+          title: '今晚青岛轻松跑步',
+          visibility: SocialRequestVisibility.Private,
+          status: UserSocialRequestStatus.Draft,
+        }),
+      expectedAgent: 'Meet Loop Agent',
+    },
+    {
+      command: 'save_candidate',
+      run: (service: SocialAgentCandidateCommandService) =>
+        service.saveCandidate(7, 101, {
+          targetUserId: 22,
+          candidateRecordId: 501,
+          socialRequestId: 301,
+        }),
+      expectedAgent: 'Social Match Agent',
+    },
+    {
+      command: 'send_candidate_message',
+      run: (service: SocialAgentCandidateCommandService) =>
+        service.sendCandidateMessage(7, 101, {
+          targetUserId: 22,
+          candidateRecordId: 501,
+          message: '今晚先轻松跑一段吗？',
+        }),
+      expectedAgent: 'Social Match Agent',
+    },
+    {
+      command: 'connect_candidate',
+      run: (service: SocialAgentCandidateCommandService) =>
+        service.connectCandidate(7, 101, {
+          candidateUserId: 22,
+          candidateRecordId: 501,
+          socialRequestId: 301,
+        }),
+      expectedAgent: 'Social Match Agent',
+    },
+  ])(
+    'routes $command through the confirmed-action AgentLoop contract',
+    async ({ command, run, expectedAgent }) => {
+      const { executeCalls, service } = makeHarness();
+
+      await run(service);
+
+      expect(executeCalls).toHaveLength(1);
+      expect(executeCalls[0]).toMatchObject({
+        taskId: 101,
+        goal: `candidate_command:${command}`,
+        agent: 'FitMeet Main Agent',
+        plan: {
+          reason: 'Candidate command endpoints execute only through AgentLoop.',
+          tools: [
+            {
+              agent: expectedAgent,
+              toolName: 'candidate_command_execute',
+              covers: ['execute_confirmed_action'],
+              requiresApproval: false,
+              input: expect.objectContaining({
+                command,
+                ownerUserId: 7,
+                taskId: 101,
+                confirmedEndpoint: true,
+                pipelineSteps: ['execute_confirmed_action'],
+                sideEffectPolicy: 'execute_only_after_user_confirmation',
+              }),
+            },
+          ],
+        },
+        maxToolCalls: 1,
+        maxRetries: 0,
+      });
+    },
+  );
 });
