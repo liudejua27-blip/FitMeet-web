@@ -319,7 +319,7 @@ const requiredContentChecks = [
   {
     file: 'backend/src/config/production-env-readiness.ts',
     patterns: [
-      "requireMinimumInt(env, 'SOCIAL_AGENT_CONTEXT_TURN_LIMIT', 40, error);",
+      "requireMinimumInt(env, 'SOCIAL_AGENT_CONTEXT_TURN_LIMIT', 80, error);",
       "requireMinimumInt(env, 'SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS', 30000, error);",
       "'SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS'",
       "requireMinimumInt(env, 'SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS', 30000, error);",
@@ -387,7 +387,7 @@ const requiredContentChecks = [
   {
     file: 'scripts/ecs-host-preflight.sh',
     patterns: [
-      'check_minimum_integer_env SOCIAL_AGENT_CONTEXT_TURN_LIMIT 40',
+      'check_minimum_integer_env SOCIAL_AGENT_CONTEXT_TURN_LIMIT 80',
       'check_minimum_integer_env SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS 30000',
       'check_minimum_integer_env SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS 20000',
       'check_minimum_integer_env SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS 30000',
@@ -709,7 +709,7 @@ const requiredContentChecks = [
   {
     file: 'backend/src/agent-gateway/social-agent-context-window.ts',
     patterns: [
-      'SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS = 40',
+      'SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS = 80',
       'SOCIAL_AGENT_MAX_CONTEXT_TURNS = 120',
       'SOCIAL_AGENT_CONTEXT_TURN_LIMIT',
       'SOCIAL_AGENT_RECENT_MESSAGE_LIMIT',
@@ -762,7 +762,7 @@ const requiredContentChecks = [
       'hydrates 20 rounds of context while redacting contact and precise location data',
       'uses the same configured context window as the router and brain',
       "key === 'SOCIAL_AGENT_CONTEXT_TURN_LIMIT'",
-      'expect(context.recentMessages).toHaveLength(40)',
+      'expect(context.recentMessages).toHaveLength(80)',
       "text: '第 9 条上下文'",
     ],
   },
@@ -785,11 +785,11 @@ const requiredContentChecks = [
     patterns: [
       'does not let stale low context window config shorten DeepSeek planner memory',
       'SOCIAL_AGENT_CONTEXT_TURN_LIMIT',
-      'expect(userPayload.priorPlan).toHaveLength(40)',
-      'expect(userPayload.recentToolCalls).toHaveLength(40)',
-      'expect(brainMemory.turns).toHaveLength(40)',
-      'expect(brainMemory.previousPlanSummary).toHaveLength(40)',
-      'expect(brainMemory.previousToolSummary).toHaveLength(40)',
+      'expect(userPayload.priorPlan).toHaveLength(80)',
+      'expect(userPayload.recentToolCalls).toHaveLength(80)',
+      'expect(brainMemory.turns).toHaveLength(80)',
+      'expect(brainMemory.previousPlanSummary).toHaveLength(80)',
+      'expect(brainMemory.previousToolSummary).toHaveLength(80)',
     ],
   },
   {
@@ -811,8 +811,8 @@ const requiredContentChecks = [
     patterns: [
       'merges stored short-term turns with hydrated history using the unified context limit',
       'SOCIAL_AGENT_CONTEXT_TURN_LIMIT',
-      'expect(context.shortTerm.recentTurns).toHaveLength(40)',
-      'expect(context.longTerm?.recentPreferenceHistory).toHaveLength(40)',
+      'expect(context.shortTerm.recentTurns).toHaveLength(80)',
+      'expect(context.longTerm?.recentPreferenceHistory).toHaveLength(80)',
     ],
   },
   {
@@ -829,7 +829,7 @@ const requiredContentChecks = [
     patterns: [
       'uses the unified context window for current task tool-call memory',
       'SOCIAL_AGENT_CONTEXT_TURN_LIMIT',
-      'expect(memory.recentToolCalls).toHaveLength(40)',
+      'expect(memory.recentToolCalls).toHaveLength(80)',
     ],
   },
   {
@@ -846,7 +846,7 @@ const requiredContentChecks = [
     patterns: [
       'passes the configured context window into layered memory construction',
       'SOCIAL_AGENT_CONTEXT_TURN_LIMIT',
-      'expect(call.conversationHistory).toHaveLength(40)',
+      'expect(call.conversationHistory).toHaveLength(80)',
     ],
   },
   {
@@ -864,8 +864,8 @@ const requiredContentChecks = [
     patterns: [
       'uses the configured context window for intent routing and brain planning',
       'SOCIAL_AGENT_CONTEXT_TURN_LIMIT',
-      'expect(routedInput.conversationHistory).toHaveLength(40)',
-      'expect(brainInput.conversationHistory).toHaveLength(40)',
+      'expect(routedInput.conversationHistory).toHaveLength(80)',
+      'expect(brainInput.conversationHistory).toHaveLength(80)',
     ],
   },
   {
@@ -882,7 +882,7 @@ const requiredContentChecks = [
     patterns: [
       'uses the unified context window to recover profile facts mentioned earlier in the thread',
       'SOCIAL_AGENT_CONTEXT_TURN_LIMIT',
-      'contextTurnLimit: 40',
+      'contextTurnLimit: 80',
       '我在青岛大学，周末下午喜欢跑步和咖啡',
       'sourceMessage: ',
     ],
@@ -902,9 +902,9 @@ const requiredContentChecks = [
     patterns: [
       'restores chat messages with the configured unified context window',
       'SOCIAL_AGENT_CONTEXT_TURN_LIMIT',
-      'expect(restoredUserMessages).toHaveLength(40)',
+      'expect(restoredUserMessages).toHaveLength(79)',
       '第 9 条上下文',
-      '第 48 条上下文',
+      '第 88 条上下文',
     ],
   },
   {
@@ -922,7 +922,7 @@ const requiredContentChecks = [
     patterns: [
       'uses the configured context window when summarizing a current task',
       'contextLimit: 40',
-      'expect(summary.plan).toHaveLength(40)',
+      'expect(summary.plan).toHaveLength(80)',
       "toBe('step_9')",
     ],
   },

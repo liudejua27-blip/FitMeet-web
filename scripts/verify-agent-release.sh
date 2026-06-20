@@ -67,6 +67,10 @@ agent_skill_eval_args=()
 if is_truthy "${RUN_AGENT_SKILL_EVAL_BACKEND:-}"; then
   agent_skill_eval_args+=(--backend)
 fi
+if [[ -n "${AGENT_SKILL_EVAL_REPORT_FILE:-}" ]]; then
+  mkdir -p "$(dirname "${AGENT_SKILL_EVAL_REPORT_FILE}")"
+  agent_skill_eval_args+=(--report "${AGENT_SKILL_EVAL_REPORT_FILE}")
+fi
 case "${RUN_AGENT_SKILL_EVAL_API:-false}" in
   true|readiness)
     agent_skill_eval_args+=(--api-readiness)

@@ -216,7 +216,7 @@ check_agent_intelligence_env() {
   [ "$intent_mode" = "llm_first" ] && pass "SOCIAL_AGENT_INTENT_ROUTER_MODE keeps LLM-first routing" || fail "SOCIAL_AGENT_INTENT_ROUTER_MODE must be llm_first."
   check_not_false_env SOCIAL_AGENT_INTENT_LLM
   check_not_false_env SOCIAL_AGENT_BRAIN_LLM_PLANNER
-  check_minimum_integer_env SOCIAL_AGENT_CONTEXT_TURN_LIMIT 40
+  check_minimum_integer_env SOCIAL_AGENT_CONTEXT_TURN_LIMIT 80
   check_minimum_integer_env SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS 30000
   check_minimum_integer_env SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS 20000
   check_minimum_integer_env SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS 30000

@@ -22,12 +22,12 @@ green checks.
 
 | Gate                         | Command                                                                                                                                                                      | Evidence                                                                                                                                                       |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unified Agent release matrix | `scripts/agent-release-matrix.sh`                                                                                                                                            | Runs the static audit, backend checks, frontend checks, browser QA, and optional real smoke gates from one entrypoint.                                         |
+| Unified Agent release matrix | `scripts/agent-release-matrix.sh`                                                                                                                                            | Runs the static audit, backend checks, frontend checks, browser QA, optional real smoke gates, and writes an Agent skill eval JSON report under `artifacts/agent-release-evidence/` from one entrypoint. |
 | Worktree cleanup audit       | Review: `scripts/agent-release-worktree-audit.sh --review` or `AGENT_RELEASE_AUDIT_OUT_DIR=/tmp/fitmeet-agent-release scripts/agent-release-worktree-audit.sh --review`; final gate: `scripts/agent-release-worktree-audit.sh --strict` | Groups dirty files into `agent-backend-core`, `agent-frontend-assistant-ui`, `discover-profile-closure`, `deploy-production`, and `tests-docs`, writes optional `*.paths.txt` / `*.status.txt` commit-splitting manifests, blocks untracked source files, generated artifacts, and non-deleted legacy Agent files, and uses `--strict` to require a clean worktree after the five release commits are split. |
 | Static release audit         | `pnpm --dir frontend run check:agent-chat-release`                                                                                                                           | Assistant-ui files tracked, old Agent shell/pet absent, release scripts include Agent smoke gates, and production build checks enforce Agent chunk splitting. |
 | Frontend typecheck           | `pnpm --dir frontend exec tsc -b`                                                                                                                                            | `/agent/chat` assistant-ui components and API adapters compile together.                                                                                       |
 | Backend typecheck            | `pnpm --dir backend exec tsc --noEmit`                                                                                                                                       | AgentLoop, checkpoint, smoke, controller, and presenter surfaces compile together.                                                                             |
-| Agent unit/acceptance suite  | `bash scripts/verify-agent-release.sh`                                                                                                                                       | Backend Agent specs, Social Codex trace replay regression, stranger candidate-pool safety, reminder safety, long-term memory history, frontend Agent specs, browser QA, and optional smoke commands are wired together. |
+| Agent unit/acceptance suite  | `AGENT_SKILL_EVAL_REPORT_FILE=artifacts/agent-release-evidence/agent-skill-eval.json bash scripts/verify-agent-release.sh`                                                  | Backend Agent specs, Social Codex trace replay regression, stranger candidate-pool safety, reminder safety, long-term memory history, frontend Agent specs, browser QA, optional smoke commands, and a JSON skill eval report are wired together. |
 | Trace replay regression      | Included in `bash scripts/verify-agent-release.sh` via Social Codex thread/session, context hydrator, task slot state machine, event-store, event-v2, Life Graph governance, trace-eval, runtime-policy, controller, tool-execution-policy specs, and frontend `socialAgentApiReplay.test.ts`. | Ensures `/social-agent/tasks/:id/events/eval` and `/events/replay` remain release-gated, thread/task/session do not drift, slot memory does not repeat answered fields, Life Graph writes stay governed, frontend replay restore keeps visible process events available, and high-risk actions require safety checks, approved resume, dry-run preview, audit metadata, and no sensitive replay payload leaks. |
 | Browser QA                   | `pnpm --dir frontend run qa:agent-chat`                                                                                                                                      | 390 / 768 / 1024 / 1440 screenshots and assertions for shell, composer, ThreadList, actions, Tool UI, stop, feedback, branch, checkpoint actions.              |
 | Production browser QA        | `EXPECTED_RELEASE_COMMIT=<release-commit> FITMEET_AGENT_BROWSER_QA_ALLOW_REMOTE=true FITMEET_AGENT_BROWSER_QA_EMAIL=<smoke-email> FITMEET_AGENT_BROWSER_QA_PASSWORD=<smoke-password> pnpm --dir frontend run qa:agent-chat:production` | First verifies `/api/health.release.commit` matches the intended release, then logs in with a dedicated smoke account, checks the deployed `/agent/chat` assistant-ui shell at 390 / 768 / 1024 / 1440, proves ordinary chat does not render social UI, and proves explicit social intent clarifies or renders opportunities. |
@@ -66,6 +66,7 @@ guards remain covered by an executable regression check.
 
 | Scenario                                      | Required proof                                                                                                                                                                      |
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Skill workflow contract is intact             | `scripts/agent-release-matrix.sh` writes an Agent skill eval report proving `social-meetup-workflow.md`, `tool-examples.jsonl`, and `eval-cases.jsonl` still cover the canonical social/meet-up chain. |
 | Ordinary chat does not trigger social UI      | `qa-agent-chat-shell.mjs` checks no OpportunityCard in ordinary chat; `smoke-agent-opportunity-journey.ts` calls `assertNoOpportunityCards` and `assertNoSocialExecutionArtifacts`. |
 | Vague social request asks clarification       | Smoke requires city, time, intensity, social boundary, stranger policy, and public-activity policy before search.                                                                   |
 | Explicit social request returns opportunities | Smoke requires at least 3 candidate/activity OpportunityCards and stable `fitmeet.tool-ui.v1` schema.                                                                               |
@@ -108,6 +109,33 @@ guards remain covered by an executable regression check.
 - Do not run mutating smoke with a real user account.
 - Do not package `.env.production`, SSL private keys, `frontend/qa`, `docs/qa`,
   `qa-gsap-round2`, `deploy/agent-smoke.remote.env`, or screenshot artifacts.
+- Skill eval JSON reports are written under `artifacts/` by default. They are
+  release evidence only, are gitignored, and must not be included in the ECS zip.
+
+## Mainline Command Shortcuts
+
+Use these shortcuts while validating the Social Codex mainline:
+
+```bash
+# Non-mutating local/CI gate with skill report, backend checks, frontend checks,
+# and browser QA.
+scripts/agent-release-matrix.sh
+
+# Same gate without browser QA, useful while iterating on backend contracts.
+scripts/agent-release-matrix.sh --skip-browser-qa
+
+# Add build proof.
+scripts/agent-release-matrix.sh --skip-browser-qa --build
+
+# Add real API readiness after staging/ECS deploy with a dedicated smoke user.
+RUN_AGENT_SKILL_EVAL_API=readiness \
+  scripts/agent-release-matrix.sh --skip-browser-qa --opportunity-readiness-smoke
+
+# Full mutating chain plus SSE abort; run only with dedicated smoke credentials.
+AGENT_SMOKE_ALLOW_MUTATIONS=true \
+RUN_AGENT_SKILL_EVAL_API=all \
+  scripts/agent-release-matrix.sh --skip-browser-qa --opportunity-full-smoke --sse-abort-smoke
+```
 
 ## Release Decision
 
