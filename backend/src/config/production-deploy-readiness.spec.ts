@@ -388,6 +388,7 @@ describe('production deploy readiness', () => {
       'agent_activity_logs',
       'social_request_candidates',
       'life_graph_profiles',
+      'life_graph_access_audit_logs',
     ]) {
       expect(criticalTableCheck).toContain(`'${table}'`);
     }

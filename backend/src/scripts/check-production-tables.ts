@@ -13,6 +13,7 @@ const REQUIRED_TABLES = [
   'agent_activity_logs',
   'social_request_candidates',
   'life_graph_profiles',
+  'life_graph_access_audit_logs',
 ] as const;
 
 type TableCheckRow = {

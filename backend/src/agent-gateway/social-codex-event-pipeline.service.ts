@@ -505,10 +505,7 @@ export class SocialCodexEventPipelineService {
     writer: SocialCodexEventWriter,
     result: UserFacingAgentResponse,
   ): Promise<void> {
-    if (
-      result.safeStatus.boundaryNotes.length > 0 ||
-      result.safeStatus.level !== 'low'
-    ) {
+    if (this.shouldEmitSafetyProcess(result)) {
       await writer('safety_check.done', 'safety_filter', '已检查安全边界', {
         state: result.safeStatus.blocked ? 'failed' : 'done',
         detail:
@@ -639,6 +636,20 @@ export class SocialCodexEventPipelineService {
         },
       );
     }
+  }
+
+  private shouldEmitSafetyProcess(result: UserFacingAgentResponse): boolean {
+    if (result.safeStatus.blocked) return true;
+    if (result.safeStatus.level !== 'low') return true;
+    if (result.safeStatus.requiredConfirmations.length > 0) return true;
+    if (result.pendingConfirmations.length > 0) return true;
+    return result.cards.some(
+      (card) =>
+        this.isCandidateCard(card) ||
+        this.isActivityCard(card) ||
+        this.cardSchemaType(card) === 'safety.approval' ||
+        this.cardSchemaType(card) === 'meet_loop.timeline',
+    );
   }
 
   stageFromStep(label: string): SocialAgentEventV2Stage {

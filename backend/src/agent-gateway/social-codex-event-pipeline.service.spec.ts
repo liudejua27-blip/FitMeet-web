@@ -167,6 +167,38 @@ describe('SocialCodexEventPipelineService', () => {
     );
   });
 
+  it('does not emit safety process for ordinary chat opt-out boundary notes', async () => {
+    const writes: Array<{ event: string; data: unknown }> = [];
+    const pipeline = new SocialCodexEventPipelineService(
+      new SocialAgentEventV2Service(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new SocialCodexApprovalSchemaService(),
+    );
+    const writer = makePipeline(writes);
+    const response: UserFacingAgentResponse = {
+      assistantMessage: '可以，我们先安静聊聊，不会推荐人或进入约练流程。',
+      lightStatus: '正在理解你的需求',
+      cards: [],
+      safeStatus: {
+        blocked: false,
+        level: 'low',
+        boundaryNotes: ['用户明确说不要推荐人，也不要约练。'],
+        requiredConfirmations: [],
+      },
+      pendingConfirmations: [],
+      permissionMode: AgentTaskPermissionMode.Confirm,
+    };
+
+    await pipeline.writeResultEvents(writer, response);
+
+    expect(writes.map((item) => item.event)).not.toContain(
+      'safety_check.done',
+    );
+  });
+
   it('does not emit early slot events for ordinary chat with time and place but no social execution intent', async () => {
     const writes: Array<{ event: string; data: unknown }> = [];
     const { pipeline, writer } = makePipelineWithSlots(writes);
