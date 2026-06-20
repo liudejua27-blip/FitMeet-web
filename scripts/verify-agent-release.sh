@@ -190,6 +190,40 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-state-machine.spec.ts \
   src/agent-gateway/social-agent-task-execution-state.spec.ts \
   src/agent-gateway/social-agent-task-lifecycle.service.spec.ts \
+  src/agent-gateway/public-social-candidate.presenter.spec.ts \
+  src/agent-gateway/public-social-intent-list-query.spec.ts \
+  src/agent-gateway/public-social-intent.helpers.spec.ts \
+  src/agent-gateway/public-social-intent.presenter.spec.ts \
+  src/agent-gateway/social-agent-profile-gate.service.spec.ts \
+  src/agent-gateway/social-agent-social-intent-gate.spec.ts \
+  src/agent-gateway/social-agent-opportunity-clarification.spec.ts \
+  src/agent-gateway/social-agent-draft-publication.service.spec.ts \
+  src/agent-gateway/social-agent-draft-search.service.spec.ts \
+  src/agent-gateway/social-agent-activity-search.service.spec.ts \
+  src/agent-gateway/social-agent-activity-tool.service.spec.ts \
+  src/agent-gateway/social-agent-target-resolver.service.spec.ts \
+  src/agent-gateway/social-agent-card-action-router.service.spec.ts \
+  src/agent-gateway/social-agent-candidate-action.service.spec.ts \
+  src/agent-gateway/social-agent-candidate-command.service.spec.ts \
+  src/agent-gateway/candidate-explanation.service.spec.ts \
+  src/agent-gateway/social-agent-candidate-card.presenter.spec.ts \
+  src/agent-gateway/social-agent-candidate-display-fields.spec.ts \
+  src/agent-gateway/social-agent-candidate-dynamic-explanation.spec.ts \
+  src/agent-gateway/social-agent-candidate-emotional-insight.spec.ts \
+  src/agent-gateway/social-agent-candidate-identity-fields.spec.ts \
+  src/agent-gateway/social-agent-candidate-life-graph-scoring.spec.ts \
+  src/agent-gateway/social-agent-candidate-message-action-result.spec.ts \
+  src/agent-gateway/social-agent-candidate-message-draft.presenter.spec.ts \
+  src/agent-gateway/social-agent-candidate-pool-activity-result.spec.ts \
+  src/agent-gateway/social-agent-candidate-pool-eligibility.spec.ts \
+  src/agent-gateway/social-agent-candidate-pool-merge.spec.ts \
+  src/agent-gateway/social-agent-candidate-pool-query.spec.ts \
+  src/agent-gateway/social-agent-candidate-pool-result.presenter.spec.ts \
+  src/agent-gateway/social-agent-candidate-profile-presenter.spec.ts \
+  src/agent-gateway/social-agent-candidate-query-parser.spec.ts \
+  src/agent-gateway/social-agent-candidate-reasons.spec.ts \
+  src/agent-gateway/social-agent-candidate-risk.spec.ts \
+  src/agent-gateway/social-agent-candidate-scoring.spec.ts \
   src/agent-gateway/social-agent-candidate-score-breakdown.spec.ts \
   src/agent-gateway/social-agent-candidate-pool.service.spec.ts \
   src/agent-gateway/social-agent-route-branch-boundary.spec.ts \
