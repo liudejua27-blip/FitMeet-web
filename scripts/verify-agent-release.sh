@@ -103,6 +103,9 @@ pnpm --dir "${ROOT_DIR}/frontend" run check:agent-chat-release
 step "Typecheck backend Agent release surface"
 pnpm --dir "${ROOT_DIR}/backend" exec tsc --noEmit
 
+step "Build backend Agent production bundle"
+pnpm --dir "${ROOT_DIR}/backend" run build
+
 step "Dry-run Agent smoke seed data"
 pnpm --dir "${ROOT_DIR}/backend" run seed:agent-smoke:dry-run
 
@@ -264,6 +267,9 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
 
 step "Typecheck frontend assistant-ui Agent shell"
 pnpm --dir "${ROOT_DIR}/frontend" exec tsc -b
+
+step "Build frontend assistant-ui Agent production bundle"
+pnpm --dir "${ROOT_DIR}/frontend" run build
 
 step "Run frontend assistant-ui Agent unit checks"
 pnpm --dir "${ROOT_DIR}/frontend" exec vitest run \
