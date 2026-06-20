@@ -45,3 +45,4 @@ Any of these actions:
 - `invite_requires_approval_checkpoint`
 - `approval_reject_prevents_side_effect`
 - `approval_resume_is_idempotent`
+- `fallback_not_streamed_as_llm_answer`

@@ -49,3 +49,4 @@ Each fact must have:
 
 - `stable_preference_saved_with_evidence`
 - `one_off_noise_not_saved`
+- `deepseek_context_window_not_truncated`

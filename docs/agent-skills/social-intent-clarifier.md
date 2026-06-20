@@ -61,3 +61,6 @@ recommendations or Discover cards yet.
 - `social_intent_extracts_slots_once`
 - `correction_updates_candidate_preference_without_reasking_core_slots`
 - `twenty_turn_memory_no_repeat_questions`
+- `deepseek_quality_routing_not_downgraded`
+- `deepseek_context_window_not_truncated`
+- `fallback_not_streamed_as_llm_answer`

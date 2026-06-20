@@ -58,6 +58,12 @@ const sourceFiles = {
     'backend/src/agent-gateway/social-agent-candidate-pool-result.presenter.ts',
   candidatePresenterSpec:
     'backend/src/agent-gateway/social-agent-candidate-pool-result.presenter.spec.ts',
+  contextWindowSpec:
+    'backend/src/agent-gateway/social-agent-context-window.spec.ts',
+  deepseekQualityBoundarySpec:
+    'backend/src/agent-gateway/social-agent-deepseek-quality-boundary.spec.ts',
+  fallbackSourceBoundarySpec:
+    'backend/src/agent-gateway/social-agent-fallback-source-boundary.spec.ts',
   inboxToolSpec:
     'backend/src/agent-gateway/social-agent-inbox-tool.service.spec.ts',
   lifeGraphGovernanceSpec:
@@ -552,6 +558,52 @@ const validators = {
       'shouldWriteFact',
     ]);
   },
+
+  deepseek_quality_routing_not_downgraded(caseItem) {
+    expectCase(
+      caseItem,
+      (item) => item.expected.noFastModelFallback === true,
+      'DeepSeek quality routes must not downgrade to fast fallback models',
+    );
+    expectCase(
+      caseItem,
+      (item) => Number(item.expected.minimumTimeoutMs) >= 20_000,
+      'DeepSeek route/planner/tool budgets must be long enough for production latency',
+    );
+    expectIncludes('deepseekQualityBoundarySpec', [
+      'does not reintroduce premature DeepSeek route, planner, or tool timeouts',
+      'keeps direct DeepSeek callers behind the shared quality timeout policy',
+      'does not let fast model fallbacks downgrade user-facing chat, planner, or final responses',
+      'keeps intent routing LLM-first for short follow-up turns with existing task context',
+    ]);
+  },
+
+  deepseek_context_window_not_truncated(caseItem) {
+    expectCase(
+      caseItem,
+      (item) => Number(item.expected.minimumContextTurns) >= 80,
+      'DeepSeek context window must preserve enough turns for multi-round social tasks',
+    );
+    expectIncludes('contextWindowSpec', [
+      'defaults to the production conversation memory window',
+      'does not let explicit tiny windows weaken LLM-facing memory',
+      'SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS',
+      'history.slice(-SOCIAL_AGENT_DEFAULT_CONTEXT_TURNS)',
+    ]);
+  },
+
+  fallback_not_streamed_as_llm_answer(caseItem) {
+    expectCase(
+      caseItem,
+      (item) => item.expected.fallbackAssistantDelta === false,
+      'fallback text must not be streamed as LLM assistant.delta',
+    );
+    expectIncludes('fallbackSourceBoundarySpec', [
+      'does not stream fallback text as an LLM assistant response',
+      'centralizes SocialAgentEventV2 assistant deltas and skips fallback chunks',
+      "input.source === 'fallback'",
+    ]);
+  },
 };
 
 function runCase(caseItem) {
@@ -570,6 +622,9 @@ function runBackendAssertions() {
     'src/agent-gateway/social-agent-profile-gate.service.spec.ts',
     'src/agent-gateway/social-codex-trace-eval.service.spec.ts',
     'src/agent-gateway/social-agent-inbox-tool.service.spec.ts',
+    'src/agent-gateway/social-agent-context-window.spec.ts',
+    'src/agent-gateway/social-agent-deepseek-quality-boundary.spec.ts',
+    'src/agent-gateway/social-agent-fallback-source-boundary.spec.ts',
   ];
   const result = spawnSync(
     'pnpm',

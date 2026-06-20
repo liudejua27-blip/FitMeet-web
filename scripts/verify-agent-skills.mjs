@@ -60,6 +60,9 @@ const requiredEvalIds = [
   'waiting_reply_missing_connection_no_error_loop',
   'stable_preference_saved_with_evidence',
   'one_off_noise_not_saved',
+  'deepseek_quality_routing_not_downgraded',
+  'deepseek_context_window_not_truncated',
+  'fallback_not_streamed_as_llm_answer',
 ];
 
 const requiredToolExampleIds = [
@@ -289,6 +292,9 @@ for (const phrase of [
   '"candidate_empty_safe_fallback"',
   '"mustNotFakeCandidates":true',
   '"sideEffectBeforeApproval":false',
+  '"deepseek_quality_routing_not_downgraded"',
+  '"deepseek_context_window_not_truncated"',
+  '"fallback_not_streamed_as_llm_answer"',
 ]) {
   if (!evalSource.includes(phrase)) {
     fail(`eval-cases.jsonl missing invariant ${phrase}`);
@@ -301,6 +307,9 @@ for (const phrase of [
   'correction_updates_candidate_preference_without_reasking_core_slots',
   'candidate_empty_safe_fallback',
   'meet_loop_full_state_machine',
+  'deepseek_quality_routing_not_downgraded',
+  'deepseek_context_window_not_truncated',
+  'fallback_not_streamed_as_llm_answer',
   '--backend',
   '--api-readiness',
   '--api-full',

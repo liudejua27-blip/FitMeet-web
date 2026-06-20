@@ -41,3 +41,4 @@ of generating a vague card.
 
 - `opportunity_card_from_completed_slots`
 - `missing_slot_blocks_card_generation`
+- `deepseek_context_window_not_truncated`

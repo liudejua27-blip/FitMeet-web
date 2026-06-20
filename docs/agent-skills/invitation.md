@@ -45,3 +45,4 @@ broaden, or publish options.
 
 - `opener_preview_without_side_effect`
 - `send_invite_requires_confirmation`
+- `deepseek_quality_routing_not_downgraded`

@@ -46,3 +46,4 @@ user wants to broaden filters.
 
 - `candidate_top_three_with_reasons`
 - `candidate_preference_uses_public_fields_only`
+- `deepseek_quality_routing_not_downgraded`
