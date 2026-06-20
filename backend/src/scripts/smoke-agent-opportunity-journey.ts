@@ -26,6 +26,9 @@
  *   AGENT_SMOKE_SKIP_CORRECTION_MEMORY=true to skip the correction-memory
  *     scenario when a smoke environment has intentionally disabled social
  *     candidate preference extraction.
+ *   AGENT_SMOKE_RUN_20_TURN_MEMORY=true to run an additional 20-turn real API
+ *     task-memory continuity scenario. This is intentionally opt-in because it
+ *     adds model calls and is best used for staging / pre-launch acceptance.
  *
  * Recommended staging flow:
  *   pnpm --dir backend run seed:agent-smoke
@@ -63,6 +66,9 @@ const STOP_AFTER_OPPORTUNITIES = truthy(
 );
 const SKIP_CORRECTION_MEMORY = truthy(
   process.env.AGENT_SMOKE_SKIP_CORRECTION_MEMORY,
+);
+const RUN_20_TURN_MEMORY = truthy(
+  process.env.AGENT_SMOKE_RUN_20_TURN_MEMORY,
 );
 
 let passCount = 0;
@@ -115,6 +121,14 @@ async function main() {
     );
   } else {
     await assertCorrectionMemoryScenario(token, socialAdvice.taskId);
+  }
+
+  if (RUN_20_TURN_MEMORY) {
+    await assertTwentyTurnSocialMemoryScenario(token, socialAdvice.taskId);
+  } else {
+    pass(
+      '20-turn social memory smoke skipped by AGENT_SMOKE_RUN_20_TURN_MEMORY',
+    );
   }
 
   const vague = await postMessageStream(token, {
@@ -518,6 +532,75 @@ async function assertCorrectionMemoryScenario(
   );
   pass(
     'candidate preference correction preserves time/place/activity and does not restart slot filling',
+  );
+}
+
+async function assertTwentyTurnSocialMemoryScenario(
+  token: string,
+  existingTaskId: number | undefined,
+) {
+  const seed = await postMessageStream(token, {
+    message:
+      '请记住这个约练任务：周末下午，散步，崂山区青岛大学附近，低强度，只在公共场所，先站内聊。先不要发布，也不要邀请。',
+    taskId: existingTaskId,
+  });
+  assertNoPendingApproval('20-turn memory seed', seed);
+  assertTaskContinuity('20-turn memory seed', existingTaskId, seed.taskId);
+  assertTextIncludesAll('20-turn memory seed response', seed.assistantMessage, [
+    ['周末'],
+    ['青岛', '青岛大学'],
+    ['散步'],
+  ]);
+
+  let activeTaskId = seed.taskId ?? existingTaskId;
+  const repeatQuestionFragments = [
+    '今晚还是周末',
+    '今天还是周末',
+    '周末还是今晚',
+    '想在什么地方',
+    '想做什么活动',
+    '你想找什么活动',
+    '哪个城市',
+    '什么城市',
+    '先告诉我时间',
+    '告诉我你的时间',
+    '告诉我地点',
+    '告诉我活动',
+    '你更想今晚',
+    '还是周末下午',
+  ];
+
+  for (let index = 1; index <= 20; index += 1) {
+    const memoryProbe = index % 5 === 0;
+    const response = await postMessageStream(token, {
+      message: memoryProbe
+        ? `第 ${index} 轮：请复述你记得的约练条件，并继续给我一个安全建议。不要重新问已经说过的时间、地点和活动。`
+        : `第 ${index} 轮：继续基于刚才的约练任务给我一个简短建议，不要发布，也不要邀请。`,
+      taskId: activeTaskId,
+    });
+    assertNoPendingApproval(`20-turn memory turn ${index}`, response);
+    assertTaskContinuity(
+      `20-turn memory turn ${index}`,
+      activeTaskId,
+      response.taskId,
+    );
+    assertTextExcludesAll(
+      `20-turn memory turn ${index} must not restart slot filling`,
+      response.assistantMessage,
+      repeatQuestionFragments,
+    );
+    if (memoryProbe) {
+      assertTextIncludesAll(
+        `20-turn memory checkpoint ${index}`,
+        response.assistantMessage,
+        [['周末'], ['青岛', '青岛大学'], ['散步']],
+      );
+    }
+    activeTaskId = response.taskId ?? activeTaskId;
+  }
+
+  pass(
+    '20-turn social task memory preserves task continuity and completed slots',
   );
 }
 
@@ -1250,6 +1333,23 @@ function assertTextIncludesAny(
   const text = value ?? '';
   if (!expected.some((item) => text.includes(item))) {
     throw new Error(`${label} missing any of: ${expected.join(', ')}`);
+  }
+}
+
+function assertTextIncludesAll(
+  label: string,
+  value: string | undefined,
+  expectedGroups: string[][],
+) {
+  const text = value ?? '';
+  const missing = expectedGroups
+    .map((group) => group.filter(Boolean))
+    .filter((group) => group.length > 0)
+    .find((group) => !group.some((item) => text.includes(item)));
+  if (missing) {
+    throw new Error(
+      `${label} missing one of each required group; first missing group: ${missing.join(', ')}`,
+    );
   }
 }
 

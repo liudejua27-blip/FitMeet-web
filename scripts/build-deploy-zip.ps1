@@ -429,7 +429,8 @@ Assert-FileContains "deploy/agent-smoke.remote.env.example" @(
   "Never use a real user account for mutating Agent smoke",
   "AGENT_SMOKE_ALLOW_REMOTE=true",
   "AGENT_SMOKE_ALLOW_MUTATIONS=true",
-  "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true"
+  "AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true",
+  "AGENT_SMOKE_RUN_20_TURN_MEMORY=false"
 )
 Assert-FileContains "docs/deployment-aliyun-ecs.md" @(
   "preflight rejects",
@@ -448,7 +449,12 @@ Assert-FileContains "backend/src/scripts/smoke-agent-opportunity-journey.ts" @(
   "search-critical context without over-asking stranger/public policy",
   "assertNoPendingApproval('clarified search', clarified)",
   "candidate preference correction preserves time/place/activity",
-  "AGENT_SMOKE_SKIP_CORRECTION_MEMORY"
+  "AGENT_SMOKE_SKIP_CORRECTION_MEMORY",
+  "AGENT_SMOKE_RUN_20_TURN_MEMORY",
+  "20-turn social task memory preserves task continuity"
+)
+Assert-FileContains "scripts/verify-agent-release.sh" @(
+  "RUN_AGENT_20_TURN_MEMORY_SMOKE=true"
 )
 Assert-FileContains "backend/src/scripts/smoke-agent-sse-abort.ts" @(
   "AGENT_SMOKE_ALLOW_NON_SMOKE_USER",
