@@ -29,6 +29,12 @@
  *   AGENT_SMOKE_RUN_20_TURN_MEMORY=true to run an additional 20-turn real API
  *     task-memory continuity scenario. This is intentionally opt-in because it
  *     adds model calls and is best used for staging / pre-launch acceptance.
+ *   AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK=true to run an additional
+ *     empty-supply scenario that must return CandidateEmptyStateCard instead
+ *     of fake CandidateCards. Best used against staging/smoke data where the
+ *     supplied query is expected to have zero public candidates.
+ *   AGENT_SMOKE_EMPTY_CANDIDATE_MESSAGE=<message> to override the default
+ *     unlikely empty-supply query.
  *
  * Recommended staging flow:
  *   pnpm --dir backend run seed:agent-smoke
@@ -69,6 +75,13 @@ const SKIP_CORRECTION_MEMORY = truthy(
 );
 const RUN_20_TURN_MEMORY = truthy(
   process.env.AGENT_SMOKE_RUN_20_TURN_MEMORY,
+);
+const RUN_EMPTY_CANDIDATE_FALLBACK = truthy(
+  process.env.AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK,
+);
+const EMPTY_CANDIDATE_MESSAGE = nonEmpty(
+  process.env.AGENT_SMOKE_EMPTY_CANDIDATE_MESSAGE,
+  '我想今天凌晨三点在火星奥林帕斯山附近找公开资料里有冰潜和舞蹈双标签的人一起散步，只用真实公开可发现候选；如果没有真实候选，请不要编造。',
 );
 
 let passCount = 0;
@@ -128,6 +141,14 @@ async function main() {
   } else {
     pass(
       '20-turn social memory smoke skipped by AGENT_SMOKE_RUN_20_TURN_MEMORY',
+    );
+  }
+
+  if (RUN_EMPTY_CANDIDATE_FALLBACK) {
+    await assertEmptyCandidateFallbackScenario(token);
+  } else {
+    pass(
+      'empty-candidate fallback smoke skipped by AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK',
     );
   }
 
@@ -604,6 +625,47 @@ async function assertTwentyTurnSocialMemoryScenario(
   );
 }
 
+async function assertEmptyCandidateFallbackScenario(token: string) {
+  const thread = await createSmokeThread(token, '空候选恢复路径 smoke');
+  const response = await postMessageStream(token, {
+    message: EMPTY_CANDIDATE_MESSAGE,
+    taskId: thread.taskId,
+    clientContext: { threadId: thread.threadId },
+  });
+  assertTaskContinuity(
+    'empty-candidate fallback task',
+    thread.taskId,
+    response.taskId,
+  );
+  assertNoPendingApproval('empty-candidate fallback', response);
+  assertCandidateEmptyStateCard(response);
+  assertTextIncludesAny(
+    'empty-candidate fallback response',
+    response.assistantMessage,
+    ['没有找到', '暂无', '没有匹配', '不编造', '发布到发现', '扩大范围'],
+  );
+  pass(
+    'empty candidate search returns CandidateEmptyStateCard instead of fake candidates',
+  );
+}
+
+async function createSmokeThread(token: string, title: string) {
+  const result = await requestJson('/social-agent/chat/threads', {
+    method: 'POST',
+    body: { title },
+    token,
+  });
+  const thread = asRecord(result.thread);
+  const taskId = readNumber(thread.taskId);
+  const threadId = readString(thread.threadId) ?? readString(thread.id);
+  if (!taskId || !threadId) {
+    throw new Error(
+      `Thread create did not return taskId/threadId: ${JSON.stringify(result).slice(0, 500)}`,
+    );
+  }
+  return { taskId, threadId };
+}
+
 async function resolveUserToken() {
   const direct = process.env.USER_JWT ?? process.env.FITMEET_USER_JWT;
   if (direct) return direct;
@@ -952,6 +1014,53 @@ function assertOpportunityCards(
   opportunities.forEach((card, index) =>
     assertOpportunityCardQuality(card, index),
   );
+}
+
+function assertCandidateEmptyStateCard(response: SmokeResponse) {
+  const cards = response.cards ?? [];
+  const emptyCard = cards.find((card) => {
+    const data = asRecord(card.data);
+    return (
+      readString(card.schemaType) === 'social_match.empty' ||
+      readString(card.type) === 'candidate_empty_state' ||
+      readString(data.schemaName) === 'CandidateEmptyStateCard'
+    );
+  });
+  if (!emptyCard) {
+    throw new Error(
+      `Expected CandidateEmptyStateCard for empty candidate search, got schemas: ${cards
+        .map((card) => readString(card.schemaType) ?? readString(card.type) ?? 'unknown')
+        .join(', ')}`,
+    );
+  }
+  const candidateCards = cards.filter(
+    (card) => readString(card.schemaType) === 'social_match.candidate',
+  );
+  if (candidateCards.length > 0) {
+    throw new Error(
+      `Empty candidate fallback must not return CandidateCards, got ${candidateCards.length}.`,
+    );
+  }
+  const data = asRecord(emptyCard.data);
+  const text = JSON.stringify({
+    title: emptyCard.title,
+    body: emptyCard.body,
+    data,
+    actions: actions(emptyCard),
+  });
+  for (const phrase of ['发布', '扩大', '改时间']) {
+    if (!text.includes(phrase)) {
+      throw new Error(
+        `CandidateEmptyStateCard missing safe recovery option "${phrase}".`,
+      );
+    }
+  }
+  if (/mock|fake|FitMeet User/i.test(text)) {
+    throw new Error(
+      'CandidateEmptyStateCard must not mention mock/fake/generated people.',
+    );
+  }
+  assertNoPublicInternalLeak('CandidateEmptyStateCard', emptyCard);
 }
 
 function assertOpportunityCardQuality(card: JsonRecord, index: number) {

@@ -35,10 +35,11 @@ green checks.
 | Remote smoke env template    | `deploy/agent-smoke.remote.env.example`                                                                                                                                      | Provides non-secret placeholders for the dedicated smoke account, mutation guards, readiness stop flag, and stable Opportunity journey knobs.                    |
 | Remote smoke evidence capture | `scripts/agent-remote-smoke-evidence.sh --all --prepare-agent-smoke-seed`                                                                                                   | Runs readiness, full opportunity, and SSE abort smoke through the ECS wrapper and stores a redacted markdown evidence file.                                    |
 | Opportunity readiness smoke  | `RUN_AGENT_OPPORTUNITY_SMOKE=readiness bash scripts/verify-agent-release.sh`                                                                                                 | Ordinary chat stays conversational, vague social request clarifies, clarified social request returns 3+ OpportunityCards, then stops before high-risk actions and verifies `/events/eval`. |
+| Empty-candidate fallback smoke | `RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true bash scripts/verify-agent-release.sh`                                                                                                | Impossible public-candidate request returns `CandidateEmptyStateCard`, suggests publish / broaden / time-change recovery paths, and does not render fake `CandidateCards`. |
 | Full opportunity smoke       | `RUN_AGENT_OPPORTUNITY_SMOKE=true bash scripts/verify-agent-release.sh`                                                                                                      | Opener draft, reject, confirm send, activity confirmation, Meet Loop, review, Life Graph proposal actions, and `/events/eval` execute with dedicated smoke data. |
 | SSE abort smoke              | `RUN_AGENT_SSE_ABORT_SMOKE=true bash scripts/verify-agent-release.sh`                                                                                                        | First delta arrives, client abort stops the run, and no result continues after disconnect.                                                                     |
 | ECS post-deploy readiness    | `scripts/ecs-post-deploy-smoke.sh --prepare-agent-smoke-seed --run-agent-opportunity-readiness-smoke --scan-compose-logs`                                                    | Production API health, readiness, Agent opportunity readiness, and backend/worker log scan pass.                                                               |
-| ECS post-deploy full smoke   | `AGENT_SMOKE_ALLOW_MUTATIONS=true scripts/ecs-post-deploy-smoke.sh --prepare-agent-smoke-seed --run-agent-opportunity-smoke --run-agent-sse-abort-smoke --scan-compose-logs` | Dedicated smoke users prove full mutating chain and SSE abort against the deployed API.                                                                        |
+| ECS post-deploy full smoke   | `AGENT_SMOKE_ALLOW_MUTATIONS=true scripts/ecs-post-deploy-smoke.sh --prepare-agent-smoke-seed --run-agent-opportunity-smoke --run-agent-empty-candidate-smoke --run-agent-sse-abort-smoke --scan-compose-logs` | Dedicated smoke users prove full mutating chain, empty-candidate recovery, and SSE abort against the deployed API.                                                                        |
 | Final Agent cutover status   | `REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true AGENT_REMOTE_SMOKE_EVIDENCE_FILE=<evidence.md> scripts/launch-status.sh --topology ecs --skip-ios-testflight-check`                 | Launch status fails unless the redacted ECS evidence file proves readiness, full opportunity, SSE abort, and zero-exit post-deploy smoke.                       |
 
 When `AGENT_RELEASE_AUDIT_OUT_DIR` is set, the worktree cleanup audit also
@@ -70,6 +71,7 @@ guards remain covered by an executable regression check.
 | Ordinary chat does not trigger social UI      | `qa-agent-chat-shell.mjs` checks no OpportunityCard in ordinary chat; `smoke-agent-opportunity-journey.ts` calls `assertNoOpportunityCards` and `assertNoSocialExecutionArtifacts`. |
 | Vague social request asks clarification       | Smoke requires city, time, intensity, social boundary, stranger policy, and public-activity policy before search.                                                                   |
 | Explicit social request returns opportunities | Smoke requires at least 3 candidate/activity OpportunityCards and stable `fitmeet.tool-ui.v1` schema.                                                                               |
+| Empty candidate recovery is safe              | Optional real API smoke requires `CandidateEmptyStateCard`, safe recovery actions, no mock/fake/generated people, and no candidate cards when supply is truly empty.                 |
 | Stranger candidate pool is safe               | Backend `social-agent-candidate-pool.service.spec.ts` verifies candidates require `profileDiscoverable` and `agentCanRecommendMe`, filters missing opt-in, respects stranger rejection, blocks complaint/moderation risk, and returns explainable top candidates only. |
 | Candidate opener requires confirmation        | Full smoke creates `candidate.generate_opener`, then `opener.confirm_send` is required before any send side effect.                                                                 |
 | Rejection stays natural and safe              | Full smoke runs `opener.reject` and checks that no contact is made.                                                                                                                 |
@@ -91,9 +93,10 @@ guards remain covered by an executable regression check.
 - Run `scripts/agent-remote-smoke-preflight.sh --readiness` before readiness
   smoke and `scripts/agent-remote-smoke-preflight.sh --full` before full smoke.
 - `scripts/ecs-post-deploy-smoke.sh` automatically invokes the same preflight
-  before opportunity readiness, full opportunity, and SSE abort smoke.
+  before opportunity readiness, empty-candidate recovery, full opportunity, and
+  SSE abort smoke.
 - `scripts/verify-agent-release.sh` also invokes the preflight before optional
-  real API opportunity or SSE abort smoke.
+  real API opportunity, empty-candidate, or SSE abort smoke.
 - `scripts/agent-remote-smoke-evidence.sh --all --prepare-agent-smoke-seed`
   captures the ECS smoke output as redacted markdown release evidence.
 - `pnpm --dir frontend run qa:agent-chat:production` captures browser evidence
@@ -110,6 +113,10 @@ guards remain covered by an executable regression check.
   corrects “普通散步搭子” into “女舞蹈生散步”, the Agent must preserve the
   previously supplied time/place/activity and update candidate preference
   instead of restarting slot filling.
+- Empty-candidate smoke is opt-in with `RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true`
+  or `scripts/ecs-post-deploy-smoke.sh --run-agent-empty-candidate-smoke`. It
+  must use the same dedicated smoke account and mutation guard because it writes
+  chat/search smoke state, but it stops before high-risk side effects.
 - Do not run mutating smoke with a real user account.
 - Do not package `.env.production`, SSL private keys, `frontend/qa`, `docs/qa`,
   `qa-gsap-round2`, `deploy/agent-smoke.remote.env`, or screenshot artifacts.
@@ -134,6 +141,10 @@ scripts/agent-release-matrix.sh --skip-browser-qa --build
 # Add real API readiness after staging/ECS deploy with a dedicated smoke user.
 RUN_AGENT_SKILL_EVAL_API=readiness \
   scripts/agent-release-matrix.sh --skip-browser-qa --opportunity-readiness-smoke
+
+# Prove empty supply does not fabricate candidates.
+RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true \
+  scripts/agent-release-matrix.sh --skip-browser-qa --empty-candidate-smoke
 
 # Full mutating chain plus SSE abort; run only with dedicated smoke credentials.
 AGENT_SMOKE_ALLOW_MUTATIONS=true \

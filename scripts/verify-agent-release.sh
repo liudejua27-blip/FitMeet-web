@@ -6,6 +6,7 @@ RUN_AGENT_BROWSER_QA="${RUN_AGENT_BROWSER_QA:-true}"
 RUN_AGENT_OPPORTUNITY_SMOKE="${RUN_AGENT_OPPORTUNITY_SMOKE:-false}"
 RUN_AGENT_SSE_ABORT_SMOKE="${RUN_AGENT_SSE_ABORT_SMOKE:-false}"
 RUN_AGENT_20_TURN_MEMORY_SMOKE="${RUN_AGENT_20_TURN_MEMORY_SMOKE:-false}"
+RUN_AGENT_EMPTY_CANDIDATE_SMOKE="${RUN_AGENT_EMPTY_CANDIDATE_SMOKE:-false}"
 
 # RUN_AGENT_OPPORTUNITY_SMOKE accepts:
 #   false     skip real API opportunity smoke
@@ -20,6 +21,10 @@ RUN_AGENT_20_TURN_MEMORY_SMOKE="${RUN_AGENT_20_TURN_MEMORY_SMOKE:-false}"
 # RUN_AGENT_20_TURN_MEMORY_SMOKE=true runs the real API opportunity smoke in a
 # 20-turn memory mode. It is opt-in because it performs additional model calls
 # and should be used against a dedicated smoke account.
+#
+# RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true adds an empty-supply check to the real
+# API opportunity smoke. It proves zero real candidates render
+# CandidateEmptyStateCard instead of fake CandidateCards.
 
 # shellcheck source=scripts/lib/toolchain.sh
 source "${ROOT_DIR}/scripts/lib/toolchain.sh"
@@ -337,6 +342,21 @@ if [ "${RUN_AGENT_20_TURN_MEMORY_SMOKE}" = "true" ]; then
     pnpm --dir "${ROOT_DIR}/backend" run smoke:agent-opportunity
 else
   step "Skip real API smoke for Agent 20-turn memory continuity"
+fi
+
+if [ "${RUN_AGENT_EMPTY_CANDIDATE_SMOKE}" = "true" ]; then
+  step "Run real API smoke for Agent empty-candidate recovery"
+  run_agent_smoke_preflight readiness
+  if agent_smoke_is_remote && ! is_truthy "${AGENT_SMOKE_ALLOW_MUTATIONS:-}"; then
+    echo "[FAIL] RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true targets remote API $(agent_smoke_api_base_url)." >&2
+    echo "[FAIL] Set AGENT_SMOKE_ALLOW_MUTATIONS=true only with a dedicated smoke account or run scripts/ecs-post-deploy-smoke.sh --prepare-agent-smoke-seed first." >&2
+    exit 1
+  fi
+  AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK=true \
+    AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true \
+    pnpm --dir "${ROOT_DIR}/backend" run smoke:agent-opportunity
+else
+  step "Skip real API smoke for Agent empty-candidate recovery"
 fi
 
 if [ "${RUN_AGENT_SSE_ABORT_SMOKE}" = "true" ]; then

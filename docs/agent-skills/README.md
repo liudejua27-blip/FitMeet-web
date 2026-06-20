@@ -86,6 +86,7 @@ available:
 node scripts/run-agent-skill-evals.mjs --api-readiness
 node scripts/run-agent-skill-evals.mjs --api-sse-abort
 RUN_AGENT_SKILL_EVAL_API=readiness bash scripts/verify-agent-release.sh
+RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true bash scripts/verify-agent-release.sh
 ```
 
 `--api-readiness` runs the real Agent opportunity smoke in
@@ -93,3 +94,6 @@ RUN_AGENT_SKILL_EVAL_API=readiness bash scripts/verify-agent-release.sh
 isolation, clarification, OpportunityCard readiness, and the correction-memory
 path where a user updates candidate preference without losing the already
 answered time/place/activity slots.
+`RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true` runs the same real smoke harness through
+an impossible public-candidate request and requires `CandidateEmptyStateCard`
+with safe recovery actions instead of fabricated candidates.

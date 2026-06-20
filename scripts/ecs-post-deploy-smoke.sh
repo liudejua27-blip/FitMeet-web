@@ -9,6 +9,7 @@ PREPARE_APP_SMOKE_USERS="${PREPARE_APP_SMOKE_USERS:-false}"
 PREPARE_AGENT_SMOKE_SEED="${PREPARE_AGENT_SMOKE_SEED:-false}"
 RUN_APP_SMOKE="${RUN_APP_SMOKE:-false}"
 RUN_AGENT_OPPORTUNITY_SMOKE="${RUN_AGENT_OPPORTUNITY_SMOKE:-false}"
+RUN_AGENT_EMPTY_CANDIDATE_SMOKE="${RUN_AGENT_EMPTY_CANDIDATE_SMOKE:-false}"
 RUN_AGENT_SSE_ABORT_SMOKE="${RUN_AGENT_SSE_ABORT_SMOKE:-false}"
 RUN_PUBLIC_INTENT_WRITE="${RUN_PUBLIC_INTENT_WRITE:-false}"
 APP_SMOKE_RUN_MUTATIONS="${APP_SMOKE_RUN_MUTATIONS:-true}"
@@ -40,6 +41,8 @@ Options:
                                  Run authenticated Agent opportunity smoke through
                                  clarification and OpportunityCard readiness only.
   --run-agent-opportunity-smoke  Run authenticated full Agent opportunity journey smoke.
+  --run-agent-empty-candidate-smoke
+                                 Run authenticated Agent empty-candidate recovery smoke.
   --run-agent-sse-abort-smoke    Run Agent SSE visibility/abort smoke:
                                  early visible status, no proxy buffering, then
                                  abort after the first assistant delta.
@@ -65,11 +68,16 @@ Environment:
                                  Required by the Agent seed script in NODE_ENV=production.
   AGENT_SMOKE_ALLOW_MUTATIONS=true
                                  Required for --run-agent-opportunity-readiness-smoke or
-                                 --run-agent-opportunity-smoke unless
+                                 --run-agent-opportunity-smoke or
+                                 --run-agent-empty-candidate-smoke unless
                                  --prepare-agent-smoke-seed is used in the same invocation.
                                  Readiness writes chat/search smoke data. Full smoke can
                                  generate invitations, activities, reviews, and Life Graph
                                  actions. Only use with dedicated smoke users.
+  AGENT_SMOKE_EMPTY_CANDIDATE_MESSAGE
+                                 Optional impossible-supply prompt used by the empty-candidate
+                                 recovery smoke. Defaults to a deliberately unrealistic
+                                 public-candidate request.
   AGENT_SMOKE_CITY/ACTIVITY/TIME/INTENSITY
                                  Optional scenario knobs for Agent opportunity smoke.
                                  Defaults align with seed: city from seed, 咖啡轻聊天,
@@ -107,6 +115,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --run-agent-opportunity-readiness-smoke)
       RUN_AGENT_OPPORTUNITY_SMOKE=readiness
+      ;;
+    --run-agent-empty-candidate-smoke)
+      RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true
       ;;
     --run-agent-sse-abort-smoke)
       RUN_AGENT_SSE_ABORT_SMOKE=true
@@ -299,6 +310,26 @@ if [[ "${RUN_AGENT_OPPORTUNITY_SMOKE}" == "readiness" || "${RUN_AGENT_OPPORTUNIT
     AGENT_SMOKE_ACTIVITY="${AGENT_SMOKE_ACTIVITY:-咖啡轻聊天}" \
     AGENT_SMOKE_TIME="${AGENT_SMOKE_TIME:-周末下午}" \
     AGENT_SMOKE_INTENSITY="${AGENT_SMOKE_INTENSITY:-轻松}" \
+    ./scripts/ecs-backend-pnpm.sh -- smoke:agent-opportunity:prod
+fi
+
+if [[ "${RUN_AGENT_EMPTY_CANDIDATE_SMOKE}" == "true" ]]; then
+  [[ -n "${AGENT_SMOKE_EMAIL:-}" ]] ||
+    fail "AGENT_SMOKE_EMAIL is required with --run-agent-empty-candidate-smoke."
+  [[ -n "${AGENT_SMOKE_PASSWORD:-}" ]] ||
+    fail "AGENT_SMOKE_PASSWORD is required with --run-agent-empty-candidate-smoke."
+  if ! is_truthy "${AGENT_SMOKE_ALLOW_MUTATIONS:-}"; then
+    fail "AGENT_SMOKE_ALLOW_MUTATIONS=true is required with --run-agent-empty-candidate-smoke unless --prepare-agent-smoke-seed is used in the same invocation."
+  fi
+
+  info "Running real Agent empty-candidate recovery smoke against ${API_BASE_URL}."
+  run_agent_remote_preflight readiness
+  AGENT_SMOKE_API_BASE_URL="${API_BASE_URL}" \
+    AGENT_SMOKE_ALLOW_REMOTE=true \
+    AGENT_SMOKE_ALLOW_MUTATIONS="${AGENT_SMOKE_ALLOW_MUTATIONS}" \
+    AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK=true \
+    AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true \
+    AGENT_SMOKE_EMPTY_CANDIDATE_MESSAGE="${AGENT_SMOKE_EMPTY_CANDIDATE_MESSAGE:-}" \
     ./scripts/ecs-backend-pnpm.sh -- smoke:agent-opportunity:prod
 fi
 

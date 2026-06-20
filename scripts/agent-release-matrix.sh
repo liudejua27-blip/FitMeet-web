@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_AGENT_BROWSER_QA="${RUN_AGENT_BROWSER_QA:-true}"
 RUN_AGENT_OPPORTUNITY_SMOKE="${RUN_AGENT_OPPORTUNITY_SMOKE:-false}"
 RUN_AGENT_SSE_ABORT_SMOKE="${RUN_AGENT_SSE_ABORT_SMOKE:-false}"
+RUN_AGENT_EMPTY_CANDIDATE_SMOKE="${RUN_AGENT_EMPTY_CANDIDATE_SMOKE:-false}"
 RUN_AGENT_RELEASE_BUILD="${RUN_AGENT_RELEASE_BUILD:-false}"
 AGENT_RELEASE_EVIDENCE_DIR="${AGENT_RELEASE_EVIDENCE_DIR:-${ROOT_DIR}/artifacts/agent-release-evidence}"
 
@@ -24,6 +25,7 @@ Options:
   --skip-browser-qa              Skip Playwright QA for /agent/chat.
   --opportunity-readiness-smoke  Run real Agent smoke through OpportunityCard readiness only.
   --opportunity-full-smoke       Run the full mutating Agent opportunity journey smoke.
+  --empty-candidate-smoke        Run real Agent empty-candidate fallback smoke.
   --sse-abort-smoke              Run real Agent SSE visibility/abort smoke.
   --build                        Also run frontend and backend production builds.
   --evidence-dir DIR             Write release evidence artifacts under DIR.
@@ -32,13 +34,15 @@ Options:
 Environment:
   RUN_AGENT_BROWSER_QA=false
   RUN_AGENT_OPPORTUNITY_SMOKE=false|readiness|true
+  RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true
   RUN_AGENT_SSE_ABORT_SMOKE=true
   AGENT_SSE_SKIP_ACCEL_BUFFERING_HEADER=true only for non-nginx local smoke.
   RUN_AGENT_RELEASE_BUILD=true
   AGENT_RELEASE_EVIDENCE_DIR=artifacts/agent-release-evidence
 
 Remote smoke safety:
-  Readiness and full opportunity smoke require dedicated smoke credentials.
+  Readiness, empty-candidate, and full opportunity smoke require dedicated
+  smoke credentials.
   Full remote smoke requires AGENT_SMOKE_ALLOW_MUTATIONS=true.
 EOF
 }
@@ -53,6 +57,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --opportunity-full-smoke)
       RUN_AGENT_OPPORTUNITY_SMOKE=true
+      ;;
+    --empty-candidate-smoke)
+      RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true
       ;;
     --sse-abort-smoke)
       RUN_AGENT_SSE_ABORT_SMOKE=true
@@ -95,6 +102,7 @@ step "Run Agent release matrix verification"
 step "Run Agent release functional verification"
 RUN_AGENT_BROWSER_QA="${RUN_AGENT_BROWSER_QA}" \
   RUN_AGENT_OPPORTUNITY_SMOKE="${RUN_AGENT_OPPORTUNITY_SMOKE}" \
+  RUN_AGENT_EMPTY_CANDIDATE_SMOKE="${RUN_AGENT_EMPTY_CANDIDATE_SMOKE}" \
   RUN_AGENT_SSE_ABORT_SMOKE="${RUN_AGENT_SSE_ABORT_SMOKE}" \
   AGENT_SKILL_EVAL_REPORT_FILE="${agent_skill_eval_report}" \
   "${ROOT_DIR}/scripts/verify-agent-release.sh"
