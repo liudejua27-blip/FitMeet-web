@@ -252,7 +252,10 @@ function isApprovalStep(step: Step) {
     step.processType === 'approval' ||
     step.metadata?.processType === 'approval' ||
     step.metadata?.kind === 'approval_required' ||
-    /^approval(?:$|[-:_])/.test(step.id)
+    step.id === 'approval' ||
+    step.id.startsWith('approval-') ||
+    step.id.startsWith('approval_') ||
+    step.id.startsWith('approval:')
   );
 }
 
