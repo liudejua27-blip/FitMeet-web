@@ -776,4 +776,33 @@ describe('SocialCodexEventPipelineService', () => {
       writes.map((item) => item.data as { taskId?: number | null }),
     ).toEqual(expect.arrayContaining([expect.objectContaining({ taskId: 42 })]));
   });
+
+  it('uses lightweight recovery copy instead of backend-style saved-conversation copy', async () => {
+    const writes: Array<{ event: string; data: unknown }> = [];
+    const pipeline = new SocialCodexEventPipelineService(
+      new SocialAgentEventV2Service(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new SocialCodexApprovalSchemaService(),
+    );
+    const writer = pipeline.createWriter({
+      write: (event, data) => writes.push({ event, data }),
+      userId: 7,
+      taskId: 42,
+      threadId: 'agent-task:42',
+      runId: 'run:test',
+    });
+
+    await pipeline.writeRunFailed(writer);
+    await pipeline.writeRunCompleted(writer, 'error_recovery');
+
+    const serialized = JSON.stringify(writes);
+    expect(serialized).toContain('连接中断了，可以继续');
+    expect(serialized).toContain('这段需求还在，可以直接继续');
+    expect(serialized).not.toContain('已保留当前对话');
+    expect(serialized).not.toContain('我已经保留当前对话');
+    expect(serialized).not.toContain('刚才的处理没有继续执行高风险动作');
+  });
 });

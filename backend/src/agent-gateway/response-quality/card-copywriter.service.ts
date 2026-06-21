@@ -167,7 +167,7 @@ export class CardCopywriterService {
       actions: [
         {
           id: 'confirm_create_activity',
-          label: '确认创建约练',
+          label: '发布到发现',
           action: 'activity.confirm_create',
           schemaAction: 'activity.confirm_create',
           loopStage: 'activity_draft_created',
@@ -192,10 +192,54 @@ export class CardCopywriterService {
             idempotencyKey: `activity-create:${input.taskId}`,
             riskLevel: 'medium',
             riskReasons: [
-              '这一步会创建真实约练',
+              '这个动作会创建真实约练',
               '公开发布或邀请他人前必须由你确认',
               '不会共享精确位置',
             ],
+          },
+        },
+        {
+          id: 'modify_activity_plan',
+          label: '修改',
+          action: 'reschedule_meet_loop',
+          schemaAction: 'activity.modify_time',
+          loopStage: 'activity_draft_created',
+          requiresConfirmation: false,
+          payload: {
+            taskId: input.taskId,
+            socialRequestDraft: {
+              ...draft,
+              locationName,
+              publicPlaceOnly: true,
+              noPreciseLocation: true,
+              publishPolicy,
+              approvalPolicy,
+              meetLoopNextStep,
+              meetLoopStage: 'activity_confirmation',
+            },
+            sideEffect: 'edit_draft_only',
+          },
+        },
+        {
+          id: 'skip_publish_activity',
+          label: '暂不发布',
+          action: 'activity.skip_publish',
+          schemaAction: 'activity.skip_publish',
+          loopStage: 'activity_draft_created',
+          requiresConfirmation: false,
+          payload: {
+            taskId: input.taskId,
+            socialRequestDraft: {
+              ...draft,
+              locationName,
+              publicPlaceOnly: true,
+              noPreciseLocation: true,
+              publishPolicy,
+              approvalPolicy,
+              meetLoopNextStep,
+              meetLoopStage: 'activity_confirmation',
+            },
+            sideEffect: 'local_dismiss',
           },
         },
       ],
@@ -457,7 +501,8 @@ export class CardCopywriterService {
           '查看详情',
           '生成开场白',
           '先收藏',
-          '确认后发邀请',
+          '发送邀请',
+          '加好友并聊天',
           '更多类似的人',
           '不感兴趣',
         ],
@@ -473,87 +518,6 @@ export class CardCopywriterService {
         displayName,
         opportunityId: `opportunity:${input.taskId}:${cardIdentity}`,
       }),
-    };
-  }
-
-  openerApproval(input: {
-    taskId: number;
-    candidate: Record<string, unknown>;
-    message: string;
-  }): FitMeetAlphaCard {
-    const displayName =
-      cleanDisplayText(input.candidate.displayName, '') ||
-      cleanDisplayText(input.candidate.nickname, '') ||
-      '对方';
-    const candidateIdentity = cleanDisplayText(
-      input.candidate.targetUserId ?? input.candidate.userId,
-      'draft',
-    );
-    return {
-      id: `opener_approval:${input.taskId}:${candidateIdentity}`,
-      type: 'opener_approval',
-      schemaVersion: 'fitmeet.tool-ui.v1',
-      schemaType: 'safety.approval',
-      title: this.confirmation.title('send_message'),
-      body: this.confirmation.body('send_message', {
-        ...input.candidate,
-        message: input.message,
-      }),
-      status: 'waiting_confirmation',
-      data: {
-        taskId: input.taskId,
-        schemaName: 'SafetyApprovalCard',
-        schemaVersion: 'fitmeet.tool-ui.v1',
-        schemaType: 'safety.approval',
-        approval: {
-          title: this.confirmation.title('send_message'),
-          boundary: '确认前不会发送。建议先站内沟通，不急着交换联系方式。',
-          riskLevel: 'medium',
-          reasons: ['这一步会向真实用户发送消息', '发送前需要你确认语气和内容'],
-          auditNote: '确认或拒绝都会写入审批日志，便于之后追溯。',
-          confirmationLabel: '确认后发送',
-          checkpointLabel: '开场白已保存，可重新生成或取消',
-        },
-        displayName,
-        message: input.message,
-        riskLevel: 'medium',
-        reasons: ['这一步会向真实用户发送消息', '发送前需要你确认语气和内容'],
-        auditNote: '确认或拒绝都会写入审批日志，便于之后追溯。',
-        confirmationLabel: '确认后发送',
-        checkpointLabel: '开场白已保存，可重新生成或取消',
-        safetyBoundary: '确认前不会发送。建议先站内沟通，不急着交换联系方式。',
-        nextStep: '你确认后，我才会把这条消息发送出去。',
-        secondaryActions: ['语气更自然', '更简短', '重新生成', '取消'],
-        meetLoopStage: 'opener_confirmation',
-      },
-      actions: [
-        {
-          id: 'send_message',
-          label: '确认发送',
-          action: 'send_message',
-          schemaAction: 'opener.confirm_send',
-          loopStage: 'opener_draft_created',
-          requiresConfirmation: true,
-          payload: {
-            taskId: input.taskId,
-            candidate: input.candidate,
-            message: input.message,
-          },
-        },
-        {
-          id: 'reject_opener',
-          label: '取消发送',
-          action: 'reject_opener',
-          schemaAction: 'opener.reject',
-          loopStage: 'opener_draft_created',
-          requiresConfirmation: false,
-          payload: {
-            taskId: input.taskId,
-            candidate: input.candidate,
-            message: input.message,
-          },
-        },
-      ],
     };
   }
 
@@ -586,9 +550,9 @@ export class CardCopywriterService {
           reasons: safety.reasons,
           auditNote: safety.blocked
             ? '已阻断，不会执行任何搜索、联系或发布动作。'
-            : '后续真实动作仍会要求你确认，并写入审计日志。',
+            : '后续真实动作仍会要求你确认，并保留确认记录。',
           confirmationLabel: safety.blocked ? '已阻断' : '后续动作需确认',
-          checkpointLabel: safety.blocked ? '未创建执行步骤' : '安全边界已保存',
+          checkpointLabel: safety.blocked ? '不会继续执行' : '已完成安全检查',
         },
       },
       actions: [],
@@ -618,15 +582,15 @@ export class CardCopywriterService {
           boundary: `当前有 ${input.approvalRequiredActions.length} 个动作需要你确认后才会继续。`,
           riskLevel: this.maxApprovalRiskLevel(input.approvalRequiredActions),
           reasons: this.approvalReasons(input.approvalRequiredActions),
-          auditNote: '确认、拒绝和执行结果都会进入审批审计日志。',
+          auditNote: '确认、取消和执行结果会保留记录，方便你之后查看或撤回。',
           confirmationLabel: '确认后才执行',
-          checkpointLabel: '审批中断点已保存',
+          checkpointLabel: '同意后继续当前步骤',
         },
         riskLevel: this.maxApprovalRiskLevel(input.approvalRequiredActions),
         reasons: this.approvalReasons(input.approvalRequiredActions),
-        auditNote: '确认、拒绝和执行结果都会进入审批审计日志。',
+        auditNote: '确认、取消和执行结果会保留记录，方便你之后查看或撤回。',
         confirmationLabel: '确认后才执行',
-        checkpointLabel: '审批中断点已保存',
+        checkpointLabel: '同意后继续当前步骤',
       },
       actions: [],
     };
@@ -718,15 +682,42 @@ export class CardCopywriterService {
         },
       },
       {
+        id: 'send_invite',
+        label: '发送邀请',
+        action: 'send_message',
+        schemaAction: 'opener.confirm_send',
+        loopStage: 'candidate_selected',
+        requiresConfirmation: true,
+        payload: {
+          ...basePayload,
+          actionType: 'send_invite',
+          sideEffect: 'send_message_or_invite',
+          approvalRequired: true,
+          checkpointRequired: true,
+          resumeMode: 'resume_after_approval',
+          idempotencyKey: `opener-send:${taskId}:${String(
+            targetUserId ?? context.opportunityId,
+          )}`,
+          suggestedOpener: context.suggestedOpener,
+          riskLevel: 'medium',
+          riskReasons: [
+            '这个动作会联系真实用户',
+            '发送邀请前必须由你确认',
+            '不会自动交换联系方式或精确位置',
+          ],
+          auditEvent: 'social_agent.candidate.invite.approval_required',
+        },
+      },
+      {
         id: 'invite_candidate',
-        label: '确认后发邀请',
+        label: '加好友并聊天',
         action: 'candidate.connect',
         schemaAction: 'candidate.connect',
         loopStage: 'candidate_selected',
         requiresConfirmation: true,
         payload: {
           ...basePayload,
-          actionType: 'send_invite',
+          actionType: 'connect_candidate',
           sideEffect: 'send_message_or_connect',
           approvalRequired: true,
           checkpointRequired: true,
@@ -737,7 +728,7 @@ export class CardCopywriterService {
           suggestedOpener: context.suggestedOpener,
           riskLevel: 'medium',
           riskReasons: [
-            '这一步会联系真实用户',
+            '这个动作会联系真实用户',
             '发送邀请前必须由你确认',
             '不会自动交换联系方式或精确位置',
           ],
@@ -1301,7 +1292,7 @@ export class CardCopywriterService {
       },
       {
         key: 'recovery',
-        label: '可恢复闭环',
+        label: '连续推进',
         detail: input.meetLoopNextStep,
       },
     ];

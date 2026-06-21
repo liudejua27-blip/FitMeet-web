@@ -500,6 +500,8 @@ function candidatePreferenceSummary(
   ) {
     return '女生、舞蹈相关';
   }
+  const publicPreference = publicCandidatePreferenceSummary(text);
+  if (publicPreference) return publicPreference;
   const explicitPreference = text.match(
     /(理想型是|偏好是|希望认识|想认识|更想认识|最好是|希望是)([^，。；.!?]{2,56})(的人|朋友|搭子|伙伴|对象)?/i,
   );
@@ -541,6 +543,42 @@ function candidatePreferenceSummary(
       : '更外向、愿意互动';
   }
   return '';
+}
+
+function publicCandidatePreferenceSummary(text: string): string {
+  const hasPreferenceContext =
+    /(喜欢|兴趣|爱好|公开资料|标签|理想型|偏好|希望认识|想认识|更想认识|最好是|希望是|会|学|专业|从事|找个|找一个|找些)/i.test(
+      text,
+    );
+  if (!hasPreferenceContext) return '';
+  const parts: string[] = [];
+  const add = (label: string) => {
+    if (!parts.includes(label)) parts.push(label);
+  };
+
+  if (/(女生|女孩|女孩子|女性|女同学|女大学生)/.test(text)) add('女生');
+  if (/(男生|男孩|男孩子|男性|男同学|男大学生)/.test(text)) add('男生');
+  if (hasProgrammingPublicPreference(text)) {
+    add('编程/科技相关');
+  }
+  if (/(摄影|拍照|相机|影像)/.test(text)) add('摄影相关');
+  if (/(音乐|唱歌|乐队|吉他|钢琴|民谣)/.test(text)) add('音乐相关');
+  if (/(读书|阅读|文学|写作)/.test(text)) add('阅读写作相关');
+  if (/(动漫|二次元|游戏|电竞)/.test(text)) add('动漫/游戏相关');
+  if (/(咖啡|探店|电影|展览|city ?walk|城市漫步)/i.test(text)) {
+    add('生活方式相近');
+  }
+  return parts.slice(0, 3).join('、');
+}
+
+function hasProgrammingPublicPreference(text: string): boolean {
+  if (/(编程|代码|程序员|程序猿|软件|计算机|人工智能|科技)/i.test(text)) {
+    return true;
+  }
+  if (/\bAI\b/i.test(text)) return true;
+  return /(?:喜欢|爱好|兴趣|会|懂|学|学习|专业|从事|做|搞|想认识|希望认识).{0,12}开发|开发.{0,10}(工程师|程序员|开发者|专业|同学|从业者)/i.test(
+    text,
+  );
 }
 
 function isGenericRelationshipGoal(value: string): boolean {

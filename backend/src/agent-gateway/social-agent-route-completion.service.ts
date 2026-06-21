@@ -220,7 +220,7 @@ export class SocialAgentRouteCompletionService {
       await append(
         'approval.required',
         'approval',
-        '这一步需要你确认',
+        '需要你确认后继续',
         'waiting',
         {
           ...pendingPayload,
@@ -248,7 +248,7 @@ export class SocialAgentRouteCompletionService {
         ? '发送邀请前需要你确认'
         : input.queuedRun
           ? '已接上候选搜索任务'
-          : '这一步处理完成',
+          : '已整理当前进度',
       completedState,
       {
         action: result.action,
@@ -460,7 +460,7 @@ export class SocialAgentRouteCompletionService {
           resumeMode: 'resume_after_approval',
           riskLevel: 'medium',
           riskReasons: [
-            '这一步会发起真实约练或联系活动发起人',
+            '这个动作会发起真实约练或联系活动发起人',
             '确认前不会创建、公开发布或通知其他用户',
           ],
         },

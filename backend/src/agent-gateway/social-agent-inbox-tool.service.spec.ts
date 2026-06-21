@@ -1,5 +1,3 @@
-import { BadRequestException } from '@nestjs/common';
-
 import {
   AgentTask,
   AgentTaskPermissionMode,
@@ -191,18 +189,32 @@ describe('SocialAgentInboxToolService', () => {
     });
   });
 
-  it('requires an agent connection for conversation-scoped inbox reads', async () => {
-    const { service } = makeService();
+  it('requires an agent connection for conversation-scoped inbox reads and safely skips without retry loops', async () => {
+    const { service, messages } = makeService();
 
     await expect(
       service.getAgentInbox(makeTask({ agentConnectionId: null }), {
         conversationId: 'conv_1',
       }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).resolves.toMatchObject({
+      status: 'skipped',
+      skipped: true,
+      retryable: false,
+      reason: 'missing_agent_connection',
+      toolName: 'get_agent_inbox',
+    });
     await expect(
       service.readInbox(makeTask({ agentConnectionId: null }), {
         conversationId: 'conv_1',
       }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).resolves.toMatchObject({
+      status: 'skipped',
+      skipped: true,
+      retryable: false,
+      reason: 'missing_agent_connection',
+      toolName: 'read_agent_inbox',
+    });
+
+    expect(messages.getAgentInboxMessages).not.toHaveBeenCalled();
   });
 });

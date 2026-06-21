@@ -576,7 +576,7 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     name: 'save_candidate',
     description: '把候选人加入当前任务的收藏/稍后处理列表。',
     category: FitMeetAgentToolCategory.Candidate,
-    riskLevel: AgentActionRiskLevel.Medium,
+    riskLevel: AgentActionRiskLevel.Low,
     requiresApproval: false,
     inputSchema: objectSchema(
       {
@@ -972,7 +972,7 @@ const TOOL_DEFINITIONS: FitMeetAgentToolDefinition[] = [
     name: 'connect_candidate',
     description: '发起好友/关注关系，不能绕过对方或用户确认。',
     category: FitMeetAgentToolCategory.Friend,
-    riskLevel: AgentActionRiskLevel.Medium,
+    riskLevel: AgentActionRiskLevel.High,
     requiresApproval: true,
     inputSchema: objectSchema(
       {

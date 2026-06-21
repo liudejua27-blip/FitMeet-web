@@ -57,7 +57,7 @@ export class SocialAgentInboxToolService {
     const conversationId = this.toolInput.string(input.conversationId);
     if (conversationId) {
       if (!agentConnectionId) {
-        throw new BadRequestException('agentConnectionId is required');
+        return this.skippedMissingConnectionResult('read_agent_inbox');
       }
       return {
         messages: await this.messages.getAgentInboxMessages(
@@ -109,7 +109,7 @@ export class SocialAgentInboxToolService {
 
     if (conversationId) {
       if (!agentConnectionId) {
-        throw new BadRequestException('agentConnectionId is required');
+        return this.skippedMissingConnectionResult('get_agent_inbox');
       }
       return {
         messages: await this.messages.getAgentInboxMessages(
@@ -144,5 +144,20 @@ export class SocialAgentInboxToolService {
     ]);
 
     return { conversations, events };
+  }
+
+  private skippedMissingConnectionResult(
+    toolName: string,
+  ): Record<string, unknown> {
+    return {
+      status: 'skipped',
+      skipped: true,
+      retryable: false,
+      reason: 'missing_agent_connection',
+      code: 'missing_agent_connection',
+      toolName,
+      message:
+        '这段旧任务没有绑定可读取的会话，我会跳过这次收件箱读取，不会反复重试。',
+    };
   }
 }

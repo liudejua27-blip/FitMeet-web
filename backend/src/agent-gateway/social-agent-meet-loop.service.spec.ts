@@ -106,6 +106,13 @@ describe('SocialAgentMeetLoopService', () => {
         agentTaskId: 101,
         type: 'create_activity',
         actionType: 'create_activity',
+        payload: expect.objectContaining({
+          taskId: 101,
+          agentTaskId: 101,
+          targetUserId: 22,
+          candidateUserId: 22,
+          socialRequestId: 301,
+        }),
       }),
     );
     expect(draft).toMatchObject({
@@ -141,6 +148,7 @@ describe('SocialAgentMeetLoopService', () => {
     const duplicateActivityAction = duplicateDraft.cards?.[0]?.actions?.find(
       (action) => action.schemaAction === 'activity.confirm_create',
     );
+    expect(duplicateDraft.cards).toHaveLength(1);
     expect(duplicateDraft).toMatchObject({
       action: 'await_confirmation',
       pendingApproval: expect.objectContaining({
@@ -152,6 +160,7 @@ describe('SocialAgentMeetLoopService', () => {
     expect(duplicateDraft.cards?.[0]).toMatchObject({
       type: 'activity_plan',
       data: expect.objectContaining({
+        approvalId: 9001,
         publicPlaceOnly: true,
         noPreciseLocation: true,
       }),
@@ -171,7 +180,7 @@ describe('SocialAgentMeetLoopService', () => {
     });
     expect(harness.approvals.approve).toHaveBeenCalledWith(9001, 7);
     expect(confirmed.cards?.[0]).toMatchObject({
-      type: 'review_card',
+      type: 'meet_loop_timeline',
       schemaType: 'meet_loop.timeline',
       data: expect.objectContaining({
         schemaType: 'meet_loop.timeline',
@@ -236,7 +245,7 @@ describe('SocialAgentMeetLoopService', () => {
       payload: checkedIn.cards?.[0]?.actions?.[0]?.payload ?? {},
     });
     expect(completed.cards?.[0]).toMatchObject({
-      type: 'review_card',
+      type: 'meet_loop_timeline',
       data: expect.objectContaining({ loopStage: 'activity_completed' }),
     });
     expect(harness.l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
@@ -341,6 +350,21 @@ describe('SocialAgentMeetLoopService', () => {
         actionType: 'create_activity',
       }),
     });
+    expect(harness.approvals.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        relatedSocialRequestId: 301,
+        relatedCandidateId: 501,
+        payload: expect.objectContaining({
+          taskId: 101,
+          agentTaskId: 101,
+          targetUserId: 22,
+          candidateUserId: 22,
+          candidateRecordId: 501,
+          socialRequestCandidateId: 501,
+          socialRequestId: 301,
+        }),
+      }),
+    );
     expect(draft.cards?.[0]).toMatchObject({
       schemaType: 'social_match.activity',
       data: expect.objectContaining({
@@ -380,7 +404,7 @@ describe('SocialAgentMeetLoopService', () => {
     );
     expect(activities.confirm).toHaveBeenCalledWith(700, 7);
     expect(confirmed.cards?.[0]).toMatchObject({
-      type: 'review_card',
+      type: 'meet_loop_timeline',
       schemaType: 'meet_loop.timeline',
       data: expect.objectContaining({
         schemaType: 'meet_loop.timeline',
@@ -620,7 +644,7 @@ describe('SocialAgentMeetLoopService', () => {
       assistantMessage: expect.stringContaining('恢复到上次保存的邀约进度'),
       cards: [
         expect.objectContaining({
-          type: 'review_card',
+          type: 'meet_loop_timeline',
           data: expect.objectContaining({
             loopStage: 'message_sent',
             timeline: expect.objectContaining({
@@ -690,7 +714,7 @@ describe('SocialAgentMeetLoopService', () => {
       (card) => card.schemaType === 'life_graph.diff',
     );
     expect(timelineCard).toMatchObject({
-      type: 'review_card',
+      type: 'meet_loop_timeline',
       data: expect.objectContaining({
         candidateUserId: 22,
         loopStage: 'reply_received',
@@ -783,7 +807,7 @@ describe('SocialAgentMeetLoopService', () => {
         assistantMessage: expect.stringContaining('不会自动通知对方'),
         cards: [
           expect.objectContaining({
-            type: 'review_card',
+            type: 'meet_loop_timeline',
             data: expect.objectContaining({
               loopStage: 'reschedule_requested',
               timeline: expect.objectContaining({
@@ -817,4 +841,70 @@ describe('SocialAgentMeetLoopService', () => {
       });
     },
   );
+
+  it('keeps an opportunity card private when the user skips publishing', async () => {
+    const harness = makeHarness();
+
+    const result = await harness.service.performActivityAction(7, 101, {
+      action: 'activity.skip_publish',
+      payload: {
+        taskId: 101,
+        activityId: 700,
+        candidateUserId: 22,
+        title: '青岛大学轻松散步',
+      },
+    });
+
+    expect(harness.approvals.create).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      action: 'reply',
+      assistantMessage: expect.stringContaining('不发布这张约练卡'),
+      cards: [
+        expect.objectContaining({
+          type: 'meet_loop_timeline',
+          schemaType: 'meet_loop.timeline',
+          data: expect.objectContaining({
+            loopStage: 'activity_draft_private',
+            timeline: expect.objectContaining({
+              nextAction: '你可以继续修改、重新发布，或先和 Agent 聊清楚需求。',
+            }),
+          }),
+        }),
+      ],
+    });
+    expect(harness.task.result).toMatchObject({
+      activityDraft: expect.objectContaining({
+        visibility: 'private',
+        autoPublished: false,
+      }),
+      meetLoop: expect.objectContaining({
+        status: 'draft_kept_private',
+        loopStage: 'activity_draft_private',
+        visibility: 'private',
+        waitingFor: 'user_next_message',
+      }),
+    });
+    expect(harness.task.memory).toMatchObject({
+      taskMemory: {
+        currentTask: expect.objectContaining({
+          waitingFor: 'user_next_message',
+          lastCompletedStep: 'activity_publish_skipped',
+        }),
+      },
+    });
+    expect(harness.l5Runtime.transitionMeetLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        agentTaskId: 101,
+        activityId: 700,
+        candidateUserId: 22,
+        stage: 'activity_draft_created',
+        waitingFor: 'user_next_message',
+        state: expect.objectContaining({
+          loopStage: 'activity_draft_private',
+          visibility: 'private',
+        }),
+      }),
+    );
+  });
 });

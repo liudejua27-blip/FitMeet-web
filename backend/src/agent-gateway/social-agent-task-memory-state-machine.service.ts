@@ -412,6 +412,9 @@ export class SocialAgentTaskMemoryStateMachineService {
     if (/(男生|男孩|男孩子|男性|男同学|男大学生)/.test(text))
       parts.push('男生');
     if (/(舞蹈生|学舞蹈|跳舞|舞蹈|舞者)/.test(text)) parts.push('舞蹈相关');
+    const publicInterestPreference =
+      this.extractPublicInterestCandidatePreference(text);
+    if (publicInterestPreference) parts.push(publicInterestPreference);
     if (/(同校|校友|青岛大学学生|大学生|学生)/.test(text)) parts.push('同校/学生');
     if (/(附近|同城|崂山区|市南区|市北区|李沧区|黄岛区)/.test(text)) parts.push('附近同城');
     const explicit = text.match(
@@ -426,6 +429,31 @@ export class SocialAgentTaskMemoryStateMachineService {
       );
     }
     return Array.from(new Set(parts.filter(Boolean))).slice(0, 4).join('、') || null;
+  }
+
+  private extractPublicInterestCandidatePreference(text: string): string | null {
+    const hasPreferenceContext =
+      /(喜欢|兴趣|爱好|公开资料|标签|理想型|偏好|希望认识|想认识|更想认识|最好是|会|学|专业|从事)/.test(
+        text,
+      );
+    if (!hasPreferenceContext) return null;
+
+    const parts: string[] = [];
+    const add = (label: string) => {
+      if (!parts.includes(label)) parts.push(label);
+    };
+
+    if (/(编程|代码|程序|软件|开发|计算机|人工智能|AI|科技)/i.test(text)) {
+      add('编程/科技相关');
+    }
+    if (/(摄影|拍照|相机|影像)/.test(text)) add('摄影相关');
+    if (/(音乐|唱歌|乐队|吉他|钢琴|民谣)/.test(text)) add('音乐相关');
+    if (/(读书|阅读|文学|写作)/.test(text)) add('阅读写作相关');
+    if (/(动漫|二次元|游戏|电竞)/.test(text)) add('动漫/游戏相关');
+    if (/(咖啡|探店|电影|展览|city ?walk|城市漫步)/i.test(text)) {
+      add('生活方式相近');
+    }
+    return parts.slice(0, 2).join('、') || null;
   }
 
   private slotState(value: unknown): SocialAgentSlotState {

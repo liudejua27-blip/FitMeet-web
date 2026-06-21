@@ -455,7 +455,8 @@ export class FitMeetAlphaAgentSdkService {
             '查看详情',
             '生成邀请开场白',
             '先收藏',
-            '确认后发邀请',
+            '发送邀请',
+            '加好友并聊天',
             '更多类似的人',
             '不感兴趣',
           ],
@@ -518,7 +519,39 @@ export class FitMeetAlphaAgentSdkService {
           },
           {
             id: 'invite_candidate',
-            label: '确认后发邀请',
+            label: '发送邀请',
+            action: 'send_message',
+            schemaAction: 'opener.confirm_send',
+            loopStage: 'candidate_selected',
+            requiresConfirmation: true,
+            payload: {
+              taskId,
+              targetUserId,
+              candidate,
+              opportunityId: `opportunity:${taskId}:${cardIdentity}`,
+              displayName,
+              safetyBoundary,
+              actionType: 'send_invite',
+              sideEffect: 'send_message_or_invite',
+              approvalRequired: true,
+              checkpointRequired: true,
+              resumeMode: 'resume_after_approval',
+              idempotencyKey: `opener-send:${taskId}:${String(
+                targetUserId ?? cardIdentity,
+              )}`,
+              suggestedOpener,
+              riskLevel: 'medium',
+              riskReasons: [
+                '这个动作会联系真实用户',
+                '发送邀请前必须由你确认',
+                '不会自动交换联系方式或精确位置',
+              ],
+              auditEvent: 'social_agent.candidate.invite.approval_required',
+            },
+          },
+          {
+            id: 'connect_candidate',
+            label: '加好友并聊天',
             action: 'candidate.connect',
             schemaAction: 'candidate.connect',
             loopStage: 'candidate_selected',
@@ -530,7 +563,7 @@ export class FitMeetAlphaAgentSdkService {
               opportunityId: `opportunity:${taskId}:${cardIdentity}`,
               displayName,
               safetyBoundary,
-              actionType: 'send_invite',
+              actionType: 'connect_candidate',
               sideEffect: 'send_message_or_connect',
               approvalRequired: true,
               checkpointRequired: true,
@@ -541,7 +574,7 @@ export class FitMeetAlphaAgentSdkService {
               suggestedOpener,
               riskLevel: 'medium',
               riskReasons: [
-                '这一步会联系真实用户',
+                '这个动作会联系真实用户',
                 '发送邀请前必须由你确认',
                 '不会自动交换联系方式或精确位置',
               ],
@@ -679,7 +712,7 @@ export class FitMeetAlphaAgentSdkService {
           actions: [
             {
               id: 'confirm_create_activity',
-              label: '确认创建约练',
+              label: '发布到发现',
               action: 'activity.confirm_create',
               schemaAction: 'activity.confirm_create',
               loopStage: 'activity_draft_created',
@@ -692,9 +725,39 @@ export class FitMeetAlphaAgentSdkService {
                 resumeMode: 'resume_after_approval',
                 riskLevel: 'medium',
                 riskReasons: [
-                  '这一步会创建真实约练',
+                  '这个动作会创建真实约练',
                   '确认前不会公开发布或通知其他用户',
                 ],
+              },
+            },
+            {
+              id: 'modify_activity_plan',
+              label: '修改',
+              action: 'reschedule_meet_loop',
+              schemaAction: 'activity.modify_time',
+              loopStage: 'activity_draft_created',
+              requiresConfirmation: false,
+              payload: {
+                taskId,
+                socialRequestDraft: draft,
+                publicPlaceOnly: true,
+                noPreciseLocation: true,
+                safetyBoundary,
+              },
+            },
+            {
+              id: 'skip_publish_activity',
+              label: '暂不发布',
+              action: 'activity.skip_publish',
+              schemaAction: 'activity.skip_publish',
+              loopStage: 'activity_draft_created',
+              requiresConfirmation: false,
+              payload: {
+                taskId,
+                socialRequestDraft: draft,
+                publicPlaceOnly: true,
+                noPreciseLocation: true,
+                safetyBoundary: '这张约练卡暂不发布；你可以继续修改或直接聊天。',
               },
             },
           ],
@@ -703,9 +766,14 @@ export class FitMeetAlphaAgentSdkService {
     }
 
     const safety = input.safety ?? this.defaultSafety();
-    cards.push(this.safetyCard(input.traceId ?? `task:${taskId}`, safety));
+    if (safety.blocked || this.shouldRenderStandaloneSafetyCard(cards)) {
+      cards.push(this.safetyCard(input.traceId ?? `task:${taskId}`, safety));
+    }
 
-    if ((input.approvalRequiredActions ?? []).length > 0) {
+    if (
+      (input.approvalRequiredActions ?? []).length > 0 &&
+      this.shouldRenderStandaloneApprovalAudit(cards)
+    ) {
       cards.push(
         this.cardCopywriter?.auditUpdate({
           taskId,
@@ -733,17 +801,17 @@ export class FitMeetAlphaAgentSdkService {
               reasons: this.approvalReasons(
                 input.approvalRequiredActions ?? [],
               ),
-              auditNote: '确认、拒绝和执行结果都会进入审批审计日志。',
+              auditNote: '确认、取消和执行结果会保留记录，方便你之后查看或撤回。',
               confirmationLabel: '确认后才执行',
-              checkpointLabel: '审批中断点已保存',
+              checkpointLabel: '同意后我会接着处理',
             },
             riskLevel: this.maxApprovalRiskLevel(
               input.approvalRequiredActions ?? [],
             ),
             reasons: this.approvalReasons(input.approvalRequiredActions ?? []),
-            auditNote: '确认、拒绝和执行结果都会进入审批审计日志。',
+            auditNote: '确认、取消和执行结果会保留记录，方便你之后查看或撤回。',
             confirmationLabel: '确认后才执行',
-            checkpointLabel: '审批中断点已保存',
+            checkpointLabel: '同意后我会接着处理',
           },
           actions: [],
         },
@@ -751,6 +819,26 @@ export class FitMeetAlphaAgentSdkService {
     }
 
     return cards;
+  }
+
+  private shouldRenderStandaloneApprovalAudit(cards: FitMeetAlphaCard[]): boolean {
+    return !this.hasProductCard(cards);
+  }
+
+  private shouldRenderStandaloneSafetyCard(cards: FitMeetAlphaCard[]): boolean {
+    return !this.hasProductCard(cards);
+  }
+
+  private hasProductCard(cards: FitMeetAlphaCard[]): boolean {
+    return cards.some((card) => {
+      const schemaType = cleanDisplayText(card.schemaType, '');
+      return (
+        schemaType === 'social_match.candidate' ||
+        schemaType === 'social_match.activity' ||
+        schemaType === 'social_match.empty' ||
+        schemaType === 'meet_loop.timeline'
+      );
+    });
   }
 
   private emptyCandidateRecoveryCard(
@@ -843,7 +931,7 @@ export class FitMeetAlphaAgentSdkService {
             sideEffect: 'publish_public_intent',
             riskLevel: 'medium',
             riskReasons: [
-              '这一步会公开约练卡',
+              '这个动作会公开约练卡',
               '公开前需要确认展示内容和位置边界',
               '不会公开联系方式或精确位置',
             ],
@@ -1330,7 +1418,7 @@ export class FitMeetAlphaAgentSdkService {
           '读取当前 Life Graph 完整度',
           '只补问影响匹配质量的缺失项',
           '生成画像更新建议并等待用户确认',
-          '写入审计记录，允许之后撤回或纠正',
+          '保留确认记录，允许之后撤回或纠正',
         ],
         betaScore: 84,
         needState: 'profile_work',
@@ -1465,9 +1553,9 @@ export class FitMeetAlphaAgentSdkService {
           reasons: safety.reasons,
           auditNote: safety.blocked
             ? '已阻断，不会执行任何搜索、联系或发布动作。'
-            : '后续真实动作仍会要求你确认，并写入审计日志。',
+            : '后续真实动作仍会要求你确认，并保留确认记录。',
           confirmationLabel: safety.blocked ? '已阻断' : '后续动作需确认',
-          checkpointLabel: safety.blocked ? '未创建执行步骤' : '安全边界已保存',
+          checkpointLabel: safety.blocked ? '不会继续执行' : '已完成安全检查',
         },
       },
       actions: [],

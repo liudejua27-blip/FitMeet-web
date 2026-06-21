@@ -158,12 +158,12 @@ describe('SocialAgentRouteCompletionService', () => {
       expect.objectContaining({
         type: 'run.completed',
         display: expect.objectContaining({
-          title: '这一步处理完成',
+          title: '已整理当前进度',
           state: 'done',
         }),
         payload: expect.objectContaining({
           summary: expect.objectContaining({
-            title: '已整理画像变化建议',
+            title: '已整理当前进度',
             state: 'completed',
             displayMode: 'covering_status',
             updateModel: 'latest_state',
@@ -307,7 +307,7 @@ describe('SocialAgentRouteCompletionService', () => {
             checkpointId: 777,
           }),
           summary: expect.objectContaining({
-            title: '这一步需要你确认',
+            title: '需要你确认后继续',
             state: 'waiting',
             displayMode: 'covering_status',
             pendingApproval: true,
@@ -413,7 +413,7 @@ describe('SocialAgentRouteCompletionService', () => {
         replyStrategy: 'direct_reply',
       }),
       assistantMessage:
-        'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。',
+        '连接刚才中断了。这段需求还在，可以直接继续。',
       assistantMessageSource: 'fallback',
       savedContext: false,
       profileUpdated: false,
@@ -427,7 +427,7 @@ describe('SocialAgentRouteCompletionService', () => {
 
     expect(messageLog.recordAssistantMessage).toHaveBeenCalledWith(
       task,
-      'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。',
+      '连接刚才中断了。这段需求还在，可以直接继续。',
       result,
     );
     expect(eventStore.appendEvent).toHaveBeenCalledTimes(3);
@@ -442,12 +442,12 @@ describe('SocialAgentRouteCompletionService', () => {
       expect.objectContaining({
         type: 'run.completed',
         display: expect.objectContaining({
-          title: '这一步处理完成',
+          title: '已整理当前进度',
           state: 'done',
         }),
         payload: expect.objectContaining({
           summary: expect.objectContaining({
-            title: '已理解你的需求',
+            title: '已整理当前进度',
             state: 'completed',
             displayMode: 'covering_status',
           }),

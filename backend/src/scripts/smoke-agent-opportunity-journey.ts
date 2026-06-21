@@ -217,14 +217,15 @@ async function main() {
     idempotencyKey: smokeKey('generate-opener'),
   });
   const openerCard = findActionCard(opener, 'opener.confirm_send');
-  assertCard(openerCard, 'opener approval card');
-  assertApprovalRequiredEvent('opener approval stream', opener);
-  assertTextIncludesAny('opener approval copy', opener.assistantMessage, [
+  assertCard(openerCard, 'opener draft card');
+  assertNoPendingApproval('opener draft generation', opener);
+  assertNoApprovalRequiredEvent('opener draft stream', opener);
+  assertTextIncludesAny('opener draft copy', opener.assistantMessage, [
     '开场白',
-    '确认',
-    '发送',
+    '不会发送',
+    '发送邀请',
   ]);
-  pass('candidate.generate_opener creates a send approval card');
+  pass('candidate.generate_opener creates a low-risk opener draft card');
 
   const rejected = await postActionStream(token, Number(opener.taskId), {
     action: 'opener.reject',
@@ -245,29 +246,29 @@ async function main() {
     idempotencyKey: smokeKey('generate-opener-after-reject'),
   });
   const secondOpenerCard = findActionCard(secondOpener, 'opener.confirm_send');
-  assertCard(secondOpenerCard, 'second opener approval card');
-  assertApprovalRequiredEvent('second opener approval stream', secondOpener);
+  assertCard(secondOpenerCard, 'second opener draft card');
+  assertNoPendingApproval('second opener draft generation', secondOpener);
+  assertNoApprovalRequiredEvent('second opener draft stream', secondOpener);
 
-  const confirmed = await postActionStream(token, Number(secondOpener.taskId), {
+  const sendApproval = await postActionStream(token, Number(secondOpener.taskId), {
     action: 'opener.confirm_send',
     payload: actionPayload(secondOpenerCard, 'opener.confirm_send'),
     idempotencyKey: smokeKey('confirm-send'),
   });
-  assertTextIncludesAny('confirmed send response', confirmed.assistantMessage, [
-    '已确认',
-    '已按你的确认',
-    '等待对方回复',
-    '下一步',
+  assertPendingApproval('opener confirm_send approval request', sendApproval);
+  assertApprovalRequiredEvent('opener confirm_send approval stream', sendApproval);
+  assertTextIncludesAny('send approval response', sendApproval.assistantMessage, [
+    '发送邀请前',
+    '确认',
+    '不会触达',
   ]);
-  const timelineCard =
-    (confirmed.cards ?? []).find(
-      (card) => readString(card.schemaType) === 'meet_loop.timeline',
-    ) ??
-    (confirmed.cards ?? []).find((card) =>
-      JSON.stringify(card).includes('message_sent'),
-    );
-  assertCard(timelineCard, 'Meet Loop timeline after confirmed send');
-  pass('opener.confirm_send resumes saved send step and returns Meet Loop');
+  pass('candidate.generate_opener creates a send approval card through opener.confirm_send before side effects');
+  await approvePendingApproval(
+    token,
+    sendApproval,
+    'opener.confirm_send approval dispatch',
+  );
+  pass('Meet Loop timeline after confirmed send approval dispatch is recoverable');
 
   const activityDraft = await postActionStream(
     token,
@@ -727,6 +728,44 @@ async function postActionStream(
   );
 }
 
+async function approvePendingApproval(
+  token: string,
+  response: SmokeResponse,
+  label: string,
+) {
+  const approval =
+    response.pendingApproval ?? (response.pendingConfirmations ?? [])[0] ?? null;
+  const approvalId = readNumber(approval?.id ?? approval?.approvalId);
+  if (!approvalId) {
+    throw new Error(`${label} cannot approve without approvalId.`);
+  }
+  const result = await requestJson(`/agent/approvals/${approvalId}/approve`, {
+    method: 'POST',
+    token,
+  });
+  if (result.ok !== true) {
+    throw new Error(
+      `${label} approval API returned non-ok response: ${JSON.stringify(
+        result,
+      ).slice(0, 500)}`,
+    );
+  }
+  if (readString(result.status) !== 'approved') {
+    throw new Error(
+      `${label} expected approved status, got ${readString(result.status) ?? 'missing'}.`,
+    );
+  }
+  if (result.dispatched !== true) {
+    throw new Error(
+      `${label} approval did not dispatch the saved side effect: ${JSON.stringify(
+        result,
+      ).slice(0, 500)}`,
+    );
+  }
+  pass(`${label} approved and dispatched saved high-risk action`);
+  return result;
+}
+
 async function postSse(
   endpoint: string,
   token: string,
@@ -990,6 +1029,14 @@ function assertApprovalRequiredEvent(label: string, response: SmokeResponse) {
   if (!response.streamEvents.includes('approval_required')) {
     throw new Error(
       `${label} did not emit approval_required SSE event for a high-risk action.`,
+    );
+  }
+}
+
+function assertNoApprovalRequiredEvent(label: string, response: SmokeResponse) {
+  if (response.streamEvents.includes('approval_required')) {
+    throw new Error(
+      `${label} unexpectedly emitted approval_required for a low-risk action.`,
     );
   }
 }
@@ -1572,9 +1619,10 @@ function inferSmokeMilestoneId(message: string) {
     [/vague social request/i, 'slot.clarification-before-search'],
     [/clarified social request/i, 'opportunity.search-ready'],
     [/readiness-only/i, 'opportunity.readiness-only'],
-    [/candidate\.generate_opener/i, 'approval.opener-required'],
+    [/candidate\.generate_opener/i, 'opener.draft-created'],
     [/opener\.reject/i, 'approval.opener-rejected'],
-    [/opener\.confirm_send/i, 'invite.confirmed-meet-loop'],
+    [/opener\.confirm_send creates/i, 'approval.opener-required'],
+    [/opener\.confirm_send approval dispatch/i, 'invite.confirmed-meet-loop'],
     [/activity\.confirm_create creates/i, 'approval.activity-required'],
     [/activity\.modify_time/i, 'meet-loop.reschedule-time'],
     [/activity\.modify_location/i, 'meet-loop.reschedule-location'],

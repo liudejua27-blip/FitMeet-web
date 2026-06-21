@@ -20,7 +20,6 @@ import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
 import type { FitMeetAlphaTurnDecision } from './fitmeet-alpha-agent.types';
 import { SocialAgentFinalResponseService } from './social-agent-final-response.service';
 import {
-  buildApprovalActions,
   buildRecommendationAssistantMessage,
 } from './social-agent-chat-result.presenter';
 import {
@@ -206,11 +205,7 @@ export class SocialAgentRecommendationResultService {
         }),
         fallbackAssistantMessage,
       ) ?? fallbackAssistantMessage;
-    const approvalRequiredActions = buildApprovalActions(
-      task.id,
-      draft,
-      candidates,
-    );
+    const approvalRequiredActions: Array<Record<string, unknown>> = [];
 
     const resultCardInput = {
       taskId: task.id,

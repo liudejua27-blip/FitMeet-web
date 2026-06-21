@@ -9,7 +9,6 @@ import {
   buildSocialAgentCheckinCard,
   buildSocialAgentLifeGraphUpdateCard,
   buildSocialAgentMeetLoopTimelineCard,
-  buildSocialAgentOpenerApprovalCard,
   buildSocialAgentProofSubmittedCard,
   buildSocialAgentProofUploadPromptCard,
   buildSocialAgentReviewCard,
@@ -108,15 +107,6 @@ describe('social agent card action presenter', () => {
   });
 
   it('keeps canonical meet-loop card stages and schema actions stable', () => {
-    const opener = buildSocialAgentOpenerApprovalCard({
-      taskId: 101,
-      targetUserId: 22,
-      approvalId: 9001,
-      candidate: { userId: 22, nickname: '小林' },
-      displayName: '小林',
-      draft: '你好，周末要不要轻松慢跑一圈？',
-      regeneratePayload: { taskId: 101 },
-    });
     const plan = buildSocialAgentActivityPlanCard({
       taskId: 101,
       approvalId: 9002,
@@ -160,43 +150,6 @@ describe('social agent card action presenter', () => {
       payload: { city: '青岛' },
     });
 
-    expect(opener.actions?.map((action) => action.schemaAction)).toEqual([
-      'opener.confirm_send',
-      'opener.regenerate',
-      'opener.reject',
-    ]);
-    expect(
-      opener.actions?.find(
-        (action) => action.schemaAction === 'opener.regenerate',
-      ),
-    ).toMatchObject({
-      payload: expect.objectContaining({
-        taskId: 101,
-        targetUserId: 22,
-        approvalId: 9001,
-        message: '你好，周末要不要轻松慢跑一圈？',
-      }),
-    });
-    expect(opener).toMatchObject({
-      schemaVersion: 'fitmeet.tool-ui.v1',
-      schemaType: 'safety.approval',
-      data: expect.objectContaining({
-        schemaName: 'SafetyApprovalCard',
-        schemaVersion: 'fitmeet.tool-ui.v1',
-        schemaType: 'safety.approval',
-        riskLevel: 'medium',
-        confirmationLabel: '确认后发送',
-        checkpointLabel: '开场白已保存，可重新生成或取消',
-        approval: expect.objectContaining({
-          riskLevel: 'medium',
-          boundary: expect.stringContaining('确认前不会发送'),
-          reasons: expect.arrayContaining([
-            '这一步会向真实用户发送消息',
-            '发送前需要你确认语气和内容',
-          ]),
-        }),
-      }),
-    });
     expect(plan).toMatchObject({
       type: 'activity_plan',
       schemaVersion: 'fitmeet.tool-ui.v1',
@@ -205,9 +158,11 @@ describe('social agent card action presenter', () => {
         schemaName: 'OpportunityCard',
         schemaVersion: 'fitmeet.tool-ui.v1',
         schemaType: 'social_match.activity',
+        approvalId: 9002,
         opportunityCard: true,
         loopStage: 'activity_draft_created',
         opportunity: expect.objectContaining({
+          approvalId: 9002,
           type: 'activity',
           title: '约练计划',
           safetyBadges: ['公共场所', '不共享精确位置', '确认后创建'],
@@ -220,11 +175,15 @@ describe('social agent card action presenter', () => {
         lifeGraphUpdatePreview: expect.stringContaining('Life Graph'),
         trustScoreUpdatePreview: expect.stringContaining('trust score'),
       }),
-      actions: [
+      actions: expect.arrayContaining([
         expect.objectContaining({ schemaAction: 'activity.confirm_create' }),
         expect.objectContaining({ schemaAction: 'activity.modify_time' }),
         expect.objectContaining({ schemaAction: 'activity.modify_location' }),
-      ],
+        expect.objectContaining({
+          schemaAction: 'activity.skip_publish',
+          requiresConfirmation: false,
+        }),
+      ]),
     });
     expect(checkin.actions?.[0]).toMatchObject({
       schemaAction: 'activity.check_in',
@@ -301,7 +260,7 @@ describe('social agent card action presenter', () => {
       canRevoke: true,
     });
     expect(timeline).toMatchObject({
-      type: 'review_card',
+      type: 'meet_loop_timeline',
       schemaVersion: 'fitmeet.tool-ui.v1',
       schemaType: 'meet_loop.timeline',
       data: expect.objectContaining({
@@ -317,8 +276,8 @@ describe('social agent card action presenter', () => {
           recoveryProtocol: expect.arrayContaining([
             expect.objectContaining({
               key: 'checkpoint',
-              label: '进度保存',
-              detail: expect.stringContaining('刷新或断线后可以回到这一步'),
+              label: '可继续',
+              detail: expect.stringContaining('回到当前邀约进度继续处理'),
             }),
             expect.objectContaining({
               key: 'waiting_for',
@@ -551,6 +510,55 @@ describe('social agent card action presenter', () => {
     expect(card).toMatchObject({
       schemaVersion: 'fitmeet.tool-ui.v1',
       schemaType: 'social_match.candidate',
+      actions: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'candidate_view_detail:101:22',
+          label: '查看详情',
+          schemaAction: 'candidate.view_detail',
+          requiresConfirmation: false,
+        }),
+        expect.objectContaining({
+          id: 'candidate_like:101:22',
+          label: '收藏',
+          schemaAction: 'candidate.like',
+          requiresConfirmation: false,
+        }),
+        expect.objectContaining({
+          id: 'candidate_generate_opener:101:22',
+          label: '生成开场白',
+          schemaAction: 'candidate.generate_opener',
+          requiresConfirmation: false,
+        }),
+        expect.objectContaining({
+          id: 'candidate_send_invite:101:22',
+          label: '发送邀请',
+          schemaAction: 'opener.confirm_send',
+          requiresConfirmation: true,
+          payload: expect.objectContaining({
+            approvalRequired: true,
+            checkpointRequired: true,
+            resumeMode: 'resume_after_approval',
+            idempotencyKey: 'opener-send:101:22',
+          }),
+        }),
+        expect.objectContaining({
+          id: 'candidate_connect:101:22',
+          label: '加好友并聊天',
+          schemaAction: 'candidate.connect',
+          requiresConfirmation: true,
+          payload: expect.objectContaining({
+            approvalRequired: true,
+            checkpointRequired: true,
+            resumeMode: 'resume_after_approval',
+            idempotencyKey: 'candidate-connect:101:22',
+          }),
+        }),
+        expect.objectContaining({
+          id: 'candidate_more_like_this:101:22',
+          schemaAction: 'candidate.more_like_this',
+          requiresConfirmation: false,
+        }),
+      ]),
       data: expect.objectContaining({
         reasonerSource: 'fallback',
         reasoningConfidence: 0.43,

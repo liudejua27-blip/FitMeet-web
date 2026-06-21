@@ -101,7 +101,7 @@ describe('buildSocialAgentCandidateConnectResult', () => {
       conversationId: null,
       approvalId: 701,
       requiresApproval: true,
-      message: '发送邀请需要你确认',
+      message: '加好友并聊天需要你确认',
       friendAction: {
         success: true,
         status: 'pending_approval',

@@ -9,6 +9,7 @@ export type SocialCodexActionType =
   | 'publish_social_request'
   | 'search_public_candidates'
   | 'rank_candidates'
+  | 'save_candidate'
   | 'generate_opener'
   | 'send_invite'
   | 'send_message'
@@ -59,7 +60,6 @@ export type SocialCodexPolicyDecision = {
 };
 
 const HIGH_RISK_ACTIONS = new Set<SocialCodexActionType>([
-  'publish_social_request',
   'send_invite',
   'send_message',
   'exchange_contact',
@@ -71,8 +71,11 @@ const HIGH_RISK_ACTIONS = new Set<SocialCodexActionType>([
   'payment',
 ]);
 
+const MEDIUM_APPROVAL_ACTIONS = new Set<SocialCodexActionType>([
+  'publish_social_request',
+]);
+
 const MEDIUM_RISK_ACTIONS = new Set<SocialCodexActionType>([
-  'generate_opener',
   'life_graph_writeback',
 ]);
 
@@ -85,6 +88,7 @@ const ACTION_BY_TOOL: Partial<
   [SocialAgentToolName.SearchActivities]: 'search_public_candidates',
   [SocialAgentToolName.SearchMatches]: 'search_public_candidates',
   [SocialAgentToolName.ExplainMatches]: 'rank_candidates',
+  [SocialAgentToolName.SaveCandidate]: 'save_candidate',
   [SocialAgentToolName.DraftOpener]: 'generate_opener',
   [SocialAgentToolName.SendMessageToCandidate]: 'send_invite',
   [SocialAgentToolName.SendMessage]: 'send_message',
@@ -142,7 +146,8 @@ export class SocialCodexRuntimePolicyService {
 
     if (
       ((containsContact && actionType !== 'exchange_contact') ||
-        (containsPreciseLocation && actionType !== 'reveal_precise_location')) &&
+        (containsPreciseLocation &&
+          actionType !== 'reveal_precise_location')) &&
       input.userConfirmed !== true
     ) {
       return this.decision(actionType, 'blocked', 'blocked', [
@@ -172,11 +177,19 @@ export class SocialCodexRuntimePolicyService {
       ]);
     }
 
+    if (MEDIUM_APPROVAL_ACTIONS.has(actionType)) {
+      return this.decision(actionType, 'approval_required', 'medium', [
+        ...reasons,
+        '这是会公开到发现页的约练内容。',
+        '发布前需要先预览内容，并由你确认后再继续。',
+      ]);
+    }
+
     if (HIGH_RISK_ACTIONS.has(actionType)) {
       return this.decision(actionType, 'approval_required', 'high', [
         ...reasons,
         '这是会影响真实用户、公开内容或隐私边界的动作。',
-        '执行前需要 dry-run、审批和审计记录。',
+        '执行前需要先预览影响，并由你确认后再继续。',
       ]);
     }
 
@@ -291,6 +304,7 @@ export class SocialCodexRuntimePolicyService {
 
   private previewTitle(actionType: SocialCodexActionType): string {
     if (actionType === 'publish_social_request') return '约练发布草稿';
+    if (actionType === 'save_candidate') return '候选收藏记录';
     if (actionType === 'send_invite') return '邀请发送草稿';
     if (actionType === 'send_message') return '消息发送草稿';
     if (actionType === 'connect_candidate') return '加好友请求草稿';
@@ -328,6 +342,8 @@ export class SocialCodexRuntimePolicyService {
     if (/contact|phone|wechat|联系方式/.test(text)) return 'exchange_contact';
     if (/location|位置|地址/.test(text)) return 'reveal_precise_location';
     if (/profile|画像/.test(text)) return 'update_sensitive_profile';
+    if (/save|favorite|bookmark|collect|收藏|保存|喜欢/.test(text))
+      return 'save_candidate';
     if (/candidate|match|search|候选|匹配/.test(text))
       return 'search_public_candidates';
     return 'summarize_intent';
@@ -370,6 +386,7 @@ export class SocialCodexRuntimePolicyService {
         'publish_social_request',
         'search_public_candidates',
         'rank_candidates',
+        'save_candidate',
         'generate_opener',
         'send_invite',
         'send_message',
@@ -398,7 +415,9 @@ export class SocialCodexRuntimePolicyService {
       typeof value === 'string' && value.trim()
         ? value.trim().toLowerCase()
         : '';
-    return text === 'true' || text === '1' || text === 'yes' || text === 'public';
+    return (
+      text === 'true' || text === '1' || text === 'yes' || text === 'public'
+    );
   }
 
   private containsContact(payload: Record<string, unknown>): boolean {
@@ -448,7 +467,9 @@ export class SocialCodexRuntimePolicyService {
     );
   }
 
-  private hasPublicCandidateBoundary(payload: Record<string, unknown>): boolean {
+  private hasPublicCandidateBoundary(
+    payload: Record<string, unknown>,
+  ): boolean {
     if (
       this.hasScalar(payload.connectionId) ||
       this.hasScalar(payload.conversationId) ||
@@ -460,24 +481,38 @@ export class SocialCodexRuntimePolicyService {
     ) {
       return true;
     }
-    const relationship = cleanDisplayText(payload.relationship, '').toLowerCase();
+    const relationship = cleanDisplayText(
+      payload.relationship,
+      '',
+    ).toLowerCase();
     if (/(friend|connected|好友|已连接)/.test(relationship)) return true;
-    if (payload.publiclyDiscoverable === true || payload.isPublicCandidate === true)
+    if (
+      payload.publiclyDiscoverable === true ||
+      payload.isPublicCandidate === true
+    )
       return true;
     const visibility = cleanDisplayText(
       payload.candidateVisibility ?? payload.visibility,
       '',
     ).toLowerCase();
     if (/(public|discoverable|公开|可发现)/.test(visibility)) return true;
-    const source = cleanDisplayText(payload.source ?? payload.candidateSource, '').toLowerCase();
-    if (/(public|discover|公开|发现|activity_signup|public_intent)/.test(source))
+    const source = cleanDisplayText(
+      payload.source ?? payload.candidateSource,
+      '',
+    ).toLowerCase();
+    if (
+      /(public|discover|公开|发现|activity_signup|public_intent)/.test(source)
+    )
       return true;
     const candidate = payload.candidate;
-    if (this.isRecord(candidate)) return this.hasPublicCandidateBoundary(candidate);
+    if (this.isRecord(candidate))
+      return this.hasPublicCandidateBoundary(candidate);
     return false;
   }
 
-  private hasPrivateCandidateBoundary(payload: Record<string, unknown>): boolean {
+  private hasPrivateCandidateBoundary(
+    payload: Record<string, unknown>,
+  ): boolean {
     const visibility = cleanDisplayText(
       payload.candidateVisibility ?? payload.visibility,
       '',

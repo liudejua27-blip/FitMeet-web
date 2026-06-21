@@ -1259,7 +1259,7 @@ export class SocialAgentChatController {
       await socialCodexEvents.writeRunStarted(
         v2,
         this.checkpointActionTitle(action),
-        '会先恢复保存点，再继续处理这一步。',
+        '会接着刚才的进度继续处理，不会重复执行已经完成的动作。',
       );
       await socialCodexEvents.writeCheckpointRestore(v2, action);
       const plan = await this.requireCheckpoints().prepareAction({
@@ -1336,7 +1336,7 @@ export class SocialAgentChatController {
       await socialCodexEvents.writeRunStarted(
         v2,
         this.checkpointActionTitle(action),
-        '会先恢复保存点，再继续处理这一步。',
+        '会接着刚才的进度继续处理，不会重复执行已经完成的动作。',
       );
       await socialCodexEvents.writeCheckpointRestore(v2, action);
       const plan = await this.requireCheckpoints().prepareStepAction({
@@ -1475,9 +1475,9 @@ export class SocialAgentChatController {
   }
 
   private checkpointActionTitle(action: AgentRunCheckpointAction) {
-    if (action === 'fork') return '正在生成新版本';
-    if (action === 'replay') return '正在重新运行这一步';
-    if (action === 'retry') return '正在重试这一步';
+    if (action === 'fork') return '正在换一种方案';
+    if (action === 'replay') return '正在重新整理';
+    if (action === 'retry') return '正在继续处理';
     return '正在恢复进度';
   }
 

@@ -205,7 +205,7 @@ export function getSocialAgentToolLabel(toolName: SocialAgentToolName): string {
     [SocialAgentToolName.SendMessageToCandidate]: '给候选人发消息',
     [SocialAgentToolName.ReplyMessage]: '回复消息',
     [SocialAgentToolName.AddFriend]: '加好友',
-    [SocialAgentToolName.ConnectCandidate]: '连接候选人',
+    [SocialAgentToolName.ConnectCandidate]: '加好友并聊天',
     [SocialAgentToolName.CreateActivity]: '创建活动',
     [SocialAgentToolName.InviteActivity]: '邀请参加活动',
     [SocialAgentToolName.JoinActivity]: '加入活动',
@@ -322,7 +322,6 @@ export function getSocialAgentToolRiskLevel(
       SocialAgentToolName.AddFriend,
       SocialAgentToolName.ConnectCandidate,
       SocialAgentToolName.InviteActivity,
-      SocialAgentToolName.SaveCandidate,
       SocialAgentToolName.PublishSocialRequest,
       SocialAgentToolName.RejectAction,
     ].includes(toolName)

@@ -15,12 +15,12 @@ describe('social agent opener draft action presenter', () => {
     suggestedMessage: '今晚先在青岛大学操场轻松跑一段吗？',
   };
 
-  it('builds the approval input for a candidate opener draft', () => {
+  it('builds the approval input for sending a candidate opener draft', () => {
     expect(
       buildSocialAgentOpenerDraftApprovalInput({
         ownerUserId: 7,
         taskId: 101,
-        action: 'candidate.generate_opener',
+        action: 'opener.confirm_send',
         targetUserId: 22,
         candidate,
         draft: '今晚先在青岛大学操场轻松跑一段吗？',
@@ -35,10 +35,13 @@ describe('social agent opener draft action presenter', () => {
       skillName: 'send_invite',
       payload: {
         source: 'agent_card_action',
-        schemaAction: 'candidate.generate_opener',
+        schemaAction: 'opener.confirm_send',
+        taskId: 101,
         agentTaskId: 101,
         candidateUserId: 22,
         targetUserId: 22,
+        candidateRecordId: 501,
+        socialRequestCandidateId: 501,
         candidate,
         message: '今晚先在青岛大学操场轻松跑一段吗？',
         suggestedOpener: '今晚先在青岛大学操场轻松跑一段吗？',
@@ -48,15 +51,43 @@ describe('social agent opener draft action presenter', () => {
         resumeMode: 'resume_after_approval',
         idempotencyKey: 'opener-send:101:22',
         riskReasons: [
-          '这一步会向真实用户发送消息',
+          '这个动作会向真实用户发送消息',
           '发送前需要你确认语气和内容',
           '不会自动交换联系方式或精确位置',
         ],
       },
-      summary: '发送开场白给候选人 #22',
-      riskLevel: 'medium',
+      summary: '发送开场白给这位用户',
+      riskLevel: 'high',
       reason: 'FitMeet Agent 已生成开场白草稿，等待用户确认后再发送。',
       createdBy: 'agent',
+      relatedCandidateId: 501,
+    });
+  });
+
+  it('keeps stable candidate identity in the opener approval payload', () => {
+    expect(
+      buildSocialAgentOpenerDraftApprovalInput({
+        ownerUserId: 7,
+        taskId: 101,
+        action: 'opener.confirm_send',
+        targetUserId: 22,
+        candidate: {
+          ...candidate,
+          socialRequestId: 301,
+        },
+        draft: '今晚先在青岛大学操场轻松跑一段吗？',
+        relatedCandidateId: 501,
+      }),
+    ).toMatchObject({
+      payload: {
+        taskId: 101,
+        agentTaskId: 101,
+        targetUserId: 22,
+        candidateUserId: 22,
+        candidateRecordId: 501,
+        socialRequestCandidateId: 501,
+        socialRequestId: 301,
+      },
       relatedCandidateId: 501,
     });
   });
@@ -66,13 +97,13 @@ describe('social agent opener draft action presenter', () => {
       buildSocialAgentOpenerDraftApprovalInput({
         ownerUserId: 7,
         taskId: 101,
-        action: 'candidate.generate_opener',
+        action: 'opener.confirm_send',
         targetUserId: null,
         candidate,
         draft: '你好，想先聊聊吗？',
         relatedCandidateId: null,
       }).summary,
-    ).toBe('发送开场白给候选人');
+    ).toBe('发送开场白给对方');
   });
 
   it('builds the pending action, draft state, and confirmation copy', () => {
@@ -87,8 +118,8 @@ describe('social agent opener draft action presenter', () => {
           id: 9001,
           type: ApprovalType.SendMessage,
           actionType: 'send_invite',
-          summary: '发送开场白给候选人 #22',
-          riskLevel: ApprovalRiskLevel.Medium,
+          summary: '发送开场白给这位用户',
+          riskLevel: ApprovalRiskLevel.High,
           payload: {},
           expiresAt: '2026-06-08T00:00:00.000Z',
         },
@@ -99,8 +130,8 @@ describe('social agent opener draft action presenter', () => {
         id: 9001,
         type: ApprovalType.SendMessage,
         actionType: 'send_invite',
-        summary: '发送开场白给候选人 #22',
-        riskLevel: ApprovalRiskLevel.Medium,
+        summary: '发送开场白给这位用户',
+        riskLevel: ApprovalRiskLevel.High,
         at: '2026-06-07T00:00:00.000Z',
       },
       cardActionDraft: {

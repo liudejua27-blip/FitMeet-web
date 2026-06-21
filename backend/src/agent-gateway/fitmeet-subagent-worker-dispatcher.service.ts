@@ -70,7 +70,7 @@ const GENERIC_WORKER_ASSISTANT_MESSAGES = [
   '我会继续帮你找',
   '我会按这些信息继续',
   '我会继续按已补齐的信息找',
-  '我会先按安全边界处理这一步',
+  '我会先按安全边界处理当前进度',
 ];
 
 @Injectable()

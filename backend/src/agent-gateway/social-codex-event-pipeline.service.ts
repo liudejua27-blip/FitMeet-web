@@ -206,11 +206,11 @@ export class SocialCodexEventPipelineService {
     return writer(
       'visible_process.delta',
       'hydrate_context',
-      '正在恢复保存点',
+      '正在接着刚才的进度',
       {
         state: 'running',
         detail:
-          '会读取上一次任务状态和待确认动作，不会重复执行已经完成的步骤。',
+          '会读取上一次任务状态和待确认动作，不会重复执行已经完成的内容。',
         payload: {
           checkpointAction: action ?? null,
         },
@@ -260,9 +260,9 @@ export class SocialCodexEventPipelineService {
   }
 
   async writeRunFailed(writer: SocialCodexEventWriter) {
-    return writer('run.failed', 'detect_social_intent', '这次处理没有完成', {
+    return writer('run.failed', 'detect_social_intent', '连接中断了，可以继续', {
       state: 'failed',
-      detail: '刚才连接中断了；已保留这段需求，可以继续处理或重新发送。',
+      detail: '这段需求还在，可以直接继续；重试会从刚才的位置接着处理。',
     });
   }
 
@@ -401,13 +401,13 @@ export class SocialCodexEventPipelineService {
     await writer(
       'approval.resolved',
       'approval',
-      decision === 'approved' ? '已确认这一步' : '已取消这一步',
+      decision === 'approved' ? '已确认' : '已取消',
       {
         state: 'done',
         detail:
           decision === 'approved'
             ? '我会从同一个任务继续处理，不会重新询问已确认的信息。'
-            : '我不会执行刚才的高风险动作，会继续保留当前对话。',
+            : '这个动作已取消，不会触达对方，也不会公开位置或联系方式。',
         payload: {
           approvalId,
           decision,
@@ -510,7 +510,7 @@ export class SocialCodexEventPipelineService {
         state: result.safeStatus.blocked ? 'failed' : 'done',
         detail:
           result.safeStatus.boundaryNotes.slice(0, 2).join('；') ||
-          `风险等级：${result.safeStatus.level}`,
+          '已按安全边界检查，真实触达前仍会让你确认。',
         payload: {
           level: result.safeStatus.level,
           blocked: result.safeStatus.blocked,
@@ -628,7 +628,7 @@ export class SocialCodexEventPipelineService {
       await writer(
         'approval.required',
         'approval',
-        schema?.title || '执行这一步前需要你确认',
+        schema?.title || '执行这个动作前需要你确认',
         {
           state: 'waiting',
           detail: schema?.detail || item.summary,
@@ -814,8 +814,8 @@ export class SocialCodexEventPipelineService {
       case 'error_recovery':
         return {
           stage: 'detect_social_intent',
-          title: '已保留当前对话',
-          detail: '刚才的处理没有继续执行高风险动作，你可以直接接着说。',
+          title: '连接中断了，可以继续',
+          detail: '这段需求还在，可以直接继续；刚才没有执行任何高风险动作。',
           state: 'done',
         };
       case 'casual_chatting':

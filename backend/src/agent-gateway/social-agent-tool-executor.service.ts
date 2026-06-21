@@ -1162,7 +1162,7 @@ export class SocialAgentToolExecutorService {
   ): string {
     const message = this.toolInput.string(payload.message) ?? '';
     if (/approval|confirm|确认|APPROVAL_REQUIRED/i.test(message)) {
-      return '这一步需要你确认后才能继续，我没有执行会影响他人的动作。';
+      return '这个动作需要你确认后才能继续，我没有执行会影响他人的动作。';
     }
     if (/timeout|timed? out|tool_timeout/i.test(message)) {
       return reliability.highRisk
@@ -1172,7 +1172,7 @@ export class SocialAgentToolExecutorService {
     if (reliability.highRisk) {
       return '这个高风险动作没有完成，我没有继续自动重试。请先确认状态，再决定是否重新执行或撤回。';
     }
-    return '这一步没成功，但上下文已经保留。你可以让我重试，或换一种方式继续。';
+    return '刚才连接不稳，但上下文已经保留。你可以让我继续处理，或换一种方式继续。';
   }
 
   private readIdempotencyKey(input: Record<string, unknown>): string | null {
@@ -1576,7 +1576,7 @@ export class SocialAgentToolExecutorService {
         message,
         retryable: false,
         userMessage:
-          '这一步涉及联系方式、精确位置或社交安全边界，我没有执行。请先修改内容或通过安全确认流程继续。',
+          '这个动作涉及联系方式、精确位置或社交安全边界，我没有执行。请先修改内容或通过安全确认流程继续。',
         reasons,
         executionContract,
         socialCodexMode: mode,

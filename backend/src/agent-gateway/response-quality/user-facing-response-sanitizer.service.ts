@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 
-import { cleanDisplayText, sanitizeForDisplay } from '../../common/display-text.util';
+import {
+  cleanDisplayText,
+  sanitizeForDisplay,
+} from '../../common/display-text.util';
 import { AgentTaskPermissionMode } from '../entities/agent-task.entity';
 import type { LifeGraphProposalDto } from '../../life-graph/dto/life-graph.dto';
 import type {
@@ -40,7 +43,10 @@ export class UserFacingResponseSanitizerService {
   ): UserFacingAgentResponse {
     const safety = this.readSafety(result);
     const pendingConfirmations = this.readPendingConfirmations(result);
-    const rawAssistantMessage = cleanDisplayText(result.assistantMessage, '').trim();
+    const rawAssistantMessage = cleanDisplayText(
+      result.assistantMessage,
+      '',
+    ).trim();
     const assistantMessage = this.readAssistantMessage(rawAssistantMessage);
     const assistantMessageSource = this.readAssistantMessageSource(result);
     const cards = this.cardAssembler.assemble(this.readCards(result));
@@ -73,7 +79,8 @@ export class UserFacingResponseSanitizerService {
 
   private readAssistantMessage(value: unknown): string {
     const text = cleanDisplayText(value, '').trim();
-    return shouldStreamFallbackAssistantText(text) ? text : '';
+    if (!shouldStreamFallbackAssistantText(text)) return '';
+    return collapseRepeatedAssistantMessageText(text).trim();
   }
 
   private readRecoveryNoticePatch(input: {
@@ -105,8 +112,8 @@ export class UserFacingResponseSanitizerService {
     if (/处理时间有点久|timeout|timed?\s*out|超时/i.test(rawText)) {
       return {
         kind: 'timeout',
-        title: '这次处理时间有点久',
-        message: '我已经保留当前对话。你可以重试，或者继续告诉我下一步。',
+        title: '这段需求还在',
+        message: '刚才处理比平时久一点，可以继续处理；不会重复执行已确认的高风险动作。',
         retryable: true,
         source: 'stream_error',
       };
@@ -116,7 +123,7 @@ export class UserFacingResponseSanitizerService {
       return {
         kind: 'interrupted',
         title: '刚才连接中断了',
-        message: '我已经保留当前对话。你可以重试，或者继续补充新的要求。',
+        message: '这段需求还在，可以继续补充新的要求，我会接着处理。',
         retryable: true,
         source: 'stream_error',
       };
@@ -138,8 +145,8 @@ export class UserFacingResponseSanitizerService {
 
     return {
       kind: 'failed',
-      title: '这次没有顺利完成',
-      message: '我已经保留当前对话。你可以重试，或者继续告诉我下一步。',
+      title: '连接中断了，可以继续',
+      message: '这段需求还在，可以继续处理；不会重复执行已确认的高风险动作。',
       retryable: true,
       source: 'fallback_suppressed',
     };
@@ -270,9 +277,9 @@ export class UserFacingResponseSanitizerService {
     ];
   }
 
-  private readLifeGraphWritebackProposal(
-    result: SanitizableAgentResult,
-  ): { lifeGraphWritebackProposal?: Record<string, unknown> } {
+  private readLifeGraphWritebackProposal(result: SanitizableAgentResult): {
+    lifeGraphWritebackProposal?: Record<string, unknown>;
+  } {
     if (
       !('lifeGraphWritebackProposal' in result) ||
       !this.isRecord(result.lifeGraphWritebackProposal)
@@ -457,16 +464,54 @@ export class UserFacingResponseSanitizerService {
     result: SanitizableAgentResult,
   ): UserFacingAgentPendingConfirmation[] {
     if ('pendingApproval' in result && result.pendingApproval) {
-      return [this.fromPendingApproval(result.pendingApproval)];
+      const confirmation = this.fromPendingApproval(result.pendingApproval);
+      return this.isUserFacingPendingConfirmation(confirmation)
+        ? [confirmation]
+        : [];
     }
 
     if ('approvalRequiredActions' in result) {
-      return result.approvalRequiredActions.map((action) =>
-        this.fromApprovalAction(action),
-      );
+      return result.approvalRequiredActions
+        .map((action) => this.fromApprovalAction(action))
+        .filter((confirmation) =>
+          this.isUserFacingPendingConfirmation(confirmation),
+        );
     }
 
     return [];
+  }
+
+  private isUserFacingPendingConfirmation(
+    confirmation: UserFacingAgentPendingConfirmation,
+  ): boolean {
+    const actionText = [
+      confirmation.actionType,
+      confirmation.type,
+      confirmation.summary,
+    ]
+      .join(' ')
+      .toLowerCase();
+    if (
+      /candidate\.like|save_candidate|favorite|bookmark|collect|generate_opener|candidate\.generate_opener|draft_opener|opener\.regenerate|opener\.reject|收藏|保存候选|生成开场白|草稿/.test(
+        actionText,
+      ) &&
+      !/opener\.confirm_send|send_message|send_invite|connect_candidate|candidate\.connect|publish|create_activity|social_request|exchange_contact|precise_location|发送邀请|确认发送|加好友|私信|发布|公开|精确位置|联系方式/.test(
+        actionText,
+      )
+    ) {
+      return false;
+    }
+
+    if (
+      /opener\.confirm_send|send_message|send_invite|connect_candidate|candidate\.connect|publish_social_request|create_activity|social_request|exchange_contact|reveal_precise_location|update_sensitive_profile|contact|location|publish|create|invite|message|connect|发送|私信|邀请|加好友|连接|发布|公开|精确位置|联系方式|敏感画像/.test(
+        actionText,
+      )
+    ) {
+      return true;
+    }
+
+    const risk = confirmation.riskLevel.toLowerCase();
+    return risk === 'medium' || risk === 'high' || risk === 'critical';
   }
 
   private fromPendingApproval(
@@ -511,7 +556,9 @@ export class UserFacingResponseSanitizerService {
     };
   }
 
-  private publicApprovalPayload(value: unknown): Record<string, unknown> | null {
+  private publicApprovalPayload(
+    value: unknown,
+  ): Record<string, unknown> | null {
     if (!this.isRecord(value)) return null;
     const payload: Record<string, unknown> = {};
     this.copySafePayloadPrimitive(value, payload, 'checkpointId');
@@ -521,8 +568,16 @@ export class UserFacingResponseSanitizerService {
     this.copySafePayloadPrimitive(value, payload, 'threadId');
     this.copySafePayloadPrimitive(value, payload, 'proposalId');
     this.copySafePayloadPrimitive(value, payload, 'publicIntentId');
+    this.copySafePayloadPrimitive(value, payload, 'socialRequestId');
     this.copySafePayloadPrimitive(value, payload, 'cardId');
     this.copySafePayloadPrimitive(value, payload, 'candidateId');
+    this.copySafePayloadPrimitive(value, payload, 'candidateRecordId');
+    this.copySafePayloadPrimitive(value, payload, 'socialRequestCandidateId');
+    this.copySafePayloadPrimitive(value, payload, 'targetUserId');
+    this.copySafePayloadPrimitive(value, payload, 'candidateUserId');
+    this.copySafePayloadPrimitive(value, payload, 'userId');
+    this.copySafePayloadPrimitive(value, payload, 'opportunityId');
+    this.copySafePayloadPrimitive(value, payload, 'activityId');
 
     const dryRunPreview = this.publicDryRunPreview(value.dryRunPreview);
     if (dryRunPreview) payload.dryRunPreview = dryRunPreview;
@@ -544,7 +599,9 @@ export class UserFacingResponseSanitizerService {
     return Object.keys(preview).length > 0 ? preview : null;
   }
 
-  private publicSocialCodexPayload(value: unknown): Record<string, unknown> | null {
+  private publicSocialCodexPayload(
+    value: unknown,
+  ): Record<string, unknown> | null {
     if (!this.isRecord(value)) return null;
     const approvalPolicy = this.isRecord(value.approvalPolicy)
       ? value.approvalPolicy
@@ -599,4 +656,102 @@ export class UserFacingResponseSanitizerService {
   private isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
   }
+}
+
+function collapseRepeatedAssistantMessageText(value: string): string {
+  const text = value.replace(/\r\n/g, '\n').trim();
+  if (!text) return '';
+  return collapseRepeatedWholeText(
+    collapseAdjacentDuplicateSentences(collapseAdjacentDuplicateBlocks(text)),
+  );
+}
+
+function collapseAdjacentDuplicateBlocks(value: string): string {
+  const blocks = value
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+  if (blocks.length < 2) return value;
+
+  const collapsed: string[] = [];
+  for (const block of blocks) {
+    const previous = collapsed[collapsed.length - 1];
+    if (
+      previous &&
+      normalizeAssistantMessageText(previous) ===
+        normalizeAssistantMessageText(block)
+    ) {
+      continue;
+    }
+    collapsed.push(block);
+  }
+
+  return collapsed.join('\n\n');
+}
+
+function collapseAdjacentDuplicateSentences(value: string): string {
+  const segments = value
+    .split(/(?<=[。！？!?])\s*/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length < 2) return value;
+
+  const collapsed: string[] = [];
+  for (const segment of segments) {
+    const previous = collapsed[collapsed.length - 1];
+    if (
+      previous &&
+      normalizeAssistantMessageText(previous) ===
+        normalizeAssistantMessageText(segment)
+    ) {
+      continue;
+    }
+    collapsed.push(segment);
+  }
+
+  return collapsed.join('');
+}
+
+function collapseRepeatedWholeText(value: string): string {
+  const text = value.trim();
+  if (text.length < 24) return text;
+
+  for (const separator of ['\n\n', '\n', ' ']) {
+    if (!text.includes(separator)) continue;
+    const parts = text
+      .split(separator)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (parts.length !== 2) continue;
+    const [first, second] = parts;
+    if (
+      first.length >= 12 &&
+      normalizeAssistantMessageText(first) ===
+        normalizeAssistantMessageText(second)
+    ) {
+      return first;
+    }
+  }
+
+  if (text.length % 2 === 0) {
+    const midpoint = text.length / 2;
+    const first = text.slice(0, midpoint).trim();
+    const second = text.slice(midpoint).trim();
+    if (
+      first.length >= 12 &&
+      normalizeAssistantMessageText(first) ===
+        normalizeAssistantMessageText(second)
+    ) {
+      return first;
+    }
+  }
+
+  return text;
+}
+
+function normalizeAssistantMessageText(value: string): string {
+  return value
+    .replace(/\s+/g, '')
+    .replace(/[，,。.!！?？；;：:、"'“”‘’（）()【】\[\]\-—]/g, '')
+    .toLowerCase();
 }

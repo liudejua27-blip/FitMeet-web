@@ -5,6 +5,7 @@ const fitMeetAlphaCardTypes = [
   'activity_plan',
   'activity_status',
   'checkin_card',
+  'meet_loop_timeline',
   'review_card',
   'audit_update',
   'safety_boundary',
@@ -26,6 +27,8 @@ const fitMeetAlphaCardActions = [
   'check_in',
   'submit_review',
   'refine_request',
+  'activity.skip_publish',
+  'opener.reject',
 ];
 
 const fitMeetAgentSchemaActions = [
@@ -35,9 +38,13 @@ const fitMeetAgentSchemaActions = [
   'candidate.generate_opener',
   'opener.confirm_send',
   'opener.regenerate',
+  'opener.reject',
   'activity.confirm_create',
+  'activity.skip_publish',
   'activity.modify_time',
   'activity.modify_location',
+  'candidate.view_detail',
+  'candidate.connect',
   'activity.check_in',
   'activity.complete',
   'activity.upload_proof',

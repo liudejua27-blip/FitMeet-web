@@ -689,7 +689,7 @@ export class SocialAgentRouteAgentLoopRunnerService {
       task,
       state: this.isRecord(output.state)
         ? (output.state as unknown as SocialAgentRouteTurnState)
-        : createSocialAgentRouteTurnState('我已经完成这一步处理。'),
+        : createSocialAgentRouteTurnState('我已经整理好当前进度。'),
       actionTurn: this.isRecord(output.actionTurn)
         ? (output.actionTurn as RouteBranchActionTurn)
         : undefined,
@@ -983,7 +983,7 @@ export class SocialAgentRouteAgentLoopRunnerService {
       return running ? '正在准备需要你确认的动作' : '已整理确认内容';
     if (toolName === 'candidate_confirmation_check')
       return running ? '正在确认候选动作' : '已确认候选动作状态';
-    return running ? '正在处理这一步' : '已完成这一步';
+    return running ? '正在推进当前进度' : '已整理当前进度';
   }
 
   private hydratedContextFromTaskContext(input: {

@@ -106,6 +106,9 @@ export class SocialAgentMeetLoopService {
         body,
       );
     }
+    if (body.action === 'activity.skip_publish') {
+      return this.skipPublishActivityFromCardAction(ownerUserId, taskId, body);
+    }
     if (body.action === 'activity.check_in') {
       return this.checkInActivityFromCardAction(ownerUserId, taskId, body);
     }
@@ -435,6 +438,70 @@ export class SocialAgentMeetLoopService {
     return result;
   }
 
+  private async skipPublishActivityFromCardAction(
+    ownerUserId: number,
+    taskId: number,
+    body: SocialAgentCardActionBody,
+  ): Promise<SocialAgentIntentRouteResult> {
+    const task = await this.assertTaskOwner(taskId, ownerUserId);
+    const payload: Record<string, unknown> = {
+      ...this.mergeActivityPayload(task, body.payload ?? {}),
+      status: 'draft_kept_private',
+      loopStage: 'activity_draft_private',
+      visibility: 'private',
+    };
+    task.result = {
+      ...(task.result ?? {}),
+      activityDraft: {
+        ...payload,
+        visibility: 'private',
+        autoPublished: false,
+      },
+      meetLoop: {
+        ...readSocialAgentMeetLoopState(task, (value) => this.isRecord(value)),
+        ...payload,
+        waitingFor: 'user_next_message',
+      },
+    };
+    transitionSocialAgentState(task, 'message_action', {
+      objective: 'meet_loop',
+      nextStep: '约练卡已保留为草稿，暂不发布到发现；你可以继续修改或直接聊天。',
+      shouldSearchNow: false,
+      awaitingSearchConfirmation: false,
+      waitingFor: 'user_next_message',
+      lastCompletedStep: 'activity_publish_skipped',
+    });
+    await this.taskRepo.save(task);
+    await this.persistMeetLoopState(task, 'activity_draft_created', {
+      waitingFor: 'user_next_message',
+      payload,
+    });
+
+    const card = buildSocialAgentMeetLoopTimelineCard({
+      taskId: task.id,
+      activityId: this.number(payload.activityId),
+      candidateUserId: this.number(
+        payload.candidateUserId ?? payload.targetUserId,
+      ),
+      stage: 'activity_draft_private',
+      description: '这张约练卡已作为草稿保留，暂时不会发布到发现。',
+      nextAction: '你可以继续修改、重新发布，或先和 Agent 聊清楚需求。',
+      payload,
+    });
+    const assistantMessage =
+      '好的，我先不发布这张约练卡，已经把它保留为草稿。你可以继续修改，也可以直接和我聊下一步。';
+    const result = this.cardActionRouteResult(task, assistantMessage, [card]);
+    await this.writeEvent(
+      task,
+      AgentTaskEventType.Note,
+      'Agent activity publish skipped from card action',
+      { action: body.action, visibility: 'private' },
+      AgentTaskEventActor.Agent,
+    );
+    await this.recordAssistantMessage(task, assistantMessage, result);
+    return result;
+  }
+
   private async createActivityApprovalFromCardAction(
     ownerUserId: number,
     taskId: number,
@@ -448,6 +515,14 @@ export class SocialAgentMeetLoopService {
       payload,
     );
     if (existingPending) return existingPending;
+    const candidateRecordId =
+      this.number(payload.candidateRecordId ?? payload.socialRequestCandidateId) ??
+      null;
+    const socialRequestId = this.number(payload.socialRequestId) ?? null;
+    const candidateUserId =
+      this.number(
+        payload.candidateUserId ?? payload.targetUserId ?? payload.invitedUserId,
+      ) ?? null;
     const approval = await this.approvals.create({
       userId: ownerUserId,
       agentConnectionId: null,
@@ -458,8 +533,22 @@ export class SocialAgentMeetLoopService {
       payload: {
         source: 'agent_card_action',
         schemaAction: body.action,
-        agentTaskId: task.id,
         ...payload,
+        taskId: task.id,
+        agentTaskId: task.id,
+        ...(candidateRecordId
+          ? {
+              candidateRecordId,
+              socialRequestCandidateId: candidateRecordId,
+            }
+          : {}),
+        ...(socialRequestId ? { socialRequestId } : {}),
+        ...(candidateUserId
+          ? {
+              targetUserId: candidateUserId,
+              candidateUserId,
+            }
+          : {}),
         publicPlaceOnly: true,
         noPreciseLocation: true,
       },
@@ -467,8 +556,8 @@ export class SocialAgentMeetLoopService {
       riskLevel: ApprovalRiskLevel.Medium,
       reason: '线下活动必须由用户确认后才能创建。',
       createdBy: 'agent',
-      relatedSocialRequestId: this.number(payload.socialRequestId) ?? null,
-      relatedCandidateId: this.number(payload.candidateRecordId) ?? null,
+      relatedSocialRequestId: socialRequestId,
+      relatedCandidateId: candidateRecordId,
     });
     const pendingApproval = this.toPendingApprovalSnapshot(approval);
     recordSocialAgentPendingAction(task, {
@@ -999,7 +1088,7 @@ export class SocialAgentMeetLoopService {
         payload: this.meetLoopPayload(task, payload),
       });
       const assistantMessage =
-        '我已经定位到活动证明这一步。请打开活动详情上传场景照、签到或文字说明；我不会要求露脸，也不会公开精确位置。';
+        '我已经定位到活动证明环节。请打开活动详情上传场景照、签到或文字说明；我不会要求露脸，也不会公开精确位置。';
       const result = this.cardActionRouteResult(task, assistantMessage, [card]);
       await this.writeEvent(
         task,

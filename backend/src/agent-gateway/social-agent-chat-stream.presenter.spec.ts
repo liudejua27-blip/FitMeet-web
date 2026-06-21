@@ -28,7 +28,7 @@ describe('social-agent-chat-stream.presenter', () => {
     expect(running).toMatchObject({
       type: 'tool_call',
       stepId: 'step-analysis',
-      title: '正在处理这一步',
+      title: '正在推进当前进度',
       detail: '正在筛选合适的人',
     });
     expect(done).toMatchObject({
@@ -40,13 +40,13 @@ describe('social-agent-chat-stream.presenter', () => {
     expect(failed).toMatchObject({
       type: 'tool_result',
       stepId: 'step-analysis',
-      title: '这一步没成功',
+      title: '刚才连接不稳',
       detail: '正在筛选合适的人',
     });
     expect(progress).toMatchObject({
       type: 'progress',
       id: 'tool:search',
-      title: '正在处理这一步',
+      title: '正在推进当前进度',
       detail: '正在筛选合适的人',
     });
   });
@@ -117,12 +117,28 @@ describe('social-agent-chat-stream.presenter', () => {
         type: 'error',
         code: 'AGENT_STREAM_FAILED',
         message:
-          'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。',
+          '连接刚才中断了。这段需求还在，可以直接继续。',
         recoveryNotice: expect.objectContaining({
           retryable: true,
           source: 'stream_error',
         }),
       });
     }
+  });
+
+  it('keeps timeout recovery copy lightweight instead of showing a failure-like title', () => {
+    const timeout = userFacingStreamErrorEvent(new Error('deepseek_timeout'));
+
+    expect(timeout).toMatchObject({
+      type: 'error',
+      code: 'AGENT_STREAM_FAILED',
+      message: '处理比平时久一点。这段需求还在，可以继续。',
+      recoveryNotice: expect.objectContaining({
+        kind: 'timeout',
+        title: '这段需求还在',
+        message: '刚才处理比平时久一点，可以继续处理；不会重复执行已确认的高风险动作。',
+      }),
+    });
+    expect(JSON.stringify(timeout)).not.toContain('这次处理时间有点久');
   });
 });

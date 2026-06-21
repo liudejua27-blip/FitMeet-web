@@ -346,10 +346,18 @@ describe('SocialAgentToolExecutionPolicyService', () => {
       socialCodex: expect.objectContaining({
         actionType: 'publish_social_request',
         mode: 'approval_required',
-        riskLevel: 'high',
+        riskLevel: 'medium',
         requiresApproval: true,
         dryRunRequired: true,
         auditRequired: true,
+        dryRunPreview: expect.objectContaining({
+          required: true,
+          sideEffectAllowedBeforeApproval: false,
+        }),
+        sandbox: expect.objectContaining({
+          externalSideEffectAllowed: false,
+          preciseLocationAllowed: false,
+        }),
         idempotencyKeyScope: 'social_codex:publish_social_request',
         idempotencyKey: expect.stringMatching(
           /^social_codex:publish_social_request:task:100:tool:create_social_request:/,

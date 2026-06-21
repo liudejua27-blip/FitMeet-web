@@ -441,7 +441,7 @@ describe('AgentApprovalDispatcherService', () => {
       skillName: 'add_friend',
       status: ApprovalStatus.Approved,
       riskLevel: ApprovalRiskLevel.Medium,
-      summary: '发送邀请给候选人 #22',
+      summary: '加好友并聊天：这位用户',
       reason: '',
       createdBy: 'agent',
       payload: {

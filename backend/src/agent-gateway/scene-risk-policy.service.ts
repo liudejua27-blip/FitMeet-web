@@ -265,7 +265,11 @@ export class SceneRiskPolicyService {
       return 'contact_exchange';
     if (/offline|meet|见面|线下/.test(raw)) return 'offline_meeting';
     if (/add_friend|friend|connect|加好友|好友/.test(raw)) return 'add_friend';
-    if (/send_message|message|发消息|私信|聊天/.test(raw))
+    if (
+      /send_message|confirm_send|send_invite|message|invite|发消息|私信|聊天|发送|邀请/.test(
+        raw,
+      )
+    )
       return 'send_message';
     if (/create_workout|workout|约练/.test(raw)) return 'create_workout';
     if (/create_activity|invite_activity|join_activity|活动|报名/.test(raw)) {

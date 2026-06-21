@@ -323,7 +323,7 @@ describe('SocialAgentMessageLogService', () => {
 
     await service.recordAssistantMessage(
       task,
-      'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。',
+      '连接刚才中断了。这段需求还在，可以直接继续。',
       makeRoute({
         assistantMessageSource: 'fallback',
         action: 'answer',
@@ -498,13 +498,13 @@ describe('SocialAgentMessageLogService', () => {
 
     await service.recordAssistantRunMessage(
       task,
-      'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。',
+      '连接刚才中断了。这段需求还在，可以直接继续。',
       {
         taskId: 101,
         status: AgentTaskStatus.AwaitingFeedback,
         visibleSteps: [],
         assistantMessage:
-          'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。',
+          '连接刚才中断了。这段需求还在，可以直接继续。',
         socialRequestDraft: null,
         candidates: [],
         approvalRequiredActions: [],

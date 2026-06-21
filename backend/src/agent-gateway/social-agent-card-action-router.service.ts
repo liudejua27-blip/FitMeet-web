@@ -36,8 +36,10 @@ export class SocialAgentCardActionRouterService {
     emit?: StreamEmit;
     options?: SocialAgentStreamOptions;
   }): Promise<SocialAgentIntentRouteResult> {
-    const action = input.body.action;
+    const action = this.normalizeCardAction(input.body.action);
     if (!action) throw new BadRequestException('Missing agent action');
+    const body =
+      action === input.body.action ? input.body : { ...input.body, action };
     let result: SocialAgentIntentRouteResult | null = null;
     const loopService = this.agentLoop ?? new AgentLoopService();
     const execution = await loopService.execute({
@@ -62,7 +64,7 @@ export class SocialAgentCardActionRouterService {
       maxRetries: 0,
       signal: input.options?.signal,
       runner: async () => {
-        result = await this.performActionTool(input);
+        result = await this.performActionTool({ ...input, body });
         return {
           handled: true,
           action,
@@ -88,14 +90,15 @@ export class SocialAgentCardActionRouterService {
     options?: SocialAgentStreamOptions;
   }): Promise<SocialAgentIntentRouteResult> {
     const { ownerUserId, taskId, body, handleMessage, emit, options } = input;
-    const action = body.action;
+    const action = this.normalizeCardAction(body.action);
     if (!action) throw new BadRequestException('Missing agent action');
+    const normalizedBody = action === body.action ? body : { ...body, action };
 
     if (action === 'opener.confirm_send') {
       return this.candidateActions.confirmOpenerSendFromCardAction(
         ownerUserId,
         taskId,
-        body,
+        normalizedBody,
         { signal: options?.signal ?? null },
       );
     }
@@ -104,7 +107,7 @@ export class SocialAgentCardActionRouterService {
       return this.candidateActions.rejectOpenerSendFromCardAction(
         ownerUserId,
         taskId,
-        body,
+        normalizedBody,
       );
     }
 
@@ -112,7 +115,7 @@ export class SocialAgentCardActionRouterService {
       return this.candidateActions.regenerateOpenerDraftFromCardAction(
         ownerUserId,
         taskId,
-        body,
+        normalizedBody,
       );
     }
 
@@ -125,7 +128,7 @@ export class SocialAgentCardActionRouterService {
       return this.candidateActions.performCandidatePreferenceAction(
         ownerUserId,
         taskId,
-        body,
+        normalizedBody,
       );
     }
 
@@ -133,7 +136,7 @@ export class SocialAgentCardActionRouterService {
       return this.candidateActions.createOpenerDraftFromCardAction(
         ownerUserId,
         taskId,
-        body,
+        normalizedBody,
       );
     }
 
@@ -141,19 +144,19 @@ export class SocialAgentCardActionRouterService {
       return this.candidateActions.connectCandidateFromCardAction(
         ownerUserId,
         taskId,
-        body,
+        normalizedBody,
       );
     }
 
     if (this.isActivityAction(action)) {
-      return this.meetLoop.performActivityAction(ownerUserId, taskId, body);
+      return this.meetLoop.performActivityAction(ownerUserId, taskId, normalizedBody);
     }
 
     if (this.isLifeGraphAction(action)) {
       return this.lifeGraphActions.performUpdateAction(
         ownerUserId,
         taskId,
-        body,
+        normalizedBody,
       );
     }
 
@@ -173,6 +176,7 @@ export class SocialAgentCardActionRouterService {
   private isActivityAction(action: string) {
     return (
       action === 'activity.confirm_create' ||
+      action === 'activity.skip_publish' ||
       action === 'activity.modify_time' ||
       action === 'activity.modify_location' ||
       action === 'activity.check_in' ||
@@ -190,6 +194,51 @@ export class SocialAgentCardActionRouterService {
       action === 'life_graph.accept_update' ||
       action === 'life_graph.reject_update'
     );
+  }
+
+  private normalizeCardAction(
+    action: SocialAgentCardActionBody['action'] | string | null | undefined,
+  ): SocialAgentCardActionBody['action'] {
+    if (!action) return null;
+    const normalized = String(action).trim().toLowerCase();
+    if (
+      normalized === 'send_invite' ||
+      normalized === 'send_message' ||
+      normalized === 'send_message_to_candidate'
+    ) {
+      return 'opener.confirm_send';
+    }
+    if (normalized === 'add_friend' || normalized === 'connect_candidate') {
+      return 'candidate.connect';
+    }
+    if (
+      normalized === 'save_candidate' ||
+      normalized === 'favorite_candidate' ||
+      normalized === 'bookmark_candidate' ||
+      normalized === 'collect_candidate'
+    ) {
+      return 'candidate.like';
+    }
+    if (normalized === 'generate_opener' || normalized === 'draft_opener') {
+      return 'candidate.generate_opener';
+    }
+    if (
+      normalized === 'publish_social_request' ||
+      normalized === 'publish_to_discover' ||
+      normalized === 'create_activity'
+    ) {
+      return 'activity.confirm_create';
+    }
+    if (normalized === 'modify_activity' || normalized === 'change_time') {
+      return 'activity.modify_time';
+    }
+    if (normalized === 'change_location') {
+      return 'activity.modify_location';
+    }
+    if (normalized === 'skip_publish') {
+      return 'activity.skip_publish';
+    }
+    return action as SocialAgentCardActionBody['action'];
   }
 
   private agentForAction(action: string) {

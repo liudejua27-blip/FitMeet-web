@@ -199,7 +199,7 @@ describe('SocialAgentCandidateActionService', () => {
     expect(approval).toMatchObject({
       id: 9001,
       actionType: 'send_invite',
-      riskLevel: 'medium',
+      riskLevel: 'high',
     });
     expect(taskRepo.save).toHaveBeenCalledWith(task);
     expect(task.memory).toMatchObject({
@@ -215,15 +215,40 @@ describe('SocialAgentCandidateActionService', () => {
           expect.objectContaining({
             id: 9001,
             actionType: 'send_invite',
-            summary: expect.stringContaining('候选人 #22'),
-            riskLevel: 'medium',
+            summary: '发送消息给小林',
+            riskLevel: 'high',
           }),
         ],
       },
     });
   });
 
-  it('creates an opener approval card without sending the message', async () => {
+  it('does not create approval records for low-risk generic action requests', async () => {
+    const task = makeTask();
+    const { approvals, service, taskRepo } = makeHarness(task);
+
+    const approval = await service.createActionApproval({
+      ownerUserId: 7,
+      task,
+      message: '帮我想想下一步',
+      route: {
+        intent: 'action_request',
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+      },
+    });
+
+    expect(approval).toBeNull();
+    expect(approvals.create).not.toHaveBeenCalled();
+    expect(taskRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('creates an opener draft card without creating approval before the user sends it', async () => {
     const { approvals, savedEvents, service, task } = makeHarness();
 
     const result = await service.createOpenerDraftFromCardAction(7, 101, {
@@ -240,55 +265,35 @@ describe('SocialAgentCandidateActionService', () => {
       },
     });
 
-    expect(approvals.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'send_message',
-        actionType: 'send_invite',
-        relatedCandidateId: 501,
-        payload: expect.objectContaining({
-          approvalRequired: true,
-          checkpointRequired: true,
-          resumeMode: 'resume_after_approval',
-          idempotencyKey: 'opener-send:101:22',
-          safetyBoundary: expect.stringContaining('确认前不会发送'),
-          riskReasons: expect.arrayContaining([
-            '这一步会向真实用户发送消息',
-            '发送前需要你确认语气和内容',
-          ]),
-        }),
-      }),
-    );
+    expect(approvals.create).not.toHaveBeenCalled();
     expect(result).toMatchObject({
-      action: 'await_confirmation',
-      pendingApproval: expect.objectContaining({
-        actionType: 'send_invite',
-      }),
+      action: 'reply',
+      pendingApproval: null,
       cards: [
         expect.objectContaining({
-          type: 'opener_approval',
+          type: 'candidate_card',
           schemaVersion: 'fitmeet.tool-ui.v1',
-          schemaType: 'safety.approval',
-          status: 'waiting_confirmation',
+          schemaType: 'social_match.candidate',
+          status: 'ready',
+          title: '小林 的开场白草稿',
+          body: '今晚先在青岛大学操场轻松跑一段吗？',
           data: expect.objectContaining({
-            schemaName: 'SafetyApprovalCard',
+            schemaName: 'OpportunityCard',
             schemaVersion: 'fitmeet.tool-ui.v1',
-            schemaType: 'safety.approval',
-            riskLevel: 'medium',
-            confirmationLabel: '确认后发送',
-            checkpointLabel: '开场白已保存，可重新生成或取消',
-            approval: expect.objectContaining({
-              riskLevel: 'medium',
-              boundary: expect.stringContaining('确认前不会发送'),
-              reasons: expect.arrayContaining([
-                '这一步会向真实用户发送消息',
-                '发送前需要你确认语气和内容',
-              ]),
-            }),
+            schemaType: 'social_match.candidate',
+            openerDraftReady: true,
+            suggestedOpener: '今晚先在青岛大学操场轻松跑一段吗？',
           }),
           actions: [
             expect.objectContaining({
+              label: '发送邀请',
               schemaAction: 'opener.confirm_send',
               requiresConfirmation: true,
+              payload: expect.objectContaining({
+                approvalRequired: true,
+                checkpointRequired: true,
+                resumeMode: 'resume_after_approval',
+              }),
             }),
             expect.objectContaining({
               schemaAction: 'opener.regenerate',
@@ -307,10 +312,171 @@ describe('SocialAgentCandidateActionService', () => {
         message: '今晚先在青岛大学操场轻松跑一段吗？',
       }),
     });
+    expect(task.memory).toMatchObject({
+      taskMemory: {
+        currentTask: expect.objectContaining({
+          state: 'messaging_candidate',
+          stateReason: 'message_action',
+          waitingFor: 'message_confirmation',
+          lastCompletedStep: 'opener_draft_created',
+        }),
+        pendingActions: [],
+      },
+    });
+    expect(savedEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: 'step.completed',
+        }),
+        expect.objectContaining({
+          eventType: 'social_agent.message.assistant',
+        }),
+      ]),
+    );
+  });
+
+  it('creates a send approval when the user clicks send on a low-risk opener draft', async () => {
+    const task = makeTask({
+      result: {
+        cardActionDraft: {
+          action: 'candidate.generate_opener',
+          targetUserId: 22,
+          candidateRecordId: 501,
+          socialRequestId: 301,
+          candidate: {
+            userId: 22,
+            candidateUserId: 22,
+            candidateRecordId: 501,
+            socialRequestId: 301,
+            displayName: '小林',
+          },
+          message: '今晚先在青岛大学操场轻松跑一段吗？',
+          idempotencyKey: 'opener-confirm-1',
+        },
+      },
+      memory: {
+        taskMemory: {
+          pendingActions: [],
+          candidateState: {
+            recommendedIds: [],
+            rejectedIds: [],
+            savedIds: [],
+            contactedIds: [],
+          },
+          activityState: { recommendedIds: [], rejectedIds: [] },
+          activeEntities: {},
+          stableProfileFacts: {},
+          boundaries: [],
+          preferences: [],
+          misunderstandings: [],
+          lastUserMessages: [],
+          recentActions: [],
+          updatedAt: '2026-06-06T00:00:00.000Z',
+        },
+      },
+    });
+    const { approvals, executor, savedEvents, service, taskRepo } =
+      makeHarness(task);
+
+    const result = await service.confirmOpenerSendFromCardAction(7, 101, {
+      action: 'opener.confirm_send',
+      idempotencyKey: 'opener-confirm-1',
+      payload: {
+        taskId: 101,
+        targetUserId: 22,
+      },
+    });
+
+    expect(executor.executeToolAction).not.toHaveBeenCalled();
+    expect(approvals.approve).not.toHaveBeenCalled();
+    expect(approvals.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: ApprovalType.SendMessage,
+        actionType: 'send_invite',
+        relatedCandidateId: 501,
+        payload: expect.objectContaining({
+          source: 'agent_card_action',
+          schemaAction: 'opener.confirm_send',
+          targetUserId: 22,
+          candidateUserId: 22,
+          message: '今晚先在青岛大学操场轻松跑一段吗？',
+          approvalRequired: true,
+          checkpointRequired: true,
+          resumeMode: 'resume_after_approval',
+          idempotencyKey: 'opener-confirm-1',
+          riskReasons: expect.arrayContaining([
+            '这个动作会向真实用户发送消息',
+            '发送前需要你确认语气和内容',
+          ]),
+        }),
+        riskLevel: ApprovalRiskLevel.High,
+      }),
+    );
+    expect(result).toMatchObject({
+      action: 'await_confirmation',
+      pendingApproval: expect.objectContaining({
+        id: 9001,
+        actionType: 'send_invite',
+      }),
+      cards: [
+        expect.objectContaining({
+          type: 'candidate_card',
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'social_match.candidate',
+          status: 'ready',
+          title: '小林 的开场白草稿',
+          data: expect.objectContaining({
+            schemaName: 'OpportunityCard',
+            openerDraftReady: true,
+            targetUserId: 22,
+            candidateRecordId: 501,
+            socialRequestId: 301,
+            suggestedOpener: '今晚先在青岛大学操场轻松跑一段吗？',
+          }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              schemaAction: 'opener.confirm_send',
+              requiresConfirmation: true,
+            }),
+          ]),
+        }),
+      ],
+      assistantMessage: '发送邀请前需要你确认。确认前不会触达对方。',
+    });
+    expect(taskRepo.save).toHaveBeenCalledWith(task);
+    expect(task.result).toMatchObject({
+      cardActionDraft: expect.objectContaining({
+        action: 'opener.confirm_send',
+        targetUserId: 22,
+        candidateRecordId: 501,
+        socialRequestId: 301,
+        message: '今晚先在青岛大学操场轻松跑一段吗？',
+        approvalId: 9001,
+      }),
+    });
+    expect(task.memory).toMatchObject({
+      taskMemory: {
+        pendingActions: [
+          expect.objectContaining({
+            id: 9001,
+            actionType: 'send_invite',
+            type: ApprovalType.SendMessage,
+            riskLevel: ApprovalRiskLevel.High,
+          }),
+        ],
+        currentTask: expect.objectContaining({
+          state: 'waiting_confirmation',
+          stateReason: 'confirmation_required',
+          waitingFor: 'message_confirmation',
+          lastCompletedStep: 'opener_draft_created',
+        }),
+      },
+    });
     expect(savedEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           eventType: 'confirmation.requested',
+          summary: 'Agent card action created opener send approval',
         }),
         expect.objectContaining({
           eventType: 'social_agent.message.assistant',
@@ -368,29 +534,41 @@ describe('SocialAgentCandidateActionService', () => {
               confirmedContext: ['公开可发现资料', '低风险站内沟通', '发送前确认'],
             }),
           }),
-          actions: [
-            expect.objectContaining({
-              schemaAction: 'candidate.generate_opener',
-              requiresConfirmation: false,
-            }),
-            expect.objectContaining({
-              schemaAction: 'candidate.connect',
-              requiresConfirmation: true,
-              payload: expect.objectContaining({
-                approvalRequired: true,
-                checkpointRequired: true,
-                resumeMode: 'resume_after_approval',
-                idempotencyKey: 'candidate-connect:101:22',
-              }),
-            }),
-            expect.objectContaining({
-              schemaAction: 'candidate.more_like_this',
-              requiresConfirmation: false,
-            }),
-          ],
         }),
       ],
     });
+    const detailCard = result.cards?.[0];
+    expect(detailCard?.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          schemaAction: 'candidate.view_detail',
+          requiresConfirmation: false,
+        }),
+        expect.objectContaining({
+          schemaAction: 'candidate.like',
+          requiresConfirmation: false,
+        }),
+        expect.objectContaining({
+          schemaAction: 'candidate.generate_opener',
+          requiresConfirmation: false,
+        }),
+        expect.objectContaining({
+          schemaAction: 'candidate.connect',
+          label: '加好友并聊天',
+          requiresConfirmation: true,
+          payload: expect.objectContaining({
+            approvalRequired: true,
+            checkpointRequired: true,
+            resumeMode: 'resume_after_approval',
+            idempotencyKey: 'candidate-connect:101:22',
+          }),
+        }),
+        expect.objectContaining({
+          schemaAction: 'candidate.more_like_this',
+          requiresConfirmation: false,
+        }),
+      ]),
+    );
     expect(savedEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -433,7 +611,7 @@ describe('SocialAgentCandidateActionService', () => {
               actionType: 'send_candidate_message',
               type: 'send_message',
               summary: '发送开场白',
-              riskLevel: 'medium',
+              riskLevel: 'high',
               at: '2026-06-06T00:00:00.000Z',
             },
           ],
@@ -588,7 +766,7 @@ describe('SocialAgentCandidateActionService', () => {
               actionType: 'send_candidate_message',
               type: 'send_message',
               summary: '发送开场白',
-              riskLevel: 'medium',
+              riskLevel: 'high',
               at: '2026-06-06T00:00:00.000Z',
             },
           ],
@@ -650,7 +828,7 @@ describe('SocialAgentCandidateActionService', () => {
       pendingApproval: null,
       cards: [
         expect.objectContaining({
-          type: 'review_card',
+          type: 'meet_loop_timeline',
           schemaVersion: 'fitmeet.tool-ui.v1',
           schemaType: 'meet_loop.timeline',
           data: expect.objectContaining({
@@ -756,7 +934,7 @@ describe('SocialAgentCandidateActionService', () => {
               actionType: 'send_candidate_message',
               type: 'send_message',
               summary: '发送开场白',
-              riskLevel: 'medium',
+              riskLevel: 'high',
               at: '2026-06-06T00:00:00.000Z',
             },
           ],
@@ -838,7 +1016,7 @@ describe('SocialAgentCandidateActionService', () => {
               actionType: 'send_candidate_message',
               type: 'send_message',
               summary: '发送开场白',
-              riskLevel: 'medium',
+              riskLevel: 'high',
               at: '2026-06-06T00:00:00.000Z',
             },
           ],
@@ -901,7 +1079,7 @@ describe('SocialAgentCandidateActionService', () => {
               actionType: 'send_candidate_message',
               type: 'send_message',
               summary: '发送开场白',
-              riskLevel: 'medium',
+              riskLevel: 'high',
               at: '2026-06-06T00:00:00.000Z',
             },
           ],
@@ -972,7 +1150,7 @@ describe('SocialAgentCandidateActionService', () => {
     );
   });
 
-  it('regenerates an opener draft as a fresh approval without sending the previous draft', async () => {
+  it('regenerates an opener draft without creating a new approval until the user sends it', async () => {
     const previousMessage = '今晚先在青岛大学操场轻松跑一段吗？';
     const task = makeTask({
       result: {
@@ -1000,7 +1178,7 @@ describe('SocialAgentCandidateActionService', () => {
               actionType: 'send_candidate_message',
               type: 'send_message',
               summary: '发送开场白',
-              riskLevel: 'medium',
+              riskLevel: 'high',
               at: '2026-06-06T00:00:00.000Z',
             },
           ],
@@ -1034,15 +1212,7 @@ describe('SocialAgentCandidateActionService', () => {
     });
 
     expect(approvals.reject).toHaveBeenCalledWith(9001, 7);
-    expect(approvals.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        actionType: 'send_invite',
-        payload: expect.objectContaining({
-          schemaAction: 'opener.regenerate',
-          message: expect.stringContaining('站内确认时间和公共地点'),
-        }),
-      }),
-    );
+    expect(approvals.create).not.toHaveBeenCalled();
     expect(executor.executeToolAction).not.toHaveBeenCalled();
     expect(task.result).toMatchObject({
       cardActionDraft: expect.objectContaining({
@@ -1058,15 +1228,13 @@ describe('SocialAgentCandidateActionService', () => {
         .cardActionDraft?.message,
     ).not.toBe(previousMessage);
     expect(result).toMatchObject({
-      action: 'await_confirmation',
-      pendingApproval: expect.objectContaining({
-        actionType: 'send_invite',
-      }),
-      assistantMessage: expect.stringContaining('重新写了一版'),
+      action: 'reply',
+      pendingApproval: null,
+      assistantMessage: expect.stringContaining('只有你点发送邀请并确认后'),
       cards: [
         expect.objectContaining({
-          type: 'opener_approval',
-          schemaType: 'safety.approval',
+          type: 'candidate_card',
+          schemaType: 'social_match.candidate',
           body: expect.stringContaining('站内确认时间和公共地点'),
           actions: [
             expect.objectContaining({
@@ -1076,7 +1244,6 @@ describe('SocialAgentCandidateActionService', () => {
             expect.objectContaining({
               schemaAction: 'opener.regenerate',
               payload: expect.objectContaining({
-                approvalId: 9001,
                 previousMessage,
               }),
             }),
@@ -1090,14 +1257,10 @@ describe('SocialAgentCandidateActionService', () => {
     });
     expect(task.memory).toMatchObject({
       taskMemory: {
-        pendingActions: [
-          expect.objectContaining({
-            id: 9001,
-            actionType: 'send_invite',
-          }),
-        ],
+        pendingActions: [],
         currentTask: expect.objectContaining({
-          state: 'waiting_confirmation',
+          state: 'messaging_candidate',
+          stateReason: 'message_action',
           waitingFor: 'message_confirmation',
           lastCompletedStep: 'opener_draft_created',
         }),
@@ -1106,8 +1269,8 @@ describe('SocialAgentCandidateActionService', () => {
     expect(savedEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          eventType: 'confirmation.requested',
-          summary: 'Agent card action regenerated opener approval',
+          eventType: 'step.completed',
+          summary: 'Agent card action regenerated opener draft',
         }),
         expect.objectContaining({
           eventType: 'social_agent.message.assistant',
@@ -1413,20 +1576,22 @@ describe('SocialAgentCandidateActionService', () => {
       action: 'await_confirmation',
       cards: [
         expect.objectContaining({
-          type: 'review_card',
+          type: 'candidate_card',
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'social_match.candidate',
           data: expect.objectContaining({
+            schemaName: 'OpportunityCard',
+            targetUserId: 22,
             candidateUserId: 22,
-            loopStage: 'activity_draft_created',
-            timeline: expect.objectContaining({
-              nextAction: expect.stringContaining('确认后再发送邀请'),
-              steps: expect.arrayContaining([
-                expect.objectContaining({
-                  key: 'draft',
-                  state: 'current',
-                }),
-              ]),
-            }),
+            candidateRecordId: 501,
+            socialRequestId: 301,
           }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              schemaAction: 'candidate.connect',
+              requiresConfirmation: true,
+            }),
+          ]),
         }),
       ],
       pendingApproval: expect.objectContaining({
@@ -1461,7 +1626,7 @@ describe('SocialAgentCandidateActionService', () => {
       id: 9901,
       type: ApprovalType.ContactRequest,
       actionType: 'connect_candidate',
-      summary: '发送邀请给候选人 #22',
+      summary: '加好友并聊天：这位用户',
       riskLevel: ApprovalRiskLevel.Medium,
       payload: {
         source: 'candidate_opportunity_card',
@@ -1492,7 +1657,7 @@ describe('SocialAgentCandidateActionService', () => {
         sourceStepId: 'step-candidate-connect-1',
         safetyBoundary: '第一次建议选择公共场所，先站内沟通。',
         suggestedOpener: '周末下午可以先在公共路线轻松跑一圈。',
-        riskLevel: 'medium',
+        riskLevel: 'high',
         riskReasons: ['这一步会联系真实用户', '发送邀请前必须由你确认'],
       },
     });
@@ -1519,27 +1684,29 @@ describe('SocialAgentCandidateActionService', () => {
       action: 'await_confirmation',
       cards: [
         expect.objectContaining({
-          type: 'review_card',
+          type: 'candidate_card',
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'social_match.candidate',
           data: expect.objectContaining({
+            schemaName: 'OpportunityCard',
+            targetUserId: 22,
             candidateUserId: 22,
-            loopStage: 'activity_draft_created',
-            timeline: expect.objectContaining({
-              nextAction: expect.stringContaining('确认后再发送邀请'),
-              steps: expect.arrayContaining([
-                expect.objectContaining({
-                  key: 'draft',
-                  state: 'current',
-                }),
-              ]),
-            }),
+            candidateRecordId: 501,
+            socialRequestId: 301,
           }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              schemaAction: 'candidate.connect',
+              requiresConfirmation: true,
+            }),
+          ]),
         }),
       ],
       pendingApproval: expect.objectContaining({
         id: 9901,
         type: 'contact_request',
         actionType: 'connect_candidate',
-        riskLevel: 'medium',
+        riskLevel: 'high',
         payload: expect.objectContaining({
           idempotencyKey: 'candidate-connect:101:22',
           checkpointRequired: true,
@@ -1563,8 +1730,8 @@ describe('SocialAgentCandidateActionService', () => {
               socialRequestId: 301,
               approvalId: 9901,
               toolCallId: 'approval_connect_candidate:101:22',
-              actionType: 'send_invite',
-              sideEffect: 'send_message_or_connect',
+              actionType: 'connect_candidate',
+              sideEffect: 'connect_candidate',
               schemaAction: 'candidate.connect',
               approvalRequired: true,
               checkpointRequired: true,
@@ -1576,7 +1743,7 @@ describe('SocialAgentCandidateActionService', () => {
               opportunityId: 'opportunity:101:22',
               safetyBoundary: '第一次建议选择公共场所，先站内沟通。',
               suggestedOpener: '周末下午可以先在公共路线轻松跑一圈。',
-              riskLevel: 'medium',
+              riskLevel: 'high',
               riskReasons: ['这一步会联系真实用户', '发送邀请前必须由你确认'],
               auditEvent: 'social_agent.candidate.connect.approval_required',
             }),
@@ -1617,7 +1784,7 @@ describe('SocialAgentCandidateActionService', () => {
       following: false,
       approvalId: 9001,
       requiresApproval: true,
-      message: '发送邀请需要你确认',
+      message: '加好友并聊天需要你确认',
       friendAction: {
         status: 'pending_approval',
         targetUserId: 22,
@@ -1647,8 +1814,8 @@ describe('SocialAgentCandidateActionService', () => {
             id: 9001,
             type: 'contact_request',
             actionType: 'connect_candidate',
-            summary: '发送邀请给候选人 #22',
-            riskLevel: 'medium',
+            summary: '加好友并聊天：这位用户',
+            riskLevel: 'high',
           }),
         ],
       },
@@ -1802,8 +1969,8 @@ describe('SocialAgentCandidateActionService', () => {
             id: 501,
             type: 'send_message',
             actionType: 'send_invite',
-            summary: '发送消息给候选人 #22',
-            riskLevel: 'medium',
+            summary: '发送消息给这位用户',
+            riskLevel: 'high',
           }),
         ],
       },

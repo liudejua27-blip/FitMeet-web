@@ -140,11 +140,11 @@ export class SocialAgentRunProgressTracker {
     eventType: AgentTaskEventType,
     payload: Record<string, unknown>,
   ): string {
-    if (payload.error) return '这一步返回了失败信号，后续应重试或重新规划。';
+    if (payload.error) return '这个动作返回了失败信号，后续应重试或重新规划。';
     if (/approval|confirm|risk|safety/i.test(`${id} ${eventType}`)) {
-      return '这一步涉及安全或确认边界，需要保留可恢复检查点。';
+      return '这个动作涉及安全或确认边界，我会保留可继续的位置。';
     }
-    return '这一步产生了可用观察，可以交给后续步骤继续整理。';
+    return '这个动作产生了可用观察，可以交给后续进度继续整理。';
   }
 
   private stepResult(label: string, payload: Record<string, unknown>): string {

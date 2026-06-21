@@ -68,7 +68,7 @@ export class SocialCodexApprovalSchemaService {
         dryRunPreviewTitle: '预览将公开的约练卡',
         executionBoundary: '只公开约练卡范围信息，不公开手机号、精确住址或私聊内容。',
         resumePolicy: '同意后从发布发现步骤继续；拒绝后保留草稿。',
-        auditNote: '发布确认会写入审计日志，后续可撤回公开。',
+        auditNote: '发布确认会保留记录，后续可撤回公开。',
       };
     }
     if (actionType === 'send_invite' || actionType === 'send_message') {
@@ -80,7 +80,7 @@ export class SocialCodexApprovalSchemaService {
         dryRunPreviewTitle: '预览将发送给对方的内容',
         executionBoundary: '不会自动追加联系方式、精确位置或超出预览的内容。',
         resumePolicy: '同意后从发送邀请步骤继续；拒绝后不会联系对方。',
-        auditNote: '发送确认会写入审计日志，并使用幂等键避免重复发送。',
+        auditNote: '发送确认会保留记录，并避免重复发送。',
       };
     }
     if (actionType === 'connect_candidate' || actionType === 'add_friend') {
@@ -92,7 +92,7 @@ export class SocialCodexApprovalSchemaService {
         dryRunPreviewTitle: '预览好友申请',
         executionBoundary: '只发送好友申请，不自动发送后续消息或交换联系方式。',
         resumePolicy: '同意后从好友申请步骤继续；拒绝后仅保留候选记录。',
-        auditNote: '好友申请会写入审计日志，可在候选动作记录里追踪。',
+        auditNote: '好友申请会保留确认记录，可在候选动作里追踪。',
       };
     }
     if (actionType === 'exchange_contact') {
@@ -133,13 +133,13 @@ export class SocialCodexApprovalSchemaService {
     }
     return {
       actionType,
-      title: '执行这一步前需要你确认',
-      detail: '这一步可能影响你和他人的社交体验，确认前不会执行。',
+      title: '执行这个动作前需要你确认',
+      detail: '这个动作可能影响你和他人的社交体验，确认前不会执行。',
       confirmationLabel: '确认执行',
       dryRunPreviewTitle: '预览将执行的动作',
-      executionBoundary: '确认前不执行真实动作，确认后只执行预览中的内容。',
-      resumePolicy: '同意后从保存点继续；拒绝后保留当前对话。',
-      auditNote: '确认结果会写入审计日志。',
+      executionBoundary: '确认前不会触达对方或公开内容；确认后只执行预览中的内容。',
+      resumePolicy: '同意后接着当前进度继续；拒绝后停止这个动作，不会触达对方。',
+      auditNote: '确认结果会保留记录。',
     };
   }
 

@@ -95,8 +95,8 @@ export class SocialAgentRouteActionTurnService {
   }): string {
     const draft = this.candidateActions.candidateMessageDraft(input.task);
     return draft
-      ? `${input.assistantMessage}\n我先给你拟一条开场白：${draft}\n这一步已经放进确认卡片。你确认前我不会发送，取消也不会联系对方。`
-      : `${input.assistantMessage}\n这一步需要你确认。我已经放进确认卡片；你确认前不会执行。`;
+      ? `${input.assistantMessage}\n我先给你拟一条开场白：${draft}\n已放进确认卡片。你确认前我不会发送，取消也不会联系对方。`
+      : `${input.assistantMessage}\n这个动作需要你确认。我已经放进确认卡片；你确认前不会执行。`;
   }
 
   private runtimeContextTelemetry(

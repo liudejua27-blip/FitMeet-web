@@ -5,11 +5,11 @@ import type { UserFacingAgentRecoveryNotice } from './user-facing-agent-response
 import type { SocialAgentEventV2 } from './social-agent-event-v2.types';
 
 const DEFAULT_STREAM_ERROR_MESSAGE =
-  'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。';
+  '连接刚才中断了。这段需求还在，可以直接继续。';
 const TIMEOUT_STREAM_ERROR_MESSAGE =
-  '这次处理时间有点久。我已经保留当前对话，你可以稍后再试。';
+  '处理比平时久一点。这段需求还在，可以继续。';
 const GENERIC_RECOVERY_PATTERN =
-  /保留当前(?:对话|方向|上下文|需求)|稍后再试|暂时没有顺利完成|连接中断|连接恢复|处理时间有点久|可以稍后再试|我已经恢复了(?:上一次|这段|当前)|我已经恢复了这段(?:对话|约练任务|任务)|我可以继续上次的话题，也可以重新开始|从已保存的(?:步骤|工具步骤|Agent 状态)|继续刚才保存的 Agent 步骤|原始目标|已从刚才的确认点继续处理/;
+  /保留当前(?:对话|方向|上下文|需求)|这段需求还在|刚才的位置|稍后继续|稍后再试|暂时没有顺利完成|连接中断|连接恢复|处理时间有点久|可以稍后再试|我已经恢复了(?:上一次|这段|当前)|我已经恢复了这段(?:对话|约练任务|任务)|我可以继续上次的话题，也可以重新开始|从已保存的(?:步骤|工具步骤|Agent 状态)|继续刚才保存的 Agent 步骤|原始目标|已从刚才的确认点继续处理/;
 const TECHNICAL_ERROR_PATTERN =
   /\b(traceId|agentTrace|structuredIntent|planner|tool\s*call|toolCall|toolCalls|DeepSeek|OpenAI|SDK|database|QueryFailedError|BadRequestException|ForbiddenException|NotFoundException|InternalServerErrorException|TypeError|ReferenceError|stack|stack trace|UnhandledPromiseRejection|agentConnectionId|connectionId|taskId|runId|seq|SQL|Postgres|TypeORM|foreign key|constraint|relation .* does not exist|column .* does not exist|violates .* constraint)\b|工具调用|数据库字段|错误堆栈/i;
 
@@ -165,7 +165,7 @@ export function toolCallStreamEvent(step: {
       stepId: safeStepId(step.id, step.label),
       agentName: cleanMetadataString(step.agentName),
       toolName,
-      title: '正在处理这一步',
+      title: '正在推进当前进度',
       detail,
     };
   }
@@ -175,7 +175,7 @@ export function toolCallStreamEvent(step: {
     stepId: safeStepId(step.id, step.label),
     agentName: cleanMetadataString(step.agentName),
     toolName,
-    title: step.status === 'failed' ? '这一步没成功' : '已整理结果',
+    title: step.status === 'failed' ? '刚才连接不稳' : '已整理结果',
     detail,
     status: step.status,
   };
@@ -289,7 +289,7 @@ export function progressFromStep(step: {
     lifecycle: lifecycleFromStep(step.label),
     id: safeStepId(step.id, step.label),
     kind: isTool ? 'tool' : 'analysis',
-    title: isTool ? '正在处理这一步' : '正在理解你的需求',
+    title: isTool ? '正在推进当前进度' : '正在理解你的需求',
     detail: lightStatusFromStep(step.label),
     state:
       step.status === 'done'
@@ -386,8 +386,8 @@ function userFacingStreamRecoveryNotice(
   if (/timeout|timed?\s*out|deepseek_timeout|处理时间有点久|超时/i.test(raw)) {
     return {
       kind: 'timeout',
-      title: '这次处理时间有点久',
-      message: '我已经保留当前对话。你可以重试，或者继续告诉我下一步。',
+      title: '这段需求还在',
+      message: '刚才处理比平时久一点，可以继续处理；不会重复执行已确认的高风险动作。',
       retryable: true,
       source: 'stream_error',
     };
@@ -396,18 +396,18 @@ function userFacingStreamRecoveryNotice(
     return {
       kind: 'interrupted',
       title: '刚才连接中断了',
-      message: '我已经保留当前对话。你可以重试，或者继续补充新的要求。',
+      message: '这段需求还在，可以继续补充新的要求，我会接着处理。',
       retryable: true,
       source: 'stream_error',
     };
   }
   return {
     kind: 'failed',
-    title: '这次没有顺利完成',
+    title: '连接中断了，可以继续',
     message:
       shouldStreamFallbackAssistantText(message) && !TECHNICAL_ERROR_PATTERN.test(message)
         ? message
-        : '我已经保留当前对话。你可以重试，或者继续告诉我下一步。',
+        : '这段需求还在，可以继续处理；不会重复执行已确认的高风险动作。',
     retryable: true,
     source: 'stream_error',
   };

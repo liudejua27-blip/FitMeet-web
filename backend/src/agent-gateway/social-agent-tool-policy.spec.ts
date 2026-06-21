@@ -93,6 +93,21 @@ describe('social agent tool policy', () => {
     expect(getSocialAgentToolRiskLevel(SocialAgentToolName.SearchMatches)).toBe(
       AgentActionRiskLevel.Low,
     );
+    expect(getSocialAgentToolRiskLevel(SocialAgentToolName.SaveCandidate)).toBe(
+      AgentActionRiskLevel.Low,
+    );
+    expect(getSocialAgentToolRiskLevel(SocialAgentToolName.DraftOpener)).toBe(
+      AgentActionRiskLevel.Low,
+    );
+    expect(getSocialAgentToolRiskLevel(SocialAgentToolName.PublishSocialRequest)).toBe(
+      AgentActionRiskLevel.Medium,
+    );
+    expect(getSocialAgentToolRiskLevel(SocialAgentToolName.SendMessageToCandidate)).toBe(
+      AgentActionRiskLevel.Medium,
+    );
+    expect(getSocialAgentToolRiskLevel(SocialAgentToolName.ConnectCandidate)).toBe(
+      AgentActionRiskLevel.Medium,
+    );
     expect(
       shouldWriteSocialAgentActionResultInbox(SocialAgentToolName.SendMessage),
     ).toBe(true);
@@ -225,6 +240,12 @@ describe('social agent tool policy', () => {
         SocialAgentToolName.CreateSocialRequest,
         { mode: 'draft', city: '青岛', activityType: '羽毛球' },
       ),
+    ).toBe(false);
+    expect(
+      requiresMandatorySocialAgentApproval(SocialAgentToolName.SaveCandidate),
+    ).toBe(false);
+    expect(
+      requiresMandatorySocialAgentApproval(SocialAgentToolName.DraftOpener),
     ).toBe(false);
   });
 });

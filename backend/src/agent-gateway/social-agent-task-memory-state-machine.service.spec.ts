@@ -113,6 +113,34 @@ describe('SocialAgentTaskMemoryStateMachineService', () => {
     expect(result.slots.candidate_preference?.value).toContain('舞蹈相关');
   });
 
+  it('keeps public interest preferences such as programming for candidate search', () => {
+    const task = makeTask();
+
+    const result = service.applyUserMessage(
+      task,
+      '我想在青岛大学附近，今天上午，找个女生散步，喜欢编程。',
+    );
+
+    expect(result.missingRequired).toEqual([]);
+    expect(result.slots.time_window).toMatchObject({
+      value: '今天上午',
+      state: 'completed',
+    });
+    expect(result.slots.location_text).toMatchObject({
+      value: '青岛大学附近',
+      state: 'completed',
+    });
+    expect(result.slots.activity).toMatchObject({
+      value: '散步',
+      state: 'completed',
+    });
+    expect(result.slots.candidate_preference?.value).toContain('女生');
+    expect(result.slots.candidate_preference?.value).toContain('编程/科技相关');
+    expect(
+      JSON.stringify((task.memory as Record<string, unknown>).knownTaskSlotConstraints),
+    ).toContain('编程/科技相关');
+  });
+
   it('persists known slot constraints with completed fields and candidate preferences', () => {
     const task = makeTask();
 
@@ -154,6 +182,46 @@ describe('SocialAgentTaskMemoryStateMachineService', () => {
     ).toEqual([]);
     expect(slots.activity?.value).toBe('散步');
     expect(slots.time_window?.value).toBe('周末下午');
+  });
+
+  it('preserves candidate preferences when continuing the same matching task', () => {
+    const task = makeTask();
+    service.applyUserMessage(
+      task,
+      '我想在青岛大学附近，今天上午，找个女生散步，喜欢编程。',
+    );
+
+    const second = service.applyUserMessage(task, '可以，帮我找人');
+    const slots = service.readSlots(task);
+    const memory = task.memory as Record<string, unknown>;
+
+    expect(second.missingRequired).toEqual([]);
+    expect(slots.activity).toMatchObject({
+      value: '散步',
+      state: 'completed',
+    });
+    expect(slots.time_window).toMatchObject({
+      value: '今天上午',
+      state: 'completed',
+    });
+    expect(slots.location_text).toMatchObject({
+      value: '青岛大学附近',
+      state: 'completed',
+    });
+    expect(slots.candidate_preference?.value).toContain('女生');
+    expect(slots.candidate_preference?.value).toContain('编程/科技相关');
+    expect(memory.knownTaskSlotConstraints).toMatchObject({
+      treatAsHardConstraints: true,
+      doNotAskAgainFor: expect.arrayContaining([
+        'activity',
+        'time_window',
+        'location_text',
+        'candidate_preference',
+      ]),
+    });
+    expect(JSON.stringify(memory.knownTaskSlotConstraints)).toContain(
+      '公开可发现资料',
+    );
   });
 
   it('preserves completed core slots when the user corrects only candidate preference', () => {

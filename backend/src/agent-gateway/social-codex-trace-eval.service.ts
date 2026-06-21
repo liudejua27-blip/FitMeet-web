@@ -339,7 +339,7 @@ export class SocialCodexTraceEvalService {
       },
       {
         id: 'thread_task_run_binding',
-        label: 'Thread / Task / Run 可恢复',
+        label: 'Thread / Task / Run 可继续',
         status:
           allBound &&
           !issueCodes.has('missing_thread_or_run') &&

@@ -3,6 +3,7 @@ import {
   evaluateSocialOpportunityClarification,
 } from './social-agent-opportunity-clarification';
 import { readSocialAgentTaskMemory } from './social-agent-memory.util';
+import { SocialAgentTaskMemoryStateMachineService } from './social-agent-task-memory-state-machine.service';
 import type { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
 
 function task(overrides: Partial<AgentTask> = {}): AgentTask {
@@ -40,6 +41,8 @@ function route(
 }
 
 describe('social opportunity clarification', () => {
+  const taskSlots = new SocialAgentTaskMemoryStateMachineService();
+
   it('asks only for search-critical context before candidate discovery', () => {
     const currentTask = task();
 
@@ -193,6 +196,40 @@ describe('social opportunity clarification', () => {
     expect(clarification.searchGoal).toContain('今天晚上');
     expect(clarification.searchGoal).toContain('散步');
     expect(clarification.searchGoal).toContain('女生、舞蹈相关');
+  });
+
+  it('keeps public interest preferences in the candidate search goal', () => {
+    const currentTask = task();
+
+    const clarification = evaluateSocialOpportunityClarification({
+      task: currentTask,
+      route: route(),
+      message:
+        '我想在青岛大学附近，今天上午，找个女生散步，喜欢编程。',
+    });
+
+    expect(clarification.complete).toBe(true);
+    expect(clarification.missing).toEqual([]);
+    expect(clarification.searchGoal).toContain('青岛大学附近');
+    expect(clarification.searchGoal).toContain('今天上午');
+    expect(clarification.searchGoal).toContain('散步');
+    expect(clarification.searchGoal).toContain('女生、编程/科技相关');
+  });
+
+  it('does not mistake public publishing consent for programming preferences', () => {
+    const currentTask = task();
+
+    const clarification = evaluateSocialOpportunityClarification({
+      task: currentTask,
+      route: route(),
+      message:
+        '帮我找青岛周末下午轻松跑步搭子，想认识同城周末有空、先运动再慢慢熟悉的人，公共场所先站内聊，接受陌生人，可以公开发起活动',
+    });
+
+    expect(clarification.complete).toBe(true);
+    expect(clarification.missing).toEqual([]);
+    expect(clarification.searchGoal).toContain('可公开发起活动');
+    expect(clarification.searchGoal).not.toContain('编程/科技相关');
   });
 
   it('does not hold candidate discovery for publish or stranger policy fields', () => {
@@ -432,6 +469,40 @@ describe('social opportunity clarification', () => {
     expect(clarification.searchGoal).toContain('散步');
     expect(clarification.searchGoal).toContain('青岛大学附近');
     expect(clarification.searchGoal).toContain('舞蹈相关标签');
+  });
+
+  it('uses slots written by the previous run so a follow-up search does not repeat answered fields', () => {
+    const currentTask = task();
+
+    const slotResult = taskSlots.applyUserMessage(
+      currentTask,
+      '我想在青岛找个搭子，青岛大学附近，今天上午，散步，女生，喜欢编程。',
+    );
+
+    expect(slotResult.missingRequired).toEqual([]);
+
+    const clarification = evaluateSocialOpportunityClarification({
+      task: currentTask,
+      route: route({
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+      }),
+      message: '可以，帮我找人',
+    });
+
+    expect(clarification.complete).toBe(true);
+    expect(clarification.missing).toEqual([]);
+    expect(clarification.assistantMessage).toBe('');
+    expect(clarification.searchGoal).toContain('青岛');
+    expect(clarification.searchGoal).toContain('青岛大学附近');
+    expect(clarification.searchGoal).toContain('今天上午');
+    expect(clarification.searchGoal).toContain('散步');
+    expect(clarification.searchGoal).toContain('女生、编程/科技相关');
   });
 
   it('does not treat inferred required slots as user-confirmed answers', () => {

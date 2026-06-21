@@ -387,7 +387,7 @@ describe('AgentSelfImproveService', () => {
         taskId: 44,
         userMessage: '我之前的记忆呢',
         assistantMessage:
-          'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。',
+          '连接刚才中断了。这段需求还在，可以直接继续。',
         route: { intent: 'casual_chat' },
         result: { assistantMessageSource: 'fallback' },
       }),

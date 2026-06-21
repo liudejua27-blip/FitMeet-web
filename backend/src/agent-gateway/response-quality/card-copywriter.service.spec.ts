@@ -233,12 +233,12 @@ describe('CardCopywriterService', () => {
           schemaAction: 'candidate.generate_opener',
         }),
         expect.objectContaining({
-          label: '确认后发邀请',
+          label: '加好友并聊天',
           action: 'candidate.connect',
           schemaAction: 'candidate.connect',
           requiresConfirmation: true,
           payload: expect.objectContaining({
-            actionType: 'send_invite',
+            actionType: 'connect_candidate',
             sideEffect: 'send_message_or_connect',
             approvalRequired: true,
             checkpointRequired: true,
@@ -249,7 +249,7 @@ describe('CardCopywriterService', () => {
             suggestedOpener: '周末下午如果方便，可以先在公共路线轻松跑一圈。',
             auditEvent: 'social_agent.candidate.connect.approval_required',
             riskReasons: expect.arrayContaining([
-              '这一步会联系真实用户',
+              '这个动作会联系真实用户',
               '发送邀请前必须由你确认',
               '不会自动交换联系方式或精确位置',
             ]),
@@ -379,7 +379,7 @@ describe('CardCopywriterService', () => {
             }),
             expect.objectContaining({
               key: 'recovery',
-              label: '可恢复闭环',
+              label: '连续推进',
               detail: '确认后进入“等待回复/确认到达/评价回写”的约练闭环。',
             }),
           ]),
@@ -415,7 +415,7 @@ describe('CardCopywriterService', () => {
         activityProtocol: expect.arrayContaining([
           expect.objectContaining({ key: 'approval', label: '创建确认' }),
           expect.objectContaining({ key: 'publish', label: '公开边界' }),
-          expect.objectContaining({ key: 'recovery', label: '可恢复闭环' }),
+          expect.objectContaining({ key: 'recovery', label: '连续推进' }),
         ]),
         explanationSteps: expect.arrayContaining([
           '需求：上海 · 周六 16:00 · 羽毛球',
@@ -428,7 +428,7 @@ describe('CardCopywriterService', () => {
       }),
       actions: expect.arrayContaining([
         expect.objectContaining({
-          label: '确认创建约练',
+          label: '发布到发现',
           action: 'activity.confirm_create',
           schemaAction: 'activity.confirm_create',
           requiresConfirmation: true,
@@ -441,7 +441,7 @@ describe('CardCopywriterService', () => {
             idempotencyKey: 'activity-create:202',
             riskLevel: 'medium',
             riskReasons: expect.arrayContaining([
-              '这一步会创建真实约练',
+              '这个动作会创建真实约练',
               '公开发布或邀请他人前必须由你确认',
               '不会共享精确位置',
             ]),
@@ -451,54 +451,28 @@ describe('CardCopywriterService', () => {
     });
   });
 
-  it('emits stable assistant-ui safety approval schema for opener approvals', () => {
-    const card = makeService().openerApproval({
-      taskId: 303,
-      candidate: {
-        userId: 22,
-        displayName: '小林',
-      },
-      message: '周末下午方便一起轻松跑一圈吗？',
+  it('keeps audit update copy user-facing instead of backend approval jargon', () => {
+    const card = makeService().auditUpdate({
+      taskId: 202,
+      approvalRequiredActions: [
+        {
+          actionType: 'send_invite',
+          riskLevel: 'medium',
+          reason: '发送邀请前需要用户确认',
+        },
+      ],
     });
 
     expect(card).toMatchObject({
-      type: 'opener_approval',
-      schemaVersion: 'fitmeet.tool-ui.v1',
       schemaType: 'safety.approval',
-      status: 'waiting_confirmation',
       data: expect.objectContaining({
-        schemaName: 'SafetyApprovalCard',
-        schemaVersion: 'fitmeet.tool-ui.v1',
-        schemaType: 'safety.approval',
-        displayName: '小林',
-        message: '周末下午方便一起轻松跑一圈吗？',
-        riskLevel: 'medium',
-        confirmationLabel: '确认后发送',
-        checkpointLabel: '开场白已保存，可重新生成或取消',
+        auditNote: '确认、取消和执行结果会保留记录，方便你之后查看或撤回。',
         approval: expect.objectContaining({
-          riskLevel: 'medium',
-          boundary: expect.stringContaining('确认前不会发送'),
-          reasons: expect.arrayContaining([
-            '这一步会向真实用户发送消息',
-            '发送前需要你确认语气和内容',
-          ]),
-          auditNote: expect.stringContaining('审批日志'),
-          confirmationLabel: '确认后发送',
-          checkpointLabel: '开场白已保存，可重新生成或取消',
+          auditNote: '确认、取消和执行结果会保留记录，方便你之后查看或撤回。',
         }),
       }),
-      actions: [
-        expect.objectContaining({
-          action: 'send_message',
-          schemaAction: 'opener.confirm_send',
-          requiresConfirmation: true,
-        }),
-        expect.objectContaining({
-          action: 'reject_opener',
-          schemaAction: 'opener.reject',
-          requiresConfirmation: false,
-        }),
-      ],
     });
+    expect(JSON.stringify(card)).not.toMatch(/审批审计日志|审计日志|audit log/i);
   });
+
 });

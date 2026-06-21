@@ -28,7 +28,7 @@ const DEBUG_FIELD_NAMES = new Set([
 export class AgentCardAssemblerService {
   assemble(cards: FitMeetAlphaCard[] | null | undefined): FitMeetAlphaCard[] {
     return this.stripDebugFields(
-      this.normalizeCardActions(cards ?? []),
+      this.dedupeCards(this.normalizeCardActions(cards ?? [])),
     ) as FitMeetAlphaCard[];
   }
 
@@ -64,6 +64,62 @@ export class AgentCardAssemblerService {
     }));
   }
 
+  private dedupeCards(cards: FitMeetAlphaCard[]): FitMeetAlphaCard[] {
+    const seen = new Set<string>();
+    const next: FitMeetAlphaCard[] = [];
+    for (const card of cards) {
+      const keys = this.cardDedupKeys(card);
+      if (keys.length > 0 && keys.some((key) => seen.has(key))) {
+        continue;
+      }
+      next.push(card);
+      keys.forEach((key) => seen.add(key));
+    }
+    return next;
+  }
+
+  private cardDedupKeys(card: FitMeetAlphaCard): string[] {
+    const keys = new Set<string>();
+    const schemaType = this.readText(card.schemaType, card.type);
+    const cardId = this.readText(card.id, '');
+    if (cardId) keys.add(`card:${schemaType}:${cardId}`);
+
+    const data = this.isRecord(card.data) ? card.data : {};
+    const approvalId =
+      this.readScalar(data.approvalId) ??
+      this.readScalar(this.recordValue(data.approval)?.id) ??
+      this.readScalar(this.recordValue(data.approvalRequest)?.id);
+    if (approvalId) keys.add(`approval:${approvalId}`);
+
+    const actionType =
+      this.readText(data.actionType, '') ||
+      this.readText(data.schemaAction, '') ||
+      this.readText(data.type, '') ||
+      this.readText(this.recordValue(data.approval)?.actionType, '');
+    const candidateRecordId =
+      this.readScalar(data.candidateRecordId) ??
+      this.readScalar(data.relatedCandidateId) ??
+      this.readScalar(data.candidateId) ??
+      this.readScalar(data.targetUserId) ??
+      this.readScalar(this.recordValue(data.candidate)?.candidateRecordId) ??
+      this.readScalar(this.recordValue(data.candidate)?.targetUserId);
+    if (candidateRecordId && actionType) {
+      keys.add(`candidate-action:${candidateRecordId}:${actionType}`);
+    }
+
+    const taskId = this.readScalar(data.taskId);
+    const opportunityId =
+      this.readScalar(data.opportunityId) ??
+      this.readScalar(data.publicIntentId) ??
+      this.readScalar(this.recordValue(data.opportunity)?.id) ??
+      this.readScalar(this.recordValue(data.activity)?.id);
+    if (taskId && opportunityId) {
+      keys.add(`task-opportunity:${taskId}:${opportunityId}`);
+    }
+
+    return Array.from(keys);
+  }
+
   private normalizeAction(
     card: FitMeetAlphaCard,
     action: FitMeetAlphaCardAction,
@@ -82,13 +138,14 @@ export class AgentCardAssemblerService {
 
   private schemaActionForLegacy(
     action: FitMeetAlphaCardAction['action'],
-  ): FitMeetAgentSchemaAction {
+  ): FitMeetAgentSchemaAction | undefined {
     switch (action) {
       case 'send_message':
         return 'opener.confirm_send';
-      case 'connect_candidate':
       case 'save_candidate':
         return 'candidate.like';
+      case 'connect_candidate':
+        return 'candidate.connect';
       case 'create_activity':
         return 'activity.confirm_create';
       case 'view_activity':
@@ -111,7 +168,7 @@ export class AgentCardAssemblerService {
       case 'confirm_profile_update':
         return 'life_graph.accept_update';
       default:
-        return 'candidate.more_like_this';
+        return undefined;
     }
   }
 
@@ -151,6 +208,7 @@ export class AgentCardAssemblerService {
         return 'activity_completed';
       case 'checkin_card':
         return 'activity_confirmed';
+      case 'meet_loop_timeline':
       case 'review_card':
         return 'activity_completed';
       case 'audit_update':
@@ -182,5 +240,23 @@ export class AgentCardAssemblerService {
       allowed.includes(value as FitMeetAgentLoopStage)
       ? (value as FitMeetAgentLoopStage)
       : null;
+  }
+
+  private readScalar(value: unknown): string | null {
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    return null;
+  }
+
+  private readText(value: unknown, fallback: string): string {
+    return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  }
+
+  private recordValue(value: unknown): Record<string, unknown> | null {
+    return this.isRecord(value) ? value : null;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
   }
 }

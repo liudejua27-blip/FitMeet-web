@@ -1358,7 +1358,7 @@ describe('SocialAgentChatController user-facing stream', () => {
     expect(serialized).toContain('"assistantMessageSource":"fallback"');
     expect(serialized).toContain('"type":"progress"');
     expect(serialized).toContain('"lifecycle":"analyzing_intent"');
-    expect(serialized).toContain('正在处理这一步');
+    expect(serialized).toContain('正在推进当前进度');
     expect(serialized).toContain('正在理解你的需求');
     expect(serialized).toContain('assistantMessage');
     expect(serialized).toContain('"lifecycle":"checking_safety"');
@@ -2137,7 +2137,7 @@ describe('SocialAgentChatController user-facing stream', () => {
     expect(serialized).toContain('"recoveryNotice"');
     expect(serialized).toContain('"kind":"failed"');
     expect(serialized).toContain('"source":"stream_error"');
-    expect(serialized).toContain('FitMeet Agent 暂时没有顺利完成');
+    expect(serialized).toContain('连接中断了，可以继续');
     expect(serialized).not.toContain('traceId');
     expect(serialized).not.toContain('planner');
     expect(serialized).not.toContain('tool call');
@@ -2186,9 +2186,10 @@ describe('SocialAgentChatController user-facing stream', () => {
     expect(serialized).toContain('"type":"run.started"');
     expect(serialized).toContain('"type":"run.failed"');
     expect(serialized).toContain('"stage":"detect_social_intent"');
-    expect(serialized).toContain('这次处理没有完成');
+    expect(serialized).toContain('连接中断了，可以继续');
     expect(serialized).toContain('"type":"error"');
-    expect(serialized).toContain('这次处理时间有点久');
+    expect(serialized).toContain('这段需求还在');
+    expect(serialized).not.toContain('这次处理时间有点久');
     expect(serialized).not.toContain('QueryFailedError');
     expect(serialized).not.toContain('database');
     expect(serialized).not.toContain('traceId');
@@ -2799,7 +2800,7 @@ describe('SocialAgentChatController user-facing stream', () => {
       const serialized = writes.join('');
       expect(serialized).toContain('"type":"run.started"');
       expect(serialized).toContain('"type":"visible_process.delta"');
-      expect(serialized).toContain('正在恢复保存点');
+      expect(serialized).toContain('正在接着刚才的进度');
       expect(serialized).toContain('"type":"assistant_delta"');
       expect(serialized).toContain('"type":"assistant_done"');
       expect(serialized).toContain('"type":"result"');
@@ -2833,7 +2834,7 @@ describe('SocialAgentChatController user-facing stream', () => {
         emit({
           type: 'assistant_delta',
           messageId: 'checkpoint-retry',
-          delta: '我会从保存点重新尝试。',
+          delta: '我会接着刚才这一步重新尝试。',
           source: 'llm',
         });
         emit({
@@ -2858,7 +2859,7 @@ describe('SocialAgentChatController user-facing stream', () => {
           profileUpdated: false,
           shouldQueueRun: false,
           runMode: null,
-          assistantMessage: '我会从保存点重新尝试。',
+          assistantMessage: '我会接着刚才这一步重新尝试。',
           cards: [],
           permissionMode: 'confirm',
           safety: {
@@ -2937,7 +2938,7 @@ describe('SocialAgentChatController user-facing stream', () => {
     const serialized = writes.join('');
     expect(serialized).toContain('"type":"run.started"');
     expect(serialized).toContain('"type":"visible_process.delta"');
-    expect(serialized).toContain('正在恢复保存点');
+    expect(serialized).toContain('正在接着刚才的进度');
     expect(serialized).toContain('"type":"assistant_delta"');
     expect(serialized).toContain('"type":"assistant_done"');
     expect(serialized).toContain('"type":"result"');
@@ -3058,11 +3059,11 @@ describe('SocialAgentChatController user-facing stream', () => {
     });
     expect(chat.handleMessageStream).not.toHaveBeenCalled();
     expect(early).toContain('"type":"run.started"');
-    expect(early).toContain('"title":"正在重新运行这一步"');
-    expect(early).toContain('会先恢复保存点，再继续处理这一步。');
+    expect(early).toContain('"title":"正在重新整理"');
+    expect(early).toContain('会接着刚才的进度继续处理，不会重复执行已经完成的动作。');
     expect(early).toContain('"type":"visible_process.delta"');
-    expect(early).toContain('"title":"正在恢复保存点"');
-    expect(early).toContain('不会重复执行已经完成的步骤');
+    expect(early).toContain('"title":"正在接着刚才的进度"');
+    expect(early).toContain('不会重复执行已经完成的内容');
     expect(early).not.toContain('"type":"assistant_delta"');
     expect(early).not.toContain('"type":"result"');
 
@@ -3226,7 +3227,7 @@ describe('SocialAgentChatController user-facing stream', () => {
     const serialized = writes.join('');
     expect(serialized).toContain('"type":"run.started"');
     expect(serialized).toContain('"type":"visible_process.delta"');
-    expect(serialized).toContain('正在恢复保存点');
+    expect(serialized).toContain('正在接着刚才的进度');
     expect(serialized).toContain('"type":"approval.resolved"');
     expect(serialized).toContain('已取消这一步');
     expect(serialized).toContain('"approvalId":88');

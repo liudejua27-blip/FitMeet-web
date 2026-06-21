@@ -564,7 +564,7 @@ export class AgentApprovalService {
       case ApprovalType.Payment:
         return `${agentName} 想代表你完成一次支付。`;
       case ApprovalType.UnknownRisk:
-        return `${agentName} 想对一个风险等级未知的目标执行动作。`;
+        return `${agentName} 想代表你执行一步需要确认的操作。`;
       case ApprovalType.PostPublish:
         return `${agentName} 想代表你发布一条动态。`;
       default:
@@ -749,7 +749,7 @@ export class AgentApprovalService {
       return '发送前预览';
     }
     if (type === ApprovalType.ContactRequest || /connect|friend/i.test(actionType)) {
-      return '连接候选人前预览';
+      return '加好友并聊天前预览';
     }
     if (type === ApprovalType.ShareLocation) return '公开位置前预览';
     if (type === ApprovalType.Payment) return '支付前预览';
@@ -770,7 +770,7 @@ export class AgentApprovalService {
       case ApprovalType.ShareLocation:
         return '确认后会公开你允许展示的位置范围。';
       default:
-        return '确认后才会执行这一步。';
+        return '确认后才会执行这个动作。';
     }
   }
 
@@ -787,7 +787,7 @@ export class AgentApprovalService {
     if (type === ApprovalType.PostPublish || /publish/i.test(actionType)) {
       return '会过滤联系方式、精确住址和敏感画像字段。';
     }
-    return '只使用当前任务必要信息，并写入审计日志。';
+    return '只使用当前任务必要信息；确认记录会保留，方便你之后追踪和撤回。';
   }
 
   private approvalIdempotencyKey(

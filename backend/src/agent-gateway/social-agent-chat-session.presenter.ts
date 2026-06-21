@@ -4,7 +4,6 @@ import {
 } from '../common/display-text.util';
 import type { AgentTask } from './entities/agent-task.entity';
 import {
-  buildApprovalActions,
   buildRecommendationAssistantMessage,
 } from './social-agent-chat-result.presenter';
 import type {
@@ -142,9 +141,7 @@ function readResultFromTaskMemory(
     debugReasons: null,
     socialRequestDraft,
     candidates,
-    approvalRequiredActions: socialRequestDraft
-      ? buildApprovalActions(task.id, socialRequestDraft, candidates)
-      : [],
+    approvalRequiredActions: [],
     events,
   };
 }

@@ -151,15 +151,16 @@ function summarizeState(input: {
 }
 
 function fallbackTitle(state: SocialCodexRunSummaryState): string {
-  if (state === 'waiting') return '需要你确认这一步';
-  if (state === 'completed') return '这一步处理完成';
-  if (state === 'failed') return '这次处理没有完成';
+  if (state === 'waiting') return '需要你确认后继续';
+  if (state === 'completed') return '已整理当前进度';
+  if (state === 'failed') return '连接中断了，可以继续';
   return '正在整理你的需求';
 }
 
 function fallbackDetail(state: SocialCodexRunSummaryState): string | null {
-  if (state === 'waiting') return '确认后我会从同一步继续。';
-  if (state === 'failed') return '你可以重试，或者补充一句新的要求。';
+  if (state === 'waiting') return '确认后我会接着处理。';
+  if (state === 'failed')
+    return '我保留了这段需求，可以继续处理或补充一句新的要求。';
   return null;
 }
 

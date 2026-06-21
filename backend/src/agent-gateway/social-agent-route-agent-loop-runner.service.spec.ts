@@ -569,7 +569,7 @@ describe('SocialAgentRouteAgentLoopRunnerService', () => {
       '正在准备需要你确认的动作',
     );
     expect(labelFor('tool', 'route_conversation_turn')).toBe('正在组织回复');
-    expect(labelFor('tool', 'unknown_internal_tool')).toBe('正在处理这一步');
+    expect(labelFor('tool', 'unknown_internal_tool')).toBe('正在推进当前进度');
     expect(labelFor('tool', 'route_search_turn')).not.toContain('route_');
   });
 

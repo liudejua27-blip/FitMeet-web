@@ -35,4 +35,27 @@ describe('Social Codex public process text', () => {
       }),
     ).toBe('只使用公开可发现的信息，联系对方前仍需要你确认。');
   });
+
+  it('rewrites generic failure copy into stage-specific product status', () => {
+    expect(
+      sanitizeSocialCodexProcessTitle('这一步没有完成', {
+        stage: 'search_candidates',
+        state: 'failed',
+      }),
+    ).toBe('连接中断了，可以继续');
+
+    expect(
+      sanitizeSocialCodexProcessTitle('这一步需要重试', {
+        stage: 'approval',
+        state: 'waiting',
+      }),
+    ).toBe('需要你确认后继续');
+
+    expect(
+      sanitizeSocialCodexProcessDetail('刚才连接不稳', {
+        stage: 'create_opportunity_card',
+        state: 'failed',
+      }),
+    ).toBe('我保留了这段需求，可以继续处理或补充一句新的要求。');
+  });
 });

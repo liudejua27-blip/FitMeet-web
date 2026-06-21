@@ -19,6 +19,23 @@ describe('SceneRiskPolicyService', () => {
     });
   });
 
+  it('treats opener confirmation as a real send action instead of a low-risk draft', () => {
+    const policy = service.evaluate({
+      sceneType: 'walking',
+      actionType: 'opener.confirm_send',
+      text: '发送这条开场白给候选人，邀请她今晚在青岛大学附近散步',
+      permissionMode: 'limited_auto',
+    });
+
+    expect(policy).toMatchObject({
+      actionType: 'send_message',
+      riskLevel: 'medium',
+      requiresConfirmation: true,
+      sceneType: 'walking',
+    });
+    expect(policy.safetyPrompts.join(' ')).toContain('需要先让用户确认');
+  });
+
   it('requires double confirmation for drinking scenes', () => {
     const policy = service.evaluate({
       sceneType: 'drinking',

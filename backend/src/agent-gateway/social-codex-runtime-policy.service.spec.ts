@@ -29,6 +29,8 @@ describe('SocialCodexRuntimePolicyService', () => {
     expect(decision.sandbox.externalSideEffectAllowed).toBe(false);
     expect(decision.sandbox.publicCandidateRequired).toBe(true);
     expect(decision.sandbox.publicCandidateVerified).toBe(true);
+    expect(decision.reasons.join(' ')).not.toMatch(/dry-run|审计记录/i);
+    expect(decision.reasons.join(' ')).toContain('预览影响');
   });
 
   it('allows low-risk public candidate reads', () => {
@@ -56,7 +58,103 @@ describe('SocialCodexRuntimePolicyService', () => {
     expect(decision.reasons.join(' ')).toContain('低风险的理解');
   });
 
-  it('treats CreateSocialRequest publish payloads as high-risk public publish actions', () => {
+  it('treats opener generation as low-risk draft work while sending remains approval-required', () => {
+    const opener = service.evaluate({
+      toolName: SocialAgentToolName.DraftOpener,
+      payload: {
+        candidateRecordId: 501,
+        targetUserId: 22,
+        publiclyDiscoverable: true,
+      },
+    });
+    const send = service.evaluate({
+      toolName: SocialAgentToolName.SendMessageToCandidate,
+      payload: {
+        candidateRecordId: 501,
+        targetUserId: 22,
+        publiclyDiscoverable: true,
+        message: '周末一起散步吗？',
+      },
+    });
+
+    expect(opener).toMatchObject({
+      actionType: 'generate_opener',
+      mode: 'allow',
+      riskLevel: 'low',
+      requiresApproval: false,
+      dryRunRequired: false,
+      auditRequired: false,
+    });
+    expect(send).toMatchObject({
+      actionType: 'send_invite',
+      mode: 'approval_required',
+      riskLevel: 'high',
+      requiresApproval: true,
+      dryRunRequired: true,
+      auditRequired: true,
+    });
+  });
+
+  it('treats candidate save as a low-risk local preference action', () => {
+    const byTool = service.evaluate({
+      toolName: SocialAgentToolName.SaveCandidate,
+      payload: {
+        candidateRecordId: 501,
+        targetUserId: 22,
+        publiclyDiscoverable: true,
+      },
+    });
+    const byLegacyText = service.evaluate({
+      actionName: 'save_candidate',
+      payload: {
+        candidateRecordId: 501,
+        targetUserId: 22,
+      },
+    });
+
+    expect(byTool).toMatchObject({
+      actionType: 'save_candidate',
+      mode: 'allow',
+      riskLevel: 'low',
+      requiresApproval: false,
+      dryRunRequired: false,
+      auditRequired: false,
+    });
+    expect(byTool.sandbox).toMatchObject({
+      readOnlyAccessAllowed: true,
+      externalSideEffectAllowed: false,
+      publicCandidateRequired: false,
+    });
+    expect(byLegacyText).toMatchObject({
+      actionType: 'save_candidate',
+      mode: 'allow',
+      requiresApproval: false,
+    });
+  });
+
+  it('normalizes legacy invite_candidate actions into the canonical send_invite approval lane', () => {
+    const decision = service.evaluate({
+      actionType: 'invite_candidate' as never,
+      payload: {
+        targetUserId: 22,
+        candidateRecordId: 501,
+        publiclyDiscoverable: true,
+        message: '周末一起散步吗？',
+      },
+    });
+
+    expect(decision).toMatchObject({
+      actionType: 'send_invite',
+      mode: 'approval_required',
+      riskLevel: 'high',
+      requiresApproval: true,
+      dryRunRequired: true,
+      auditRequired: true,
+    });
+    expect(decision.idempotencyKeyScope).toBe('social_codex:send_invite');
+  });
+
+  it('treats CreateSocialRequest publish payloads as medium-risk actions that still require approval', () => {
     const decision = service.evaluate({
       toolName: SocialAgentToolName.CreateSocialRequest,
       payload: {
@@ -70,7 +168,7 @@ describe('SocialCodexRuntimePolicyService', () => {
     expect(decision).toMatchObject({
       actionType: 'publish_social_request',
       mode: 'approval_required',
-      riskLevel: 'high',
+      riskLevel: 'medium',
       requiresApproval: true,
       dryRunRequired: true,
       auditRequired: true,

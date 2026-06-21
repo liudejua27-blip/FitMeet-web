@@ -289,7 +289,7 @@ describe('SocialAgentRecommendationResultService', () => {
       status: AgentTaskStatus.AwaitingConfirmation,
       assistantMessage: '最终推荐回复',
       candidates: [expect.objectContaining({ userId: 22 })],
-      approvalRequiredActions: expect.any(Array),
+      approvalRequiredActions: [],
       cards: [expect.objectContaining({ type: 'candidate_card' })],
       traceId: 'trace-1',
     });

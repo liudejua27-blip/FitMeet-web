@@ -200,7 +200,7 @@ describe('FitMeetAlphaAgentSdkService', () => {
     }
   });
 
-  it('builds user-facing cards for draft, candidates, safety and approvals', () => {
+  it('builds user-facing cards for draft and candidates without standalone safety or approval summaries', () => {
     const service = new FitMeetAlphaAgentSdkService(config);
 
     const cards = service.buildResultCards({
@@ -254,10 +254,10 @@ describe('FitMeetAlphaAgentSdkService', () => {
       expect.arrayContaining([
         'activity_plan',
         'candidate_card',
-        'safety_boundary',
-        'audit_update',
       ]),
     );
+    expect(cards.map((card) => card.type)).not.toContain('safety_boundary');
+    expect(cards.map((card) => card.type)).not.toContain('audit_update');
     expect(cards[0]?.type).toBe('candidate_card');
     expect(candidateCards).toHaveLength(2);
     expect(candidateCards.map((card) => card.data?.['displayName'])).toEqual([
@@ -274,10 +274,28 @@ describe('FitMeetAlphaAgentSdkService', () => {
           requiresConfirmation: false,
         }),
         expect.objectContaining({
-          label: '确认后发邀请',
+          label: '先收藏',
+          action: 'save_candidate',
+          schemaAction: 'candidate.like',
+          requiresConfirmation: false,
+        }),
+        expect.objectContaining({
+          label: '发送邀请',
+          action: 'send_message',
+          schemaAction: 'opener.confirm_send',
+          requiresConfirmation: true,
+          payload: expect.objectContaining({
+            actionType: 'send_invite',
+          }),
+        }),
+        expect.objectContaining({
+          label: '加好友并聊天',
           action: 'candidate.connect',
           schemaAction: 'candidate.connect',
           requiresConfirmation: true,
+          payload: expect.objectContaining({
+            actionType: 'connect_candidate',
+          }),
         }),
         expect.objectContaining({
           label: '不感兴趣',
@@ -346,8 +364,22 @@ describe('FitMeetAlphaAgentSdkService', () => {
       rankingBreakdown: expect.arrayContaining([
         expect.objectContaining({ key: 'boundary', label: '安全边界' }),
       ]),
-      nextActions: expect.arrayContaining(['生成邀请开场白', '确认后发邀请']),
+      nextActions: expect.arrayContaining(['生成邀请开场白', '加好友并聊天']),
     });
+    expect(
+      cards.find((card) => card.type === 'candidate_card')?.data?.[
+        'opportunity'
+      ],
+    ).toEqual(
+      expect.objectContaining({
+        safetyBoundary: expect.any(String),
+        safetyBadges: expect.arrayContaining([
+          expect.stringContaining('公开可发现'),
+          expect.stringContaining('脱敏'),
+          '位置已模糊',
+        ]),
+      }),
+    );
     expect(cards.find((card) => card.type === 'activity_plan')).toMatchObject({
       schemaVersion: 'fitmeet.tool-ui.v1',
       schemaType: 'social_match.activity',
@@ -389,6 +421,7 @@ describe('FitMeetAlphaAgentSdkService', () => {
       }),
       actions: expect.arrayContaining([
         expect.objectContaining({
+          label: '发布到发现',
           action: 'activity.confirm_create',
           schemaAction: 'activity.confirm_create',
           requiresConfirmation: true,
@@ -402,41 +435,21 @@ describe('FitMeetAlphaAgentSdkService', () => {
             ]),
           }),
         }),
+        expect.objectContaining({
+          label: '修改',
+          action: 'reschedule_meet_loop',
+          schemaAction: 'activity.modify_time',
+          requiresConfirmation: false,
+        }),
+        expect.objectContaining({
+          label: '暂不发布',
+          action: 'activity.skip_publish',
+          schemaAction: 'activity.skip_publish',
+          requiresConfirmation: false,
+        }),
       ]),
     });
-    expect(cards.find((card) => card.type === 'safety_boundary')).toMatchObject(
-      {
-        schemaVersion: 'fitmeet.tool-ui.v1',
-        schemaType: 'safety.approval',
-        data: expect.objectContaining({
-          schemaName: 'SafetyApprovalCard',
-          schemaVersion: 'fitmeet.tool-ui.v1',
-          schemaType: 'safety.approval',
-          approval: expect.objectContaining({
-            riskLevel: 'low',
-            confirmationLabel: '后续动作需确认',
-            checkpointLabel: '安全边界已保存',
-          }),
-        }),
-      },
-    );
-    expect(cards.find((card) => card.type === 'audit_update')).toMatchObject({
-      schemaVersion: 'fitmeet.tool-ui.v1',
-      schemaType: 'safety.approval',
-      data: expect.objectContaining({
-        schemaName: 'SafetyApprovalCard',
-        schemaVersion: 'fitmeet.tool-ui.v1',
-        schemaType: 'safety.approval',
-        riskLevel: 'medium',
-        reasons: expect.arrayContaining(['send_message']),
-        approval: expect.objectContaining({
-          riskLevel: 'medium',
-          reasons: expect.arrayContaining(['send_message']),
-          confirmationLabel: '确认后才执行',
-          checkpointLabel: '审批中断点已保存',
-        }),
-      }),
-    });
+    expect(cards.find((card) => card.type === 'safety_boundary')).toBeUndefined();
   });
 
   it('builds a recovery card instead of fake candidates when real candidate search is empty', () => {
@@ -522,7 +535,7 @@ describe('FitMeetAlphaAgentSdkService', () => {
     );
   });
 
-  it('limits user-visible opportunity cards to three while keeping safety and audit cards', () => {
+  it('limits user-visible opportunity cards to three while keeping safety concise', () => {
     const service = new FitMeetAlphaAgentSdkService(config);
 
     const cards = service.buildResultCards({
@@ -612,7 +625,76 @@ describe('FitMeetAlphaAgentSdkService', () => {
       '候选 C',
     ]);
     expect(cards.find((card) => card.type === 'activity_plan')).toBeUndefined();
-    expect(cards.find((card) => card.type === 'safety_boundary')).toBeDefined();
-    expect(cards.find((card) => card.type === 'audit_update')).toBeDefined();
+    expect(cards.find((card) => card.type === 'safety_boundary')).toBeUndefined();
+    expect(cards.find((card) => card.type === 'audit_update')).toBeUndefined();
+  });
+
+  it('keeps blocked safety as a standalone card even when product cards exist', () => {
+    const service = new FitMeetAlphaAgentSdkService(config);
+
+    const cards = service.buildResultCards({
+      taskId: 12,
+      traceId: 'trace-blocked-safety',
+      socialRequestDraft: {
+        description: '今晚在青岛大学附近找跑步搭子',
+        city: '青岛',
+        activityType: '跑步',
+      },
+      candidates: [
+        {
+          userId: 7,
+          displayName: '小刘',
+          matchScore: 86,
+          commonTags: ['跑步'],
+          reasons: ['同城同兴趣'],
+        },
+      ],
+      safety: {
+        blocked: true,
+        level: 'high',
+        reasons: ['请求包含不安全的线下行为'],
+        boundaryNotes: ['不会继续搜索、联系或发布'],
+        requiredConfirmations: [],
+      },
+    });
+
+    expect(cards.find((card) => card.type === 'candidate_card')).toBeDefined();
+    expect(cards.find((card) => card.type === 'safety_boundary')).toMatchObject({
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'safety.approval',
+      status: 'blocked',
+      data: expect.objectContaining({
+        schemaName: 'SafetyApprovalCard',
+        approval: expect.objectContaining({
+          riskLevel: 'high',
+          confirmationLabel: '已阻断',
+          checkpointLabel: '不会继续执行',
+        }),
+      }),
+    });
+  });
+
+  it('keeps a standalone approval card when no product card can own the action', () => {
+    const service = new FitMeetAlphaAgentSdkService(config);
+
+    const cards = service.buildResultCards({
+      taskId: 12,
+      traceId: 'trace-standalone-approval',
+      socialRequestDraft: null,
+      candidates: [],
+      approvalRequiredActions: [{ id: 1, actionType: 'send_message', riskLevel: 'medium' }],
+    });
+
+    expect(cards.find((card) => card.type === 'audit_update')).toMatchObject({
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'safety.approval',
+      data: expect.objectContaining({
+        schemaName: 'SafetyApprovalCard',
+        approval: expect.objectContaining({
+          riskLevel: 'medium',
+          confirmationLabel: '确认后才执行',
+        }),
+      }),
+    });
   });
 });
