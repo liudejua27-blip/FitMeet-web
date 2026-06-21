@@ -112,18 +112,18 @@ export function toolStatus(status: ToolCallMessagePartProps['status']) {
   if (status?.type === 'requires-action') {
     return {
       status: 'waiting' as const,
-      text: '需要你确认这一步',
+      text: '需要你确认后继续',
     };
   }
   if (status?.type === 'incomplete') {
     return {
       status: 'error' as const,
-      text: '这一步没有完成',
+      text: '刚才连接不稳',
     };
   }
   return {
     status: 'complete' as const,
-    text: '已完成这一步',
+    text: '已整理当前进度',
   };
 }
 
@@ -170,7 +170,7 @@ export function summarizeDataPart(name: string | undefined, data: unknown): Proc
     visibleSummary?.title ??
     publicDetail(record.title) ??
     (name === 'fitmeet-approval'
-      ? '需要你确认这一步'
+      ? '需要你确认后继续'
       : name === 'fitmeet-process'
         ? '正在处理'
         : '正在处理');
@@ -307,7 +307,7 @@ function compactFallbackProcessTitle(
 ) {
   const text = `${rawTitle ?? ''} ${step?.id ?? ''} ${step?.label ?? ''} ${step?.detail ?? ''}`;
   if (status === 'waiting') return '需要你确认后继续';
-  if (status === 'error') return '这一步没有完成';
+  if (status === 'error') return '刚才连接不稳';
   if (/候选|推荐|匹配|candidate|search|rank/i.test(text)) {
     return status === 'running' ? '正在筛选公开可发现的人' : '已整理公开可发现的人选';
   }
@@ -398,11 +398,11 @@ export function summarizeToolCallFallback(part: ToolCallMessagePartProps): Proce
 
 export function humanToolName(name: string) {
   if (!name) return '正在处理';
-  if (/approval|safety/i.test(name)) return '需要你确认这一步';
+  if (/approval|safety/i.test(name)) return '需要你确认后继续';
   if (/search|match|candidate|social/i.test(name)) return '正在整理合适的信息';
   if (/profile|life|graph|memory/i.test(name)) return '正在整理上下文';
-  if (/meet|invite|schedule/i.test(name)) return '正在整理约定步骤';
-  return '正在推进这一步';
+  if (/meet|invite|schedule/i.test(name)) return '正在整理邀约进度';
+  return '正在推进当前进度';
 }
 
 function toolFallbackStatusTitle(
@@ -412,11 +412,11 @@ function toolFallbackStatusTitle(
 ) {
   if (status === 'running') return humanToolName(name);
   if (status === 'waiting' || status === 'error') return fallbackText;
-  if (/approval|safety/i.test(name)) return '已确认这一步';
+  if (/approval|safety/i.test(name)) return '已处理你的确认';
   if (/search|match|candidate|social/i.test(name)) return '已整理合适的信息';
   if (/profile|life|graph|memory/i.test(name)) return '已整理上下文';
-  if (/meet|invite|schedule/i.test(name)) return '已整理约定步骤';
-  return '已完成这一步';
+  if (/meet|invite|schedule/i.test(name)) return '已整理邀约进度';
+  return '已完成当前进度';
 }
 
 function toolFallbackStepId(name: string) {
@@ -437,7 +437,7 @@ export function naturalProcessTitle(summary: ProcessSummary) {
     return summary.status === 'running' ? '正在确认需要补充的信息' : '已确认需要补充的信息';
   }
   if (summary.status === 'waiting') return '需要你确认后继续';
-  if (summary.status === 'error') return '这一步没有完成';
+  if (summary.status === 'error') return '刚才连接不稳';
   if (summary.steps.some((step) => classifyStepCategory(step) === 'social_match')) {
     return summary.status === 'running' ? '正在整理合适选项' : '已整理相关选项';
   }
@@ -727,15 +727,15 @@ function resultLinesForData(
   const explicit = publicDetail(record.summary);
   if (explicit) return [explicit];
   if (pendingConfirmations.length > 0) {
-    return ['这一步会影响实际动作，我会等你确认后再继续。'];
+    return ['这次操作会影响真实动作，我会等你确认后再继续。'];
   }
   const lastError = [...steps].reverse().find((step) => step.status === 'error');
   if (lastError) {
-    return [lastError.detail ?? '这一步没有完成，我可以重新尝试或换一种方式处理。'];
+    return [lastError.detail ?? '我保留了这段需求，可以继续处理或换一种方式。'];
   }
   const completed = steps.filter((step) => step.status === 'complete');
   if (completed.length > 0) {
-    return [`已完成 ${completed.length} 个步骤，结果会继续合并到回复里。`];
+    return [`已完成 ${completed.length} 项进度，结果会继续合并到回复里。`];
   }
   const running = steps.find((step) => step.status === 'running');
   if (running) return ['正在处理，我会把有用结果整理成自然回复。'];
@@ -743,18 +743,18 @@ function resultLinesForData(
 }
 
 function checkpointActionLabel(key: string | null) {
-  if (key === 'retry') return '重试这一步';
-  if (key === 'replay') return '重新运行这一步';
-  if (key === 'fork') return '生成新版本';
+  if (key === 'retry') return '继续处理';
+  if (key === 'replay') return '重新整理';
+  if (key === 'fork') return '换一种方案';
   if (key === 'resume') return '继续处理';
   return null;
 }
 
 function checkpointActionBusyLabel(key: CheckpointToolActionKey) {
   if (key === 'resume') return '正在继续';
-  if (key === 'retry') return '正在重试';
-  if (key === 'replay') return '正在重新运行';
-  return '正在生成';
+  if (key === 'retry') return '正在继续';
+  if (key === 'replay') return '正在整理';
+  return '正在换方案';
 }
 
 function resumeModeFromUnknown(value: unknown): ResumeContext['mode'] {

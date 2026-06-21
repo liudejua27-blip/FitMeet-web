@@ -29,9 +29,17 @@ type UseAgentStreamEventHandlerInput = {
   appendAssistantDelta: (
     delta: string,
     source?: UserFacingAgentAssistantMessageSource,
+    anchor?: { runId?: string | null; messageId?: string | null },
   ) => void;
-  appendStreamingAssistant: (taskId: number | null, intent: AgentConversationIntent) => void;
-  finishAssistantDelta: (source?: UserFacingAgentAssistantMessageSource) => void;
+  appendStreamingAssistant: (
+    taskId: number | null,
+    intent: AgentConversationIntent,
+    anchor?: { runId?: string | null; messageId?: string | null },
+  ) => void;
+  finishAssistantDelta: (
+    source?: UserFacingAgentAssistantMessageSource,
+    anchor?: { runId?: string | null; messageId?: string | null },
+  ) => void;
   finishUserFacing: (result: Extract<AgentStreamEvent, { type: 'result' }>['result']) => void;
 };
 
@@ -68,7 +76,11 @@ export function useAgentStreamEventHandler({
           }
         }
         if (shouldAttachVisibleProcessToMessage(progressEvent)) {
-          appendStreamingAssistant(eventTaskId ?? activeTaskId, runConversationIntentRef.current);
+          appendStreamingAssistant(
+            eventTaskId ?? activeTaskId,
+            runConversationIntentRef.current,
+            runMessageAnchorFromEvent(progressEvent),
+          );
         }
         setSteps((current) =>
           mergeProgressStep(current, progressEvent, runConversationIntentRef.current),
@@ -77,11 +89,11 @@ export function useAgentStreamEventHandler({
       const streamIntent = resolveIntentFromStreamEvent(event);
       if (streamIntent) runConversationIntentRef.current = streamIntent;
       if (event.type === 'assistant_delta') {
-        appendAssistantDelta(event.delta, event.source);
+        appendAssistantDelta(event.delta, event.source, runMessageAnchorFromEvent(event));
         return;
       }
       if (event.type === 'assistant_done') {
-        finishAssistantDelta(event.source);
+        finishAssistantDelta(event.source, runMessageAnchorFromEvent(event));
         return;
       }
       if (event.type === 'progress') {
@@ -121,6 +133,24 @@ export function useAgentStreamEventHandler({
   return { handleAgentStreamEvent };
 }
 
+function runMessageAnchorFromEvent(event: AgentStreamEvent): {
+  runId?: string | null;
+  messageId?: string | null;
+} {
+  const metadata =
+    typeof event === 'object' && event !== null && 'metadata' in event
+      ? event.metadata
+      : undefined;
+  return {
+    runId: stringOrNull(metadata?.runId ?? ('runId' in event ? event.runId : null)),
+    messageId: stringOrNull('messageId' in event ? event.messageId : metadata?.messageId),
+  };
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 function legacyStatusToCoveringProgress(
   event: Extract<AgentStreamEvent, { type: 'status' }>,
 ): Extract<AgentStreamEvent, { type: 'progress' }> {
@@ -152,6 +182,6 @@ function legacyStatusTitleForLifecycle(lifecycle: AgentLifecycle): string {
   if (lifecycle === 'ranking_matches') return '正在整理合适机会';
   if (lifecycle === 'checking_safety') return '正在检查安全边界';
   if (lifecycle === 'drafting_opener') return '正在生成开场白';
-  if (lifecycle === 'waiting_confirmation') return '需要你确认这一步';
+  if (lifecycle === 'waiting_confirmation') return '需要你确认后继续';
   return '正在理解你的需求';
 }

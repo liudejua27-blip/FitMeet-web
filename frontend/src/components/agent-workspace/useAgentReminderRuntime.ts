@@ -11,6 +11,7 @@ import {
 } from '../../api/socialAgentApi';
 import type { AgentThreadMessage } from './socialAgentThreadStore';
 import { readAgentReminderRouteState } from './agentReminderRouteState';
+import { agentCardDedupKeys } from './agentCardIdentity';
 import { socialCodexThreadIdForTask } from './socialCodexThreadId';
 
 type SetState<T> = (value: T | ((current: T) => T)) => void;
@@ -108,10 +109,18 @@ export function useAgentReminderRuntime({
         const response = responseFromRunNextResult(result);
         setMessages((current) => {
           if (current.some((message) => message.id === messageId)) return current;
-          const existingCardIds = new Set(
-            current.flatMap((message) => message.result?.cards.map((card) => card.id) ?? []),
+          const existingCardKeys = new Set(
+            current.flatMap((message) =>
+              message.result?.cards.flatMap((card) => agentCardDedupKeys(card)) ?? [],
+            ),
           );
-          if (response.cards.some((card) => existingCardIds.has(card.id))) return current;
+          if (
+            response.cards.some((card) =>
+              agentCardDedupKeys(card).some((key) => existingCardKeys.has(key)),
+            )
+          ) {
+            return current;
+          }
           return [
             ...current,
             {

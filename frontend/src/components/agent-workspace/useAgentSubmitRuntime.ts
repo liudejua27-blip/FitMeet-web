@@ -39,6 +39,7 @@ const LOCAL_COVERING_STATUS_ID = 'local-covering-status';
 const LOCAL_COVERING_STATUS_SOURCE = 'local.covering_status';
 const SOFT_COVERING_STATUS_DELAY_MS = 1000;
 const SLOW_COVERING_STATUS_DELAY_MS = 8000;
+export const NON_BRANCH_RELOAD_PREFIX = 'non-branch-reload:';
 
 type UseAgentSubmitRuntimeInput = {
   isRunning: boolean;
@@ -148,8 +149,13 @@ export function useAgentSubmitRuntime({
         return;
       }
 
-      const branchUserId = branchReloadUserIdRef.current;
-      createBranchForNextAssistantRef.current = Boolean(branchUserId);
+      const reloadUserId = branchReloadUserIdRef.current;
+      const shouldCreateBranch =
+        Boolean(reloadUserId) && !reloadUserId?.startsWith(NON_BRANCH_RELOAD_PREFIX);
+      const branchUserId = reloadUserId?.startsWith(NON_BRANCH_RELOAD_PREFIX)
+        ? reloadUserId.slice(NON_BRANCH_RELOAD_PREFIX.length)
+        : reloadUserId;
+      createBranchForNextAssistantRef.current = shouldCreateBranch;
       setMessages((current) =>
         branchUserId
           ? current
@@ -233,6 +239,10 @@ export function useAgentSubmitRuntime({
           navigate('/agent/chat', { replace: false });
         }
       } catch (error) {
+        if (finishedRef.current) {
+          settleStreamingAssistantAfterInterruption();
+          return;
+        }
         const stopped = stopRequestedRef.current || isAbortError(error);
         const agentError = stopped
           ? mapAgentError(new DOMException('Aborted', 'AbortError'))
@@ -327,9 +337,9 @@ export function streamEventReplacesLocalCoveringStatus(event: AgentStreamEvent):
   if (event.type === 'approval_required') return true;
   if (event.type === 'result') return true;
   if (event.type === 'error') return true;
-  if (event.type === 'agent_loop_step') return true;
-  if (event.type === 'tool_call') return true;
-  if (event.type === 'tool_result') return true;
+  if (event.type === 'agent_loop_step') return false;
+  if (event.type === 'tool_call') return false;
+  if (event.type === 'tool_result') return false;
   if ('eventId' in event && typeof event.eventId === 'string') {
     if (event.visibility !== 'user_visible') return false;
     return event.type !== 'run.started';

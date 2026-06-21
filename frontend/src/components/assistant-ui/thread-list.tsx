@@ -501,11 +501,16 @@ function ReminderPreferenceToggle({
 
   useEffect(() => {
     if (!focus) return;
-    const frame = window.requestAnimationFrame(() => {
+    const focusToggle = () => {
       toggleRef.current?.focus({ preventScroll: false });
       toggleRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    });
-    return () => window.cancelAnimationFrame(frame);
+    };
+    const frame = window.requestAnimationFrame(focusToggle);
+    const timeout = window.setTimeout(focusToggle, 80);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timeout);
+    };
   }, [focus]);
 
   return (

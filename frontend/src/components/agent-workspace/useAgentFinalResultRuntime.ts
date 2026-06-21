@@ -5,7 +5,15 @@ import type {
   UserFacingAgentResponse,
 } from '../../api/socialAgentApi';
 import type { FitMeetAssistantRecovery } from './FitMeetAssistantUI.types';
-import { ASSISTANT_STREAMING_PLACEHOLDER } from './useAgentMessageStream';
+import {
+  ASSISTANT_STREAMING_PLACEHOLDER,
+  collapseRepeatedAssistantTextBlocks,
+  findAssistantRunMessageIndex,
+} from './useAgentMessageStream';
+import {
+  isSameAssistantAnswerSurface,
+  normalizeAssistantTextForMerge,
+} from './assistantTextDedupe';
 import {
   assistantMessageForUserFacingResult,
   branchForAssistant,
@@ -21,6 +29,11 @@ import {
   stepIdFromLightStatus,
   traceIdFromResult,
 } from './agentWorkspaceRuntime';
+import { agentCardDedupKeys } from './agentCardIdentity';
+import {
+  reduceSingleRunAssistantMessages,
+  type AssistantRunMessageAnchor,
+} from './agentAssistantMessageReducer';
 import type {
   AgentConversationIntent,
   AgentThreadMessage,
@@ -42,7 +55,6 @@ type UseAgentFinalResultRuntimeInput = {
   setMessages: SetState<AgentThreadMessage[]>;
   setSteps: SetState<Step[]>;
   settleStreamingAssistantAfterInterruption: (status?: 'done' | 'error') => void;
-  publicText: (value: unknown, fallback: string) => string;
   nextId: (prefix: string) => string;
 };
 
@@ -59,26 +71,19 @@ export function useAgentFinalResultRuntime({
   setMessages,
   setSteps,
   settleStreamingAssistantAfterInterruption,
-  publicText,
   nextId,
 }: UseAgentFinalResultRuntimeInput) {
   const mergePendingApprovalDispatchCards = useCallback(
     (finalResult: UserFacingAgentResponse): UserFacingAgentResponse => {
       const cards = pendingApprovalDispatchCardsRef.current;
-      if (cards.length === 0) return finalResult;
+      if (cards.length === 0) {
+        return dedupeUserFacingResponseCards(finalResult);
+      }
       pendingApprovalDispatchCardsRef.current = [];
-      const existingApprovalIds = new Set(
-        finalResult.cards.map((card) => stringFromUnknown(card.data.approvalId)).filter(Boolean),
-      );
-      const nextCards = cards.filter((card) => {
-        const approvalId = stringFromUnknown(card.data.approvalId);
-        return !approvalId || !existingApprovalIds.has(approvalId);
-      });
-      if (nextCards.length === 0) return finalResult;
-      return {
+      return dedupeUserFacingResponseCards({
         ...finalResult,
-        cards: [...nextCards, ...finalResult.cards],
-      };
+        cards: [...cards, ...finalResult.cards],
+      });
     },
     [pendingApprovalDispatchCardsRef],
   );
@@ -124,7 +129,15 @@ export function useAgentFinalResultRuntime({
       pendingOpportunityClarificationRef.current =
         responseAwaitsOpportunityClarification(displayResult);
       setMessages((current) => {
+        const reduce = (next: AgentThreadMessage[]) =>
+          reduceSingleRunAssistantMessages(next);
         const last = current.at(-1);
+        const runAnchor = resultRunMessageAnchor(displayResult);
+        const anchoredIndex = findAssistantRunResultMergeIndex(
+          current,
+          runAnchor,
+          finalMessage,
+        );
         const assistantMessage = {
           id: nextId('assistant'),
           role: 'assistant',
@@ -132,6 +145,8 @@ export function useAgentFinalResultRuntime({
           status: 'done',
           result: displayResult,
           taskId: findTaskId(displayResult) ?? activeTaskId,
+          runId: runAnchor.runId ?? null,
+          messageId: runAnchor.messageId ?? null,
           traceId: traceIdFromResult(displayResult),
           showSocialResult,
           conversationIntent,
@@ -139,17 +154,54 @@ export function useAgentFinalResultRuntime({
           assistantMessageSource: displayResult.assistantMessageSource,
           branchable: !fallbackSourced,
         } satisfies AgentThreadMessage;
-        if (last?.role === 'assistant' && last.status === 'streaming') {
+        if (anchoredIndex >= 0) {
+          const anchored = current[anchoredIndex];
           const previousContent =
-            last.content === ASSISTANT_STREAMING_PLACEHOLDER ? '' : last.content;
-          return [
-            ...current.slice(0, -1),
+            anchored.content === ASSISTANT_STREAMING_PLACEHOLDER ? '' : anchored.content;
+          return reduce([
+            ...current.slice(0, anchoredIndex),
             {
-              ...last,
-              content: previousContent.trim() ? previousContent : finalMessage,
+              ...anchored,
+              content: mergeAssistantFinalText(previousContent, finalMessage),
               status: 'done',
               result: displayResult,
               taskId: findTaskId(displayResult) ?? activeTaskId,
+              runId: runAnchor.runId ?? anchored.runId ?? null,
+              messageId: runAnchor.messageId ?? anchored.messageId ?? null,
+              traceId: traceIdFromResult(displayResult),
+              branch:
+                createBranchForNextAssistantRef.current && !fallbackSourced
+                  ? branchForAssistant(current, anchored.id)
+                  : anchored.branch,
+              createsBranch:
+                createBranchForNextAssistantRef.current && !fallbackSourced
+                  ? true
+                  : anchored.createsBranch,
+              showSocialResult,
+              conversationIntent,
+              surfaceKind: 'answer',
+              assistantMessageSource:
+                displayResult.assistantMessageSource ?? anchored.assistantMessageSource,
+              branchable:
+                !fallbackSourced && anchored.assistantMessageSource !== 'fallback',
+            },
+            ...current.slice(anchoredIndex + 1),
+          ]);
+        }
+        if (last?.role === 'assistant' && last.status === 'streaming') {
+          const previousContent =
+            last.content === ASSISTANT_STREAMING_PLACEHOLDER ? '' : last.content;
+          const mergedContent = mergeAssistantFinalText(previousContent, finalMessage);
+          return reduce([
+            ...current.slice(0, -1),
+            {
+              ...last,
+              content: mergedContent,
+              status: 'done',
+              result: displayResult,
+              taskId: findTaskId(displayResult) ?? activeTaskId,
+              runId: runAnchor.runId ?? last.runId ?? null,
+              messageId: runAnchor.messageId ?? last.messageId ?? null,
               traceId: traceIdFromResult(displayResult),
               branch: createBranchForNextAssistantRef.current && !fallbackSourced
                 ? branchForAssistant(current, last.id)
@@ -162,16 +214,19 @@ export function useAgentFinalResultRuntime({
                 displayResult.assistantMessageSource ?? last.assistantMessageSource,
               branchable: !fallbackSourced && last.assistantMessageSource !== 'fallback',
             },
-          ];
+          ]);
         }
         if (last?.role === 'assistant' && last.status === 'done' && last.content.trim()) {
           if (!last.result) {
-            return [
+            return reduce([
               ...current.slice(0, -1),
               {
                 ...last,
+                content: mergeAssistantFinalText(last.content, finalMessage),
                 result: displayResult,
                 taskId: findTaskId(displayResult) ?? activeTaskId,
+                runId: runAnchor.runId ?? last.runId ?? null,
+                messageId: runAnchor.messageId ?? last.messageId ?? null,
                 traceId: traceIdFromResult(displayResult),
                 showSocialResult,
                 conversationIntent,
@@ -179,14 +234,32 @@ export function useAgentFinalResultRuntime({
                 assistantMessageSource: displayResult.assistantMessageSource,
                 branchable: !fallbackSourced,
               },
-            ];
+            ]);
           }
           if (last.content.trim() !== finalMessage.trim()) {
-            return [...current, assistantMessage];
+            if (isSameAssistantAnswerSurface(last.content, finalMessage)) {
+              return reduce([
+                ...current.slice(0, -1),
+                {
+                  ...last,
+                  result: displayResult,
+                  taskId: findTaskId(displayResult) ?? activeTaskId,
+                  runId: runAnchor.runId ?? last.runId ?? null,
+                  messageId: runAnchor.messageId ?? last.messageId ?? null,
+                  traceId: traceIdFromResult(displayResult),
+                  showSocialResult,
+                  conversationIntent,
+                  surfaceKind: 'answer',
+                  assistantMessageSource: displayResult.assistantMessageSource,
+                  branchable: !fallbackSourced,
+                },
+              ]);
+            }
+            return reduce([...current, assistantMessage]);
           }
           return current;
         }
-        return [...current, assistantMessage];
+        return reduce([...current, assistantMessage]);
       });
       createBranchForNextAssistantRef.current = false;
       const awaitingApproval = responseRequiresApproval(displayResult);
@@ -215,7 +288,6 @@ export function useAgentFinalResultRuntime({
       messages,
       nextId,
       pendingOpportunityClarificationRef,
-      publicText,
       runConversationIntentRef,
       setMessages,
       setRecovery,
@@ -229,5 +301,90 @@ export function useAgentFinalResultRuntime({
 }
 
 function stringFromUnknown(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+export function dedupeUserFacingResponseCards(
+  result: UserFacingAgentResponse,
+): UserFacingAgentResponse {
+  const seen = new Set<string>();
+  const cards: FitMeetAlphaCard[] = [];
+  for (const card of result.cards) {
+    const keys = userFacingCardDedupKeys(card);
+    if (keys.some((key) => seen.has(key))) continue;
+    for (const key of keys) seen.add(key);
+    cards.push(card);
+  }
+  if (cards.length === result.cards.length) return result;
+  return { ...result, cards };
+}
+
+function userFacingCardDedupKeys(card: FitMeetAlphaCard) {
+  return agentCardDedupKeys(card);
+}
+
+function resultRunMessageAnchor(
+  result: UserFacingAgentResponse,
+): AssistantRunMessageAnchor {
+  return {
+    runId: stringFromUnknown(result.runtime?.runId),
+    messageId: stringFromUnknown(result.runtime?.messageId),
+  };
+}
+
+export function mergeAssistantFinalText(previous: string, finalMessage: string): string {
+  const previousText = previous === ASSISTANT_STREAMING_PLACEHOLDER ? '' : previous;
+  const previousNorm = normalizeAssistantTextForMerge(previousText);
+  const finalNorm = normalizeAssistantTextForMerge(finalMessage);
+  if (!previousNorm) return collapseRepeatedAssistantTextBlocks(finalMessage);
+  if (!finalNorm) return collapseRepeatedAssistantTextBlocks(previousText);
+  if (previousNorm === finalNorm) return collapseRepeatedAssistantTextBlocks(previousText);
+  if (previousNorm.includes(finalNorm)) return collapseRepeatedAssistantTextBlocks(previousText);
+  if (finalNorm.includes(previousNorm)) return collapseRepeatedAssistantTextBlocks(finalMessage);
+  if (shouldPreferFinalAnswerText(previousText, finalMessage)) {
+    return collapseRepeatedAssistantTextBlocks(finalMessage);
+  }
+  return collapseRepeatedAssistantTextBlocks(previousText);
+}
+
+function shouldPreferFinalAnswerText(previous: string, finalMessage: string): boolean {
+  const previousNorm = normalizeAssistantTextForMerge(previous);
+  const finalNorm = normalizeAssistantTextForMerge(finalMessage);
+  if (!previousNorm || !finalNorm) return false;
+  if (isTransientAssistantStatusText(previousNorm)) return finalNorm.length >= 8;
+  if (previousNorm.length <= 64 && finalNorm.length >= previousNorm.length + 18) {
+    return true;
+  }
+  return false;
+}
+
+function isTransientAssistantStatusText(value: string): boolean {
+  return /^(正在|已记录|已整理|正在整理|正在理解|正在查找|正在筛选|正在检查|可以继续|当前进度|刚才连接不稳)/.test(
+    value,
+  ) || /[.。…]$/.test(value) && value.length <= 42 && /正在|继续|整理|查找|筛选|检查/.test(value);
+}
+
+export function findAssistantRunResultMergeIndex(
+  messages: AgentThreadMessage[],
+  anchor: AssistantRunMessageAnchor,
+  finalMessage: string,
+): number {
+  const anchoredIndex = findAssistantRunMessageIndex(messages, anchor);
+  if (anchoredIndex >= 0) return anchoredIndex;
+  const finalNorm = normalizeAssistantTextForMerge(finalMessage);
+  for (let index = messages.length - 1; index >= Math.max(0, messages.length - 6); index -= 1) {
+    const message = messages[index];
+    if (message.role !== 'assistant' || message.surfaceKind === 'recovery') continue;
+    if (message.status === 'streaming') return index;
+    const content = message.content === ASSISTANT_STREAMING_PLACEHOLDER ? '' : message.content;
+    if (!content.trim()) continue;
+    if (!message.result && (!finalNorm || isSameAssistantAnswerSurface(content, finalMessage))) {
+      return index;
+    }
+    if (message.result && isSameAssistantAnswerSurface(content, finalMessage)) {
+      return index;
+    }
+  }
+  return -1;
 }

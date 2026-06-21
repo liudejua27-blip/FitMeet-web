@@ -204,12 +204,15 @@ function assistantDeltaDedupKey(
 ): AssistantStreamDedupKey {
   return {
     key: [
-      event.messageId ?? '',
       event.source ?? '',
-      event.delta ?? '',
+      normalizeAssistantDeltaForDedup(event.delta ?? ''),
     ].join('\u001f'),
     protocol: sourceProtocolFromMappedEvent(event),
   };
+}
+
+function normalizeAssistantDeltaForDedup(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 function sourceProtocolFromMappedEvent(event: AgentStreamEvent): string | null {
@@ -547,9 +550,9 @@ function legacyTitleForLifecycle(
   state: 'running' | 'done' | 'failed' | 'waiting',
 ): string {
   const done = state === 'done';
-  if (state === 'failed') return '这一步没有处理好，可以重试';
+  if (state === 'failed') return '刚才连接不稳，可以继续';
   if (state === 'waiting' || lifecycle === 'waiting_confirmation') {
-    return done ? '已处理你的确认' : '需要你确认这一步';
+    return done ? '已处理你的确认' : '需要你确认后继续';
   }
   if (lifecycle === 'reading_life_graph') {
     return done ? '已读取你的偏好' : '正在读取你的偏好';
@@ -611,6 +614,7 @@ function socialAgentV2ToProgress(
         sourceProtocol: 'social_agent_event_v2',
         eventId: event.eventId,
         seq: event.seq,
+        runId: event.runId,
         taskId: event.taskId ?? null,
         threadId: event.threadId ?? null,
       },
@@ -650,6 +654,7 @@ function publicV2Title(event: Extract<UserFacingAgentStreamEvent, { eventId: str
   const stageState = v2ProcessState(event);
   const stageTitle = socialCodexStageTitle(event.stage, stageState);
   const slotSummary = publicSlotSummaryFromPayload(event.payload);
+  if (event.type === 'run.failed') return '这段需求还在';
   if (event.type === 'slot.filled' && slotSummary) return `已记住：${slotSummary}`;
   if (event.type === 'slot.completed' && slotSummary) return `已确认：${slotSummary}`;
   if (
@@ -661,8 +666,8 @@ function publicV2Title(event: Extract<UserFacingAgentStreamEvent, { eventId: str
   }
   if (event.type === 'run.started') return stageTitle ?? '正在理解你的需求';
   if (event.type === 'visible_process.delta') return stageTitle ?? '正在理解你的需求';
-  if (event.type === 'tool.started') return stageTitle ?? '正在推进这一步';
-  if (event.type === 'tool.progress') return stageTitle ?? '正在推进这一步';
+  if (event.type === 'tool.started') return stageTitle ?? '正在推进当前进度';
+  if (event.type === 'tool.progress') return stageTitle ?? '正在推进当前进度';
   if (event.type === 'tool.done') return stageTitle ?? '已整理当前进度';
   if (event.type === 'slot.filled') return '已记住你刚补充的信息';
   if (event.type === 'slot.completed') return stageTitle ?? '已记录你的关键信息';
@@ -679,10 +684,9 @@ function publicV2Title(event: Extract<UserFacingAgentStreamEvent, { eventId: str
   if (event.type === 'safety_check.done') {
     return socialCodexStageTitle('safety_filter', 'done') ?? '已检查安全边界';
   }
-  if (event.type === 'approval.required') return stageTitle ?? '需要你确认这一步';
+  if (event.type === 'approval.required') return stageTitle ?? '需要你确认后继续';
   if (event.type === 'approval.resolved') return stageTitle ?? '已处理你的确认';
   if (event.type === 'run.completed') return stageTitle ?? '已整理当前进度';
-  if (event.type === 'run.failed') return '这次处理没有完成';
   return stageTitle ?? '正在整理当前进度';
 }
 
@@ -936,7 +940,7 @@ function publicApprovalRuntimeMetadata(
   const boundary = publicExecutionBoundary(executionContract);
   if (boundary) out.executionBoundary = boundary;
   if (approvalPolicy.resumeAfterDecision === true || isRecord(source.resumeCursor)) {
-    out.resumePolicy = '同意后从保存点继续';
+    out.resumePolicy = '同意后接着当前进度继续';
   }
   return out;
 }
@@ -951,9 +955,9 @@ function firstRecord(...values: unknown[]): Record<string, unknown> | null {
 function publicExecutionBoundary(contract: string | null): string | null {
   if (!contract) return null;
   if (/approval_required|dry_run|audit/i.test(contract)) {
-    return '需要预览、确认和审计后继续';
+    return '需要先预览，并由你确认后继续';
   }
-  if (/blocked/i.test(contract)) return '这一步已被安全边界拦截';
+  if (/blocked/i.test(contract)) return '这个动作已被安全边界拦截';
   return null;
 }
 

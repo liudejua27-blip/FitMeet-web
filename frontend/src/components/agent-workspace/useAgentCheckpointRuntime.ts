@@ -68,7 +68,7 @@ export function useAgentCheckpointRuntime({
         typeof checkpointId === 'number' || typeof checkpointId === 'string'
           ? checkpointId
           : null;
-      if (!resolvedCheckpointId) throw new Error('当前步骤没有可恢复的检查点。');
+      if (!resolvedCheckpointId) throw new Error('当前步骤还没有可以继续的位置。');
       if (isRunning) throw new Error('上一轮还在生成，请先停止或等待它完成。');
 
       setRecovery(null);

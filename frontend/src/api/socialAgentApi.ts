@@ -37,6 +37,7 @@ export interface UserFacingAgentPendingConfirmation {
   actionType: string;
   summary: string;
   riskLevel: string;
+  payload?: Record<string, unknown>;
   expiresAt: string | null;
 }
 
@@ -76,6 +77,7 @@ export type FitMeetAgentSchemaAction =
   | 'opener.regenerate'
   | 'opener.reject'
   | 'activity.confirm_create'
+  | 'activity.skip_publish'
   | 'activity.modify_time'
   | 'activity.modify_location'
   | 'activity.check_in'
@@ -116,6 +118,8 @@ export interface UserFacingAgentResponse {
   permissionMode: SocialAgentPermissionMode;
   lifeGraphWritebackProposal?: Record<string, unknown>;
   runtime?: {
+    runId?: string | null;
+    messageId?: string | null;
     checkpointId?: number | null;
     checkpointType?: string | null;
     canResume?: boolean;
@@ -310,6 +314,7 @@ export type FitMeetAlphaCardType =
   | 'activity_plan'
   | 'activity_status'
   | 'checkin_card'
+  | 'meet_loop_timeline'
   | 'review_card'
   | 'audit_update'
   | 'safety_boundary';
@@ -373,6 +378,9 @@ export type UserFacingAgentStreamEvent =
   | {
       type: 'assistant_delta';
       lifecycle?: string;
+      runId?: string;
+      taskId?: number | null;
+      threadId?: string | number | null;
       messageId?: string;
       delta: string;
       source?: 'llm' | 'fallback';
@@ -380,6 +388,9 @@ export type UserFacingAgentStreamEvent =
   | {
       type: 'assistant_done';
       lifecycle?: string;
+      runId?: string;
+      taskId?: number | null;
+      threadId?: string | number | null;
       messageId?: string;
       source?: 'llm' | 'fallback';
     }
@@ -977,6 +988,7 @@ async function runUserFacingAgentStreamAt(
   const decoder = new TextDecoder();
   let buffer = '';
   let finalResult: UserFacingAgentResponse | null = null;
+  let completedEvent: (SocialAgentEventV2 & { type: 'run.completed' }) | null = null;
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -991,6 +1003,7 @@ async function runUserFacingAgentStreamAt(
         const sanitized = sanitizeSocialAgentResponse(event);
         onEvent(sanitized);
         if (sanitized.type === 'result') finalResult = sanitized.result;
+        if (isSocialAgentV2RunCompleted(sanitized)) completedEvent = sanitized;
         if (sanitized.type === 'error') throw streamEventError(sanitized);
         if (isSocialAgentV2RunFailed(sanitized)) throw socialAgentV2RunFailedError(sanitized);
       }
@@ -1002,13 +1015,17 @@ async function runUserFacingAgentStreamAt(
         const sanitized = sanitizeSocialAgentResponse(event);
         onEvent(sanitized);
         if (sanitized.type === 'result') finalResult = sanitized.result;
+        if (isSocialAgentV2RunCompleted(sanitized)) completedEvent = sanitized;
         if (sanitized.type === 'error') throw streamEventError(sanitized);
         if (isSocialAgentV2RunFailed(sanitized)) throw socialAgentV2RunFailedError(sanitized);
       }
     }
 
+    if (!finalResult && completedEvent) {
+      finalResult = userFacingResponseFromRunCompletedEvent(completedEvent);
+    }
     if (!finalResult) {
-      throw new Error('FitMeet Agent 没有返回最终结果，请稍后再试。');
+      throw missingFinalResultError();
     }
     return finalResult;
   } finally {
@@ -1018,6 +1035,26 @@ async function runUserFacingAgentStreamAt(
       // The stream may already be closed or aborted.
     }
   }
+}
+
+function missingFinalResultError() {
+  const recoveryNotice: UserFacingAgentRecoveryNotice = {
+    kind: 'interrupted',
+    title: '这段需求还在',
+    message: '可以继续处理，我会从这里接着处理；也可以补充新的要求。',
+    retryable: true,
+    source: 'stream_error',
+  };
+  const error = new Error(recoveryNotice.message) as Error & {
+    code?: string;
+    retryable?: boolean;
+    recoveryNotice?: UserFacingAgentRecoveryNotice;
+  };
+  error.name = 'AGENT_STREAM_INCOMPLETE';
+  error.code = 'AGENT_STREAM_INCOMPLETE';
+  error.retryable = true;
+  error.recoveryNotice = recoveryNotice;
+  return error;
 }
 
 function streamEventError(event: Extract<UserFacingAgentStreamEvent, { type: 'error' }>) {
@@ -1033,6 +1070,16 @@ function streamEventError(event: Extract<UserFacingAgentStreamEvent, { type: 'er
   return error;
 }
 
+function isSocialAgentV2RunCompleted(
+  event: UserFacingAgentStreamEvent,
+): event is SocialAgentEventV2 & { type: 'run.completed' } {
+  return (
+    event.type === 'run.completed' &&
+    typeof event.eventId === 'string' &&
+    typeof event.seq === 'number'
+  );
+}
+
 function isSocialAgentV2RunFailed(
   event: UserFacingAgentStreamEvent,
 ): event is SocialAgentEventV2 & { type: 'run.failed' } {
@@ -1043,12 +1090,52 @@ function isSocialAgentV2RunFailed(
   );
 }
 
-function socialAgentV2RunFailedError(event: SocialAgentEventV2 & { type: 'run.failed' }) {
-  const title = textFromUnknown(event.display?.title) ?? '这次处理没有完成';
-  const message =
+function userFacingResponseFromRunCompletedEvent(
+  event: SocialAgentEventV2 & { type: 'run.completed' },
+): UserFacingAgentResponse {
+  const summary = recordFromUnknown(event.payload?.summary);
+  const assistantMessage =
+    textFromUnknown(event.payload?.assistantMessage) ??
+    textFromUnknown(summary?.detail) ??
     textFromUnknown(event.display?.detail) ??
-    textFromUnknown(event.payload?.message) ??
-    '刚才连接中断了。当前需求还在，可以重试或继续补充。';
+    textFromUnknown(summary?.title) ??
+    textFromUnknown(event.display?.title) ??
+    '我整理好了，可以继续追问或让我接着处理下一步。';
+  const lightStatus =
+    event.display?.state === 'waiting' ? '正在等待你确认' : '已整理回复';
+  return {
+    assistantMessage,
+    assistantMessageSource: 'llm',
+    lightStatus,
+    cards: [],
+    safeStatus: {
+      blocked: false,
+      level: 'low',
+      boundaryNotes: [],
+      requiredConfirmations: [],
+    },
+    pendingConfirmations: [],
+    permissionMode: 'assist',
+    runtime: {
+      threadId: textFromUnknown(event.threadId) ?? null,
+      runId: textFromUnknown(event.runId) ?? null,
+      messageId:
+        textFromUnknown(event.messageId) ??
+        textFromUnknown(event.payload?.messageId) ??
+        null,
+    },
+  };
+}
+
+function socialAgentV2RunFailedError(event: SocialAgentEventV2 & { type: 'run.failed' }) {
+  const title = recoveryTitleFromRunFailedEvent(event);
+  const explicitMessage =
+    textFromUnknown(event.display?.detail) ??
+    textFromUnknown(event.payload?.message);
+  const message =
+    explicitMessage && !isGenericRunFailedMessage(explicitMessage)
+      ? explicitMessage
+      : '刚才连接中断了。当前需求还在，可以重试或继续补充。';
   const code = textFromUnknown(event.payload?.code) ?? 'AGENT_RUN_FAILED';
   const recoveryNotice = recoveryNoticeFromRunFailedEvent(event, title, message);
   const error = new Error(message) as Error & {
@@ -1063,6 +1150,55 @@ function socialAgentV2RunFailedError(event: SocialAgentEventV2 & { type: 'run.fa
   return error;
 }
 
+function recoveryTitleFromRunFailedEvent(
+  event: SocialAgentEventV2 & { type: 'run.failed' },
+): string {
+  const rawNotice = recordFromUnknown(event.payload?.recoveryNotice);
+  const explicit = [
+    textFromUnknown(event.payload?.recoveryTitle),
+    textFromUnknown(rawNotice?.title),
+    textFromUnknown(event.display?.title),
+  ].find((value): value is string => Boolean(value && !isGenericRunFailedTitle(value)));
+  if (explicit) {
+    return explicit;
+  }
+  return event.display?.state === 'failed' ? '这段需求还在' : '当前进度可以继续';
+}
+
+function isGenericRunFailedTitle(value: string): boolean {
+  return genericRunFailedTitlePattern().test(value.trim());
+}
+
+function isGenericRunFailedMessage(value: string): boolean {
+  return genericRunFailedMessagePattern().test(value.trim());
+}
+
+function genericRunFailedTitlePattern() {
+  const phrases = [
+    ['这次', '处理', '没有', '完成'],
+    ['这一步', '没有', '完成'],
+    ['这次', '没有', '顺利', '完成'],
+    ['暂时', '没有', '顺利', '完成'],
+    ['run failed'],
+    ['处理', '失败'],
+  ].map((parts) => parts.join(''));
+  return new RegExp(phrases.join('|'), 'i');
+}
+
+function genericRunFailedMessagePattern() {
+  const phrases = [
+    ['这次', '处理', '没有', '完成'],
+    ['这一步', '没有', '完成'],
+    ['暂时', '没有', '顺利', '完成'],
+    ['保留', '当前', '对话'],
+    ['稍后', '再试'],
+    ['可以', '稍后', '再试'],
+    ['服务', '暂时', '不可用'],
+    ['FitMeet Agent'],
+  ].map((parts) => parts.join(''));
+  return new RegExp(phrases.join('|'), 'i');
+}
+
 function recoveryNoticeFromRunFailedEvent(
   event: SocialAgentEventV2 & { type: 'run.failed' },
   fallbackTitle: string,
@@ -1070,8 +1206,14 @@ function recoveryNoticeFromRunFailedEvent(
 ): UserFacingAgentRecoveryNotice {
   const rawNotice = recordFromUnknown(event.payload?.recoveryNotice);
   const kind = recoveryKindFromUnknown(rawNotice?.kind ?? event.payload?.kind);
-  const title = textFromUnknown(rawNotice?.title) ?? fallbackTitle;
-  const message = textFromUnknown(rawNotice?.message) ?? fallbackMessage;
+  const explicitTitle = textFromUnknown(rawNotice?.title);
+  const explicitMessage = textFromUnknown(rawNotice?.message);
+  const title =
+    explicitTitle && !isGenericRunFailedTitle(explicitTitle) ? explicitTitle : fallbackTitle;
+  const message =
+    explicitMessage && !isGenericRunFailedMessage(explicitMessage)
+      ? explicitMessage
+      : fallbackMessage;
   return {
     kind,
     title,

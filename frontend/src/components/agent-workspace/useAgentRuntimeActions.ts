@@ -11,10 +11,14 @@ import type {
 import type { FitMeetToolActionInput } from '../assistant-ui/tool-ui-actions';
 import type { Step } from './socialAgentThreadStore';
 import type { AgentCheckpointRuntimeAction } from './useAgentCheckpointRuntime';
+import { NON_BRANCH_RELOAD_PREFIX } from './useAgentSubmitRuntime';
 
 type SetState<T> = (value: T | ((current: T) => T)) => void;
 
 type SubmitAgentMessage = (event?: undefined, prompt?: string) => Promise<void> | void;
+type ReloadLastUserMessageOptions = {
+  createBranch?: boolean;
+};
 
 type UseAgentRuntimeActionsInput = {
   messages: FitMeetAssistantMessage[];
@@ -88,10 +92,14 @@ export function useAgentRuntimeActions({
     settleStreamingAssistantAfterInterruption,
   ]);
 
-  const reloadLastUserMessage = useCallback(() => {
+  const reloadLastUserMessage = useCallback((options: ReloadLastUserMessageOptions = {}) => {
     if (!currentGoal || isRunning) return;
-    branchReloadUserIdRef.current =
-      [...messages].reverse().find((message) => message.role === 'user')?.id ?? null;
+    const userMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
+    branchReloadUserIdRef.current = userMessageId
+      ? options.createBranch === false
+        ? `${NON_BRANCH_RELOAD_PREFIX}${userMessageId}`
+        : userMessageId
+      : null;
     void submit(undefined, currentGoal);
   }, [branchReloadUserIdRef, currentGoal, isRunning, messages, submit]);
 

@@ -249,7 +249,6 @@ export function useAgentWorkspaceController(view: AgentView) {
     setMessages,
     setSteps,
     settleStreamingAssistantAfterInterruption,
-    publicText,
     nextId,
   });
 
@@ -392,6 +391,7 @@ export function useAgentWorkspaceController(view: AgentView) {
     isRunning,
     activeTaskId,
     currentGoal,
+    messages,
     steps,
     setMessages,
     setSteps,

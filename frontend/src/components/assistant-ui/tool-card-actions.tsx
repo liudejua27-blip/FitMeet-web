@@ -3,6 +3,11 @@ import { CheckCircle2, Loader2, RefreshCcw, Send, ShieldCheck } from 'lucide-rea
 import { useSyncExternalStore } from 'react';
 
 import { cn } from '../../lib/utils';
+import type {
+  UserFacingAgentPendingConfirmation,
+  UserFacingAgentResponse,
+} from '../../api/socialAgentApi';
+import { agentApprovalUserFacingText } from '../../lib/agentApprovalCopy';
 import { useAssistantMessageRuntime } from './message-runtime-context';
 import { sanitizePublicProcessText as sanitizePublicText } from './public-process-text';
 import { TOOL_UI_CARD_ACTION_COPY } from './tool-ui-action-copy';
@@ -28,6 +33,9 @@ type CardActionRuntimeState = {
   completedKey: string | null;
   failedKey: string | null;
   error: string | null;
+  inlineApproval: InlineCardApproval | null;
+  inlineDraft: InlineCardDraft | null;
+  inlineOutcome: InlineCardOutcome | null;
 };
 
 const EMPTY_CARD_ACTION_STATE: CardActionRuntimeState = {
@@ -35,12 +43,49 @@ const EMPTY_CARD_ACTION_STATE: CardActionRuntimeState = {
   completedKey: null,
   failedKey: null,
   error: null,
+  inlineApproval: null,
+  inlineDraft: null,
+  inlineOutcome: null,
+};
+
+type InlineCardApproval = {
+  approvalId?: number | string | null;
+  title: string;
+  summary: string;
+  riskLevel: string;
+  actionKey: string;
+  confirmLabel: string;
+  confirmBusyLabel: string;
+  confirmAction?: {
+    action: string | null;
+    schemaAction: ToolUISchemaAction | null | undefined;
+    payload?: Record<string, unknown>;
+  } | null;
+};
+
+type InlineCardDraft = {
+  title: string;
+  body: string;
+  actionKey: string;
+};
+
+type InlineCardOutcome = {
+  title: string;
+  body: string;
+  actionKey: string;
 };
 
 const cardActionRuntimeState = new Map<string, CardActionRuntimeState>();
 const cardActionRuntimeListeners = new Set<() => void>();
 
-export function CardActionSummary({
+export function CardActionSummary(props: {
+  card: SchemaDrivenAssistantCard;
+  actions: SchemaDrivenAssistantCard['actions'];
+}) {
+  return <UnifiedActionCard {...props} />;
+}
+
+export function UnifiedActionCard({
   card,
   actions,
 }: {
@@ -56,35 +101,94 @@ export function CardActionSummary({
     };
     return custom.fitmeetMessageId ?? state.message.id;
   });
-  const [runtimeKey, actionState] = useCardActionRuntimeState(messageId, card.id);
+  const runtimeScope = useAuiState((state) => {
+    const custom = state.message.metadata.custom as {
+      fitmeetMessageId?: string;
+      fitmeetThreadId?: string;
+      threadId?: string | number | null;
+      fitmeetTaskId?: string | number | null;
+      taskId?: string | number | null;
+      fitmeetRunId?: string;
+      runId?: string | null;
+    };
+    const messageId = custom.fitmeetMessageId ?? state.message.id;
+    return cardActionRuntimeScope({
+      threadId:
+        custom.fitmeetThreadId ??
+        custom.threadId ??
+        custom.fitmeetTaskId ??
+        custom.taskId,
+      runId: custom.fitmeetRunId ?? custom.runId,
+      messageId,
+    });
+  });
+  const [runtimeKey, actionState] = useCardActionRuntimeState(runtimeScope, card.id);
   const { busyKey, completedKey, failedKey, error } = actionState;
-  const allActions = visibleCardActions(card, actions).slice(0, 4);
+  const allActions = visibleCardActions(card, actions).slice(0, 5);
+  const inlineApproval = actionState.inlineApproval;
+  const inlineDraft = actionState.inlineDraft;
+  const inlineOutcome = actionState.inlineOutcome;
+  const hasInlineCardState = Boolean(inlineApproval || inlineDraft || inlineOutcome);
   const candidateActions =
-    isLatestAssistantMessage || completedKey || failedKey ? allActions : [];
-  const visible = completedKey
-    ? candidateActions.filter((action) => cardActionKey(action) === completedKey)
-    : candidateActions;
+    isLatestAssistantMessage || completedKey || failedKey || hasInlineCardState
+      ? allActions
+      : [];
+  const keepActionGroupAfterCompletion =
+    isLatestAssistantMessage && card.schemaType === 'social_match.candidate';
+  const visible =
+    completedKey && !keepActionGroupAfterCompletion
+      ? candidateActions.filter((action) => cardActionKey(action) === completedKey)
+      : candidateActions;
   const completedAction = completedKey
-    ? visible.find((action) => cardActionKey(action) === completedKey)
+    ? visible.find((action) => cardActionKey(action) === completedKey) ?? null
     : null;
   const failedAction = failedKey
     ? visible.find((action) => cardActionKey(action) === failedKey)
     : null;
   const confirmationNoteId = `tool-action-confirmation-${card.id}`;
   const hasConfirmationActions = visible.some((action) => action.requiresConfirmation);
-  if (visible.length === 0) return null;
+  if (visible.length === 0 && !inlineApproval && !inlineDraft && !inlineOutcome) return null;
 
   const runAction = async (action: (typeof visible)[number]) => {
-    if (!toolActions.onCardAction) return;
     const key = cardActionKey(action);
+    if (isLocalOnlyCardAction(action)) {
+      setCardActionRuntimeState(runtimeKey, {
+        busyKey: null,
+        completedKey: key,
+        failedKey: null,
+        error: null,
+        inlineApproval: null,
+        inlineDraft: null,
+        inlineOutcome: null,
+      });
+      return;
+    }
+    const replayedApproval = action.requiresConfirmation
+      ? inlineApprovalFromCardData(card, allActions, action)
+      : null;
+    if (replayedApproval) {
+      setCardActionRuntimeState(runtimeKey, {
+        busyKey: null,
+        completedKey: null,
+        failedKey: null,
+        error: null,
+        inlineApproval: replayedApproval,
+        inlineDraft: actionState.inlineDraft,
+        inlineOutcome: actionState.inlineOutcome,
+      });
+      return;
+    }
+    if (!toolActions.onCardAction) return;
     setCardActionRuntimeState(runtimeKey, {
       busyKey: key,
       completedKey: null,
       failedKey: null,
       error: null,
+      inlineDraft: actionState.inlineDraft,
+      inlineOutcome: actionState.inlineOutcome,
     });
     try {
-      await toolActions.onCardAction({
+      const response = await toolActions.onCardAction({
         messageId,
         taskId: primitiveTaskId(card.data.taskId),
         cardId: card.id,
@@ -92,85 +196,253 @@ export function CardActionSummary({
         schemaAction: action.schemaAction,
         payload: payloadForCardAction(card, action),
       });
+      const draft = inlineDraftFromResponse(response, key, action);
+      if (draft) {
+        setCardActionRuntimeState(runtimeKey, {
+          busyKey: null,
+          completedKey: key,
+          failedKey: null,
+          error: null,
+          inlineApproval: null,
+          inlineDraft: draft,
+          inlineOutcome: actionState.inlineOutcome,
+        });
+        return;
+      }
+      const approval = inlineApprovalFromResponse(
+        response,
+        key,
+        action.schemaAction ?? action.action ?? key,
+      );
+      if (approval) {
+        setCardActionRuntimeState(runtimeKey, {
+          busyKey: null,
+          completedKey: null,
+          failedKey: null,
+          error: null,
+          inlineApproval: approval,
+          inlineDraft: actionState.inlineDraft,
+          inlineOutcome: actionState.inlineOutcome,
+        });
+        return;
+      }
+      const outcome = inlineOutcomeFromActionResponse(response, key, action);
       setCardActionRuntimeState(runtimeKey, {
         busyKey: null,
         completedKey: key,
         failedKey: null,
         error: null,
+        inlineApproval: null,
+        inlineDraft: draft ?? actionState.inlineDraft,
+        inlineOutcome: outcome ?? actionState.inlineOutcome,
       });
     } catch (nextError) {
       setCardActionRuntimeState(runtimeKey, {
         busyKey: null,
         completedKey: null,
         failedKey: key,
-        error: nextError instanceof Error ? nextError.message : '这一步没有完成，请重试。',
+        error: nextError instanceof Error ? nextError.message : '当前动作可以重试，不会重复触达对方。',
+        inlineApproval: null,
+        inlineDraft: actionState.inlineDraft,
+        inlineOutcome: actionState.inlineOutcome,
+      });
+    }
+  };
+
+  const resolveInlineApproval = async (decision: 'approved' | 'rejected') => {
+    if (!inlineApproval) return;
+    const hasApprovalId =
+      inlineApproval.approvalId !== null &&
+      inlineApproval.approvalId !== undefined &&
+      String(inlineApproval.approvalId).trim().length > 0;
+    if (decision === 'approved' && !hasApprovalId && inlineApproval.confirmAction) {
+      if (!toolActions.onCardAction) {
+        setCardActionRuntimeState(runtimeKey, {
+          ...actionState,
+          busyKey: null,
+          failedKey: inlineApproval.actionKey,
+          error: '当前确认缺少可执行入口，请刷新后重试。',
+        });
+        return;
+      }
+      setCardActionRuntimeState(runtimeKey, {
+        ...actionState,
+        busyKey: `${inlineApproval.actionKey}:${decision}`,
+        failedKey: null,
+        error: null,
+      });
+      try {
+        const response = await toolActions.onCardAction({
+          messageId,
+          cardId: card.id,
+          taskId: primitiveTaskId(card.data.taskId),
+          action: inlineApproval.confirmAction.action,
+          schemaAction: inlineApproval.confirmAction.schemaAction,
+          payload: inlineApproval.confirmAction.payload ?? {},
+        });
+        const outcome = inlineOutcomeFromApprovalResponse(response, inlineApproval, decision);
+        setCardActionRuntimeState(runtimeKey, {
+          busyKey: null,
+          completedKey: inlineApproval.actionKey,
+          failedKey: null,
+          error: null,
+          inlineApproval: null,
+          inlineDraft: actionState.inlineDraft,
+          inlineOutcome: outcome ?? actionState.inlineOutcome,
+        });
+      } catch (nextError) {
+        setCardActionRuntimeState(runtimeKey, {
+          ...actionState,
+          busyKey: null,
+          failedKey: inlineApproval.actionKey,
+          error: nextError instanceof Error ? nextError.message : '当前确认可以重试，不会重复执行真实动作。',
+        });
+      }
+      return;
+    }
+    const handler =
+      decision === 'approved' ? toolActions.onApproveApproval : toolActions.onRejectApproval;
+    if (!handler || !hasApprovalId) {
+      if (decision === 'rejected') {
+        setCardActionRuntimeState(runtimeKey, {
+          busyKey: null,
+          completedKey: null,
+          failedKey: null,
+          error: null,
+          inlineApproval: null,
+          inlineDraft: actionState.inlineDraft,
+          inlineOutcome: {
+            title: '已取消',
+            body: '这个动作不会继续执行，也不会触达对方。',
+            actionKey: inlineApproval.actionKey,
+          },
+        });
+      }
+      return;
+    }
+    setCardActionRuntimeState(runtimeKey, {
+      ...actionState,
+      busyKey: `${inlineApproval.actionKey}:${decision}`,
+      failedKey: null,
+      error: null,
+    });
+    try {
+      const response = await handler({
+        messageId,
+        cardId: card.id,
+        taskId: primitiveTaskId(card.data.taskId),
+        approvalId: inlineApproval.approvalId ?? null,
+        payload: {
+          decision,
+          approvalId: inlineApproval.approvalId ?? null,
+        },
+      });
+      const outcome = inlineOutcomeFromApprovalResponse(response, inlineApproval, decision);
+      setCardActionRuntimeState(runtimeKey, {
+        busyKey: null,
+        completedKey: decision === 'approved' ? inlineApproval.actionKey : null,
+        failedKey: null,
+        error: null,
+        inlineApproval: null,
+        inlineDraft: actionState.inlineDraft,
+        inlineOutcome: outcome ?? actionState.inlineOutcome,
+      });
+    } catch (nextError) {
+      setCardActionRuntimeState(runtimeKey, {
+        ...actionState,
+        busyKey: null,
+        failedKey: inlineApproval.actionKey,
+        error: nextError instanceof Error ? nextError.message : '当前确认可以重试，不会重复执行真实动作。',
       });
     }
   };
 
   return (
-    <div className="mt-3 space-y-2">
-      <div className="flex flex-wrap gap-1.5">
-        {visible.map((action) => {
-          const key = cardActionKey(action);
-          const isBusy = busyKey === key;
-          const isCompleted = completedKey === key;
-          const isFailed = failedKey === key;
-          const isLockedByAnotherAction = Boolean(busyKey && !isBusy);
-          const executable = Boolean(
-            isLatestAssistantMessage && toolActions.onCardAction && action.schemaAction,
-          );
-          const actionStateLabel = cardActionStateLabel(action, isBusy, isCompleted, isFailed);
-          return (
-            <button
-              key={`${action.label}-${action.schemaAction ?? action.action ?? 'action'}`}
-              type="button"
-              aria-describedby={action.requiresConfirmation ? confirmationNoteId : undefined}
-              aria-busy={isBusy}
-              data-testid="assistant-ui-schema-action"
-              data-schema-action={action.schemaAction ?? 'unknown'}
-              data-action-source={action.source}
-              data-action-history-state={isLatestAssistantMessage ? 'latest' : 'expired'}
-              data-requires-confirmation={action.requiresConfirmation ? 'true' : 'false'}
-              data-checkpoint-required={actionRequiresCheckpoint(action) ? 'true' : 'false'}
-              data-action-state={
-                isBusy ? 'running' : isCompleted ? 'succeeded' : isFailed ? 'failed' : 'idle'
-              }
-              disabled={
-                !executable || (threadRunning && !isFailed) || isBusy || isLockedByAnotherAction
-              }
-              onClick={() => void runAction(action)}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs ring-1 transition',
-                executable
-                  ? 'hover:-translate-y-px hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-black/20'
-                  : 'cursor-default',
-                action.requiresConfirmation
-                  ? 'bg-amber-50 text-amber-800 ring-amber-100'
-                  : 'bg-[#f7f7f8] text-[#52525b] ring-black/5',
-                isCompleted && 'bg-emerald-50 text-emerald-700 ring-emerald-100',
-                isFailed && 'bg-red-50 text-red-700 ring-red-100',
-                isBusy && 'cursor-wait opacity-70',
-                isLockedByAnotherAction && 'opacity-50',
-                !isLatestAssistantMessage && 'opacity-60',
-              )}
-            >
-              {isBusy ? (
-                <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
-              ) : isCompleted ? (
-                <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
-              ) : isFailed ? (
-                <RefreshCcw className="h-3 w-3" aria-hidden="true" />
-              ) : action.requiresConfirmation ? (
-                <ShieldCheck className="h-3 w-3" aria-hidden="true" />
-              ) : (
-                <Send className="h-3 w-3" aria-hidden="true" />
-              )}
-              {actionStateLabel}
-            </button>
-          );
-        })}
-      </div>
+    <div
+      className="mt-3 space-y-2"
+      data-testid="assistant-ui-unified-action-card"
+      data-card-action-model="unified-action-card"
+      data-card-schema-type={card.schemaType}
+    >
+      {visible.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {visible.map((action) => {
+            const key = cardActionKey(action);
+            const isBusy = busyKey === key;
+            const isCompleted = completedKey === key;
+            const isFailed = failedKey === key;
+            const isLockedByAnotherAction = Boolean(busyKey && !isBusy);
+            const canRetryFailedAction = Boolean(
+              isFailed && toolActions.onCardAction && action.schemaAction,
+            );
+            const isLocalOnlyAction = isLocalOnlyCardAction(action);
+            const hasReplayedInlineApproval = Boolean(
+              action.requiresConfirmation && inlineApprovalFromCardData(card, allActions, action),
+            );
+            const executable = Boolean(
+              (isLatestAssistantMessage || hasInlineCardState || canRetryFailedAction) &&
+                ((toolActions.onCardAction && action.schemaAction) ||
+                  isLocalOnlyAction ||
+                  hasReplayedInlineApproval),
+            );
+            const actionStateLabel = cardActionStateLabel(action, isBusy, isCompleted, isFailed);
+            return (
+              <button
+                key={`${action.label}-${action.schemaAction ?? action.action ?? 'action'}`}
+                type="button"
+                aria-describedby={action.requiresConfirmation ? confirmationNoteId : undefined}
+                aria-busy={isBusy}
+                data-testid="assistant-ui-schema-action"
+                data-schema-action={action.schemaAction ?? 'unknown'}
+                data-action-source={action.source}
+                data-action-history-state={isLatestAssistantMessage ? 'latest' : 'expired'}
+                data-action-executable={executable ? 'true' : 'false'}
+                data-action-retryable={canRetryFailedAction ? 'true' : 'false'}
+                data-action-handler={toolActions.onCardAction ? 'available' : 'missing'}
+                data-requires-confirmation={action.requiresConfirmation ? 'true' : 'false'}
+                data-checkpoint-required={actionRequiresCheckpoint(action) ? 'true' : 'false'}
+                data-action-state={
+                  isBusy ? 'running' : isCompleted ? 'succeeded' : isFailed ? 'failed' : 'idle'
+                }
+                disabled={
+                  (!executable && !canRetryFailedAction) ||
+                  (threadRunning && !isFailed) ||
+                  isBusy ||
+                  isLockedByAnotherAction
+                }
+                onClick={() => void runAction(action)}
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs ring-1 transition',
+                  executable
+                    ? 'hover:-translate-y-px hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-black/20'
+                    : 'cursor-default',
+                  action.requiresConfirmation
+                    ? 'bg-amber-50 text-amber-800 ring-amber-100'
+                    : 'bg-[#f7f7f8] text-[#52525b] ring-black/5',
+                  isCompleted && 'bg-emerald-50 text-emerald-700 ring-emerald-100',
+                  isFailed && 'bg-red-50 text-red-700 ring-red-100',
+                  isBusy && 'cursor-wait opacity-70',
+                  isLockedByAnotherAction && 'opacity-50',
+                  !isLatestAssistantMessage && 'opacity-60',
+                )}
+              >
+                {isBusy ? (
+                  <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                ) : isCompleted ? (
+                  <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+                ) : isFailed ? (
+                  <RefreshCcw className="h-3 w-3" aria-hidden="true" />
+                ) : action.requiresConfirmation ? (
+                  <ShieldCheck className="h-3 w-3" aria-hidden="true" />
+                ) : (
+                  <Send className="h-3 w-3" aria-hidden="true" />
+                )}
+                {actionStateLabel}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
       {hasConfirmationActions ? (
         <p
           id={confirmationNoteId}
@@ -183,7 +455,17 @@ export function CardActionSummary({
             : '这是历史步骤，确认入口已过期；请使用最新回复里的操作。'}
         </p>
       ) : null}
-      {completedKey ? (
+      {inlineApproval ? (
+        <InlineApprovalPanel
+          approval={inlineApproval}
+          busyKey={busyKey}
+          onApprove={() => void resolveInlineApproval('approved')}
+          onReject={() => void resolveInlineApproval('rejected')}
+        />
+      ) : null}
+      {inlineDraft ? <InlineDraftPreview draft={inlineDraft} /> : null}
+      {inlineOutcome ? <InlineOutcomePreview outcome={inlineOutcome} /> : null}
+      {shouldShowCardActionResult(completedAction, inlineDraft, inlineOutcome) ? (
         <p
           className="rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs leading-5 text-emerald-700"
           role="status"
@@ -193,7 +475,7 @@ export function CardActionSummary({
         >
           {completedAction
             ? cardActionResultMessage(completedAction)
-            : '这一步已完成，后续结果会继续留在当前对话。'}
+            : '已按你的选择处理，后续结果会继续留在当前对话。'}
         </p>
       ) : null}
       {error ? (
@@ -204,49 +486,420 @@ export function CardActionSummary({
           data-testid="assistant-ui-card-action-error"
           data-schema-action={failedAction?.schemaAction ?? 'unknown'}
         >
-          {sanitizePublicText(error) ?? '这一步暂时没有完成，可以稍后重试。'}
+          {sanitizePublicText(error) ?? '当前动作可以重试，我会沿同一张卡继续处理。'}
         </p>
       ) : null}
     </div>
   );
 }
 
+function InlineApprovalPanel({
+  approval,
+  busyKey,
+  onApprove,
+  onReject,
+}: {
+  approval: InlineCardApproval;
+  busyKey: string | null;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  const approving = busyKey === `${approval.actionKey}:approved`;
+  const rejecting = busyKey === `${approval.actionKey}:rejected`;
+  return (
+    <div
+      className="rounded-2xl bg-[#f7f7f8] p-3 text-xs leading-5 text-[#52525b] ring-1 ring-black/5"
+      data-testid="assistant-ui-inline-approval-panel"
+      data-component="ApprovalInlinePanel"
+      data-risk-level={approval.riskLevel}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-medium text-[#27272a]">{approval.title}</p>
+          <p className="mt-0.5 text-[#71717a]">{approval.summary}</p>
+        </div>
+      </div>
+      <p className="mt-2 rounded-xl bg-white px-2.5 py-1.5 text-[11px] leading-5 text-[#71717a] ring-1 ring-black/[0.04]">
+        确认前不会触达对方，也不会公开位置或联系方式。
+      </p>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          onClick={onReject}
+          disabled={Boolean(busyKey)}
+          className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-xs text-[#52525b] ring-1 ring-black/10 transition hover:bg-[#f4f4f5] disabled:opacity-60"
+        >
+          {rejecting ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+          取消
+        </button>
+        <button
+          type="button"
+          onClick={onApprove}
+          disabled={Boolean(busyKey)}
+          className="inline-flex items-center gap-1.5 rounded-full bg-[#18181b] px-2.5 py-1 text-xs text-white ring-1 ring-black/10 transition hover:bg-black disabled:opacity-60"
+        >
+          {approving ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3" />}
+          {approving ? approval.confirmBusyLabel : approval.confirmLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function InlineDraftPreview({ draft }: { draft: InlineCardDraft }) {
+  return (
+    <div
+      className="rounded-2xl bg-[#f7f7f8] p-3 text-xs leading-5 text-[#52525b] ring-1 ring-black/5"
+      data-testid="assistant-ui-inline-draft-preview"
+      data-component="InlineOpenerDraft"
+      data-action-key={draft.actionKey}
+    >
+      <p className="font-medium text-[#27272a]">{draft.title}</p>
+      <p className="mt-1 rounded-xl bg-white px-2.5 py-2 text-[#3f3f46] ring-1 ring-black/[0.04]">
+        {draft.body}
+      </p>
+      <p className="mt-1.5 text-[11px] text-[#71717a]">
+        只有你继续点击发送邀请并确认后，才会触达对方。
+      </p>
+    </div>
+  );
+}
+
+function InlineOutcomePreview({ outcome }: { outcome: InlineCardOutcome }) {
+  return (
+    <div
+      className="rounded-2xl bg-emerald-50/80 p-3 text-xs leading-5 text-emerald-900 ring-1 ring-emerald-100"
+      data-testid="assistant-ui-inline-outcome-preview"
+      data-component="InlineApprovalOutcome"
+      data-action-key={outcome.actionKey}
+    >
+      <p className="font-medium text-emerald-950">{outcome.title}</p>
+      <p className="mt-1 text-emerald-900">{outcome.body}</p>
+    </div>
+  );
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
 export function visibleCardActions(
   card: SchemaDrivenAssistantCard,
   actions: SchemaDrivenAssistantCard['actions'],
 ): VisibleCardAction[] {
   const defaultPayload = defaultCardActionPayload(card);
-  const normalized = actions
-    .map((action): VisibleCardAction => {
-      const schemaAction = toolUISchemaActionFromUnknown(action.schemaAction);
-      const rawAction = publicString(action.action);
-      const requiresConfirmation = action.requiresConfirmation === true;
-      return {
-        id: publicString(action.id),
-        label: normalizeVisibleActionLabel(
-          publicDetail(action.label),
+  const normalized = dedupeVisibleCardActions(
+    card.schemaType,
+    actions
+      .map((action): VisibleCardAction => {
+        const rawAction = publicString(action.action);
+        const schemaAction = normalizedVisibleSchemaAction(
+          card.schemaType,
+          toolUISchemaActionFromUnknown(action.schemaAction),
+          rawAction,
+        );
+        const requiresConfirmation = visibleActionRequiresConfirmation(
           schemaAction,
           rawAction,
+          action.requiresConfirmation === true,
+        );
+        return {
+          id: publicString(action.id),
+          label: normalizeVisibleActionLabel(
+            publicDetail(action.label),
+            card.schemaType,
+            schemaAction,
+            rawAction,
+            requiresConfirmation,
+          ),
           requiresConfirmation,
-        ),
-        requiresConfirmation,
-        schemaAction,
-        action: rawAction,
-        payload: mergeCardActionPayload(defaultPayload, action.payload),
-        source: 'backend',
-      };
-    })
-    .filter((action) => action.label);
+          schemaAction,
+          action: rawAction,
+          payload: mergeCardActionPayload(defaultPayload, action.payload),
+          source: 'backend',
+        };
+      })
+      .filter((action) => action.label)
+      .filter((action) => !shouldHideVisibleCardAction(card.schemaType, action)),
+  );
   const seen = new Set(
-    normalized.map((action) => action.schemaAction ?? action.action ?? action.label),
+    normalized.map((action) => visibleActionGroupKey(card.schemaType, action)),
   );
   const defaults = defaultCardActions(card).filter((action) => {
-    const key = action.schemaAction ?? action.action ?? action.label;
+    const key = visibleActionGroupKey(card.schemaType, action);
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
   });
-  return [...normalized, ...defaults];
+  return sortVisibleCardActions(card.schemaType, [...normalized, ...defaults]);
+}
+
+function dedupeVisibleCardActions(
+  schemaType: SchemaDrivenAssistantCard['schemaType'],
+  actions: VisibleCardAction[],
+) {
+  const seen = new Set<string>();
+  const result: VisibleCardAction[] = [];
+  for (const action of actions) {
+    const key = visibleActionGroupKey(schemaType, action);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(action);
+  }
+  return result;
+}
+
+function shouldHideVisibleCardAction(
+  schemaType: SchemaDrivenAssistantCard['schemaType'],
+  action: VisibleCardAction,
+) {
+  return schemaType === 'social_match.activity' && action.schemaAction === 'activity.view_detail';
+}
+
+function visibleActionGroupKey(
+  schemaType: SchemaDrivenAssistantCard['schemaType'],
+  action: VisibleCardAction,
+) {
+  if (schemaType === 'social_match.empty') {
+    const recoveryMode = publicString(action.payload?.recoveryMode);
+    if (recoveryMode) return `empty.recovery:${recoveryMode}`;
+    if (action.schemaAction === 'candidate.more_like_this') {
+      return `empty.more:${action.id ?? action.action ?? action.label ?? 'more'}`;
+    }
+  }
+  if (
+    schemaType === 'social_match.activity' &&
+    (action.schemaAction === 'activity.modify_time' ||
+      action.schemaAction === 'activity.modify_location')
+  ) {
+    return 'activity.modify';
+  }
+  const canonicalKey = canonicalVisibleActionKey(schemaType, action);
+  if (canonicalKey) return canonicalKey;
+  return action.schemaAction ?? action.action ?? action.label ?? 'action';
+}
+
+function normalizedVisibleSchemaAction(
+  schemaType: SchemaDrivenAssistantCard['schemaType'],
+  schemaAction: ToolUISchemaAction | undefined,
+  rawAction: string | null,
+): ToolUISchemaAction | undefined {
+  if (
+    schemaType === 'social_match.activity' &&
+    (schemaAction === 'activity.modify_location' ||
+      /^(change_location|activity\.modify_location)$/.test(normalizeActionName(rawAction)))
+  ) {
+    return 'activity.modify_time';
+  }
+  if (schemaAction) return schemaAction;
+  return canonicalVisibleActionKey(schemaType, { schemaAction, action: rawAction }) ?? undefined;
+}
+
+function canonicalVisibleActionKey(
+  schemaType: SchemaDrivenAssistantCard['schemaType'],
+  action: Pick<VisibleCardAction, 'schemaAction' | 'action'>,
+): ToolUISchemaAction | null {
+  const schemaAction = action.schemaAction;
+  const rawAction = normalizeActionName(action.action);
+  if (schemaAction) return schemaAction;
+  if (schemaType === 'social_match.candidate') {
+    if (/^(view_candidate|view_profile|candidate\.view_detail)$/.test(rawAction)) {
+      return 'candidate.view_detail';
+    }
+    if (
+      /^(save_candidate|favorite_candidate|bookmark_candidate|collect_candidate|candidate\.save|candidate\.like|candidate\.favorite|candidate\.bookmark)$/.test(
+        rawAction,
+      )
+    ) {
+      return 'candidate.like';
+    }
+    if (/^(generate_opener|draft_opener|candidate\.generate_opener)$/.test(rawAction)) {
+      return 'candidate.generate_opener';
+    }
+    if (/^(send_invite|send_message|send_message_to_candidate|opener\.confirm_send)$/.test(rawAction)) {
+      return 'opener.confirm_send';
+    }
+    if (/^(connect_candidate|add_friend|candidate\.connect)$/.test(rawAction)) {
+      return 'candidate.connect';
+    }
+    if (/^(skip_candidate|candidate\.skip)$/.test(rawAction)) {
+      return 'candidate.skip';
+    }
+  }
+  if (schemaType === 'social_match.activity' || schemaType === 'social_match.empty') {
+    if (
+      /^(publish_social_request|publish_to_discover|create_activity|activity\.confirm_create)$/.test(
+        rawAction,
+      )
+    ) {
+      return 'activity.confirm_create';
+    }
+    if (/^(modify_activity|change_time|activity\.modify_time)$/.test(rawAction)) {
+      return 'activity.modify_time';
+    }
+    if (/^(change_location|activity\.modify_location)$/.test(rawAction)) {
+      return 'activity.modify_location';
+    }
+    if (/^(skip_publish|activity\.skip_publish)$/.test(rawAction)) {
+      return 'activity.skip_publish';
+    }
+    if (/^(expand_radius|relax_preference|candidate\.more_like_this)$/.test(rawAction)) {
+      return 'candidate.more_like_this';
+    }
+  }
+  return null;
+}
+
+function visibleActionRequiresConfirmation(
+  schemaAction: ToolUISchemaAction | undefined,
+  rawAction: string | null,
+  rawRequiresConfirmation: boolean,
+) {
+  const normalizedRawAction = normalizeActionName(rawAction);
+  if (isLowRiskVisibleAction(schemaAction, normalizedRawAction)) return false;
+  if (isHighRiskVisibleAction(schemaAction, normalizedRawAction)) return true;
+  return rawRequiresConfirmation;
+}
+
+const LOW_RISK_VISIBLE_SCHEMA_ACTIONS = new Set<ToolUISchemaAction>([
+  'candidate.view_detail',
+  'candidate.like',
+  'candidate.generate_opener',
+  'candidate.more_like_this',
+  'candidate.skip',
+  'activity.view_detail',
+  'activity.modify_time',
+  'activity.modify_location',
+  'activity.skip_publish',
+  'opener.regenerate',
+  'opener.reject',
+]);
+
+const LOW_RISK_VISIBLE_RAW_ACTIONS = new Set([
+  'save_candidate',
+  'favorite_candidate',
+  'bookmark_candidate',
+  'collect_candidate',
+  'candidate.like',
+  'candidate.save',
+  'candidate.favorite',
+  'candidate.bookmark',
+  'generate_opener',
+  'draft_opener',
+  'candidate.generate_opener',
+  'view_candidate',
+  'candidate.view_detail',
+  'skip_candidate',
+  'candidate.skip',
+  'candidate.more_like_this',
+  'expand_radius',
+  'relax_preference',
+  'activity.view_detail',
+  'activity.modify_time',
+  'activity.modify_location',
+  'activity.skip_publish',
+  'change_time',
+  'modify_activity',
+  'skip_publish',
+  'opener.regenerate',
+  'opener.reject',
+]);
+
+const HIGH_RISK_VISIBLE_SCHEMA_ACTIONS = new Set<ToolUISchemaAction>([
+  'candidate.connect',
+  'opener.confirm_send',
+  'activity.confirm_create',
+]);
+
+const HIGH_RISK_VISIBLE_RAW_ACTIONS = new Set([
+  'connect_candidate',
+  'candidate.connect',
+  'add_friend',
+  'send_invite',
+  'send_message',
+  'send_message_to_candidate',
+  'opener.confirm_send',
+  'publish_social_request',
+  'publish_to_discover',
+  'create_activity',
+  'activity.confirm_create',
+  'exchange_contact',
+  'reveal_precise_location',
+  'update_sensitive_profile',
+]);
+
+function isLowRiskVisibleAction(
+  schemaAction: ToolUISchemaAction | undefined,
+  normalizedRawAction: string,
+) {
+  return (
+    (schemaAction ? LOW_RISK_VISIBLE_SCHEMA_ACTIONS.has(schemaAction) : false) ||
+    LOW_RISK_VISIBLE_RAW_ACTIONS.has(normalizedRawAction)
+  );
+}
+
+function isHighRiskVisibleAction(
+  schemaAction: ToolUISchemaAction | undefined,
+  normalizedRawAction: string,
+) {
+  return (
+    (schemaAction ? HIGH_RISK_VISIBLE_SCHEMA_ACTIONS.has(schemaAction) : false) ||
+    HIGH_RISK_VISIBLE_RAW_ACTIONS.has(normalizedRawAction)
+  );
+}
+
+function normalizeActionName(value: string | null | undefined) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function sortVisibleCardActions(
+  schemaType: SchemaDrivenAssistantCard['schemaType'],
+  actions: VisibleCardAction[],
+): VisibleCardAction[] {
+  const preferredOrder =
+    schemaType === 'social_match.candidate'
+      ? [
+          'candidate.view_detail',
+          'candidate.like',
+          'candidate.generate_opener',
+          'opener.confirm_send',
+          'candidate.connect',
+          'candidate.skip',
+          'candidate.more_like_this',
+        ]
+      : schemaType === 'social_match.activity'
+        ? [
+            'activity.confirm_create',
+            'activity.modify_time',
+            'activity.skip_publish',
+            'activity.view_detail',
+            'activity.modify_location',
+            'activity.check_in',
+            'activity.complete',
+          ]
+        : schemaType === 'social_match.empty'
+          ? [
+              'activity.confirm_create',
+              'candidate.more_like_this',
+              'activity.modify_time',
+              'activity.skip_publish',
+            ]
+        : [];
+  if (preferredOrder.length === 0) return actions;
+  const rank = new Map(preferredOrder.map((item, index) => [item, index]));
+  return actions
+    .map((action, index) => ({ action, index }))
+    .sort((left, right) => {
+      const leftRank = rank.get(actionSortKey(schemaType, left.action)) ?? Number.MAX_SAFE_INTEGER;
+      const rightRank = rank.get(actionSortKey(schemaType, right.action)) ?? Number.MAX_SAFE_INTEGER;
+      return leftRank === rightRank ? left.index - right.index : leftRank - rightRank;
+    })
+    .map((item) => item.action);
+}
+
+function actionSortKey(
+  schemaType: SchemaDrivenAssistantCard['schemaType'],
+  action: VisibleCardAction,
+) {
+  if (action.schemaAction === 'activity.modify_location') return 'activity.modify_time';
+  return canonicalVisibleActionKey(schemaType, action) ?? action.schemaAction ?? '';
 }
 
 function payloadForCardAction(
@@ -285,7 +938,7 @@ function cardActionStateLabel(
   isCompleted: boolean,
   isFailed: boolean,
 ) {
-  if (isFailed) return `重试${action.label ?? '这一步'}`;
+  if (isFailed) return `重试${action.label ?? '这个动作'}`;
   if (!isBusy && !isCompleted) return action.label;
   if (action.schemaAction) {
     const copy = TOOL_UI_CARD_ACTION_COPY[action.schemaAction];
@@ -298,7 +951,466 @@ function cardActionResultMessage(action: VisibleCardAction) {
   if (action.schemaAction) {
     return TOOL_UI_CARD_ACTION_COPY[action.schemaAction].result;
   }
-  return '这一步已完成，后续结果会继续留在当前对话。';
+  return '已按你的选择处理，后续结果会继续留在当前对话。';
+}
+
+function shouldShowCardActionResult(
+  completedAction: VisibleCardAction | null,
+  inlineDraft: InlineCardDraft | null,
+  inlineOutcome: InlineCardOutcome | null,
+) {
+  if (!completedAction) return false;
+  if (inlineDraft || inlineOutcome) return false;
+  return completedAction.requiresConfirmation;
+}
+
+function inlineApprovalFromResponse(
+  response: UserFacingAgentResponse | void,
+  actionKey: string,
+  semanticActionKey = actionKey,
+): InlineCardApproval | null {
+  if (!response) return null;
+  if (response.pendingConfirmations?.length) {
+    const confirmation =
+      response.pendingConfirmations.find(
+        (item) =>
+          item.id !== null &&
+          item.id !== undefined &&
+          confirmationMatchesActionKey(item, semanticActionKey),
+      ) ??
+      response.pendingConfirmations.find((item) => item.id !== null && item.id !== undefined) ??
+      response.pendingConfirmations[0];
+    return inlineApprovalFromConfirmation(confirmation, actionKey);
+  }
+  const approvalCard = response.cards.find((card) => {
+    const schemaType = publicString(card.schemaType) ?? publicString(card.data?.schemaType);
+    return schemaType === 'safety.approval' || isRecord(card.data?.approval);
+  });
+  if (!approvalCard) return null;
+  const approvalData = isRecord(approvalCard.data?.approval) ? approvalCard.data.approval : {};
+  const actionType =
+    publicString(approvalData.actionType) ??
+    publicString(approvalData.action) ??
+    semanticActionKey;
+  const summary =
+    publicDetail(approvalData.summary) ??
+    publicDetail(approvalData.boundary) ??
+    publicDetail(approvalCard.body) ??
+    publicDetail(approvalCard.title) ??
+    '确认前不会触达对方或公开敏感信息。';
+  const riskLevel =
+    publicString(approvalData.riskLevel) ??
+    publicString(approvalCard.data?.riskLevel) ??
+    'medium';
+  const confirmAction = inlineApprovalConfirmActionFromCard(approvalCard);
+  const approvalId = firstPublicPrimitive(
+    approvalCard.data?.approvalId,
+    approvalData.id,
+    approvalCard.data?.id,
+  );
+  if (approvalId === null && confirmAction) {
+    return {
+      approvalId: null,
+      title: approvalTitleForAction(actionType),
+      summary: approvalSummaryForAction(actionType, summary),
+      riskLevel,
+      actionKey,
+      confirmLabel: approvalConfirmLabelForAction(actionKey, actionType),
+      confirmBusyLabel: approvalConfirmBusyLabelForAction(actionKey, actionType),
+      confirmAction,
+    };
+  }
+  if (approvalId === null) return null;
+  return inlineApprovalFromRawConfirmation(
+    {
+      id: approvalId,
+      type: publicString(approvalData.type) ?? publicString(approvalCard.type) ?? 'action',
+      actionType,
+      summary,
+      riskLevel,
+    },
+    actionKey,
+  );
+}
+
+function inlineApprovalConfirmActionFromCard(
+  card: UserFacingAgentResponse['cards'][number],
+): InlineCardApproval['confirmAction'] {
+  const actions = Array.isArray(card.actions) ? card.actions : [];
+  const rawAction = actions.find((item) => {
+    const schemaAction = toolUISchemaActionFromUnknown(item.schemaAction);
+    const action = publicString(item.action);
+    return (
+      item.requiresConfirmation === true ||
+      schemaAction === 'opener.confirm_send' ||
+      schemaAction === 'candidate.connect' ||
+      schemaAction === 'activity.confirm_create' ||
+      /send|invite|connect|publish|create/i.test(action ?? '')
+    );
+  });
+  if (!rawAction) return null;
+  return {
+    action: publicString(rawAction.action),
+    schemaAction: toolUISchemaActionFromUnknown(rawAction.schemaAction),
+    payload: isRecord(rawAction.payload) ? rawAction.payload : {},
+  };
+}
+
+function inlineDraftFromResponse(
+  response: UserFacingAgentResponse | void,
+  actionKey: string,
+  action: VisibleCardAction,
+): InlineCardDraft | null {
+  if (
+    action.schemaAction !== 'candidate.generate_opener' &&
+    action.schemaAction !== 'opener.regenerate'
+  ) {
+    return null;
+  }
+  const card = response?.cards.find((item) => {
+    const schemaType = publicString(item.schemaType) ?? publicString(item.data?.schemaType);
+    const type = publicString(item.type);
+    return schemaType === 'social_match.candidate' || type === 'opener_approval';
+  });
+  if (!card) return null;
+  const body =
+    publicDetail(card.data?.suggestedOpener) ??
+    publicDetail(card.data?.message) ??
+    publicDetail(card.body) ??
+    publicDetail(response?.assistantMessage);
+  if (!body) return null;
+  return {
+    title: publicDetail(card.title) ?? '开场白草稿',
+    body,
+    actionKey,
+  };
+}
+
+function inlineOutcomeFromActionResponse(
+  response: UserFacingAgentResponse | void,
+  actionKey: string,
+  action: VisibleCardAction,
+): InlineCardOutcome | null {
+  if (
+    action.schemaAction !== 'candidate.like' &&
+    action.schemaAction !== 'candidate.skip' &&
+    action.schemaAction !== 'candidate.more_like_this' &&
+    action.schemaAction !== 'candidate.view_detail' &&
+    action.schemaAction !== 'activity.view_detail' &&
+    action.schemaAction !== 'activity.modify_time' &&
+    action.schemaAction !== 'activity.modify_location' &&
+    action.schemaAction !== 'activity.skip_publish'
+  ) {
+    return null;
+  }
+  const firstCard = response?.cards[0];
+  const stableBody = inlineOutcomeStableBody(action.schemaAction);
+  const body =
+    stableBody ??
+    publicDetail(response?.assistantMessage) ??
+    publicDetail(firstCard?.body) ??
+    publicDetail(firstCard?.title) ??
+    inlineOutcomeFallbackBody(action.schemaAction);
+  return {
+    title: inlineOutcomeTitle(action.schemaAction),
+    body,
+    actionKey,
+  };
+}
+
+function inlineOutcomeStableBody(schemaAction: ToolUISchemaAction | null | undefined) {
+  if (schemaAction === 'candidate.like') {
+    return '已记录这个候选，后续推荐会参考你的选择。';
+  }
+  if (schemaAction === 'candidate.skip') {
+    return '已跳过这个候选，后续会减少类似推荐。';
+  }
+  if (schemaAction === 'candidate.more_like_this') {
+    return '我会沿着当前条件继续找类似机会。';
+  }
+  if (schemaAction === 'activity.skip_publish') {
+    return '这张约练卡已保留为草稿，暂时不会发布到发现。';
+  }
+  return null;
+}
+
+function inlineOutcomeTitle(schemaAction: ToolUISchemaAction | null | undefined) {
+  if (schemaAction === 'candidate.like') return '已收藏';
+  if (schemaAction === 'candidate.skip') return '已跳过';
+  if (schemaAction === 'candidate.more_like_this') return '继续找类似机会';
+  if (schemaAction === 'activity.skip_publish') return '已暂不发布';
+  if (schemaAction === 'activity.modify_time' || schemaAction === 'activity.modify_location') {
+    return '已准备修改';
+  }
+  if (schemaAction === 'activity.view_detail') return '活动详情';
+  return '候选详情';
+}
+
+function inlineOutcomeFallbackBody(schemaAction: ToolUISchemaAction | null | undefined) {
+  if (schemaAction === 'candidate.like') {
+    return '已记录这个候选，后续推荐会参考你的选择。';
+  }
+  if (schemaAction === 'candidate.skip') {
+    return '已跳过这个候选，后续会减少类似推荐。';
+  }
+  if (schemaAction === 'candidate.more_like_this') {
+    return '我会沿着当前条件继续找类似机会。';
+  }
+  if (schemaAction === 'activity.skip_publish') {
+    return '这张约练卡已作为草稿保留，暂时不会发布到发现。';
+  }
+  if (schemaAction === 'activity.modify_time') {
+    return '可以继续告诉我新的时间，我会按新的安排更新这张约练卡。';
+  }
+  if (schemaAction === 'activity.modify_location') {
+    return '可以继续告诉我新的大致区域，我会按新的地点范围更新这张约练卡。';
+  }
+  if (schemaAction === 'activity.view_detail') {
+    return '活动详情已整理在当前卡片里。';
+  }
+  return '候选详情已整理在当前卡片里。';
+}
+
+function inlineOutcomeFromApprovalResponse(
+  response: UserFacingAgentResponse | void,
+  approval: InlineCardApproval,
+  decision: 'approved' | 'rejected',
+): InlineCardOutcome | null {
+  if (decision === 'rejected') {
+    return {
+      title: '已取消',
+      body:
+        publicDetail(response?.assistantMessage) ??
+        '这个动作不会继续执行，也不会触达对方。',
+      actionKey: approval.actionKey,
+    };
+  }
+  const meetLoop = response?.cards.find((item) => {
+    const schemaType = publicString(item.schemaType) ?? publicString(item.data?.schemaType);
+    return schemaType === 'meet_loop.timeline';
+  });
+  if (meetLoop) {
+    return {
+      title: publicDetail(meetLoop.title) ?? '邀约进展',
+      body:
+        publicDetail(meetLoop.body) ??
+        publicDetail(meetLoop.data?.nextAction) ??
+        publicDetail(response?.assistantMessage) ??
+        '已按你的确认继续，后续进展会留在当前对话。',
+      actionKey: approval.actionKey,
+    };
+  }
+  if (!response?.assistantMessage) return null;
+  return {
+    title: inlineApprovalApprovedTitle(approval),
+    body: publicDetail(response.assistantMessage) ?? '已按你的确认继续。',
+    actionKey: approval.actionKey,
+  };
+}
+
+function inlineApprovalApprovedTitle(approval: InlineCardApproval) {
+  const text = `${approval.actionKey} ${approval.title} ${approval.summary}`.toLowerCase();
+  if (/send|message|invite|opener|发送|私信|邀请|开场白/.test(text)) return '邀请已确认';
+  if (/connect|friend|candidate|contact|加好友|好友|连接|候选|联系/.test(text)) {
+    return '好友申请已确认';
+  }
+  if (/publish|social_request|activity|meet|create|发现|发布|活动|约练|创建/.test(text)) {
+    return '发布已确认';
+  }
+  if (/location|precise|exchange|reveal|位置|联系方式|公开/.test(text)) {
+    return '公开前确认已记录';
+  }
+  return '确认已记录';
+}
+
+function inlineApprovalFromCardData(
+  card: SchemaDrivenAssistantCard,
+  actions: VisibleCardAction[],
+  preferredAction?: VisibleCardAction,
+): InlineCardApproval | null {
+  const preferredActionKey = preferredAction ? cardActionKey(preferredAction) : null;
+  const preferredKeys = [
+    preferredActionKey,
+    preferredAction?.schemaAction,
+    preferredAction?.action,
+  ].filter((value): value is string => Boolean(value));
+  const rawMap = isRecord(card.data.inlineApprovalConfirmations)
+    ? card.data.inlineApprovalConfirmations
+    : null;
+  if (rawMap) {
+    for (const key of preferredKeys) {
+      const mapped = rawMap[key];
+      if (!isRecord(mapped)) continue;
+      const approval = inlineApprovalFromRawConfirmation(mapped, key);
+      if (approval) return approval;
+    }
+    if (preferredAction) {
+      const semanticActionKey =
+        preferredAction.schemaAction ??
+        preferredAction.action ??
+        preferredActionKey ??
+        'approval';
+      for (const [key, mapped] of Object.entries(rawMap)) {
+        if (!isRecord(mapped)) continue;
+        if (!rawInlineApprovalMatchesAction(mapped, semanticActionKey, key)) continue;
+        const approval = inlineApprovalFromRawConfirmation(mapped, semanticActionKey);
+        if (approval) return approval;
+      }
+    }
+  }
+  const raw = isRecord(card.data.inlineApprovalConfirmation)
+    ? card.data.inlineApprovalConfirmation
+    : null;
+  if (!raw) return null;
+  const actionKey =
+    (preferredAction ? cardActionKey(preferredAction) : null) ??
+    publicString(raw.actionKey) ??
+    actions.find((action) => action.requiresConfirmation)?.schemaAction ??
+    actions.find((action) => action.requiresConfirmation)?.action ??
+    actions[0]?.schemaAction ??
+    actions[0]?.action ??
+    'approval';
+  const rawActionKey = publicString(raw.actionKey);
+  if (preferredAction && rawActionKey && !preferredKeys.includes(rawActionKey)) {
+    return null;
+  }
+  return inlineApprovalFromRawConfirmation(raw, actionKey);
+}
+
+function rawInlineApprovalMatchesAction(
+  raw: Record<string, unknown>,
+  semanticActionKey: string,
+  mapKey: string,
+) {
+  if (mapKey === semanticActionKey) return true;
+  return confirmationMatchesActionKey(
+    {
+      id: publicString(raw.id) ?? 0,
+      type: publicString(raw.type) ?? 'action',
+      actionType: publicString(raw.actionType) ?? publicString(raw.action) ?? mapKey,
+      summary: publicDetail(raw.summary) ?? publicDetail(raw.title) ?? mapKey,
+      riskLevel: publicString(raw.riskLevel) ?? 'medium',
+      expiresAt: publicString(raw.expiresAt),
+    },
+    semanticActionKey,
+  );
+}
+
+function inlineApprovalFromRawConfirmation(
+  raw: Record<string, unknown>,
+  actionKey: string,
+): InlineCardApproval | null {
+  const id = raw.id;
+  if (id === null || id === undefined || (typeof id !== 'number' && typeof id !== 'string')) {
+    return null;
+  }
+  return inlineApprovalFromConfirmation(
+    {
+      id,
+      type: publicString(raw.type) ?? 'action',
+      actionType: publicString(raw.actionType) ?? actionKey,
+      summary: publicDetail(raw.summary) ?? '确认前不会触达对方或公开敏感信息。',
+      riskLevel: publicString(raw.riskLevel) ?? 'medium',
+      expiresAt: publicString(raw.expiresAt),
+    },
+    publicString(raw.actionKey) ?? actionKey,
+  );
+}
+
+function inlineApprovalFromConfirmation(
+  confirmation: UserFacingAgentPendingConfirmation,
+  actionKey: string,
+): InlineCardApproval | null {
+  if (confirmation.id === null || confirmation.id === undefined) return null;
+  return {
+    approvalId: confirmation.id,
+    title: approvalTitleForAction(confirmation.actionType),
+    summary: approvalSummaryForAction(confirmation.actionType, confirmation.summary),
+    riskLevel: sanitizePublicText(confirmation.riskLevel) ?? 'medium',
+    actionKey,
+    confirmLabel: approvalConfirmLabelForAction(actionKey, confirmation.actionType),
+    confirmBusyLabel: approvalConfirmBusyLabelForAction(actionKey, confirmation.actionType),
+  };
+}
+
+function confirmationMatchesActionKey(
+  confirmation: UserFacingAgentPendingConfirmation,
+  actionKey: string,
+) {
+  const actionText = [
+    confirmation.actionType,
+    confirmation.type,
+    confirmation.summary,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  if (actionKey === 'candidate.connect') {
+    return /connect|friend|candidate|contact|加好友|好友|连接|候选|联系/.test(actionText);
+  }
+  if (actionKey === 'opener.confirm_send') {
+    return /send|message|invite|opener|发送|私信|邀请|开场白/.test(actionText);
+  }
+  if (actionKey === 'activity.confirm_create') {
+    return /publish|social_request|activity|meet|create|发现|发布|活动|约练|创建/.test(
+      actionText,
+    );
+  }
+  return actionText.includes(actionKey.toLowerCase());
+}
+
+function approvalTitleForAction(actionType: string) {
+  if (/send|message|invite/i.test(actionType)) return '确认发送邀请';
+  if (/connect|friend|candidate\.connect/i.test(actionType)) return '确认加好友并聊天';
+  if (/publish|social_request|activity|meet|create/i.test(actionType)) {
+    return '确认发布到发现';
+  }
+  return '确认继续';
+}
+
+function approvalConfirmLabelForAction(actionKey: string, actionType: string) {
+  const text = `${actionType} ${actionKey}`;
+  if (/send|message|invite|opener/i.test(text)) return '确认发送';
+  if (/connect|friend|candidate/i.test(text)) return '确认加好友';
+  if (/publish|social_request|activity|meet|create/i.test(text)) return '确认发布';
+  if (/contact|location|precise|exchange/i.test(text)) return '确认公开';
+  return '确认继续';
+}
+
+function approvalConfirmBusyLabelForAction(actionKey: string, actionType: string) {
+  const label = approvalConfirmLabelForAction(actionKey, actionType);
+  if (label === '确认加好友') return '正在加好友';
+  if (label === '确认发送') return '正在发送';
+  if (label === '确认发布') return '正在发布';
+  if (label === '确认公开') return '正在公开';
+  return '正在继续';
+}
+
+function approvalSummaryForAction(actionType: string, rawSummary: string | null | undefined) {
+  const summary = rawSummary
+    ? agentApprovalUserFacingText(sanitizePublicText(rawSummary))
+    : null;
+  const technical =
+    !summary ||
+    /risk|medium|high|low|checkpoint|dry[- ]?run|audit|approval|风险等级|状态已保存|等待保存点|审计|保存点|审批/i.test(
+      summary,
+    );
+  if (/send|message|invite/i.test(actionType)) {
+    return technical
+      ? '确认后才会发送邀请内容；发送前不会联系对方。'
+      : summary;
+  }
+  if (/connect|friend|candidate\.connect/i.test(actionType)) {
+    return technical
+      ? '确认后才会向对方发起连接；你可以先查看详情或取消。'
+      : summary;
+  }
+  if (/publish|social_request|activity|meet|create/i.test(actionType)) {
+    return technical
+      ? '确认后这张约练卡才会出现在发现页；你可以先修改或暂不发布。'
+      : summary;
+  }
+  return technical ? '确认前不会触达对方或公开敏感信息。' : summary;
 }
 
 function mergeCardActionPayload(
@@ -314,12 +1426,36 @@ function mergeCardActionPayload(
 
 function normalizeVisibleActionLabel(
   label: string | null,
+  schemaType: SchemaDrivenAssistantCard['schemaType'],
   schemaAction: ToolUISchemaAction | undefined,
   action: string | null,
   requiresConfirmation: boolean,
 ) {
-  if (schemaAction === 'candidate.connect' || action === 'candidate.connect') {
-    return requiresConfirmation ? '确认后发邀请' : '发邀请';
+  const canonicalKey = canonicalVisibleActionKey(schemaType, { schemaAction, action });
+  if (canonicalKey === 'candidate.view_detail') {
+    return '查看详情';
+  }
+  if (canonicalKey === 'candidate.connect') {
+    return requiresConfirmation ? '加好友并聊天' : '加好友并聊天';
+  }
+  if (canonicalKey === 'candidate.like') return '收藏';
+  if (canonicalKey === 'candidate.generate_opener') {
+    return '生成开场白';
+  }
+  if (canonicalKey === 'opener.confirm_send') {
+    return '发送邀请';
+  }
+  if (schemaType === 'social_match.activity' && canonicalKey === 'activity.confirm_create') {
+    return '发布到发现';
+  }
+  if (schemaType === 'social_match.activity' && canonicalKey === 'activity.skip_publish') {
+    return '暂不发布';
+  }
+  if (
+    schemaType === 'social_match.activity' &&
+    (canonicalKey === 'activity.modify_time' || canonicalKey === 'activity.modify_location')
+  ) {
+    return '修改';
   }
   return label;
 }
@@ -347,8 +1483,26 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
         source: 'default' as const,
       },
       {
+        id: `${card.id}:save`,
+        label: '收藏',
+        requiresConfirmation: false,
+        schemaAction: 'candidate.like',
+        action: 'candidate.like',
+        payload: basePayload,
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:send-invite`,
+        label: '发送邀请',
+        requiresConfirmation: true,
+        schemaAction: 'opener.confirm_send',
+        action: 'opener.confirm_send',
+        payload: basePayload,
+        source: 'default' as const,
+      },
+      {
         id: `${card.id}:connect`,
-        label: '确认后发邀请',
+        label: '加好友并聊天',
         requiresConfirmation: true,
         schemaAction: 'candidate.connect',
         action: 'candidate.connect',
@@ -360,21 +1514,70 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
   if (card.schemaType === 'social_match.activity') {
     return [
       {
-        id: `${card.id}:view`,
-        label: '查看活动详情',
-        requiresConfirmation: false,
-        schemaAction: 'activity.view_detail',
-        action: 'activity.view_detail',
-        payload: basePayload,
-        source: 'default' as const,
-      },
-      {
         id: `${card.id}:create`,
-        label: '确认后发起',
+        label: '发布到发现',
         requiresConfirmation: true,
         schemaAction: 'activity.confirm_create',
         action: 'activity.confirm_create',
         payload: basePayload,
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:edit`,
+        label: '修改',
+        requiresConfirmation: false,
+        schemaAction: 'activity.modify_time',
+        action: 'activity.modify_time',
+        payload: basePayload,
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:skip-publish`,
+        label: '暂不发布',
+        requiresConfirmation: false,
+        schemaAction: 'activity.skip_publish',
+        action: 'activity.skip_publish',
+        payload: basePayload,
+        source: 'default' as const,
+      },
+    ];
+  }
+  if (card.schemaType === 'social_match.empty') {
+    return [
+      {
+        id: `${card.id}:publish`,
+        label: '发布到发现',
+        requiresConfirmation: true,
+        schemaAction: 'activity.confirm_create',
+        action: 'publish_to_discover',
+        payload: { ...basePayload, recoveryMode: 'publish_to_discover' },
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:expand`,
+        label: '扩大范围',
+        requiresConfirmation: false,
+        schemaAction: 'candidate.more_like_this',
+        action: 'expand_radius',
+        payload: { ...basePayload, recoveryMode: 'expand_radius' },
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:change-time`,
+        label: '换个时间',
+        requiresConfirmation: false,
+        schemaAction: 'activity.modify_time',
+        action: 'change_time',
+        payload: { ...basePayload, recoveryMode: 'change_time' },
+        source: 'default' as const,
+      },
+      {
+        id: `${card.id}:relax`,
+        label: '放宽偏好',
+        requiresConfirmation: false,
+        schemaAction: 'candidate.more_like_this',
+        action: 'relax_preference',
+        payload: { ...basePayload, recoveryMode: 'relax_preference' },
         source: 'default' as const,
       },
     ];
@@ -426,6 +1629,10 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
   return [];
 }
 
+function isLocalOnlyCardAction(_action: VisibleCardAction) {
+  return false;
+}
+
 function defaultCardActionPayload(card: SchemaDrivenAssistantCard): Record<string, unknown> {
   const opportunity = isRecord(card.data.opportunity) ? card.data.opportunity : {};
   const proposal = isRecord(card.data.proposal) ? card.data.proposal : {};
@@ -444,6 +1651,11 @@ function defaultCardActionPayload(card: SchemaDrivenAssistantCard): Record<strin
       card.data.socialRequestCandidateId,
       opportunity.candidateId,
       opportunity.candidateRecordId,
+      firstActionPayloadPrimitive(card, [
+        'candidateId',
+        'candidateRecordId',
+        'socialRequestCandidateId',
+      ]),
     ),
     targetUserId: firstPublicPrimitive(
       card.data.targetUserId,
@@ -452,6 +1664,7 @@ function defaultCardActionPayload(card: SchemaDrivenAssistantCard): Record<strin
       opportunity.targetUserId,
       opportunity.userId,
       opportunity.candidateUserId,
+      firstActionPayloadPrimitive(card, ['targetUserId', 'userId', 'candidateUserId']),
     ),
     socialRequestId: firstPublicPrimitive(card.data.socialRequestId, opportunity.socialRequestId),
     publicIntentId: firstPublicPrimitive(card.data.publicIntentId, opportunity.publicIntentId),
@@ -462,6 +1675,21 @@ function defaultCardActionPayload(card: SchemaDrivenAssistantCard): Record<strin
     suggestedOpener:
       publicDetail(opportunity.suggestedOpener) ?? publicDetail(card.data.suggestedOpener),
   });
+}
+
+function firstActionPayloadPrimitive(
+  card: SchemaDrivenAssistantCard,
+  keys: string[],
+): string | number | null {
+  for (const action of card.actions) {
+    const payload = isRecord(action.payload) ? action.payload : null;
+    if (!payload) continue;
+    for (const key of keys) {
+      const value = firstPublicPrimitive(payload[key]);
+      if (value !== null) return value;
+    }
+  }
+  return null;
 }
 
 function defaultLifeGraphPayload(
@@ -600,8 +1828,20 @@ function defaultActivityPayload(
   });
 }
 
-function cardActionRuntimeKey(messageId: string, cardId: string) {
-  return `${messageId}:${cardId}`;
+// eslint-disable-next-line react-refresh/only-export-components
+export function cardActionRuntimeScope(input: {
+  threadId?: unknown;
+  runId?: unknown;
+  messageId: string;
+}) {
+  const threadId = runtimeIdentityPart(input.threadId) ?? 'thread:unknown';
+  const runId = runtimeIdentityPart(input.runId) ?? 'run:unknown';
+  return `${threadId}:${runId}:${input.messageId}`;
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function cardActionRuntimeKey(runtimeScope: string, cardId: string) {
+  return `${runtimeScope}:${cardId}`;
 }
 
 function subscribeCardActionRuntime(listener: () => void) {
@@ -613,6 +1853,7 @@ function emitCardActionRuntimeChange() {
   cardActionRuntimeListeners.forEach((listener) => listener());
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function resetCardActionRuntimeStateForTests() {
   cardActionRuntimeState.clear();
   emitCardActionRuntimeChange();
@@ -630,14 +1871,20 @@ function setCardActionRuntimeState(key: string, patch: Partial<CardActionRuntime
   emitCardActionRuntimeChange();
 }
 
-function useCardActionRuntimeState(messageId: string, cardId: string) {
-  const key = cardActionRuntimeKey(messageId, cardId);
+function useCardActionRuntimeState(runtimeScope: string, cardId: string) {
+  const key = cardActionRuntimeKey(runtimeScope, cardId);
   const state = useSyncExternalStore(
     subscribeCardActionRuntime,
     () => readCardActionRuntimeState(key),
     () => EMPTY_CARD_ACTION_STATE,
   );
   return [key, state] as const;
+}
+
+function runtimeIdentityPart(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  return null;
 }
 
 function stripEmptyPayloadFields(value: Record<string, unknown>): Record<string, unknown> {
@@ -665,12 +1912,14 @@ function primitiveTaskId(value: unknown): number | string | null {
 }
 
 function publicDetail(value: unknown) {
-  if (typeof value === 'string') return sanitizePublicText(value);
+  if (typeof value === 'string') return agentApprovalUserFacingText(sanitizePublicText(value));
   if (isRecord(value)) {
     const keys = ['title', 'message', 'summary', 'detail', 'status'];
     for (const key of keys) {
       const candidate = publicString(value[key]);
-      const sanitized = candidate ? sanitizePublicText(candidate) : null;
+      const sanitized = candidate
+        ? agentApprovalUserFacingText(sanitizePublicText(candidate))
+        : null;
       if (sanitized) return sanitized;
     }
   }

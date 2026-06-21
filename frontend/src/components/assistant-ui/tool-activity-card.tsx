@@ -128,6 +128,7 @@ export function ActivityOpportunityCard({ card }: { card: SchemaDrivenAssistantC
           fallback={opportunity.nextAction}
           label="适合你的原因"
         />
+        <CardActionSummary card={card} actions={card.actions} />
         <ProductCardDetails title="查看发布边界和约练闭环">
           {opportunity.reasons.length > 1 ? (
             <ReasonList title="更多适配理由" reasons={opportunity.reasons.slice(1)} />
@@ -227,7 +228,6 @@ export function ActivityOpportunityCard({ card }: { card: SchemaDrivenAssistantC
             schemaType={card.schemaType}
           />
         </ProductCardDetails>
-        <CardActionSummary card={card} actions={card.actions} />
       </div>
     </article>
   );

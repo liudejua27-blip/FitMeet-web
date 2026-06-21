@@ -141,7 +141,7 @@ export function MeetLoopResultCard({ card }: { card: SchemaDrivenAssistantCard }
                         ) : null}
                         {step.checkpointReady ? (
                           <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] text-current ring-1 ring-current/10">
-                            可恢复
+                            可以继续
                           </span>
                         ) : null}
                         {step.resumeMode ? (
@@ -253,7 +253,7 @@ function meetLoopRecoverableActionLabel(action: string) {
   if (action === 'activity.modify_time') return '可调整时间';
   if (action === 'activity.modify_location') return '可调整地点';
   if (action === 'candidate.connect') return '确认后连接';
-  return '可恢复';
+  return '可以继续';
 }
 
 function meetLoopCounterpartIntentLabel(intent: string | null) {

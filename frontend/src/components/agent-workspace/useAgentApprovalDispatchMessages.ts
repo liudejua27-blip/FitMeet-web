@@ -10,13 +10,18 @@ import type {
 import type {
   AgentThreadMessage,
 } from './socialAgentThreadStore';
+import { agentCardApprovalId, mergeUniqueAgentCards } from './agentCardIdentity';
 
 type SetState<T> = (value: T | ((current: T) => T)) => void;
 
 type AppendApprovalDispatchInput = {
   approvalId: number;
+  actionType?: string | null;
   dispatchResult?: AgentApprovalDispatchResult;
   taskId?: number | null;
+  targetMessageId?: string | null;
+  targetCardId?: string | null;
+  suppressStandalone?: boolean;
 };
 
 type UseAgentApprovalDispatchMessagesInput = {
@@ -35,60 +40,22 @@ export function useAgentApprovalDispatchMessages({
   const appendApprovalDispatchResultMessage = useCallback(
     (input: AppendApprovalDispatchInput) => {
       const response = responseFromApprovalDispatchResult(input);
-      if (!response) return;
+      if (!response) return null;
 
-      pendingApprovalDispatchCardsRef.current = [
-        ...pendingApprovalDispatchCardsRef.current,
-        ...response.cards,
-      ];
-      setMessages((current) => {
-        const hasRenderedCard = (message: AgentThreadMessage) =>
-          message.result?.cards.some(
-            (card) =>
-              stringFromUnknown(card.data.approvalId) === String(input.approvalId) &&
-              card.schemaType === 'meet_loop.timeline',
-          ) === true;
-        if (current.some(hasRenderedCard)) return current;
-
-        const targetIndex = current.findIndex(
-          (message) =>
-            message.role === 'assistant' &&
-            message.result &&
-            (message.resolvedApproval?.id === input.approvalId ||
-              message.result.pendingConfirmations.some(
-                (confirmation) => String(confirmation.id) === String(input.approvalId),
-              )),
-        );
-        if (targetIndex >= 0) {
-          return current.map((message, index) =>
-            index === targetIndex && message.result
-              ? {
-                  ...message,
-                  result: {
-                    ...message.result,
-                    cards: [...message.result.cards, ...response.cards],
-                  },
-                  showSocialResult: true,
-                  conversationIntent: 'approval',
-                }
-              : message,
-          );
-        }
-
-        return [
-          ...current,
-          {
-            id: nextId('assistant'),
-            role: 'assistant',
-            content: response.assistantMessage,
-            status: 'done',
-            result: response,
-            taskId: input.taskId ?? activeTaskId,
-            conversationIntent: 'approval',
-            showSocialResult: true,
-          },
-        ];
-      });
+      pendingApprovalDispatchCardsRef.current = mergeUniqueAgentCards(
+        pendingApprovalDispatchCardsRef.current,
+        response.cards,
+      );
+      setMessages((current) =>
+        mergeApprovalDispatchResponseIntoMessages({
+          activeTaskId,
+          current,
+          input,
+          nextId,
+          response,
+        }),
+      );
+      return response;
     },
     [activeTaskId, nextId, pendingApprovalDispatchCardsRef, setMessages],
   );
@@ -96,8 +63,92 @@ export function useAgentApprovalDispatchMessages({
   return { appendApprovalDispatchResultMessage };
 }
 
+export function mergeApprovalDispatchResponseIntoMessages(input: {
+  activeTaskId: number | null;
+  current: AgentThreadMessage[];
+  input: AppendApprovalDispatchInput;
+  nextId: (prefix: string) => string;
+  response: UserFacingAgentResponse;
+}) {
+  const hasRenderedCard = (message: AgentThreadMessage) =>
+    message.result?.cards.some(
+      (card) =>
+        agentCardApprovalId(card.data) === String(input.input.approvalId) &&
+        card.schemaType === 'meet_loop.timeline',
+    ) === true;
+  if (input.current.some(hasRenderedCard)) return input.current;
+
+  const explicitTargetIndex = input.current.findIndex(
+    (message) =>
+      input.input.targetMessageId &&
+      (message.id === input.input.targetMessageId ||
+        String(message.messageId ?? '') === String(input.input.targetMessageId)),
+  );
+  const cardTargetIndex = input.current.findIndex(
+    (message) =>
+      input.input.targetCardId &&
+      message.result?.cards.some((card) => card.id === input.input.targetCardId),
+  );
+  const targetIndex =
+    explicitTargetIndex >= 0
+      ? explicitTargetIndex
+      : cardTargetIndex >= 0
+        ? cardTargetIndex
+        : input.current.findIndex(
+            (message) =>
+              message.role === 'assistant' &&
+              message.result &&
+              (message.resolvedApproval?.id === input.input.approvalId ||
+                message.result.pendingConfirmations.some(
+                  (confirmation) => String(confirmation.id) === String(input.input.approvalId),
+                ) ||
+                message.result.cards.some(
+                  (card) => agentCardApprovalId(card.data) === String(input.input.approvalId),
+                )),
+          );
+  if (targetIndex >= 0) {
+    return input.current.map((message, index) =>
+      index === targetIndex && message.result
+        ? {
+            ...message,
+            result: {
+              ...message.result,
+              cards: mergeUniqueAgentCards(message.result.cards, input.response.cards),
+            },
+            showSocialResult: true,
+            conversationIntent: 'approval' as const,
+          }
+        : message,
+    );
+  }
+
+  if (input.input.suppressStandalone) return input.current;
+
+  return [
+    ...input.current,
+    {
+      id: input.nextId('assistant'),
+      role: 'assistant' as const,
+      content: input.response.assistantMessage,
+      status: 'done' as const,
+      result: input.response,
+      taskId: input.input.taskId ?? input.activeTaskId,
+      conversationIntent: 'approval' as const,
+      showSocialResult: true,
+    },
+  ];
+}
+
+export function mergeUniqueApprovalDispatchCards(
+  existing: FitMeetAlphaCard[],
+  incoming: FitMeetAlphaCard[],
+) {
+  return mergeUniqueAgentCards(existing, incoming);
+}
+
 function responseFromApprovalDispatchResult(input: {
   approvalId: number;
+  actionType?: string | null;
   dispatchResult?: AgentApprovalDispatchResult;
   taskId?: number | null;
 }): UserFacingAgentResponse | null {
@@ -109,6 +160,10 @@ function responseFromApprovalDispatchResult(input: {
   if (!targetUserId && !conversationId && !friendRequestId) return null;
   const candidateRecordId = numberFromUnknown(result.candidateRecordId);
   const socialRequestId = numberFromUnknown(result.socialRequestId);
+  const actionType =
+    stringFromUnknown(input.actionType) ??
+    stringFromUnknown(result.actionType) ??
+    (friendRequestId ? 'connect_candidate' : 'send_invite');
   const openedConversation = result.openedConversation === true || Boolean(conversationId);
   const assistantMessage = openedConversation
     ? '已按你的确认建立站内沟通入口。接下来先等对方回复；如果需要，我也可以继续帮你调整节奏或准备后续话术。'
@@ -133,6 +188,7 @@ function responseFromApprovalDispatchResult(input: {
           schemaVersion: 'fitmeet.tool-ui.v1',
           schemaType: 'meet_loop.timeline',
           approvalId: input.approvalId,
+          actionType,
           taskId: input.taskId ?? null,
           candidateUserId: targetUserId,
           targetUserId,
@@ -193,6 +249,7 @@ function stringIdFromUnknown(value: unknown): string {
 }
 
 function stringFromUnknown(value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   return typeof value === 'string' ? value.trim() : '';
 }
 

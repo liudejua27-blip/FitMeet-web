@@ -39,19 +39,6 @@ export function CandidateEmptyStateCard({ card }: { card: SchemaDrivenAssistantC
         </div>
       ) : null}
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        {view.recoveryOptions.map((option) => (
-          <div
-            key={option.key}
-            className="rounded-xl bg-[#f7f7f8] px-3 py-2 text-xs leading-5 text-[#52525b] ring-1 ring-black/5"
-            data-requires-confirmation={option.requiresConfirmation ? 'true' : 'false'}
-          >
-            <p className="font-medium text-[#27272a]">{option.label}</p>
-            <p className="mt-0.5">{option.detail}</p>
-          </div>
-        ))}
-      </div>
-
       {view.safetyBoundary || view.nextBestStep ? (
         <div className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800 ring-1 ring-emerald-100">
           <p className="flex items-center gap-1.5 font-medium">

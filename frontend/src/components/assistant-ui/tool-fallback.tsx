@@ -108,8 +108,35 @@ export function AssistantDataFallback(part: DataMessagePartProps) {
 }
 
 function FitMeetCardsToolUI({ data, summary }: { data: unknown; summary: ProcessSummary }) {
+  if (rawCardsAreOnlyLowRiskSafetyApprovals(data)) return null;
   const cards = extractCanonicalAssistantCards(data);
-  if (cards.length === 0) return <AgentProcessBlock summary={summary} />;
+  if (cards.length === 0) {
+    return <AgentProcessBlock summary={summary} />;
+  }
+  const approvalCards = cards.filter((card) => card.schemaType === 'safety.approval');
+  const productCards = cards.filter((card) => card.schemaType !== 'safety.approval');
+  if (approvalCards.length > 1 && productCards.length === 0) {
+    return (
+      <ApprovalToolUI
+        data={{
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'safety.approval',
+          pendingConfirmations: approvalCards.map(pendingConfirmationFromSafetyCard),
+        }}
+        summary={summary}
+      />
+    );
+  }
+  if (approvalCards.length > 0 && productCards.length > 0) {
+    return (
+      <ToolUICardCollectionBlock
+        data={data}
+        cards={productCards}
+        summary={summary}
+        renderCard={({ card }) => <AssistantCardRenderer card={card} />}
+      />
+    );
+  }
 
   return (
     <ToolUICardCollectionBlock
@@ -121,12 +148,134 @@ function FitMeetCardsToolUI({ data, summary }: { data: unknown; summary: Process
   );
 }
 
+function rawCardsAreOnlyLowRiskSafetyApprovals(data: unknown) {
+  if (!isRecord(data) || !Array.isArray(data.cards) || data.cards.length === 0) return false;
+  const rawCards = data.cards.filter(isRecord);
+  if (rawCards.length === 0) return false;
+  return rawCards.every((card) => {
+    const schemaType =
+      primitiveIdentityString(card.schemaType) ??
+      primitiveIdentityString(isRecord(card.data) ? card.data.schemaType : null);
+    if (schemaType !== 'safety.approval') return false;
+    const confirmation = pendingConfirmationFromRawSafetyCard(card);
+    const actionType = confirmation.actionType ?? '';
+    return isLowRiskApprovalAction(actionType, confirmation.summary);
+  });
+}
+
+function pendingConfirmationFromRawSafetyCard(card: Record<string, unknown>) {
+  return pendingConfirmationFromSafetyCard({
+    id: primitiveIdentityString(card.id) ?? 'approval',
+    type: primitiveIdentityString(card.type) ?? 'approval',
+    schemaType: 'safety.approval',
+    schemaVersion: primitiveIdentityString(card.schemaVersion) ?? 'fitmeet.tool-ui.v1',
+    title: publicDetail(card.title) ?? '安全确认',
+    body: publicDetail(card.body) ?? undefined,
+    status: primitiveIdentityString(card.status) ?? undefined,
+    data: isRecord(card.data) ? card.data : {},
+    actions: [],
+  });
+}
+
+function isLowRiskApprovalAction(actionType: string, summary: string) {
+  const normalized = actionType.trim().toLowerCase();
+  if (
+    /^(candidate\.like|candidate\.save|candidate\.favorite|candidate\.bookmark|candidate\.generate_opener|candidate\.view_detail|candidate\.skip|candidate\.more_like_this|save_candidate|favorite_candidate|bookmark_candidate|collect_candidate|generate_opener|draft_opener|view_candidate|skip_candidate)$/i.test(
+      normalized,
+    )
+  ) {
+    return true;
+  }
+  const text = summary.trim().toLowerCase();
+  return (
+    /save|like|favorite|collect|bookmark|generate_opener|draft|收藏|喜欢|保存|开场白|草稿/.test(
+      text,
+    ) &&
+    !/send|message|invite|connect|friend|publish|contact|location|发送|私信|邀请|连接|好友|发布|联系|位置/.test(
+      text,
+    )
+  );
+}
+
+function pendingConfirmationFromSafetyCard(card: SchemaDrivenAssistantCard) {
+  const approval = isRecord(card.data.approval) ? card.data.approval : {};
+  const searchText = [
+    card.title,
+    card.body,
+    card.data.summary,
+    card.data.boundary,
+    card.data.actionType,
+    card.data.action,
+    approval.summary,
+    approval.boundary,
+    approval.actionType,
+    approval.action,
+  ]
+    .map((item) => (typeof item === 'string' ? item : ''))
+    .filter(Boolean)
+    .join(' ');
+  const actionType =
+    primitiveIdentityString(card.data.actionType) ??
+    primitiveIdentityString(card.data.action) ??
+    primitiveIdentityString(approval.actionType) ??
+    primitiveIdentityString(approval.action) ??
+    inferApprovalActionType(searchText);
+  return {
+    id:
+      primitiveIdentityString(card.data.approvalId) ??
+      primitiveIdentityString(approval.id) ??
+      card.id,
+    type:
+      primitiveIdentityString(card.data.type) ??
+      primitiveIdentityString(approval.type) ??
+      'approval',
+    actionType,
+    summary:
+      publicDetail(card.data.summary) ??
+      publicDetail(approval.summary) ??
+      publicDetail(card.data.boundary) ??
+      publicDetail(approval.boundary) ??
+      card.body ??
+      card.title,
+    riskLevel:
+      primitiveIdentityString(card.data.riskLevel) ??
+      primitiveIdentityString(approval.riskLevel) ??
+      'medium',
+    expiresAt:
+      primitiveIdentityString(card.data.expiresAt) ??
+      primitiveIdentityString(approval.expiresAt),
+  };
+}
+
+function inferApprovalActionType(text: string) {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (/收藏|保存|喜欢|like|save|favorite|collect|bookmark/.test(normalized)) {
+    return 'candidate.like';
+  }
+  if (
+    /开场白|草稿|opener|draft/.test(normalized) &&
+    !/发送|send|invite|message|私信|邀请/.test(normalized)
+  ) {
+    return 'candidate.generate_opener';
+  }
+  if (/发送|私信|邀请|send|message|invite/.test(normalized)) return 'send_invite';
+  if (/加好友|好友|连接|connect|friend/.test(normalized)) return 'connect_candidate';
+  if (/发布|发现|约练|活动|publish|social_request|activity|meet/.test(normalized)) {
+    return 'publish_social_request';
+  }
+  if (/位置|联系方式|联系|contact|location|precise/.test(normalized)) {
+    return 'exchange_contact';
+  }
+  return undefined;
+}
+
 function AssistantCardRenderer({ card }: { card: SchemaDrivenAssistantCard }) {
   const Renderer = ASSISTANT_CARD_RENDERERS[card.schemaType] ?? GenericResultCard;
   return (
     <div
       data-renderer={card.schemaType}
-      data-product-component={productComponentForSchemaType(card.schemaType)}
+      data-product-renderer={productComponentForSchemaType(card.schemaType)}
     >
       <Renderer card={card} />
     </div>
@@ -347,7 +496,7 @@ function ProcessStatusBlock({
           <ProcessVisibleDetail detail={line.detail ?? statusLabel} />
           <CompactProcessEvidence evidence={evidence} />
           <ApprovalRuntimeHints metadata={approvalRuntimeMetadata(summary)} />
-          <InterruptResumeState summary={summary} />
+          <InterruptResumeState summary={summary} compact />
           {summary.resultLines.length > 0 ? (
             <ResultSummary lines={summary.resultLines} status={summary.status} />
           ) : null}
@@ -448,6 +597,18 @@ function ProcessVisibleDetail({ detail }: { detail?: string | null }) {
 }
 
 function compactProcessLine(summary: ProcessSummary): { title: string; detail?: string | null } {
+  if (summary.status === 'error') {
+    const primaryError =
+      [...summary.steps].reverse().find((step) => step.status === 'error') ??
+      [...summary.historySteps].reverse().find((step) => step.status === 'error') ??
+      null;
+    return {
+      title: naturalProcessTitle(summary),
+      detail:
+        compactPublicStepDetail(primaryError?.detail) ??
+        (primaryError?.label ? compactPublicStepLabel(primaryError.label) : null),
+    };
+  }
   if (summary.visibleSummary && summary.visibleSummary.status === summary.status) {
     return {
       title: compactPublicStepLabel(summary.visibleSummary.title),
@@ -464,12 +625,6 @@ function compactProcessLine(summary: ProcessSummary): { title: string; detail?: 
       detail:
         compactPublicStepDetail(primary.detail) ??
         (summary.resultLines.length > 0 ? summary.resultLines[0] : null),
-    };
-  }
-  if (summary.status === 'error') {
-    return {
-      title: naturalProcessTitle(summary),
-      detail: primary?.label ? compactPublicStepLabel(primary.label) : null,
     };
   }
   if (summary.status === 'waiting') {
@@ -652,9 +807,9 @@ function ApprovalRuntimeHints({ metadata }: { metadata?: Record<string, unknown>
   const items = [
     publicDetail(metadata.dryRunPreviewTitle) ??
       (metadata.dryRunAvailable === true ? '发送前预览已准备' : null),
-    metadata.sideEffectAllowedBeforeApproval === false ? '确认前不执行真实动作' : null,
+    metadata.sideEffectAllowedBeforeApproval === false ? '确认前不会触达对方' : null,
     metadata.auditRequired === true ? '会留下确认记录' : null,
-    publicDetail(metadata.resumePolicy),
+    approvalRuntimeHint(metadata.resumePolicy),
     publicDetail(metadata.executionBoundary),
   ]
     .filter((item): item is string => Boolean(item))
@@ -675,6 +830,15 @@ function ApprovalRuntimeHints({ metadata }: { metadata?: Record<string, unknown>
       ))}
     </div>
   );
+}
+
+function approvalRuntimeHint(value: unknown) {
+  const text = publicDetail(value);
+  if (!text) return null;
+  if (/checkpoint|resume|保存点|保存的步骤|从保存|恢复点/i.test(text)) {
+    return '同意后我会接着处理';
+  }
+  return text;
 }
 
 function approvalRuntimeMetadata(summary: ProcessSummary) {
@@ -750,7 +914,7 @@ function ExecutableTraceActions({ summary }: { summary: ProcessSummary }) {
         busyKey: null,
         completedKey: null,
         failedKey: item.key,
-        error: '当前步骤没有可恢复的检查点。',
+        error: '当前还没有可以继续的位置。',
       };
       setLocalActionState(nextState);
       setCheckpointActionRuntimeState(runtimeKey, nextState);
@@ -787,7 +951,7 @@ function ExecutableTraceActions({ summary }: { summary: ProcessSummary }) {
         busyKey: null,
         completedKey: null,
         failedKey: item.key,
-        error: nextError instanceof Error ? nextError.message : '操作没有完成，请重试。',
+        error: nextError instanceof Error ? nextError.message : '刚才没处理完，可以沿同一对话重试。',
       };
       setLocalActionState(failedState);
       setCheckpointActionRuntimeState(runtimeKey, failedState);
@@ -810,7 +974,7 @@ function ExecutableTraceActions({ summary }: { summary: ProcessSummary }) {
     <div className="ml-1 rounded-xl bg-white/70 px-3 py-2 ring-1 ring-black/5">
       <div className="flex flex-wrap items-center gap-2">
         <span className="mr-1 text-xs font-medium text-[#52525b]">
-          {summary.status === 'error' ? '失败后可继续' : '继续处理'}
+          {summary.status === 'error' ? '可以继续' : '下一步'}
         </span>
         {actionItems.map((item) => (
           <ToolActionButton
@@ -838,7 +1002,7 @@ function ExecutableTraceActions({ summary }: { summary: ProcessSummary }) {
           data-checkpoint-id={String(summary.checkpointId ?? '')}
           data-step-id={summary.stepId ?? ''}
         >
-          {sanitizePublicText(error) ?? '这一步暂时没有完成，可以重新尝试。'}
+          {sanitizePublicText(error) ?? '刚才没处理完，可以沿同一对话重试。'}
         </p>
       ) : null}
       {completedActionLabel ? (
@@ -858,9 +1022,9 @@ function ExecutableTraceActions({ summary }: { summary: ProcessSummary }) {
 }
 
 function checkpointActionLabel(key: string | null) {
-  if (key === 'retry') return '重试这一步';
-  if (key === 'replay') return '重新运行这一步';
-  if (key === 'fork') return '生成新版本';
+  if (key === 'retry') return '继续处理';
+  if (key === 'replay') return '重新整理';
+  if (key === 'fork') return '换一种方案';
   if (key === 'resume') return '继续处理';
   return null;
 }
@@ -885,16 +1049,16 @@ function handlerForCheckpointAction(
 function ProcessReplayPanel({ summary }: { summary: ProcessSummary }) {
   const chips = [
     summary.resumeContext.hasCheckpoint
-      ? { icon: <ShieldCheck className="h-3.5 w-3.5" />, label: '进度已保存' }
+      ? { icon: <ShieldCheck className="h-3.5 w-3.5" />, label: '可以从这里继续' }
       : null,
     summary.checkpointId && summary.replayable
-      ? { icon: <History className="h-3.5 w-3.5" />, label: '可重新运行这一步' }
+      ? { icon: <History className="h-3.5 w-3.5" />, label: '可重新整理' }
       : null,
     summary.checkpointId && summary.forkable
-      ? { icon: <GitBranch className="h-3.5 w-3.5" />, label: '可生成新版本' }
+      ? { icon: <GitBranch className="h-3.5 w-3.5" />, label: '可换一种方案' }
       : null,
     summary.checkpointId && summary.retryable
-      ? { icon: <RefreshCcw className="h-3.5 w-3.5" />, label: '失败可重试' }
+      ? { icon: <RefreshCcw className="h-3.5 w-3.5" />, label: '可以继续' }
       : null,
   ].filter(Boolean) as Array<{ icon: ReactNode; label: string }>;
 
@@ -922,7 +1086,7 @@ function ProcessReplayPanel({ summary }: { summary: ProcessSummary }) {
       </div>
       {summary.retryable ? (
         <p className="mt-2 text-xs leading-5 text-[#71717a]">
-          重试只会从保存的步骤继续；重新运行和新版本会沿同一对话恢复上下文。
+          继续会沿着当前对话处理；换一种方案也会保留刚才的上下文。
         </p>
       ) : null}
     </details>
@@ -961,7 +1125,7 @@ function statusIcon(status: ProcessStatus) {
 function statusText(status: ProcessStatus) {
   if (status === 'running') return '进行中';
   if (status === 'waiting') return '等待确认';
-  if (status === 'error') return '需要重试';
+  if (status === 'error') return '可以继续';
   return '已完成';
 }
 
@@ -980,6 +1144,11 @@ function publicDetail(value: unknown) {
 
 function publicString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function primitiveIdentityString(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return publicString(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -164,7 +164,7 @@ const AGENT_ERROR_COPY: Record<
   },
   NETWORK_ERROR: {
     title: '网络暂时不稳定',
-    message: '这次请求没有顺利完成。你可以再试一次。',
+    message: '刚才连接不稳，当前需求还在。你可以继续，或者点重试从这里接着处理。',
     retryable: true,
     lifecycle: 'failed',
   },

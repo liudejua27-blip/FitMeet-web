@@ -2,6 +2,7 @@ import { Sparkles } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import {
+  dedupeAssistantCards,
   extractCanonicalAssistantCards,
   summarizeToolUICardCollection,
   type SchemaDrivenAssistantCard,
@@ -21,17 +22,29 @@ export function ToolUICardCollectionBlock({
   summary: ProcessSummary;
   renderCard: ToolUICardRenderer;
 }) {
-  const cards = providedCards ?? extractCanonicalAssistantCards(data);
+  const cards = dedupeAssistantCards(providedCards ?? extractCanonicalAssistantCards(data));
   if (cards.length === 0) return null;
 
   const collection = summarizeToolUICardCollection(cards);
+  const isProductCard = (card: SchemaDrivenAssistantCard) =>
+    card.schemaType === 'social_match.candidate' ||
+    card.schemaType === 'social_match.activity' ||
+    card.schemaType === 'social_match.empty';
+  const isProductCardFlow = cards.every(isProductCard);
+  const isSingleProductCard = cards.length === 1 && isProductCardFlow;
+  const sectionClassName = isProductCardFlow
+    ? 'my-3 space-y-2 text-sm text-[#52525b]'
+    : 'my-3 space-y-2 rounded-2xl border border-black/10 bg-[#f7f7f8] px-3 py-3 text-sm text-[#52525b] shadow-[0_1px_2px_rgba(0,0,0,0.03)]';
 
   return (
     <section
-      className="my-3 space-y-2 rounded-2xl border border-black/10 bg-[#f7f7f8] px-3 py-3 text-sm text-[#52525b] shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
+      className={sectionClassName}
       data-testid="assistant-ui-generative-cards"
       aria-label="整理结果"
       data-schema-version="fitmeet.tool-ui.v1"
+      data-card-density={
+        isSingleProductCard ? 'single-product' : isProductCardFlow ? 'product-flow' : 'collection'
+      }
       data-product-components={collection.components.join(',')}
       data-candidate-count={collection.candidateCount}
       data-empty-count={collection.emptyCount}
@@ -40,15 +53,24 @@ export function ToolUICardCollectionBlock({
       data-life-graph-diff-count={collection.lifeGraphDiffCount}
       data-meet-loop-count={collection.meetLoopCount}
     >
-      <div className="flex items-center gap-2 px-1">
-        <CollectionStatusBadge status={summary.status}>
-          <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-        </CollectionStatusBadge>
-        <div className="min-w-0">
-          <p className="font-medium leading-5 text-[#27272a]">{collection.title}</p>
-          <p className="text-xs leading-5 text-[#71717a]">{collection.detail}</p>
+      {!isSingleProductCard ? (
+        <div
+          className={
+            isProductCardFlow
+              ? 'flex items-center gap-2 px-1 text-[#52525b]'
+              : 'flex items-center gap-2 px-1'
+          }
+          data-collection-header={isProductCardFlow ? 'lightweight-product-summary' : 'panel-summary'}
+        >
+          <CollectionStatusBadge status={summary.status}>
+            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+          </CollectionStatusBadge>
+          <div className="min-w-0">
+            <p className="font-medium leading-5 text-[#27272a]">{collection.title}</p>
+            <p className="text-xs leading-5 text-[#71717a]">{collection.detail}</p>
+          </div>
         </div>
-      </div>
+      ) : null}
       <div className="space-y-2">
         {cards.map((card) => (
           <div

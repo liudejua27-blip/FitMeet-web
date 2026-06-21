@@ -20,6 +20,7 @@ export const TOOL_UI_SCHEMA_ACTIONS = [
   'activity.confirm_create',
   'activity.modify_time',
   'activity.modify_location',
+  'activity.skip_publish',
   'activity.check_in',
   'activity.complete',
   'activity.upload_proof',
@@ -51,12 +52,12 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
   'candidate.connect': {
     busy: '正在准备邀请',
     done: '已准备邀请',
-    result: '已准备邀请请求，真正触达前仍会经过确认。',
+    result: '已准备好友申请，确认前不会触达对方。',
   },
   'candidate.generate_opener': {
     busy: '正在生成开场白',
     done: '已生成开场白',
-    result: '已生成开场白，真正发送前仍会等你确认。',
+    result: '开场白草稿已准备好，不会自动发送给对方。',
   },
   'candidate.more_like_this': {
     busy: '正在找类似选项',
@@ -71,7 +72,7 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
   'opener.regenerate': {
     busy: '正在重新生成',
     done: '已重新生成',
-    result: '已重新生成开场白，发送前仍会等你确认。',
+    result: '已重新生成开场白草稿，不会自动发送给对方。',
   },
   'opener.reject': {
     busy: '正在取消发送',
@@ -84,9 +85,9 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     result: '已打开详情，我会把后续判断继续放在这段对话里。',
   },
   'activity.confirm_create': {
-    busy: '正在准备发起',
-    done: '已准备发起',
-    result: '已准备活动发起流程，发布前仍会保留确认边界。',
+    busy: '正在准备发布',
+    done: '已准备发布',
+    result: '已准备发布到发现，确认前不会公开。',
   },
   'activity.modify_time': {
     busy: '正在准备改期',
@@ -97,6 +98,11 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     busy: '正在准备地点调整',
     done: '已准备地点调整',
     result: '已准备地点调整方案，真正改动前仍会等你确认。',
+  },
+  'activity.skip_publish': {
+    busy: '正在保留草稿',
+    done: '已暂不发布',
+    result: '已保留这张约练卡，暂时不会发布到发现。',
   },
   'activity.check_in': {
     busy: '正在记录到达',
@@ -141,11 +147,11 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
   'safety.approve': {
     busy: '正在确认安全边界',
     done: '已确认边界',
-    result: '已确认这一步的安全边界，后续执行仍会保留审计记录。',
+    result: '已确认安全边界，后续执行会保留确认记录。',
   },
   'safety.reject': {
-    busy: '正在拒绝这一步',
-    done: '已拒绝',
-    result: '已拒绝这一步，不会继续执行相关高风险动作。',
+    busy: '正在取消',
+    done: '已取消',
+    result: '已取消，不会继续执行相关高风险动作。',
   },
 };

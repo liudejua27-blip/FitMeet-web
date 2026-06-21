@@ -69,6 +69,12 @@ export function ChatGPTMessage({
     };
     return custom.fitmeetBranch;
   });
+  const createsBranch = useAuiState((state) => {
+    const custom = state.message.metadata.custom as {
+      fitmeetCreatesBranch?: boolean;
+    };
+    return custom.fitmeetCreatesBranch === true;
+  });
   const feedbackStatus = useAuiState((state) => {
     const custom = state.message.metadata.custom as {
       feedbackStatus?: FitMeetAssistantMessage['feedbackStatus'];
@@ -258,7 +264,7 @@ export function ChatGPTMessage({
             messageId={fitmeetMessageId}
             onFeedback={onFeedback}
           />
-          {branch?.count && branch.count > 1 ? (
+          {createsBranch && branch?.count && branch.count > 1 ? (
             <ChatGPTBranchPicker branch={branch} messageId={id} onBranchSwitch={onBranchSwitch} />
           ) : null}
         </div>

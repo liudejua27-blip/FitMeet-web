@@ -119,6 +119,12 @@ export function CandidateResultCard({ card }: { card: SchemaDrivenAssistantCard 
             fallback={opportunity.recommendedNextAction}
             label="推荐理由"
           />
+          {opportunity.suggestedOpener ? (
+            <p className="mt-2 rounded-xl bg-[#f7f7f8] px-3 py-2 text-xs leading-5 text-[#3f3f46] ring-1 ring-black/5">
+              开场白预览：{opportunity.suggestedOpener}
+            </p>
+          ) : null}
+          <CardActionSummary card={card} actions={card.actions} />
           <ProductCardDetails title="查看推荐依据和安全边界">
             <OpportunityGuardrailStrip
               schemaType={card.schemaType}
@@ -254,11 +260,6 @@ export function CandidateResultCard({ card }: { card: SchemaDrivenAssistantCard 
               schemaType={card.schemaType}
             />
           </ProductCardDetails>
-          {opportunity.suggestedOpener ? (
-            <p className="mt-2 rounded-xl bg-[#f7f7f8] px-3 py-2 text-xs leading-5 text-[#3f3f46] ring-1 ring-black/5">
-              开场白预览：{opportunity.suggestedOpener}
-            </p>
-          ) : null}
           <ProductCardDetails title="查看下一步和安全边界">
             {opportunity.recommendedNextAction ? (
               <p className="rounded-xl bg-[#f7f7f8] px-3 py-2 text-xs leading-5 text-[#52525b] ring-1 ring-black/5">
@@ -271,7 +272,6 @@ export function CandidateResultCard({ card }: { card: SchemaDrivenAssistantCard 
               </p>
             ) : null}
           </ProductCardDetails>
-          <CardActionSummary card={card} actions={card.actions} />
         </div>
       </div>
     </article>
