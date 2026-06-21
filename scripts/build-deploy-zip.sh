@@ -2,9 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUTPUT="${1:-${ROOT_DIR}/fitmeet-ecs-deploy.zip}"
-OUTPUT_DIR="$(dirname "${OUTPUT}")"
-OUTPUT_NAME="$(basename "${OUTPUT}")"
+OUTPUT_INPUT="${1:-${ROOT_DIR}/fitmeet-ecs-deploy.zip}"
+OUTPUT_DIR="$(dirname "${OUTPUT_INPUT}")"
+OUTPUT_NAME="$(basename "${OUTPUT_INPUT}")"
+mkdir -p "${OUTPUT_DIR}"
+OUTPUT_DIR="$(cd "${OUTPUT_DIR}" && pwd)"
+OUTPUT="${OUTPUT_DIR}/${OUTPUT_NAME}"
 CHECKSUM_OUTPUT="${OUTPUT}.sha256"
 INSTALLER_OUTPUT="${OUTPUT_DIR}/fitmeet-ecs-install-release.sh"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fitmeet-ecs-deploy.XXXXXX")"
