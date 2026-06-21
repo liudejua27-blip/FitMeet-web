@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -9,7 +10,7 @@ const baseUrlArg = process.argv.find((arg) => arg.startsWith('--base-url='))?.re
 const hasExplicitBaseUrl = Boolean(
   process.env.FITMEET_E2E_BASE_URL || process.env.PLAYWRIGHT_BASE_URL || baseUrlArg,
 );
-const baseUrl = process.env.FITMEET_E2E_BASE_URL || process.env.PLAYWRIGHT_BASE_URL || baseUrlArg || DEFAULT_BASE_URL;
+let baseUrl = process.env.FITMEET_E2E_BASE_URL || process.env.PLAYWRIGHT_BASE_URL || baseUrlArg || DEFAULT_BASE_URL;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const qaOutputDir = path.resolve(__dirname, '..', 'qa', 'agent-chat-shell');
@@ -67,6 +68,23 @@ const forbiddenOrdinarySocialCopy = [
   /候选人/,
   /发布到发现/,
 ];
+
+const isPortAvailable = async (port) =>
+  await new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(false));
+    server.once('listening', () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, '127.0.0.1');
+  });
+
+const findAvailablePort = async (preferredPort) => {
+  for (let port = preferredPort; port < preferredPort + 50; port += 1) {
+    if (await isPortAvailable(port)) return port;
+  }
+  throw new Error(`[agent-chat-qa] Could not find an available local port near ${preferredPort}`);
+};
 
 const assertNoInternalToolTerms = async (page, viewport, scope) => {
   const bodyText = await page.locator('body').innerText();
@@ -356,7 +374,7 @@ const startLocalViteServer = async ({
 
     child.stderr.on('data', (chunk) => {
       const output = String(chunk);
-      if (output.includes('EADDRINUSE')) {
+      if (output.includes('EADDRINUSE') || (output.includes('Port') && output.includes('is already in use'))) {
         settleFailed(
           `[agent-chat-qa] Port ${port} is already in use. Set PLAYWRIGHT_BASE_URL to test an existing server.`,
         );
@@ -2349,7 +2367,9 @@ const runWithViewport = async (browser, viewport, assertion) => {
 let serverProcess;
 let realModeServerProcess;
 if (!hasExplicitBaseUrl) {
-  serverProcess = await startLocalViteServer();
+  const localPort = await findAvailablePort(5173);
+  baseUrl = `http://127.0.0.1:${localPort}`;
+  serverProcess = await startLocalViteServer({ port: localPort });
 }
 
 await mkdir(qaOutputDir, { recursive: true });
@@ -2393,12 +2413,13 @@ try {
       await runWithViewport(browser, viewport, assertEndToEndOpportunityJourney);
     }
 
+    const realModePort = await findAvailablePort(5174);
     realModeServerProcess = await startLocalViteServer({
-      port: 5174,
+      port: realModePort,
       adapter: 'real',
       mockFlow: false,
     });
-    const realModeBaseUrl = 'http://127.0.0.1:5174';
+    const realModeBaseUrl = `http://127.0.0.1:${realModePort}`;
     await runWithViewport(browser, viewports[3], (page, viewport) =>
       assertRealModeThreadListPersistence(page, viewport, realModeBaseUrl),
     );
