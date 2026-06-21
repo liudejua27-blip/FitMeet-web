@@ -6784,7 +6784,7 @@ describe('AgentWorkspacePage', () => {
       'data-skeleton-row-count',
       '6',
     );
-    expect(screen.getByText('Loading')).toBeInTheDocument();
+    expect(screen.getByText('正在加载')).toBeInTheDocument();
     expect(screen.getByTestId('assistant-ui-thread-list')).toHaveAttribute('aria-busy', 'true');
     expect(screen.getByTestId('assistant-ui-thread-list')).toHaveAttribute(
       'data-runtime-loading',
@@ -8156,7 +8156,7 @@ describe('AgentWorkspacePage', () => {
     const runtimeHints = screen.getByTestId('assistant-ui-approval-runtime-hints');
     expect(runtimeHints).toHaveTextContent('邀请发送草稿');
     expect(runtimeHints).toHaveTextContent('确认前不会触达对方');
-    expect(runtimeHints).toHaveTextContent('会留下确认记录');
+    expect(runtimeHints).toHaveTextContent('之后可以回看这次确认');
     expect(runtimeHints).toHaveTextContent('同意后接着当前进度继续');
     expect(screen.getByText(/确认后才会发出好友申请/)).toBeInTheDocument();
     expect(screen.getByTestId('assistant-ui-approval-tool')).not.toHaveTextContent(/将要执行：/);

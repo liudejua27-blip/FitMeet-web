@@ -537,6 +537,84 @@ describe('SocialCodexEventPipelineService', () => {
     });
   });
 
+  it('scopes legacy numeric assistant message ids by run so reruns do not merge into old replies', async () => {
+    const writes: Array<{ event: string; data: unknown }> = [];
+    const writer = makePipeline(writes);
+
+    await writer('assistant.delta', 'detect_social_intent', '正在回复', {
+      state: 'running',
+      messageId: 'agent-message:42',
+      payload: {
+        delta: '第一段',
+        messageId: 'agent-message:42',
+        source: 'llm',
+      },
+    });
+
+    const assistant = writes.find((item) => item.event === 'assistant.delta')
+      ?.data as {
+      messageId?: string;
+      payload?: Record<string, unknown>;
+    };
+    expect(assistant).toMatchObject({
+      messageId: 'agent-message:42:run:test',
+      payload: {
+        messageId: 'agent-message:42:run:test',
+      },
+    });
+  });
+
+  it('uses current-message slots for profile gate before hydrated context catches up', async () => {
+    const writes: Array<{ event: string; data: unknown }> = [];
+    const profileGate = {
+      getMinimumProfileStatusWithTaskSlots: jest.fn().mockResolvedValue({
+        passed: true,
+        missing: [],
+        assistantMessage: '',
+        profileCompleteness: 40,
+        readinessLevel: null,
+        canEnterMatchPool: true,
+        nextActions: [],
+      }),
+    };
+    const pipeline = new SocialCodexEventPipelineService(
+      new SocialAgentEventV2Service(),
+      undefined,
+      new SocialAgentTaskMemoryStateMachineService(),
+      {
+        hydrateContext: jest.fn().mockResolvedValue({ taskSlots: {} }),
+      } as never,
+      profileGate as never,
+      new SocialCodexApprovalSchemaService(),
+    );
+    const writer = pipeline.createWriter({
+      write: (event, data) => writes.push({ event, data }),
+      userId: 7,
+      taskId: 42,
+      threadId: 'agent-task:42',
+      runId: 'run:test',
+    });
+
+    await pipeline.writeProfileGateIfNeeded(writer, 7, {
+      text: '我想在青岛大学附近，今天晚上，散步，找女生，最好喜欢编程',
+      taskId: 42,
+      threadId: 'agent-task:42',
+    });
+
+    expect(profileGate.getMinimumProfileStatusWithTaskSlots).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({
+        activity: expect.objectContaining({ value: '散步' }),
+        time_window: expect.objectContaining({ value: '今天晚上' }),
+        location_text: expect.objectContaining({ value: '青岛大学附近' }),
+        candidate_preference: expect.objectContaining({
+          value: expect.stringContaining('女生'),
+        }),
+      }),
+    );
+    expect(writes.map((item) => item.event)).toContain('tool.done');
+  });
+
   it('emits product-language process display text even when callers pass internal labels', async () => {
     const writes: Array<{ event: string; data: unknown }> = [];
     const writer = makePipeline(writes);

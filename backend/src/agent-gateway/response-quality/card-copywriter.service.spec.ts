@@ -465,14 +465,24 @@ describe('CardCopywriterService', () => {
 
     expect(card).toMatchObject({
       schemaType: 'safety.approval',
+      title: '确认后我再继续',
+      body:
+        '我准备好了一步会触达他人或公开内容的操作。你确认前，我不会发送、连接或发布。',
       data: expect.objectContaining({
-        auditNote: '确认、取消和执行结果会保留记录，方便你之后查看或撤回。',
+        auditNote:
+          '确认或取消后，你都可以回看这次决定；如果想改内容，直接告诉我。',
         approval: expect.objectContaining({
-          auditNote: '确认、取消和执行结果会保留记录，方便你之后查看或撤回。',
+          title: '确认后我再继续',
+          boundary:
+            '我准备好了一步会触达他人或公开内容的操作。你确认前，我不会发送、连接或发布。',
+          auditNote:
+            '确认或取消后，你都可以回看这次决定；如果想改内容，直接告诉我。',
+          checkpointLabel: '我会接着处理',
         }),
       }),
     });
     expect(JSON.stringify(card)).not.toMatch(/审批审计日志|审计日志|audit log/i);
+    expect(JSON.stringify(card)).not.toMatch(/当前有\s*\d+\s*个动作/);
   });
 
 });

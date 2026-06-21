@@ -986,22 +986,25 @@ function assistantCardsForResult(result: UserFacingAgentResponse): Record<string
 
 type PendingConfirmation = UserFacingAgentResponse['pendingConfirmations'][number];
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function attachPendingConfirmationsToAssistantCards(
   cards: Record<string, unknown>[],
   confirmations: PendingConfirmation[],
 ) {
-  if (cards.length === 0 || confirmations.length === 0) {
-    return { cards, standaloneConfirmations: confirmations };
+  const userVisibleConfirmations = dedupePendingCardConfirmations(
+    confirmations.filter((confirmation) => !isLowRiskCardConfirmation(confirmation)),
+  );
+  if (cards.length === 0 || userVisibleConfirmations.length === 0) {
+    return { cards, standaloneConfirmations: userVisibleConfirmations };
   }
 
   const used = new Set<number>();
   const cardsWithInlineApprovals = cards.map((card) => {
-    const matches = confirmations
+    const matches = userVisibleConfirmations
       .map((confirmation, index) => ({ confirmation, index }))
       .filter(
         ({ confirmation, index }) =>
           !used.has(index) &&
-          !isLowRiskCardConfirmation(confirmation) &&
           confirmationCanLiveInsideCard(card, confirmation, cards),
       );
     if (matches.length === 0) return card;
@@ -1011,10 +1014,10 @@ export function attachPendingConfirmationsToAssistantCards(
     const inlineApprovalConfirmations = matches.reduce<Record<string, unknown>>(
       (out, { confirmation }) => {
         const actionKey = inlineApprovalActionKeyForCard(card, confirmation);
-        out[actionKey] = {
+        out[actionKey] = chooseInlineCardConfirmation(out[actionKey], {
           ...confirmation,
           actionKey,
-        };
+        });
         return out;
       },
       isRecord(data.inlineApprovalConfirmations)
@@ -1032,13 +1035,112 @@ export function attachPendingConfirmationsToAssistantCards(
     };
   });
 
-  const standaloneConfirmations = confirmations.filter((confirmation, index) => {
+  const standaloneConfirmations = userVisibleConfirmations.filter((_, index) => {
     if (used.has(index)) return false;
-    if (isLowRiskCardConfirmation(confirmation)) return false;
     return true;
   });
 
   return { cards: cardsWithInlineApprovals, standaloneConfirmations };
+}
+
+function chooseInlineCardConfirmation(
+  current: unknown,
+  next: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!isRecord(current)) return next;
+  const currentId = primitiveStringFromUnknown(current.id);
+  const nextId = primitiveStringFromUnknown(next.id);
+  if (!currentId && nextId) return next;
+  if (currentId && !nextId) return current;
+  const currentRisk = riskPriority(current.riskLevel);
+  const nextRisk = riskPriority(next.riskLevel);
+  return nextRisk >= currentRisk ? next : current;
+}
+
+function riskPriority(value: unknown) {
+  const risk = primitiveStringFromUnknown(value)?.toLowerCase();
+  if (risk === 'critical') return 4;
+  if (risk === 'high') return 3;
+  if (risk === 'medium') return 2;
+  if (risk === 'low') return 1;
+  return 0;
+}
+
+function dedupePendingCardConfirmations(confirmations: PendingConfirmation[]) {
+  const seen = new Set<string>();
+  const result: PendingConfirmation[] = [];
+  for (const confirmation of confirmations) {
+    const key = pendingCardConfirmationKey(confirmation);
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    result.push(confirmation);
+  }
+  return result;
+}
+
+function pendingCardConfirmationKey(confirmation: PendingConfirmation) {
+  const id = primitiveStringFromUnknown(confirmation.id);
+  if (id) return `approval:${id}`;
+  const actionType =
+    primitiveStringFromUnknown(confirmation.actionType) ??
+    primitiveStringFromUnknown(confirmation.type) ??
+    inlineApprovalActionKeyFromConfirmation(confirmation);
+  const targetKey = pendingCardConfirmationTargetKey(confirmation);
+  if (actionType || targetKey) {
+    return ['pending', actionType, targetKey].filter(Boolean).join(':');
+  }
+  const summary = stringFromUnknown(confirmation.summary)
+    ?.normalize('NFKC')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .slice(0, 120);
+  return summary ? `summary:${summary}` : null;
+}
+
+function pendingCardConfirmationTargetKey(confirmation: PendingConfirmation) {
+  const record = confirmation as unknown as Record<string, unknown>;
+  const payload = isRecord(record.payload) ? record.payload : {};
+  const candidateId = firstPrimitiveString(
+    record.candidateRecordId,
+    record.socialRequestCandidateId,
+    record.targetUserId,
+    record.candidateUserId,
+    record.userId,
+    payload.candidateRecordId,
+    payload.socialRequestCandidateId,
+    payload.targetUserId,
+    payload.candidateUserId,
+    payload.userId,
+  );
+  if (candidateId) return `candidate:${candidateId}`;
+  const opportunityId = firstPrimitiveString(
+    record.opportunityId,
+    record.activityId,
+    record.publicIntentId,
+    record.socialRequestId,
+    payload.opportunityId,
+    payload.activityId,
+    payload.publicIntentId,
+    payload.socialRequestId,
+  );
+  if (opportunityId) {
+    const taskId = firstPrimitiveString(record.taskId, payload.taskId);
+    return taskId ? `opportunity:${taskId}:${opportunityId}` : `opportunity:${opportunityId}`;
+  }
+  const taskId = firstPrimitiveString(record.taskId, payload.taskId);
+  return taskId ? `task:${taskId}` : null;
+}
+
+function inlineApprovalActionKeyFromConfirmation(confirmation: PendingConfirmation) {
+  const actionType = stringFromUnknown(confirmation.actionType)?.toLowerCase() ?? '';
+  if (/connect|friend|candidate/.test(actionType)) return 'candidate.connect';
+  if (/send|message|invite|opener/.test(actionType)) return 'opener.confirm_send';
+  if (/publish|social_request|activity|meet/.test(actionType)) return 'activity.confirm_create';
+  const text = confirmationSearchText(confirmation);
+  if (/opener|send|message|invite|发送|邀请/.test(text)) return 'opener.confirm_send';
+  if (/connect|friend|candidate|好友|连接|候选/.test(text)) return 'candidate.connect';
+  if (/publish|social_request|发现|发布|约练|活动/.test(text)) return 'activity.confirm_create';
+  return null;
 }
 
 function confirmationCanLiveInsideCard(
@@ -1188,6 +1290,15 @@ function isLowRiskCardConfirmation(confirmation: PendingConfirmation) {
 }
 
 function isHighRiskCardConfirmation(confirmation: PendingConfirmation) {
+  const actionType = stringFromUnknown(confirmation.actionType)?.trim().toLowerCase();
+  if (
+    actionType &&
+    /^(candidate\.like|candidate\.generate_opener|candidate\.view_detail|candidate\.skip|candidate\.more_like_this|save_candidate|generate_opener|draft_opener)$/i.test(
+      actionType,
+    )
+  ) {
+    return false;
+  }
   const text = confirmationSearchText(confirmation);
   return /publish|social_request|connect_candidate|candidate\.connect|friend|send_invite|opener\.confirm_send|send|message|invite|contact|location|precise|exchange|create|公开|发布|加好友|好友|连接|发送|私信|邀请|联系方式|精确位置|创建/.test(
     text,
@@ -1325,6 +1436,10 @@ function primitiveStringFromUnknown(value: unknown): string | null {
   if (typeof value === 'string' && value.trim()) return value.trim();
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   return null;
+}
+
+function firstPrimitiveString(...values: unknown[]) {
+  return values.map((value) => primitiveStringFromUnknown(value)).find(Boolean) ?? null;
 }
 
 function appendMessageText(message: AppendMessage): string {

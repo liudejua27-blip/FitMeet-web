@@ -196,6 +196,7 @@ Assert-RequiredPath "frontend/src/components/assistant-ui/tool-card-collection.t
 Assert-RequiredPath "frontend/src/components/assistant-ui/tool-card-shared.tsx"
 Assert-RequiredPath "frontend/src/components/assistant-ui/tool-process-model.ts"
 Assert-RequiredPath "frontend/src/components/assistant-ui/tool-generic-card.tsx"
+Assert-RequiredPath "frontend/src/components/assistant-ui/tool-risk-policy.ts"
 Assert-RequiredPath "frontend/src/components/assistant-ui/tool-ui-action-copy.ts"
 Assert-RequiredPath "frontend/src/components/assistant-ui/tool-ui-schema.ts"
 Assert-RequiredPath "frontend/src/components/assistant-ui/tool-ui-actions.tsx"
@@ -680,6 +681,7 @@ Invoke-Step "Scan deploy zip" {
     HasAssistantToolCardShared = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/src/components/assistant-ui/tool-card-shared\.tsx$' })
     HasAssistantProcessModel = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/src/components/assistant-ui/tool-process-model\.ts$' })
     HasAssistantToolGenericCard = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/src/components/assistant-ui/tool-generic-card\.tsx$' })
+    HasAssistantToolRiskPolicy = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/src/components/assistant-ui/tool-risk-policy\.ts$' })
     HasAssistantToolActionCopy = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/src/components/assistant-ui/tool-ui-action-copy\.ts$' })
     HasAssistantToolSchema = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/src/components/assistant-ui/tool-ui-schema\.ts$' })
     HasAssistantToolActions = [bool]($entries | Where-Object { $_ -match '(^|/)frontend/src/components/assistant-ui/tool-ui-actions\.tsx$' })
@@ -818,6 +820,7 @@ Invoke-Step "Scan deploy zip" {
     -not $scan.HasAssistantToolCardShared -or
     -not $scan.HasAssistantProcessModel -or
     -not $scan.HasAssistantToolGenericCard -or
+    -not $scan.HasAssistantToolRiskPolicy -or
     -not $scan.HasAssistantToolActionCopy -or
     -not $scan.HasAssistantToolSchema -or
     -not $scan.HasAssistantToolActions -or

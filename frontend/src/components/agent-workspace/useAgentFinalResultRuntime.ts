@@ -29,7 +29,7 @@ import {
   stepIdFromLightStatus,
   traceIdFromResult,
 } from './agentWorkspaceRuntime';
-import { agentCardDedupKeys } from './agentCardIdentity';
+import { mergeUniqueAgentCards } from './agentCardIdentity';
 import {
   reduceSingleRunAssistantMessages,
   type AssistantRunMessageAnchor,
@@ -308,20 +308,9 @@ function stringFromUnknown(value: unknown): string | null {
 export function dedupeUserFacingResponseCards(
   result: UserFacingAgentResponse,
 ): UserFacingAgentResponse {
-  const seen = new Set<string>();
-  const cards: FitMeetAlphaCard[] = [];
-  for (const card of result.cards) {
-    const keys = userFacingCardDedupKeys(card);
-    if (keys.some((key) => seen.has(key))) continue;
-    for (const key of keys) seen.add(key);
-    cards.push(card);
-  }
+  const cards = mergeUniqueAgentCards([], result.cards);
   if (cards.length === result.cards.length) return result;
   return { ...result, cards };
-}
-
-function userFacingCardDedupKeys(card: FitMeetAlphaCard) {
-  return agentCardDedupKeys(card);
 }
 
 function resultRunMessageAnchor(
@@ -342,6 +331,12 @@ export function mergeAssistantFinalText(previous: string, finalMessage: string):
   if (previousNorm === finalNorm) return collapseRepeatedAssistantTextBlocks(previousText);
   if (previousNorm.includes(finalNorm)) return collapseRepeatedAssistantTextBlocks(previousText);
   if (finalNorm.includes(previousNorm)) return collapseRepeatedAssistantTextBlocks(finalMessage);
+  if (
+    !isTransientAssistantStatusText(previousNorm) &&
+    isGenericIdleAssistantText(finalNorm)
+  ) {
+    return collapseRepeatedAssistantTextBlocks(previousText);
+  }
   if (shouldPreferFinalAnswerText(previousText, finalMessage)) {
     return collapseRepeatedAssistantTextBlocks(finalMessage);
   }
@@ -363,6 +358,12 @@ function isTransientAssistantStatusText(value: string): boolean {
   return /^(正在|已记录|已整理|正在整理|正在理解|正在查找|正在筛选|正在检查|可以继续|当前进度|刚才连接不稳)/.test(
     value,
   ) || /[.。…]$/.test(value) && value.length <= 42 && /正在|继续|整理|查找|筛选|检查/.test(value);
+}
+
+function isGenericIdleAssistantText(value: string): boolean {
+  return /^(你好[，,]?\s*我在|你可以随便聊|等你明确说要找人|等你明确说要找活动|我主要能帮你做这几件事)/.test(
+    value,
+  );
 }
 
 export function findAssistantRunResultMergeIndex(

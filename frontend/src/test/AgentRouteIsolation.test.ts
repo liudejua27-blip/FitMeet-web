@@ -232,7 +232,7 @@ describe('Agent user route isolation', () => {
     expect(finalResultSource).toContain("from './agentCardIdentity'");
     expect(finalResultSource).toContain("from './assistantTextDedupe'");
     expect(finalResultSource).toContain('reduceSingleRunAssistantMessages');
-    expect(finalResultSource).toContain('agentCardDedupKeys');
+    expect(finalResultSource).toContain('mergeUniqueAgentCards');
     expect(approvalDispatchSource).toContain("from './agentCardIdentity'");
     expect(approvalDispatchSource).toContain('mergeUniqueAgentCards');
     expect(reminderRuntimeSource).toContain("from './agentCardIdentity'");

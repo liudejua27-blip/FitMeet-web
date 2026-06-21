@@ -60,6 +60,8 @@ export interface UserFacingAgentResponse {
   lifeGraphWritebackProposal?: Record<string, unknown>;
   permissionMode: AgentTaskPermissionMode;
   runtime?: {
+    runId?: string | null;
+    messageId?: string | null;
     checkpointId?: number | null;
     checkpointType?: string | null;
     canResume?: boolean;

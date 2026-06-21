@@ -1,5 +1,7 @@
 import {
   enforceSocialIntentGate,
+  enforceExplicitSocialExecutionRoute,
+  hasExplicitCandidateRefinementIntent,
   hasExplicitCandidateMessageConfirmationIntent,
   hasExistingSocialActionContext,
   hasExplicitSocialExecutionIntent,
@@ -49,6 +51,7 @@ describe('social agent social intent gate', () => {
     '推荐几个公开可发现的篮球搭子',
     '帮我找几个适合我的青岛跑步搭子',
     '我想认识周末能一起咖啡散步的新朋友',
+    '我想在青岛大学附近，今天晚上，散步，找女生，最好喜欢编程',
   ])('allows explicit opportunity discovery: %s', (message) => {
     expect(hasExplicitSocialExecutionIntent(message)).toBe(true);
     expect(
@@ -59,7 +62,75 @@ describe('social agent social intent gate', () => {
     ).toBe(true);
   });
 
+  it('keeps rich profile facts as profile enrichment unless the user asks to search now', () => {
+    const profileFacts =
+      '我是白羊男，18，身高181，体重70kg，在青岛上学，性格开放、infp。常住在崂山区青岛大学，想找个同校的女生';
+
+    expect(hasExplicitSocialExecutionIntent(profileFacts)).toBe(false);
+    expect(
+      shouldAllowSocialExecution({
+        message: profileFacts,
+        intent: 'social_search',
+      }),
+    ).toBe(false);
+    expect(
+      enforceSocialIntentGate({ message: profileFacts }, {
+        intent: 'social_search',
+        confidence: 0.9,
+        entities: {
+          city: '青岛',
+          activityType: '',
+          targetGender: '女生',
+          timePreference: '',
+          locationPreference: '青岛大学',
+        },
+        shouldSearch: true,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'search_candidates',
+        source: 'deepseek',
+      } satisfies SocialAgentIntentRouterResult),
+    ).toMatchObject({
+      intent: 'profile_enrichment',
+      shouldSearch: false,
+      shouldUpdateProfile: true,
+      replyStrategy: 'conversational_answer',
+    });
+  });
+
+  it('keeps explicit profile completion requests out of social search', () => {
+    const message = '请帮我完善人物画像：我周末下午一般有空，喜欢跑步。';
+
+    expect(hasExplicitSocialExecutionIntent(message)).toBe(false);
+    expect(
+      enforceSocialIntentGate({ message }, {
+        intent: 'social_search',
+        confidence: 0.88,
+        entities: {
+          city: '',
+          activityType: '跑步',
+          targetGender: '',
+          timePreference: '周末下午',
+          locationPreference: '',
+        },
+        shouldSearch: true,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'search_candidates',
+        source: 'deepseek',
+      } satisfies SocialAgentIntentRouterResult),
+    ).toMatchObject({
+      intent: 'profile_enrichment_request',
+      shouldSearch: false,
+      shouldUpdateProfile: true,
+      replyStrategy: 'conversational_answer',
+    });
+  });
+
   it('allows candidate follow-up only when there is existing social context', () => {
+    expect(hasExplicitCandidateRefinementIntent('有没有女生')).toBe(true);
     expect(
       shouldAllowSocialExecution({
         message: '第二个更合适吗？',
@@ -73,6 +144,39 @@ describe('social agent social intent gate', () => {
         taskContext: { hasCandidates: true },
       }),
     ).toBe(true);
+  });
+
+  it('forces explicit candidate refinement back into candidate follow-up even if model routes generic chat', () => {
+    const route = enforceExplicitSocialExecutionRoute(
+      {
+        message: '有没有女生',
+        taskContext: { hasCandidates: true, candidateCount: 4 },
+        conversationIntent: 'conversation',
+      },
+      {
+        intent: 'casual_chat',
+        confidence: 0.78,
+        entities: {
+          city: '',
+          activityType: '',
+          targetGender: '',
+          timePreference: '',
+          locationPreference: '',
+        },
+        shouldSearch: false,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'conversational_answer',
+        source: 'deepseek',
+      } satisfies SocialAgentIntentRouterResult,
+    );
+
+    expect(route).toMatchObject({
+      intent: 'candidate_followup',
+      shouldSearch: true,
+      replyStrategy: 'search_candidates',
+    });
   });
 
   it('uses conversation intent to block implicit social continuation from stale context', () => {

@@ -756,7 +756,7 @@ function ThreadListSkeleton() {
       data-testid="assistant-ui-thread-list-skeleton"
       data-skeleton-row-count="6"
     >
-      <p className="px-2 pb-1 pt-2 text-[11px] font-medium text-[#a1a1aa]">Loading</p>
+      <p className="px-2 pb-1 pt-2 text-[11px] font-medium text-[#a1a1aa]">正在加载</p>
       {Array.from({ length: 6 }).map((_, index) => (
         <div
           key={index}

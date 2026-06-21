@@ -76,11 +76,15 @@ describe('assistant-ui tool fallback rendering', () => {
     expect(approval).toHaveAttribute('data-hidden-confirmation-count', '2');
     expect(screen.getAllByTestId('assistant-ui-approval-confirmation-row')).toHaveLength(1);
     expect(screen.getByTestId('assistant-ui-approval-collapsed-count')).toHaveTextContent(
-      '还有 2 个待确认动作',
+      '还有 2 个动作也在这张卡里',
+    );
+    expect(screen.getByTestId('assistant-ui-approval-queued-actions')).toHaveTextContent(
+      '确认加好友并聊天',
+    );
+    expect(screen.getByTestId('assistant-ui-approval-queued-actions')).toHaveTextContent(
+      '确认发布到发现',
     );
     expect(approval).toHaveTextContent('确认发送邀请');
-    expect(approval).not.toHaveTextContent('确认加好友并聊天');
-    expect(approval).not.toHaveTextContent('确认发布到发现');
     expect(approval).not.toHaveTextContent(/connect_candidate|publish_social_request/);
   });
 
@@ -138,6 +142,38 @@ describe('assistant-ui tool fallback rendering', () => {
 
     expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
     expect(screen.queryByText(/收藏候选人|生成开场白/)).not.toBeInTheDocument();
+  });
+
+  it('does not render draft-only opener safety cards as standalone approvals', () => {
+    render(
+      <AssistantDataFallback
+        type="data"
+        status={{ type: 'complete' }}
+        name="fitmeet-cards"
+        data={{
+          cards: [
+            {
+              id: 'opener-draft-only',
+              schemaType: 'safety.approval',
+              schemaVersion: 'fitmeet.tool-ui.v1',
+              title: '生成开场白草稿',
+              body: '只生成草稿，不会自动发送给对方。',
+              data: {
+                schemaName: 'SafetyApprovalCard',
+                schemaType: 'safety.approval',
+                summary: '生成开场白草稿，不会发送给对方。',
+                riskLevel: 'low',
+              },
+              actions: [],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-ui-generative-cards')).not.toBeInTheDocument();
+    expect(screen.queryByText(/生成开场白草稿/)).not.toBeInTheDocument();
   });
 
   it('keeps standalone approval panels for high-risk social actions', () => {
@@ -987,11 +1023,13 @@ describe('assistant-ui tool fallback rendering', () => {
     expect(approvalPanel).toHaveAttribute('data-hidden-confirmation-count', '1');
     expect(screen.getAllByTestId('assistant-ui-approval-confirmation-row')).toHaveLength(1);
     expect(screen.getByTestId('assistant-ui-approval-collapsed-count')).toHaveTextContent(
-      '还有 1 个待确认动作',
+      '还有 1 个动作也在这张卡里',
+    );
+    expect(screen.getByTestId('assistant-ui-approval-queued-actions')).toHaveTextContent(
+      '确认加好友并聊天',
     );
     expect(screen.queryAllByTestId('assistant-ui-schema-card')).toHaveLength(0);
     expect(approvalPanel).toHaveTextContent('确认发送邀请');
-    expect(approvalPanel).not.toHaveTextContent('确认加好友并聊天');
     expect(approvalPanel).not.toHaveTextContent(/riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:|保存点/i);
   });
 
@@ -1684,7 +1722,7 @@ describe('assistant-ui tool fallback rendering', () => {
       '确认前不会触达对方',
     );
     expect(screen.getByTestId('assistant-ui-approval-runtime-hints')).toHaveTextContent(
-      '会留下确认记录',
+      '之后可以回看这次确认',
     );
     expect(screen.queryByText(/hydrate_context|planner|traceId|raw JSON|payload/i)).not.toBeInTheDocument();
   });

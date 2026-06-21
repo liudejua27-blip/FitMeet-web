@@ -46,6 +46,7 @@ import {
   transitionSocialAgentState,
 } from './social-agent-memory.util';
 import { TonePolicyService } from './response-quality/tone-policy.service';
+import { buildRunScopedAssistantMessageId } from './social-agent-stream-message-id.util';
 
 @Injectable()
 export class SocialAgentRecommendationResultService {
@@ -83,11 +84,13 @@ export class SocialAgentRecommendationResultService {
     candidates: SocialAgentChatCandidate[];
     searchResult: SocialAgentCandidateSearchResult;
     statusReason: string;
+    runId?: number | string | null;
     emit?: StreamEmit;
     signal?: AbortSignal | null;
     alphaTurn?: FitMeetAlphaTurnDecision;
     buildMemoryContext: (task: AgentTask) => unknown;
     taskContext?: Record<string, unknown>;
+    taskSlotSummary?: Record<string, string>;
     toEventDto: (event: AgentTaskEvent) => Record<string, unknown>;
   }): Promise<SocialAgentChatRunResult> {
     const {
@@ -101,6 +104,11 @@ export class SocialAgentRecommendationResultService {
       emit,
       alphaTurn,
     } = input;
+    const assistantMessageId = buildRunScopedAssistantMessageId({
+      taskId: task.id,
+      runId: input.runId,
+      traceId: alphaTurn?.traceId,
+    });
     task.status = AgentTaskStatus.AwaitingConfirmation;
     task.statusReason = statusReason;
     this.rememberShortTermCandidates(task, draft, candidates, searchResult);
@@ -185,7 +193,7 @@ export class SocialAgentRecommendationResultService {
       assistantStreamed = true;
       await emit?.({
         type: 'assistant_delta',
-        messageId: `agent-message:${task.id}`,
+        messageId: assistantMessageId,
         delta,
         source: 'llm',
       });
@@ -215,6 +223,7 @@ export class SocialAgentRecommendationResultService {
       safety: alphaTurn?.safety,
       traceId: alphaTurn?.traceId,
       lifeGraphSignals: lifeGraphSignals as Record<string, unknown> | null,
+      taskSlotSummary: input.taskSlotSummary ?? null,
     };
     const result = {
       taskId: task.id,
@@ -235,12 +244,19 @@ export class SocialAgentRecommendationResultService {
       traceId: alphaTurn?.traceId,
       agentTrace: alphaTurn?.agentTrace,
       structuredIntent: alphaTurn?.structuredIntent,
+      runtime: {
+        runId:
+          input.runId !== null && input.runId !== undefined
+            ? String(input.runId)
+            : alphaTurn?.traceId ?? null,
+        messageId: assistantMessageId,
+      },
     };
     this.evaluateAgentQuality(result);
     if (assistantStreamed) {
       await emit?.({
         type: 'assistant_done',
-        messageId: `agent-message:${task.id}`,
+        messageId: assistantMessageId,
         source: 'llm',
       });
     }

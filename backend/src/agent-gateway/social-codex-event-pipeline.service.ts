@@ -75,6 +75,17 @@ export class SocialCodexEventPipelineService {
     const emittedDisplayKeys = new Set<string>();
     const emittedEvents: SocialAgentEventV2[] = [];
     return async (type, stage, title, options) => {
+      const messageId =
+        type === 'assistant.delta'
+          ? this.runScopedAssistantMessageId(options.messageId, input.runId)
+          : options.messageId;
+      const payload =
+        type === 'assistant.delta'
+          ? {
+              ...(options.payload ?? {}),
+              messageId,
+            }
+          : options.payload;
       const safeTitle = sanitizeSocialCodexProcessTitle(title, {
         type,
         stage,
@@ -93,13 +104,13 @@ export class SocialCodexEventPipelineService {
         runId: input.runId,
         stage,
         visibility: 'user_visible',
-        messageId: options.messageId,
+        messageId,
         display: {
           title: safeTitle,
           ...(safeDetail ? { detail: safeDetail } : {}),
           state: options.state,
         },
-        payload: sanitizeSocialAgentUserVisiblePayload(type, options.payload),
+        payload: sanitizeSocialAgentUserVisiblePayload(type, payload),
       });
       if (this.isTerminalRunEvent(event)) {
         event = this.withRunSummary(event, emittedEvents);
@@ -126,6 +137,21 @@ export class SocialCodexEventPipelineService {
 
   private isTerminalRunEvent(event: SocialAgentEventV2): boolean {
     return event.type === 'run.completed' || event.type === 'run.failed';
+  }
+
+  private runScopedAssistantMessageId(
+    messageId: string | null | undefined,
+    runId: string,
+  ): string {
+    const raw = cleanDisplayText(messageId, '').trim();
+    const run =
+      typeof runId === 'string' && runId.trim() ? runId.trim() : 'unknown-run';
+    if (!raw) return `agent-message:${run}`;
+    if (raw.includes(run) || raw.startsWith('agent-message:run:')) {
+      return raw;
+    }
+    if (/^agent-message:\d+$/.test(raw)) return `${raw}:${run}`;
+    return raw;
   }
 
   private withRunSummary(
@@ -351,12 +377,16 @@ export class SocialCodexEventPipelineService {
           })
           .catch(() => null)
       : null;
+    const taskSlots = this.mergeCurrentMessageSlots(
+      context?.taskSlots,
+      input.text,
+    );
     const status = await (
       typeof this.profileGate.getMinimumProfileStatusWithTaskSlots ===
       'function'
         ? this.profileGate.getMinimumProfileStatusWithTaskSlots(
             userId,
-            context?.taskSlots,
+            taskSlots,
           )
         : this.profileGate.getMinimumProfileStatus(userId)
     ).catch(() => null);
@@ -709,6 +739,28 @@ export class SocialCodexEventPipelineService {
         normalized,
       );
     return hasActivity && hasTime && hasPlace;
+  }
+
+  private mergeCurrentMessageSlots(
+    existingSlots: unknown,
+    text: string | null | undefined,
+  ): Record<string, unknown> | null | undefined {
+    if (!this.taskSlots || typeof text !== 'string') return existingSlots as
+      | Record<string, unknown>
+      | null
+      | undefined;
+    const extracted = this.taskSlots.extractSlotsFromUserMessage(text);
+    if (Object.keys(extracted).length === 0) {
+      return existingSlots as Record<string, unknown> | null | undefined;
+    }
+    const existing =
+      existingSlots && typeof existingSlots === 'object' && !Array.isArray(existingSlots)
+        ? (existingSlots as Record<string, unknown>)
+        : {};
+    return {
+      ...existing,
+      ...extracted,
+    };
   }
 
   private toolTypeForStatus(

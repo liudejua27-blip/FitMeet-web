@@ -168,6 +168,8 @@ export class UserFacingResponseSanitizerService {
     if (!('runtime' in result) || !result.runtime) return undefined;
     const runtime = result.runtime;
     return {
+      runId: this.readText(runtime.runId, '') || null,
+      messageId: this.readText(runtime.messageId, '') || null,
       checkpointId: this.readNumber(runtime.checkpointId),
       checkpointType: this.readText(runtime.checkpointType, ''),
       canResume: runtime.canResume === true,

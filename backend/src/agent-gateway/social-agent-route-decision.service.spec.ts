@@ -68,6 +68,7 @@ function makeHarness(
     longTermFails?: boolean;
     ownedTask?: AgentTask;
     hydratedContext?: Record<string, unknown> | null;
+    routeTaskContext?: Record<string, unknown>;
   } = {},
 ) {
   const socialProfiles = {
@@ -104,7 +105,9 @@ function makeHarness(
   };
   const routeContext = {
     buildMemoryContext: jest.fn().mockReturnValue({ summary: 'memory' }),
-    buildTaskContext: jest.fn().mockReturnValue({ taskId: 101 }),
+    buildTaskContext: jest
+      .fn()
+      .mockReturnValue(options.routeTaskContext ?? { taskId: 101 }),
     applyRagContext: jest.fn().mockResolvedValue(undefined),
   };
   const messageLog = {
@@ -207,6 +210,11 @@ describe('SocialAgentRouteDecisionService', () => {
     });
 
     expect(result.route).toBe(brainDecision.route);
+    expect(result.route).toMatchObject({
+      intent: 'social_search',
+      shouldSearch: true,
+      replyStrategy: 'search_candidates',
+    });
     expect(result.longTermSnapshot).toBe(longTermSnapshot);
     expect(result.profile).toMatchObject({
       city: '青岛',
@@ -236,7 +244,7 @@ describe('SocialAgentRouteDecisionService', () => {
       brainDecision.route,
     );
     expect(metrics.recordIntent).toHaveBeenCalledWith(
-      'profile_update',
+      'social_search',
       'rules',
     );
     expect(routeContext.applyRagContext).toHaveBeenCalledWith(
@@ -256,7 +264,7 @@ describe('SocialAgentRouteDecisionService', () => {
       taskMemory: {
         lastUserMessages: [
           expect.objectContaining({
-            intent: 'profile_update',
+            intent: 'social_search',
             text: '帮我找周末下午能一起跑步的人',
           }),
         ],
@@ -851,6 +859,44 @@ describe('SocialAgentRouteDecisionService', () => {
         'location_text',
       ]),
     });
+  });
+
+  it('keeps candidate refinement follow-ups inside the existing social task instead of answering generically', async () => {
+    const casualRoute = makeRoute({
+      intent: 'casual_chat',
+      shouldSearch: false,
+      replyStrategy: 'conversational_answer',
+    });
+    const brainDecision = makeBrainDecision(casualRoute, {
+      conversationMode: 'answer',
+      shouldExecuteTool: false,
+      tools: [],
+      userIntent: 'casual_chat',
+      reason: 'model downgraded candidate preference',
+      responseGoal: 'answer normally',
+    });
+    const { service } = makeHarness({
+      brainDecision,
+      routeTaskContext: {
+        taskId: 101,
+        hasCandidates: true,
+        candidateCount: 4,
+      },
+    });
+
+    const result = await service.prepare({
+      ownerUserId: 7,
+      task: makeTask({ goal: '青岛散步搭子' }),
+      body: { taskId: 101, message: '有没有女生' },
+      message: '有没有女生',
+    });
+
+    expect(result.route).toMatchObject({
+      intent: 'candidate_followup',
+      shouldSearch: true,
+      replyStrategy: 'search_candidates',
+    });
+    expect(result.brainDecision?.route).toBe(result.route);
   });
 
   it('records long-term memory failures and continues with a null snapshot', async () => {

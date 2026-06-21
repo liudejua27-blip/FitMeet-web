@@ -171,6 +171,7 @@ export class FitMeetAlphaAgentSdkService {
   buildResultCards(input: {
     taskId: number;
     socialRequestDraft?: Record<string, unknown> | null;
+    taskSlotSummary?: Record<string, string> | null;
     candidates?: Array<Record<string, unknown>>;
     approvalRequiredActions?: Array<Record<string, unknown>>;
     safety?: FitMeetAgentSafety;
@@ -179,7 +180,11 @@ export class FitMeetAlphaAgentSdkService {
   }): FitMeetAlphaCard[] {
     const cards: FitMeetAlphaCard[] = [];
     const taskId = input.taskId;
-    const draft = input.socialRequestDraft;
+    const taskSlotSummary = this.record(input.taskSlotSummary);
+    const draft = this.draftWithTaskSlotSummary(
+      input.socialRequestDraft,
+      taskSlotSummary,
+    );
     let opportunityCardCount = 0;
     const hasOpportunityCardRoom = () =>
       opportunityCardCount < MAX_VISIBLE_OPPORTUNITY_CARDS;
@@ -200,6 +205,7 @@ export class FitMeetAlphaAgentSdkService {
             taskId,
             candidate,
             draft: draft ?? null,
+            taskSlotSummary,
             lifeGraphSignals: input.lifeGraphSignals ?? null,
           }),
         );
@@ -774,6 +780,12 @@ export class FitMeetAlphaAgentSdkService {
       (input.approvalRequiredActions ?? []).length > 0 &&
       this.shouldRenderStandaloneApprovalAudit(cards)
     ) {
+      const approvalBoundary =
+        (input.approvalRequiredActions ?? []).length > 1
+          ? '我准备好了几步会触达他人或公开内容的操作。你确认前，我不会发送、连接或发布。'
+          : '我准备好了一步会触达他人或公开内容的操作。你确认前，我不会发送、连接或发布。';
+      const approvalAuditNote =
+        '确认或取消后，你都可以回看这次决定；如果想改内容，直接告诉我。';
       cards.push(
         this.cardCopywriter?.auditUpdate({
           taskId,
@@ -783,8 +795,8 @@ export class FitMeetAlphaAgentSdkService {
           type: 'audit_update',
           schemaVersion: 'fitmeet.tool-ui.v1',
           schemaType: 'safety.approval',
-          title: '有动作需要你确认',
-          body: `当前有 ${(input.approvalRequiredActions ?? []).length} 个动作需要你确认后才会继续。`,
+          title: '确认后我再继续',
+          body: approvalBoundary,
           status: 'waiting_confirmation',
           data: {
             taskId,
@@ -793,25 +805,25 @@ export class FitMeetAlphaAgentSdkService {
             schemaType: 'safety.approval',
             approvalRequiredActions: input.approvalRequiredActions ?? [],
             approval: {
-              title: '有动作需要你确认',
-              boundary: `当前有 ${(input.approvalRequiredActions ?? []).length} 个动作需要你确认后才会继续。`,
+              title: '确认后我再继续',
+              boundary: approvalBoundary,
               riskLevel: this.maxApprovalRiskLevel(
                 input.approvalRequiredActions ?? [],
               ),
               reasons: this.approvalReasons(
                 input.approvalRequiredActions ?? [],
               ),
-              auditNote: '确认、取消和执行结果会保留记录，方便你之后查看或撤回。',
+              auditNote: approvalAuditNote,
               confirmationLabel: '确认后才执行',
-              checkpointLabel: '同意后我会接着处理',
+              checkpointLabel: '我会接着处理',
             },
             riskLevel: this.maxApprovalRiskLevel(
               input.approvalRequiredActions ?? [],
             ),
             reasons: this.approvalReasons(input.approvalRequiredActions ?? []),
-            auditNote: '确认、取消和执行结果会保留记录，方便你之后查看或撤回。',
+            auditNote: approvalAuditNote,
             confirmationLabel: '确认后才执行',
-            checkpointLabel: '同意后我会接着处理',
+            checkpointLabel: '我会接着处理',
           },
           actions: [],
         },
@@ -2165,6 +2177,40 @@ export class FitMeetAlphaAgentSdkService {
       '轻活动',
       '确认后的候选人',
     ].includes(value);
+  }
+
+  private draftWithTaskSlotSummary(
+    draft: Record<string, unknown> | null | undefined,
+    taskSlotSummary: Record<string, unknown>,
+  ): Record<string, unknown> | null | undefined {
+    if (!draft) return draft;
+    const next: Record<string, unknown> = { ...draft };
+    this.assignDraftSlotIfMissing(next, 'activityType', taskSlotSummary.activity);
+    this.assignDraftSlotIfMissing(next, 'timePreference', taskSlotSummary.time_window);
+    this.assignDraftSlotIfMissing(next, 'preferredTime', taskSlotSummary.time_window);
+    this.assignDraftSlotIfMissing(next, 'locationName', taskSlotSummary.location_text);
+    this.assignDraftSlotIfMissing(next, 'location', taskSlotSummary.location_text);
+    this.assignDraftSlotIfMissing(next, 'city', taskSlotSummary.geo_area);
+    this.assignDraftSlotIfMissing(next, 'intensity', taskSlotSummary.intensity);
+    this.assignDraftSlotIfMissing(
+      next,
+      'candidatePreference',
+      taskSlotSummary.candidate_preference,
+    );
+    this.assignDraftSlotIfMissing(next, 'safetyBoundary', taskSlotSummary.safety_boundary);
+    return next;
+  }
+
+  private assignDraftSlotIfMissing(
+    draft: Record<string, unknown>,
+    key: string,
+    value: unknown,
+  ): void {
+    const slotValue = this.text(value);
+    if (!slotValue || this.isPlaceholderContext(slotValue)) return;
+    const current = this.text(draft[key]);
+    if (current && !this.isPlaceholderContext(current)) return;
+    draft[key] = slotValue;
   }
 
   private text(value: unknown): string {

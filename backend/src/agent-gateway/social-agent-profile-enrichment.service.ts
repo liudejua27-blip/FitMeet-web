@@ -40,6 +40,7 @@ import type {
   SocialAgentIntentType,
 } from './social-agent-intent-router.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
+import { buildRunScopedAssistantMessageId } from './social-agent-stream-message-id.util';
 
 type MemoryContextBuilder = (
   task: AgentTask,
@@ -70,6 +71,7 @@ export class SocialAgentProfileEnrichmentService {
     intent: SocialAgentIntentType;
     buildMemoryContext: MemoryContextBuilder;
     buildTaskContext?: TaskContextBuilder;
+    traceId?: string | null;
     emit?: StreamEmit;
     signal?: AbortSignal | null;
   }): Promise<{
@@ -82,6 +84,10 @@ export class SocialAgentProfileEnrichmentService {
     assistantMessageSource?: SocialAgentAssistantMessageSource;
   }> {
     const { ownerUserId, task, message, intent, buildMemoryContext } = input;
+    const assistantMessageId = buildRunScopedAssistantMessageId({
+      taskId: task.id,
+      traceId: input.traceId,
+    });
 
     if (this.isProfileMissingFieldsQuestion(message)) {
       return {
@@ -215,7 +221,7 @@ export class SocialAgentProfileEnrichmentService {
               assistantStreamed = true;
               await input.emit?.({
                 type: 'assistant_delta',
-                messageId: `agent-message:${task.id}`,
+                messageId: assistantMessageId,
                 delta,
                 source: 'llm',
               });
@@ -272,7 +278,7 @@ export class SocialAgentProfileEnrichmentService {
             assistantStreamed = true;
             await input.emit?.({
               type: 'assistant_delta',
-              messageId: `agent-message:${task.id}`,
+              messageId: assistantMessageId,
               delta,
               source: 'llm',
             });

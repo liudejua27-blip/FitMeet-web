@@ -120,14 +120,16 @@ describe('SocialAgentRouteConversationTurnService', () => {
       profileUpdated: true,
       profileUpdateProposal: { proposedFields: [] },
     });
-    expect(profileEnrichment.handleTurn).toHaveBeenCalledWith({
-      ownerUserId: 7,
-      task,
-      message: '我其实周末下午更有空',
-      intent: 'correction_or_clarification',
-      buildMemoryContext: expect.any(Function),
-      buildTaskContext: expect.any(Function),
-    });
+    expect(profileEnrichment.handleTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        task,
+        message: '我其实周末下午更有空',
+        intent: 'correction_or_clarification',
+        buildMemoryContext: expect.any(Function),
+        buildTaskContext: expect.any(Function),
+      }),
+    );
     const buildMemoryContext = profileEnrichment.handleTurn.mock.calls[0][0]
       .buildMemoryContext as (currentTask: AgentTask) => unknown;
     expect(buildMemoryContext(task)).toEqual({ summary: 'memory' });

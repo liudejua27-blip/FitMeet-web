@@ -287,7 +287,9 @@ export function useAgentSessionRestore({
               id: nextId('assistant'),
               role: 'assistant',
               status: 'done',
-              content: publicText(restoredResponse.assistantMessage, '我已经恢复了上一次对话。'),
+              content: restoredIsGeneric
+                ? ''
+                : publicText(restoredResponse.assistantMessage, '我已经恢复了上一次对话。'),
               result: usefulRestoredResponse,
               taskId: restoredTaskId,
               conversationIntent: restoredIntent,
@@ -330,10 +332,12 @@ export function useAgentSessionRestore({
                         id: nextId('assistant'),
                         role: 'assistant',
                         status: 'done',
-                        content: publicText(
-                          restoredResponse.assistantMessage,
-                          '我已经恢复了这段对话。',
-                        ),
+                        content: restoredIsGeneric
+                          ? ''
+                          : publicText(
+                              restoredResponse.assistantMessage,
+                              '我已经恢复了这段对话。',
+                            ),
                         result: usefulRestoredResponse,
                         taskId: restoredTaskId,
                         conversationIntent: replayIntent,

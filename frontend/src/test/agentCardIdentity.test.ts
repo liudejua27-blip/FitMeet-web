@@ -242,6 +242,88 @@ describe('agent card identity', () => {
       'candidate-card-chen-connect-approval',
     ]);
   });
+
+  it('replaces replayed process cards with the latest covering status', () => {
+    const started = fitmeetCard({
+      id: 'social-codex:summary:start',
+      schemaType: 'generic.card',
+      data: {
+        taskId: 88,
+        processType: 'run_summary',
+        displayMode: 'covering_status',
+        title: '正在理解你的需求',
+      },
+    });
+    const latest = fitmeetCard({
+      id: 'social-codex:summary:latest',
+      schemaType: 'generic.card',
+      data: {
+        taskId: 88,
+        processType: 'run_summary',
+        displayMode: 'covering_status',
+        title: '正在筛选公开可发现的人',
+      },
+    });
+
+    expect(mergeUniqueAgentCards([started], [latest])).toEqual([latest]);
+    expect(agentCardDedupKeys(latest)).toContain('process:task:88:run-summary');
+  });
+
+  it('treats SocialAgentEventV2 process cards as one covering status per run', () => {
+    const slotFilled = fitmeetCard({
+      id: 'event-slot-filled',
+      schemaType: 'generic.card',
+      data: {
+        runId: 'run-social-codex',
+        sourceProtocol: 'social_agent_event_v2',
+        processType: 'slot_memory',
+        title: '已记住：今天上午、青岛大学、散步',
+      },
+    });
+    const candidateSearch = fitmeetCard({
+      id: 'event-candidate-search',
+      schemaType: 'generic.card',
+      data: {
+        runId: 'run-social-codex',
+        sourceProtocol: 'social_agent_event_v2',
+        processType: 'candidate_search',
+        title: '正在筛选公开可发现的人',
+      },
+    });
+
+    expect(mergeUniqueAgentCards([slotFilled], [candidateSearch])).toEqual([candidateSearch]);
+    expect(agentCardDedupKeys(slotFilled)).toContain(
+      'generic.card:process:run:run-social-codex:run-summary',
+    );
+  });
+
+  it('keeps process summaries scoped to different runs separate', () => {
+    const firstRun = fitmeetCard({
+      id: 'social-codex:summary:first',
+      schemaType: 'generic.card',
+      data: {
+        runId: 'run-1',
+        processType: 'run_summary',
+        displayMode: 'covering_status',
+        title: '正在整理你的约练需求',
+      },
+    });
+    const nextRun = fitmeetCard({
+      id: 'social-codex:summary:second',
+      schemaType: 'generic.card',
+      data: {
+        runId: 'run-2',
+        processType: 'run_summary',
+        displayMode: 'covering_status',
+        title: '正在整理你的约练需求',
+      },
+    });
+
+    expect(mergeUniqueAgentCards([firstRun], [nextRun]).map((card) => card.id)).toEqual([
+      'social-codex:summary:first',
+      'social-codex:summary:second',
+    ]);
+  });
 });
 
 function fitmeetCard(input: {

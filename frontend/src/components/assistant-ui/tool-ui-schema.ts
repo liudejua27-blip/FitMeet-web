@@ -1,3 +1,8 @@
+import {
+  isLowRiskApprovalActionType,
+  isLowRiskApprovalText,
+} from './tool-risk-policy';
+
 export type ToolUISchemaType =
   | 'social_match.candidate'
   | 'social_match.activity'
@@ -526,25 +531,7 @@ function inlineApprovalActionKeyForApprovalCard(
 function isLowRiskApprovalCard(card: SchemaDrivenAssistantCard) {
   const actionType = approvalCardActionType(card);
   if (isLowRiskApprovalActionType(actionType)) return true;
-  return isLowRiskApprovalCardText(approvalCardSearchText(card));
-}
-
-function isLowRiskApprovalActionType(value: string | null) {
-  if (!value) return false;
-  return /^(candidate\.like|candidate\.generate_opener|candidate\.view_detail|candidate\.skip|candidate\.more_like_this|save_candidate|favorite_candidate|bookmark_candidate|collect_candidate|generate_opener|draft_opener|view_candidate|skip_candidate)$/i.test(
-    value,
-  );
-}
-
-function isLowRiskApprovalCardText(text: string) {
-  return (
-    /save|like|favorite|collect|bookmark|generate_opener|draft|收藏|喜欢|保存|开场白|草稿/.test(
-      text,
-    ) &&
-    !/send|message|invite|connect|friend|publish|contact|location|发送|私信|邀请|连接|好友|发布|联系|位置/.test(
-      text,
-    )
-  );
+  return isLowRiskApprovalText(approvalCardSearchText(card));
 }
 
 function approvalCardActionType(card: SchemaDrivenAssistantCard) {

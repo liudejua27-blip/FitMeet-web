@@ -852,16 +852,33 @@ export class SocialAgentRouteAgentLoopRunnerService {
     decision: RouteDecision,
     resumeContext: RouteResumeContext | null,
   ): AgentLoopToolPlan {
+    const input = this.jsonSafeWorkerToolInput({
+      intent: decision.route.intent,
+      taskContext: decision.taskContext ?? null,
+      ...(resumeContext ? { resumeContext } : {}),
+    });
     return {
       agent: this.agentForBranch(toolName, decision),
       toolName,
-      input: {
-        intent: decision.route.intent,
-        taskContext: decision.taskContext ?? null,
-        ...(resumeContext ? { resumeContext } : {}),
-      },
+      input,
       requiresApproval: false,
     };
+  }
+
+  private jsonSafeWorkerToolInput(
+    input: Record<string, unknown>,
+  ): Record<string, unknown> {
+    try {
+      return JSON.parse(JSON.stringify(input)) as Record<string, unknown>;
+    } catch {
+      return {
+        intent:
+          typeof input.intent === 'string' && input.intent.trim()
+            ? input.intent
+            : 'unknown',
+        taskContext: null,
+      };
+    }
   }
 
   private agentForBranch(

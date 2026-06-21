@@ -147,7 +147,7 @@ export function sanitizeStoredThreadMessage(message: AgentThreadMessage): AgentT
   if (!content && !hasUsefulResult) return null;
   return {
     ...message,
-    content: content || '我可以继续上次的话题，也可以重新开始。',
+    content: isGenericRecovery ? '' : content || '我可以继续上次的话题，也可以重新开始。',
     result: hasUsefulResult ? result : null,
     conversationIntent: hasUsefulResult
       ? intentForRestoredResponse(result as UserFacingAgentResponse, 'conversation')
@@ -222,9 +222,33 @@ export function isSocialActionIntent(text: string) {
   ) {
     return false;
   }
-  return /(帮我找|给我找|想找|我要找|我想认识|想认识|低压力社交|找一个|找个|找人|找.{0,48}(人|搭子|伙伴|朋友|用户|候选|活动|局|约练)|约练|约跑|约球|认识.{0,16}(朋友|人|搭子)|推荐.{0,16}(用户|朋友|人|搭子|候选|活动|局|约练)|搜索.{0,16}(用户|朋友|人|搭子|候选|活动|局|约练)|匹配.{0,16}(用户|朋友|人|搭子|候选)|附近.{0,16}(用户|朋友|人|搭子|活动)|同城.{0,16}(用户|朋友|人|搭子|活动)|真实用户|约练用户|户外搭子|篮球搭子|约练搭子|一起.{0,16}(咖啡|拍照|跑步|健身|羽毛球|网球|篮球|徒步|户外|骑行|运动|训练)|周末.{0,16}(咖啡|拍照|跑步|健身|羽毛球|网球|篮球|徒步|户外|骑行|运动|训练)|参加.{0,8}(活动|约练)|发起.{0,8}(活动|约练)|加好友|发邀请|线下见面|线下活动)/.test(
-    normalized,
-  );
+  if (
+    /(帮我找|给我找|想找|我要找|我想认识|想认识|低压力社交|找一个|找个|找人|找.{0,48}(女生|男生|女性|男性|人|搭子|伙伴|朋友|用户|候选|活动|局|约练)|约练|约跑|约球|认识.{0,16}(朋友|人|搭子)|推荐.{0,16}(用户|朋友|人|搭子|候选|活动|局|约练)|搜索.{0,16}(用户|朋友|人|搭子|候选|活动|局|约练)|匹配.{0,16}(用户|朋友|人|搭子|候选)|附近.{0,16}(用户|朋友|人|搭子|活动)|同城.{0,16}(用户|朋友|人|搭子|活动)|真实用户|约练用户|户外搭子|篮球搭子|约练搭子|一起.{0,16}(咖啡|拍照|跑步|健身|羽毛球|网球|篮球|徒步|户外|骑行|运动|训练)|周末.{0,16}(咖啡|拍照|跑步|健身|羽毛球|网球|篮球|徒步|户外|骑行|运动|训练)|参加.{0,8}(活动|约练)|发起.{0,8}(活动|约练)|加好友|发邀请|线下见面|线下活动)/.test(
+      normalized,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /((有没有|有无|筛一下|筛选|优先|最好|只要|更想|换成|找找).{0,18}(女生|男生|女性|男性|女的|男的|舞蹈|舞蹈生|编程|程序员|科技|摄影|音乐|读书|学生|同校|附近|同城))|^(女生|男生|女性|男性|女的|男的|舞蹈生|喜欢编程|会编程|附近的|同城的)[。.!！\s]*$/.test(
+      normalized,
+    )
+  ) {
+    return true;
+  }
+  const hasActivity =
+    /(散步|跑步|羽毛球|篮球|健身|徒步|爬山|骑行|游泳|瑜伽|飞盘|网球|乒乓|咖啡|吃饭|电影|city\s*walk|citywalk)/i.test(
+      normalized,
+    );
+  const hasTime =
+    /(周末|今天|明天|后天|今晚|上午|下午|晚上|中午|早上|[0-9一二三四五六七八九十]+点)/i.test(
+      normalized,
+    );
+  const hasPlace =
+    /(附近|大学|公园|商场|体育馆|健身房|校区|区|市|青岛|上海|北京|深圳|广州|杭州|成都|武汉|南京)/i.test(
+      normalized,
+    );
+  return hasActivity && hasTime && hasPlace;
 }
 
 export function stepsForPrompt(prompt: string) {
@@ -390,6 +414,20 @@ export function intentForRestoredResponse(
 }
 
 export function sanitizeRestoredResponse(response: UserFacingAgentResponse): UserFacingAgentResponse {
+  if (
+    isFallbackAssistantResponse(response) &&
+    isGenericRecoveryAssistantText(response.assistantMessage) &&
+    (response.cards.some(isSocialSurfaceCard) ||
+      response.pendingConfirmations.length > 0 ||
+      response.safeStatus.blocked)
+  ) {
+    return {
+      ...response,
+      assistantMessage: '',
+      assistantMessageSource: response.assistantMessageSource ?? 'fallback',
+      lightStatus: '已整理回复',
+    };
+  }
   if (!isGenericCheckpointResponse(response)) return response;
   return {
     ...response,
@@ -772,14 +810,16 @@ export function messagesFromSessionSnapshot(
       ),
     );
   }
-  const restoredIsGeneric = isGenericRecoveryAssistantText(sanitizedRestored.assistantMessage);
+  const restoredIsGeneric =
+    isGenericRecoveryAssistantText(restored?.assistantMessage) ||
+    isGenericRecoveryAssistantText(sanitizedRestored.assistantMessage);
   return reduceSingleRunAssistantMessages([
     ...restoredMessages,
     {
       id: `task-${taskId ?? 'latest'}-result`,
       role: 'assistant',
       content: restoredIsGeneric
-        ? '我可以继续上次的话题，也可以重新开始。'
+        ? ''
         : publicText(sanitizedRestored.assistantMessage, '我已经恢复了这段对话。'),
       status: 'done',
       result: sanitizedRestored,

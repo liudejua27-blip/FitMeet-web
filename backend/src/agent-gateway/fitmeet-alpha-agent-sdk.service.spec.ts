@@ -212,6 +212,10 @@ describe('FitMeetAlphaAgentSdkService', () => {
         activityType: '跑步',
         interestTags: ['跑步', '同城'],
       },
+      taskSlotSummary: {
+        time_window: '今天晚上',
+        location_text: '青岛大学附近',
+      },
       candidates: [
         {
           userId: 7,
@@ -312,11 +316,17 @@ describe('FitMeetAlphaAgentSdkService', () => {
       schemaVersion: 'fitmeet.tool-ui.v1',
       schemaType: 'social_match.candidate',
       opportunityCard: true,
-      confirmedContext: ['青岛', '跑步', expect.stringContaining('公共操场')],
+      confirmedContext: expect.arrayContaining([
+        '青岛',
+        '今天晚上',
+        '跑步',
+        expect.stringContaining('公共操场'),
+      ]),
       opportunity: expect.objectContaining({
         type: 'person',
         name: '小刘',
         avatarUrl: 'https://cdn.example.com/xiaoliu.png',
+        time: '今天晚上',
         score: 86,
         relationshipGoal: '先从低压力运动搭子开始',
         idealType: '同城周末有空、愿意先站内聊',
@@ -348,7 +358,12 @@ describe('FitMeetAlphaAgentSdkService', () => {
           expect.stringContaining('区域：青岛'),
           expect.stringContaining('共同兴趣：跑步、同城'),
         ]),
-        confirmedContext: ['青岛', '跑步', expect.stringContaining('公共操场')],
+        confirmedContext: expect.arrayContaining([
+          '青岛',
+          '今天晚上',
+          '跑步',
+          expect.stringContaining('公共操场'),
+        ]),
         recommendedNextAction: expect.stringContaining('确认后再发送'),
       }),
       relationshipGoal: '先从低压力运动搭子开始',
@@ -357,6 +372,7 @@ describe('FitMeetAlphaAgentSdkService', () => {
       recommendationLine: expect.any(String),
       whyNow: expect.any(String),
       safetyBoundary: expect.any(String),
+      timePreference: '今天晚上',
       sharedInterests: expect.arrayContaining(['跑步', '同城']),
       explanationSteps: expect.arrayContaining([
         expect.stringContaining('来源：青岛大学'),
@@ -392,25 +408,28 @@ describe('FitMeetAlphaAgentSdkService', () => {
         opportunityType: 'activity',
         opportunityTitle: '跑步约练',
         opportunitySubtitle: expect.stringContaining('青岛'),
-        confirmedContext: [
+        confirmedContext: expect.arrayContaining([
           '青岛',
+          '今天晚上',
           '跑步',
-          '青岛的公共场所',
+          '青岛大学附近',
           expect.stringContaining('公共场所'),
-        ],
+        ]),
         opportunity: expect.objectContaining({
           type: 'activity',
           title: '跑步约练',
           city: '青岛',
-          location: '青岛的公共场所',
+          location: '青岛大学附近',
+          time: '今天晚上',
           activityType: '跑步',
           safetyBadges: ['公共场所', '不共享精确位置', '确认后创建'],
-          confirmedContext: [
+          confirmedContext: expect.arrayContaining([
             '青岛',
+            '今天晚上',
             '跑步',
-            '青岛的公共场所',
+            '青岛大学附近',
             expect.stringContaining('公共场所'),
-          ],
+          ]),
         }),
         publicPlaceOnly: true,
         noPreciseLocation: true,

@@ -33,7 +33,7 @@ import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.s
 import { SocialAgentTaskMemoryStateMachineService } from './social-agent-task-memory-state-machine.service';
 import { buildSocialAgentKnownTaskSlotConstraints } from './social-agent-task-slot-constraints.presenter';
 import {
-  enforceSocialIntentGate,
+  enforceExplicitSocialExecutionRoute,
   hasExplicitSocialExecutionIntent,
   isSocialExecutionIntent,
 } from './social-agent-social-intent-gate';
@@ -120,7 +120,7 @@ export class SocialAgentRouteDecisionService {
       conversationHistory,
       signal: input.signal,
     });
-    route = enforceSocialIntentGate(
+    route = this.enforceRouteBoundary(
       {
         message,
         taskContext,
@@ -143,7 +143,7 @@ export class SocialAgentRouteDecisionService {
       signal: input.signal,
     });
     if (brainDecision) {
-      route = enforceSocialIntentGate(
+      route = this.enforceRouteBoundary(
         {
           message,
           taskContext,
@@ -192,6 +192,13 @@ export class SocialAgentRouteDecisionService {
     body: SocialAgentRouteMessageBody,
   ): NonNullable<SocialAgentRouteMessageBody['conversationIntent']> | null {
     return body.clientContext?.conversationIntent ?? body.conversationIntent ?? null;
+  }
+
+  private enforceRouteBoundary(
+    input: Parameters<typeof enforceExplicitSocialExecutionRoute>[0],
+    route: SocialAgentIntentRouterResult,
+  ): SocialAgentIntentRouterResult {
+    return enforceExplicitSocialExecutionRoute(input, route);
   }
 
   private shouldApplyCurrentMessageToTaskSlots(

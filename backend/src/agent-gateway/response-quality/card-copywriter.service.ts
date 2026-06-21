@@ -250,9 +250,11 @@ export class CardCopywriterService {
     taskId: number;
     candidate: Record<string, unknown>;
     draft?: Record<string, unknown> | null;
+    taskSlotSummary?: Record<string, unknown> | null;
     lifeGraphSignals?: Record<string, unknown> | null;
   }): FitMeetAlphaCard {
     const candidate = input.candidate;
+    const taskSlotSummary = this.record(input.taskSlotSummary);
     const displayName =
       cleanDisplayText(candidate.displayName, '') ||
       cleanDisplayText(candidate.nickname, '') ||
@@ -322,8 +324,12 @@ export class CardCopywriterService {
     const whyNow =
       cleanDisplayText(candidate.whyNow, '') ||
       this.personalization.whyNow({
-        timePreference: input.draft?.timePreference,
-        locationText: input.draft?.city ?? input.draft?.locationText,
+        timePreference: input.draft?.timePreference ?? taskSlotSummary.time_window,
+        locationText:
+          input.draft?.city ??
+          input.draft?.locationText ??
+          taskSlotSummary.location_text ??
+          taskSlotSummary.geo_area,
         candidateCity: candidate.city,
         distanceKm: candidate.distanceKm,
       });
@@ -332,7 +338,9 @@ export class CardCopywriterService {
       cleanDisplayText(candidate.city, '') ||
       cleanDisplayText(input.draft?.city, '同城');
     const timePreference = cleanDisplayText(
-      input.draft?.timePreference ?? candidate.timePreference,
+      input.draft?.timePreference ??
+        taskSlotSummary.time_window ??
+        candidate.timePreference,
       '时间待确认',
     );
     const intensity = cleanDisplayText(
@@ -563,13 +571,19 @@ export class CardCopywriterService {
     taskId: number;
     approvalRequiredActions: Array<Record<string, unknown>>;
   }): FitMeetAlphaCard {
+    const boundary =
+      input.approvalRequiredActions.length > 1
+        ? '我准备好了几步会触达他人或公开内容的操作。你确认前，我不会发送、连接或发布。'
+        : '我准备好了一步会触达他人或公开内容的操作。你确认前，我不会发送、连接或发布。';
+    const auditNote =
+      '确认或取消后，你都可以回看这次决定；如果想改内容，直接告诉我。';
     return {
       id: `audit_update:${input.taskId}:approval`,
       type: 'audit_update',
       schemaVersion: 'fitmeet.tool-ui.v1',
       schemaType: 'safety.approval',
-      title: '有动作需要你确认',
-      body: `当前有 ${input.approvalRequiredActions.length} 个动作需要你确认后才会继续。`,
+      title: '确认后我再继续',
+      body: boundary,
       status: 'waiting_confirmation',
       data: {
         taskId: input.taskId,
@@ -578,19 +592,19 @@ export class CardCopywriterService {
         schemaType: 'safety.approval',
         approvalRequiredActions: input.approvalRequiredActions,
         approval: {
-          title: '有动作需要你确认',
-          boundary: `当前有 ${input.approvalRequiredActions.length} 个动作需要你确认后才会继续。`,
+          title: '确认后我再继续',
+          boundary,
           riskLevel: this.maxApprovalRiskLevel(input.approvalRequiredActions),
           reasons: this.approvalReasons(input.approvalRequiredActions),
-          auditNote: '确认、取消和执行结果会保留记录，方便你之后查看或撤回。',
+          auditNote,
           confirmationLabel: '确认后才执行',
-          checkpointLabel: '同意后继续当前步骤',
+          checkpointLabel: '我会接着处理',
         },
         riskLevel: this.maxApprovalRiskLevel(input.approvalRequiredActions),
         reasons: this.approvalReasons(input.approvalRequiredActions),
-        auditNote: '确认、取消和执行结果会保留记录，方便你之后查看或撤回。',
+        auditNote,
         confirmationLabel: '确认后才执行',
-        checkpointLabel: '同意后继续当前步骤',
+        checkpointLabel: '我会接着处理',
       },
       actions: [],
     };

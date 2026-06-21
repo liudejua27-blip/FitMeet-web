@@ -13,6 +13,7 @@ import { shouldUseSocialAgentLlmDirectReply } from './social-agent-route-respons
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
 import { SocialAgentProfileEnrichmentService } from './social-agent-profile-enrichment.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
+import { buildRunScopedAssistantMessageId } from './social-agent-stream-message-id.util';
 
 type HandleRouteConversationTurnInput = {
   ownerUserId: number;
@@ -50,6 +51,10 @@ export class SocialAgentRouteConversationTurnService {
   async handle(
     input: HandleRouteConversationTurnInput,
   ): Promise<HandleRouteConversationTurnResult> {
+    const assistantMessageId = buildRunScopedAssistantMessageId({
+      taskId: input.task.id,
+      traceId: input.traceId,
+    });
     if (this.isProfileEnrichmentIntent(input.route)) {
       const handled = await this.profileEnrichment.handleTurn({
         ownerUserId: input.ownerUserId,
@@ -60,13 +65,14 @@ export class SocialAgentRouteConversationTurnService {
           this.buildMemoryContext(currentTask, input),
         buildTaskContext: (currentTask, memoryContext) =>
           this.buildTaskContext(currentTask, input, memoryContext) ?? null,
+        traceId: input.traceId ?? null,
         emit: input.emit,
         signal: input.signal,
       });
       if (handled.assistantStreamed) {
         await input.emit?.({
           type: 'assistant_done',
-          messageId: `agent-message:${handled.task.id}`,
+          messageId: assistantMessageId,
           source: 'llm',
         });
       }
@@ -108,7 +114,7 @@ export class SocialAgentRouteConversationTurnService {
               assistantStreamed = true;
               await input.emit?.({
                 type: 'assistant_delta',
-                messageId: `agent-message:${input.task.id}`,
+                messageId: assistantMessageId,
                 delta,
                 source: 'llm',
               });
@@ -119,7 +125,7 @@ export class SocialAgentRouteConversationTurnService {
       if (assistantStreamed) {
         await input.emit?.({
           type: 'assistant_done',
-          messageId: `agent-message:${input.task.id}`,
+          messageId: assistantMessageId,
           source: 'llm',
         });
       }

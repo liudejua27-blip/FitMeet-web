@@ -301,6 +301,59 @@ describe('SocialAgentRecommendationResultService', () => {
     ]);
   });
 
+  it('streams recommendation text with a run-scoped assistant message id', async () => {
+    const { finalResponses, service, task } = makeHarness();
+    finalResponses.generate.mockImplementationOnce(
+      async (_input: unknown, options: { onDelta?: (delta: string) => void }) => {
+        options.onDelta?.('最终');
+        options.onDelta?.('推荐');
+        return '最终推荐回复';
+      },
+    );
+    const emitted: Array<Record<string, unknown>> = [];
+
+    const result = await service.completeRecommendationResult({
+      ownerUserId: 7,
+      task,
+      visibleSteps: [],
+      draft: makeDraft(),
+      candidates: [makeCandidate()],
+      searchResult: makeSearchResult(),
+      statusReason: 'recommendations_ready_waiting_user_confirmation',
+      runId: 'run-abc',
+      emit: (event) => {
+        emitted.push(event as unknown as Record<string, unknown>);
+      },
+      buildMemoryContext: () => ({}),
+      toEventDto: (event) => ({ id: event.id }),
+    });
+
+    expect(result.runtime).toMatchObject({
+      runId: 'run-abc',
+      messageId: 'agent-message:101:run-abc',
+    });
+    expect(emitted).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'assistant_delta',
+          messageId: 'agent-message:101:run-abc',
+        }),
+        expect.objectContaining({
+          type: 'assistant_done',
+          messageId: 'agent-message:101:run-abc',
+        }),
+        expect.objectContaining({
+          type: 'result',
+          result: expect.objectContaining({
+            runtime: expect.objectContaining({
+              messageId: 'agent-message:101:run-abc',
+            }),
+          }),
+        }),
+      ]),
+    );
+  });
+
   it('uses hydrated taskContext for final recommendation LLM replies', async () => {
     const { finalResponses, service, task } = makeHarness();
     const taskContext = {

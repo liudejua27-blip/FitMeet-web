@@ -50,7 +50,7 @@ export function reduceSingleRunAssistantMessages(
       existingIndex === undefined &&
       message.role === 'assistant' &&
       previous?.role === 'assistant' &&
-      shouldMergeAdjacentAssistantWithoutRunKey(previous, message)
+      shouldMergeAdjacentDuplicateAssistant(previous, message)
     ) {
       changed = true;
       const merged = mergeSingleRunAssistantMessage(previous, message);
@@ -79,13 +79,22 @@ export function reduceSingleRunAssistantMessages(
   return changed ? next : messages;
 }
 
-function shouldMergeAdjacentAssistantWithoutRunKey(
+function shouldMergeAdjacentDuplicateAssistant(
   existing: AgentThreadMessage,
   incoming: AgentThreadMessage,
 ): boolean {
+  if (existing.createsBranch || incoming.createsBranch || existing.branch || incoming.branch) {
+    return false;
+  }
   const existingKeys = assistantRunKeysFromMessage(existing);
   const incomingKeys = assistantRunKeysFromMessage(incoming);
-  if (existingKeys.length > 0 || incomingKeys.length > 0) return false;
+  if (
+    existingKeys.length > 0 &&
+    incomingKeys.length > 0 &&
+    existingKeys.some((key) => incomingKeys.includes(key))
+  ) {
+    return true;
+  }
   const left = existing.content === ASSISTANT_PLACEHOLDER ? '' : existing.content;
   const right = incoming.content === ASSISTANT_PLACEHOLDER ? '' : incoming.content;
   const leftNorm = normalizeAssistantText(left);

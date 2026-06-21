@@ -90,6 +90,7 @@ export class SocialAgentRunRecommendationService {
     visibleStepLabel: (id: string, label: string) => string;
     recordRuntimeStep?: (input: RuntimeStepRecord) => Promise<void> | void;
     recordRuntimeTool?: (input: RuntimeToolRecord) => Promise<void> | void;
+    runId?: number | string | null;
   }): Promise<{ task: AgentTask; result: SocialAgentChatRunResult }> {
     let task = input.task;
     const progress = new SocialAgentRunProgressTracker({
@@ -519,6 +520,7 @@ export class SocialAgentRunRecommendationService {
                 draftPublication?.autoPublished === true
                   ? 'recommendations_ready_public_intent_auto_published'
                   : 'recommendations_ready_waiting_user_confirmation',
+              runId: input.runId ?? null,
               emit: input.emit,
               signal: input.signal,
               alphaTurn: input.alphaTurn,
@@ -529,6 +531,7 @@ export class SocialAgentRunRecommendationService {
                   hydratedContext,
                 ),
               taskContext: finalTaskContext,
+              taskSlotSummary: this.executionSlotSummary(task),
               toEventDto: (event) => this.toEventDto(event),
             });
           return {

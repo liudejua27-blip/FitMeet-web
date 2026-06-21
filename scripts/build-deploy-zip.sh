@@ -276,6 +276,7 @@ require_path "frontend/src/components/assistant-ui/tool-card-shared.tsx"
 require_path "frontend/src/components/assistant-ui/tool-process-model.ts"
 require_path "frontend/src/components/assistant-ui/tool-fallback.tsx"
 require_path "frontend/src/components/assistant-ui/tool-generic-card.tsx"
+require_path "frontend/src/components/assistant-ui/tool-risk-policy.ts"
 require_path "frontend/src/components/assistant-ui/tool-ui-action-copy.ts"
 require_path "frontend/src/components/assistant-ui/tool-ui-actions.tsx"
 require_path "frontend/src/components/assistant-ui/tool-ui-schema.ts"
@@ -765,6 +766,7 @@ require_entry "assistant-ui Tool UI card collection" '^FitMeet-web/frontend/src/
 require_entry "assistant-ui Tool UI card shared primitives" '^FitMeet-web/frontend/src/components/assistant-ui/tool-card-shared\.tsx$'
 require_entry "assistant-ui process model" '^FitMeet-web/frontend/src/components/assistant-ui/tool-process-model\.ts$'
 require_entry "assistant-ui generic Tool UI card" '^FitMeet-web/frontend/src/components/assistant-ui/tool-generic-card\.tsx$'
+require_entry "assistant-ui Tool UI risk policy" '^FitMeet-web/frontend/src/components/assistant-ui/tool-risk-policy\.ts$'
 require_entry "assistant-ui Tool UI action copy" '^FitMeet-web/frontend/src/components/assistant-ui/tool-ui-action-copy\.ts$'
 require_entry "assistant-ui Tool UI actions" '^FitMeet-web/frontend/src/components/assistant-ui/tool-ui-actions\.tsx$'
 require_entry "assistant-ui Tool UI schema" '^FitMeet-web/frontend/src/components/assistant-ui/tool-ui-schema\.ts$'

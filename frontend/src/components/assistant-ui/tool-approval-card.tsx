@@ -35,7 +35,8 @@ export function ApprovalToolUI({ data, summary }: { data: unknown; summary: Proc
   const allConfirmations = extractPendingConfirmations(data);
   const confirmations = allConfirmations.filter(isActionRequiringInlineApproval);
   const visibleConfirmations = confirmations.slice(0, 1);
-  const hiddenConfirmationCount = Math.max(0, confirmations.length - visibleConfirmations.length);
+  const hiddenConfirmations = confirmations.slice(visibleConfirmations.length);
+  const hiddenConfirmationCount = hiddenConfirmations.length;
   const resolvedApproval = extractResolvedApproval(data);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -103,12 +104,7 @@ export function ApprovalToolUI({ data, summary }: { data: unknown; summary: Proc
               />
             ))}
             {hiddenConfirmationCount > 0 ? (
-              <p
-                className="rounded-xl bg-[#f7f7f8] px-3 py-2 text-xs leading-5 text-[#71717a] ring-1 ring-black/5"
-                data-testid="assistant-ui-approval-collapsed-count"
-              >
-                还有 {hiddenConfirmationCount} 个待确认动作。先处理当前确认，后续我会继续带你确认。
-              </p>
+              <QueuedApprovalSummary confirmations={hiddenConfirmations} />
             ) : null}
           </>
         ) : resolvedApproval ? (
@@ -129,6 +125,47 @@ export function ApprovalToolUI({ data, summary }: { data: unknown; summary: Proc
         </p>
       ) : null}
     </section>
+  );
+}
+
+function QueuedApprovalSummary({
+  confirmations,
+}: {
+  confirmations: PendingConfirmation[];
+}) {
+  const labels = Array.from(
+    new Set(
+      confirmations
+        .map((confirmation) => approvalTitleForConfirmation(confirmation))
+        .filter(Boolean),
+    ),
+  );
+  if (labels.length === 0) return null;
+
+  return (
+    <div
+      className="rounded-xl bg-[#f7f7f8] px-3 py-2 text-xs leading-5 text-[#71717a] ring-1 ring-black/5"
+      data-testid="assistant-ui-approval-collapsed-count"
+      data-queued-approval-count={String(confirmations.length)}
+    >
+      <p>
+        还有 {confirmations.length} 个动作也在这张卡里。先处理当前确认，后续我会按顺序继续问你。
+      </p>
+      <div
+        className="mt-1.5 flex flex-wrap gap-1.5"
+        data-testid="assistant-ui-approval-queued-actions"
+        aria-label="后续待确认动作"
+      >
+        {labels.map((label) => (
+          <span
+            key={label}
+            className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-[#52525b] ring-1 ring-black/5"
+          >
+            {label}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 

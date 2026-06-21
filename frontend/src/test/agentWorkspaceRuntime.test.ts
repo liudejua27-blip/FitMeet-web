@@ -103,6 +103,16 @@ describe('agent workspace runtime fallback boundaries', () => {
     expect(threadIdFromResponse(response)).toBe('agent-task:91');
   });
 
+  it('classifies explicit social matching prompts as social even with rich candidate preferences', () => {
+    expect(
+      intentForPrompt('我想在青岛大学附近，今天晚上，散步，找女生，最好喜欢编程'),
+    ).toBe('social');
+    expect(intentForPrompt('有没有女生')).toBe('social');
+    expect(intentForPrompt('最好是舞蹈生')).toBe('social');
+    expect(intentForPrompt('继续刚才青岛大学散步的约练任务')).toBe('social');
+    expect(intentForPrompt('有没有找人功能')).toBe('conversation');
+  });
+
   it('dedupes approval dispatch cards by stable approval id while keeping different candidate actions', () => {
     const sendCard = approvalDispatchCard({
       id: 'approval-88-meet-loop',
@@ -329,6 +339,17 @@ describe('agent workspace runtime fallback boundaries', () => {
     ).toBe('我已经按今晚、青岛大学附近、散步这些条件继续处理，并会优先查找公开可发现的人。');
   });
 
+  it('does not let a generic idle fallback replace a concrete streamed social answer', () => {
+    expect(
+      mergeAssistantFinalText(
+        '明白，你想今晚在青岛大学附近散步，并优先找公开资料里有编程兴趣的女生。我会按这些条件继续处理。',
+        '你好，我在。你可以随便聊，也可以补充偏好；等你明确说要找人、找活动或找搭子时，我再开始搜索。',
+      ),
+    ).toBe(
+      '明白，你想今晚在青岛大学附近散步，并优先找公开资料里有编程兴趣的女生。我会按这些条件继续处理。',
+    );
+  });
+
   it('merges near-duplicate final text into the current assistant message without a run anchor', () => {
     const streamed =
       '谢谢你的认可！我现在会先把你的约练需求整理清楚，再继续推荐具体的人和活动。';
@@ -463,6 +484,44 @@ describe('agent workspace runtime fallback boundaries', () => {
       result: expect.objectContaining({
         assistantMessage: answer,
       }),
+    });
+  });
+
+  it('dedupes adjacent assistant answers when reconnect replay uses a different run id', () => {
+    const answer =
+      '明白了，你想在青岛大学附近找今天上午可以一起散步、并且公开资料里有编程兴趣的人。我会按这些条件继续处理。';
+    const replayedAnswer =
+      '明白，你想在青岛大学附近找今天上午可以一起散步，并且公开资料里有编程兴趣的人。我会按这些条件继续处理。';
+
+    const reduced = reduceSingleRunAssistantMessages([
+      userMessage('user-1', '今天上午青岛大学附近散步，女生，喜欢编程'),
+      {
+        id: 'assistant-run-a',
+        role: 'assistant',
+        content: answer,
+        status: 'done',
+        runId: 'run-a',
+        messageId: 'message-a',
+        result: null,
+      },
+      {
+        id: 'assistant-run-b-replay',
+        role: 'assistant',
+        content: replayedAnswer,
+        status: 'done',
+        runId: 'run-b-replay',
+        messageId: 'message-b-replay',
+        result: null,
+      },
+    ]);
+
+    expect(reduced).toHaveLength(2);
+    expect(reduced[1]).toMatchObject({
+      id: 'assistant-run-a',
+      role: 'assistant',
+      content: replayedAnswer,
+      runId: 'run-b-replay',
+      messageId: 'message-b-replay',
     });
   });
 
@@ -807,6 +866,45 @@ describe('agent workspace runtime fallback boundaries', () => {
       'connect_candidate',
       'activity.confirm_create',
     ]);
+  });
+
+  it('keeps only the latest covering process card inside a final result package', () => {
+    const firstProcess = {
+      id: 'social-codex:summary:understand',
+      type: 'audit_update',
+      schemaType: 'generic.card',
+      title: '正在理解你的需求',
+      body: '我会先识别这是普通聊天，还是需要进入约练流程。',
+      data: {
+        taskId: 101,
+        runId: 'run-covering-process',
+        processType: 'run_summary',
+        displayMode: 'covering_status',
+        title: '正在理解你的需求',
+      },
+      actions: [],
+    } satisfies FitMeetAlphaCard;
+    const latestProcess = {
+      ...firstProcess,
+      id: 'social-codex:summary:candidate-search',
+      title: '正在筛选公开可发现的人',
+      body: '我会优先看公开资料和自愿公开标签。',
+      data: {
+        ...firstProcess.data,
+        title: '正在筛选公开可发现的人',
+        currentSeq: 3,
+      },
+    } satisfies FitMeetAlphaCard;
+
+    const result = dedupeUserFacingResponseCards(
+      userFacingResponseWithCards([firstProcess, latestProcess]),
+    );
+
+    expect(result.cards).toHaveLength(1);
+    expect(result.cards[0]).toMatchObject({
+      id: 'social-codex:summary:candidate-search',
+      title: '正在筛选公开可发现的人',
+    });
   });
 
   it('dedupes replayed cards when ids move between nested data and action payloads', () => {
@@ -1155,6 +1253,60 @@ describe('agent workspace runtime fallback boundaries', () => {
     );
 
     expect(messages.map((message) => message.id)).toEqual(['user-1']);
+  });
+
+  it('keeps useful restored cards while hiding generic recovery assistant text', () => {
+    const restored: UserFacingAgentResponse = {
+      assistantMessage: 'FitMeet Agent 暂时没有顺利完成。我已经保留当前对话，请稍后再试。',
+      assistantMessageSource: 'fallback',
+      lightStatus: '已整理回复',
+      cards: [
+        {
+          id: 'candidate-card-chen',
+          type: 'candidate_card',
+          schemaType: 'social_match.candidate',
+          title: '陈砚',
+          body: '公开资料里有散步和青岛大学附近相关信息。',
+          status: 'ready',
+          data: {
+            candidateRecordId: 501,
+            targetUserId: 22,
+          },
+          actions: [],
+        },
+      ],
+      pendingConfirmations: [],
+      safeStatus: {
+        blocked: false,
+        level: 'low',
+        boundaryNotes: [],
+        requiredConfirmations: [],
+      },
+      permissionMode: 'confirm',
+    };
+
+    const messages = messagesFromSessionSnapshot(
+      {
+        hasSession: true,
+        activeTaskId: 42,
+        task: { id: 42, status: 'active' },
+        messages: [{ id: 'user-1', role: 'user', content: '继续找今晚青岛大学散步搭子' }],
+      },
+      restored,
+      42,
+    );
+
+    expect(messages).toHaveLength(2);
+    expect(messages[1]).toMatchObject({
+      role: 'assistant',
+      content: '',
+      surfaceKind: 'recovery',
+      branchable: false,
+      showSocialResult: true,
+    });
+    expect(messages[1].result?.cards).toHaveLength(1);
+    expect(JSON.stringify(messages)).not.toContain('稍后再试');
+    expect(JSON.stringify(messages)).not.toContain('FitMeet Agent 暂时没有顺利完成');
   });
 
   it('filters saved-checkpoint recovery copy with original goal from restored session history', () => {

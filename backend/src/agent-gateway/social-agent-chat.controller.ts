@@ -72,6 +72,8 @@ import {
   AgentRunCheckpointService,
   type AgentRunCheckpointAction,
 } from './agent-run-checkpoint.service';
+import { buildRunScopedAssistantMessageId } from './social-agent-stream-message-id.util';
+import { readSocialAgentStoredRun } from './social-agent-chat-run.presenter';
 
 type LlmAssistantTextResult = {
   streamed: boolean;
@@ -624,6 +626,7 @@ export class SocialAgentChatController {
     let hasAssistantDelta = false;
     let hasAssistantDone = false;
     let wroteResult = false;
+    let streamedAssistantMessageId: string | null = null;
     let taskBoundInitialTraceTaskId = body?.taskId ?? null;
     try {
       const initialCopy = this.initialRunCopy(body);
@@ -667,6 +670,12 @@ export class SocialAgentChatController {
           if (payload.type === 'result') {
             if (wroteResult) return;
             let streamResult = payload.result;
+            const assistantMessageId =
+              streamedAssistantMessageId ??
+              buildRunScopedAssistantMessageId({
+                taskId: payload.result.taskId ?? body?.taskId ?? null,
+                runId,
+              });
             if (!hasAssistantDelta) {
               const assistantV2 = socialCodexEvents.createWriter({
                 write,
@@ -683,7 +692,7 @@ export class SocialAgentChatController {
                 {
                   rawResult: streamResult as unknown as Record<string, unknown>,
                   userMessage: body?.goal ?? '',
-                  messageId: `agent-run:${payload.result.taskId}`,
+                  messageId: assistantMessageId,
                   userId: req.user.id,
                   taskId: payload.result.taskId ?? body?.taskId ?? null,
                   threadId: this.eventThreadId(
@@ -714,7 +723,7 @@ export class SocialAgentChatController {
                   write,
                   {
                     text: result.assistantMessage,
-                    messageId: `agent-run:${streamResult.taskId}`,
+                    messageId: assistantMessageId,
                     traceId: streamResult.traceId,
                     socialCodexEvents,
                     v2: assistantV2,
@@ -728,6 +737,11 @@ export class SocialAgentChatController {
                 };
               }
             }
+            streamResult = this.withAssistantRuntimeAnchor(
+              streamResult,
+              runId,
+              assistantMessageId,
+            );
             await this.persistFinalRunAssistantMemory(req.user.id, streamResult);
             const result = this.userFacingSanitizer.toUserFacingAgentResponse(
               streamResult,
@@ -771,6 +785,7 @@ export class SocialAgentChatController {
 
           if (payload.type === 'assistant_delta') {
             if (payload.delta.trim()) hasAssistantDelta = true;
+            if (payload.messageId) streamedAssistantMessageId = payload.messageId;
             write('assistant_delta', {
               type: 'assistant_delta',
               lifecycle: 'analyzing_intent',
@@ -790,6 +805,7 @@ export class SocialAgentChatController {
 
           if (payload.type === 'assistant_done') {
             if (hasAssistantDone) return;
+            if (payload.messageId) streamedAssistantMessageId = payload.messageId;
             write('assistant_done', {
               type: 'assistant_done',
               lifecycle: 'completed',
@@ -874,6 +890,7 @@ export class SocialAgentChatController {
       runId,
     });
     let hasAssistantDelta = false;
+    let streamedAssistantMessageId: string | null = null;
     let taskBoundInitialTraceTaskId = body.taskId ?? null;
     try {
       const initialCopy = this.initialRunCopy(body);
@@ -916,6 +933,7 @@ export class SocialAgentChatController {
         (payload) => {
           if (payload.type === 'assistant_delta') {
             if (payload.delta.trim()) hasAssistantDelta = true;
+            if (payload.messageId) streamedAssistantMessageId = payload.messageId;
             write('assistant_delta', {
               type: 'assistant_delta',
               lifecycle: 'analyzing_intent',
@@ -932,6 +950,7 @@ export class SocialAgentChatController {
             });
           }
           if (payload.type === 'assistant_done') {
+            if (payload.messageId) streamedAssistantMessageId = payload.messageId;
             write('assistant_done', {
               type: 'assistant_done',
               lifecycle: 'completed',
@@ -949,7 +968,9 @@ export class SocialAgentChatController {
         },
         { signal, deferAssistantMessageLog: true },
       );
-      let streamResult = result;
+      let streamResult: SocialAgentIntentRouteResult | SocialAgentChatRunResult =
+        result;
+      let routeAssistantAlreadyPersistedByRun = false;
       if (result.taskId && taskBoundInitialTraceTaskId !== result.taskId) {
         taskBoundInitialTraceTaskId = result.taskId;
         await this.writeTaskBoundInitialTrace({
@@ -965,25 +986,50 @@ export class SocialAgentChatController {
           text: body.message,
         });
       }
+      const queuedRunResult = await this.waitForQueuedRunResult({
+        ownerUserId: req.user.id,
+        result,
+        signal,
+        maxWaitMs: this.queuedRunInlineWaitMs(body),
+      });
+      if (queuedRunResult) {
+        streamResult = queuedRunResult;
+        routeAssistantAlreadyPersistedByRun = true;
+        write('status', {
+          type: 'status',
+          lifecycle: 'completed',
+          lightStatus: '已找到可继续处理的结果',
+          taskId: queuedRunResult.taskId ?? result.taskId ?? undefined,
+          threadId:
+            this.eventThreadId(
+              queuedRunResult.taskId ?? result.taskId,
+              body.clientContext?.threadId,
+            ) ?? undefined,
+        });
+      }
       const assistantV2 = socialCodexEvents.createWriter({
         write,
         userId: req.user.id,
-        taskId: result.taskId ?? body.taskId ?? null,
+        taskId: streamResult.taskId ?? result.taskId ?? body.taskId ?? null,
         threadId: this.eventThreadId(
-          result.taskId ?? body.taskId,
+          streamResult.taskId ?? result.taskId ?? body.taskId,
           body.clientContext?.threadId,
         ),
         runId,
       });
       if (!hasAssistantDelta) {
+        const assistantMessageId = buildRunScopedAssistantMessageId({
+          taskId: streamResult.taskId ?? result.taskId ?? body.taskId ?? null,
+          runId,
+        });
         const streamed = await this.writeLlmAssistantTextForResult(write, {
           rawResult: streamResult as unknown as Record<string, unknown>,
           userMessage: body.message ?? '',
-          messageId: `agent-message:${result.taskId ?? Date.now()}`,
+          messageId: assistantMessageId,
           userId: req.user.id,
-          taskId: result.taskId ?? body.taskId ?? null,
+          taskId: streamResult.taskId ?? result.taskId ?? body.taskId ?? null,
           threadId: this.eventThreadId(
-            result.taskId ?? body.taskId,
+            streamResult.taskId ?? result.taskId ?? body.taskId,
             body.clientContext?.threadId,
           ),
           signal,
@@ -992,6 +1038,7 @@ export class SocialAgentChatController {
         });
         hasAssistantDelta = streamed.streamed;
         if (streamed.streamed) {
+          streamedAssistantMessageId = assistantMessageId;
           streamResult = {
             ...streamResult,
             assistantMessage: streamed.text ?? '',
@@ -1005,6 +1052,17 @@ export class SocialAgentChatController {
           };
         }
       }
+      const assistantMessageId =
+        streamedAssistantMessageId ??
+        buildRunScopedAssistantMessageId({
+          taskId: streamResult.taskId ?? result.taskId ?? body.taskId ?? null,
+          runId,
+        });
+      streamResult = this.withAssistantRuntimeAnchor(
+        streamResult,
+        runId,
+        assistantMessageId,
+      );
       const userFacing = this.userFacingSanitizer.toUserFacingAgentResponse(
         streamResult,
         result.permissionMode ?? AgentTaskPermissionMode.Confirm,
@@ -1013,21 +1071,26 @@ export class SocialAgentChatController {
       if (!hasAssistantDelta) {
         const wroteFallback = await this.writeFallbackAssistantText(write, {
           text: userFacing.assistantMessage,
-          messageId: `agent-message:${result.taskId ?? Date.now()}`,
+          messageId: assistantMessageId,
           traceId: result.traceId,
           socialCodexEvents,
           v2: assistantV2,
         });
         hasAssistantDelta = wroteFallback;
       }
-      await this.persistFinalRouteAssistantMemory(req.user.id, streamResult);
+      if (!routeAssistantAlreadyPersistedByRun) {
+        await this.persistFinalRouteAssistantMemory(
+          req.user.id,
+          streamResult as SocialAgentIntentRouteResult,
+        );
+      }
       this.writeApprovalRequiredEvents(write, userFacing.pendingConfirmations);
       const resultV2 = socialCodexEvents.createWriter({
         write,
         userId: req.user.id,
-        taskId: result.taskId ?? null,
+        taskId: streamResult.taskId ?? result.taskId ?? null,
         threadId: this.eventThreadId(
-          result.taskId,
+          streamResult.taskId ?? result.taskId,
           body.clientContext?.threadId,
         ),
         runId,
@@ -1036,9 +1099,12 @@ export class SocialAgentChatController {
       await socialCodexEvents.writeContextEvents(
         resultV2,
         req.user.id,
-        result.taskId,
+        streamResult.taskId ?? result.taskId,
         runId,
-        this.eventThreadId(result.taskId, body.clientContext?.threadId),
+        this.eventThreadId(
+          streamResult.taskId ?? result.taskId,
+          body.clientContext?.threadId,
+        ),
       );
       await socialCodexEvents.writeRunCompleted(resultV2, lifecycle);
       write('result', {
@@ -1079,6 +1145,7 @@ export class SocialAgentChatController {
       runId,
     });
     let hasAssistantDelta = false;
+    let streamedAssistantMessageId: string | null = null;
     try {
       await socialCodexEvents.writeRunStarted(
         v2,
@@ -1100,6 +1167,7 @@ export class SocialAgentChatController {
         (payload) => {
           if (payload.type === 'assistant_delta') {
             if (payload.delta.trim()) hasAssistantDelta = true;
+            if (payload.messageId) streamedAssistantMessageId = payload.messageId;
             write('assistant_delta', {
               type: 'assistant_delta',
               lifecycle: 'analyzing_intent',
@@ -1116,6 +1184,7 @@ export class SocialAgentChatController {
             });
           }
           if (payload.type === 'assistant_done') {
+            if (payload.messageId) streamedAssistantMessageId = payload.messageId;
             write('assistant_done', {
               type: 'assistant_done',
               lifecycle: 'completed',
@@ -1142,10 +1211,14 @@ export class SocialAgentChatController {
         runId,
       });
       if (!hasAssistantDelta) {
+        const assistantMessageId = buildRunScopedAssistantMessageId({
+          taskId: result.taskId ?? taskId,
+          runId,
+        });
         const streamed = await this.writeLlmAssistantTextForResult(write, {
           rawResult: streamResult as unknown as Record<string, unknown>,
           userMessage: this.actionUserMessage(body),
-          messageId: `agent-action:${result.taskId ?? taskId}`,
+          messageId: assistantMessageId,
           userId: req.user.id,
           taskId: result.taskId ?? taskId,
           threadId: actionThreadId,
@@ -1155,6 +1228,7 @@ export class SocialAgentChatController {
         });
         hasAssistantDelta = streamed.streamed;
         if (streamed.streamed) {
+          streamedAssistantMessageId = assistantMessageId;
           streamResult = {
             ...streamResult,
             assistantMessage: streamed.text ?? '',
@@ -1168,6 +1242,17 @@ export class SocialAgentChatController {
           };
         }
       }
+      const assistantMessageId =
+        streamedAssistantMessageId ??
+        buildRunScopedAssistantMessageId({
+          taskId: result.taskId ?? taskId,
+          runId,
+        });
+      streamResult = this.withAssistantRuntimeAnchor(
+        streamResult,
+        runId,
+        assistantMessageId,
+      );
       const userFacing = this.userFacingSanitizer.toUserFacingAgentResponse(
         streamResult,
         result.permissionMode ?? AgentTaskPermissionMode.Confirm,
@@ -1176,7 +1261,7 @@ export class SocialAgentChatController {
       if (!hasAssistantDelta) {
         const wroteFallback = await this.writeFallbackAssistantText(write, {
           text: userFacing.assistantMessage,
-          messageId: `agent-action:${result.taskId ?? taskId}`,
+          messageId: assistantMessageId,
           traceId: result.traceId,
           socialCodexEvents,
           v2: assistantV2,
@@ -1479,6 +1564,72 @@ export class SocialAgentChatController {
     if (action === 'replay') return '正在重新整理';
     if (action === 'retry') return '正在继续处理';
     return '正在恢复进度';
+  }
+
+  private queuedRunInlineWaitMs(body: SocialAgentRouteMessageBody): number {
+    const intent =
+      body.conversationIntent ?? body.clientContext?.conversationIntent ?? null;
+    if (intent === 'conversation') return 0;
+    return 18_000;
+  }
+
+  private async waitForQueuedRunResult(input: {
+    ownerUserId: number;
+    result: SocialAgentIntentRouteResult;
+    signal?: AbortSignal | null;
+    maxWaitMs: number;
+  }): Promise<SocialAgentChatRunResult | null> {
+    if (input.maxWaitMs <= 0) return null;
+    const queuedRun = input.result.queuedRun;
+    if (!queuedRun?.runId || !queuedRun.taskId || !this.taskLifecycle) {
+      return null;
+    }
+
+    const deadline = Date.now() + input.maxWaitMs;
+    while (Date.now() < deadline) {
+      if (input.signal?.aborted) return null;
+      const task = await this.taskLifecycle
+        .assertTaskOwner(queuedRun.taskId, input.ownerUserId)
+        .catch(() => null);
+      if (!task) return null;
+      const stored = readSocialAgentStoredRun(
+        task,
+        queuedRun.runId,
+        (_id, label) => label,
+      );
+      if (stored?.status === 'completed' && this.isChatRunResult(stored.result)) {
+        return stored.result;
+      }
+      if (stored?.status === 'failed') return null;
+      await this.sleep(400, input.signal);
+    }
+    return null;
+  }
+
+  private isChatRunResult(value: unknown): value is SocialAgentChatRunResult {
+    if (!this.recordValue(value)) return false;
+    const result = value as Partial<SocialAgentChatRunResult>;
+    return (
+      typeof result.assistantMessage === 'string' &&
+      typeof result.taskId === 'number' &&
+      Array.isArray(result.visibleSteps) &&
+      Array.isArray(result.candidates)
+    );
+  }
+
+  private sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
+    if (signal?.aborted) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      signal?.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        { once: true },
+      );
+    });
   }
 
   private writeApprovalRequiredEvents(
@@ -1909,6 +2060,23 @@ export class SocialAgentChatController {
       this.stringValue(record.label) ||
       JSON.stringify(body ?? {})
     );
+  }
+
+  private withAssistantRuntimeAnchor<
+    T extends { runtime?: Record<string, unknown> | null },
+  >(
+    result: T,
+    runId: string,
+    messageId: string,
+  ): T {
+    return {
+      ...result,
+      runtime: {
+        ...(result.runtime ?? {}),
+        runId,
+        messageId,
+      },
+    };
   }
 
   @Post('tasks/:id/publish-social-request')

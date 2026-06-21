@@ -53,6 +53,10 @@ import {
   type SchemaDrivenAssistantCard,
   type ToolUISchemaType,
 } from './tool-ui-schema';
+import {
+  isLowRiskApprovalActionType,
+  isLowRiskApprovalText,
+} from './tool-risk-policy';
 import { sanitizePublicProcessText as sanitizePublicText } from './public-process-text';
 
 const LazyCandidateResultCard = lazy(() =>
@@ -178,23 +182,8 @@ function pendingConfirmationFromRawSafetyCard(card: Record<string, unknown>) {
 }
 
 function isLowRiskApprovalAction(actionType: string, summary: string) {
-  const normalized = actionType.trim().toLowerCase();
-  if (
-    /^(candidate\.like|candidate\.save|candidate\.favorite|candidate\.bookmark|candidate\.generate_opener|candidate\.view_detail|candidate\.skip|candidate\.more_like_this|save_candidate|favorite_candidate|bookmark_candidate|collect_candidate|generate_opener|draft_opener|view_candidate|skip_candidate)$/i.test(
-      normalized,
-    )
-  ) {
-    return true;
-  }
-  const text = summary.trim().toLowerCase();
-  return (
-    /save|like|favorite|collect|bookmark|generate_opener|draft|收藏|喜欢|保存|开场白|草稿/.test(
-      text,
-    ) &&
-    !/send|message|invite|connect|friend|publish|contact|location|发送|私信|邀请|连接|好友|发布|联系|位置/.test(
-      text,
-    )
-  );
+  if (isLowRiskApprovalActionType(actionType)) return true;
+  return isLowRiskApprovalText(summary);
 }
 
 function pendingConfirmationFromSafetyCard(card: SchemaDrivenAssistantCard) {
@@ -808,7 +797,7 @@ function ApprovalRuntimeHints({ metadata }: { metadata?: Record<string, unknown>
     publicDetail(metadata.dryRunPreviewTitle) ??
       (metadata.dryRunAvailable === true ? '发送前预览已准备' : null),
     metadata.sideEffectAllowedBeforeApproval === false ? '确认前不会触达对方' : null,
-    metadata.auditRequired === true ? '会留下确认记录' : null,
+    metadata.auditRequired === true ? '之后可以回看这次确认' : null,
     approvalRuntimeHint(metadata.resumePolicy),
     publicDetail(metadata.executionBoundary),
   ]

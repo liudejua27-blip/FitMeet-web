@@ -140,6 +140,8 @@ export interface SocialAgentChatRunResult {
   agentLoop?: AgentLoopRun;
   subagentHandoffs?: SubagentHandoffResult[];
   runtime?: {
+    runId?: string | null;
+    messageId?: string | null;
     checkpointId?: number | null;
     checkpointType?: string | null;
     canResume?: boolean;

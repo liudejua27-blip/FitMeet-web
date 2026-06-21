@@ -30,7 +30,7 @@ const nonSocialLookupPattern =
   /(找回|查找|找一下|找找|帮我找|给我找|想找).{0,16}(聊天记录|消息记录|历史消息|历史会话|会话|密码|账号|设置|页面|入口|资料|文件|订单|帮助|说明|客服|教程|规则|隐私政策|协议|账单|发票)/i;
 
 const explicitSocialSearchPattern =
-  /(帮我找|给我找|想找|我要找|我想认识|想认识|认识.*(新朋友|朋友|人)|低压力社交|找一个|找个|找人|找.*(搭子|伙伴|朋友)|推荐.{0,8}(用户|朋友|人|搭子|候选|活动)|搜索.{0,8}(用户|朋友|人|搭子|候选|活动)|匹配.{0,8}(用户|朋友|人|搭子|候选)|附近.{0,8}(用户|朋友|人|搭子|活动)|同城.{0,8}(用户|朋友|人|搭子|活动)|真实用户|约练用户|户外搭子|篮球搭子|约练搭子|一起.{0,12}(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|户外|骑行|city\s*walk|citywalk|篮球|网球|游泳|运动|训练)|周末.{0,12}(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|户外|骑行|city\s*walk|citywalk|篮球|运动|训练))/i;
+  /(帮我找|给我找|想找|我要找|我想认识|想认识|认识.*(新朋友|朋友|人)|低压力社交|找一个|找个|找人|找.*(女生|男生|女性|男性|搭子|伙伴|朋友)|推荐.{0,8}(用户|朋友|人|搭子|候选|活动)|搜索.{0,8}(用户|朋友|人|搭子|候选|活动)|匹配.{0,8}(用户|朋友|人|搭子|候选)|附近.{0,8}(用户|朋友|人|搭子|活动)|同城.{0,8}(用户|朋友|人|搭子|活动)|真实用户|约练用户|户外搭子|篮球搭子|约练搭子|一起.{0,12}(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|户外|骑行|city\s*walk|citywalk|篮球|网球|游泳|运动|训练)|周末.{0,12}(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|户外|骑行|city\s*walk|citywalk|篮球|运动|训练))/i;
 
 const explicitActivitySearchPattern =
   /(找|搜索|推荐|参加|发起|创建|有没有|附近|同城).{0,12}(活动|局|约练|跑团|课程|场地|线下见面|户外)/i;
@@ -41,9 +41,19 @@ const explicitSocialActionPattern =
 const explicitCandidateMessageConfirmationPattern =
   /^(确认发送|确认发出|发送吧|可以发送|发吧|帮我发送|就发这条|确认)[。.!！\s]*$/i;
 
+const explicitCandidateRefinementPattern =
+  /((有没有|有无|筛一下|筛选|优先|最好|只要|更想|换成|找找).{0,18}(女生|男生|女性|男性|女的|男的|舞蹈|编程|程序员|科技|摄影|音乐|读书|学生|同校|附近|同城))|^(女生|男生|女性|男性|女的|男的|舞蹈生|喜欢编程|会编程|附近的|同城的)[。.!！\s]*$/i;
+
+const profileEnrichmentRequestPattern =
+  /(帮我完善.*画像|请帮我完善.*画像|完善.*ai画像|完善.*AI画像|完善.*人物画像|上面.*画像.*完善|刚才.*画像.*完善|把刚才.*写入画像|保存到.*画像|调用工具.*画像|工具.*完善.*画像|写入.*画像|存到.*画像|人物画像|ai画像|AI画像)/i;
+
+const immediateSocialSearchPattern =
+  /((现在|马上|直接|立刻|立即).{0,16}(帮我找|给我找|找人|搜索|推荐|匹配|找.*搭子|找.*女生|找.*男生))|((帮我找|给我找|搜索|推荐|匹配).{0,24}(候选|用户|朋友|人|搭子|女生|男生|活动|局))/i;
+
 export function hasExplicitSocialExecutionIntent(message: string): boolean {
   const text = message.trim().toLowerCase();
   if (!text) return false;
+  if (isProfileEnrichmentDominant(text)) return false;
   if (isConversationOnlySocialMention(text)) return false;
   if (socialHelpQuestionPattern.test(text)) return false;
   if (socialCapabilityQuestionPattern.test(text)) return false;
@@ -54,6 +64,19 @@ export function hasExplicitSocialExecutionIntent(message: string): boolean {
     explicitActivitySearchPattern.test(text);
   if (socialSearchNegationPattern.test(text)) return false;
   if (hasSearchIntent) return true;
+  const hasActivity =
+    /(散步|跑步|羽毛球|篮球|健身|徒步|爬山|骑行|游泳|瑜伽|飞盘|网球|乒乓|咖啡|吃饭|电影|city\s*walk|citywalk)/i.test(
+      text,
+    );
+  const hasTime =
+    /(周末|今天|明天|后天|今晚|上午|下午|晚上|中午|早上|[0-9一二三四五六七八九十]+点)/i.test(
+      text,
+    );
+  const hasPlace =
+    /(附近|大学|公园|商场|体育馆|健身房|校区|区|市|青岛|上海|北京|深圳|广州|杭州|成都|武汉|南京)/i.test(
+      text,
+    );
+  if (hasActivity && hasTime && hasPlace) return true;
   if (socialSideEffectNegationPattern.test(text)) return false;
   return explicitSocialActionPattern.test(text);
 }
@@ -61,6 +84,7 @@ export function hasExplicitSocialExecutionIntent(message: string): boolean {
 export function hasExplicitSocialSideEffectIntent(message: string): boolean {
   const text = message.trim().toLowerCase();
   if (!text) return false;
+  if (isProfileEnrichmentDominant(text)) return false;
   if (isConversationOnlySocialMention(text)) return false;
   if (socialSideEffectNegationPattern.test(text)) return false;
   if (socialHelpQuestionPattern.test(text)) return false;
@@ -79,6 +103,17 @@ export function hasExplicitCandidateMessageConfirmationIntent(
   if (socialCapabilityQuestionPattern.test(text)) return false;
   if (nonSocialLookupPattern.test(text)) return false;
   return explicitCandidateMessageConfirmationPattern.test(text);
+}
+
+export function hasExplicitCandidateRefinementIntent(message: string): boolean {
+  const text = message.trim().toLowerCase();
+  if (!text) return false;
+  if (isProfileEnrichmentDominant(text)) return false;
+  if (isConversationOnlySocialMention(text)) return false;
+  if (socialHelpQuestionPattern.test(text)) return false;
+  if (socialCapabilityQuestionPattern.test(text)) return false;
+  if (nonSocialLookupPattern.test(text)) return false;
+  return explicitCandidateRefinementPattern.test(text);
 }
 
 export function explicitlyRejectsSocialExecution(message: string): boolean {
@@ -162,6 +197,7 @@ export function shouldAllowSocialExecution(input: {
   intent?: string;
   conversationIntent?: SocialAgentConversationIntent | null;
 }): boolean {
+  if (isProfileEnrichmentDominant(input.message)) return false;
   if (explicitlyRejectsSocialExecution(input.message)) return false;
   if (isConversationOnlySocialMention(input.message)) return false;
   if (
@@ -177,6 +213,12 @@ export function shouldAllowSocialExecution(input: {
     );
   }
   if (hasExplicitSocialExecutionIntent(input.message)) return true;
+  if (
+    hasExplicitCandidateRefinementIntent(input.message) &&
+    hasExistingSocialExecutionContext(input)
+  ) {
+    return true;
+  }
   if (
     input.intent &&
     ['social_search', 'activity_search', 'candidate_followup'].includes(
@@ -196,6 +238,19 @@ export function enforceSocialIntentGate(
   result: SocialAgentIntentRouterResult,
 ): SocialAgentIntentRouterResult {
   if (!isSocialExecutionIntent(result.intent)) return result;
+  const profileDominant = profileDominantIntent(input.message);
+  if (profileDominant) {
+    return {
+      ...result,
+      intent: profileDominant,
+      confidence: Math.max(result.confidence, 0.9),
+      shouldSearch: false,
+      shouldReplan: false,
+      shouldUpdateProfile: true,
+      shouldExecuteAction: false,
+      replyStrategy: 'conversational_answer',
+    };
+  }
   if (
     shouldAllowSocialExecution({
       message: input.message,
@@ -215,6 +270,55 @@ export function enforceSocialIntentGate(
     shouldExecuteAction: false,
     replyStrategy: 'conversational_answer',
   };
+}
+
+export function enforceExplicitSocialExecutionRoute(
+  input: SocialAgentIntentRouterInput & {
+    conversationIntent?: SocialAgentConversationIntent | null;
+  },
+  result: SocialAgentIntentRouterResult,
+): SocialAgentIntentRouterResult {
+  const gated = enforceSocialIntentGate(input, result);
+  if (isSocialExecutionIntent(gated.intent)) return gated;
+  if (
+    hasExplicitCandidateRefinementIntent(input.message) &&
+    hasExistingSocialExecutionContext(input)
+  ) {
+    return normalizeAllowedSocialExecutionRoute({
+      ...gated,
+      intent: 'candidate_followup',
+      confidence: Math.max(gated.confidence, 0.9),
+      source: gated.source,
+      shouldSearch: true,
+      shouldReplan: false,
+      shouldExecuteAction: false,
+      replyStrategy: 'search_candidates',
+    });
+  }
+  if (!hasExplicitSocialExecutionIntent(input.message)) return gated;
+  if (hasExplicitSocialSideEffectIntent(input.message)) {
+    if (!hasExistingSocialActionContext(input)) return gated;
+    return normalizeAllowedSocialExecutionRoute({
+      ...gated,
+      intent: 'action_request',
+      confidence: Math.max(gated.confidence, 0.9),
+      source: gated.source,
+      shouldSearch: false,
+      shouldReplan: false,
+      shouldExecuteAction: true,
+      replyStrategy: 'execute_action',
+    });
+  }
+  return normalizeAllowedSocialExecutionRoute({
+    ...gated,
+    intent: 'social_search',
+    confidence: Math.max(gated.confidence, 0.9),
+    source: gated.source,
+    shouldSearch: true,
+    shouldReplan: false,
+    shouldExecuteAction: false,
+    replyStrategy: 'search_candidates',
+  });
 }
 
 function positiveNumber(value: unknown): number {
@@ -261,4 +365,49 @@ function normalizeAllowedSocialExecutionRoute(
     };
   }
   return result;
+}
+
+function isProfileEnrichmentDominant(message: string): boolean {
+  return profileDominantIntent(message) !== null;
+}
+
+function profileDominantIntent(
+  message: string,
+): 'profile_enrichment' | 'profile_enrichment_request' | null {
+  const text = message.trim().toLowerCase();
+  if (!text) return null;
+  if (profileEnrichmentRequestPattern.test(text)) {
+    return 'profile_enrichment_request';
+  }
+  if (
+    hasRichProfileFactsForGate(text) &&
+    !immediateSocialSearchPattern.test(text)
+  ) {
+    return 'profile_enrichment';
+  }
+  return null;
+}
+
+function hasRichProfileFactsForGate(message: string): boolean {
+  const text = message.trim().toLowerCase();
+  if (!text) return false;
+  const signals = [
+    /我是[^，。,.]{0,14}(男|女)/i,
+    /\b\d{1,2}\s*岁?\b/,
+    /身高\s*\d{2,3}/i,
+    /体重\s*\d{2,3}/i,
+    /(白羊|金牛|双子|巨蟹|狮子|处女|天秤|天蝎|射手|摩羯|水瓶|双鱼)/,
+    /\b(infp|enfp|intj|entj|intp|entp|isfp|istp|isfj|istj|esfp|estp|esfj|estj|infj|enfj)\b/i,
+    /(我在|我常住|常住|住在).{0,24}(青岛|北京|上海|深圳|广州|大学|校区|区)/,
+    /(性格|开放|外向|内向|慢热|开朗)/,
+    /(喜欢|爱好|平时|一般).{0,24}(跑步|散步|羽毛球|篮球|健身|咖啡|拍照|编程|音乐|读书)/,
+    /(周末|下午|晚上|工作日).{0,12}(有空|一般|通常|偏好)/,
+    /(想找|想认识|希望认识).{0,24}(同校|女生|男生|搭子|朋友)/,
+  ];
+  return (
+    signals.reduce(
+      (count, pattern) => count + (pattern.test(text) ? 1 : 0),
+      0,
+    ) >= 2
+  );
 }

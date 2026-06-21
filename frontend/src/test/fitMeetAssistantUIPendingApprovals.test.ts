@@ -129,4 +129,128 @@ describe('FitMeetAssistantUI pending approval attachment', () => {
     expect(standaloneConfirmations).toHaveLength(1);
     expect(standaloneConfirmations[0]).toMatchObject({ id: 8801 });
   });
+
+  it('drops orphan low-risk confirmations when replay has no owning card', () => {
+    const { cards, standaloneConfirmations } = attachPendingConfirmationsToAssistantCards(
+      [],
+      [
+        {
+          id: 'save-chen',
+          type: 'save_candidate',
+          actionType: 'save_candidate',
+          summary: '收藏 陈砚，后续推荐会参考。',
+          riskLevel: 'medium',
+          expiresAt: null,
+        },
+        {
+          id: 'opener-chen',
+          type: 'candidate.generate_opener',
+          actionType: 'candidate.generate_opener',
+          summary: '生成开场白草稿，不会发送给对方。',
+          riskLevel: 'medium',
+          expiresAt: null,
+        },
+      ],
+    );
+
+    expect(cards).toEqual([]);
+    expect(standaloneConfirmations).toEqual([]);
+  });
+
+  it('dedupes replayed pending confirmations before attaching them to cards', () => {
+    const { cards, standaloneConfirmations } = attachPendingConfirmationsToAssistantCards(
+      [
+        {
+          id: 'candidate-card-chen',
+          schemaType: 'social_match.candidate',
+          data: {
+            schemaType: 'social_match.candidate',
+            candidateRecordId: 501,
+            displayName: '陈砚',
+          },
+        },
+      ],
+      [
+        {
+          id: 8801,
+          type: 'send_invite',
+          actionType: 'send_invite',
+          summary: '确认发送给 陈砚',
+          riskLevel: 'medium',
+          payload: { candidateRecordId: 501 },
+          expiresAt: null,
+        },
+        {
+          id: 8801,
+          type: 'send_invite',
+          actionType: 'send_invite',
+          summary: '确认发送给 陈砚',
+          riskLevel: 'medium',
+          payload: { candidateRecordId: 501 },
+          expiresAt: null,
+        },
+        {
+          id: null,
+          type: 'send_invite',
+          actionType: 'send_invite',
+          summary: '确认发送给 陈砚',
+          riskLevel: 'medium',
+          payload: { candidateRecordId: 501 },
+          expiresAt: null,
+        },
+        {
+          id: null,
+          type: 'send_invite',
+          actionType: 'send_invite',
+          summary: '确认发送给 陈砚',
+          riskLevel: 'medium',
+          payload: { candidateRecordId: 501 },
+          expiresAt: null,
+        },
+      ],
+    );
+
+    expect(standaloneConfirmations).toEqual([]);
+    const inlineApprovals = (cards[0].data as Record<string, unknown>)
+      .inlineApprovalConfirmations as Record<string, unknown>;
+    expect(Object.keys(inlineApprovals)).toEqual(['opener.confirm_send']);
+    expect(inlineApprovals['opener.confirm_send']).toMatchObject({
+      id: 8801,
+      actionType: 'send_invite',
+      actionKey: 'opener.confirm_send',
+    });
+  });
+
+  it('dedupes orphan confirmations by action target when no card owns them', () => {
+    const { cards, standaloneConfirmations } = attachPendingConfirmationsToAssistantCards(
+      [],
+      [
+        {
+          id: null,
+          type: 'publish_social_request',
+          actionType: 'publish_social_request',
+          summary: '确认发布到发现',
+          riskLevel: 'medium',
+          payload: { taskId: 101, opportunityId: 'qdu-walk' },
+          expiresAt: null,
+        },
+        {
+          id: null,
+          type: 'publish_social_request',
+          actionType: 'publish_social_request',
+          summary: '确认发布到发现',
+          riskLevel: 'medium',
+          payload: { taskId: 101, opportunityId: 'qdu-walk' },
+          expiresAt: null,
+        },
+      ],
+    );
+
+    expect(cards).toEqual([]);
+    expect(standaloneConfirmations).toHaveLength(1);
+    expect(standaloneConfirmations[0]).toMatchObject({
+      actionType: 'publish_social_request',
+      payload: { taskId: 101, opportunityId: 'qdu-walk' },
+    });
+  });
 });

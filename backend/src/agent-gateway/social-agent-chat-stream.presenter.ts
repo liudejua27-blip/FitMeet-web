@@ -244,15 +244,6 @@ export function lifecycleFromUserFacingResponse(
   if (response.safeStatus.blocked) return 'checking_safety';
   if (response.pendingConfirmations.length > 0) return 'waiting_confirmation';
   if (
-    response.cards.some(
-      (card) =>
-        card.status === 'waiting_confirmation' ||
-        card.actions.some((action) => action.requiresConfirmation),
-    )
-  ) {
-    return 'waiting_confirmation';
-  }
-  if (
     response.safeStatus.level === 'medium' ||
     response.safeStatus.level === 'high' ||
     response.safeStatus.level === 'blocked' ||

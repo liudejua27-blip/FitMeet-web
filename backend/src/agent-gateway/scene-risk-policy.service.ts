@@ -265,6 +265,7 @@ export class SceneRiskPolicyService {
       return 'contact_exchange';
     if (/offline|meet|见面|线下/.test(raw)) return 'offline_meeting';
     if (/add_friend|friend|connect|加好友|好友/.test(raw)) return 'add_friend';
+    if (this.isDraftOnlyOpenerAction(raw)) return 'generate_opener';
     if (
       /send_message|confirm_send|send_invite|message|invite|发消息|私信|聊天|发送|邀请/.test(
         raw,
@@ -279,6 +280,18 @@ export class SceneRiskPolicyService {
     if (/search|match|候选|搜索|匹配/.test(raw)) return 'search_candidates';
     if (/profile|画像|整理/.test(raw)) return 'profile';
     return 'chat';
+  }
+
+  private isDraftOnlyOpenerAction(text: string): boolean {
+    return (
+      /draft|opener|开场白|草稿/.test(text) &&
+      /不会(?:自动)?发送|不(?:会)?发送|未发送|只(?:会)?生成|仅(?:会)?生成|仅.*草稿|只.*草稿/.test(
+        text,
+      ) &&
+      !/确认.*发送|发送邀请|发消息|私信|邀请|send_invite|confirm_send|send_message|message|invite/.test(
+        text,
+      )
+    );
   }
 
   private baseRisk(actionType: SceneActionType): SceneRiskLevel {

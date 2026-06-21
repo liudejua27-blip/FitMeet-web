@@ -36,6 +36,21 @@ describe('SceneRiskPolicyService', () => {
     expect(policy.safetyPrompts.join(' ')).toContain('需要先让用户确认');
   });
 
+  it('keeps draft-only opener generation low risk even when copy says it will not send', () => {
+    const policy = service.evaluate({
+      sceneType: 'walking',
+      text: '生成开场白草稿，不会发送给对方，只会给用户预览',
+      permissionMode: 'limited_auto',
+    });
+
+    expect(policy).toMatchObject({
+      actionType: 'generate_opener',
+      riskLevel: 'low',
+      requiresConfirmation: false,
+      sceneType: 'walking',
+    });
+  });
+
   it('requires double confirmation for drinking scenes', () => {
     const policy = service.evaluate({
       sceneType: 'drinking',

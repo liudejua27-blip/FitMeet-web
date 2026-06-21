@@ -127,7 +127,8 @@ function isNearDuplicateAssistantText(left: string, right: string): boolean {
   if (shorter.length < 18) return false;
   const coverage = shorter.length / longer.length;
   if (coverage >= 0.72 && longer.includes(shorter)) return true;
-  return commonPrefixRatio(leftCompact, rightCompact) >= 0.9;
+  if (commonPrefixRatio(leftCompact, rightCompact) >= 0.9) return true;
+  return characterBigramDice(leftCompact, rightCompact) >= 0.82;
 }
 
 function compactAssistantTextForDedupe(value: string): string {
@@ -143,4 +144,32 @@ function commonPrefixRatio(left: string, right: string): number {
   let count = 0;
   while (count < limit && left[count] === right[count]) count += 1;
   return count / limit;
+}
+
+function characterBigramDice(left: string, right: string): number {
+  if (left.length < 28 || right.length < 28) return 0;
+  const leftBigrams = characterBigrams(left);
+  const rightBigrams = characterBigrams(right);
+  if (leftBigrams.size === 0 || rightBigrams.size === 0) return 0;
+  let overlap = 0;
+  for (const [bigram, leftCount] of leftBigrams) {
+    const rightCount = rightBigrams.get(bigram) ?? 0;
+    overlap += Math.min(leftCount, rightCount);
+  }
+  return (2 * overlap) / (bigramCount(leftBigrams) + bigramCount(rightBigrams));
+}
+
+function characterBigrams(value: string): Map<string, number> {
+  const out = new Map<string, number>();
+  for (let index = 0; index < value.length - 1; index += 1) {
+    const bigram = value.slice(index, index + 2);
+    out.set(bigram, (out.get(bigram) ?? 0) + 1);
+  }
+  return out;
+}
+
+function bigramCount(value: Map<string, number>): number {
+  let count = 0;
+  for (const item of value.values()) count += item;
+  return count;
 }

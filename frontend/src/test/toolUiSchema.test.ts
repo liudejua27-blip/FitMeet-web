@@ -266,6 +266,27 @@ describe('tool-ui-schema', () => {
     });
   });
 
+  it('treats draft-only opener confirmations as low risk even when copy says it will not send', () => {
+    const cards = [
+      normalizeAssistantCard({
+        id: 'opener-draft-only',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'safety.approval',
+        title: '生成开场白草稿',
+        body: '只生成草稿，不会自动发送给对方。',
+        data: {
+          schemaName: 'SafetyApprovalCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'safety.approval',
+          summary: '生成开场白草稿，不会发送给对方。',
+          riskLevel: 'low',
+        },
+      }),
+    ];
+
+    expect(dedupeAssistantCards(cards)).toHaveLength(0);
+  });
+
   it('folds publish approvals into the opportunity card instead of creating a second panel', () => {
     const cards = [
       normalizeAssistantCard({

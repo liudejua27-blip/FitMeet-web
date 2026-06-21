@@ -4,12 +4,24 @@ export function mergeUniqueAgentCards(
   existing: FitMeetAlphaCard[],
   incoming: FitMeetAlphaCard[],
 ) {
-  const seen = new Set(existing.flatMap(agentCardDedupKeys));
+  const keyToIndex = new Map<string, number>();
+  existing.forEach((card, index) => {
+    for (const key of agentCardDedupKeys(card)) keyToIndex.set(key, index);
+  });
   const merged = [...existing];
   for (const card of incoming) {
     const keys = agentCardDedupKeys(card);
-    if (keys.some((key) => seen.has(key))) continue;
-    for (const key of keys) seen.add(key);
+    const existingIndex = keys
+      .map((key) => keyToIndex.get(key))
+      .find((index): index is number => typeof index === 'number');
+    if (existingIndex !== undefined) {
+      if (shouldReplaceDuplicateCard(merged[existingIndex], card)) {
+        merged[existingIndex] = card;
+        for (const key of keys) keyToIndex.set(key, existingIndex);
+      }
+      continue;
+    }
+    for (const key of keys) keyToIndex.set(key, merged.length);
     merged.push(card);
   }
   return merged;
@@ -58,6 +70,11 @@ export function agentCardDedupKeys(card: FitMeetAlphaCard) {
   for (const draftKey of collectOpportunityDraftKeys(card)) {
     add('opportunity-draft', draftKey);
     add(`${type}:opportunity-draft`, draftKey);
+  }
+
+  for (const processKey of collectProcessKeys(card)) {
+    add('process', processKey);
+    add(`${type}:process`, processKey);
   }
 
   if (keys.size === 0) keys.add(`${type}:fallback:${card.id ?? JSON.stringify(card.data)}`);
@@ -237,6 +254,59 @@ function collectActionTypes(card: FitMeetAlphaCard) {
     ...actionPayloadValues(card, 'actionType'),
     ...actionPayloadValues(card, 'action'),
   );
+}
+
+function shouldReplaceDuplicateCard(existing: FitMeetAlphaCard, incoming: FitMeetAlphaCard) {
+  return isProcessStatusCard(existing) || isProcessStatusCard(incoming);
+}
+
+function isProcessStatusCard(card: FitMeetAlphaCard) {
+  return collectProcessKeys(card).length > 0;
+}
+
+function collectProcessKeys(card: FitMeetAlphaCard) {
+  if (card.schemaType === 'safety.approval') return [];
+  const processType = firstString(
+    card.data.processType,
+    nestedValue(card.data.metadata, 'processType'),
+    nestedValue(card.data.summary, 'processType'),
+    nestedValue(card.data.visibleSummary, 'processType'),
+  );
+  const sourceProtocol = firstString(
+    card.data.sourceProtocol,
+    nestedValue(card.data.metadata, 'sourceProtocol'),
+  );
+  const displayMode = firstString(
+    card.data.displayMode,
+    nestedValue(card.data.metadata, 'displayMode'),
+    nestedValue(card.data.visibleSummary, 'displayMode'),
+  );
+  const cardId = stringFromUnknown(card.id) ?? '';
+  const looksLikeProcess =
+    Boolean(processType) ||
+    sourceProtocol === 'social_agent_event_v2' ||
+    displayMode === 'covering_status' ||
+    /^social-codex:/i.test(cardId);
+  if (!looksLikeProcess) return [];
+
+  const runId = firstString(card.data.runId, nestedValue(card.data.metadata, 'runId'));
+  const taskId = firstString(card.data.taskId, nestedValue(card.data.metadata, 'taskId'));
+  const threadId = firstString(card.data.threadId, nestedValue(card.data.metadata, 'threadId'));
+  const scope = runId
+    ? `run:${runId}`
+    : taskId
+      ? `task:${taskId}`
+      : threadId
+        ? `thread:${threadId}`
+        : 'global';
+  const group =
+    processType === 'run_summary' ||
+    sourceProtocol === 'social_agent_event_v2' ||
+    displayMode === 'covering_status' ||
+    cardId === 'social-codex:summary'
+      ? 'run-summary'
+      : processType ?? 'progress';
+  return [`${scope}:${group}`];
 }
 
 function actionPayloadValues(card: FitMeetAlphaCard, key: string) {

@@ -11,6 +11,7 @@ import { SocialAgentChatService } from './social-agent-chat.service';
 import { AgentTaskStatus } from './entities/agent-task.entity';
 import { SocialAgentCandidateCommandService } from './social-agent-candidate-command.service';
 import { SocialAgentTaskMemoryStateMachineService } from './social-agent-task-memory-state-machine.service';
+import { withSocialAgentStoredRun } from './social-agent-chat-run.presenter';
 
 describe('SocialAgentChatController protocol boundaries', () => {
   const controllerSource = () =>
@@ -590,6 +591,155 @@ describe('SocialAgentChatController user-facing stream', () => {
     expect(serialized).toContain('"type":"assistant_delta"');
     expect(serialized).toContain('"type":"assistant.delta"');
     expect(serialized).toContain('"type":"result"');
+  });
+
+  it('uses completed queued search result in the same message stream when available', async () => {
+    const writes: string[] = [];
+    const queuedRun = {
+      taskId: 800,
+      runId: 'sar_completed_inline',
+      status: 'completed',
+      phase: 'completed',
+      message: '已完成搜索并刷新候选人',
+      visibleSteps: [],
+      queuedAt: new Date().toISOString(),
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      failedAt: null,
+      pollAfterMs: 1500,
+      error: null,
+      replan: null,
+      result: {
+        taskId: 800,
+        status: AgentTaskStatus.Succeeded,
+        visibleSteps: [],
+        assistantMessage: '找到 3 个候选，先看陈砚。',
+        socialRequestDraft: null,
+        candidates: [{ userId: 22, displayName: '陈砚' }],
+        approvalRequiredActions: [],
+        events: [],
+        cards: [
+          {
+            id: 'candidate-22',
+            type: 'candidate_card',
+            schemaType: 'social_match.candidate',
+            title: '和陈砚低压力认识',
+            subtitle: '青岛 · 今天晚上 · 散步',
+            status: 'ready',
+            data: {
+              candidateRecordId: 22,
+              candidateUserId: 22,
+              name: '陈砚',
+              timePreference: '今天晚上',
+              locationName: '青岛大学附近',
+            },
+            actions: [],
+          },
+        ],
+        safety: {
+          blocked: false,
+          level: 'low',
+          reasons: [],
+          boundaryNotes: [],
+          requiredConfirmations: [],
+        },
+      },
+    };
+    const task = {
+      id: 800,
+      ownerUserId: 7,
+      result: withSocialAgentStoredRun({}, queuedRun as never),
+    };
+    const chat = {
+      handleMessageStream: jest.fn(async () => ({
+        taskId: 800,
+        status: AgentTaskStatus.Planning,
+        intent: 'social_search',
+        confidence: 0.9,
+        entities: {},
+        shouldSearch: true,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: false,
+        replyStrategy: 'search_candidates',
+        source: 'rules',
+        action: 'queue_search',
+        savedContext: true,
+        profileUpdated: false,
+        shouldQueueRun: true,
+        runMode: 'initial',
+        queuedRun,
+        assistantMessage: '我这就帮你看看。',
+        cards: [],
+        permissionMode: 'limited_auto',
+        safety: {
+          blocked: false,
+          level: 'low',
+          reasons: [],
+          boundaryNotes: [],
+          requiredConfirmations: [],
+        },
+      })),
+    };
+    const taskLifecycle = {
+      assertTaskOwner: jest.fn().mockResolvedValue(task),
+    };
+    const controller = new SocialAgentChatController(
+      chat as unknown as SocialAgentChatService,
+      {} as unknown as SocialAgentCandidateCommandService,
+      new UserFacingResponseSanitizerService(
+        new LightStatusMapperService(),
+        new AgentCardAssemblerService(),
+      ),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new SocialAgentTaskMemoryStateMachineService(),
+      undefined,
+      undefined,
+      taskLifecycle as never,
+    );
+    const response = {
+      status: jest.fn(),
+      setHeader: jest.fn(),
+      flushHeaders: jest.fn(),
+      flush: jest.fn(),
+      write: jest.fn((chunk: string) => {
+        writes.push(chunk);
+      }),
+      end: jest.fn(),
+    } as unknown as Response;
+
+    await controller.handleMessageStream(
+      { user: { id: 7 } } as Parameters<
+        SocialAgentChatController['handleMessageStream']
+      >[0],
+      {
+        message: '我想在青岛大学附近今天晚上找散步搭子',
+        conversationIntent: 'social',
+        clientContext: {
+          source: 'web',
+          threadId: 'agent-task:800',
+          conversationIntent: 'social',
+        },
+      },
+      response,
+    );
+
+    const serialized = writes.join('');
+    expect(taskLifecycle.assertTaskOwner).toHaveBeenCalledWith(800, 7);
+    expect(serialized).toContain('找到 3 个候选，先看陈砚');
+    expect(serialized).toContain('和陈砚低压力认识');
+    expect(serialized).toContain('今天晚上');
+    expect(serialized).not.toContain('我这就帮你看看');
   });
 
   it('binds message stream initial trace to the result task when downstream emits no task event', async () => {
