@@ -200,7 +200,7 @@ describe('Agent adapter layer', () => {
       recoveryNotice: {
         kind: 'timeout' as const,
         title: '这次处理时间有点久',
-        message: '我已经保留当前对话。你可以重试，或者继续告诉我下一步。',
+        message: '可以继续处理，也可以补充新的要求。',
         retryable: true,
         source: 'stream_error' as const,
       },
@@ -209,7 +209,7 @@ describe('Agent adapter layer', () => {
     expect(mapAgentError(error)).toMatchObject({
       code: 'SERVER_ERROR',
       title: '这次处理时间有点久',
-      message: '我已经保留当前对话。你可以重试，或者继续告诉我下一步。',
+      message: '可以继续处理，也可以补充新的要求。',
       retryable: true,
       recoveryNotice: {
         kind: 'timeout',
@@ -892,6 +892,36 @@ describe('Agent adapter layer', () => {
     ]);
   });
 
+  it('maps SocialAgentEventV2 failed fallback to a light reconnect status', () => {
+    const mapped = mapUserFacingAgentStreamEvent({
+      type: 'run.failed',
+      eventId: 'run-v2-failed-fallback:1',
+      seq: 1,
+      createdAt: '2026-06-21T00:00:00.000Z',
+      userId: '7',
+      threadId: '202',
+      taskId: 202,
+      runId: 'run-v2-failed-fallback',
+      stage: 'hydrate_context',
+      visibility: 'user_visible',
+      display: {
+        title: 'run failed',
+        detail: 'planner traceId payload',
+        state: 'failed',
+      },
+    });
+
+    expect(mapped).toEqual(
+      expect.objectContaining({
+        type: 'progress',
+        title: '这段需求还在',
+        detail: '我保留了这段需求，你可以继续处理或重新发送。',
+      }),
+    );
+    expect(JSON.stringify(mapped)).not.toContain('这次没有处理好');
+    expect(JSON.stringify(mapped)).not.toMatch(/planner|traceId|payload/i);
+  });
+
   it('sanitizes SocialAgentEventV2 display text before it reaches process UI', async () => {
     const streamed = mockResponse();
     const apiClient = {
@@ -1188,7 +1218,7 @@ describe('Agent adapter layer', () => {
     );
     expect(progressEvents[1]).toEqual(
       expect.objectContaining({
-        title: '正在筛选公开可发现的人',
+        title: '正在推进当前进度',
         detail: undefined,
         state: 'running',
       }),
@@ -1299,6 +1329,13 @@ describe('Agent adapter layer', () => {
     expect(JSON.stringify(mapped)).not.toMatch(
       /tool_call_started|slot_filled|hydrate_context|planner|traceId|raw JSON|payload/i,
     );
+    expect(JSON.stringify(mapped)).not.toContain('这次处理没有完成');
+    expect(
+      mapped.find(
+        (event): event is Extract<AgentStreamEvent, { type: 'progress' }> =>
+          event?.type === 'progress' && event.metadata?.eventId === 'v2-contract-17',
+      ),
+    ).toEqual(expect.objectContaining({ title: '这段需求还在' }));
   });
 
   it('maps SocialAgentEventV2 visible process events to one cover-style public progress row', async () => {
@@ -2045,8 +2082,8 @@ describe('Agent adapter layer', () => {
           dryRunPreviewSummary: '确认前不会触达对方。',
           sideEffectAllowedBeforeApproval: false,
           auditRequired: true,
-          executionBoundary: '需要预览、确认和审计后继续',
-          resumePolicy: '同意后从保存点继续',
+          executionBoundary: '需要先预览，并由你确认后继续',
+          resumePolicy: '同意后接着当前进度继续',
         }),
       }),
     );
@@ -2072,7 +2109,7 @@ describe('Agent adapter layer', () => {
           visibility: 'user_visible',
           display: {
             title: '已取消这一步',
-            detail: '我不会执行刚才的高风险动作，会继续保留当前对话。',
+            detail: '这一步已取消，不会触达对方，也不会公开位置或联系方式。',
             state: 'done',
           },
           payload: {
@@ -2111,7 +2148,7 @@ describe('Agent adapter layer', () => {
         type: 'progress',
         state: 'done',
         lifecycle: 'waiting_confirmation',
-        detail: '我不会执行刚才的高风险动作，会继续保留当前对话。',
+        detail: '确认前不会执行真实发布、邀请或联系动作。',
         metadata: expect.objectContaining({
           processType: 'approval',
           stageLabel: '等待确认',
@@ -2119,6 +2156,7 @@ describe('Agent adapter layer', () => {
         }),
       }),
     );
+    expect(JSON.stringify(resolved)).not.toContain('保留当前对话');
     expect(JSON.stringify(resolved)).not.toMatch(
       /run-hidden|"payload"|planner|traceId|resumeToken|checkpointId/,
     );

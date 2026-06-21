@@ -172,7 +172,7 @@ prepare_agent_smoke_seed_once() {
   set +e
   (
     cd "${APP_DIR}"
-    pnpm -C backend run seed:agent-smoke
+    ./scripts/ecs-backend-pnpm.sh -- seed:agent-smoke:prod -- --allow-production
   ) >"${raw_output}" 2>&1
   status=$?
   redact <"${raw_output}" | tee -a "${EVIDENCE_FILE}"

@@ -5,6 +5,7 @@ import {
   extractAssistantCards,
   FITMEET_TOOL_UI_SCHEMA_VERSION,
   defaultOpportunityActionsForSchema,
+  dedupeAssistantCards,
   isCanonicalAssistantCard,
   normalizeAssistantCard,
   normalizeActivityOpportunityView,
@@ -93,7 +94,7 @@ describe('tool-ui-schema', () => {
     ];
 
     expect(summarizeToolUICardCollection(cards)).toMatchObject({
-      title: '2 个候选 · 1 个恢复建议 · 1 张约练卡 · 1 个确认',
+      title: '2 个候选 · 1 个下一步建议 · 1 张约练卡 · 1 个待确认动作',
       candidateCount: 2,
       emptyCount: 1,
       opportunityCount: 3,
@@ -108,6 +109,480 @@ describe('tool-ui-schema', () => {
     expect(summarizeToolUICardCollection(cards).detail).toContain('结构化卡片');
   });
 
+  it('collapses noisy approval cards into the current opportunity card action row', () => {
+    const cards = [
+      normalizeAssistantCard({
+        id: 'candidate-501',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'social_match.candidate',
+        title: '陈砚',
+        data: {
+          schemaName: 'OpportunityCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'social_match.candidate',
+          candidateRecordId: 501,
+          targetUserId: 22,
+        },
+      }),
+      normalizeAssistantCard({
+        id: 'save-approval-501',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'safety.approval',
+        title: '收藏 陈砚',
+        data: {
+          schemaName: 'SafetyApprovalCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'safety.approval',
+          actionType: 'save_candidate',
+          candidateRecordId: 501,
+          riskLevel: 'low',
+        },
+      }),
+      normalizeAssistantCard({
+        id: 'send-approval-501',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'safety.approval',
+        title: '确认发送开场白给 陈砚',
+        data: {
+          schemaName: 'SafetyApprovalCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'safety.approval',
+          actionType: 'send_invite',
+          candidateRecordId: 501,
+          approvalId: 8801,
+          summary: '发送这条开场白前需要你确认。',
+          riskLevel: 'medium',
+        },
+      }),
+      normalizeAssistantCard({
+        id: 'connect-approval-501',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'safety.approval',
+        title: '加好友并聊天：陈砚',
+        data: {
+          schemaName: 'SafetyApprovalCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'safety.approval',
+          actionType: 'connect_candidate',
+          candidateRecordId: 501,
+          approvalId: 8802,
+          riskLevel: 'medium',
+        },
+      }),
+    ];
+
+    const deduped = dedupeAssistantCards(cards);
+
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0]).toMatchObject({
+      id: 'candidate-501',
+      schemaType: 'social_match.candidate',
+      data: {
+        inlineApprovalConfirmation: {
+          id: '8801',
+          actionType: 'send_invite',
+          riskLevel: 'medium',
+          actionKey: 'opener.confirm_send',
+        },
+        inlineApprovalConfirmations: {
+          'opener.confirm_send': {
+            id: '8801',
+            actionType: 'send_invite',
+            riskLevel: 'medium',
+            actionKey: 'opener.confirm_send',
+          },
+          'candidate.connect': {
+            id: '8802',
+            actionType: 'connect_candidate',
+            riskLevel: 'medium',
+            actionKey: 'candidate.connect',
+          },
+        },
+      },
+    });
+  });
+
+  it('drops low-risk approval panels even when their safety copy mentions confirmation', () => {
+    const cards = [
+      normalizeAssistantCard({
+        id: 'candidate-chen',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'social_match.candidate',
+        title: '陈砚',
+        data: {
+          schemaName: 'OpportunityCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'social_match.candidate',
+          candidateRecordId: 501,
+          targetUserId: 22,
+        },
+      }),
+      normalizeAssistantCard({
+        id: 'save-approval-chen',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'safety.approval',
+        title: '收藏 陈砚',
+        body: '风险级别：medium · 动作：需要确认的操作。确认前不会自动发送、连接或发布。',
+        data: {
+          schemaName: 'SafetyApprovalCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'safety.approval',
+          actionType: 'save_candidate',
+          candidateRecordId: 501,
+          approvalId: 7701,
+          riskLevel: 'medium',
+          summary: '收藏候选陈砚，后续推荐会参考。',
+        },
+      }),
+      normalizeAssistantCard({
+        id: 'opener-approval-chen',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'safety.approval',
+        title: '生成开场白：陈砚',
+        body: '确认前不会触达对方。',
+        data: {
+          schemaName: 'SafetyApprovalCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'safety.approval',
+          actionType: 'generate_opener',
+          candidateRecordId: 501,
+          approvalId: 7702,
+          riskLevel: 'medium',
+          summary: '生成开场白草稿，不会发送给对方。',
+        },
+      }),
+    ];
+
+    const deduped = dedupeAssistantCards(cards);
+
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0]).toMatchObject({
+      id: 'candidate-chen',
+      schemaType: 'social_match.candidate',
+      data: expect.not.objectContaining({
+        inlineApprovalConfirmation: expect.anything(),
+        inlineApprovalConfirmations: expect.anything(),
+      }),
+    });
+  });
+
+  it('folds publish approvals into the opportunity card instead of creating a second panel', () => {
+    const cards = [
+      normalizeAssistantCard({
+        id: 'activity-101',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'social_match.activity',
+        title: '青岛大学散步约练',
+        data: {
+          schemaName: 'OpportunityCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'social_match.activity',
+          taskId: 77,
+          opportunityId: 'walk-qdu',
+        },
+      }),
+      normalizeAssistantCard({
+        id: 'publish-approval-101',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'safety.approval',
+        title: '确认发布到发现',
+        data: {
+          schemaName: 'SafetyApprovalCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'safety.approval',
+          taskId: 77,
+          opportunityId: 'walk-qdu',
+          actionType: 'publish_social_request',
+          approvalId: 9901,
+          riskLevel: 'medium',
+        },
+      }),
+    ];
+
+    const deduped = dedupeAssistantCards(cards);
+
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0]).toMatchObject({
+      id: 'activity-101',
+      schemaType: 'social_match.activity',
+      data: {
+        inlineApprovalConfirmation: {
+          id: '9901',
+          actionType: 'publish_social_request',
+          riskLevel: 'medium',
+          actionKey: 'activity.confirm_create',
+        },
+        inlineApprovalConfirmations: {
+          'activity.confirm_create': {
+            id: '9901',
+            actionType: 'publish_social_request',
+            riskLevel: 'medium',
+            actionKey: 'activity.confirm_create',
+          },
+        },
+      },
+    });
+  });
+
+  it('folds candidate approvals whose stable identity only exists in the approval payload', () => {
+    const cards = [
+      normalizeAssistantCard({
+        id: 'candidate-501',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'social_match.candidate',
+        title: '陈砚',
+        data: {
+          schemaName: 'OpportunityCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'social_match.candidate',
+          candidateRecordId: 501,
+          targetUserId: 22,
+        },
+      }),
+      normalizeAssistantCard({
+        id: 'payload-only-send-approval',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'safety.approval',
+        title: '确认发送邀请',
+        data: {
+          schemaName: 'SafetyApprovalCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'safety.approval',
+          approval: {
+            id: 8810,
+            payload: {
+              actionType: 'send_invite',
+              candidateRecordId: 501,
+              targetUserId: 22,
+              riskLevel: 'medium',
+              summary: '发送邀请给陈砚前需要你确认。',
+            },
+          },
+        },
+      }),
+    ];
+
+    const deduped = dedupeAssistantCards(cards);
+
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0]).toMatchObject({
+      id: 'candidate-501',
+      schemaType: 'social_match.candidate',
+      data: {
+        inlineApprovalConfirmations: {
+          'opener.confirm_send': {
+            id: '8810',
+            actionType: 'send_invite',
+            riskLevel: 'medium',
+            actionKey: 'opener.confirm_send',
+          },
+        },
+      },
+    });
+  });
+
+  it('folds publish approvals whose task and opportunity ids only exist in the approval payload', () => {
+    const cards = [
+      normalizeAssistantCard({
+        id: 'activity-202',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'social_match.activity',
+        title: '青岛大学散步约练',
+        data: {
+          schemaName: 'OpportunityCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'social_match.activity',
+          taskId: 88,
+          opportunityId: 'walk-qdu-evening',
+        },
+      }),
+      normalizeAssistantCard({
+        id: 'payload-only-publish-approval',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'safety.approval',
+        title: '确认发布到发现',
+        data: {
+          schemaName: 'SafetyApprovalCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'safety.approval',
+          approval: {
+            id: 9910,
+            payload: {
+              actionType: 'publish_social_request',
+              taskId: 88,
+              opportunityId: 'walk-qdu-evening',
+              riskLevel: 'medium',
+              summary: '发布到发现前需要你确认。',
+            },
+          },
+        },
+      }),
+    ];
+
+    const deduped = dedupeAssistantCards(cards);
+
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0]).toMatchObject({
+      id: 'activity-202',
+      schemaType: 'social_match.activity',
+      data: {
+        inlineApprovalConfirmations: {
+          'activity.confirm_create': {
+            id: '9910',
+            actionType: 'publish_social_request',
+            riskLevel: 'medium',
+            actionKey: 'activity.confirm_create',
+          },
+        },
+      },
+    });
+  });
+
+  it('uses candidate names to fold replayed approvals into the right card when ids are missing', () => {
+    const cards = [
+      normalizeAssistantCard({
+        id: 'candidate-chen',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'social_match.candidate',
+        title: '陈砚',
+        data: {
+          schemaName: 'OpportunityCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'social_match.candidate',
+          displayName: '陈砚',
+        },
+      }),
+      normalizeAssistantCard({
+        id: 'candidate-xia',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'social_match.candidate',
+        title: '夏禾',
+        data: {
+          schemaName: 'OpportunityCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'social_match.candidate',
+          displayName: '夏禾',
+        },
+      }),
+      normalizeAssistantCard({
+        id: 'send-approval-chen',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'safety.approval',
+        title: '确认发送给 陈砚',
+        data: {
+          schemaName: 'SafetyApprovalCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'safety.approval',
+          actionType: 'send_invite',
+          approvalId: 8805,
+          summary: '发送这条开场白给陈砚前需要你确认。',
+          riskLevel: 'medium',
+        },
+      }),
+    ];
+
+    const deduped = dedupeAssistantCards(cards);
+
+    expect(deduped).toHaveLength(2);
+    expect(deduped.find((card) => card.id === 'send-approval-chen')).toBeUndefined();
+    expect(deduped.find((card) => card.id === 'candidate-chen')).toMatchObject({
+      data: {
+        inlineApprovalConfirmations: {
+          'opener.confirm_send': {
+            id: '8805',
+            actionType: 'send_invite',
+            actionKey: 'opener.confirm_send',
+          },
+        },
+      },
+    });
+    expect(deduped.find((card) => card.id === 'candidate-xia')).toMatchObject({
+      data: expect.not.objectContaining({
+        inlineApprovalConfirmations: expect.anything(),
+      }),
+    });
+  });
+
+  it('keeps pure approval panels when there is no opportunity card to own the action', () => {
+    const cards = [
+      normalizeAssistantCard({
+        id: 'publish-approval',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'safety.approval',
+        title: '确认发布到发现',
+        data: {
+          schemaName: 'SafetyApprovalCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'safety.approval',
+          actionType: 'publish_social_request',
+          approvalId: 8803,
+          riskLevel: 'medium',
+        },
+      }),
+    ];
+
+    expect(dedupeAssistantCards(cards)).toHaveLength(1);
+    expect(dedupeAssistantCards(cards)[0]).toMatchObject({
+      id: 'publish-approval',
+      schemaType: 'safety.approval',
+    });
+  });
+
+  it('keeps different high-risk approvals for the same candidate when no card can own them', () => {
+    const cards = [
+      normalizeAssistantCard({
+        id: 'send-approval-501',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'safety.approval',
+        title: '确认发送邀请',
+        data: {
+          schemaName: 'SafetyApprovalCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'safety.approval',
+          actionType: 'send_invite',
+          candidateRecordId: 501,
+          approvalId: 8801,
+          riskLevel: 'medium',
+        },
+      }),
+      normalizeAssistantCard({
+        id: 'send-approval-501-replay',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'safety.approval',
+        title: '确认发送邀请',
+        data: {
+          schemaName: 'SafetyApprovalCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'safety.approval',
+          actionType: 'send_invite',
+          candidateRecordId: 501,
+          approvalId: 8801,
+          riskLevel: 'medium',
+        },
+      }),
+      normalizeAssistantCard({
+        id: 'connect-approval-501',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'safety.approval',
+        title: '确认加好友并聊天',
+        data: {
+          schemaName: 'SafetyApprovalCard',
+          schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+          schemaType: 'safety.approval',
+          actionType: 'connect_candidate',
+          candidateRecordId: 501,
+          approvalId: 8802,
+          riskLevel: 'medium',
+        },
+      }),
+    ];
+
+    expect(dedupeAssistantCards(cards).map((card) => card.id)).toEqual([
+      'send-approval-501',
+      'connect-approval-501',
+    ]);
+  });
+
   it('provides safe default opportunity action paths when backend cards omit actions', () => {
     expect(defaultOpportunityActionsForSchema('social_match.candidate')).toEqual([
       {
@@ -116,8 +591,18 @@ describe('tool-ui-schema', () => {
         source: 'default',
       },
       {
+        schemaAction: 'candidate.like',
+        requiresConfirmation: false,
+        source: 'default',
+      },
+      {
         schemaAction: 'candidate.generate_opener',
         requiresConfirmation: false,
+        source: 'default',
+      },
+      {
+        schemaAction: 'opener.confirm_send',
+        requiresConfirmation: true,
         source: 'default',
       },
       {
@@ -128,8 +613,8 @@ describe('tool-ui-schema', () => {
     ]);
     expect(defaultOpportunityActionsForSchema('social_match.activity')).toEqual([
       {
-        schemaAction: 'activity.view_detail',
-        requiresConfirmation: false,
+        schemaAction: 'activity.confirm_create',
+        requiresConfirmation: true,
         source: 'default',
       },
       {
@@ -138,13 +623,8 @@ describe('tool-ui-schema', () => {
         source: 'default',
       },
       {
-        schemaAction: 'activity.modify_location',
+        schemaAction: 'activity.skip_publish',
         requiresConfirmation: false,
-        source: 'default',
-      },
-      {
-        schemaAction: 'activity.confirm_create',
-        requiresConfirmation: true,
         source: 'default',
       },
     ]);
@@ -315,10 +795,10 @@ describe('tool-ui-schema', () => {
     });
 
     expect(publicText).not.toMatch(
-      /tool[_\s-]?call|tool[_\s-]?result|traceId|planner|raw JSON|subagent|internal|debug/i,
+      /tool[_\s-]?call|tool[_\s-]?result|traceId|planner|raw JSON|subagent|internal|debug|审计记录/i,
     );
     expect(publicText).toContain('时间和边界更接近');
-    expect(publicText).toContain('发送前会保留审计记录');
+    expect(publicText).toContain('会发送真实消息');
     expect(publicText).toContain('可继续对话');
   });
 
@@ -615,7 +1095,7 @@ describe('tool-ui-schema', () => {
       },
       {
         key: 'recovery',
-        label: '可恢复',
+        label: '可以继续',
         detail: '你可以跳过、重试生成开场白，或从确认点继续。',
       },
     ]);
@@ -1157,7 +1637,7 @@ describe('tool-ui-schema', () => {
         },
         {
           key: 'recovery',
-          label: '可恢复',
+          label: '可以继续',
           detail: '你可以跳过、重试生成开场白，或从确认点继续。',
         },
       ],
@@ -1259,7 +1739,7 @@ describe('tool-ui-schema', () => {
         },
         {
           key: 'recovery',
-          label: '可恢复闭环',
+          label: '连续推进',
           detail: '确认后进入等待回复、改期、确认到达、评价和画像回写流程。',
         },
       ],
@@ -1419,7 +1899,7 @@ describe('tool-ui-schema', () => {
       data: {
         timeline: {
           title: '周末邀约进展',
-          description: '我会按可恢复步骤推进。',
+          description: '我会按可继续步骤推进。',
           nextAction: '等待你确认后发送邀请。',
           steps: [
             {
@@ -1447,7 +1927,7 @@ describe('tool-ui-schema', () => {
 
     const explicitView = normalizeMeetLoopTimelineView(explicit);
     expect(explicitView.title).toBe('周末邀约进展');
-    expect(explicitView.description).toBe('我会按可恢复步骤推进。');
+    expect(explicitView.description).toBe('我会按可继续步骤推进。');
     expect(explicitView.nextAction).toBe('等待你确认后发送邀请。');
     expect(explicitView.stage).toBeNull();
     expect(explicitView.connectionState).toBeNull();
@@ -1549,7 +2029,7 @@ describe('tool-ui-schema', () => {
             recoveryProtocol: [
               {
                 key: 'checkpoint',
-                label: '进度保存',
+                label: '可继续',
                 detail: '当前邀约状态已保存，刷新或断线后可以回到这一步。',
               },
               {
@@ -1573,7 +2053,7 @@ describe('tool-ui-schema', () => {
       recoveryProtocol: [
         {
           key: 'checkpoint',
-          label: '进度保存',
+          label: '可继续',
           detail: '当前邀约状态已保存，刷新或断线后可以回到这一步。',
         },
         {

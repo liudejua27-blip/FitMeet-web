@@ -35,7 +35,7 @@ describe('assistant-ui tool process model', () => {
       detail: '正在读取你的偏好',
     });
     expect(summary.steps[0]).toMatchObject({
-      label: '需要你确认这一步',
+      label: '需要你确认后继续',
       detail: '正在确认候选动作',
     });
 
@@ -427,7 +427,7 @@ describe('assistant-ui tool process model', () => {
     } as never);
 
     expect(summary.visibleSummary).toMatchObject({
-      title: '需要你确认这一步',
+      title: '需要你确认后继续',
       status: 'waiting',
       source: 'tool.status',
       displayMode: 'covering_status',

@@ -189,6 +189,56 @@ describe('Agent user route isolation', () => {
     expect(assistantPropsSource).toContain('void startNewThread()');
   });
 
+  it('keeps single-run message and card dedupe runtime wired into the production Agent path', () => {
+    const reducerPath = join(
+      srcRoot,
+      'components',
+      'agent-workspace',
+      'agentAssistantMessageReducer.ts',
+    );
+    const cardIdentityPath = join(
+      srcRoot,
+      'components',
+      'agent-workspace',
+      'agentCardIdentity.ts',
+    );
+    const textDedupePath = join(
+      srcRoot,
+      'components',
+      'agent-workspace',
+      'assistantTextDedupe.ts',
+    );
+    const messageStreamSource = readSource(
+      join('components', 'agent-workspace', 'useAgentMessageStream.ts'),
+    );
+    const finalResultSource = readSource(
+      join('components', 'agent-workspace', 'useAgentFinalResultRuntime.ts'),
+    );
+    const approvalDispatchSource = readSource(
+      join('components', 'agent-workspace', 'useAgentApprovalDispatchMessages.ts'),
+    );
+    const reminderRuntimeSource = readSource(
+      join('components', 'agent-workspace', 'useAgentReminderRuntime.ts'),
+    );
+
+    expect(existsSync(reducerPath)).toBe(true);
+    expect(existsSync(cardIdentityPath)).toBe(true);
+    expect(existsSync(textDedupePath)).toBe(true);
+    expect(messageStreamSource).toContain("from './agentAssistantMessageReducer'");
+    expect(messageStreamSource).toContain("from './assistantTextDedupe'");
+    expect(messageStreamSource).toContain('reduceSingleRunAssistantMessages');
+    expect(messageStreamSource).toContain('findSingleRunAssistantMessageIndex');
+    expect(finalResultSource).toContain("from './agentAssistantMessageReducer'");
+    expect(finalResultSource).toContain("from './agentCardIdentity'");
+    expect(finalResultSource).toContain("from './assistantTextDedupe'");
+    expect(finalResultSource).toContain('reduceSingleRunAssistantMessages');
+    expect(finalResultSource).toContain('agentCardDedupKeys');
+    expect(approvalDispatchSource).toContain("from './agentCardIdentity'");
+    expect(approvalDispatchSource).toContain('mergeUniqueAgentCards');
+    expect(reminderRuntimeSource).toContain("from './agentCardIdentity'");
+    expect(reminderRuntimeSource).toContain('agentCardDedupKeys');
+  });
+
   it('keeps retired agent copy and shell selectors out of production source', () => {
     const forbiddenPatterns = [
       /今天想认识什么样的人？/,
@@ -219,6 +269,49 @@ describe('Agent user route isolation', () => {
       .flatMap((file) => {
         const source = readFileSync(file, 'utf8');
         return forbiddenPatterns
+          .filter((pattern) => pattern.test(source))
+          .map((pattern) => `${relative(srcRoot, file).replace(/\\/g, '/')}: ${pattern}`);
+      });
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('keeps backend recovery and approval jargon behind production sanitizers', () => {
+    const allowedSanitizerFiles = new Set([
+      'api/socialAgentApi.ts',
+      'components/agent-workspace/agentWorkspaceRuntime.ts',
+      'components/assistant-ui/public-process-text.ts',
+      'components/assistant-ui/tool-approval-card.tsx',
+      'components/assistant-ui/tool-card-actions.tsx',
+      'components/assistant-ui/tool-ui-schema.ts',
+      'lib/agentApprovalCopy.ts',
+      'lib/socialCodexProcessCopy.ts',
+    ]);
+    const forbiddenUserCopyPatterns = [
+      /这次处理没有完成/,
+      /操作没有完成/,
+      /可恢复中断/,
+      /风险级别/,
+      /状态已保存/,
+      /等待保存点/,
+      /将要执行/,
+      /动作[：:]/,
+      /确认前不执行/,
+      /不会自动发送、连接或发布/,
+      /同意后从保存点继续/,
+    ];
+    const offenders = collectSourceFiles(srcRoot)
+      .filter((file) => {
+        const relativePath = relative(srcRoot, file).replace(/\\/g, '/');
+        return (
+          !relativePath.startsWith('test/') &&
+          !relativePath.startsWith('dev/') &&
+          !allowedSanitizerFiles.has(relativePath)
+        );
+      })
+      .flatMap((file) => {
+        const source = readFileSync(file, 'utf8');
+        return forbiddenUserCopyPatterns
           .filter((pattern) => pattern.test(source))
           .map((pattern) => `${relative(srcRoot, file).replace(/\\/g, '/')}: ${pattern}`);
       });

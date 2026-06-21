@@ -281,7 +281,7 @@ const checkpointStreamResponse = (action, checkpointId, stepId) => {
       safeStatus: {
         blocked: false,
         level: 'low',
-        boundaryNotes: ['已沿保存点继续，没有重复执行高风险动作。'],
+        boundaryNotes: ['已沿当前进度继续，没有重复执行高风险动作。'],
         requiredConfirmations: [],
       },
       pendingConfirmations: [],
@@ -555,6 +555,32 @@ const seedAuthenticatedSession = async (page, options = { mockFeedback: true }) 
       });
     });
   }
+  await page.route('**/api/agent/owner/approvals/*/approve', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        status: 'approved',
+        dispatched: true,
+        result: {
+          openedConversation: true,
+          conversationId: 9901,
+          idempotencyKey: 'qa-agent-chat-approval-9901',
+        },
+      }),
+    });
+  });
+  await page.route('**/api/agent/owner/approvals/*/reject', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        status: 'rejected',
+      }),
+    });
+  });
   await page.addInitScript((user) => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -1301,7 +1327,7 @@ const assertSocialIntentToolStructure = async (page, viewport) => {
   );
   await candidatePath.waitFor({ timeout: 5_000 });
   const candidatePathText = await candidatePath.innerText();
-  for (const expected of ['先看详情', '生成开场白', '确认后发邀请']) {
+  for (const expected of ['先看详情', '生成开场白', '发送邀请', '加好友并聊天']) {
     if (!candidatePathText.includes(expected)) {
       throw new Error(`[agent-chat-qa] ${viewport.name}: candidate path missing "${expected}"`);
     }
@@ -1311,7 +1337,7 @@ const assertSocialIntentToolStructure = async (page, viewport) => {
   );
   await activityPath.waitFor({ timeout: 5_000 });
   const activityPathText = await activityPath.innerText();
-  for (const expected of ['查看活动', '确认后发起']) {
+  for (const expected of ['发布到发现', '修改', '暂不发布']) {
     if (!activityPathText.includes(expected)) {
       throw new Error(`[agent-chat-qa] ${viewport.name}: activity path missing "${expected}"`);
     }
@@ -1374,15 +1400,21 @@ const assertToolActionMicrointeraction = async (page, viewport) => {
   await viewDetailButton.click();
 
   await page.getByText('我把这个候选机会的详情整理好了').first().waitFor({ timeout: 12_000 });
-  await page.getByText('轻松社交搭子详情').waitFor({ timeout: 5_000 });
-  await page
-    .locator('[data-testid="opportunity-card"]')
-    .filter({ hasText: '轻松社交搭子详情' })
-    .waitFor({ timeout: 5_000 });
+  const inlineDetail = page.locator('[data-testid="assistant-ui-inline-outcome-preview"]').first();
+  await inlineDetail.waitFor({ timeout: 5_000 });
+  const inlineDetailText = await inlineDetail.innerText();
+  for (const expected of ['候选详情', '我把这个候选机会的详情整理好了。']) {
+    if (!inlineDetailText.includes(expected)) {
+      throw new Error(
+        `[agent-chat-qa] ${viewport.name}: inline candidate detail missing "${expected}"`,
+      );
+    }
+  }
 
   const detailCard = page
-    .locator('[data-testid="opportunity-card"]')
-    .filter({ hasText: '轻松社交搭子详情' });
+    .locator('[data-testid="opportunity-card"][data-product-component="CandidateCards"]')
+    .first();
+  await detailCard.waitFor({ timeout: 5_000 });
   await expectAttribute(detailCard, 'data-card-model', 'assistant-ui-opportunity-card', viewport);
   await expectAttribute(detailCard, 'data-product-component', 'CandidateCards', viewport);
   await expectAttribute(detailCard, 'data-action-path', 'safe-sequenced', viewport);
@@ -1402,6 +1434,31 @@ const assertToolActionMicrointeraction = async (page, viewport) => {
   console.log(`[agent-chat-qa] ${viewport.name}: tool action PASS (${screenshotPath})`);
 };
 
+const waitForInlineOpenerDraft = async (page, viewport) => {
+  const draft = page.locator('[data-testid="assistant-ui-inline-draft-preview"]').last();
+  await draft.waitFor({ timeout: 12_000 });
+  const draftText = await draft.innerText();
+  for (const expected of ['站内聊', '只有你继续点击发送邀请并确认后']) {
+    if (!draftText.includes(expected)) {
+      throw new Error(`[agent-chat-qa] ${viewport.name}: opener draft missing "${expected}"`);
+    }
+  }
+  return draft;
+};
+
+const waitForInlineInviteApproval = async (page, viewport) => {
+  const approval = page.locator('[data-testid="assistant-ui-inline-approval-panel"]').last();
+  await approval.waitFor({ timeout: 12_000 });
+  await expectAttribute(approval, 'data-component', 'ApprovalInlinePanel', viewport);
+  const approvalText = await approval.innerText();
+  for (const expected of ['确认发送', '确认前不会触达对方']) {
+    if (!approvalText.includes(expected)) {
+      throw new Error(`[agent-chat-qa] ${viewport.name}: inline approval missing "${expected}"`);
+    }
+  }
+  return approval;
+};
+
 const assertSocialActionChain = async (page, viewport) => {
   await seedAuthenticatedSession(page);
   await page.goto(new URL('/agent/chat', baseUrl).toString());
@@ -1411,23 +1468,11 @@ const assertSocialActionChain = async (page, viewport) => {
 
   await page.locator('[data-testid="opportunity-card"]').waitFor({ timeout: 12_000 });
   await page.getByRole('button', { name: '生成开场白' }).first().click();
-  await page.getByText('我先帮你写了一条自然一点的开场白').first().waitFor({ timeout: 12_000 });
-  await page.getByText('确认前不会替你发送').first().waitFor({ timeout: 5_000 });
+  await waitForInlineOpenerDraft(page, viewport);
 
   const sendInviteButtons = page.getByRole('button', { name: '发送邀请' });
   await sendInviteButtons.last().click();
-  const approvalTool = page.locator('[data-testid="assistant-ui-approval-tool"]').last();
-  await approvalTool.waitFor({ timeout: 12_000 });
-  const approvalGuardrails = page.locator('[data-testid="assistant-ui-approval-guardrails"]').last();
-  await approvalGuardrails.waitFor({ timeout: 5_000 });
-  await expectAttribute(approvalTool, 'data-card-model', 'assistant-ui-approval-card', viewport);
-  await expectAttribute(approvalTool, 'data-has-checkpoint', 'true', viewport);
-  const approvalGuardrailText = await approvalGuardrails.innerText();
-  for (const expected of ['确认前不执行', '不会自动发送、连接或发布', '状态已保存']) {
-    if (!approvalGuardrailText.includes(expected)) {
-      throw new Error(`[agent-chat-qa] ${viewport.name}: approval guardrails missing "${expected}"`);
-    }
-  }
+  await waitForInlineInviteApproval(page, viewport);
 
   await page.getByRole('button', { name: '确认发送' }).last().click();
   await page.waitForFunction(
@@ -1486,13 +1531,15 @@ const assertSocialActionRewriteDoesNotSend = async (page, viewport) => {
 
   await page.locator('[data-testid="opportunity-card"]').waitFor({ timeout: 12_000 });
   await page.getByRole('button', { name: '生成开场白' }).first().click();
-  await page.getByText('我先帮你写了一条自然一点的开场白').first().waitFor({ timeout: 12_000 });
+  await waitForInlineOpenerDraft(page, viewport);
 
   await page.getByRole('button', { name: '发送邀请' }).last().click();
-  await page.getByText('是否确认发送这个邀请？').first().waitFor({ timeout: 12_000 });
+  await waitForInlineInviteApproval(page, viewport);
 
-  await page.getByRole('button', { name: '再改一下' }).last().click();
-  await page.getByText('我先帮你写了一条自然一点的开场白').last().waitFor({ timeout: 12_000 });
+  await page.getByRole('button', { name: '取消' }).last().click();
+  await page.getByText('这个动作不会继续执行，也不会触达对方。').last().waitFor({
+    timeout: 12_000,
+  });
 
   const bodyText = await page.locator('body').innerText();
   if (bodyText.includes('完成了。我已经为你准备好下一步建议')) {
@@ -1653,22 +1700,10 @@ const assertEndToEndOpportunityJourney = async (page, viewport) => {
   }
 
   await page.getByRole('button', { name: '生成开场白' }).first().click();
-  await page.getByText('我先帮你写了一条自然一点的开场白').first().waitFor({ timeout: 12_000 });
-  await page.getByText('确认前不会替你发送').first().waitFor({ timeout: 5_000 });
+  await waitForInlineOpenerDraft(page, viewport);
 
   await page.getByRole('button', { name: '发送邀请' }).last().click();
-  const approvalTool = page.locator('[data-testid="assistant-ui-approval-tool"]').last();
-  await approvalTool.waitFor({ timeout: 12_000 });
-  const approvalGuardrails = page.locator('[data-testid="assistant-ui-approval-guardrails"]').last();
-  await approvalGuardrails.waitFor({ timeout: 5_000 });
-  await expectAttribute(approvalTool, 'data-card-model', 'assistant-ui-approval-card', viewport);
-  await expectAttribute(approvalTool, 'data-has-checkpoint', 'true', viewport);
-  const approvalText = await approvalGuardrails.innerText();
-  for (const expected of ['确认前不执行', '不会自动发送、连接或发布', '状态已保存']) {
-    if (!approvalText.includes(expected)) {
-      throw new Error(`[agent-chat-qa] ${viewport.name}: e2e approval guardrails missing "${expected}"`);
-    }
-  }
+  await waitForInlineInviteApproval(page, viewport);
 
   await page.getByRole('button', { name: '确认发送' }).last().click();
   await page.waitForFunction(
@@ -1893,8 +1928,9 @@ const assertCheckpointStepActions = async (page, viewport) => {
   await waitForApp(page);
 
   await submitComposer(page, 'checkpoint qa 失败，请展示可重试步骤');
-  await page.getByText('这一步没有完成，但我已经保存了进度').waitFor({ timeout: 12_000 });
-  const latestFailedTool = page.locator('[data-testid="assistant-ui-tool-ui"]').last();
+  const latestFailedTool = page
+    .locator('[data-testid="assistant-ui-tool-ui"][data-checkpoint-state="retryable"]')
+    .last();
   await latestFailedTool.waitFor({ timeout: 5_000 });
   if ((await latestFailedTool.getAttribute('data-checkpoint-state')) !== 'retryable') {
     throw new Error(`[agent-chat-qa] ${viewport.name}: failed checkpoint tool was not marked retryable`);
@@ -1969,8 +2005,9 @@ const assertCheckpointStepActions = async (page, viewport) => {
   await page.getByText('已重试这个步骤。').waitFor({ timeout: 12_000 });
 
   await submitComposer(page, 'checkpoint qa 完成，请展示 replay fork');
-  await page.getByText('这一步已经完成，并且保存了可恢复状态').waitFor({ timeout: 12_000 });
-  const latestCompleteTool = page.locator('[data-testid="assistant-ui-tool-ui"]').last();
+  const latestCompleteTool = page
+    .locator('[data-testid="assistant-ui-tool-ui"][data-checkpoint-state="replayable-forkable"]')
+    .last();
   await latestCompleteTool.waitFor({ timeout: 5_000 });
   if ((await latestCompleteTool.getAttribute('data-checkpoint-state')) !== 'replayable-forkable') {
     throw new Error(`[agent-chat-qa] ${viewport.name}: completed checkpoint tool was not marked replayable-forkable`);
@@ -2045,17 +2082,21 @@ const assertCheckpointStepActions = async (page, viewport) => {
   }
   await replayButton.click();
   await page.getByText('已重新运行这一步。').waitFor({ timeout: 12_000 });
-
-  await submitComposer(page, 'checkpoint qa 完成，请再次展示 fork');
-  const latestCompleteToolForFork = page
+  const replayedCompleteTool = page
     .locator('[data-testid="assistant-ui-tool-ui"][data-checkpoint-state="replayable-forkable"]')
     .last();
-  await latestCompleteToolForFork.waitFor({ timeout: 12_000 });
-  if ((await latestCompleteToolForFork.evaluate((node) => (node instanceof HTMLDetailsElement ? node.open : true))) === false) {
-    await latestCompleteToolForFork.locator('summary').click();
-  }
-  const forkButtonForLatestTool = latestCompleteToolForFork
-    .locator('[data-testid="assistant-ui-checkpoint-action"][data-checkpoint-action="fork"]')
+  await replayedCompleteTool.waitFor({ timeout: 12_000 });
+  await page
+    .locator(
+      '[data-testid="assistant-ui-tool-ui"][data-checkpoint-state="replayable-forkable"] summary',
+    )
+    .last()
+    .click({ timeout: 5_000 });
+
+  const forkButtonForLatestTool = page
+    .locator(
+      '[data-testid="assistant-ui-checkpoint-action"][data-checkpoint-action="fork"][data-checkpoint-id="123"][data-step-id="rank"]',
+    )
     .last();
   await forkButtonForLatestTool.waitFor({ timeout: 5_000 });
   if ((await forkButtonForLatestTool.getAttribute('data-checkpoint-id')) !== '123') {
