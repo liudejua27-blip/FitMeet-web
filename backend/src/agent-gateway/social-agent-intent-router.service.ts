@@ -317,14 +317,14 @@ export class SocialAgentIntentRouterService {
       });
     }
 
-    if (asksWorkflowHelp) {
-      return this.result('workflow_help', 0.9, entities, {
+    if (asksProfileEnrichmentRequest && !asksWorkflowHelp) {
+      return this.result('profile_enrichment_request', 0.9, entities, {
         replyStrategy: 'conversational_answer',
       });
     }
 
-    if (asksProfileEnrichmentRequest) {
-      return this.result('profile_enrichment_request', 0.9, entities, {
+    if (asksWorkflowHelp) {
+      return this.result('workflow_help', 0.9, entities, {
         replyStrategy: 'conversational_answer',
       });
     }

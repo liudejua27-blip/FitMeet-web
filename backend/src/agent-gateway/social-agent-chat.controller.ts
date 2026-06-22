@@ -774,10 +774,15 @@ export class SocialAgentChatController {
                 );
                 hasAssistantDelta = wroteFallback;
                 hasAssistantDone = wroteFallback;
-                streamResult = {
-                  ...streamResult,
-                  assistantMessageSource: streamed.source ?? 'fallback',
-                };
+                streamResult = wroteFallback
+                  ? {
+                      ...streamResult,
+                      assistantMessageSource: 'fallback',
+                    }
+                  : {
+                      ...streamResult,
+                      assistantMessageSource: streamed.source ?? 'fallback',
+                    };
               }
             }
             streamResult = this.withAssistantRuntimeAnchor(

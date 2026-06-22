@@ -117,7 +117,9 @@ export class SocialAgentProfileEnrichmentService {
         SocialAgentToolName.UpdateProfileFromAgentContext,
       ),
     );
+    const pendingProfile = this.pendingExtractedProfile(task);
     const mergedProfile: ExtractedProfileFields = {
+      ...pendingProfile,
       ...plannedProfile,
       ...extractedProfile,
       ...llmExtractedProfile,
@@ -555,6 +557,17 @@ export class SocialAgentProfileEnrichmentService {
       userTurns[0] ??
       null
     );
+  }
+
+  private pendingExtractedProfile(task: AgentTask): ExtractedProfileFields {
+    const memory = this.isRecord(task.memory) ? task.memory : {};
+    const pending = this.isRecord(memory.pendingProfileEnrichment)
+      ? memory.pendingProfileEnrichment
+      : {};
+    const extracted = this.isRecord(pending.extractedProfile)
+      ? pending.extractedProfile
+      : {};
+    return this.chatLlm.profileFieldsFromRecord(extracted);
   }
 
   private extractProfileFieldsFromConversation(

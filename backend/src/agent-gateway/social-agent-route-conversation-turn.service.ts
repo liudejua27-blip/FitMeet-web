@@ -62,6 +62,7 @@ export class SocialAgentRouteConversationTurnService {
     });
     const forceProfileMissingFieldsReply =
       !this.isProfileEnrichmentIntent(input.route) &&
+      input.brainToolResults.length === 0 &&
       this.isProfileMissingFieldsQuestion(input.message);
     if (
       this.isProfileEnrichmentIntent(input.route) ||

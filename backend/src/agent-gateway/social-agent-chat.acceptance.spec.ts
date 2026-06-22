@@ -416,6 +416,7 @@ function makeHarness(options: Record<string, unknown> = {}) {
     recordFallback: jest.fn(),
     recordLatency: jest.fn(),
     observeRouteLatency: jest.fn(),
+    recordDeterministicRouteReply: jest.fn(),
     snapshot: jest.fn().mockReturnValue({}),
   };
   const intentRouter = new SocialAgentIntentRouterService({
@@ -1111,7 +1112,6 @@ describe('SocialAgentChat acceptance flow', () => {
     const result = await service.routeMessage(7, {
       message: '请帮我完善人物画像：我周末下午一般有空，喜欢跑步。',
     });
-
     expect([
       'profile_enrichment',
       'profile_enrichment_request',
@@ -1231,7 +1231,6 @@ describe('SocialAgentChat acceptance flow', () => {
       message: '对，你调用工具去帮我完善ai画像',
       taskId: 101,
     });
-
     expect(result.intent).toBe('profile_enrichment_request');
     expect(result.shouldSearch).toBe(false);
     expect(result.profileUpdated).toBe(true);
@@ -2060,7 +2059,7 @@ describe('SocialAgentChat acceptance flow', () => {
           type: 'activity_plan',
           actions: expect.arrayContaining([
             expect.objectContaining({
-              schemaAction: 'activity.confirm_create',
+              schemaAction: 'publish_to_discover',
               requiresConfirmation: true,
             }),
             expect.objectContaining({
