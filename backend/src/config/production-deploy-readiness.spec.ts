@@ -110,6 +110,7 @@ describe('production deploy readiness', () => {
     const rootEnvTemplate = readRepoFile('.env.example');
     const backendEnvTemplate = readRepoFile('backend/.env.example');
     const ecsTemplate = readRepoFile('deploy/env.production.ecs.example');
+    const compose = readRepoFile('docker-compose.prod.yml');
     const buildZipScript = readRepoFile('scripts/build-deploy-zip.sh');
     const cloudPreflight = readRepoFile('scripts/cloud-platform-preflight.sh');
     const launchStatus = readRepoFile('scripts/launch-status.sh');
@@ -127,6 +128,7 @@ describe('production deploy readiness', () => {
     const agentGoalVerifier = readRepoFile(
       'scripts/verify-agent-goal-production.sh',
     );
+    const agentReleaseMatrix = readRepoFile('docs/agent-release-e2e-matrix.md');
     const packageJson = readRepoFile('backend/package.json');
     const frontendPackageJson = readRepoFile('frontend/package.json');
     const smokeSeed = readRepoFile(
@@ -154,6 +156,10 @@ describe('production deploy readiness', () => {
     expect(ecsTemplate).toContain('DEEPSEEK_MODEL=deepseek-v4-pro');
     expect(ecsTemplate).toContain('AGENT_PLANNER_MODEL=deepseek-v4-pro');
     expect(ecsTemplate).toContain('AGENT_SAFETY_MODEL=');
+    expect(ecsTemplate).toContain('SOCIAL_AGENT_CACHE_BACKEND=redis');
+    expect(ecsTemplate).toContain(
+      'SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND=redis',
+    );
     expect(ecsTemplate).toContain('SOCIAL_AGENT_MODEL_ROUTING_MODE=quality');
     expect(ecsTemplate).toContain('SOCIAL_AGENT_INTENT_ROUTER_MODE=llm_first');
     expect(ecsTemplate).toContain('SOCIAL_AGENT_CONTEXT_TURN_LIMIT=80');
@@ -171,7 +177,9 @@ describe('production deploy readiness', () => {
     expect(ecsTemplate).toContain(
       'SOCIAL_AGENT_FINAL_RESPONSE_FIRST_CHUNK_TIMEOUT_MS=20000',
     );
-    expect(ecsTemplate).toContain('SOCIAL_AGENT_FINAL_RESPONSE_MAX_TOKENS=1200');
+    expect(ecsTemplate).toContain(
+      'SOCIAL_AGENT_FINAL_RESPONSE_MAX_TOKENS=1200',
+    );
     expect(ecsTemplate).toContain('SOCIAL_AGENT_PLANNER_TIMEOUT_MS=25000');
     expect(ecsTemplate).toContain('SOCIAL_AGENT_INTENT_TIMEOUT_MS=25000');
     expect(ecsTemplate).toContain('SOCIAL_AGENT_DEEPSEEK_RETRY_ATTEMPTS=2');
@@ -182,9 +190,21 @@ describe('production deploy readiness', () => {
       expect(template).toContain('SOCIAL_AGENT_INTENT_ROUTER_MODE=llm_first');
       expect(template).toContain('SOCIAL_AGENT_CONTEXT_TURN_LIMIT=80');
       expect(template).toContain('SOCIAL_AGENT_DEEPSEEK_TIMEOUT_MS=30000');
-      expect(template).toContain('SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS=20000');
+      expect(template).toContain(
+        'SOCIAL_AGENT_DEEPSEEK_FIRST_CHUNK_TIMEOUT_MS=20000',
+      );
       expect(template).toContain('SOCIAL_AGENT_DEEPSEEK_RETRY_ATTEMPTS=2');
     }
+    expect(
+      compose.split(
+        'SOCIAL_AGENT_CACHE_BACKEND: ${SOCIAL_AGENT_CACHE_BACKEND:-redis}',
+      ).length - 1,
+    ).toBeGreaterThanOrEqual(2);
+    expect(
+      compose.split(
+        'SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND: ${SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND:-redis}',
+      ).length - 1,
+    ).toBeGreaterThanOrEqual(2);
     expect(buildZipScript).toContain('deploy/env.production.ecs.example');
     expect(buildZipScript).toContain('docs/deployment-vercel-railway.md');
     expect(buildZipScript).toContain('scripts/cloud-platform-preflight.sh');
@@ -280,11 +300,21 @@ describe('production deploy readiness', () => {
     expect(ecsPreflight).toContain('FRONTEND_BASE_URL targets');
     expect(ecsPreflight).toContain('PUBLIC_API_BASE_URL targets');
     expect(ecsPreflight).toContain('check_deepseek_models');
+    expect(ecsPreflight).toContain('check_agent_cache_env');
+    expect(ecsPreflight).toContain(
+      'process-local cache makes hit rate unstable across backend/worker instances',
+    );
     expect(ecsPreflight).toContain('check_worker_env');
     expect(ecsPreflight).toContain('nginx does not depend on subagent-worker');
     expect(ecsPreflight).toContain('backend process role is API-only');
     expect(ecsPreflight).toContain(
+      'backend receives Social Agent Redis cache configuration',
+    );
+    expect(ecsPreflight).toContain(
       'subagent-worker process role owns scheduler jobs',
+    );
+    expect(ecsPreflight).toContain(
+      'subagent-worker receives Social Agent Redis cache configuration',
     );
     expect(ecsPreflight).toContain('nginx/ssl/fullchain.pem');
     expect(ecsPreflight).toContain('check_port 443');
@@ -369,6 +399,10 @@ describe('production deploy readiness', () => {
     );
     expect(agentGoalVerifier).not.toContain(
       'pnpm -C backend run seed:agent-smoke:prod',
+    );
+    expect(agentReleaseMatrix).toContain('Distributed Agent cache');
+    expect(agentReleaseMatrix).toContain(
+      'exact LLM output, semantic response, embedding, and tool-result caches',
     );
   });
 
