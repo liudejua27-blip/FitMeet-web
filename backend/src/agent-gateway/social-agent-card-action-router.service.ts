@@ -87,7 +87,7 @@ export class SocialAgentCardActionRouterService {
     if (!finalResult) {
       throw new Error('Card action AgentLoop completed without result.');
     }
-    if (this.isLowRiskDeterministicResult(action, finalResult)) {
+    if (this.isDeterministicCardActionResult(action, finalResult)) {
       this.metrics?.recordDeterministicAction(action, {
         estimatedAvoidedLlmCalls: 1,
       });
@@ -216,12 +216,10 @@ export class SocialAgentCardActionRouterService {
     );
   }
 
-  private isLowRiskDeterministicResult(
+  private isDeterministicCardActionResult(
     action: string,
     result: SocialAgentIntentRouteResult,
   ): boolean {
-    if (!this.isLowRiskDeterministicAction(action)) return false;
-    if (result.pendingApproval) return false;
     if (
       result.shouldSearch ||
       result.shouldReplan ||
@@ -230,7 +228,9 @@ export class SocialAgentCardActionRouterService {
     ) {
       return false;
     }
-    return true;
+    if (this.isLowRiskDeterministicAction(action)) return true;
+    if (result.pendingApproval) return true;
+    return this.isApprovalCheckpointAction(action);
   }
 
   private isLowRiskDeterministicAction(action: string): boolean {
@@ -246,6 +246,20 @@ export class SocialAgentCardActionRouterService {
       'activity.modify_time',
       'activity.modify_location',
       'activity.skip_publish',
+    ]).has(action);
+  }
+
+  private isApprovalCheckpointAction(action: string): boolean {
+    if (this.isPublishAction(action)) return true;
+    return new Set([
+      'opener.confirm_send',
+      'candidate.connect',
+      'connect_candidate',
+      'activity.confirm_create',
+      'life_graph.accept_update',
+      'life_graph.reject_update',
+      'meet_loop.resume',
+      'meet_loop.reschedule',
     ]).has(action);
   }
 

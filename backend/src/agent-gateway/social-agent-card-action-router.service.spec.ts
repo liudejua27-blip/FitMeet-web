@@ -299,6 +299,7 @@ describe('SocialAgentCardActionRouterService', () => {
       handleMessage,
       lifeGraphActions,
       meetLoop,
+      metrics,
       service,
     } = makeHarness();
     candidateActions.connectCandidateFromCardAction.mockResolvedValue(
@@ -522,6 +523,17 @@ describe('SocialAgentCardActionRouterService', () => {
       });
       expect(item.expectedHandler).toHaveBeenCalled();
     }
+    for (const action of [
+      'candidate.connect',
+      'activity.confirm_create',
+      'activity.skip_publish',
+      'life_graph.accept_update',
+      'meet_loop.resume',
+    ]) {
+      expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(action, {
+        estimatedAvoidedLlmCalls: 1,
+      });
+    }
   });
 
   it('handles unknown card actions deterministically without re-entering chat LLM', async () => {
@@ -556,7 +568,7 @@ describe('SocialAgentCardActionRouterService', () => {
   });
 
   it('keeps opener send and candidate connect actions on separate handlers', async () => {
-    const { candidateActions, executeCalls, handleMessage, service } =
+    const { candidateActions, executeCalls, handleMessage, metrics, service } =
       makeHarness();
     candidateActions.confirmOpenerSendFromCardAction.mockResolvedValue(
       routeResult({
@@ -668,6 +680,14 @@ describe('SocialAgentCardActionRouterService', () => {
       }),
     );
     expect(executeCalls).toHaveLength(3);
+    for (const action of [
+      'opener.confirm_send',
+      'candidate.connect',
+    ]) {
+      expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(action, {
+        estimatedAvoidedLlmCalls: 1,
+      });
+    }
     expect(
       executeCalls.map((call) => ({
         goal: call.goal,
@@ -857,7 +877,7 @@ describe('SocialAgentCardActionRouterService', () => {
   });
 
   it('returns an inline publish confirmation card before publishing to Discover', async () => {
-    const { draftPublication, handleMessage, service } = makeHarness();
+    const { draftPublication, handleMessage, metrics, service } = makeHarness();
 
     const result = await service.perform({
       ownerUserId: 7,
@@ -876,6 +896,10 @@ describe('SocialAgentCardActionRouterService', () => {
 
     expect(handleMessage).not.toHaveBeenCalled();
     expect(draftPublication.publishDraft).not.toHaveBeenCalled();
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
+      'publish_to_discover',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
     expect(result.pendingApproval).toBeNull();
     expect(result.cards).toEqual([
       expect.objectContaining({
