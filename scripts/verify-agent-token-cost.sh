@@ -5,6 +5,7 @@ API_BASE_URL="${API_BASE_URL:-https://www.ourfitmeet.cn/api}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-20}"
 REQUIRE_AGENT_COST_DATA="${REQUIRE_AGENT_COST_DATA:-false}"
 REQUIRE_STAGE_COSTS="${REQUIRE_STAGE_COSTS:-final_response,planner,brain}"
+AGENT_TOKEN_COST_EVIDENCE_FILE="${AGENT_TOKEN_COST_EVIDENCE_FILE:-}"
 ADMIN_JWT="${FITMEET_ADMIN_JWT:-${ADMIN_JWT:-}}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
@@ -27,6 +28,7 @@ Environment:
   FITMEET_ADMIN_JWT or ADMIN_JWT        Optional admin bearer token for /social-agent/l5/observability
   REQUIRE_AGENT_COST_DATA=true          Fail if live run/cost evidence is missing
   REQUIRE_STAGE_COSTS=csv               Required LLM use-case buckets when REQUIRE_AGENT_COST_DATA=true
+  AGENT_TOKEN_COST_EVIDENCE_FILE=path    Optional JSON evidence output path for release archives
   MIN_PROMPT_PREFIX_REUSE_RATE=0.70     Optional fail threshold for stable prompt prefix reuse
   MIN_STAGE_PROMPT_PREFIX_REUSE_RATE=0.70
                                       Optional fail threshold applied to each required LLM stage
@@ -126,6 +128,7 @@ const requiredStages = String(requiredStagesRaw || '')
   .split(',')
   .map((value) => value.trim())
   .filter(Boolean);
+const evidenceFile = process.env.AGENT_TOKEN_COST_EVIDENCE_FILE || '';
 
 const readJson = (file) => {
   if (!file) return null;
@@ -178,6 +181,46 @@ const minCacheHitRate = envNumber('MIN_CACHE_HIT_RATE');
 const minPromptPrefixReuseRate = envNumber('MIN_PROMPT_PREFIX_REUSE_RATE');
 const minStagePromptPrefixReuseRate = envNumber('MIN_STAGE_PROMPT_PREFIX_REUSE_RATE');
 const maxAvgLlmCallsPerRun = envNumber('MAX_AVG_LLM_CALLS_PER_RUN');
+const thresholds = {
+  minWorkflowRouteRate,
+  minCacheHitRate,
+  minPromptPrefixReuseRate,
+  minStagePromptPrefixReuseRate,
+  maxAvgLlmCallsPerRun,
+};
+const publicEvidence = {
+  workflowRouteTotal: number(workflow.total),
+  workflowRouteRate: number(publicWorkflowRouteRate),
+  estimatedAvoidedLlmCalls: number(token.estimatedAvoidedLlmCalls),
+  cacheTotal: number(token.cacheTotal ?? cache.total),
+  cacheHitRate: number(publicCacheHitRate),
+  savedApproxPromptChars: number(
+    token.savedApproxPromptChars ?? cache.savedApproxPromptChars,
+  ),
+  promptPrefixObservations: number(token.promptFingerprintObservations),
+  distinctPromptPrefixHashes: number(token.distinctPromptPrefixHashes),
+  promptPrefixReuseRate: number(publicPromptPrefixReuseRate),
+};
+let l5Evidence = null;
+
+const writeEvidence = (status, missingItems) => {
+  if (!evidenceFile) return;
+  const payload = {
+    schemaVersion: 'fitmeet.agent-token-cost-evidence.v1',
+    generatedAt: new Date().toISOString(),
+    apiBaseUrl: process.env.API_BASE_URL || '',
+    requireAgentCostData: requireData,
+    requiredStages,
+    thresholds,
+    status,
+    missing: missingItems,
+    publicMetrics: publicEvidence,
+    l5Observability: l5Evidence,
+  };
+  fs.mkdirSync(require('path').dirname(evidenceFile), { recursive: true });
+  fs.writeFileSync(evidenceFile, `${JSON.stringify(payload, null, 2)}\n`);
+  console.log(`\nWrote token-cost evidence: ${evidenceFile}`);
+};
 
 if (minWorkflowRouteRate !== null && number(publicWorkflowRouteRate) < minWorkflowRouteRate) {
   missing.push(`workflow route rate >= ${minWorkflowRouteRate}`);
@@ -232,6 +275,15 @@ if (!observability) {
   console.log(`- completion tokens: ${aggregate.completionTokens}`);
   console.log(`- reasoning tokens: ${aggregate.reasoningTokens}`);
   console.log(`- LLM use cases: ${useCaseNames.length ? useCaseNames.join(', ') : 'none'}`);
+  l5Evidence = {
+    agentRunCount: number(execution.agentRunCount),
+    llmCallCount: number(execution.llmCallCount),
+    avgLlmCallsPerRun: number(execution.avgLlmCallsPerRun),
+    toolCallCount: number(execution.toolCallCount),
+    aggregate,
+    promptCacheHitRate,
+    useCases: {},
+  };
 
   for (const useCase of useCaseNames) {
     const bucket = llmTokenCost[useCase] || {};
@@ -249,6 +301,21 @@ if (!observability) {
         promptPrefixReuseRate,
       )} prefixes=${distinctPromptPrefixHashes} dynamic=${distinctDynamicContextHashes}`,
     );
+    l5Evidence.useCases[useCase] = {
+      calls,
+      promptTokens: number(bucket.promptTokens),
+      promptCacheHitTokens: number(bucket.promptCacheHitTokens),
+      promptCacheMissTokens: number(bucket.promptCacheMissTokens),
+      estimatedBillableInputTokens: number(bucket.estimatedBillableInputTokens),
+      completionTokens: number(bucket.completionTokens),
+      reasoningTokens: number(bucket.reasoningTokens),
+      promptCacheHitRate: number(bucket.promptCacheHitRate),
+      promptPrefixReuseRate:
+        promptPrefixReuseRate === null ? null : Number(promptPrefixReuseRate.toFixed(4)),
+      distinctPromptPrefixHashes,
+      distinctDynamicContextHashes,
+      models: Array.isArray(bucket.models) ? bucket.models : [],
+    };
   }
 
   if (requireData) {
@@ -295,8 +362,10 @@ if (!observability) {
 
 if (missing.length) {
   console.error(`\nMissing required token-cost evidence: ${missing.join(', ')}`);
+  writeEvidence('failed', missing);
   process.exit(1);
 }
 
+writeEvidence('passed', []);
 console.log('\nFitMeet Agent token-cost verification completed.');
 NODE

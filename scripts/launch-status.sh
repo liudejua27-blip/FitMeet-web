@@ -12,6 +12,8 @@ RUN_IOS_TESTFLIGHT_CHECK="${RUN_IOS_TESTFLIGHT_CHECK:-true}"
 RUN_RAILWAY_DOCKER_BUILD="${RUN_RAILWAY_DOCKER_BUILD:-false}"
 REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE="${REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE:-false}"
 AGENT_REMOTE_SMOKE_EVIDENCE_FILE="${AGENT_REMOTE_SMOKE_EVIDENCE_FILE:-}"
+REQUIRE_AGENT_TOKEN_COST_EVIDENCE="${REQUIRE_AGENT_TOKEN_COST_EVIDENCE:-false}"
+AGENT_TOKEN_COST_EVIDENCE_FILE="${AGENT_TOKEN_COST_EVIDENCE_FILE:-}"
 VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY="${VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY:-false}"
 FITMEET_APP_DIR="${FITMEET_APP_DIR:-/Users/liuchongjiang/Documents/FitMeet app}"
 
@@ -54,6 +56,10 @@ Environment:
                               Require redacted Agent remote smoke evidence file.
   AGENT_REMOTE_SMOKE_EVIDENCE_FILE
                               Evidence markdown from scripts/agent-remote-smoke-evidence.sh.
+  REQUIRE_AGENT_TOKEN_COST_EVIDENCE=true
+                              Require Agent token/cost JSON evidence file.
+  AGENT_TOKEN_COST_EVIDENCE_FILE
+                              Evidence JSON from scripts/verify-agent-token-cost.sh.
   VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY=true
                               Validate only the redacted Agent remote smoke evidence file.
 EOF
@@ -211,6 +217,63 @@ validate_agent_remote_smoke_evidence() {
   echo "[PASS] Agent remote smoke evidence is present and redacted: ${evidence_file}"
 }
 
+validate_agent_token_cost_evidence() {
+  local evidence_file="${AGENT_TOKEN_COST_EVIDENCE_FILE}"
+
+  if [[ -z "${evidence_file}" ]]; then
+    echo "[FAIL] AGENT_TOKEN_COST_EVIDENCE_FILE is required when REQUIRE_AGENT_TOKEN_COST_EVIDENCE=true." >&2
+    return 1
+  fi
+  if [[ ! -f "${evidence_file}" ]]; then
+    echo "[FAIL] Agent token/cost evidence file does not exist: ${evidence_file}" >&2
+    return 1
+  fi
+
+  node - "${evidence_file}" <<'NODE'
+const fs = require('fs');
+const file = process.argv[2];
+const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+const fail = (message) => {
+  console.error(`[FAIL] ${message}`);
+  process.exit(1);
+};
+const number = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+if (doc.schemaVersion !== 'fitmeet.agent-token-cost-evidence.v1') {
+  fail(`Unexpected token/cost evidence schema: ${doc.schemaVersion || 'missing'}`);
+}
+if (doc.status !== 'passed') {
+  fail(`Agent token/cost evidence status is ${doc.status || 'missing'}`);
+}
+if (Array.isArray(doc.missing) && doc.missing.length > 0) {
+  fail(`Agent token/cost evidence has missing items: ${doc.missing.join(', ')}`);
+}
+if (!doc.l5Observability || typeof doc.l5Observability !== 'object') {
+  fail('Agent token/cost evidence is missing L5 observability data.');
+}
+const l5 = doc.l5Observability;
+if (number(l5.agentRunCount) < 1) fail('Agent token/cost evidence has no agent runs.');
+if (number(l5.llmCallCount) < 1) fail('Agent token/cost evidence has no LLM calls.');
+if (number(l5.avgLlmCallsPerRun) <= 0) {
+  fail('Agent token/cost evidence has invalid avg LLM calls/run.');
+}
+const aggregate = l5.aggregate || {};
+if (number(aggregate.promptTokens) < 1) {
+  fail('Agent token/cost evidence has no prompt token data.');
+}
+const requiredStages = Array.isArray(doc.requiredStages) ? doc.requiredStages : [];
+const useCases = l5.useCases || {};
+for (const stage of requiredStages) {
+  const bucket = useCases[stage];
+  if (!bucket) fail(`Agent token/cost evidence missing stage: ${stage}`);
+  if (number(bucket.calls) < 1) fail(`Agent token/cost evidence stage has no calls: ${stage}`);
+  if (number(bucket.promptTokens) < 1) {
+    fail(`Agent token/cost evidence stage has no prompt tokens: ${stage}`);
+  }
+}
+console.log(`[PASS] Agent token/cost evidence is present: ${file}`);
+NODE
+}
+
 cd "${ROOT_DIR}" || exit 1
 
 if [[ "${VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY}" == "true" ]]; then
@@ -312,6 +375,12 @@ if [[ "${REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE}" == "true" ]]; then
   run_gate "Agent remote smoke evidence" validate_agent_remote_smoke_evidence
 else
   warn "Skipped Agent remote smoke evidence gate. Set REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true before final Agent cutover."
+fi
+
+if [[ "${REQUIRE_AGENT_TOKEN_COST_EVIDENCE}" == "true" ]]; then
+  run_gate "Agent token/cost evidence" validate_agent_token_cost_evidence
+else
+  warn "Skipped Agent token/cost evidence gate. Set REQUIRE_AGENT_TOKEN_COST_EVIDENCE=true before final Agent cutover."
 fi
 
 printf '\nLaunch status: %s failure(s), %s warning(s).\n' "${failures}" "${warnings}"
