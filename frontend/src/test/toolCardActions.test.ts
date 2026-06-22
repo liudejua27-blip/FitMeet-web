@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { FITMEET_TOOL_UI_SCHEMA_VERSION } from '../components/assistant-ui/tool-ui-schema';
 import {
+  FITMEET_TOOL_UI_SCHEMA_VERSION,
+  type SchemaDrivenAssistantCard,
+} from '../components/assistant-ui/tool-ui-schema';
+import {
+  cardActionNavigationHrefForTests,
   cardActionRuntimeKey,
   cardActionRuntimeScope,
   visibleCardActions,
@@ -305,5 +309,63 @@ describe('tool-card-actions runtime identity', () => {
     expect(actions.find((action) => action.label === '暂不发布')).toMatchObject({
       requiresConfirmation: false,
     });
+  });
+
+  it('routes candidate detail actions to the public user profile page', () => {
+    const card: SchemaDrivenAssistantCard = {
+      id: 'candidate-chen',
+      type: 'candidate_card',
+      schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+      schemaType: 'social_match.candidate',
+      title: '陈砚',
+      data: {
+        candidateRecordId: 501,
+        targetUserId: 22,
+      },
+      actions: [],
+    };
+    const detailAction = visibleCardActions(card, [])[0];
+
+    expect(detailAction).toMatchObject({
+      label: '查看详情',
+      schemaAction: 'candidate.view_detail',
+      requiresConfirmation: false,
+    });
+    expect(cardActionNavigationHrefForTests(card, detailAction)).toBe('/user/22');
+  });
+
+  it('keeps published discover detail actions visible and routes them to the public intent page', () => {
+    const card: SchemaDrivenAssistantCard = {
+      id: 'publish_to_discover:77:intent_302',
+      type: 'activity_status',
+      schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+      schemaType: 'social_match.activity',
+      title: '已发布到发现',
+      data: {
+        taskId: 77,
+        publicIntentId: 'intent_302',
+        discoverHref: '/public-intent/intent_302',
+      },
+      actions: [
+        {
+          id: 'view_public_intent',
+          label: '查看详情',
+          action: 'activity.view_detail',
+          schemaAction: 'activity.view_detail',
+          requiresConfirmation: false,
+          payload: {
+            taskId: 77,
+            publicIntentId: 'intent_302',
+            discoverHref: '/public-intent/intent_302',
+          },
+        },
+      ],
+    };
+    const actions = visibleCardActions(card, card.actions);
+
+    expect(actions.map((action) => action.label)).toContain('查看详情');
+    const detailAction = actions.find((action) => action.schemaAction === 'activity.view_detail');
+    expect(detailAction).toBeTruthy();
+    expect(cardActionNavigationHrefForTests(card, detailAction!)).toBe('/public-intent/intent_302');
   });
 });

@@ -134,6 +134,7 @@ describe('AgentWorkspacePage', () => {
     window.localStorage.clear();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
+    window.history.pushState({}, '', '/');
     act(() => {
       resetCardActionRuntimeStateForTests();
       useAuthStore.setState({ isLoggedIn: false, user: null, showLoginModal: false });
@@ -2872,33 +2873,18 @@ describe('AgentWorkspacePage', () => {
       'data-schema-action',
       'life_graph.reject_update',
     );
-    expect(getEnabledSchemaActionButton('activity.view_detail')).toBeNull();
+    expect(getEnabledSchemaActionButton('activity.view_detail')).toHaveAttribute(
+      'data-schema-action',
+      'activity.view_detail',
+    );
     const messageCountBeforeDetail = screen.getAllByTestId('assistant-ui-message').length;
     fireEvent.click(getEnabledSchemaActionButton('candidate.view_detail') as HTMLButtonElement);
-    await waitFor(() =>
-      expect(actionStreamSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          taskId: 101,
-          action: 'candidate.view_detail',
-          payload: expect.objectContaining({
-            taskId: 101,
-            cardId: 'candidate-1',
-            schemaType: 'social_match.candidate',
-            candidate: expect.objectContaining({
-              name: '小林',
-              title: '和小林低压力认识',
-              score: 87,
-            }),
-            suggestedOpener: '周末下午如果方便，我们可以先在公共场所轻松跑一圈。',
-          }),
-        }),
-        expect.any(Function),
-        expect.any(AbortSignal),
-      ),
+    expect(window.location.pathname).toBe('/user/22');
+    expect(actionStreamSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'candidate.view_detail' }),
+      expect.any(Function),
+      expect.any(AbortSignal),
     );
-    const inlineDetail = await screen.findByTestId('assistant-ui-inline-outcome-preview');
-    expect(inlineDetail).toHaveTextContent('候选详情');
-    expect(inlineDetail).toHaveTextContent('我把这个候选机会的详情整理好了。');
     expect(screen.getAllByTestId('assistant-ui-message')).toHaveLength(messageCountBeforeDetail);
     const openerButton = getEnabledSchemaActionButton('candidate.generate_opener');
     expect(openerButton).not.toBeNull();
@@ -2920,7 +2906,7 @@ describe('AgentWorkspacePage', () => {
       'data-action-state',
       'succeeded',
     );
-    await waitFor(() => expect(actionStreamSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(actionStreamSpy).toHaveBeenCalledTimes(1));
     expect(document.querySelector('.agent-gpt-result-block')).toBeNull();
     expect(document.body.textContent ?? '').not.toContain('hidden-trace');
   });

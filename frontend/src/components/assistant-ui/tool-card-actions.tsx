@@ -151,6 +151,11 @@ export function UnifiedActionCard({
 
   const runAction = async (action: (typeof visible)[number]) => {
     const key = cardActionKey(action);
+    const navigationHref = cardActionNavigationHref(card, action);
+    if (navigationHref) {
+      navigateToInternalHref(navigationHref);
+      return;
+    }
     if (isLocalOnlyCardAction(action)) {
       setCardActionRuntimeState(runtimeKey, {
         busyKey: null,
@@ -632,7 +637,7 @@ export function visibleCardActions(
         };
       })
       .filter((action) => action.label)
-      .filter((action) => !shouldHideVisibleCardAction(card.schemaType, action)),
+      .filter((action) => !shouldHideVisibleCardAction(card.schemaType, card, action)),
   );
   const seen = new Set(
     normalized.map((action) => visibleActionGroupKey(card.schemaType, action)),
@@ -663,9 +668,14 @@ function dedupeVisibleCardActions(
 
 function shouldHideVisibleCardAction(
   schemaType: SchemaDrivenAssistantCard['schemaType'],
+  card: SchemaDrivenAssistantCard,
   action: VisibleCardAction,
 ) {
-  return schemaType === 'social_match.activity' && action.schemaAction === 'activity.view_detail';
+  return (
+    schemaType === 'social_match.activity' &&
+    action.schemaAction === 'activity.view_detail' &&
+    !cardActionNavigationHref(card, action)
+  );
 }
 
 function visibleActionGroupKey(
@@ -1773,6 +1783,90 @@ function meetLoopCurrentStepKey(card: SchemaDrivenAssistantCard) {
 
 function isLocalOnlyCardAction(_action: VisibleCardAction) {
   return false;
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function cardActionNavigationHrefForTests(
+  card: SchemaDrivenAssistantCard,
+  action: VisibleCardAction,
+) {
+  return cardActionNavigationHref(card, action);
+}
+
+function cardActionNavigationHref(
+  card: SchemaDrivenAssistantCard,
+  action: VisibleCardAction,
+): string | null {
+  const payload = payloadForCardAction(card, action);
+  if (action.schemaAction === 'candidate.view_detail') {
+    const direct = firstSafeInternalHref(
+      payload.profileHref,
+      payload.userHref,
+      payload.detailHref,
+      payload.href,
+      card.data.profileHref,
+      card.data.userHref,
+      card.data.detailHref,
+      card.data.href,
+    );
+    if (direct) return direct;
+    const targetUserId = firstPublicPrimitive(
+      payload.targetUserId,
+      payload.candidateUserId,
+      payload.userId,
+      card.data.targetUserId,
+      card.data.candidateUserId,
+      card.data.userId,
+    );
+    return targetUserId === null
+      ? null
+      : `/user/${encodeURIComponent(String(targetUserId))}`;
+  }
+  if (action.schemaAction === 'activity.view_detail') {
+    const direct = firstSafeInternalHref(
+      payload.discoverHref,
+      payload.detailHref,
+      payload.activityHref,
+      payload.href,
+      card.data.discoverHref,
+      card.data.detailHref,
+      card.data.activityHref,
+      card.data.href,
+    );
+    if (direct) return direct;
+    const publicIntentId = firstPublicPrimitive(payload.publicIntentId, card.data.publicIntentId);
+    if (publicIntentId !== null) return `/public-intent/${encodeURIComponent(String(publicIntentId))}`;
+    const socialRequestId = firstPublicPrimitive(payload.socialRequestId, card.data.socialRequestId);
+    if (socialRequestId !== null) return `/social-request/${encodeURIComponent(String(socialRequestId))}`;
+    const activityId = firstPublicPrimitive(payload.activityId, card.data.activityId);
+    return activityId === null ? null : `/activity/${encodeURIComponent(String(activityId))}`;
+  }
+  return null;
+}
+
+function firstSafeInternalHref(...values: unknown[]): string | null {
+  for (const value of values) {
+    const href = publicString(value);
+    if (!href) continue;
+    if (isSafeInternalHref(href)) return href;
+  }
+  return null;
+}
+
+function isSafeInternalHref(href: string) {
+  return (
+    href.startsWith('/user/') ||
+    href.startsWith('/public-intent/') ||
+    href.startsWith('/social-request/') ||
+    href.startsWith('/activity/') ||
+    href === '/discover'
+  );
+}
+
+function navigateToInternalHref(href: string) {
+  if (typeof window === 'undefined') return;
+  window.history.pushState({}, '', href);
+  window.dispatchEvent(new Event('popstate'));
 }
 
 function defaultCardActionPayload(card: SchemaDrivenAssistantCard): Record<string, unknown> {
