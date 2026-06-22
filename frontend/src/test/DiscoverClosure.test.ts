@@ -25,7 +25,7 @@ describe('Discover closure links', () => {
       1,
     );
 
-    expect(detailHrefForDiscoverMeet(linked)).toBe('/social-request/301');
+    expect(detailHrefForDiscoverMeet(linked)).toBe('/public-intent/intent%3Alinked-run');
     expect(detailHrefForDiscoverMeet(standalone)).toBe(
       '/public-intent/intent%3Astandalone-run',
     );
@@ -78,6 +78,16 @@ describe('Discover closure links', () => {
     expect(source).not.toContain('青岛 · {resolvedDistance}');
     expect(source).not.toContain('`${(index + 1) * 10} 分钟前`');
     expect(source).toContain("formatRelativePublishedTime(meet.createdAt, '刚刚更新')");
+  });
+
+  it('records real Discover and profile clicks as recommendation behavior signals', () => {
+    const source = readFileSync(join(process.cwd(), 'src/pages/DiscoverPage.tsx'), 'utf8');
+
+    expect(source).toContain('recordInterestEvent');
+    expect(source).toContain("eventType: 'discover_click'");
+    expect(source).toContain("eventType: 'view_profile'");
+    expect(source).toContain("source: 'discover_page'");
+    expect(source).toContain("source: 'discover_people_list'");
   });
 });
 

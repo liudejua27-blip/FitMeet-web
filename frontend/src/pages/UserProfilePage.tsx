@@ -1,7 +1,8 @@
 ﻿import { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useSocialStore } from '../stores';
+import { useAuthStore, useSocialStore } from '../stores';
 import * as dataService from '../services/dataService';
+import { socialAgentApi } from '../api/socialAgentApi';
 import type { Meet, Post, UserProfile } from '../types';
 
 interface ProfileView {
@@ -41,6 +42,7 @@ export const UserProfilePage = () => {
   const navigate = useNavigate();
   const userId = Number.parseInt(id || '0', 10);
   const { isFollowing, toggleFollow } = useSocialStore();
+  const { isLoggedIn } = useAuthStore();
   const [user, setUser] = useState<ProfileView | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [meets, setMeets] = useState<Meet[]>([]);
@@ -78,6 +80,39 @@ export const UserProfilePage = () => {
   useEffect(() => {
     void loadProfile();
   }, [loadProfile]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !user?.id) return;
+    const day = new Date().toISOString().slice(0, 10);
+    const startedAt = Date.now();
+    void socialAgentApi
+      .recordInterestEvent({
+        eventType: 'view_profile',
+        targetUserId: user.id,
+        city: user.city || null,
+        source: 'user_profile_page',
+        dedupeKey: `profile:view:${user.id}:${day}`,
+      })
+      .catch(() => undefined);
+
+    const timer = window.setTimeout(() => {
+      void socialAgentApi
+        .recordInterestEvent({
+          eventType: 'view_profile',
+          targetUserId: user.id,
+          weight: 2,
+          city: user.city || null,
+          source: 'user_profile_dwell',
+          dedupeKey: `profile:dwell:${user.id}:${day}`,
+          metadata: {
+            dwellMs: Date.now() - startedAt,
+          },
+        })
+        .catch(() => undefined);
+    }, 8000);
+
+    return () => window.clearTimeout(timer);
+  }, [isLoggedIn, user?.city, user?.id]);
 
   if (loading) {
     return (

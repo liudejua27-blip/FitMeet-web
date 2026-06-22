@@ -3,6 +3,7 @@ import clsx from 'clsx';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { SiteLink } from '../components/navigation/SiteLink';
 import * as dataService from '../services/dataService';
+import { socialAgentApi } from '../api/socialAgentApi';
 import { getMeetDistanceMeters } from '../lib/distance';
 import { getBrowserLocation } from '../lib/location';
 import type { Coordinates } from '../lib/amap';
@@ -206,6 +207,7 @@ export const DiscoverPage = () => {
         avatar: (meet.username || 'F').slice(0, 1),
         color: meet.color,
         href: `/user/${meet.userId}`,
+        meet,
       })),
     [displayMeets],
   );
@@ -255,6 +257,65 @@ export const DiscoverPage = () => {
       }
     },
     [addNotification, isLoggedIn, joinedMeets, loadDiscover, navigate, openLogin],
+  );
+
+  const recordDiscoverInterest = useCallback(
+    (meet: DiscoverMeet) => {
+      if (!isLoggedIn) return;
+      const targetUserId =
+        Number.isFinite(meet.userId) && Number(meet.userId) > 0
+          ? Number(meet.userId)
+          : null;
+      const day = new Date().toISOString().slice(0, 10);
+      void socialAgentApi
+        .recordInterestEvent({
+          eventType: 'discover_click',
+          targetUserId,
+          socialRequestId: meet.linkedSocialRequestId ?? null,
+          activityId:
+            Number.isFinite(meet.activityId) && Number(meet.activityId) > 0
+              ? Number(meet.activityId)
+              : null,
+          activityTags: [meet.sport, meet.type, getSportLabel(meet.sport)].filter(
+            (item): item is string => Boolean(item),
+          ),
+          city: meet.city ?? null,
+          locationText: meet.loc ?? null,
+          timeWindow: meet.time || meet.startAt || null,
+          source: 'discover_page',
+          dedupeKey: `discover:${meet.sourceKind ?? 'meet'}:${String(meet.publicIntentId ?? meet.id)}:${day}`,
+          metadata: {
+            publicIntentId: meet.publicIntentId ?? null,
+            detailHref: detailHrefForDiscoverMeet(meet),
+          },
+        })
+        .catch(() => undefined);
+    },
+    [isLoggedIn],
+  );
+
+  const recordProfileInterest = useCallback(
+    (person: { userId?: number; meet?: DiscoverMeet }) => {
+      if (!isLoggedIn || !person.userId) return;
+      const day = new Date().toISOString().slice(0, 10);
+      void socialAgentApi
+        .recordInterestEvent({
+          eventType: 'view_profile',
+          targetUserId: person.userId,
+          activityTags: person.meet
+            ? [person.meet.sport, person.meet.type, getSportLabel(person.meet.sport)].filter(
+                (item): item is string => Boolean(item),
+              )
+            : null,
+          city: person.meet?.city ?? null,
+          locationText: person.meet?.loc ?? null,
+          timeWindow: person.meet?.time || person.meet?.startAt || null,
+          source: 'discover_people_list',
+          dedupeKey: `discover:profile:${person.userId}:${day}`,
+        })
+        .catch(() => undefined);
+    },
+    [isLoggedIn],
   );
 
   const openCreate = useCallback(() => {
@@ -416,6 +477,7 @@ export const DiscoverPage = () => {
                     distance={getMeetDistanceMeters(meet, userLocation)}
                     detailHref={detailHrefForDiscoverMeet(meet)}
                     onJoin={() => void handleJoin(meet)}
+                    onOpen={() => recordDiscoverInterest(meet)}
                   />
                 ))}
               </div>
@@ -452,7 +514,10 @@ export const DiscoverPage = () => {
                   <button
                     key={person.id}
                     type="button"
-                    onClick={() => navigate(person.href)}
+                    onClick={() => {
+                      recordProfileInterest(person);
+                      navigate(person.href);
+                    }}
                   >
                     <span className="match-person-avatar" style={{ background: person.color }}>
                       {person.avatar}
@@ -595,6 +660,7 @@ function MeetupMatchCard({
   joined,
   meet,
   onJoin,
+  onOpen,
   detailHref,
 }: {
   distance: number | null | undefined;
@@ -602,6 +668,7 @@ function MeetupMatchCard({
   joined: boolean;
   meet: DiscoverMeet;
   onJoin: () => void;
+  onOpen?: () => void;
   detailHref: string;
 }) {
   const score = matchScore(meet);
@@ -629,7 +696,12 @@ function MeetupMatchCard({
   );
 
   return (
-    <Link to={detailHref} className="match-card-link" data-meet-anchor={meet.id}>
+    <Link
+      to={detailHref}
+      className="match-card-link"
+      data-meet-anchor={meet.id}
+      onClick={onOpen}
+    >
       <article className={`match-card match-card--${tone}`}>
         <div className="match-card__head">
           <span className="match-card__sport">{sportIcon(meet.sport)}</span>
@@ -687,9 +759,7 @@ export function publicIntentToDiscoverMeet(
 ): DiscoverMeet {
   const sport = normalizeSportGroup(intent.requestType || intent.interestTags?.[0] || 'custom');
   const color = ['#10a37f', '#f97316', '#4f46e5', '#d97706'][index % 4];
-  const detailHref = intent.linkedSocialRequestId
-    ? `/social-request/${intent.linkedSocialRequestId}`
-    : `/public-intent/${encodeURIComponent(intent.id)}`;
+  const detailHref = `/public-intent/${encodeURIComponent(intent.id)}`;
   return {
     id: publicIntentSyntheticId(intent.id, index),
     userId: intent.userId ?? undefined,
