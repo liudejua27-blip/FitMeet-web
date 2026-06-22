@@ -150,6 +150,45 @@ describe('SocialAgentWorkflowRouterService', () => {
     expect(intentRouter.routeByRules).toHaveBeenCalledTimes(1);
   });
 
+  it('routes publish requests with completed slots through the action workflow', () => {
+    const intentRouter = {
+      routeByRules: jest.fn(() =>
+        route({
+          intent: 'action_request',
+          shouldSearch: false,
+          shouldExecuteAction: true,
+          replyStrategy: 'execute_action',
+        }),
+      ),
+    };
+    const service = new SocialAgentWorkflowRouterService(intentRouter as never);
+
+    const decision = service.route({
+      message: '那你帮我发布到发现',
+      taskContext: {
+        taskSlots: {
+          activity: { value: '散步', state: 'completed' },
+          time_window: { value: '今天晚上', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+        },
+      },
+      profile: {},
+      conversationHistory: [],
+      conversationIntent: 'social',
+    });
+
+    expect(decision).toMatchObject({
+      reason: 'social_action_workflow',
+      skipBrain: true,
+      route: {
+        intent: 'action_request',
+        shouldExecuteAction: true,
+        replyStrategy: 'execute_action',
+      },
+    });
+    expect(intentRouter.routeByRules).toHaveBeenCalledTimes(1);
+  });
+
   it('does not route empty-candidate recovery copy without an empty-candidate context', () => {
     const intentRouter = {
       routeByRules: jest.fn(() => route()),

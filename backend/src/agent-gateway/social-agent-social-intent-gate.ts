@@ -45,7 +45,7 @@ const explicitNonPublishSocialActionPattern =
   /(发消息|发送.*(给|第一个|第二个|第三个|这个|那个|他|她|候选)|加好友|邀请(第一个|第二个|第三个|这个|那个|他|她|候选)|约他|约她|联系(第一个|第二个|第三个|这个|那个|他|她|候选)|收藏(第一个|第二个|第三个|这个|那个|他|她|候选)|帮我加|帮我邀请)/i;
 
 const explicitPublishActionPattern =
-  /(确认发布|帮我发布|帮我发到发现|发布到发现|发布约练|发布卡片|公开发布|发到发现|同步到发现)/i;
+  /(确认发布|帮我.{0,8}(发布|发到发现|同步到发现)|请.{0,8}(发布|发到发现|同步到发现)|发布到发现|发布约练|发布卡片|公开发布|发到发现|同步到发现)/i;
 
 const explicitCandidateMessageConfirmationPattern =
   /^(确认发送|确认发出|发送吧|可以发送|发吧|帮我发送|就发这条|确认)[。.!！\s]*$/i;
@@ -93,6 +93,7 @@ export function hasExplicitSocialExecutionIntent(message: string): boolean {
   if (socialSideEffectNegationPattern.test(text)) return false;
   return (
     explicitSocialActionPattern.test(text) ||
+    explicitPublishActionPattern.test(text) ||
     explicitCandidateMessageConfirmationPattern.test(text)
   );
 }
@@ -114,6 +115,7 @@ export function hasExplicitSocialSideEffectIntent(message: string): boolean {
   }
   return (
     explicitSocialActionPattern.test(text) ||
+    explicitPublishActionPattern.test(text) ||
     explicitCandidateMessageConfirmationPattern.test(text)
   );
 }
@@ -378,7 +380,7 @@ export function enforceExplicitSocialExecutionRoute(
   });
 }
 
-function hasExistingPublishContext(
+export function hasExistingPublishContext(
   message: string,
   taskContext?: SocialAgentIntentRouterInput['taskContext'],
 ): boolean {

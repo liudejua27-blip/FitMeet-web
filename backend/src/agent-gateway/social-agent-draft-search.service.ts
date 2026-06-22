@@ -614,7 +614,7 @@ export type SocialAgentDraftAutoPublishResult = {
 };
 
 function containsPublicPublishConsent(text: string): boolean {
-  return /(可以|愿意|同意|授权|允许).{0,8}(公开|发现页|公开发起|公开活动|发布到发现|同步到发现)/i.test(
+  return /((可以|愿意|同意|授权|允许).{0,8}(公开|发现页|公开发起|公开活动|发布到发现|同步到发现))|(帮我|请|直接|现在|确认).{0,12}(发布|公开|发到发现|同步到发现)|发布到发现|同步到发现|公开发布/i.test(
     text,
   );
 }

@@ -8,6 +8,7 @@ import { SocialAgentIntentRouterService } from './social-agent-intent-router.ser
 import type { SocialAgentRouteMessageBody } from './social-agent-chat.types';
 import {
   enforceExplicitSocialExecutionRoute,
+  hasExistingPublishContext,
   hasExistingSocialActionContext,
   hasExistingSocialExecutionContext,
   hasExplicitCandidateRefinementIntent,
@@ -93,7 +94,13 @@ export class SocialAgentWorkflowRouterService {
     if (!isSocialExecutionIntent(route.intent)) return null;
 
     if (route.intent === 'action_request') {
-      if (!explicitAction || !hasActionContext) return null;
+      if (
+        !explicitAction ||
+        (!hasActionContext &&
+          !hasExistingPublishContext(message, input.taskContext))
+      ) {
+        return null;
+      }
       return {
         route,
         reason: 'social_action_workflow',

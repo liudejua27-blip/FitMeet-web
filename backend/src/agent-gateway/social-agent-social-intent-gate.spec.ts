@@ -252,6 +252,15 @@ describe('social agent social intent gate', () => {
     ).toBe(true);
   });
 
+  it('recognizes explicit publish requests without reducing them to candidate search only', () => {
+    const message =
+      '我想今天晚上在青岛大学附近散步，帮我生成并发布一张约练卡到发现，只公开模糊地点。';
+
+    expect(hasExplicitSocialExecutionIntent(message)).toBe(true);
+    expect(hasExplicitPublishSideEffectIntent(message)).toBe(true);
+    expect(hasExplicitSocialSideEffectIntent(message)).toBe(true);
+  });
+
   it('keeps publish opt-out from becoming a publish side effect while preserving explicit matching', () => {
     expect(hasExplicitPublishSideEffectIntent('先不发布到发现')).toBe(false);
     expect(

@@ -33,6 +33,7 @@ type AlphaAgentBundle = {
 };
 
 const MAX_VISIBLE_OPPORTUNITY_CARDS = 3;
+const MAX_VISIBLE_CARDS_WITH_ACTIVITY_DRAFT = MAX_VISIBLE_OPPORTUNITY_CARDS + 1;
 
 @Injectable()
 export class FitMeetAlphaAgentSdkService {
@@ -187,7 +188,10 @@ export class FitMeetAlphaAgentSdkService {
     );
     let opportunityCardCount = 0;
     const hasOpportunityCardRoom = () =>
-      opportunityCardCount < MAX_VISIBLE_OPPORTUNITY_CARDS;
+      opportunityCardCount <
+      (draft
+        ? MAX_VISIBLE_CARDS_WITH_ACTIVITY_DRAFT
+        : MAX_VISIBLE_OPPORTUNITY_CARDS);
     const pushOpportunityCard = (card: FitMeetAlphaCard) => {
       if (!hasOpportunityCardRoom()) return;
       cards.push(card);

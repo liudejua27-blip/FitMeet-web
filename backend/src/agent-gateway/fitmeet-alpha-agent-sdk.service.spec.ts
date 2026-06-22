@@ -554,7 +554,7 @@ describe('FitMeetAlphaAgentSdkService', () => {
     );
   });
 
-  it('limits user-visible opportunity cards to three while keeping safety concise', () => {
+  it('keeps three candidate cards while preserving the activity publish card', () => {
     const service = new FitMeetAlphaAgentSdkService(config);
 
     const cards = service.buildResultCards({
@@ -579,14 +579,19 @@ describe('FitMeetAlphaAgentSdkService', () => {
       (card) => card.data?.['opportunityCard'] === true,
     );
 
-    expect(opportunityCards).toHaveLength(3);
+    expect(opportunityCards).toHaveLength(4);
     expect(opportunityCards.map((card) => card.type)).toEqual([
       'candidate_card',
       'candidate_card',
       'candidate_card',
+      'activity_plan',
     ]);
+    const candidateOpportunityCards = opportunityCards.filter(
+      (card) => card.type === 'candidate_card',
+    );
+
     expect(
-      opportunityCards.every(
+      candidateOpportunityCards.every(
         (card) =>
           card.schemaVersion === 'fitmeet.tool-ui.v1' &&
           card.schemaType === 'social_match.candidate' &&
@@ -594,8 +599,9 @@ describe('FitMeetAlphaAgentSdkService', () => {
           card.data?.['opportunityCard'] === true,
       ),
     ).toBe(true);
+
     expect(
-      opportunityCards.every((card) => {
+      candidateOpportunityCards.every((card) => {
         const data = card.data ?? {};
         const opportunity = data['opportunity'] as
           | Record<string, unknown>
@@ -614,7 +620,7 @@ describe('FitMeetAlphaAgentSdkService', () => {
       }),
     ).toBe(true);
     expect(
-      opportunityCards.every((card) => {
+      candidateOpportunityCards.every((card) => {
         const schemaActions = card.actions.map((action) => action.schemaAction);
         return (
           schemaActions.includes('candidate.view_detail') &&
@@ -625,7 +631,7 @@ describe('FitMeetAlphaAgentSdkService', () => {
       }),
     ).toBe(true);
     expect(
-      opportunityCards.every((card) =>
+      candidateOpportunityCards.every((card) =>
         card.actions.some(
           (action) =>
             action.schemaAction === 'candidate.connect' &&
@@ -638,12 +644,21 @@ describe('FitMeetAlphaAgentSdkService', () => {
         ),
       ),
     ).toBe(true);
-    expect(opportunityCards.map((card) => card.data?.['displayName'])).toEqual([
+    expect(candidateOpportunityCards.map((card) => card.data?.['displayName'])).toEqual([
       '候选 A',
       '候选 B',
       '候选 C',
     ]);
-    expect(cards.find((card) => card.type === 'activity_plan')).toBeUndefined();
+    expect(cards.find((card) => card.type === 'activity_plan')).toMatchObject({
+      type: 'activity_plan',
+      actions: expect.arrayContaining([
+        expect.objectContaining({
+          label: '发布到发现',
+          schemaAction: 'publish_to_discover',
+          requiresConfirmation: true,
+        }),
+      ]),
+    });
     expect(cards.find((card) => card.type === 'safety_boundary')).toBeUndefined();
     expect(cards.find((card) => card.type === 'audit_update')).toBeUndefined();
   });
