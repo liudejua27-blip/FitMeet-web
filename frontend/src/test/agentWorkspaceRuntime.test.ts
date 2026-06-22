@@ -41,6 +41,7 @@ import {
 import {
   mergeApprovalDispatchResponseIntoMessages,
   mergeUniqueApprovalDispatchCards,
+  responseFromApprovalDispatchResult,
 } from '../components/agent-workspace/useAgentApprovalDispatchMessages';
 import {
   collapseRepeatedAssistantTextBlocks,
@@ -196,6 +197,20 @@ describe('agent workspace runtime fallback boundaries', () => {
       },
     ];
 
+    const publishResponse = responseFromApprovalDispatchResult({
+      approvalId: 9901,
+      actionType: 'publish_social_request',
+      dispatchResult: {
+        socialRequestId: 301,
+        publicIntentId: 'public_301',
+        discoverHref: '/public-intent/public_301',
+        status: 'published',
+        synced: true,
+      },
+      taskId: 101,
+    });
+    expect(publishResponse).not.toBeNull();
+
     const merged = mergeApprovalDispatchResponseIntoMessages({
       activeTaskId: 101,
       current,
@@ -262,6 +277,125 @@ describe('agent workspace runtime fallback boundaries', () => {
     });
 
     expect(merged).toBe(current);
+  });
+
+  it('merges approved Discover publish dispatch back into the originating opportunity card', () => {
+    const opportunityCard = {
+      id: 'opportunity-card-301',
+      type: 'activity_status',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'social_match.activity',
+      title: '今晚青岛大学散步',
+      body: '发布前需要确认。',
+      data: {
+        taskId: 101,
+        socialRequestId: 301,
+      },
+      actions: [],
+    } satisfies FitMeetAlphaCard;
+    const current: AgentThreadMessage[] = [
+      userMessage('user-1', '同意发布'),
+      {
+        id: 'assistant-origin',
+        role: 'assistant',
+        content: '发布前需要确认。',
+        status: 'done',
+        result: userFacingResponseWithCards([opportunityCard]),
+        showSocialResult: true,
+      },
+    ];
+    const publishResponse = responseFromApprovalDispatchResult({
+      approvalId: 9901,
+      actionType: 'publish_social_request',
+      dispatchResult: {
+        socialRequestId: 301,
+        publicIntentId: 'public_301',
+        discoverHref: '/public-intent/public_301',
+        status: 'published',
+        synced: true,
+      },
+      taskId: 101,
+    });
+    expect(publishResponse).not.toBeNull();
+
+    const merged = mergeApprovalDispatchResponseIntoMessages({
+      activeTaskId: 101,
+      current,
+      input: {
+        approvalId: 9901,
+        actionType: 'publish_social_request',
+        dispatchResult: {
+          socialRequestId: 301,
+          publicIntentId: 'public_301',
+          discoverHref: '/public-intent/public_301',
+          status: 'published',
+          synced: true,
+        },
+        taskId: 101,
+        targetMessageId: 'assistant-origin',
+        targetCardId: 'opportunity-card-301',
+        suppressStandalone: true,
+      },
+      nextId: (prefix) => `${prefix}-new`,
+      response: publishResponse!,
+    });
+
+    expect(merged).toHaveLength(2);
+    expect(merged[1].result?.cards.map((card) => card.id)).toEqual([
+      'approval-9901-publish-discover',
+    ]);
+    expect(merged[1].result?.cards[0]).toMatchObject({
+      schemaType: 'social_match.activity',
+      title: '已发布到发现',
+      data: expect.objectContaining({
+        publicIntentId: 'public_301',
+        discoverHref: '/public-intent/public_301',
+        publishStatus: 'published',
+      }),
+    });
+  });
+
+  it('converts approved Discover publish dispatch into a visible detail card', () => {
+    const response = responseFromApprovalDispatchResult({
+      approvalId: 9901,
+      actionType: 'publish_social_request',
+      dispatchResult: {
+        id: 'public_301',
+        socialRequestId: 301,
+        publicIntentId: 'public_301',
+        discoverHref: '/public-intent/public_301',
+        status: 'published',
+        synced: true,
+      },
+      taskId: 101,
+    });
+
+    expect(response).toMatchObject({
+      assistantMessage: expect.stringContaining('发布到发现页'),
+      lightStatus: '已整理回复',
+      cards: [
+        expect.objectContaining({
+          schemaType: 'social_match.activity',
+          title: '已发布到发现',
+          data: expect.objectContaining({
+            taskId: 101,
+            socialRequestId: 301,
+            publicIntentId: 'public_301',
+            discoverHref: '/public-intent/public_301',
+            publishStatus: 'published',
+          }),
+          actions: [
+            expect.objectContaining({
+              label: '查看发现详情',
+              schemaAction: 'activity.view_detail',
+              payload: expect.objectContaining({
+                discoverHref: '/public-intent/public_301',
+              }),
+            }),
+          ],
+        }),
+      ],
+    });
   });
 
   it('collapses repeated assistant delta and final text surfaces in a single run', () => {

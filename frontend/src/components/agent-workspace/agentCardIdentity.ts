@@ -257,7 +257,22 @@ function collectActionTypes(card: FitMeetAlphaCard) {
 }
 
 function shouldReplaceDuplicateCard(existing: FitMeetAlphaCard, incoming: FitMeetAlphaCard) {
-  return isProcessStatusCard(existing) || isProcessStatusCard(incoming);
+  return (
+    isProcessStatusCard(existing) ||
+    isProcessStatusCard(incoming) ||
+    isPublishedOpportunityCard(incoming)
+  );
+}
+
+function isPublishedOpportunityCard(card: FitMeetAlphaCard) {
+  const type = stringFromUnknown(card.schemaType ?? card.type);
+  if (type !== 'social_match.activity' && type !== 'activity_status') return false;
+  const publishStatus = stringFromUnknown(card.data.publishStatus);
+  return (
+    publishStatus === 'published' ||
+    card.data.synced === true ||
+    Boolean(stringFromUnknown(card.data.discoverHref))
+  );
 }
 
 function isProcessStatusCard(card: FitMeetAlphaCard) {

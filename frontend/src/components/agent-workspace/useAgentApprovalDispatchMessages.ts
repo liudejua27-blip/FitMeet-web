@@ -146,7 +146,7 @@ export function mergeUniqueApprovalDispatchCards(
   return mergeUniqueAgentCards(existing, incoming);
 }
 
-function responseFromApprovalDispatchResult(input: {
+export function responseFromApprovalDispatchResult(input: {
   approvalId: number;
   actionType?: string | null;
   dispatchResult?: AgentApprovalDispatchResult;
@@ -154,6 +154,8 @@ function responseFromApprovalDispatchResult(input: {
 }): UserFacingAgentResponse | null {
   const result = input.dispatchResult;
   if (!result) return null;
+  const publishResponse = publishResponseFromApprovalDispatch(input, result);
+  if (publishResponse) return publishResponse;
   const targetUserId = numberFromUnknown(result.targetUserId);
   const conversationId = stringIdFromUnknown(result.conversationId);
   const friendRequestId = stringIdFromUnknown(result.friendRequestId);
@@ -236,6 +238,83 @@ function responseFromApprovalDispatchResult(input: {
       blocked: false,
       level: 'medium',
       boundaryNotes: ['确认前没有执行真实连接动作', '后续沟通仍建议先站内、公共场景、低压力推进'],
+      requiredConfirmations: [],
+    },
+    pendingConfirmations: [],
+    permissionMode: 'limited_auto',
+  };
+}
+
+function publishResponseFromApprovalDispatch(
+  input: {
+    approvalId: number;
+    actionType?: string | null;
+    taskId?: number | null;
+  },
+  result: AgentApprovalDispatchResult,
+): UserFacingAgentResponse | null {
+  const actionType =
+    stringFromUnknown(input.actionType) ??
+    stringFromUnknown(result.actionType) ??
+    '';
+  const publicIntentId =
+    stringIdFromUnknown(result.publicIntentId) ??
+    stringIdFromUnknown(result.id);
+  const socialRequestId = numberFromUnknown(result.socialRequestId);
+  const isPublish =
+    /publish|social_request/i.test(actionType) ||
+    Boolean(publicIntentId || socialRequestId);
+  if (!isPublish) return null;
+  const discoverHref =
+    stringIdFromUnknown(result.discoverHref) ??
+    (publicIntentId
+      ? `/public-intent/${encodeURIComponent(publicIntentId)}`
+      : socialRequestId
+        ? `/social-request/${encodeURIComponent(String(socialRequestId))}`
+        : '');
+  if (!discoverHref) return null;
+  return {
+    assistantMessage:
+      '已按你的确认发布到发现页。附近公开可发现用户现在可以看到这张约练卡。',
+    lightStatus: '已整理回复',
+    cards: [
+      {
+        id: `approval-${input.approvalId}-publish-discover`,
+        type: 'activity_status',
+        schemaVersion: 'fitmeet.tool-ui.v1',
+        schemaType: 'social_match.activity',
+        title: '已发布到发现',
+        body: '这张约练卡已经公开到发现页，你可以打开详情查看展示效果。',
+        status: 'completed',
+        data: {
+          schemaName: 'OpportunityCard',
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'social_match.activity',
+          approvalId: input.approvalId,
+          actionType: 'publish_social_request',
+          taskId: input.taskId ?? null,
+          socialRequestId,
+          publicIntentId,
+          discoverHref,
+          publishStatus: 'published',
+          synced: true,
+        },
+        actions: [
+          {
+            id: `approval-${input.approvalId}-view-discover`,
+            label: '查看发现详情',
+            action: 'activity.view_detail',
+            schemaAction: 'activity.view_detail',
+            requiresConfirmation: false,
+            payload: { socialRequestId, publicIntentId, discoverHref },
+          },
+        ],
+      },
+    ],
+    safeStatus: {
+      blocked: false,
+      level: 'medium',
+      boundaryNotes: ['公开的是约练卡片，不包含精确位置或联系方式'],
       requiredConfirmations: [],
     },
     pendingConfirmations: [],

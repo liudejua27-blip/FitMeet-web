@@ -73,6 +73,8 @@ type InlineCardOutcome = {
   title: string;
   body: string;
   actionKey: string;
+  href?: string | null;
+  hrefLabel?: string | null;
 };
 
 const cardActionRuntimeState = new Map<string, CardActionRuntimeState>();
@@ -614,6 +616,16 @@ function InlineOutcomePreview({ outcome }: { outcome: InlineCardOutcome }) {
     >
       <p className="font-medium text-emerald-950">{outcome.title}</p>
       <p className="mt-1 text-emerald-900">{outcome.body}</p>
+      {outcome.href ? (
+        <button
+          type="button"
+          className="mt-2 inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[11px] font-medium text-emerald-950 ring-1 ring-emerald-200 transition hover:bg-emerald-100"
+          data-testid="assistant-ui-inline-outcome-link"
+          onClick={() => navigateToInternalHref(outcome.href ?? '')}
+        >
+          {outcome.hrefLabel ?? '查看详情'}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -1172,6 +1184,9 @@ function inlineOutcomeFromActionResponse(
     title: inlineOutcomeTitle(action.schemaAction),
     body,
     actionKey,
+    href: inlineOutcomeHrefFromResponse(response, action.schemaAction),
+    hrefLabel:
+      action.schemaAction === 'publish_to_discover' ? '查看发现详情' : null,
   };
 }
 
@@ -1297,11 +1312,50 @@ function inlineOutcomeFromApprovalResponse(
     };
   }
   if (!response?.assistantMessage) return null;
+  const publishedHref = inlineOutcomeHrefFromResponse(response, 'publish_to_discover');
+  if (publishedHref && /publish|social_request|发现|发布/i.test(approval.actionKey)) {
+    return {
+      title: '已发布到发现',
+      body:
+        publicDetail(response.assistantMessage) ??
+        '这张约练卡已发布到发现页，公开可发现用户可以看到。',
+      actionKey: approval.actionKey,
+      href: publishedHref,
+      hrefLabel: '查看发现详情',
+    };
+  }
   return {
     title: inlineApprovalApprovedTitle(approval),
     body: publicDetail(response.assistantMessage) ?? '已按你的确认继续。',
     actionKey: approval.actionKey,
   };
+}
+
+function inlineOutcomeHrefFromResponse(
+  response: UserFacingAgentResponse | void,
+  schemaAction: ToolUISchemaAction | null | undefined,
+) {
+  if (schemaAction !== 'publish_to_discover' && schemaAction !== 'activity.view_detail') {
+    return null;
+  }
+  for (const card of response?.cards ?? []) {
+    const direct = firstSafeInternalHref(
+      card.data?.discoverHref,
+      card.data?.detailHref,
+      card.data?.activityHref,
+      card.data?.href,
+    );
+    if (direct) return direct;
+    const publicIntentId = firstPublicPrimitive(card.data?.publicIntentId);
+    if (publicIntentId !== null) {
+      return `/public-intent/${encodeURIComponent(String(publicIntentId))}`;
+    }
+    const socialRequestId = firstPublicPrimitive(card.data?.socialRequestId);
+    if (socialRequestId !== null) {
+      return `/social-request/${encodeURIComponent(String(socialRequestId))}`;
+    }
+  }
+  return null;
 }
 
 function candidateConnectOutcomeBody(response: UserFacingAgentResponse | void) {

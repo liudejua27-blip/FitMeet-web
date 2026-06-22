@@ -15,6 +15,7 @@ describe('AgentApprovalDispatcherService', () => {
     actionLogs?: Record<string, jest.Mock>;
     l5Runtime?: Record<string, jest.Mock>;
     socialRequests?: Record<string, jest.Mock>;
+    taskRepo?: Record<string, jest.Mock>;
   } = {}) {
     const activities = options.activities ?? {};
     const approvalRepo =
@@ -44,6 +45,12 @@ describe('AgentApprovalDispatcherService', () => {
       create: jest.fn((input) => input),
       save: jest.fn((input) => Promise.resolve(input)),
     };
+    const taskRepo =
+      options.taskRepo ??
+      ({
+        findOne: jest.fn().mockResolvedValue(null),
+        save: jest.fn((input) => Promise.resolve(input)),
+      } as Record<string, jest.Mock>);
     const service = new AgentApprovalDispatcherService(
       {} as never,
       activities as never,
@@ -60,8 +67,17 @@ describe('AgentApprovalDispatcherService', () => {
       actionLogs as never,
       socialRequests as never,
       l5Runtime as never,
+      taskRepo as never,
     );
-    return { actionLogs, approvalRepo, l5Runtime, logRepo, service, socialRequests };
+    return {
+      actionLogs,
+      approvalRepo,
+      l5Runtime,
+      logRepo,
+      service,
+      socialRequests,
+      taskRepo,
+    };
   }
 
   it('dispatches approved public social request publish through SocialRequestsService', async () => {
@@ -70,7 +86,29 @@ describe('AgentApprovalDispatcherService', () => {
         .fn()
         .mockResolvedValue({ id: 'public_301', status: 'active' }),
     };
-    const { actionLogs, logRepo, service } = makeService({ socialRequests });
+    const task = {
+      id: 101,
+      ownerUserId: 7,
+      status: 'awaiting_confirmation',
+      statusReason: 'publish_social_request_requires_approval',
+      result: {
+        publishSocialRequest: {
+          status: 'pending_approval',
+          socialRequestId: 301,
+          approvalId: 9910,
+        },
+      },
+      memory: { shortTerm: { publishStatus: 'pending_approval' } },
+      completedAt: null,
+    };
+    const taskRepo = {
+      findOne: jest.fn().mockResolvedValue(task),
+      save: jest.fn((input) => Promise.resolve(input)),
+    };
+    const { actionLogs, logRepo, service } = makeService({
+      socialRequests,
+      taskRepo,
+    });
 
     const result = await service.dispatch({
       id: 9910,
@@ -127,8 +165,42 @@ describe('AgentApprovalDispatcherService', () => {
     );
     expect(result).toEqual({
       ok: true,
-      result: { id: 'public_301', status: 'active' },
+      result: {
+        id: 'public_301',
+        status: 'published',
+        socialRequestId: 301,
+        publicIntentId: 'public_301',
+        discoverHref: '/public-intent/public_301',
+        synced: true,
+      },
     });
+    expect(taskRepo.findOne).toHaveBeenCalledWith({
+      where: { id: 101, ownerUserId: 7 },
+    });
+    expect(taskRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'succeeded',
+        statusReason: 'social_request_published_and_synced',
+        result: expect.objectContaining({
+          publishSocialRequest: expect.objectContaining({
+            approvalId: 9910,
+            socialRequestId: 301,
+            publicIntentId: 'public_301',
+            discoverHref: '/public-intent/public_301',
+            status: 'published',
+            synced: true,
+          }),
+        }),
+        memory: expect.objectContaining({
+          shortTerm: expect.objectContaining({
+            publishedSocialRequestId: 301,
+            publicIntentId: 'public_301',
+            discoverHref: '/public-intent/public_301',
+            publishStatus: 'published',
+          }),
+        }),
+      }),
+    );
   });
 
   it('dispatches approved mark-candidate-messaged approvals into candidate state updates', async () => {

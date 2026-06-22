@@ -12,6 +12,10 @@ import {
   ApprovalStatus,
   ApprovalType,
 } from './entities/agent-approval-request.entity';
+import {
+  AgentTask,
+  AgentTaskStatus,
+} from './entities/agent-task.entity';
 import { AgentConnection } from './entities/agent-connection.entity';
 import {
   AgentActivityLog,
@@ -116,6 +120,9 @@ export class AgentApprovalDispatcherService {
     private readonly socialRequests?: SocialRequestsService,
     @Optional()
     private readonly l5Runtime?: AgentL5RuntimeService,
+    @Optional()
+    @InjectRepository(AgentTask)
+    private readonly taskRepo?: Repository<AgentTask>,
   ) {}
 
   /**
@@ -359,6 +366,7 @@ export class AgentApprovalDispatcherService {
             socialRequestId,
             approval.userId,
           );
+          await this.markTaskPublishDispatched(approval, socialRequestId, intent);
           await this.writeLog(
             approval,
             conn,
@@ -383,7 +391,20 @@ export class AgentApprovalDispatcherService {
               },
             },
           );
-          return { ok: true, result: intent };
+          const publicIntentId = this.text(intent?.id);
+          return {
+            ok: true,
+            result: {
+              ...(typeof intent === 'object' && intent !== null ? intent : {}),
+              socialRequestId,
+              publicIntentId,
+              discoverHref: publicIntentId
+                ? `/public-intent/${encodeURIComponent(publicIntentId)}`
+                : `/social-request/${encodeURIComponent(String(socialRequestId))}`,
+              status: 'published',
+              synced: true,
+            },
+          };
         }
 
         case ApprovalType.SubmitCompletionProof:
@@ -514,6 +535,54 @@ export class AgentApprovalDispatcherService {
       });
       return { ok: false, errorMessage };
     }
+  }
+
+  private async markTaskPublishDispatched(
+    approval: AgentApprovalRequest,
+    socialRequestId: number,
+    intent: unknown,
+  ): Promise<void> {
+    if (!approval.agentTaskId || !this.taskRepo) return;
+    const task = await this.taskRepo.findOne({
+      where: { id: approval.agentTaskId, ownerUserId: approval.userId },
+    });
+    if (!task) return;
+    const publicIntentId = this.text((intent as { id?: unknown } | null)?.id);
+    task.status = AgentTaskStatus.Succeeded;
+    task.statusReason = 'social_request_published_and_synced';
+    task.completedAt = new Date();
+    task.result = {
+      ...(task.result ?? {}),
+      publishSocialRequest: {
+        approvalId: approval.id,
+        socialRequestId,
+        publicIntentId,
+        discoverHref: publicIntentId
+          ? `/public-intent/${encodeURIComponent(publicIntentId)}`
+          : `/social-request/${encodeURIComponent(String(socialRequestId))}`,
+        status: 'published',
+        synced: true,
+      },
+    };
+    const memory =
+      typeof task.memory === 'object' && task.memory !== null
+        ? { ...(task.memory as Record<string, unknown>) }
+        : {};
+    const shortTerm =
+      typeof memory.shortTerm === 'object' && memory.shortTerm !== null
+        ? { ...(memory.shortTerm as Record<string, unknown>) }
+        : {};
+    memory.shortTerm = {
+      ...shortTerm,
+      publishedSocialRequestId: socialRequestId,
+      publicIntentId,
+      discoverHref: publicIntentId
+        ? `/public-intent/${encodeURIComponent(publicIntentId)}`
+        : `/social-request/${encodeURIComponent(String(socialRequestId))}`,
+      publishStatus: 'published',
+    };
+    task.memory = memory;
+    await this.taskRepo.save(task);
   }
 
   private async sendOwnerMessageDirectly(
