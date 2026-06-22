@@ -17,7 +17,7 @@ fitmeet_bootstrap_toolchain
 
 usage() {
   cat <<'EOF'
-Usage: scripts/agent-remote-smoke-evidence.sh [--readiness|--20-turn-memory|--empty-candidate|--full|--sse-abort|--all] [--prepare-agent-smoke-seed] [--no-scan-compose-logs] [--evidence-file PATH]
+Usage: scripts/agent-remote-smoke-evidence.sh [--readiness|--20-turn-memory|--empty-candidate|--private-match|--discover-publish|--full|--sse-abort|--all] [--prepare-agent-smoke-seed] [--no-scan-compose-logs] [--evidence-file PATH]
 
 Runs the remote Agent smoke gates through scripts/ecs-post-deploy-smoke.sh and
 captures a redacted evidence log. It does not store raw passwords, JWTs, bearer
@@ -29,9 +29,12 @@ Modes:
   --readiness        OpportunityCard readiness only; stops before high-risk actions.
   --20-turn-memory   20-turn task-memory continuity smoke.
   --empty-candidate  Empty-candidate recovery smoke; must not fabricate people.
+  --private-match    Private candidate matching smoke; must not publish Discover cards.
+  --discover-publish Agent publish-to-Discover smoke with public detail read-back.
   --full             Full mutating opportunity journey.
   --sse-abort        SSE visibility/abort smoke.
-  --all              Readiness, 20-turn memory, empty-candidate, full, then SSE abort.
+  --all              Readiness, 20-turn memory, empty-candidate, private-match,
+                     discover-publish, full, then SSE abort.
 
 Environment:
   BASE_URL / API_BASE_URL        Target Web/API. Defaults to www.ourfitmeet.cn.
@@ -58,6 +61,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --empty-candidate)
       MODE=empty-candidate
+      ;;
+    --private-match)
+      MODE=private-match
+      ;;
+    --discover-publish)
+      MODE=discover-publish
       ;;
     --full)
       MODE=full
@@ -96,9 +105,9 @@ API_BASE_URL="${API_BASE_URL%/}"
 APP_DIR="${APP_DIR%/}"
 
 case "${MODE}" in
-  readiness|20-turn-memory|empty-candidate|full|sse-abort|all) ;;
+  readiness|20-turn-memory|empty-candidate|private-match|discover-publish|full|sse-abort|all) ;;
   *)
-    echo "[agent-smoke-evidence][FAIL] MODE must be readiness, 20-turn-memory, empty-candidate, full, sse-abort, or all." >&2
+    echo "[agent-smoke-evidence][FAIL] MODE must be readiness, 20-turn-memory, empty-candidate, private-match, discover-publish, full, sse-abort, or all." >&2
     exit 2
     ;;
 esac
@@ -217,6 +226,10 @@ post_deploy_args() {
     args+=(--run-agent-20-turn-memory-smoke)
   elif [[ "${smoke_mode}" == "empty-candidate" ]]; then
     args+=(--run-agent-empty-candidate-smoke)
+  elif [[ "${smoke_mode}" == "private-match" ]]; then
+    args+=(--run-agent-private-match-smoke)
+  elif [[ "${smoke_mode}" == "discover-publish" ]]; then
+    args+=(--run-agent-discover-publish-smoke)
   elif [[ "${smoke_mode}" == "full" ]]; then
     args+=(--run-agent-opportunity-smoke)
   elif [[ "${smoke_mode}" == "sse-abort" ]]; then
@@ -259,6 +272,12 @@ case "${MODE}" in
   empty-candidate)
     run_post_deploy_smoke empty-candidate
     ;;
+  private-match)
+    run_post_deploy_smoke private-match
+    ;;
+  discover-publish)
+    run_post_deploy_smoke discover-publish
+    ;;
   full)
     run_post_deploy_smoke full
     ;;
@@ -269,6 +288,8 @@ case "${MODE}" in
     run_post_deploy_smoke readiness
     run_post_deploy_smoke 20-turn-memory
     run_post_deploy_smoke empty-candidate
+    run_post_deploy_smoke private-match
+    run_post_deploy_smoke discover-publish
     run_post_deploy_smoke full
     run_post_deploy_smoke sse-abort
     ;;

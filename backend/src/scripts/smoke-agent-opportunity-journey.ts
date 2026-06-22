@@ -36,6 +36,11 @@ import { dirname, resolve } from 'node:path';
  *     empty-supply scenario that must return CandidateEmptyStateCard instead
  *     of fake CandidateCards. Best used against staging/smoke data where the
  *     supplied query is expected to have zero public candidates.
+ *   AGENT_SMOKE_RUN_PRIVATE_MATCH=true to run an additional private matching
+ *     scenario where the user explicitly does not want to publish a Discover
+ *     card but still expects real public-discoverable candidate recommendations.
+ *   AGENT_SMOKE_RUN_DISCOVER_PUBLISH=true to confirm an OpportunityCard publish
+ *     flow writes a PublicSocialIntent and returns a Discover detail link.
  *   AGENT_SMOKE_EMPTY_CANDIDATE_MESSAGE=<message> to override the default
  *     unlikely empty-supply query.
  *   AGENT_SMOKE_REPORT_FILE=<path> to write a machine-readable JSON report of
@@ -92,6 +97,10 @@ const RUN_20_TURN_MEMORY = truthy(
 );
 const RUN_EMPTY_CANDIDATE_FALLBACK = truthy(
   process.env.AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK,
+);
+const RUN_PRIVATE_MATCH = truthy(process.env.AGENT_SMOKE_RUN_PRIVATE_MATCH);
+const RUN_DISCOVER_PUBLISH = truthy(
+  process.env.AGENT_SMOKE_RUN_DISCOVER_PUBLISH,
 );
 const EMPTY_CANDIDATE_MESSAGE = nonEmpty(
   process.env.AGENT_SMOKE_EMPTY_CANDIDATE_MESSAGE,
@@ -170,6 +179,12 @@ async function main() {
     );
   }
 
+  if (RUN_PRIVATE_MATCH) {
+    await assertPrivateMatchingScenario(token);
+  } else {
+    pass('private matching smoke skipped by AGENT_SMOKE_RUN_PRIVATE_MATCH');
+  }
+
   const vague = await postMessageStream(token, {
     message: `我想找人一起${SMOKE_ACTIVITY}`,
     taskId: socialAdvice.taskId,
@@ -201,6 +216,16 @@ async function main() {
   pass(
     'clarified social request returns 3+ candidate/activity opportunities after search-critical context without over-asking stranger/public policy',
   );
+  if (RUN_DISCOVER_PUBLISH) {
+    await assertDiscoverPublishScenario(token, clarified, activityCard);
+    await assertTraceEvalPass(
+      token,
+      'discover publish trace',
+      clarified.taskId,
+    );
+    pass('discover publish smoke stopped after public intent read-back');
+    return;
+  }
   if (STOP_AFTER_OPPORTUNITIES) {
     await assertTraceEvalPass(
       token,
@@ -668,6 +693,103 @@ async function assertEmptyCandidateFallbackScenario(token: string) {
   );
 }
 
+async function assertPrivateMatchingScenario(token: string) {
+  const thread = await createSmokeThread(token, '私密候选匹配闭环 smoke');
+  const response = await postMessageStream(token, {
+    message: `${SMOKE_CITY}${SMOKE_TIME}，${SMOKE_INTENSITY}${SMOKE_ACTIVITY}。我不想发布到发现，也不要生成公开约练卡，只想根据我的画像和公开可发现资料推荐合适的人。先站内聊，发送前确认。`,
+    taskId: thread.taskId,
+    clientContext: { threadId: thread.threadId },
+  });
+
+  assertTaskContinuity(
+    'private matching task',
+    thread.taskId,
+    response.taskId,
+  );
+  assertNoPendingApproval('private matching first recommendation', response);
+  assertPrivateCandidateRecommendations(response);
+  assertNoDiscoverPublishArtifacts('private matching response', response);
+  assertTextIncludesAny(
+    'private matching response',
+    response.assistantMessage,
+    ['推荐', '候选', '公开可发现', '不会发布', '不发布'],
+  );
+  pass(
+    'private matching returns real candidate cards without publishing a Discover card',
+  );
+}
+
+async function assertDiscoverPublishScenario(
+  token: string,
+  response: SmokeResponse,
+  activityCard: JsonRecord,
+) {
+  const taskId = response.taskId;
+  if (!taskId) throw new Error('Discover publish smoke requires taskId.');
+  const publishPreview = await postActionStream(token, taskId, {
+    action: 'publish_to_discover',
+    payload: publishPayloadFromOpportunityCard(activityCard, taskId),
+    idempotencyKey: smokeKey('publish-discover-preview'),
+  });
+  assertNoPendingApproval('publish-to-Discover inline preview', publishPreview);
+  const confirmationCard = findActionCard(
+    publishPreview,
+    'publish_to_discover',
+  );
+  assertCard(confirmationCard, 'publish-to-Discover confirmation card');
+  if (readString(confirmationCard.schemaType) !== 'safety.approval') {
+    throw new Error('Publish preview must render an inline safety.approval card.');
+  }
+
+  const published = await postActionStream(token, taskId, {
+    action: 'publish_to_discover',
+    payload: actionPayload(confirmationCard, 'publish_to_discover'),
+    idempotencyKey: smokeKey('publish-discover-confirmed'),
+  });
+  assertNoPendingApproval('publish-to-Discover confirmed action', published);
+  assertTextIncludesAny('publish-to-Discover confirmed response', published.assistantMessage, [
+    '已发布',
+    '发现',
+    '查看',
+  ]);
+  const publishedCard = (published.cards ?? []).find((card) => {
+    const data = asRecord(card.data);
+    return (
+      readString(data.publishStatus) === 'published' ||
+      readString(card.title)?.includes('已发布')
+    );
+  });
+  assertCard(publishedCard, 'published Discover card');
+  const data = asRecord(publishedCard.data);
+  const publicIntentId = readString(data.publicIntentId);
+  const discoverHref = readString(data.discoverHref);
+  if (!publicIntentId) {
+    throw new Error('Published Discover card did not return publicIntentId.');
+  }
+  if (!discoverHref || !discoverHref.includes(encodeURIComponent(publicIntentId))) {
+    throw new Error(
+      `Published Discover card did not return a stable detail href for ${publicIntentId}.`,
+    );
+  }
+
+  const detail = await requestJson(
+    `/public/social-intents/${encodeURIComponent(publicIntentId)}`,
+    { method: 'GET', token: null },
+  );
+  if (readString(detail.id) !== publicIntentId) {
+    throw new Error(
+      `Public intent read-back mismatch. Expected ${publicIntentId}, got ${readString(detail.id) ?? 'missing'}.`,
+    );
+  }
+  assertTextIncludesAny('public intent read-back title', readString(detail.title), [
+    SMOKE_CITY,
+    SMOKE_ACTIVITY,
+    '约练',
+    '搭子',
+  ]);
+  pass('publish_to_discover writes a readable PublicSocialIntent detail');
+}
+
 async function createSmokeThread(token: string, title: string) {
   const result = await requestJson('/social-agent/chat/threads', {
     method: 'POST',
@@ -1126,6 +1248,84 @@ function assertCandidateEmptyStateCard(response: SmokeResponse) {
     );
   }
   assertNoPublicInternalLeak('CandidateEmptyStateCard', emptyCard);
+}
+
+function assertPrivateCandidateRecommendations(response: SmokeResponse) {
+  const candidates = (response.cards ?? []).filter(
+    (card) => readString(card.schemaType) === 'social_match.candidate',
+  );
+  if (candidates.length < 1) {
+    throw new Error(
+      `Private matching expected at least one CandidateCard, got schemas: ${(response.cards ?? [])
+        .map((card) => readString(card.schemaType) ?? readString(card.type) ?? 'unknown')
+        .join(', ')}`,
+    );
+  }
+  candidates.slice(0, 3).forEach((card, index) => {
+    assertOpportunityCardQuality(card, index);
+    const actionsList = actions(card);
+    assertCardHasActions(`Private CandidateCard #${index + 1}`, actionsList, [
+      'candidate.view_detail',
+      'candidate.generate_opener',
+      'candidate.connect',
+    ]);
+    assertNoPublicInternalLeak(`Private CandidateCard #${index + 1}`, card);
+  });
+}
+
+function assertNoDiscoverPublishArtifacts(label: string, response: SmokeResponse) {
+  const publishActions = (response.cards ?? []).flatMap((card) =>
+    actions(card).filter((item) => {
+      const action = readString(item.schemaAction) ?? readString(item.action) ?? '';
+      return /publish_to_discover|publish_social_request/i.test(action);
+    }),
+  );
+  if (publishActions.length > 0) {
+    throw new Error(
+      `${label} unexpectedly exposed Discover publish actions in a private matching flow.`,
+    );
+  }
+  const text = JSON.stringify({
+    assistantMessage: response.assistantMessage,
+    cards: response.cards,
+  });
+  if (/"discoverHref"|publicIntentId|已发布|发布成功|查看发现详情/.test(text)) {
+    throw new Error(
+      `${label} unexpectedly exposed Discover publication metadata or copy.`,
+    );
+  }
+}
+
+function publishPayloadFromOpportunityCard(card: JsonRecord, taskId: number) {
+  const data = asRecord(card.data);
+  const opportunity = asRecord(data.opportunity);
+  return {
+    taskId,
+    opportunityId: readString(card.id) ?? `activity:${taskId}`,
+    title:
+      readString(opportunity.title) ??
+      readString(card.title) ??
+      `${SMOKE_CITY}${SMOKE_ACTIVITY}约练`,
+    description:
+      readString(opportunity.summary) ??
+      readString(card.body) ??
+      `想在${SMOKE_CITY}${SMOKE_TIME}进行${SMOKE_ACTIVITY}，先站内聊，公开模糊地点。`,
+    city: readString(opportunity.city ?? data.city) ?? SMOKE_CITY,
+    activityType:
+      readString(opportunity.activityType ?? data.activityType) ?? SMOKE_ACTIVITY,
+    timePreference:
+      readString(opportunity.time ?? data.timeLabel ?? data.timePreference) ??
+      SMOKE_TIME,
+    locationPreference:
+      readString(opportunity.location ?? data.location ?? data.locationName) ??
+      `${SMOKE_CITY}公共场所`,
+    radiusKm: readNumber(opportunity.radiusKm ?? data.radiusKm) ?? 5,
+    interestTags:
+      readStringArray(opportunity.interestTags ?? data.interestTags).length > 0
+        ? readStringArray(opportunity.interestTags ?? data.interestTags)
+        : [SMOKE_ACTIVITY, '公共场所', '先站内聊'],
+    confirmedPublish: false,
+  };
 }
 
 function assertOpportunityCardQuality(card: JsonRecord, index: number) {
@@ -1616,6 +1816,8 @@ function inferSmokeMilestoneId(message: string) {
     [/correction-memory|candidate preference correction/i, 'memory.correction-context-preserved'],
     [/20-turn/i, 'memory.twenty-turn-continuity'],
     [/empty candidate|empty-candidate/i, 'candidate.empty-supply-fallback'],
+    [/private matching/i, 'candidate.private-matching-no-publish'],
+    [/publish_to_discover|Discover publish/i, 'discover.publish-readback'],
     [/vague social request/i, 'slot.clarification-before-search'],
     [/clarified social request/i, 'opportunity.search-ready'],
     [/readiness-only/i, 'opportunity.readiness-only'],
@@ -1653,6 +1855,8 @@ function writeSmokeReport(status: 'passed' | 'failed', error?: unknown) {
       skipCorrectionMemory: SKIP_CORRECTION_MEMORY,
       run20TurnMemory: RUN_20_TURN_MEMORY,
       runEmptyCandidateFallback: RUN_EMPTY_CANDIDATE_FALLBACK,
+      runPrivateMatch: RUN_PRIVATE_MATCH,
+      runDiscoverPublish: RUN_DISCOVER_PUBLISH,
     },
     summary: {
       passCount,

@@ -12,6 +12,8 @@ RUN_APP_SMOKE="${RUN_APP_SMOKE:-false}"
 RUN_AGENT_OPPORTUNITY_SMOKE="${RUN_AGENT_OPPORTUNITY_SMOKE:-false}"
 RUN_AGENT_20_TURN_MEMORY_SMOKE="${RUN_AGENT_20_TURN_MEMORY_SMOKE:-false}"
 RUN_AGENT_EMPTY_CANDIDATE_SMOKE="${RUN_AGENT_EMPTY_CANDIDATE_SMOKE:-false}"
+RUN_AGENT_PRIVATE_MATCH_SMOKE="${RUN_AGENT_PRIVATE_MATCH_SMOKE:-false}"
+RUN_AGENT_DISCOVER_PUBLISH_SMOKE="${RUN_AGENT_DISCOVER_PUBLISH_SMOKE:-false}"
 RUN_AGENT_SSE_ABORT_SMOKE="${RUN_AGENT_SSE_ABORT_SMOKE:-false}"
 RUN_PUBLIC_INTENT_WRITE="${RUN_PUBLIC_INTENT_WRITE:-false}"
 APP_SMOKE_RUN_MUTATIONS="${APP_SMOKE_RUN_MUTATIONS:-true}"
@@ -49,6 +51,12 @@ Options:
                                  Run authenticated Agent 20-turn task-memory smoke.
   --run-agent-empty-candidate-smoke
                                  Run authenticated Agent empty-candidate recovery smoke.
+  --run-agent-private-match-smoke
+                                 Run authenticated private candidate matching smoke without
+                                 publishing a Discover card.
+  --run-agent-discover-publish-smoke
+                                 Run authenticated Agent publish-to-Discover smoke and
+                                 read back the public detail.
   --run-agent-sse-abort-smoke    Run Agent SSE visibility/abort smoke:
                                  early visible status, no proxy buffering, then
                                  abort after the first assistant delta.
@@ -69,7 +77,9 @@ Environment:
   AGENT_SMOKE_EMAIL/PASSWORD     Required with --run-agent-opportunity-readiness-smoke,
                                  --run-agent-opportunity-smoke,
                                  --run-agent-20-turn-memory-smoke,
-                                 --run-agent-empty-candidate-smoke, or
+                                 --run-agent-empty-candidate-smoke,
+                                 --run-agent-private-match-smoke, or
+                                 --run-agent-discover-publish-smoke, or
                                  --run-agent-sse-abort-smoke unless
                                  --prepare-agent-smoke-seed is used.
   AGENT_SMOKE_SEED_ALLOW_PRODUCTION=true
@@ -141,6 +151,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --run-agent-empty-candidate-smoke)
       RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true
+      ;;
+    --run-agent-private-match-smoke)
+      RUN_AGENT_PRIVATE_MATCH_SMOKE=true
+      ;;
+    --run-agent-discover-publish-smoke)
+      RUN_AGENT_DISCOVER_PUBLISH_SMOKE=true
       ;;
     --run-agent-sse-abort-smoke)
       RUN_AGENT_SSE_ABORT_SMOKE=true
@@ -386,6 +402,48 @@ if [[ "${RUN_AGENT_EMPTY_CANDIDATE_SMOKE}" == "true" ]]; then
     AGENT_SMOKE_RUN_EMPTY_CANDIDATE_FALLBACK=true \
     AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true \
     AGENT_SMOKE_EMPTY_CANDIDATE_MESSAGE="${AGENT_SMOKE_EMPTY_CANDIDATE_MESSAGE:-}" \
+    AGENT_SMOKE_REPORT_STDOUT="${AGENT_SMOKE_REPORT_STDOUT:-true}" \
+    AGENT_SMOKE_REPORT_FILE="${AGENT_SMOKE_REPORT_FILE:-}" \
+    ./scripts/ecs-backend-pnpm.sh -- smoke:agent-opportunity:prod
+fi
+
+if [[ "${RUN_AGENT_PRIVATE_MATCH_SMOKE}" == "true" ]]; then
+  [[ -n "${AGENT_SMOKE_EMAIL:-}" ]] ||
+    fail "AGENT_SMOKE_EMAIL is required with --run-agent-private-match-smoke."
+  [[ -n "${AGENT_SMOKE_PASSWORD:-}" ]] ||
+    fail "AGENT_SMOKE_PASSWORD is required with --run-agent-private-match-smoke."
+  if ! is_truthy "${AGENT_SMOKE_ALLOW_MUTATIONS:-}"; then
+    fail "AGENT_SMOKE_ALLOW_MUTATIONS=true is required with --run-agent-private-match-smoke unless --prepare-agent-smoke-seed is used in the same invocation."
+  fi
+
+  info "Running real Agent private matching smoke against ${API_BASE_URL}."
+  run_agent_remote_preflight readiness
+  AGENT_SMOKE_API_BASE_URL="${API_BASE_URL}" \
+    AGENT_SMOKE_ALLOW_REMOTE=true \
+    AGENT_SMOKE_ALLOW_MUTATIONS="${AGENT_SMOKE_ALLOW_MUTATIONS}" \
+    AGENT_SMOKE_RUN_PRIVATE_MATCH=true \
+    AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true \
+    AGENT_SMOKE_REPORT_STDOUT="${AGENT_SMOKE_REPORT_STDOUT:-true}" \
+    AGENT_SMOKE_REPORT_FILE="${AGENT_SMOKE_REPORT_FILE:-}" \
+    ./scripts/ecs-backend-pnpm.sh -- smoke:agent-opportunity:prod
+fi
+
+if [[ "${RUN_AGENT_DISCOVER_PUBLISH_SMOKE}" == "true" ]]; then
+  [[ -n "${AGENT_SMOKE_EMAIL:-}" ]] ||
+    fail "AGENT_SMOKE_EMAIL is required with --run-agent-discover-publish-smoke."
+  [[ -n "${AGENT_SMOKE_PASSWORD:-}" ]] ||
+    fail "AGENT_SMOKE_PASSWORD is required with --run-agent-discover-publish-smoke."
+  if ! is_truthy "${AGENT_SMOKE_ALLOW_MUTATIONS:-}"; then
+    fail "AGENT_SMOKE_ALLOW_MUTATIONS=true is required with --run-agent-discover-publish-smoke unless --prepare-agent-smoke-seed is used in the same invocation."
+  fi
+
+  info "Running real Agent Discover publish smoke against ${API_BASE_URL}."
+  run_agent_remote_preflight full
+  AGENT_SMOKE_API_BASE_URL="${API_BASE_URL}" \
+    AGENT_SMOKE_ALLOW_REMOTE=true \
+    AGENT_SMOKE_ALLOW_MUTATIONS="${AGENT_SMOKE_ALLOW_MUTATIONS}" \
+    AGENT_SMOKE_RUN_DISCOVER_PUBLISH=true \
+    AGENT_SMOKE_STOP_AFTER_OPPORTUNITIES=true \
     AGENT_SMOKE_REPORT_STDOUT="${AGENT_SMOKE_REPORT_STDOUT:-true}" \
     AGENT_SMOKE_REPORT_FILE="${AGENT_SMOKE_REPORT_FILE:-}" \
     ./scripts/ecs-backend-pnpm.sh -- smoke:agent-opportunity:prod
