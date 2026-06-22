@@ -88,4 +88,56 @@ describe('SocialAgentEmbeddingCacheService', () => {
     expect(next.vector).toEqual([2]);
     expect(cache.stats().evictions).toBeGreaterThanOrEqual(1);
   });
+
+  it('shares embeddings through Redis when distributed cache is enabled', async () => {
+    const store = new Map<string, string>();
+    const redis = {
+      get: jest.fn((key: string) => Promise.resolve(store.get(key) ?? null)),
+      setex: jest.fn((key: string, _ttl: number, value: string) => {
+        store.set(key, value);
+        return Promise.resolve('OK');
+      }),
+    };
+    const config = {
+      get: jest.fn((key: string) =>
+        key === 'SOCIAL_AGENT_CACHE_BACKEND' ? 'redis' : undefined,
+      ),
+    };
+    const redisService = { getClient: jest.fn(() => redis) };
+    const writer = new SocialAgentEmbeddingCacheService(
+      config as never,
+      redisService as never,
+    );
+    const reader = new SocialAgentEmbeddingCacheService(
+      config as never,
+      redisService as never,
+    );
+    const input = {
+      namespace: 'rag_query',
+      model: 'fitmeet-lexical-v1',
+      text: '青岛大学 散步',
+      dimensions: 64,
+    };
+
+    await expect(
+      writer.getOrSetWithMeta(input, () => [0.1234567, 1], { ttlMs: 10_000 }),
+    ).resolves.toMatchObject({ hit: false });
+
+    await expect(
+      reader.getOrSetWithMeta(input, () => [9, 9], { ttlMs: 10_000 }),
+    ).resolves.toMatchObject({
+      hit: true,
+      vector: [0.123457, 1],
+    });
+
+    expect(redis.setex).toHaveBeenCalledWith(
+      expect.stringMatching(/^fitmeet:social-agent:embedding-cache:/),
+      10,
+      expect.stringContaining('"vector":[0.123457,1]'),
+    );
+    expect(reader.stats()).toMatchObject({
+      distributedHits: 1,
+      distributedErrors: 0,
+    });
+  });
 });

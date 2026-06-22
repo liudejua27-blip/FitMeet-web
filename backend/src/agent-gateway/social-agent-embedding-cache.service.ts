@@ -1,8 +1,11 @@
 import { createHash } from 'crypto';
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type Redis from 'ioredis';
 
 import { cleanDisplayText } from '../common/display-text.util';
+import { RedisService } from '../redis/redis.service';
 
 export type SocialAgentEmbeddingCacheInput = {
   namespace: string;
@@ -19,6 +22,10 @@ export type SocialAgentEmbeddingCacheStats = {
   evictions: number;
   size: number;
   savedApproxInputChars: number;
+  distributedHits: number;
+  distributedMisses: number;
+  distributedWrites: number;
+  distributedErrors: number;
 };
 
 export type SocialAgentEmbeddingCacheRead = {
@@ -40,17 +47,34 @@ type CacheOptions = {
   ttlMs?: number;
 };
 
+type DistributedCacheEntry = {
+  vector: number[];
+  approxInputChars: number;
+  createdAt: string;
+};
+
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_ENTRIES = 2_048;
+const REDIS_KEY_PREFIX = 'fitmeet:social-agent:embedding-cache';
 
 @Injectable()
 export class SocialAgentEmbeddingCacheService {
+  private readonly logger = new Logger(SocialAgentEmbeddingCacheService.name);
   private readonly entries = new Map<string, CacheEntry>();
   private hits = 0;
   private misses = 0;
   private writes = 0;
   private evictions = 0;
   private savedApproxInputChars = 0;
+  private distributedHits = 0;
+  private distributedMisses = 0;
+  private distributedWrites = 0;
+  private distributedErrors = 0;
+
+  constructor(
+    @Optional() private readonly configService?: ConfigService,
+    @Optional() private readonly redisService?: RedisService,
+  ) {}
 
   get(input: SocialAgentEmbeddingCacheInput): number[] | null {
     return this.getWithMeta(input)?.vector ?? null;
@@ -121,8 +145,26 @@ export class SocialAgentEmbeddingCacheService {
   ): Promise<SocialAgentEmbeddingCacheRead> {
     const cached = this.getWithMeta(input);
     if (cached) return cached;
+    const distributed = await this.readDistributed(input);
+    if (distributed) {
+      this.set(input, distributed.vector, {
+        ttlMs: this.normalizeTtl(options.ttlMs),
+      });
+      this.savedApproxInputChars += distributed.approxInputChars;
+      return {
+        key: this.keyFor(input),
+        vector: distributed.vector.slice(),
+        hit: true,
+        approxInputChars: distributed.approxInputChars,
+      };
+    }
     const vector = await loader();
-    return this.set(input, vector, options);
+    const stored = this.set(input, vector, options);
+    await this.writeDistributed(input, stored.vector, {
+      ttlMs: this.normalizeTtl(options.ttlMs),
+      approxInputChars: stored.approxInputChars,
+    });
+    return stored;
   }
 
   delete(input: SocialAgentEmbeddingCacheInput): void {
@@ -136,6 +178,10 @@ export class SocialAgentEmbeddingCacheService {
     this.writes = 0;
     this.evictions = 0;
     this.savedApproxInputChars = 0;
+    this.distributedHits = 0;
+    this.distributedMisses = 0;
+    this.distributedWrites = 0;
+    this.distributedErrors = 0;
   }
 
   stats(): SocialAgentEmbeddingCacheStats {
@@ -146,6 +192,10 @@ export class SocialAgentEmbeddingCacheService {
       evictions: this.evictions,
       size: this.entries.size,
       savedApproxInputChars: this.savedApproxInputChars,
+      distributedHits: this.distributedHits,
+      distributedMisses: this.distributedMisses,
+      distributedWrites: this.distributedWrites,
+      distributedErrors: this.distributedErrors,
     };
   }
 
@@ -153,7 +203,9 @@ export class SocialAgentEmbeddingCacheService {
     const namespace = this.cleanKeyPart(input.namespace, 'default');
     const model = this.cleanKeyPart(input.model, 'unknown');
     const dimensions =
-      Number.isFinite(input.dimensions) && input.dimensions && input.dimensions > 0
+      Number.isFinite(input.dimensions) &&
+      input.dimensions &&
+      input.dimensions > 0
         ? Math.floor(input.dimensions)
         : 0;
     const hash =
@@ -161,6 +213,96 @@ export class SocialAgentEmbeddingCacheService {
         ? input.contentHash.trim()
         : this.hashText(input.text);
     return [namespace, model, dimensions, hash].join('|');
+  }
+
+  private async readDistributed(
+    input: SocialAgentEmbeddingCacheInput,
+  ): Promise<{ vector: number[]; approxInputChars: number } | null> {
+    const client = this.distributedClient();
+    if (!client) return null;
+
+    try {
+      const raw = await client.get(this.redisKey(input));
+      if (!raw) {
+        this.distributedMisses += 1;
+        return null;
+      }
+      const parsed = JSON.parse(raw) as DistributedCacheEntry;
+      if (!Array.isArray(parsed.vector)) {
+        this.distributedMisses += 1;
+        return null;
+      }
+      this.distributedHits += 1;
+      const vector = this.normalizeVector(parsed.vector);
+      return {
+        vector,
+        approxInputChars:
+          Number.isFinite(parsed.approxInputChars) &&
+          parsed.approxInputChars >= 0
+            ? parsed.approxInputChars
+            : this.approxInputChars(input),
+      };
+    } catch (error) {
+      this.recordDistributedError(error);
+      return null;
+    }
+  }
+
+  private async writeDistributed(
+    input: SocialAgentEmbeddingCacheInput,
+    vector: number[],
+    options: { ttlMs: number; approxInputChars: number },
+  ): Promise<void> {
+    const client = this.distributedClient();
+    if (!client) return;
+
+    try {
+      const ttlSeconds = Math.max(1, Math.ceil(options.ttlMs / 1000));
+      const entry: DistributedCacheEntry = {
+        vector: this.normalizeVector(vector),
+        approxInputChars: options.approxInputChars,
+        createdAt: new Date().toISOString(),
+      };
+      await client.setex(
+        this.redisKey(input),
+        ttlSeconds,
+        JSON.stringify(entry),
+      );
+      this.distributedWrites += 1;
+    } catch (error) {
+      this.recordDistributedError(error);
+    }
+  }
+
+  private distributedClient(): Pick<Redis, 'get' | 'setex'> | null {
+    if (!this.distributedCacheEnabled()) return null;
+    try {
+      return this.redisService?.getClient() ?? null;
+    } catch (error) {
+      this.recordDistributedError(error);
+      return null;
+    }
+  }
+
+  private distributedCacheEnabled(): boolean {
+    const backend = this.configService
+      ?.get<string>('SOCIAL_AGENT_CACHE_BACKEND')
+      ?.trim()
+      .toLowerCase();
+    return backend === 'redis' || backend === 'hybrid';
+  }
+
+  private redisKey(input: SocialAgentEmbeddingCacheInput): string {
+    const digest = createHash('sha256')
+      .update(this.keyFor(input))
+      .digest('hex');
+    return `${REDIS_KEY_PREFIX}:${digest}`;
+  }
+
+  private recordDistributedError(error: unknown): void {
+    this.distributedErrors += 1;
+    const message = error instanceof Error ? error.message : String(error);
+    this.logger.debug(`Distributed embedding cache unavailable: ${message}`);
   }
 
   private evictExpired(now = Date.now()): void {
@@ -197,14 +339,14 @@ export class SocialAgentEmbeddingCacheService {
   }
 
   private normalizeText(text: string): string {
-    return cleanDisplayText(text, '')
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .trim();
+    return cleanDisplayText(text, '').toLowerCase().replace(/\s+/g, ' ').trim();
   }
 
   private cleanKeyPart(value: string, fallback: string): string {
-    const cleaned = value.trim().toLowerCase().replace(/[^a-z0-9_.:-]+/g, '_');
+    const cleaned = value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_.:-]+/g, '_');
     return cleaned || fallback;
   }
 }

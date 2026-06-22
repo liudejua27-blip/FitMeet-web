@@ -255,7 +255,7 @@ export class SocialAgentFinalResponseService {
     const semanticCacheTtlMs = this.semanticResponseCacheTtlMs();
     const semanticCacheEligible = this.isSemanticResponseCacheEligible(input);
     if (semanticCacheTtlMs > 0 && semanticCacheEligible) {
-      const cached = this.semanticResponseCacheService().get(
+      const cached = await this.semanticResponseCacheService().getAsync(
         {
           userMessage: input.userMessage,
           intent: this.intentOf(input),
@@ -311,7 +311,7 @@ export class SocialAgentFinalResponseService {
           outputCacheTtlMs,
           promptBudget.approxPromptChars,
         );
-        this.writeSemanticResponseCache(input, answer, {
+        await this.writeSemanticResponseCache(input, answer, {
           model,
           promptPrefixHash: promptBudget.promptPrefixHash,
           ttlMs: semanticCacheTtlMs,
@@ -364,7 +364,7 @@ export class SocialAgentFinalResponseService {
         outputCacheTtlMs,
         promptBudget.approxPromptChars,
       );
-      this.writeSemanticResponseCache(input, answer, {
+      await this.writeSemanticResponseCache(input, answer, {
         model,
         promptPrefixHash: promptBudget.promptPrefixHash,
         ttlMs: semanticCacheTtlMs,
@@ -722,7 +722,7 @@ export class SocialAgentFinalResponseService {
     });
   }
 
-  private writeSemanticResponseCache(
+  private async writeSemanticResponseCache(
     input: SocialAgentFinalResponseInput,
     answer: string | null,
     options: {
@@ -732,10 +732,10 @@ export class SocialAgentFinalResponseService {
       eligible: boolean;
       approxPromptChars: number;
     },
-  ): void {
+  ): Promise<void> {
     const text = cleanDisplayText(answer, '').trim();
     if (!text || options.ttlMs <= 0 || !options.eligible) return;
-    this.semanticResponseCacheService().set(
+    await this.semanticResponseCacheService().setAsync(
       {
         userMessage: input.userMessage,
         answer: text,

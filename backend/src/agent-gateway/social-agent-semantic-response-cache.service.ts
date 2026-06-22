@@ -1,6 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { createHash } from 'crypto';
+
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type Redis from 'ioredis';
 
 import { cleanDisplayText } from '../common/display-text.util';
+import { RedisService } from '../redis/redis.service';
 
 export type SocialAgentSemanticResponseCacheHit = {
   answer: string;
@@ -16,6 +21,10 @@ export type SocialAgentSemanticResponseCacheStats = {
   evictions: number;
   size: number;
   savedApproxPromptChars: number;
+  distributedHits: number;
+  distributedMisses: number;
+  distributedWrites: number;
+  distributedErrors: number;
 };
 
 type CacheEntry = {
@@ -46,18 +55,48 @@ type CacheOptions = {
   approxPromptChars?: number;
 };
 
+type PreparedText = {
+  normalizedText: string;
+  alias: string | null;
+  tokens: Set<string>;
+};
+
+type DistributedCacheEntry = Omit<
+  CacheEntry,
+  'tokens' | 'createdAt' | 'expiresAt'
+> & {
+  tokens: string[];
+  createdAt: string;
+};
+
 const DEFAULT_TTL_MS = 300_000;
 const DEFAULT_MAX_ENTRIES = 128;
 const DEFAULT_THRESHOLD = 0.78;
+const REDIS_ENTRY_KEY_PREFIX = 'fitmeet:social-agent:semantic-response-cache';
+const REDIS_INDEX_KEY_PREFIX =
+  'fitmeet:social-agent:semantic-response-cache-index';
 
 @Injectable()
 export class SocialAgentSemanticResponseCacheService {
+  private readonly logger = new Logger(
+    SocialAgentSemanticResponseCacheService.name,
+  );
   private readonly entries = new Map<string, CacheEntry>();
   private hits = 0;
   private misses = 0;
   private writes = 0;
   private evictions = 0;
   private savedApproxPromptChars = 0;
+
+  private distributedHits = 0;
+  private distributedMisses = 0;
+  private distributedWrites = 0;
+  private distributedErrors = 0;
+
+  constructor(
+    @Optional() private readonly configService?: ConfigService,
+    @Optional() private readonly redisService?: RedisService,
+  ) {}
 
   get(
     input: CacheInput,
@@ -93,6 +132,15 @@ export class SocialAgentSemanticResponseCacheService {
     };
   }
 
+  async getAsync(
+    input: CacheInput,
+    options: CacheOptions = {},
+  ): Promise<SocialAgentSemanticResponseCacheHit | null> {
+    const cached = this.get(input, options);
+    if (cached) return cached;
+    return this.readDistributed(input, options);
+  }
+
   set(input: CacheInput, options: CacheOptions = {}): string | null {
     const answer = cleanDisplayText(input.answer, '').trim();
     if (!answer) return null;
@@ -106,14 +154,7 @@ export class SocialAgentSemanticResponseCacheService {
       this.entries.delete(oldestKey);
       this.evictions += 1;
     }
-    const id = [
-      'semantic',
-      input.model,
-      input.promptPrefixHash ?? 'none',
-      this.normalizeIntent(input.intent),
-      prepared.alias ?? 'generic',
-      prepared.normalizedText,
-    ].join('|');
+    const id = this.idFor(input, prepared);
     this.entries.set(id, {
       id,
       answer,
@@ -134,6 +175,16 @@ export class SocialAgentSemanticResponseCacheService {
     return answer;
   }
 
+  async setAsync(
+    input: CacheInput,
+    options: CacheOptions = {},
+  ): Promise<string | null> {
+    const answer = this.set(input, options);
+    if (!answer) return null;
+    await this.writeDistributed(input, answer, options);
+    return answer;
+  }
+
   clear(): void {
     this.entries.clear();
     this.hits = 0;
@@ -141,6 +192,10 @@ export class SocialAgentSemanticResponseCacheService {
     this.writes = 0;
     this.evictions = 0;
     this.savedApproxPromptChars = 0;
+    this.distributedHits = 0;
+    this.distributedMisses = 0;
+    this.distributedWrites = 0;
+    this.distributedErrors = 0;
   }
 
   stats(): SocialAgentSemanticResponseCacheStats {
@@ -151,7 +206,128 @@ export class SocialAgentSemanticResponseCacheService {
       evictions: this.evictions,
       size: this.entries.size,
       savedApproxPromptChars: this.savedApproxPromptChars,
+      distributedHits: this.distributedHits,
+      distributedMisses: this.distributedMisses,
+      distributedWrites: this.distributedWrites,
+      distributedErrors: this.distributedErrors,
     };
+  }
+
+  private async readDistributed(
+    input: CacheInput,
+    options: CacheOptions = {},
+  ): Promise<SocialAgentSemanticResponseCacheHit | null> {
+    const client = this.distributedClient();
+    if (!client) return null;
+
+    const query = this.prepare(input.userMessage);
+    if (!query.normalizedText || query.tokens.size === 0) {
+      return null;
+    }
+
+    try {
+      const rawIndex = await client.get(this.redisIndexKey(input));
+      if (!rawIndex) {
+        this.distributedMisses += 1;
+        return null;
+      }
+      const ids = this.parseDistributedIndex(rawIndex);
+      if (ids.length === 0) {
+        this.distributedMisses += 1;
+        return null;
+      }
+
+      let best: {
+        entry: CacheEntry;
+        similarity: number;
+        approxChars: number;
+      } | null = null;
+      for (const id of ids.slice(-DEFAULT_MAX_ENTRIES)) {
+        const rawEntry = await client.get(this.redisEntryKey(id));
+        if (!rawEntry) continue;
+        const entry = this.parseDistributedEntry(rawEntry);
+        if (!entry || !this.sameScope(entry, input)) continue;
+        const similarity = this.similarity(query, entry);
+        if (!best || similarity > best.similarity) {
+          best = { entry, similarity, approxChars: entry.approxChars };
+        }
+      }
+
+      const threshold = this.normalizeThreshold(options.threshold);
+      if (!best || best.similarity < threshold) {
+        this.distributedMisses += 1;
+        return null;
+      }
+
+      this.distributedHits += 1;
+      this.savedApproxPromptChars += best.approxChars;
+      this.entries.set(best.entry.id, {
+        ...best.entry,
+        createdAt: Date.now(),
+        expiresAt: Date.now() + this.normalizeTtl(options.ttlMs),
+      });
+      return {
+        answer: best.entry.answer,
+        similarity: best.similarity,
+        approxChars: best.approxChars,
+        alias: best.entry.alias,
+      };
+    } catch (error) {
+      this.recordDistributedError(error);
+      return null;
+    }
+  }
+
+  private async writeDistributed(
+    input: CacheInput,
+    answer: string,
+    options: CacheOptions = {},
+  ): Promise<void> {
+    const client = this.distributedClient();
+    if (!client) return;
+
+    const prepared = this.prepare(input.userMessage);
+    if (!prepared.normalizedText || prepared.tokens.size === 0) return;
+
+    try {
+      const ttlMs = this.normalizeTtl(options.ttlMs);
+      const ttlSeconds = Math.max(1, Math.ceil(ttlMs / 1000));
+      const id = this.idFor(input, prepared);
+      const approxChars = this.normalizeApproxChars(
+        options.approxPromptChars,
+        answer.length + prepared.normalizedText.length,
+      );
+      const entry: DistributedCacheEntry = {
+        id,
+        answer,
+        alias: prepared.alias,
+        intent: this.normalizeIntent(input.intent),
+        model: input.model,
+        promptPrefixHash: input.promptPrefixHash ?? null,
+        normalizedText: prepared.normalizedText,
+        tokens: Array.from(prepared.tokens),
+        approxChars,
+        createdAt: new Date().toISOString(),
+      };
+      await client.setex(
+        this.redisEntryKey(id),
+        ttlSeconds,
+        JSON.stringify(entry),
+      );
+      const rawIndex = await client.get(this.redisIndexKey(input));
+      const ids = this.parseDistributedIndex(rawIndex);
+      const nextIds = [...ids.filter((value) => value !== id), id].slice(
+        -DEFAULT_MAX_ENTRIES,
+      );
+      await client.setex(
+        this.redisIndexKey(input),
+        ttlSeconds,
+        JSON.stringify(nextIds),
+      );
+      this.distributedWrites += 1;
+    } catch (error) {
+      this.recordDistributedError(error);
+    }
   }
 
   private sameScope(entry: CacheEntry, input: CacheInput): boolean {
@@ -173,11 +349,7 @@ export class SocialAgentSemanticResponseCacheService {
     return base;
   }
 
-  private prepare(text: string): {
-    normalizedText: string;
-    alias: string | null;
-    tokens: Set<string>;
-  } {
+  private prepare(text: string): PreparedText {
     const normalizedText = cleanDisplayText(text, '')
       .toLowerCase()
       .replace(/[^\p{L}\p{N}]+/gu, '');
@@ -191,6 +363,98 @@ export class SocialAgentSemanticResponseCacheService {
       }
     }
     return { normalizedText, alias, tokens };
+  }
+
+  private idFor(input: CacheInput, prepared: PreparedText): string {
+    return [
+      'semantic',
+      input.model,
+      input.promptPrefixHash ?? 'none',
+      this.normalizeIntent(input.intent),
+      prepared.alias ?? 'generic',
+      prepared.normalizedText,
+    ].join('|');
+  }
+
+  private parseDistributedIndex(raw: string | null): string[] {
+    if (!raw) return [];
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed)
+        ? parsed.filter((value): value is string => typeof value === 'string')
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private parseDistributedEntry(raw: string): CacheEntry | null {
+    try {
+      const parsed = JSON.parse(raw) as DistributedCacheEntry;
+      if (!parsed.answer || !Array.isArray(parsed.tokens)) return null;
+      return {
+        id: parsed.id,
+        answer: parsed.answer,
+        alias: parsed.alias ?? null,
+        intent: parsed.intent ?? null,
+        model: parsed.model,
+        promptPrefixHash: parsed.promptPrefixHash ?? null,
+        normalizedText: parsed.normalizedText,
+        tokens: new Set(parsed.tokens),
+        createdAt: Date.now(),
+        expiresAt: Date.now() + DEFAULT_TTL_MS,
+        approxChars: this.normalizeApproxChars(
+          parsed.approxChars,
+          parsed.answer.length + parsed.normalizedText.length,
+        ),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private distributedClient(): Pick<Redis, 'get' | 'setex'> | null {
+    if (!this.distributedCacheEnabled()) return null;
+    try {
+      return this.redisService?.getClient() ?? null;
+    } catch (error) {
+      this.recordDistributedError(error);
+      return null;
+    }
+  }
+
+  private distributedCacheEnabled(): boolean {
+    const backend = this.configService
+      ?.get<string>('SOCIAL_AGENT_CACHE_BACKEND')
+      ?.trim()
+      .toLowerCase();
+    return backend === 'redis' || backend === 'hybrid';
+  }
+
+  private redisEntryKey(id: string): string {
+    const digest = createHash('sha256').update(id).digest('hex');
+    return `${REDIS_ENTRY_KEY_PREFIX}:${digest}`;
+  }
+
+  private redisIndexKey(input: CacheInput): string {
+    const digest = createHash('sha256')
+      .update(
+        [
+          input.model,
+          input.promptPrefixHash ?? 'none',
+          this.normalizeIntent(input.intent) ?? 'none',
+        ].join('|'),
+      )
+      .digest('hex');
+    return `${REDIS_INDEX_KEY_PREFIX}:${digest}`;
+  }
+
+  private recordDistributedError(error: unknown): void {
+    this.distributedErrors += 1;
+    const message = error instanceof Error ? error.message : String(error);
+    this.logger.debug(
+      `Distributed semantic response cache unavailable: ${message}`,
+    );
   }
 
   private aliasFor(text: string): string | null {
@@ -245,7 +509,10 @@ export class SocialAgentSemanticResponseCacheService {
     return Math.max(1, Math.floor(ttlMs));
   }
 
-  private normalizeApproxChars(value: number | undefined, fallback: number): number {
+  private normalizeApproxChars(
+    value: number | undefined,
+    fallback: number,
+  ): number {
     if (!Number.isFinite(value) || value === undefined || value <= 0) {
       return Math.max(0, Math.floor(fallback));
     }
