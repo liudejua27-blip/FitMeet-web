@@ -452,7 +452,7 @@ function convertFitMeetMessage(
       data: {
         schemaVersion: FITMEET_ASSISTANT_TOOL_SCHEMA_VERSION,
         schemaType: 'agent.process',
-        title: '正在处理',
+        title: '正在整理当前信息',
         runtime: message.result?.runtime ?? null,
         visibleSummary: visibleProcessSummary,
         steps: runtimeProcessSteps.map((step) => ({
@@ -1135,11 +1135,13 @@ function inlineApprovalActionKeyFromConfirmation(confirmation: PendingConfirmati
   const actionType = stringFromUnknown(confirmation.actionType)?.toLowerCase() ?? '';
   if (/connect|friend|candidate/.test(actionType)) return 'candidate.connect';
   if (/send|message|invite|opener/.test(actionType)) return 'opener.confirm_send';
-  if (/publish|social_request|activity|meet/.test(actionType)) return 'activity.confirm_create';
+  if (/publish|social_request/.test(actionType)) return 'publish_to_discover';
+  if (/activity|meet/.test(actionType)) return 'activity.confirm_create';
   const text = confirmationSearchText(confirmation);
   if (/opener|send|message|invite|发送|邀请/.test(text)) return 'opener.confirm_send';
   if (/connect|friend|candidate|好友|连接|候选/.test(text)) return 'candidate.connect';
-  if (/publish|social_request|发现|发布|约练|活动/.test(text)) return 'activity.confirm_create';
+  if (/publish|social_request|发现|发布/.test(text)) return 'publish_to_discover';
+  if (/约练|活动/.test(text)) return 'activity.confirm_create';
   return null;
 }
 
@@ -1262,12 +1264,16 @@ function inlineApprovalActionKeyForCard(
   const actionType = stringFromUnknown(confirmation.actionType)?.toLowerCase() ?? '';
   if (/connect|friend|candidate/.test(actionType)) return 'candidate.connect';
   if (/send|message|invite|opener/.test(actionType)) return 'opener.confirm_send';
-  if (/publish|social_request|activity|meet/.test(actionType)) return 'activity.confirm_create';
+  if (/publish|social_request/.test(actionType)) return 'publish_to_discover';
+  if (/activity|meet/.test(actionType)) return 'activity.confirm_create';
   const text = confirmationSearchText(confirmation);
+  if (schemaType === 'social_match.activity' && /publish|social_request|发现|发布/.test(text)) {
+    return 'publish_to_discover';
+  }
   if (schemaType === 'social_match.activity') return 'activity.confirm_create';
   if (/opener|send|message|invite|发送|邀请/.test(text)) return 'opener.confirm_send';
   if (/connect|friend|candidate|好友|连接|候选/.test(text)) return 'candidate.connect';
-  if (/publish|social_request|发现|发布/.test(text)) return 'activity.confirm_create';
+  if (/publish|social_request|发现|发布/.test(text)) return 'publish_to_discover';
   return 'candidate.connect';
 }
 

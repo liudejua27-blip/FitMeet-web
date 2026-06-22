@@ -22,6 +22,7 @@ import {
   intentForResponse,
   isApprovalProgressStepId,
   isFallbackAssistantResponse,
+  isNonBranchableAssistantSource,
   isNonAnswerFallbackResponse,
   recoveryFromUserFacingResponse,
   responseAwaitsOpportunityClarification,
@@ -124,6 +125,10 @@ export function useAgentFinalResultRuntime({
         '我整理好了，可以继续追问或让我接着处理下一步。',
       );
       const fallbackSourced = isFallbackAssistantResponse(displayResult);
+      const nonBranchableSourced = isNonBranchableAssistantSource(
+        displayResult.assistantMessageSource,
+      );
+      const branchAllowed = !fallbackSourced && !nonBranchableSourced;
       const conversationIntent = intentForResponse(displayResult, runConversationIntentRef.current);
       const showSocialResult = conversationIntent === 'social' || conversationIntent === 'approval';
       pendingOpportunityClarificationRef.current =
@@ -152,7 +157,7 @@ export function useAgentFinalResultRuntime({
           conversationIntent,
           surfaceKind: 'answer',
           assistantMessageSource: displayResult.assistantMessageSource,
-          branchable: !fallbackSourced,
+          branchable: branchAllowed,
         } satisfies AgentThreadMessage;
         if (anchoredIndex >= 0) {
           const anchored = current[anchoredIndex];
@@ -170,11 +175,11 @@ export function useAgentFinalResultRuntime({
               messageId: runAnchor.messageId ?? anchored.messageId ?? null,
               traceId: traceIdFromResult(displayResult),
               branch:
-                createBranchForNextAssistantRef.current && !fallbackSourced
+                createBranchForNextAssistantRef.current && branchAllowed
                   ? branchForAssistant(current, anchored.id)
                   : anchored.branch,
               createsBranch:
-                createBranchForNextAssistantRef.current && !fallbackSourced
+                createBranchForNextAssistantRef.current && branchAllowed
                   ? true
                   : anchored.createsBranch,
               showSocialResult,
@@ -183,7 +188,8 @@ export function useAgentFinalResultRuntime({
               assistantMessageSource:
                 displayResult.assistantMessageSource ?? anchored.assistantMessageSource,
               branchable:
-                !fallbackSourced && anchored.assistantMessageSource !== 'fallback',
+                branchAllowed &&
+                !isNonBranchableAssistantSource(anchored.assistantMessageSource),
             },
             ...current.slice(anchoredIndex + 1),
           ]);
@@ -203,16 +209,17 @@ export function useAgentFinalResultRuntime({
               runId: runAnchor.runId ?? last.runId ?? null,
               messageId: runAnchor.messageId ?? last.messageId ?? null,
               traceId: traceIdFromResult(displayResult),
-              branch: createBranchForNextAssistantRef.current && !fallbackSourced
+              branch: createBranchForNextAssistantRef.current && branchAllowed
                 ? branchForAssistant(current, last.id)
                 : undefined,
-              createsBranch: createBranchForNextAssistantRef.current && !fallbackSourced,
+              createsBranch: createBranchForNextAssistantRef.current && branchAllowed,
               showSocialResult,
               conversationIntent,
               surfaceKind: 'answer',
               assistantMessageSource:
                 displayResult.assistantMessageSource ?? last.assistantMessageSource,
-              branchable: !fallbackSourced && last.assistantMessageSource !== 'fallback',
+              branchable:
+                branchAllowed && !isNonBranchableAssistantSource(last.assistantMessageSource),
             },
           ]);
         }
@@ -232,7 +239,7 @@ export function useAgentFinalResultRuntime({
                 conversationIntent,
                 surfaceKind: 'answer',
                 assistantMessageSource: displayResult.assistantMessageSource,
-                branchable: !fallbackSourced,
+                branchable: branchAllowed,
               },
             ]);
           }
@@ -251,7 +258,7 @@ export function useAgentFinalResultRuntime({
                   conversationIntent,
                   surfaceKind: 'answer',
                   assistantMessageSource: displayResult.assistantMessageSource,
-                  branchable: !fallbackSourced,
+                  branchable: branchAllowed,
                 },
               ]);
             }

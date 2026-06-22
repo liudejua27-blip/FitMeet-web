@@ -363,10 +363,10 @@ function localCoveringStatusStep(
     phase === 'slow'
       ? social
         ? '还在整理你的约练需求…'
-        : '还在思考…'
+        : '还在理解你的需求…'
       : social
         ? '正在整理你的约练需求…'
-        : '正在思考…';
+        : '正在理解你的需求…';
   const detail =
     phase === 'slow'
       ? '可以继续等待，也可以随时停止后重试。'

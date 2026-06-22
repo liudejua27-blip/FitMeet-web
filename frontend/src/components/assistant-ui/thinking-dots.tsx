@@ -7,7 +7,7 @@ type AssistantThinkingDotsProps = {
 
 export function AssistantThinkingDots({
   className,
-  label = '正在思考',
+  label = '正在理解你的需求',
 }: AssistantThinkingDotsProps) {
   return (
     <span

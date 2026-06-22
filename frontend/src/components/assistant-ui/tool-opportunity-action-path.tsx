@@ -57,6 +57,7 @@ function actionPathSteps(actions: VisibleCardAction[], schemaType: ToolUISchemaT
   const order: ToolUISchemaAction[] =
     schemaType === 'social_match.activity'
       ? [
+          'publish_to_discover',
           'activity.confirm_create',
           'activity.modify_time',
           'activity.skip_publish',
@@ -111,7 +112,8 @@ function actionPathLabel(schemaAction: ToolUISchemaAction, _requiresConfirmation
   if (schemaAction === 'activity.modify_time') return '修改';
   if (schemaAction === 'activity.modify_location') return '调整地点';
   if (schemaAction === 'activity.skip_publish') return '暂不发布';
-  if (schemaAction === 'activity.confirm_create') return '发布到发现';
+  if (schemaAction === 'publish_to_discover') return '发布到发现';
+  if (schemaAction === 'activity.confirm_create') return '创建约练';
   if (schemaAction === 'activity.check_in') return '到达签到';
   if (schemaAction === 'activity.complete') return '记录完成';
   if (schemaAction === 'review.submit') return '提交评价';

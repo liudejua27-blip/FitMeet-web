@@ -28,6 +28,7 @@ import {
   type AgentSkillPatchEffectDto,
   type AgentSubagentMemoryDto,
   type SocialAgentMessageFeedbackDto,
+  type SocialAgentRuntimeMetricsDto,
   type SubagentWorkerJobDto,
 } from '../api/agentL5RuntimeApi';
 import { WebsiteLayout } from '../components/website/WebsitePlatform';
@@ -338,6 +339,7 @@ export const AgentL5AdminPage = memo(function AgentL5AdminPage() {
                   observability={dashboard?.observability ?? null}
                   onRecordSatisfaction={recordSatisfaction}
                   satisfactionBusy={satisfactionBusy}
+                  socialAgentMetrics={dashboard?.socialAgentMetrics ?? null}
                 />
               ) : activeTab === 'workers' ? (
                 <WorkerQueuePanel
@@ -969,13 +971,20 @@ function ObservabilityPanel({
   observability,
   onRecordSatisfaction,
   satisfactionBusy,
+  socialAgentMetrics,
 }: {
   observability: AgentObservabilityDto | null;
   onRecordSatisfaction: (score: number) => void;
   satisfactionBusy: boolean;
+  socialAgentMetrics: SocialAgentRuntimeMetricsDto | null;
 }) {
   const counters = observability?.counters ?? {};
   const latency = observability?.latency ?? {};
+  const llmTokenCost = observability?.llmTokenCost ?? {};
+  const executionCost = observability?.executionCostSummary;
+  const llmContextBudgetRecommendations =
+    observability?.llmContextBudgetRecommendations ?? {};
+  const recentRunCost = observability?.recentRunCostSummary ?? [];
   const failureReasons = observability?.failureReasons ?? {};
   const queueDepth = observability?.queueDepth ?? {};
   const alerts = observability?.alerts ?? [];
@@ -995,6 +1004,79 @@ function ObservabilityPanel({
     ['SSE latency', firstLatencyValue(latency, 'sse')],
     ['User satisfaction avg', satisfactionValue(latency)],
   ];
+  const llmTokenRows = Object.entries(llmTokenCost)
+    .sort(([, left], [, right]) => right.calls - left.calls)
+    .map(([useCase, bucket]) => {
+      const recommendation = llmContextBudgetRecommendations[useCase];
+      return [
+        useCase,
+        String(bucket.calls),
+        recommendation?.mode === 'strict' ? (
+          <StatusPill key={`${useCase}-mode`} tone="warn">
+            strict
+          </StatusPill>
+        ) : (
+          <StatusPill key={`${useCase}-mode`} tone="good">
+            standard
+          </StatusPill>
+        ),
+        formatContextBudgetReasons(recommendation?.reasons),
+        formatPercent(bucket.promptCacheHitRate),
+        compactNumber(bucket.promptTokens),
+        compactNumber(bucket.estimatedBillableInputTokens),
+        compactNumber(bucket.completionTokens + bucket.reasoningTokens),
+        compactNumber(bucket.avgApproxPromptChars),
+        bucket.models.join(', ') || '-',
+      ];
+    });
+  const executionCostItems = executionCostSummaryItems(executionCost);
+  const llmStageCostItems = llmStageCostSummaryItems(executionCost);
+  const toolStageCostItems = toolStageCostSummaryItems(executionCost);
+  const recentRunCostRows = recentRunCost.slice(0, 8).map((run) => [
+    <div key={`${run.runId}-run`} className="grid gap-1">
+      <span className="font-black text-white">{run.runId}</span>
+      <span className="text-xs font-bold text-[#8f8174]">
+        task {run.taskId ?? '-'} · {formatDate(run.updatedAt)}
+      </span>
+    </div>,
+    <StatusPill key={`${run.runId}-status`} tone={runStatusTone(run.status)}>
+      {run.status}
+    </StatusPill>,
+    `${run.llmCallCount} LLM · ${run.toolCallCount} tools`,
+    formatPercent(run.promptCacheHitRate),
+    compactNumber(run.estimatedBillableInputTokens),
+    compactNumber(run.completionTokens + run.reasoningTokens),
+    topRunCostKeys(run.llmUseCases),
+    topRunCostKeys(run.tools),
+    run.models.join(', ') || '-',
+  ]);
+  const llmOutputCacheItems = cacheSummaryItems(
+    socialAgentMetrics?.llmOutputCacheSummary,
+  );
+  const promptFingerprintItems = promptFingerprintSummaryItems(
+    socialAgentMetrics?.llmPromptFingerprintSummary,
+  );
+  const toolResultCacheItems = cacheSummaryItems(
+    socialAgentMetrics?.toolResultCacheSummary,
+  );
+  const embeddingCacheItems = cacheSummaryItems(
+    socialAgentMetrics?.embeddingCacheSummary,
+  );
+  const cacheEfficiencyItems = cacheEfficiencySummaryItems(
+    socialAgentMetrics?.cacheEfficiencySummary,
+  );
+  const workflowEfficiencyItems = workflowEfficiencySummaryItems(
+    socialAgentMetrics?.workflowEfficiencySummary,
+  );
+  const deterministicRouteItems = deterministicRouteSummaryItems(
+    socialAgentMetrics?.deterministicRouteEfficiencySummary,
+  );
+  const deterministicActionItems = deterministicActionSummaryItems(
+    socialAgentMetrics?.deterministicActionEfficiencySummary,
+  );
+  const tokenOptimizationItems = tokenOptimizationSummaryItems(
+    socialAgentMetrics?.tokenOptimizationSummary,
+  );
 
   return (
     <PanelShell
@@ -1033,6 +1115,61 @@ function ObservabilityPanel({
         />
       </div>
 
+      <div className="mt-5">
+        <DataTable
+          emptyText="暂无 LLM token 成本数据"
+          headers={[
+            'Use case',
+            'Calls',
+            'Mode',
+            'Reason',
+            'Cache hit',
+            'Prompt tokens',
+            'Billable input',
+            'Output tokens',
+            'Avg prompt chars',
+            'Models',
+          ]}
+          rows={llmTokenRows}
+        />
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-3">
+        <ObservabilityList
+          emptyText="暂无 run 调用密度数据"
+          items={executionCostItems}
+          title="Run Cost Density"
+        />
+        <ObservabilityList
+          emptyText="暂无 LLM stage cost"
+          items={llmStageCostItems}
+          title="LLM Stage Cost"
+        />
+        <ObservabilityList
+          emptyText="暂无 tool stage cost"
+          items={toolStageCostItems}
+          title="Tool Stage Cost"
+        />
+      </div>
+
+      <div className="mt-5">
+        <DataTable
+          emptyText="暂无 run 级成本记录"
+          headers={[
+            'Run',
+            'Status',
+            'Calls',
+            'Cache hit',
+            'Billable input',
+            'Output tokens',
+            'LLM use cases',
+            'Tools',
+            'Models',
+          ]}
+          rows={recentRunCostRows}
+        />
+      </div>
+
       <div className="mt-5 grid gap-4 xl:grid-cols-3">
         <ObservabilityList
           emptyText="暂无活跃报警"
@@ -1065,6 +1202,54 @@ function ObservabilityPanel({
           title="Queue Backlog"
         />
       </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+        <ObservabilityList
+          emptyText="暂无 token 优化汇总"
+          items={tokenOptimizationItems}
+          title="Token Optimization"
+        />
+        <ObservabilityList
+          emptyText="暂无 workflow 命中数据"
+          items={workflowEfficiencyItems}
+          title="Workflow Efficiency"
+        />
+        <ObservabilityList
+          emptyText="暂无确定性普通回复数据"
+          items={deterministicRouteItems}
+          title="Deterministic Replies"
+        />
+        <ObservabilityList
+          emptyText="暂无确定性动作数据"
+          items={deterministicActionItems}
+          title="Deterministic Actions"
+        />
+        <ObservabilityList
+          emptyText="暂无缓存效率汇总"
+          items={cacheEfficiencyItems}
+          title="Cache Efficiency"
+        />
+        <ObservabilityList
+          emptyText="暂无 LLM 输出缓存数据"
+          items={llmOutputCacheItems}
+          title="LLM Output Cache"
+        />
+        <ObservabilityList
+          emptyText="暂无 prompt prefix 复用数据"
+          items={promptFingerprintItems}
+          title="Prompt Prefix Reuse"
+        />
+        <ObservabilityList
+          emptyText="暂无工具结果缓存数据"
+          items={toolResultCacheItems}
+          title="Tool Result Cache"
+        />
+        <ObservabilityList
+          emptyText="暂无 embedding 缓存数据"
+          items={embeddingCacheItems}
+          title="Embedding Cache"
+        />
+      </div>
     </PanelShell>
   );
 }
@@ -1078,7 +1263,7 @@ function ObservabilityList({
   items: Array<{
     key: string;
     label: string;
-    tone: 'danger' | 'neutral' | 'warn';
+    tone: 'danger' | 'good' | 'neutral' | 'warn';
     value: string;
   }>;
   title: string;
@@ -1241,6 +1426,15 @@ function workerJobTone(status: SubagentWorkerJobDto['status']) {
   return 'neutral';
 }
 
+function runStatusTone(
+  status: NonNullable<AgentObservabilityDto['recentRunCostSummary']>[number]['status'],
+) {
+  if (status === 'completed') return 'good';
+  if (status === 'failed') return 'danger';
+  if (status === 'approval_required' || status === 'started') return 'warn';
+  return 'neutral';
+}
+
 function patchStatusTone(status: AgentSkillPatchDto['status']) {
   if (status === 'published' || status === 'approved') return 'good';
   if (status === 'rolled_back' || status === 'rejected') return 'danger';
@@ -1321,10 +1515,395 @@ function satisfactionValue(
   return `${Math.round(bucket.avgMs * 100)}% avg · ${bucket.count} samples`;
 }
 
+function tokenOptimizationSummaryItems(
+  summary:
+    | SocialAgentRuntimeMetricsDto['tokenOptimizationSummary']
+    | undefined,
+): Array<{
+  key: string;
+  label: string;
+  tone: 'danger' | 'good' | 'neutral' | 'warn';
+  value: string;
+}> {
+  if (!summary) return [];
+  return [
+    {
+      key: 'token-optimization-avoided-llm',
+      label: 'Estimated avoided LLM calls',
+      value: compactNumber(summary.estimatedAvoidedLlmCalls),
+      tone: summary.estimatedAvoidedLlmCalls > 0 ? 'good' : 'neutral',
+    },
+    {
+      key: 'token-optimization-cache-hit',
+      label: 'Combined cache hit rate',
+      value: `${formatPercent(summary.cacheHitRate)} · ${summary.cacheHits}/${summary.cacheTotal}`,
+      tone:
+        summary.cacheTotal === 0
+          ? 'neutral'
+          : summary.cacheHitRate >= 0.5
+            ? 'good'
+            : 'warn',
+    },
+    {
+      key: 'token-optimization-saved-context',
+      label: 'Saved context chars',
+      value: compactNumber(summary.savedApproxPromptChars),
+      tone: summary.savedApproxPromptChars > 0 ? 'good' : 'neutral',
+    },
+    {
+      key: 'token-optimization-prefix-reuse',
+      label: 'Prompt prefix reuse',
+      value: `${formatPercent(summary.promptPrefixReuseRate)} · ${summary.distinctPromptPrefixHashes} prefixes`,
+      tone:
+        summary.promptFingerprintObservations === 0
+          ? 'neutral'
+          : summary.promptPrefixReuseRate >= 0.5
+            ? 'good'
+            : 'warn',
+    },
+  ];
+}
+
+function deterministicActionSummaryItems(
+  summary:
+    | SocialAgentRuntimeMetricsDto['deterministicActionEfficiencySummary']
+    | undefined,
+): Array<{
+  key: string;
+  label: string;
+  tone: 'danger' | 'good' | 'neutral' | 'warn';
+  value: string;
+}> {
+  if (!summary) return [];
+  const rows: Array<{
+    key: string;
+    label: string;
+    tone: 'danger' | 'good' | 'neutral' | 'warn';
+    value: string;
+  }> = [
+    {
+      key: 'deterministic-actions-total',
+      label: 'Deterministic low-risk actions',
+      value: `${summary.total} actions`,
+      tone: summary.total > 0 ? 'good' : 'neutral',
+    },
+    {
+      key: 'deterministic-actions-avoided-llm',
+      label: 'Avoided final LLM calls',
+      value: compactNumber(summary.estimatedAvoidedLlmCalls),
+      tone: summary.estimatedAvoidedLlmCalls > 0 ? 'good' : 'neutral',
+    },
+  ];
+
+  for (const [action, count] of Object.entries(summary.byAction ?? {})
+    .sort(([, left], [, right]) => right - left)
+    .slice(0, 6)) {
+    rows.push({
+      key: `deterministic-action-${action}`,
+      label: action,
+      value: `${count} hits`,
+      tone: 'good',
+    });
+  }
+  return rows;
+}
+
+function deterministicRouteSummaryItems(
+  summary:
+    | SocialAgentRuntimeMetricsDto['deterministicRouteEfficiencySummary']
+    | undefined,
+): Array<{
+  key: string;
+  label: string;
+  tone: 'danger' | 'good' | 'neutral' | 'warn';
+  value: string;
+}> {
+  if (!summary) return [];
+  const rows: Array<{
+    key: string;
+    label: string;
+    tone: 'danger' | 'good' | 'neutral' | 'warn';
+    value: string;
+  }> = [
+    {
+      key: 'deterministic-replies-total',
+      label: 'Deterministic chat replies',
+      value: `${summary.total} replies`,
+      tone: summary.total > 0 ? 'good' : 'neutral',
+    },
+    {
+      key: 'deterministic-replies-avoided-llm',
+      label: 'Avoided conversational LLM calls',
+      value: compactNumber(summary.estimatedAvoidedLlmCalls),
+      tone: summary.estimatedAvoidedLlmCalls > 0 ? 'good' : 'neutral',
+    },
+  ];
+
+  for (const [intent, count] of Object.entries(summary.byIntent ?? {})
+    .sort(([, left], [, right]) => right - left)
+    .slice(0, 6)) {
+    rows.push({
+      key: `deterministic-reply-${intent}`,
+      label: intent,
+      value: `${count} hits`,
+      tone: 'good',
+    });
+  }
+  return rows;
+}
+
+function promptFingerprintSummaryItems(
+  summary:
+    | SocialAgentRuntimeMetricsDto['llmPromptFingerprintSummary']
+    | undefined,
+): Array<{
+  key: string;
+  label: string;
+  tone: 'danger' | 'good' | 'neutral' | 'warn';
+  value: string;
+}> {
+  return Object.entries(summary ?? {})
+    .sort(([, left], [, right]) => right.observations - left.observations)
+    .slice(0, 8)
+    .map(([key, value]) => {
+      const tone: 'good' | 'neutral' | 'warn' =
+        value.observations === 0
+          ? 'neutral'
+          : value.promptPrefixReuseRate >= 0.5
+            ? 'good'
+            : 'warn';
+      return {
+        key,
+        label: key,
+        value: `${formatPercent(value.promptPrefixReuseRate)} reuse · ${value.distinctPromptPrefixHashes} prefix · ${value.distinctDynamicContextHashes} dynamic`,
+        tone,
+      };
+    });
+}
+
+function cacheSummaryItems(
+  summary: SocialAgentRuntimeMetricsDto['llmOutputCacheSummary'] | undefined,
+): Array<{
+  key: string;
+  label: string;
+  tone: 'danger' | 'good' | 'neutral' | 'warn';
+  value: string;
+}> {
+  return Object.entries(summary ?? {})
+    .sort(([, left], [, right]) => right.total - left.total)
+    .slice(0, 8)
+    .map(([key, value]) => ({
+      key,
+      label: key,
+      value: `${formatPercent(value.hitRate)} · saved ${compactNumber(
+        value.savedApproxPromptChars,
+      )} chars`,
+      tone: value.hitRate >= 0.5 ? 'good' : value.total > 0 ? 'warn' : 'neutral',
+    }));
+}
+
+function cacheEfficiencySummaryItems(
+  summary: SocialAgentRuntimeMetricsDto['cacheEfficiencySummary'] | undefined,
+): Array<{
+  key: string;
+  label: string;
+  tone: 'danger' | 'good' | 'neutral' | 'warn';
+  value: string;
+}> {
+  const labels = {
+    combined: 'Combined Cache',
+    embedding: 'Embedding',
+    llmOutput: 'LLM Output',
+    toolResult: 'Tool Result',
+  } as const;
+
+  return (['combined', 'llmOutput', 'toolResult', 'embedding'] as const)
+    .map((key) => {
+      const value = summary?.[key];
+      if (!value) return null;
+      const tone: 'good' | 'neutral' | 'warn' =
+        value.total === 0 ? 'neutral' : value.hitRate >= 0.5 ? 'good' : 'warn';
+      return {
+        key,
+        label: labels[key],
+        value: `${formatPercent(value.hitRate)} · ${value.hits}/${value.total} hit · saved ${compactNumber(
+          value.savedApproxPromptChars,
+        )} chars`,
+        tone,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+}
+
+function workflowEfficiencySummaryItems(
+  summary: SocialAgentRuntimeMetricsDto['workflowEfficiencySummary'] | undefined,
+): Array<{
+  key: string;
+  label: string;
+  tone: 'danger' | 'good' | 'neutral' | 'warn';
+  value: string;
+}> {
+  if (!summary) return [];
+
+  const reasonLabels: Record<string, string> = {
+    candidate_refinement_workflow: 'Candidate refinement',
+    explicit_social_workflow: 'Explicit social workflow',
+    social_action_workflow: 'Social action workflow',
+  };
+  const topReason = Object.entries(summary.byReason ?? {}).sort(
+    ([, left], [, right]) => right - left,
+  )[0];
+
+  return [
+    {
+      key: 'workflow-route-rate',
+      label: 'Workflow route rate',
+      value: `${formatPercent(summary.workflowRouteRate)} · ${summary.total}/${summary.totalIntentRoutes} routes`,
+      tone:
+        summary.totalIntentRoutes === 0
+          ? 'neutral'
+          : summary.workflowRouteRate >= 0.3
+            ? 'good'
+            : 'warn',
+    },
+    {
+      key: 'estimated-avoided-llm-calls',
+      label: 'Estimated avoided LLM calls',
+      value: compactNumber(summary.estimatedAvoidedLlmCalls),
+      tone: summary.estimatedAvoidedLlmCalls > 0 ? 'good' : 'neutral',
+    },
+    {
+      key: 'top-workflow-reason',
+      label: 'Top workflow reason',
+      value: topReason
+        ? `${reasonLabels[topReason[0]] ?? topReason[0]} · ${topReason[1]}`
+        : '-',
+      tone: topReason ? 'good' : 'neutral',
+    },
+  ];
+}
+
+function executionCostSummaryItems(
+  summary: AgentObservabilityDto['executionCostSummary'] | undefined,
+): Array<{
+  key: string;
+  label: string;
+  tone: 'danger' | 'good' | 'neutral' | 'warn';
+  value: string;
+}> {
+  if (!summary) return [];
+  return [
+    {
+      key: 'agent-runs',
+      label: 'Agent runs',
+      value: compactNumber(summary.agentRunCount),
+      tone: 'neutral',
+    },
+    {
+      key: 'llm-calls',
+      label: 'LLM calls',
+      value: `${compactNumber(summary.llmCallCount)} · ${summary.avgLlmCallsPerRun}/run`,
+      tone: summary.avgLlmCallsPerRun > 2 ? 'warn' : 'good',
+    },
+    {
+      key: 'tool-calls',
+      label: 'Tool calls',
+      value: `${compactNumber(summary.toolCallCount)} · ${summary.avgToolCallsPerRun}/run`,
+      tone: summary.avgToolCallsPerRun > 8 ? 'warn' : 'good',
+    },
+  ];
+}
+
+function llmStageCostSummaryItems(
+  summary: AgentObservabilityDto['executionCostSummary'] | undefined,
+): Array<{
+  key: string;
+  label: string;
+  tone: 'danger' | 'good' | 'neutral' | 'warn';
+  value: string;
+}> {
+  return Object.entries(summary?.llmByUseCase ?? {})
+    .sort(([, left], [, right]) => right.calls - left.calls)
+    .slice(0, 8)
+    .map(([useCase, bucket]) => ({
+      key: useCase,
+      label: useCase,
+      value: `${compactNumber(bucket.calls)} calls · ${compactNumber(
+        bucket.estimatedBillableInputTokens,
+      )} input · ${compactNumber(
+        bucket.completionTokens + bucket.reasoningTokens,
+      )} output · ${bucket.avgLatencyMs ? `${bucket.avgLatencyMs}ms` : '-'}`,
+      tone: bucket.estimatedBillableInputTokens > 6000 ? 'warn' : 'neutral',
+    }));
+}
+
+function toolStageCostSummaryItems(
+  summary: AgentObservabilityDto['executionCostSummary'] | undefined,
+): Array<{
+  key: string;
+  label: string;
+  tone: 'danger' | 'good' | 'neutral' | 'warn';
+  value: string;
+}> {
+  return Object.entries(summary?.toolByName ?? {})
+    .sort(([, left], [, right]) => right.calls - left.calls)
+    .slice(0, 8)
+    .map(([toolName, bucket]) => ({
+      key: toolName,
+      label: toolName,
+      value: `${compactNumber(bucket.calls)} calls · ${compactNumber(
+        bucket.failed,
+      )} failed · ${compactNumber(bucket.blocked)} blocked · ${
+        bucket.avgLatencyMs ? `${bucket.avgLatencyMs}ms` : '-'
+      }`,
+      tone: bucket.failed > 0 ? 'warn' : 'neutral',
+    }));
+}
+
+function formatPercent(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return '-';
+  return `${Math.round(value * 1000) / 10}%`;
+}
+
+function formatContextBudgetReasons(reasons: string[] | undefined) {
+  if (!reasons?.length) return '-';
+  const labels: Record<string, string> = {
+    avg_prompt_context_too_large: 'prompt too large',
+    avg_billable_input_high: 'billable input high',
+    prompt_cache_hit_rate_low: 'cache hit low',
+    prompt_prefix_churn_high: 'prefix churn',
+  };
+  return reasons.map((reason) => labels[reason] ?? reason).join(', ');
+}
+
+function compactNumber(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return '-';
+  return new Intl.NumberFormat('en', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
 function topEntries(record: Record<string, number>) {
   return Object.entries(record)
     .sort(([, left], [, right]) => right - left)
     .slice(0, 8);
+}
+
+function topRunCostKeys(
+  record:
+    | Record<string, number>
+    | Record<string, { calls: number; failed?: number; blocked?: number }>,
+) {
+  const entries = Object.entries(record)
+    .map(([key, value]) => [
+      key,
+      typeof value === 'number' ? value : value.calls,
+    ] as const)
+    .sort(([, left], [, right]) => right - left)
+    .slice(0, 3);
+  if (!entries.length) return '-';
+  return entries.map(([key, value]) => `${key} ${value}`).join(', ');
 }
 
 function formatDate(value: string | null | undefined) {

@@ -98,6 +98,7 @@ export function useAgentCardActionRuntime({
       runConversationIntentRef.current =
         action === 'candidate.connect' ||
         action === 'opener.confirm_send' ||
+        action === 'publish_to_discover' ||
         action === 'activity.confirm_create'
           ? 'approval'
           : 'social';
@@ -241,6 +242,7 @@ function isExecutableToolUISchemaAction(
     value === 'opener.confirm_send' ||
     value === 'opener.regenerate' ||
     value === 'opener.reject' ||
+    value === 'publish_to_discover' ||
     value === 'activity.confirm_create' ||
     value === 'activity.skip_publish' ||
     value === 'activity.modify_time' ||
@@ -266,6 +268,7 @@ function shouldAppendActionResultMessage(
     action === 'opener.reject' ||
     (action === 'candidate.connect' && confirmsExistingApproval) ||
     (action === 'opener.confirm_send' && confirmsExistingApproval) ||
+    (action === 'publish_to_discover' && confirmsExistingApproval) ||
     (action === 'activity.confirm_create' && confirmsExistingApproval)
   );
 }
@@ -288,6 +291,7 @@ function shouldRenderCardActionResultInline(
     action === 'candidate.connect' ||
     action === 'opener.confirm_send' ||
     action === 'opener.regenerate' ||
+    action === 'publish_to_discover' ||
     action === 'activity.confirm_create'
   );
 }
@@ -346,6 +350,7 @@ const CARD_ACTION_ASSISTANT_MESSAGES: Partial<Record<FitMeetAgentCardExecutableA
   'candidate.connect': '已准备邀请请求，真正触达前仍会经过确认。',
   'opener.confirm_send': '已进入发送确认流程，发送结果会继续回到这段对话。',
   'opener.reject': '已取消这次发送，未联系对方。',
+  publish_to_discover: '已发布到发现页，你可以从发现页查看这张约练卡。',
   'activity.confirm_create': '已准备活动发起流程，发布前仍会保留确认边界。',
   'activity.skip_publish': '已保留这张约练卡，暂时不会发布到发现。',
   'activity.modify_time': '已准备时间调整方案，真正改动前仍会等你确认。',

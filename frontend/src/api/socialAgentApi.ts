@@ -16,13 +16,18 @@ export type UserFacingAgentLightStatus =
   | '正在整理回复'
   | '已整理回复'
   | '正在结合你的 Life Graph'
+  | '正在读取你的偏好'
   | '正在筛选合适的人'
+  | '正在筛选公开可发现的人'
   | '正在排除时间不合适的人'
+  | '正在整理合适机会'
   | '正在检查安全边界'
   | '正在生成开场白'
   | '正在等待你确认'
   | '正在创建约练计划'
-  | '正在更新你的 Life Graph';
+  | '正在整理约练方案'
+  | '正在更新你的 Life Graph'
+  | '正在整理画像变化建议';
 
 export interface UserFacingAgentSafeStatus {
   blocked: boolean;
@@ -41,7 +46,11 @@ export interface UserFacingAgentPendingConfirmation {
   expiresAt: string | null;
 }
 
-export type UserFacingAgentAssistantMessageSource = 'llm' | 'fallback';
+export type UserFacingAgentAssistantMessageSource =
+  | 'llm'
+  | 'fallback'
+  | 'deterministic_route'
+  | 'deterministic_action';
 
 export interface UserFacingAgentRecoveryNotice {
   kind: 'failed' | 'timeout' | 'interrupted' | 'checkpoint';
@@ -76,6 +85,7 @@ export type FitMeetAgentSchemaAction =
   | 'opener.confirm_send'
   | 'opener.regenerate'
   | 'opener.reject'
+  | 'publish_to_discover'
   | 'activity.confirm_create'
   | 'activity.skip_publish'
   | 'activity.modify_time'
@@ -613,6 +623,38 @@ type MessageFeedbackInput = {
   metadata?: Record<string, unknown>;
 };
 
+export type SocialAgentUserInterestEventType =
+  | 'view_profile'
+  | 'save_candidate'
+  | 'skip_candidate'
+  | 'more_like_this'
+  | 'generate_opener'
+  | 'send_invite'
+  | 'connect_candidate'
+  | 'discover_click'
+  | 'activity_complete'
+  | 'review_positive'
+  | 'review_negative'
+  | 'chat_topic';
+
+export type SocialAgentUserInterestEventInput = {
+  eventType: SocialAgentUserInterestEventType;
+  taskId?: number | null;
+  targetUserId?: number | null;
+  candidateRecordId?: number | null;
+  socialRequestId?: number | null;
+  activityId?: number | null;
+  weight?: number | null;
+  activityTags?: string[] | null;
+  candidatePreferenceTags?: string[] | null;
+  city?: string | null;
+  locationText?: string | null;
+  timeWindow?: string | null;
+  source?: string | null;
+  dedupeKey?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
 type CheckpointStreamInput = {
   checkpointId: number | string;
   stepId?: string | null;
@@ -779,6 +821,17 @@ export const socialAgentApi = {
         method: 'POST',
         body: JSON.stringify(data),
       })
+      .then(sanitizeSocialAgentResponse),
+
+  recordInterestEvent: (data: SocialAgentUserInterestEventInput) =>
+    api
+      .requestProtected<{ ok: true; recorded: boolean; eventId: number | null }>(
+        fitMeetCoreEndpoints.socialAgentChat.interestEvents,
+        {
+          method: 'POST',
+          body: JSON.stringify(data),
+        },
+      )
       .then(sanitizeSocialAgentResponse),
 
   getReminderPreference: () =>

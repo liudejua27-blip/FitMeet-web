@@ -106,7 +106,7 @@ export function toolStatus(status: ToolCallMessagePartProps['status']) {
   if (status?.type === 'running') {
     return {
       status: 'running' as const,
-      text: '正在处理',
+      text: '正在整理当前信息',
     };
   }
   if (status?.type === 'requires-action') {
@@ -172,8 +172,8 @@ export function summarizeDataPart(name: string | undefined, data: unknown): Proc
     (name === 'fitmeet-approval'
       ? '需要你确认后继续'
       : name === 'fitmeet-process'
-        ? '正在处理'
-        : '正在处理');
+        ? '正在整理当前信息'
+        : '正在整理当前信息');
   const stepId = stepIdFromRuntime(runtime) ?? targetStepIdFromSteps(steps, status);
   const checkpointActions = checkpointActionsFromRuntime(runtime, {
     checkpointId,
@@ -320,7 +320,7 @@ function compactFallbackProcessTitle(
   if (/安全|审批|确认|边界|approval|safety|permission/i.test(text)) {
     return status === 'running' ? '正在检查安全边界' : '已检查安全边界';
   }
-  return status === 'running' ? '正在思考下一步' : '已整理当前进展';
+  return status === 'running' ? '正在理解你的需求' : '已整理当前进展';
 }
 
 function compactFallbackProcessDetail(step: ProcessStep | null, status: ProcessStatus) {
@@ -397,12 +397,16 @@ export function summarizeToolCallFallback(part: ToolCallMessagePartProps): Proce
 }
 
 export function humanToolName(name: string) {
-  if (!name) return '正在处理';
+  if (!name) return '正在整理当前信息';
   if (/approval|safety/i.test(name)) return '需要你确认后继续';
-  if (/search|match|candidate|social/i.test(name)) return '正在整理合适的信息';
-  if (/profile|life|graph|memory/i.test(name)) return '正在整理上下文';
+  if (/publish|discover/i.test(name)) return '正在准备同步到发现';
+  if (/slot|clarify|intent/i.test(name)) return '正在整理你的关键信息';
+  if (/opportunity|card|activity/i.test(name)) return '正在补齐约练卡';
+  if (/search|match|candidate|social/i.test(name)) return '正在筛选公开可发现的人';
+  if (/rank|filter/i.test(name)) return '正在整理合适机会';
+  if (/profile|life|graph|memory/i.test(name)) return '正在读取你的偏好';
   if (/meet|invite|schedule/i.test(name)) return '正在整理邀约进度';
-  return '正在推进当前进度';
+  return '正在整理当前信息';
 }
 
 function toolFallbackStatusTitle(
@@ -413,10 +417,14 @@ function toolFallbackStatusTitle(
   if (status === 'running') return humanToolName(name);
   if (status === 'waiting' || status === 'error') return fallbackText;
   if (/approval|safety/i.test(name)) return '已处理你的确认';
-  if (/search|match|candidate|social/i.test(name)) return '已整理合适的信息';
-  if (/profile|life|graph|memory/i.test(name)) return '已整理上下文';
+  if (/publish|discover/i.test(name)) return '这张约练卡可以发布到发现';
+  if (/slot|clarify|intent/i.test(name)) return '已记录你的关键信息';
+  if (/opportunity|card|activity/i.test(name)) return '这张约练卡可以发布到发现';
+  if (/search|match|candidate|social/i.test(name)) return '已筛选公开可发现的人';
+  if (/rank|filter/i.test(name)) return '已整理合适机会';
+  if (/profile|life|graph|memory/i.test(name)) return '已读取你的偏好';
   if (/meet|invite|schedule/i.test(name)) return '已整理邀约进度';
-  return '已完成当前进度';
+  return '已整理当前信息';
 }
 
 function toolFallbackStepId(name: string) {
@@ -444,7 +452,7 @@ export function naturalProcessTitle(summary: ProcessSummary) {
   if (summary.steps.some((step) => classifyStepCategory(step) === 'life_graph')) {
     return summary.status === 'running' ? '正在结合上下文' : '已整理上下文';
   }
-  return summary.status === 'running' ? '正在处理' : '已处理';
+  return summary.status === 'running' ? '正在整理当前信息' : '已整理当前信息';
 }
 
 function checkpointActionsFromRuntime(
@@ -738,7 +746,7 @@ function resultLinesForData(
     return [`已完成 ${completed.length} 项进度，结果会继续合并到回复里。`];
   }
   const running = steps.find((step) => step.status === 'running');
-  if (running) return ['正在处理，我会把有用结果整理成自然回复。'];
+  if (running) return ['正在整理当前信息，我会把有用结果整理成自然回复。'];
   return ['已整理为可读结果。'];
 }
 
@@ -772,7 +780,7 @@ function humanStepLabel(label: string | null, kind: string | null, status: Proce
   if (/memory|slot|saved|progress/i.test(`${kind ?? ''}`)) return '正在保存进度';
   if (kind === 'tool') return '正在整理相关信息';
   if (kind === 'status') return '正在确认当前状态';
-  return '正在思考下一步';
+  return '正在理解你的需求';
 }
 
 function publicDetail(value: unknown) {

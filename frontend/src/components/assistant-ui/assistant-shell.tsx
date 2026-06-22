@@ -152,7 +152,7 @@ export function AssistantShell({
 
   return (
     <div
-      className="flex h-[100dvh] min-h-[100svh] overflow-hidden bg-white text-[#0d0d0d]"
+      className="flex h-[100svh] min-h-[100svh] overflow-hidden bg-white text-[#0d0d0d]"
       data-testid="assistant-ui-shell"
       data-sidebar-state={sidebarOpen ? 'open' : 'closed'}
       data-sidebar-mode={isDesktopSidebar ? 'desktop' : 'mobile'}

@@ -138,7 +138,9 @@ export function sanitizeStoredThreadMessage(message: AgentThreadMessage): AgentT
   const result = message.result ? sanitizeRestoredResponse(message.result) : null;
   const content = publicText(message.content, result?.assistantMessage ?? '');
   const hasUsefulResult = Boolean(result && restoredResponseHasUsefulSurface(result));
-  const fallbackSourced = isFallbackAssistantMessage(message) || isFallbackAssistantResponse(result);
+  const nonBranchableSourced =
+    isNonBranchableAssistantSource(message.assistantMessageSource) ||
+    isNonBranchableAssistantSource(result?.assistantMessageSource);
   const isGenericRecovery =
     isGenericRecoveryAssistantText(message.content) ||
     isGenericRecoveryAssistantText(content) ||
@@ -158,7 +160,7 @@ export function sanitizeStoredThreadMessage(message: AgentThreadMessage): AgentT
       : false,
     surfaceKind: isGenericRecovery ? 'recovery' : 'answer',
     assistantMessageSource: message.assistantMessageSource ?? result?.assistantMessageSource,
-    branchable: !isGenericRecovery && !fallbackSourced,
+    branchable: !isGenericRecovery && !nonBranchableSourced,
   };
 }
 
@@ -619,11 +621,27 @@ export function isFallbackAssistantMessage(message: AgentThreadMessage) {
   );
 }
 
+export function isNonBranchableAssistantSource(value: unknown) {
+  return (
+    value === 'fallback' ||
+    value === 'deterministic_route' ||
+    value === 'deterministic_action'
+  );
+}
+
+export function isDeterministicAssistantMessage(message: AgentThreadMessage) {
+  return (
+    message.assistantMessageSource === 'deterministic_route' ||
+    message.assistantMessageSource === 'deterministic_action'
+  );
+}
+
 export function isBranchableAssistantMessage(message: AgentThreadMessage) {
   return (
     message.role === 'assistant' &&
     message.branchable !== false &&
     !isFallbackAssistantMessage(message) &&
+    !isDeterministicAssistantMessage(message) &&
     (message.surfaceKind === undefined || message.surfaceKind === 'answer')
   );
 }
@@ -804,7 +822,7 @@ export function messagesFromSessionSnapshot(
               assistantMessageSource: sanitizedRestored.assistantMessageSource,
               branchable:
                 !isGenericRecoveryAssistantText(message.content) &&
-                !isFallbackAssistantResponse(sanitizedRestored),
+                !isNonBranchableAssistantSource(sanitizedRestored.assistantMessageSource),
             }
           : message,
       ),
@@ -829,7 +847,9 @@ export function messagesFromSessionSnapshot(
       showSocialResult,
       surfaceKind: restoredIsGeneric ? 'recovery' : 'answer',
       assistantMessageSource: sanitizedRestored.assistantMessageSource,
-      branchable: !restoredIsGeneric && !isFallbackAssistantResponse(sanitizedRestored),
+      branchable:
+        !restoredIsGeneric &&
+        !isNonBranchableAssistantSource(sanitizedRestored.assistantMessageSource),
     },
   ]);
 }
@@ -891,8 +911,8 @@ export function sessionMessageToThreadMessage(
     assistantMessageSource: assistantSource,
     branchable:
       role === 'assistant'
-        ? assistantSource !== 'fallback' &&
-          !isFallbackAssistantResponse(embeddedResult)
+        ? !isNonBranchableAssistantSource(assistantSource) &&
+          !isNonBranchableAssistantSource(embeddedResult?.assistantMessageSource)
         : undefined,
   };
 }
@@ -966,7 +986,12 @@ function normalizeComparableAssistantText(value: unknown) {
 }
 
 function assistantMessageSourceFromUnknown(value: unknown) {
-  return value === 'llm' || value === 'fallback' ? value : undefined;
+  return value === 'llm' ||
+    value === 'fallback' ||
+    value === 'deterministic_route' ||
+    value === 'deterministic_action'
+    ? value
+    : undefined;
 }
 
 export function branchForAssistant(
@@ -1137,7 +1162,7 @@ export function mergeProgressStep(
         : event.state === 'waiting'
           ? 'waiting'
           : 'running';
-  const rawLabel = publicText(event.title, event.kind === 'tool' ? '正在推进当前进度' : '分析中');
+  const rawLabel = publicText(event.title, event.kind === 'tool' ? '正在整理当前信息' : '正在理解你的需求');
   const processType =
     typeof event.metadata?.processType === 'string' && event.metadata.processType.trim()
       ? event.metadata.processType.trim()

@@ -31,6 +31,7 @@ export type ToolUISchemaAction =
   | 'opener.confirm_send'
   | 'opener.regenerate'
   | 'opener.reject'
+  | 'publish_to_discover'
   | 'activity.view_detail'
   | 'activity.confirm_create'
   | 'activity.modify_time'
@@ -519,11 +520,17 @@ function inlineApprovalActionKeyForApprovalCard(
   hostCard: SchemaDrivenAssistantCard | undefined,
 ) {
   const text = approvalCardSearchText(card);
-  if (hostCard?.schemaType === 'social_match.activity') return 'activity.confirm_create';
+  if (hostCard?.schemaType === 'social_match.activity') {
+    return /publish|social_request|发现|发布/.test(text)
+      ? 'publish_to_discover'
+      : 'activity.confirm_create';
+  }
   if (/send|message|invite|opener|发送|私信|邀请|开场白/.test(text)) return 'opener.confirm_send';
   if (/connect|friend|candidate|加好友|好友|连接|候选/.test(text)) return 'candidate.connect';
   if (/publish|social_request|activity|meet|发现|发布|活动|约练/.test(text)) {
-    return 'activity.confirm_create';
+    return /publish|social_request|发现|发布/.test(text)
+      ? 'publish_to_discover'
+      : 'activity.confirm_create';
   }
   return 'candidate.connect';
 }
@@ -922,6 +929,7 @@ export function toolUISchemaActionFromUnknown(value: unknown): ToolUISchemaActio
     text === 'opener.confirm_send' ||
     text === 'opener.regenerate' ||
     text === 'opener.reject' ||
+    text === 'publish_to_discover' ||
     text === 'activity.view_detail' ||
     text === 'activity.confirm_create' ||
     text === 'activity.modify_time' ||
@@ -955,8 +963,9 @@ function toolUISchemaActionFromLegacyAction(value: string | null): ToolUISchemaA
   if (value === 'relax_preference') return 'candidate.more_like_this';
   if (value === 'send_message') return 'opener.confirm_send';
   if (value === 'view_activity') return 'activity.view_detail';
+  if (value === 'publish_social_request') return 'publish_to_discover';
+  if (value === 'publish_to_discover') return 'publish_to_discover';
   if (value === 'create_activity') return 'activity.confirm_create';
-  if (value === 'publish_to_discover') return 'activity.confirm_create';
   if (value === 'modify_activity') return 'activity.modify_time';
   if (value === 'change_time') return 'activity.modify_time';
   if (value === 'skip_publish') return 'activity.skip_publish';
@@ -974,10 +983,13 @@ function legacyActionRequiresConfirmation(
   return (
     rawAction === 'connect_candidate' ||
     rawAction === 'send_message' ||
+    rawAction === 'publish_social_request' ||
+    rawAction === 'publish_to_discover' ||
     rawAction === 'create_activity' ||
     rawAction === 'confirm_profile_update' ||
     schemaAction === 'candidate.connect' ||
     schemaAction === 'opener.confirm_send' ||
+    schemaAction === 'publish_to_discover' ||
     schemaAction === 'activity.confirm_create' ||
     schemaAction === 'life_graph.accept_update'
   );
@@ -1009,14 +1021,14 @@ export function defaultOpportunityActionsForSchema(
   }
   if (schemaType === 'social_match.activity') {
     return [
-      { schemaAction: 'activity.confirm_create', requiresConfirmation: true, source: 'default' },
+      { schemaAction: 'publish_to_discover', requiresConfirmation: true, source: 'default' },
       { schemaAction: 'activity.modify_time', requiresConfirmation: false, source: 'default' },
       { schemaAction: 'activity.skip_publish', requiresConfirmation: false, source: 'default' },
     ];
   }
   if (schemaType === 'social_match.empty') {
     return [
-      { schemaAction: 'activity.confirm_create', requiresConfirmation: true, source: 'default' },
+      { schemaAction: 'publish_to_discover', requiresConfirmation: true, source: 'default' },
       { schemaAction: 'candidate.more_like_this', requiresConfirmation: false, source: 'default' },
       { schemaAction: 'activity.modify_time', requiresConfirmation: false, source: 'default' },
     ];
@@ -1350,6 +1362,12 @@ function defaultCandidateEmptyRecoveryOptions(): CandidateEmptyStateRecoveryOpti
       key: 'change_time',
       label: '换个时间',
       detail: '保留活动和地点，把时间换成更容易匹配的窗口。',
+      requiresConfirmation: false,
+    },
+    {
+      key: 'relax_preference',
+      label: '放宽偏好',
+      detail: '保留安全边界，先放宽非必要偏好再搜索。',
       requiresConfirmation: false,
     },
   ];

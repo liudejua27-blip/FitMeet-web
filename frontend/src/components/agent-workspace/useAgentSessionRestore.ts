@@ -14,6 +14,7 @@ import {
   socialCodexStageTitle,
 } from '../../lib/socialCodexProcessCopy';
 import { sanitizePublicProcessText } from '../assistant-ui/public-process-text';
+import { isNonBranchableAssistantSource } from './agentWorkspaceRuntime';
 import { mapUserFacingAgentStreamEvent, type AgentAdapter, type AgentStreamEvent } from './api';
 import { socialCodexThreadIdForTask } from './socialCodexThreadId';
 import type {
@@ -265,7 +266,9 @@ export function useAgentSessionRestore({
           ? restoredResponse
           : null;
         const restoredIsGeneric = isGenericRecoveryAssistantText(restoredResponse.assistantMessage);
-        const restoredIsFallback = restoredResponse.assistantMessageSource === 'fallback';
+        const restoredIsNonBranchable = isNonBranchableAssistantSource(
+          restoredResponse.assistantMessageSource,
+        );
         setUserResult(usefulRestoredResponse);
         setRecovery(null);
         if (
@@ -296,7 +299,7 @@ export function useAgentSessionRestore({
               showSocialResult: restoredIntent !== 'conversation',
               surfaceKind: restoredIsGeneric ? 'recovery' : 'answer',
               assistantMessageSource: restoredResponse.assistantMessageSource,
-              branchable: !restoredIsGeneric && !restoredIsFallback,
+              branchable: !restoredIsGeneric && !restoredIsNonBranchable,
             },
           ];
         });
@@ -344,7 +347,7 @@ export function useAgentSessionRestore({
                         showSocialResult: replayIntent === 'approval',
                         surfaceKind: restoredIsGeneric ? 'recovery' : 'answer',
                         assistantMessageSource: restoredResponse.assistantMessageSource,
-                        branchable: !restoredIsGeneric && !restoredIsFallback,
+                        branchable: !restoredIsGeneric && !restoredIsNonBranchable,
                       },
                     ];
                   }

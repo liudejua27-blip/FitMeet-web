@@ -113,8 +113,8 @@ export const SOCIAL_CODEX_INTERNAL_PROCESS_LABELS: Record<string, string> = {
   generate_opener: SOCIAL_CODEX_STAGE_COPY.generate_opener.running,
   send_invite: SOCIAL_CODEX_STAGE_COPY.send_invite.running,
   life_graph_writeback: SOCIAL_CODEX_STAGE_COPY.life_graph_writeback.running,
-  tool_call_started: '正在推进当前进度',
-  tool_result_done: '已整理当前进度',
+  tool_call_started: '正在整理当前信息',
+  tool_result_done: '已整理当前信息',
 };
 
 export function socialCodexStageTitle(
@@ -147,17 +147,21 @@ export function socialCodexProcessLabelForInternalName(value: unknown) {
 
 export function isGenericSocialCodexProcessTitle(value: unknown) {
   if (typeof value !== 'string') return false;
-  return genericSocialCodexProcessTitlePattern().test(value.trim());
+  return isGenericProcessText(value);
 }
 
-function genericSocialCodexProcessTitlePattern() {
-  const phrases = [
+function isGenericProcessText(value: string) {
+  const normalized = value.replace(/\s+/g, '');
+  const tokenSets = [
     ['这一步', '处理', '完成'],
     ['已完成', '这一步'],
     ['处理', '完成'],
     ['已处理'],
     ['正在', '处理'],
     ['正在', '处理', '这一步'],
+    ['正在', '推进', '当前', '进度'],
+    ['正在', '处理', '当前', '步骤'],
+    ['正在', '思考'],
     ['这次', '处理', '没有', '完成'],
     ['这一步', '没有', '完成'],
     ['这一步', '需要', '重试'],
@@ -166,11 +170,12 @@ function genericSocialCodexProcessTitlePattern() {
     ['完成'],
     ['处理中'],
     ['已整理', '结果'],
+    ['已整理', '当前', '进度'],
     ['工具'],
     ['步骤'],
     ['调用'],
-  ].map((parts) => parts.join(''));
-  return new RegExp(`^(${phrases.join('|')})$`, 'i');
+  ];
+  return tokenSets.some((tokens) => tokens.every((token) => normalized.includes(token)));
 }
 
 export function isKnownSocialCodexStageTitle(value: unknown) {

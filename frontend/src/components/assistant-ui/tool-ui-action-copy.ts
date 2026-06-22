@@ -17,6 +17,7 @@ export const TOOL_UI_SCHEMA_ACTIONS = [
   'opener.regenerate',
   'opener.reject',
   'activity.view_detail',
+  'publish_to_discover',
   'activity.confirm_create',
   'activity.modify_time',
   'activity.modify_location',
@@ -83,6 +84,11 @@ export const TOOL_UI_CARD_ACTION_COPY: Record<ToolUISchemaAction, ToolUICardActi
     busy: '正在打开详情',
     done: '已打开详情',
     result: '已打开详情，我会把后续判断继续放在这段对话里。',
+  },
+  publish_to_discover: {
+    busy: '正在发布',
+    done: '已发布',
+    result: '已发布到发现页，公开可发现用户可以看到这张约练卡。',
   },
   'activity.confirm_create': {
     busy: '正在准备发布',

@@ -122,13 +122,173 @@ export type AgentObservabilityLatencyDto = {
   firstMs: number | null;
 };
 
+export type AgentLlmTokenCostDto = {
+  calls: number;
+  success: number;
+  failed: number;
+  promptTokens: number;
+  promptCacheHitTokens: number;
+  promptCacheMissTokens: number;
+  promptCacheHitRate: number | null;
+  completionTokens: number;
+  reasoningTokens: number;
+  reportedTokenCount: number;
+  approxPromptChars: number;
+  avgApproxPromptChars: number;
+  estimatedBillableInputTokens: number;
+  distinctPromptPrefixHashes: number;
+  distinctDynamicContextHashes: number;
+  models: string[];
+};
+
+export type AgentLlmContextBudgetRecommendationDto = {
+  mode: 'standard' | 'strict';
+  reasons: string[];
+  calls: number;
+  avgApproxPromptChars: number;
+  avgBillableInputTokens: number;
+  promptCacheHitRate: number | null;
+  distinctPromptPrefixHashes: number;
+  distinctDynamicContextHashes: number;
+};
+
+export type AgentExecutionCostSummaryDto = {
+  agentRunCount: number;
+  llmCallCount: number;
+  toolCallCount: number;
+  avgLlmCallsPerRun: number;
+  avgToolCallsPerRun: number;
+  llmByUseCase: Record<
+    string,
+    {
+      calls: number;
+      estimatedBillableInputTokens: number;
+      completionTokens: number;
+      reasoningTokens: number;
+      avgLatencyMs: number;
+    }
+  >;
+  toolByName: Record<
+    string,
+    {
+      calls: number;
+      failed: number;
+      blocked: number;
+      avgLatencyMs: number;
+    }
+  >;
+};
+
+export type AgentRunCostSummaryDto = {
+  runId: string;
+  traceId: string | null;
+  taskId: number | null;
+  status: 'started' | 'completed' | 'approval_required' | 'failed' | 'unknown';
+  firstSeenAt: string;
+  updatedAt: string;
+  agentRunLatencyMs: number | null;
+  failureReason: string | null;
+  llmCallCount: number;
+  toolCallCount: number;
+  promptTokens: number;
+  promptCacheHitTokens: number;
+  promptCacheMissTokens: number;
+  promptCacheHitRate: number | null;
+  estimatedBillableInputTokens: number;
+  completionTokens: number;
+  reasoningTokens: number;
+  reportedTokenCount: number;
+  approxPromptChars: number;
+  models: string[];
+  llmUseCases: Record<string, number>;
+  tools: Record<
+    string,
+    {
+      calls: number;
+      observed: number;
+      failed: number;
+      blocked: number;
+    }
+  >;
+};
+
 export type AgentObservabilityDto = {
   startedAt: string;
   counters: Record<string, number>;
   latency: Record<string, AgentObservabilityLatencyDto>;
+  llmTokenCost?: Record<string, AgentLlmTokenCostDto>;
+  executionCostSummary?: AgentExecutionCostSummaryDto;
+  recentRunCostSummary?: AgentRunCostSummaryDto[];
+  llmContextBudgetRecommendations?: Record<
+    string,
+    AgentLlmContextBudgetRecommendationDto
+  >;
   failureReasons: Record<string, number>;
   queueDepth: Record<string, number>;
   alerts: AgentObservabilityAlertDto[];
+};
+
+export type AgentCacheSummaryDto = {
+  hits: number;
+  misses: number;
+  total: number;
+  hitRate: number;
+  savedApproxPromptChars: number;
+};
+
+export type AgentPromptFingerprintSummaryDto = {
+  observations: number;
+  distinctPromptPrefixHashes: number;
+  distinctDynamicContextHashes: number;
+  promptPrefixReuseRate: number;
+};
+
+export type SocialAgentRuntimeMetricsDto = {
+  tokenOptimizationSummary?: {
+    estimatedAvoidedLlmCalls: number;
+    workflowAvoidedLlmCalls: number;
+    deterministicReplyAvoidedLlmCalls: number;
+    deterministicActionAvoidedLlmCalls: number;
+    cacheHits: number;
+    cacheMisses: number;
+    cacheTotal: number;
+    cacheHitRate: number;
+    savedApproxPromptChars: number;
+    promptFingerprintObservations: number;
+    distinctPromptPrefixHashes: number;
+    promptPrefixReuseRate: number;
+  };
+  cacheEfficiencySummary?: {
+    toolResult: AgentCacheSummaryDto;
+    llmOutput: AgentCacheSummaryDto;
+    embedding?: AgentCacheSummaryDto;
+    combined: AgentCacheSummaryDto;
+  };
+  workflowEfficiencySummary?: {
+    total: number;
+    totalIntentRoutes: number;
+    workflowRouteRate: number;
+    estimatedAvoidedLlmCalls: number;
+    byIntent: Record<string, number>;
+    byReason: Record<string, number>;
+  };
+  deterministicRouteEfficiencySummary?: {
+    total: number;
+    estimatedAvoidedLlmCalls: number;
+    byIntent: Record<string, number>;
+  };
+  deterministicActionEfficiencySummary?: {
+    total: number;
+    estimatedAvoidedLlmCalls: number;
+    byAction: Record<string, number>;
+  };
+  toolResultCacheSummary?: Record<string, AgentCacheSummaryDto>;
+  llmOutputCacheSummary?: Record<string, AgentCacheSummaryDto>;
+  llmPromptFingerprintSummary?: Record<
+    string,
+    AgentPromptFingerprintSummaryDto
+  >;
+  embeddingCacheSummary?: Record<string, AgentCacheSummaryDto>;
 };
 
 export type SocialAgentMessageFeedbackDto = {
@@ -155,6 +315,7 @@ export type AgentL5DashboardDto = {
   autoRuns: AgentSkillPatchDto[];
   messageFeedback?: SocialAgentMessageFeedbackDto[];
   observability?: AgentObservabilityDto;
+  socialAgentMetrics?: SocialAgentRuntimeMetricsDto;
   workerJobs?: SubagentWorkerJobDto[];
   workerHeartbeats?: SubagentWorkerHeartbeatDto[];
   workerFailures?: SubagentWorkerFailureDto[];

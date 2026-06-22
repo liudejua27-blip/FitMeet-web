@@ -163,6 +163,21 @@ export function UnifiedActionCard({
       });
       return;
     }
+    const localApproval = action.requiresConfirmation
+      ? localInlineApprovalForCardAction(card, action)
+      : null;
+    if (localApproval) {
+      setCardActionRuntimeState(runtimeKey, {
+        busyKey: null,
+        completedKey: null,
+        failedKey: null,
+        error: null,
+        inlineApproval: localApproval,
+        inlineDraft: actionState.inlineDraft,
+        inlineOutcome: actionState.inlineOutcome,
+      });
+      return;
+    }
     const replayedApproval = action.requiresConfirmation
       ? inlineApprovalFromCardData(card, allActions, action)
       : null;
@@ -724,11 +739,10 @@ function canonicalVisibleActionKey(
     }
   }
   if (schemaType === 'social_match.activity' || schemaType === 'social_match.empty') {
-    if (
-      /^(publish_social_request|publish_to_discover|create_activity|activity\.confirm_create)$/.test(
-        rawAction,
-      )
-    ) {
+    if (/^(publish_social_request|publish_to_discover)$/.test(rawAction)) {
+      return 'publish_to_discover';
+    }
+    if (/^(create_activity|activity\.confirm_create)$/.test(rawAction)) {
       return 'activity.confirm_create';
     }
     if (/^(modify_activity|change_time|activity\.modify_time)$/.test(rawAction)) {
@@ -805,6 +819,7 @@ const LOW_RISK_VISIBLE_RAW_ACTIONS = new Set([
 const HIGH_RISK_VISIBLE_SCHEMA_ACTIONS = new Set<ToolUISchemaAction>([
   'candidate.connect',
   'opener.confirm_send',
+  'publish_to_discover',
   'activity.confirm_create',
 ]);
 
@@ -866,6 +881,7 @@ function sortVisibleCardActions(
         ]
       : schemaType === 'social_match.activity'
         ? [
+            'publish_to_discover',
             'activity.confirm_create',
             'activity.modify_time',
             'activity.skip_publish',
@@ -876,12 +892,22 @@ function sortVisibleCardActions(
           ]
         : schemaType === 'social_match.empty'
           ? [
-              'activity.confirm_create',
+              'publish_to_discover',
               'candidate.more_like_this',
               'activity.modify_time',
               'activity.skip_publish',
             ]
-        : [];
+          : schemaType === 'meet_loop.timeline'
+            ? [
+                'activity.check_in',
+                'activity.complete',
+                'review.submit',
+                'life_graph.accept_update',
+                'meet_loop.resume',
+                'meet_loop.reschedule',
+                'activity.upload_proof',
+              ]
+            : [];
   if (preferredOrder.length === 0) return actions;
   const rank = new Map(preferredOrder.map((item, index) => [item, index]));
   return actions
@@ -1044,6 +1070,7 @@ function inlineApprovalConfirmActionFromCard(
       item.requiresConfirmation === true ||
       schemaAction === 'opener.confirm_send' ||
       schemaAction === 'candidate.connect' ||
+      schemaAction === 'publish_to_discover' ||
       schemaAction === 'activity.confirm_create' ||
       /send|invite|connect|publish|create/i.test(action ?? '')
     );
@@ -1096,6 +1123,7 @@ function inlineOutcomeFromActionResponse(
     action.schemaAction !== 'candidate.skip' &&
     action.schemaAction !== 'candidate.more_like_this' &&
     action.schemaAction !== 'candidate.view_detail' &&
+    action.schemaAction !== 'publish_to_discover' &&
     action.schemaAction !== 'activity.view_detail' &&
     action.schemaAction !== 'activity.modify_time' &&
     action.schemaAction !== 'activity.modify_location' &&
@@ -1131,6 +1159,9 @@ function inlineOutcomeStableBody(schemaAction: ToolUISchemaAction | null | undef
   if (schemaAction === 'activity.skip_publish') {
     return '这张约练卡已保留为草稿，暂时不会发布到发现。';
   }
+  if (schemaAction === 'publish_to_discover') {
+    return '这张约练卡已发布到发现页，公开可发现用户可以看到。';
+  }
   return null;
 }
 
@@ -1138,6 +1169,7 @@ function inlineOutcomeTitle(schemaAction: ToolUISchemaAction | null | undefined)
   if (schemaAction === 'candidate.like') return '已收藏';
   if (schemaAction === 'candidate.skip') return '已跳过';
   if (schemaAction === 'candidate.more_like_this') return '继续找类似机会';
+  if (schemaAction === 'publish_to_discover') return '已发布到发现';
   if (schemaAction === 'activity.skip_publish') return '已暂不发布';
   if (schemaAction === 'activity.modify_time' || schemaAction === 'activity.modify_location') {
     return '已准备修改';
@@ -1159,6 +1191,9 @@ function inlineOutcomeFallbackBody(schemaAction: ToolUISchemaAction | null | und
   if (schemaAction === 'activity.skip_publish') {
     return '这张约练卡已作为草稿保留，暂时不会发布到发现。';
   }
+  if (schemaAction === 'publish_to_discover') {
+    return '这张约练卡已发布到发现页，公开可发现用户可以看到。';
+  }
   if (schemaAction === 'activity.modify_time') {
     return '可以继续告诉我新的时间，我会按新的安排更新这张约练卡。';
   }
@@ -1169,6 +1204,31 @@ function inlineOutcomeFallbackBody(schemaAction: ToolUISchemaAction | null | und
     return '活动详情已整理在当前卡片里。';
   }
   return '候选详情已整理在当前卡片里。';
+}
+
+function localInlineApprovalForCardAction(
+  card: SchemaDrivenAssistantCard,
+  action: VisibleCardAction,
+): InlineCardApproval | null {
+  if (action.schemaAction !== 'publish_to_discover') return null;
+  const payload = payloadForCardAction(card, action);
+  return {
+    approvalId: null,
+    title: '确认发布到发现',
+    summary: '确认后这张约练卡才会出现在发现页；你可以先修改或暂不发布。',
+    riskLevel: 'medium',
+    actionKey: cardActionKey(action),
+    confirmLabel: '确认发布',
+    confirmBusyLabel: '正在发布',
+    confirmAction: {
+      action: 'publish_to_discover',
+      schemaAction: 'publish_to_discover',
+      payload: {
+        ...payload,
+        confirmedPublish: true,
+      },
+    },
+  };
 }
 
 function inlineOutcomeFromApprovalResponse(
@@ -1182,6 +1242,13 @@ function inlineOutcomeFromApprovalResponse(
       body:
         publicDetail(response?.assistantMessage) ??
         '这个动作不会继续执行，也不会触达对方。',
+      actionKey: approval.actionKey,
+    };
+  }
+  if (isCandidateConnectApproval(approval)) {
+    return {
+      title: '邀约进展',
+      body: candidateConnectOutcomeBody(response),
       actionKey: approval.actionKey,
     };
   }
@@ -1206,6 +1273,20 @@ function inlineOutcomeFromApprovalResponse(
     body: publicDetail(response.assistantMessage) ?? '已按你的确认继续。',
     actionKey: approval.actionKey,
   };
+}
+
+function candidateConnectOutcomeBody(response: UserFacingAgentResponse | void) {
+  const body =
+    publicDetail(response?.assistantMessage) ??
+    '站内沟通入口已准备好，后续回复会继续保存在这段对话里。';
+  if (body.includes('站内沟通入口')) return body;
+  return `${body} 站内沟通入口已准备好，后续回复会继续保存在这段对话里。`;
+}
+
+function isCandidateConnectApproval(approval: InlineCardApproval) {
+  const text = `${approval.actionKey} ${approval.title} ${approval.summary}`.toLowerCase();
+  if (/send|message|invite|opener|发送|私信|邀请|开场白/.test(text)) return false;
+  return /connect|friend|contact|加好友|好友|连接|联系/.test(text);
 }
 
 function inlineApprovalApprovedTitle(approval: InlineCardApproval) {
@@ -1351,10 +1432,11 @@ function confirmationMatchesActionKey(
   if (actionKey === 'opener.confirm_send') {
     return /send|message|invite|opener|发送|私信|邀请|开场白/.test(actionText);
   }
+  if (actionKey === 'publish_to_discover') {
+    return /publish|social_request|发现|发布/.test(actionText);
+  }
   if (actionKey === 'activity.confirm_create') {
-    return /publish|social_request|activity|meet|create|发现|发布|活动|约练|创建/.test(
-      actionText,
-    );
+    return /activity|meet|create|活动|约练|创建/.test(actionText);
   }
   return actionText.includes(actionKey.toLowerCase());
 }
@@ -1362,9 +1444,10 @@ function confirmationMatchesActionKey(
 function approvalTitleForAction(actionType: string) {
   if (/send|message|invite/i.test(actionType)) return '确认发送邀请';
   if (/connect|friend|candidate\.connect/i.test(actionType)) return '确认加好友并聊天';
-  if (/publish|social_request|activity|meet|create/i.test(actionType)) {
+  if (/publish|social_request/i.test(actionType)) {
     return '确认发布到发现';
   }
+  if (/activity|meet|create/i.test(actionType)) return '确认创建约练';
   return '确认继续';
 }
 
@@ -1372,7 +1455,8 @@ function approvalConfirmLabelForAction(actionKey: string, actionType: string) {
   const text = `${actionType} ${actionKey}`;
   if (/send|message|invite|opener/i.test(text)) return '确认发送';
   if (/connect|friend|candidate/i.test(text)) return '确认加好友';
-  if (/publish|social_request|activity|meet|create/i.test(text)) return '确认发布';
+  if (/publish|social_request/i.test(text)) return '确认发布';
+  if (/activity|meet|create/i.test(text)) return '确认创建';
   if (/contact|location|precise|exchange/i.test(text)) return '确认公开';
   return '确认继续';
 }
@@ -1382,6 +1466,7 @@ function approvalConfirmBusyLabelForAction(actionKey: string, actionType: string
   if (label === '确认加好友') return '正在加好友';
   if (label === '确认发送') return '正在发送';
   if (label === '确认发布') return '正在发布';
+  if (label === '确认创建') return '正在创建';
   if (label === '确认公开') return '正在公开';
   return '正在继续';
 }
@@ -1405,10 +1490,13 @@ function approvalSummaryForAction(actionType: string, rawSummary: string | null 
       ? '确认后才会向对方发起连接；你可以先查看详情或取消。'
       : summary;
   }
-  if (/publish|social_request|activity|meet|create/i.test(actionType)) {
+  if (/publish|social_request/i.test(actionType)) {
     return technical
       ? '确认后这张约练卡才会出现在发现页；你可以先修改或暂不发布。'
       : summary;
+  }
+  if (/activity|meet|create/i.test(actionType)) {
+    return technical ? '确认后才会创建线下约练；你可以先修改或取消。' : summary;
   }
   return technical ? '确认前不会触达对方或公开敏感信息。' : summary;
 }
@@ -1445,8 +1533,11 @@ function normalizeVisibleActionLabel(
   if (canonicalKey === 'opener.confirm_send') {
     return '发送邀请';
   }
-  if (schemaType === 'social_match.activity' && canonicalKey === 'activity.confirm_create') {
+  if (schemaType === 'social_match.activity' && canonicalKey === 'publish_to_discover') {
     return '发布到发现';
+  }
+  if (schemaType === 'social_match.activity' && canonicalKey === 'activity.confirm_create') {
+    return '创建约练';
   }
   if (schemaType === 'social_match.activity' && canonicalKey === 'activity.skip_publish') {
     return '暂不发布';
@@ -1514,11 +1605,11 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
   if (card.schemaType === 'social_match.activity') {
     return [
       {
-        id: `${card.id}:create`,
+        id: `${card.id}:publish`,
         label: '发布到发现',
         requiresConfirmation: true,
-        schemaAction: 'activity.confirm_create',
-        action: 'activity.confirm_create',
+        schemaAction: 'publish_to_discover',
+        action: 'publish_to_discover',
         payload: basePayload,
         source: 'default' as const,
       },
@@ -1548,7 +1639,7 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
         id: `${card.id}:publish`,
         label: '发布到发现',
         requiresConfirmation: true,
-        schemaAction: 'activity.confirm_create',
+        schemaAction: 'publish_to_discover',
         action: 'publish_to_discover',
         payload: { ...basePayload, recoveryMode: 'publish_to_discover' },
         source: 'default' as const,
@@ -1605,6 +1696,28 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
     ];
   }
   if (card.schemaType === 'meet_loop.timeline') {
+    if (meetLoopCurrentStepKey(card) === 'met') {
+      return [
+        {
+          id: `${card.id}:complete`,
+          label: '确认完成',
+          requiresConfirmation: true,
+          schemaAction: 'activity.complete',
+          action: 'activity.complete',
+          payload: basePayload,
+          source: 'default' as const,
+        },
+        {
+          id: `${card.id}:reschedule`,
+          label: '调整时间',
+          requiresConfirmation: true,
+          schemaAction: 'meet_loop.reschedule',
+          action: 'meet_loop.reschedule',
+          payload: basePayload,
+          source: 'default' as const,
+        },
+      ];
+    }
     return [
       {
         id: `${card.id}:resume`,
@@ -1627,6 +1740,35 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
     ];
   }
   return [];
+}
+
+function meetLoopCurrentStepKey(card: SchemaDrivenAssistantCard) {
+  const stageText = [
+    card.data.loopStage,
+    card.data.stage,
+    card.data.status,
+    card.status,
+  ]
+    .map((item) => publicString(item)?.toLowerCase())
+    .filter(Boolean)
+    .join(' ');
+  if (/met|meet|offline|checkin|check_in|checked_in|arrived|到达|签到|见面/.test(stageText)) {
+    return 'met';
+  }
+  if (/review|completed|complete|评价/.test(stageText)) return 'completed';
+  if (/life|graph|trust|画像|回写/.test(stageText)) return 'life_graph';
+  const timeline = isRecord(card.data.timeline) ? card.data.timeline : {};
+  const steps = Array.isArray(timeline.steps)
+    ? timeline.steps
+    : Array.isArray(card.data.steps)
+      ? card.data.steps
+      : [];
+  for (const step of steps) {
+    if (!isRecord(step)) continue;
+    if (publicString(step.state) !== 'current') continue;
+    return publicString(step.key)?.toLowerCase() ?? null;
+  }
+  return null;
 }
 
 function isLocalOnlyCardAction(_action: VisibleCardAction) {
@@ -1665,6 +1807,15 @@ function defaultCardActionPayload(card: SchemaDrivenAssistantCard): Record<strin
       opportunity.userId,
       opportunity.candidateUserId,
       firstActionPayloadPrimitive(card, ['targetUserId', 'userId', 'candidateUserId']),
+    ),
+    candidateUserId: firstPublicPrimitive(
+      card.data.candidateUserId,
+      card.data.targetUserId,
+      card.data.userId,
+      opportunity.candidateUserId,
+      opportunity.targetUserId,
+      opportunity.userId,
+      firstActionPayloadPrimitive(card, ['candidateUserId', 'targetUserId', 'userId']),
     ),
     socialRequestId: firstPublicPrimitive(card.data.socialRequestId, opportunity.socialRequestId),
     publicIntentId: firstPublicPrimitive(card.data.publicIntentId, opportunity.publicIntentId),

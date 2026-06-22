@@ -720,7 +720,7 @@ function isRunSummaryStep(step: ProcessStep) {
 
 function compactPublicStepLabel(value: string) {
   const label = (sanitizePublicText(value) ?? '').replace(/\s+/g, ' ').trim();
-  if (!label) return '正在处理';
+  if (!label) return '正在整理当前信息';
   return label
     .replace(/^工具[：:]\s*/g, '')
     .replace(/^步骤[：:]\s*/g, '')

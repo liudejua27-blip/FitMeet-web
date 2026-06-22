@@ -117,11 +117,11 @@ export function ChatGPTComposer({ requiresAuth, onLogin }: ChatGPTComposerProps)
         </AuiIf>
         <ComposerPrimitive.Input
           rows={1}
-          autoFocus={!requiresAuth}
           placeholder={requiresAuth ? '登录后继续' : '询问任何问题'}
           aria-describedby={uploadStatusId}
           data-testid="assistant-ui-composer-input"
           data-input-model="single-composer"
+          data-auto-focus="disabled"
           className="max-h-40 min-h-8 w-full resize-none bg-transparent px-3 pt-0.5 text-[16px] leading-6 text-[#0d0d0d] outline-none placeholder:text-[#8e8e8e]"
         />
         <ComposerDictationPreview />

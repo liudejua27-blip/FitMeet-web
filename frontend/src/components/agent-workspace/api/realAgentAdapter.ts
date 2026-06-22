@@ -264,10 +264,7 @@ function withLifecycle(event: UserFacingAgentStreamEvent): AgentStreamEvent | nu
   if (event.type === 'status') {
     const lifecycle = explicitLifecycle ?? lifecycleFromLightStatus(event.lightStatus);
     const state = 'running';
-    const title =
-      event.lightStatus === '正在思考'
-        ? event.lightStatus
-        : legacyTitleForLifecycle(lifecycle, state);
+    const title = legacyTitleForLifecycle(lifecycle, state);
     return {
       type: 'progress',
       id: 'social-codex:summary',
@@ -584,9 +581,23 @@ function stageLabelForLifecycle(lifecycle: AgentLifecycle): string {
 }
 
 function isGenericLegacyProcessCopy(value: string): boolean {
-  return /正在处理这一步|正在推进这一步|正在处理|已整理结果|已完成这一步|已完成|工具|步骤|调用/i.test(
-    value,
-  );
+  const normalized = value.replace(/\s+/g, '');
+  const tokenSets = [
+    ['正在', '处理', '这一步'],
+    ['正在', '推进', '这一步'],
+    ['正在', '推进', '进度'],
+    ['正在', '处理', '步骤'],
+    ['正在', '整理', '当前', '信息'],
+    ['正在', '思考'],
+    ['已整理', '结果'],
+    ['已整理', '进度'],
+    ['已完成', '这一步'],
+    ['已完成'],
+    ['工具'],
+    ['步骤'],
+    ['调用'],
+  ];
+  return tokenSets.some((tokens) => tokens.every((token) => normalized.includes(token)));
 }
 
 function isSocialAgentEventV2(
@@ -666,8 +677,8 @@ function publicV2Title(event: Extract<UserFacingAgentStreamEvent, { eventId: str
   }
   if (event.type === 'run.started') return stageTitle ?? '正在理解你的需求';
   if (event.type === 'visible_process.delta') return stageTitle ?? '正在理解你的需求';
-  if (event.type === 'tool.started') return stageTitle ?? '正在推进当前进度';
-  if (event.type === 'tool.progress') return stageTitle ?? '正在推进当前进度';
+  if (event.type === 'tool.started') return stageTitle ?? '正在整理当前信息';
+  if (event.type === 'tool.progress') return stageTitle ?? '正在整理当前信息';
   if (event.type === 'tool.done') return stageTitle ?? '已整理当前进度';
   if (event.type === 'slot.filled') return '已记住你刚补充的信息';
   if (event.type === 'slot.completed') return stageTitle ?? '已记录你的关键信息';
@@ -1446,7 +1457,7 @@ function inferLightStatus(
     return '正在等待你确认';
   }
   if (cards.some((card) => isRecord(card) && card.type === 'candidate_card')) {
-    return '正在筛选合适的人';
+    return '正在筛选公开可发现的人';
   }
   return '正在理解你的需求';
 }

@@ -16,6 +16,7 @@ import {
   collapseRepeatedAssistantTextBlocks,
   normalizeAssistantTextForMerge,
 } from './assistantTextDedupe';
+import { isNonBranchableAssistantSource } from './agentWorkspaceRuntime';
 
 export { collapseRepeatedAssistantTextBlocks } from './assistantTextDedupe';
 
@@ -69,7 +70,9 @@ export function useAgentMessageStream({
             messageId: anchor.messageId ?? target.messageId ?? null,
             assistantMessageSource: source ?? target.assistantMessageSource,
             branchable:
-              target.assistantMessageSource === 'fallback' ? false : target.branchable,
+              isNonBranchableAssistantSource(source ?? target.assistantMessageSource)
+                ? false
+                : target.branchable,
           };
           if (
             nextMessage.content === target.content &&
@@ -99,7 +102,9 @@ export function useAgentMessageStream({
               messageId: anchor.messageId ?? last.messageId ?? null,
               assistantMessageSource: source ?? last.assistantMessageSource,
               branchable:
-                last.assistantMessageSource === 'fallback' ? false : last.branchable,
+                isNonBranchableAssistantSource(source ?? last.assistantMessageSource)
+                  ? false
+                  : last.branchable,
             },
           ]);
         }
@@ -179,7 +184,7 @@ export function useAgentMessageStream({
           status: 'done',
           assistantMessageSource: source ?? target.assistantMessageSource,
           branchable:
-            source === 'fallback' || target.assistantMessageSource === 'fallback'
+            isNonBranchableAssistantSource(source ?? target.assistantMessageSource)
               ? false
               : target.branchable,
         },
