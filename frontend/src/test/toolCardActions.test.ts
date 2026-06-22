@@ -311,6 +311,33 @@ describe('tool-card-actions runtime identity', () => {
     });
   });
 
+  it('keeps location modification actions separate from time modification actions', () => {
+    const actions = visibleCardActions(
+      {
+        id: 'activity-walk',
+        type: 'activity_plan',
+        schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+        schemaType: 'social_match.activity',
+        title: '青岛大学散步约练',
+        data: {
+          taskId: 77,
+          opportunityId: 'walk-qdu',
+        },
+        actions: [
+          { id: 'raw-location', label: '改地点', action: 'change_location' },
+        ],
+      },
+      [
+        { id: 'raw-location', label: '改地点', action: 'change_location' },
+      ],
+    );
+
+    expect(actions.find((action) => action.action === 'change_location')).toMatchObject({
+      schemaAction: 'activity.modify_location',
+      label: '修改',
+    });
+  });
+
   it('routes candidate detail actions to the public user profile page', () => {
     const card: SchemaDrivenAssistantCard = {
       id: 'candidate-chen',

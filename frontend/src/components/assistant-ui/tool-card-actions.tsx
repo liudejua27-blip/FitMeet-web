@@ -711,7 +711,7 @@ function normalizedVisibleSchemaAction(
     (schemaAction === 'activity.modify_location' ||
       /^(change_location|activity\.modify_location)$/.test(normalizeActionName(rawAction)))
   ) {
-    return 'activity.modify_time';
+    return 'activity.modify_location';
   }
   if (schemaAction) return schemaAction;
   return canonicalVisibleActionKey(schemaType, { schemaAction, action: rawAction }) ?? undefined;
