@@ -29,9 +29,7 @@ describe('SocialAgentWorkflowRouterService', () => {
     const intentRouter = {
       routeByRules: jest.fn(() => route()),
     };
-    const service = new SocialAgentWorkflowRouterService(
-      intentRouter as never,
-    );
+    const service = new SocialAgentWorkflowRouterService(intentRouter as never);
 
     const decision = service.route({
       message: '帮我找今晚青岛大学附近散步搭子',
@@ -59,9 +57,7 @@ describe('SocialAgentWorkflowRouterService', () => {
         route({ intent: 'candidate_followup', shouldReplan: true }),
       ),
     };
-    const service = new SocialAgentWorkflowRouterService(
-      intentRouter as never,
-    );
+    const service = new SocialAgentWorkflowRouterService(intentRouter as never);
 
     expect(
       service.route({
@@ -87,9 +83,7 @@ describe('SocialAgentWorkflowRouterService', () => {
         }),
       ),
     };
-    const service = new SocialAgentWorkflowRouterService(
-      intentRouter as never,
-    );
+    const service = new SocialAgentWorkflowRouterService(intentRouter as never);
 
     const decision = service.route({
       message: '可以，继续',
@@ -121,9 +115,7 @@ describe('SocialAgentWorkflowRouterService', () => {
     const intentRouter = {
       routeByRules: jest.fn(() => route()),
     };
-    const service = new SocialAgentWorkflowRouterService(
-      intentRouter as never,
-    );
+    const service = new SocialAgentWorkflowRouterService(intentRouter as never);
 
     expect(
       service.route({
@@ -137,6 +129,42 @@ describe('SocialAgentWorkflowRouterService', () => {
     expect(intentRouter.routeByRules).not.toHaveBeenCalled();
   });
 
+  it('routes candidate message confirmations through the action workflow when pending actions exist', () => {
+    const intentRouter = {
+      routeByRules: jest.fn(() =>
+        route({
+          intent: 'casual_chat',
+          shouldSearch: false,
+          shouldExecuteAction: false,
+          replyStrategy: 'conversational_answer',
+        }),
+      ),
+    };
+    const service = new SocialAgentWorkflowRouterService(intentRouter as never);
+
+    const decision = service.route({
+      message: '发送吧',
+      taskContext: {
+        pendingActions: [{ actionType: 'send_invite' }],
+      },
+      profile: {},
+      conversationHistory: [],
+      conversationIntent: 'conversation',
+    });
+
+    expect(decision).toMatchObject({
+      reason: 'social_action_workflow',
+      skipBrain: true,
+      route: {
+        intent: 'action_request',
+        shouldSearch: false,
+        shouldExecuteAction: true,
+        replyStrategy: 'execute_action',
+      },
+    });
+    expect(intentRouter.routeByRules).toHaveBeenCalledTimes(1);
+  });
+
   it('does not route ordinary product or chat questions', () => {
     const intentRouter = {
       routeByRules: jest.fn(() =>
@@ -147,9 +175,7 @@ describe('SocialAgentWorkflowRouterService', () => {
         }),
       ),
     };
-    const service = new SocialAgentWorkflowRouterService(
-      intentRouter as never,
-    );
+    const service = new SocialAgentWorkflowRouterService(intentRouter as never);
 
     expect(
       service.route({

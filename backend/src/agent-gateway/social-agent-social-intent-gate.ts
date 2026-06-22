@@ -78,7 +78,10 @@ export function hasExplicitSocialExecutionIntent(message: string): boolean {
     );
   if (hasActivity && hasTime && hasPlace) return true;
   if (socialSideEffectNegationPattern.test(text)) return false;
-  return explicitSocialActionPattern.test(text);
+  return (
+    explicitSocialActionPattern.test(text) ||
+    explicitCandidateMessageConfirmationPattern.test(text)
+  );
 }
 
 export function hasExplicitSocialSideEffectIntent(message: string): boolean {
@@ -90,7 +93,10 @@ export function hasExplicitSocialSideEffectIntent(message: string): boolean {
   if (socialHelpQuestionPattern.test(text)) return false;
   if (socialCapabilityQuestionPattern.test(text)) return false;
   if (nonSocialLookupPattern.test(text)) return false;
-  return explicitSocialActionPattern.test(text);
+  return (
+    explicitSocialActionPattern.test(text) ||
+    explicitCandidateMessageConfirmationPattern.test(text)
+  );
 }
 
 export function hasExplicitCandidateMessageConfirmationIntent(

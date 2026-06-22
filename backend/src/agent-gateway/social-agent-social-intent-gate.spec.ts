@@ -283,6 +283,21 @@ describe('social agent social intent gate', () => {
         },
       }),
     ).toBe(true);
+    expect(
+      shouldAllowSocialExecution({
+        message: '发送吧',
+        intent: 'action_request',
+      }),
+    ).toBe(false);
+    expect(
+      shouldAllowSocialExecution({
+        message: '发送吧',
+        intent: 'action_request',
+        taskContext: {
+          pendingActions: [{ actionType: 'send_invite' }],
+        },
+      }),
+    ).toBe(true);
   });
 
   it('keeps explicit opt-out and conversation-only messages from continuing task search', () => {
