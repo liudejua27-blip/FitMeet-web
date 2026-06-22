@@ -32,6 +32,10 @@ Environment:
   MIN_PROMPT_PREFIX_REUSE_RATE=0.70     Optional fail threshold for stable prompt prefix reuse
   MIN_STAGE_PROMPT_PREFIX_REUSE_RATE=0.70
                                       Optional fail threshold applied to each required LLM stage
+  MAX_PROMPT_PREFIX_DISTINCT_RATIO=0.30
+                                      Optional fail threshold for distinct prefix hashes / observations
+  MAX_STAGE_PROMPT_PREFIX_DISTINCT_RATIO=0.30
+                                      Optional fail threshold for distinct prefix hashes / calls per stage
   MIN_CACHE_HIT_RATE=0.30               Optional fail threshold for combined/public cache hit rate
   MIN_WORKFLOW_ROUTE_RATE=0.30          Optional fail threshold for workflow bypass coverage
   MAX_AVG_LLM_CALLS_PER_RUN=3           Optional fail threshold for live avg LLM calls per run
@@ -180,14 +184,25 @@ const minWorkflowRouteRate = envNumber('MIN_WORKFLOW_ROUTE_RATE');
 const minCacheHitRate = envNumber('MIN_CACHE_HIT_RATE');
 const minPromptPrefixReuseRate = envNumber('MIN_PROMPT_PREFIX_REUSE_RATE');
 const minStagePromptPrefixReuseRate = envNumber('MIN_STAGE_PROMPT_PREFIX_REUSE_RATE');
+const maxPromptPrefixDistinctRatio = envNumber('MAX_PROMPT_PREFIX_DISTINCT_RATIO');
+const maxStagePromptPrefixDistinctRatio = envNumber(
+  'MAX_STAGE_PROMPT_PREFIX_DISTINCT_RATIO',
+);
 const maxAvgLlmCallsPerRun = envNumber('MAX_AVG_LLM_CALLS_PER_RUN');
 const thresholds = {
   minWorkflowRouteRate,
   minCacheHitRate,
   minPromptPrefixReuseRate,
   minStagePromptPrefixReuseRate,
+  maxPromptPrefixDistinctRatio,
+  maxStagePromptPrefixDistinctRatio,
   maxAvgLlmCallsPerRun,
 };
+const publicPromptPrefixDistinctRatio =
+  number(token.promptFingerprintObservations) > 0
+    ? number(token.distinctPromptPrefixHashes) /
+      number(token.promptFingerprintObservations)
+    : null;
 const publicEvidence = {
   workflowRouteTotal: number(workflow.total),
   workflowRouteRate: number(publicWorkflowRouteRate),
@@ -200,6 +215,10 @@ const publicEvidence = {
   promptPrefixObservations: number(token.promptFingerprintObservations),
   distinctPromptPrefixHashes: number(token.distinctPromptPrefixHashes),
   promptPrefixReuseRate: number(publicPromptPrefixReuseRate),
+  promptPrefixDistinctRatio:
+    publicPromptPrefixDistinctRatio === null
+      ? null
+      : Number(publicPromptPrefixDistinctRatio.toFixed(4)),
 };
 let l5Evidence = null;
 
@@ -233,6 +252,13 @@ if (
   number(publicPromptPrefixReuseRate) < minPromptPrefixReuseRate
 ) {
   missing.push(`prompt prefix reuse rate >= ${minPromptPrefixReuseRate}`);
+}
+if (maxPromptPrefixDistinctRatio !== null) {
+  if (publicPromptPrefixDistinctRatio === null) {
+    missing.push('prompt prefix distinct ratio');
+  } else if (publicPromptPrefixDistinctRatio > maxPromptPrefixDistinctRatio) {
+    missing.push(`prompt prefix distinct ratio <= ${maxPromptPrefixDistinctRatio}`);
+  }
 }
 
 const observability = readJson(observabilityPath);
@@ -292,6 +318,8 @@ if (!observability) {
     const distinctDynamicContextHashes = number(bucket.distinctDynamicContextHashes);
     const promptPrefixReuseRate =
       calls > 0 ? Math.max(0, 1 - distinctPromptPrefixHashes / calls) : null;
+    const promptPrefixDistinctRatio =
+      calls > 0 ? distinctPromptPrefixHashes / calls : null;
     console.log(
       `  - ${useCase}: calls=${calls} prompt=${number(
         bucket.promptTokens,
@@ -312,6 +340,10 @@ if (!observability) {
       promptCacheHitRate: number(bucket.promptCacheHitRate),
       promptPrefixReuseRate:
         promptPrefixReuseRate === null ? null : Number(promptPrefixReuseRate.toFixed(4)),
+      promptPrefixDistinctRatio:
+        promptPrefixDistinctRatio === null
+          ? null
+          : Number(promptPrefixDistinctRatio.toFixed(4)),
       distinctPromptPrefixHashes,
       distinctDynamicContextHashes,
       models: Array.isArray(bucket.models) ? bucket.models : [],
@@ -348,6 +380,21 @@ if (!observability) {
       if (stagePromptPrefixReuseRate < minStagePromptPrefixReuseRate) {
         missing.push(
           `${stage} prompt prefix reuse rate >= ${minStagePromptPrefixReuseRate}`,
+        );
+      }
+    }
+  }
+  if (maxStagePromptPrefixDistinctRatio !== null) {
+    for (const stage of requiredStages) {
+      const bucket = llmTokenCost[stage];
+      if (!bucket) continue;
+      const calls = number(bucket.calls);
+      const distinctPromptPrefixHashes = number(bucket.distinctPromptPrefixHashes);
+      const stagePromptPrefixDistinctRatio =
+        calls > 0 ? distinctPromptPrefixHashes / calls : 1;
+      if (stagePromptPrefixDistinctRatio > maxStagePromptPrefixDistinctRatio) {
+        missing.push(
+          `${stage} prompt prefix distinct ratio <= ${maxStagePromptPrefixDistinctRatio}`,
         );
       }
     }

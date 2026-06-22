@@ -65,6 +65,10 @@ Environment:
                               Optional launch-time override for public prompt prefix reuse.
   MIN_STAGE_PROMPT_PREFIX_REUSE_RATE
                               Optional launch-time override for each required LLM stage.
+  MAX_PROMPT_PREFIX_DISTINCT_RATIO
+                              Optional launch-time override for public prompt prefix hash drift.
+  MAX_STAGE_PROMPT_PREFIX_DISTINCT_RATIO
+                              Optional launch-time override for stage prompt prefix hash drift.
   MIN_CACHE_HIT_RATE          Optional launch-time override for public cache hit rate.
   MIN_WORKFLOW_ROUTE_RATE     Optional launch-time override for workflow bypass coverage.
   MAX_AVG_LLM_CALLS_PER_RUN   Optional launch-time override for live avg LLM calls/run.
@@ -280,6 +284,11 @@ const assertMax = (label, value, max) => {
   if (optionalNumber(value) === null) fail(`${label} is missing.`);
   if (number(value) > max) fail(`${label} ${number(value)} is above allowed ${max}.`);
 };
+const ratio = (numerator, denominator) => {
+  const den = number(denominator);
+  if (den <= 0) return null;
+  return number(numerator) / den;
+};
 if (doc.schemaVersion !== 'fitmeet.agent-token-cost-evidence.v1') {
   fail(`Unexpected token/cost evidence schema: ${doc.schemaVersion || 'missing'}`);
 }
@@ -323,11 +332,24 @@ assertMin(
   publicMetrics.promptPrefixReuseRate,
   threshold('minPromptPrefixReuseRate', 'MIN_PROMPT_PREFIX_REUSE_RATE'),
 );
+assertMax(
+  'Agent token/cost prompt prefix distinct ratio',
+  publicMetrics.promptPrefixDistinctRatio ??
+    ratio(
+      publicMetrics.distinctPromptPrefixHashes,
+      publicMetrics.promptPrefixObservations,
+    ),
+  threshold('maxPromptPrefixDistinctRatio', 'MAX_PROMPT_PREFIX_DISTINCT_RATIO'),
+);
 const requiredStages = Array.isArray(doc.requiredStages) ? doc.requiredStages : [];
 const useCases = l5.useCases || {};
 const minStagePromptPrefixReuseRate = threshold(
   'minStagePromptPrefixReuseRate',
   'MIN_STAGE_PROMPT_PREFIX_REUSE_RATE',
+);
+const maxStagePromptPrefixDistinctRatio = threshold(
+  'maxStagePromptPrefixDistinctRatio',
+  'MAX_STAGE_PROMPT_PREFIX_DISTINCT_RATIO',
 );
 for (const stage of requiredStages) {
   const bucket = useCases[stage];
@@ -340,6 +362,12 @@ for (const stage of requiredStages) {
     `Agent token/cost ${stage} prompt prefix reuse rate`,
     bucket.promptPrefixReuseRate,
     minStagePromptPrefixReuseRate,
+  );
+  assertMax(
+    `Agent token/cost ${stage} prompt prefix distinct ratio`,
+    bucket.promptPrefixDistinctRatio ??
+      ratio(bucket.distinctPromptPrefixHashes, bucket.calls),
+    maxStagePromptPrefixDistinctRatio,
   );
 }
 console.log(`[PASS] Agent token/cost evidence is present: ${file}`);
