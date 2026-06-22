@@ -436,9 +436,12 @@ export class SocialAgentCardActionRouterService {
       this.publishDraftFromPayload(payload),
     );
     const publicIntentId = this.text(result.publicIntentId);
-    const discoverHref = publicIntentId
+    const socialRequestId = this.number(result.socialRequestId);
+    const discoverHref = this.text(result.discoverHref) || (publicIntentId
       ? `/public-intent/${encodeURIComponent(publicIntentId)}`
-      : '/discover';
+      : socialRequestId
+        ? `/social-request/${encodeURIComponent(String(socialRequestId))}`
+        : '/discover');
     return this.simpleRouteResult({
       taskId,
       assistantMessage: `已发布到发现页。你可以在发现页查看这张约练卡，也可以打开详情继续查看发起人公开信息和动态。`,
@@ -454,6 +457,7 @@ export class SocialAgentCardActionRouterService {
           data: {
             taskId,
             publicIntentId,
+            socialRequestId,
             discoverHref,
             autoPublished: true,
             publishStatus: 'published',
@@ -465,7 +469,7 @@ export class SocialAgentCardActionRouterService {
               action: 'activity.view_detail',
               schemaAction: 'activity.view_detail',
               requiresConfirmation: false,
-              payload: { taskId, publicIntentId, discoverHref },
+              payload: { taskId, publicIntentId, socialRequestId, discoverHref },
             },
           ],
         },

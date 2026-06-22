@@ -601,7 +601,12 @@ describe('SocialAgentChatController user-facing stream', () => {
 
     releaseRun();
     await stream;
-    expect(writes.join('')).toContain('"type":"assistant_delta"');
+    const serialized = writes.join('');
+    expect(serialized).toContain('"type":"assistant_delta"');
+    expect(serialized).not.toContain('"messageId":"ordinary-chat"');
+    expect(serialized).toMatch(
+      /"messageId":"agent-message:task:social-codex:message:7:thread-ordinary:[^"]+"/,
+    );
   });
 
   it('writes an immediate Social Codex status before a slow message stream resolves', async () => {
@@ -2545,6 +2550,10 @@ describe('SocialAgentChatController user-facing stream', () => {
     expect(serialized).toContain('正在读取你的偏好');
     expect(serialized).not.toContain('"lightStatus":"正在处理你的选择"');
     expect(serialized).toContain('"type":"assistant_delta"');
+    expect(serialized).not.toContain('"messageId":"action-1"');
+    expect(serialized).toMatch(
+      /"messageId":"agent-message:101:social-codex:action:7:101:[^"]+"/,
+    );
     expect(serialized).toContain('"type":"assistant.delta"');
     expect(serialized).toContain('"source":"llm"');
     expect(serialized).toContain('"type":"assistant_done"');

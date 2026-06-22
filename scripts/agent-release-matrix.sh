@@ -29,6 +29,10 @@ Options:
   --20-turn-memory-smoke         Run real Agent 20-turn task-memory continuity smoke.
   --empty-candidate-smoke        Run real Agent empty-candidate fallback smoke.
   --sse-abort-smoke              Run real Agent SSE visibility/abort smoke.
+  --strict-agent-smoke           Require remote readiness, 20-turn memory,
+                                 empty-candidate, and SSE abort smokes.
+  --strict-agent-full-smoke      Require full mutating opportunity smoke plus
+                                 20-turn memory, empty-candidate, and SSE abort.
   --build                        Also run frontend and backend production builds.
   --evidence-dir DIR             Write release evidence artifacts under DIR.
   --help                         Show this help.
@@ -68,6 +72,18 @@ while [[ $# -gt 0 ]]; do
       RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true
       ;;
     --sse-abort-smoke)
+      RUN_AGENT_SSE_ABORT_SMOKE=true
+      ;;
+    --strict-agent-smoke)
+      RUN_AGENT_OPPORTUNITY_SMOKE=readiness
+      RUN_AGENT_20_TURN_MEMORY_SMOKE=true
+      RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true
+      RUN_AGENT_SSE_ABORT_SMOKE=true
+      ;;
+    --strict-agent-full-smoke)
+      RUN_AGENT_OPPORTUNITY_SMOKE=true
+      RUN_AGENT_20_TURN_MEMORY_SMOKE=true
+      RUN_AGENT_EMPTY_CANDIDATE_SMOKE=true
       RUN_AGENT_SSE_ABORT_SMOKE=true
       ;;
     --build)

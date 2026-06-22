@@ -120,6 +120,7 @@ describe('SocialAgentDraftPublicationService', () => {
       taskId: 101,
       socialRequestId: 301,
       publicIntentId: 'social_request_301',
+      discoverHref: '/public-intent/social_request_301',
       status: 'published',
       taskStatus: AgentTaskStatus.Succeeded,
       synced: true,
@@ -131,6 +132,7 @@ describe('SocialAgentDraftPublicationService', () => {
       publishSocialRequest: {
         socialRequestId: 301,
         publicIntentId: 'social_request_301',
+        discoverHref: '/public-intent/social_request_301',
         status: 'published',
         synced: true,
       },
@@ -140,6 +142,7 @@ describe('SocialAgentDraftPublicationService', () => {
         publishedSocialRequestId: 301,
         socialRequestId: 301,
         publicIntentId: 'social_request_301',
+        discoverHref: '/public-intent/social_request_301',
         publishStatus: 'published',
       },
     });

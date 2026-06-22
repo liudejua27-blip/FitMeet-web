@@ -575,16 +575,38 @@ export class SocialAgentChatController {
               text: body?.goal,
             });
           }
-          write(payload.type, payload);
           if (payload.type === 'assistant_delta') {
+            const messageId = this.legacyAssistantMessageId({
+              messageId: payload.messageId,
+              taskId: taskBoundInitialTraceTaskId ?? body?.taskId ?? null,
+              runId,
+            });
+            write('assistant_delta', {
+              ...payload,
+              messageId,
+            });
             await this.writeSocialCodexAssistantDelta({
               socialCodexEvents,
               v2,
               delta: payload.delta,
-              messageId: payload.messageId,
+              messageId,
               source: payload.source,
             });
+            return;
           }
+          if (payload.type === 'assistant_done') {
+            const messageId = this.legacyAssistantMessageId({
+              messageId: payload.messageId,
+              taskId: taskBoundInitialTraceTaskId ?? body?.taskId ?? null,
+              runId,
+            });
+            write('assistant_done', {
+              ...payload,
+              messageId,
+            });
+            return;
+          }
+          write(payload.type, payload);
           if (payload.type === 'step') {
             await socialCodexEvents.writeStep(v2, payload.step);
           }
@@ -833,11 +855,16 @@ export class SocialAgentChatController {
 
           if (payload.type === 'assistant_delta') {
             if (payload.delta.trim()) hasAssistantDelta = true;
-            if (payload.messageId) streamedAssistantMessageId = payload.messageId;
+            const messageId = this.legacyAssistantMessageId({
+              messageId: payload.messageId,
+              taskId: taskBoundInitialTraceTaskId ?? body?.taskId ?? null,
+              runId,
+            });
+            streamedAssistantMessageId = messageId;
             write('assistant_delta', {
               type: 'assistant_delta',
               lifecycle: 'analyzing_intent',
-              messageId: payload.messageId,
+              messageId,
               delta: payload.delta,
               source: payload.source ?? 'llm',
             });
@@ -845,7 +872,7 @@ export class SocialAgentChatController {
               socialCodexEvents,
               v2,
               delta: payload.delta,
-              messageId: payload.messageId,
+              messageId,
               source: payload.source,
             });
             return;
@@ -853,11 +880,16 @@ export class SocialAgentChatController {
 
           if (payload.type === 'assistant_done') {
             if (hasAssistantDone) return;
-            if (payload.messageId) streamedAssistantMessageId = payload.messageId;
+            const messageId = this.legacyAssistantMessageId({
+              messageId: payload.messageId ?? streamedAssistantMessageId,
+              taskId: taskBoundInitialTraceTaskId ?? body?.taskId ?? null,
+              runId,
+            });
+            streamedAssistantMessageId = messageId;
             write('assistant_done', {
               type: 'assistant_done',
               lifecycle: 'completed',
-              messageId: payload.messageId,
+              messageId,
               source: payload.source ?? 'llm',
             });
             hasAssistantDone = true;
@@ -981,11 +1013,16 @@ export class SocialAgentChatController {
         (payload) => {
           if (payload.type === 'assistant_delta') {
             if (payload.delta.trim()) hasAssistantDelta = true;
-            if (payload.messageId) streamedAssistantMessageId = payload.messageId;
+            const messageId = this.legacyAssistantMessageId({
+              messageId: payload.messageId,
+              taskId: taskBoundInitialTraceTaskId ?? body.taskId ?? null,
+              runId,
+            });
+            streamedAssistantMessageId = messageId;
             write('assistant_delta', {
               type: 'assistant_delta',
               lifecycle: 'analyzing_intent',
-              messageId: payload.messageId,
+              messageId,
               delta: payload.delta,
               source: payload.source ?? 'llm',
             });
@@ -993,16 +1030,21 @@ export class SocialAgentChatController {
               socialCodexEvents,
               v2,
               delta: payload.delta,
-              messageId: payload.messageId,
+              messageId,
               source: payload.source,
             });
           }
           if (payload.type === 'assistant_done') {
-            if (payload.messageId) streamedAssistantMessageId = payload.messageId;
+            const messageId = this.legacyAssistantMessageId({
+              messageId: payload.messageId ?? streamedAssistantMessageId,
+              taskId: taskBoundInitialTraceTaskId ?? body.taskId ?? null,
+              runId,
+            });
+            streamedAssistantMessageId = messageId;
             write('assistant_done', {
               type: 'assistant_done',
               lifecycle: 'completed',
-              messageId: payload.messageId,
+              messageId,
               source: payload.source ?? 'llm',
             });
           }
@@ -1215,11 +1257,16 @@ export class SocialAgentChatController {
         (payload) => {
           if (payload.type === 'assistant_delta') {
             if (payload.delta.trim()) hasAssistantDelta = true;
-            if (payload.messageId) streamedAssistantMessageId = payload.messageId;
+            const messageId = this.legacyAssistantMessageId({
+              messageId: payload.messageId,
+              taskId,
+              runId,
+            });
+            streamedAssistantMessageId = messageId;
             write('assistant_delta', {
               type: 'assistant_delta',
               lifecycle: 'analyzing_intent',
-              messageId: payload.messageId,
+              messageId,
               delta: payload.delta,
               source: payload.source ?? 'llm',
             });
@@ -1227,16 +1274,21 @@ export class SocialAgentChatController {
               socialCodexEvents,
               v2,
               delta: payload.delta,
-              messageId: payload.messageId,
+              messageId,
               source: payload.source,
             });
           }
           if (payload.type === 'assistant_done') {
-            if (payload.messageId) streamedAssistantMessageId = payload.messageId;
+            const messageId = this.legacyAssistantMessageId({
+              messageId: payload.messageId ?? streamedAssistantMessageId,
+              taskId,
+              runId,
+            });
+            streamedAssistantMessageId = messageId;
             write('assistant_done', {
               type: 'assistant_done',
               lifecycle: 'completed',
-              messageId: payload.messageId,
+              messageId,
               source: payload.source ?? 'llm',
             });
           }
@@ -1806,6 +1858,20 @@ export class SocialAgentChatController {
     if (typeof value === 'number' && Number.isFinite(value))
       return String(value);
     return 'new';
+  }
+
+  private legacyAssistantMessageId(input: {
+    messageId?: string | null;
+    taskId?: number | string | null;
+    runId: string;
+  }): string {
+    const raw = cleanDisplayText(input.messageId, '').trim();
+    if (raw && raw.includes(input.runId)) return raw;
+    return buildRunScopedAssistantMessageId({
+      taskId: input.taskId ?? null,
+      runId: input.runId,
+      fallback: raw || null,
+    });
   }
 
   private async writeFallbackAssistantText(

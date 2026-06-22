@@ -92,6 +92,7 @@ export class SocialAgentDraftPublicationService {
       : {};
     const publicIntentId =
       cleanDisplayText(output.publicIntentId ?? publicIntent.id, '') || null;
+    const discoverHref = this.discoverHref(publicIntentId, socialRequestId);
     const socialRequest = this.isRecord(output.socialRequest)
       ? output.socialRequest
       : output;
@@ -103,6 +104,7 @@ export class SocialAgentDraftPublicationService {
       {
         socialRequestId,
         publicIntentId,
+        discoverHref,
         status: 'published',
         toolName: SocialAgentToolName.CreateSocialRequest,
         toolCallId: publishAction.id,
@@ -117,6 +119,7 @@ export class SocialAgentDraftPublicationService {
     rememberSocialAgentShortTerm(task, {
       publishedSocialRequestId: socialRequestId,
       publicIntentId,
+      discoverHref,
       socialRequestId,
       publishStatus: 'published',
     });
@@ -128,6 +131,7 @@ export class SocialAgentDraftPublicationService {
       publishSocialRequest: {
         socialRequestId,
         publicIntentId,
+        discoverHref,
         status: 'published',
         synced: true,
         toolCallId: publishAction.id,
@@ -141,6 +145,7 @@ export class SocialAgentDraftPublicationService {
       taskId,
       socialRequestId,
       publicIntentId,
+      discoverHref,
       status: 'published',
       taskStatus: task.status,
       synced: true,
@@ -223,5 +228,15 @@ export class SocialAgentDraftPublicationService {
   private number(value: unknown): number | null {
     const num = Number(value);
     return Number.isFinite(num) && num > 0 ? num : null;
+  }
+
+  private discoverHref(
+    publicIntentId: string | null,
+    socialRequestId: number,
+  ): string {
+    if (publicIntentId) {
+      return `/public-intent/${encodeURIComponent(publicIntentId)}`;
+    }
+    return `/social-request/${encodeURIComponent(String(socialRequestId))}`;
   }
 }
