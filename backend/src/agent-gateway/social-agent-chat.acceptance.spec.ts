@@ -1623,11 +1623,15 @@ describe('SocialAgentChat acceptance flow', () => {
     const confirmOpenerAction = opener.cards?.[0]?.actions?.find(
       (action) => action.schemaAction === 'opener.confirm_send',
     );
-    const openerApproval = await service.performCardAction(7, search.taskId as number, {
-      action: 'opener.confirm_send',
-      idempotencyKey: 'friendship-main-chain-confirm-1',
-      payload: confirmOpenerAction?.payload ?? {},
-    });
+    const openerApproval = await service.performCardAction(
+      7,
+      search.taskId as number,
+      {
+        action: 'opener.confirm_send',
+        idempotencyKey: 'friendship-main-chain-confirm-1',
+        payload: confirmOpenerAction?.payload ?? {},
+      },
+    );
 
     expect(openerApproval).toMatchObject({
       intent: 'action_request',
@@ -1650,14 +1654,18 @@ describe('SocialAgentChat acceptance flow', () => {
       ],
     });
 
-    const confirmed = await service.performCardAction(7, search.taskId as number, {
-      action: 'opener.confirm_send',
-      idempotencyKey: 'friendship-main-chain-confirm-1',
-      payload: {
-        taskId: search.taskId,
-        approvalId: 9001,
+    const confirmed = await service.performCardAction(
+      7,
+      search.taskId as number,
+      {
+        action: 'opener.confirm_send',
+        idempotencyKey: 'friendship-main-chain-confirm-1',
+        payload: {
+          taskId: search.taskId,
+          approvalId: 9001,
+        },
       },
-    });
+    );
 
     expect(approvals.approve).toHaveBeenCalledWith(9001, 7);
     expect(executor.executeToolAction).toHaveBeenCalledWith(
@@ -1679,7 +1687,8 @@ describe('SocialAgentChat acceptance flow', () => {
       { signal: null },
     );
     expect(approvals.approve.mock.invocationCallOrder[0]).toBeLessThan(
-      executor.executeToolAction.mock.invocationCallOrder.at(-1) ?? Number.MAX_SAFE_INTEGER,
+      executor.executeToolAction.mock.invocationCallOrder.at(-1) ??
+        Number.MAX_SAFE_INTEGER,
     );
     expect(confirmed).toMatchObject({
       action: 'reply',
@@ -2099,6 +2108,77 @@ describe('SocialAgentChat acceptance flow', () => {
     ]);
   });
 
+  it('keeps a publishable opportunity card when the first social turn asks to publish to Discover', async () => {
+    const { service, executor, taskRepo } = makeHarness();
+    const goal =
+      '我想今天晚上在青岛大学附近散步，帮我生成并发布一张约练卡到发现，只公开模糊地点。';
+
+    const result = await service.run(7, {
+      goal,
+      permissionMode: AgentTaskPermissionMode.Confirm,
+    });
+
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.CreateSocialRequest,
+      expect.objectContaining({
+        visibility: SocialRequestVisibility.Private,
+        status: UserSocialRequestStatus.Draft,
+        requireUserConfirmation: true,
+      }),
+      7,
+      { signal: null },
+    );
+    expect(executor.executeToolAction).toHaveBeenCalledWith(
+      101,
+      SocialAgentToolName.SearchMatches,
+      expect.objectContaining({ socialRequestId: 301, limit: 10 }),
+      7,
+      { signal: null },
+    );
+
+    const publishCard = (result.cards ?? []).find(
+      (card) => card.type === 'activity_plan',
+    );
+    const candidateCards = (result.cards ?? []).filter(
+      (card) => card.type === 'candidate_card',
+    );
+
+    expect(candidateCards).toHaveLength(1);
+    expect(publishCard).toMatchObject({
+      type: 'activity_plan',
+      schemaVersion: 'fitmeet.tool-ui.v1',
+      schemaType: 'social_match.activity',
+      data: expect.objectContaining({
+        schemaName: 'OpportunityCard',
+        opportunityCard: true,
+        socialRequestId: 301,
+        publicIntentId: 'social_request_301',
+        discoverHref: '/public-intent/social_request_301',
+      }),
+      actions: expect.arrayContaining([
+        expect.objectContaining({
+          label: '发布到发现',
+          action: 'publish_to_discover',
+          schemaAction: 'publish_to_discover',
+          requiresConfirmation: true,
+        }),
+        expect.objectContaining({
+          label: '暂不发布',
+          action: 'activity.skip_publish',
+          schemaAction: 'activity.skip_publish',
+          requiresConfirmation: false,
+        }),
+      ]),
+    });
+    const finalSavedTask = taskRepo.save.mock.calls.at(-1)?.[0] as AgentTask;
+    expect(finalSavedTask.memory.shortTerm).toMatchObject({
+      currentGoal: goal,
+      socialRequestId: 301,
+      currentStatus: AgentTaskStatus.AwaitingConfirmation,
+    });
+  });
+
   it('keeps every recalled candidate in memory while showing only three opportunity cards', async () => {
     const alphaAgentSdk = new FitMeetAlphaAgentSdkService({
       get: jest.fn((key: string) =>
@@ -2149,6 +2229,12 @@ describe('SocialAgentChat acceptance flow', () => {
     const opportunityCards = (result.cards ?? []).filter(
       (card) => card.data?.['opportunityCard'] === true,
     );
+    const candidateOpportunityCards = opportunityCards.filter(
+      (card) => card.type === 'candidate_card',
+    );
+    const activityPlanCard = opportunityCards.find(
+      (card) => card.type === 'activity_plan',
+    );
     const finalSavedTask = taskRepo.save.mock.calls.at(-1)?.[0] as AgentTask;
     const shortTermMemory = finalSavedTask.memory.shortTerm as {
       candidates?: Array<Record<string, unknown>>;
@@ -2193,19 +2279,31 @@ describe('SocialAgentChat acceptance flow', () => {
       7,
       { signal: null },
     );
-    expect(opportunityCards).toHaveLength(3);
-    expect(opportunityCards.map((card) => card.type)).toEqual([
+    expect(opportunityCards).toHaveLength(4);
+    expect(candidateOpportunityCards).toHaveLength(3);
+    expect(candidateOpportunityCards.map((card) => card.type)).toEqual([
       'candidate_card',
       'candidate_card',
       'candidate_card',
     ]);
-    expect(opportunityCards.map((card) => card.data?.['displayName'])).toEqual([
-      '小林',
-      '阿森',
-      '小周',
-    ]);
+    expect(activityPlanCard).toMatchObject({
+      type: 'activity_plan',
+      actions: expect.arrayContaining([
+        expect.objectContaining({
+          schemaAction: 'publish_to_discover',
+          requiresConfirmation: true,
+        }),
+        expect.objectContaining({
+          schemaAction: 'activity.skip_publish',
+          requiresConfirmation: false,
+        }),
+      ]),
+    });
     expect(
-      opportunityCards.every(
+      candidateOpportunityCards.map((card) => card.data?.['displayName']),
+    ).toEqual(['小林', '阿森', '小周']);
+    expect(
+      candidateOpportunityCards.every(
         (card) =>
           card.schemaVersion === 'fitmeet.tool-ui.v1' &&
           card.schemaType === 'social_match.candidate' &&
@@ -2213,7 +2311,8 @@ describe('SocialAgentChat acceptance flow', () => {
           card.data?.['opportunityCard'] === true,
       ),
     ).toBe(true);
-    const cardReadinessIssues = opportunityCards.flatMap((card, index) => {
+    const cardReadinessIssues = candidateOpportunityCards.flatMap(
+      (card, index) => {
         const opportunity = card.data?.['opportunity'] as
           | Record<string, unknown>
           | undefined;
@@ -2222,30 +2321,48 @@ describe('SocialAgentChat acceptance flow', () => {
         const discoverySafetySignals = opportunity?.['discoverySafetySignals'];
         const recommendationProtocol = opportunity?.['recommendationProtocol'];
         const reasons = opportunity?.['reasons'];
-        const recommendationConsent = card.data?.[
-          'recommendationConsent'
-        ] as Record<string, unknown> | undefined;
+        const recommendationConsent = card.data?.['recommendationConsent'] as
+          | Record<string, unknown>
+          | undefined;
         const coldStartSignals = card.data?.['coldStartSignals'];
         const issues: string[] = [];
         const prefix = `card-${index + 1}`;
-        if (typeof opportunity?.['summary'] !== 'string') issues.push(`${prefix}:summary`);
-        if (typeof opportunity?.['safetyBoundary'] !== 'string') issues.push(`${prefix}:safetyBoundary`);
-        if (typeof opportunity?.['recommendedNextAction'] !== 'string') issues.push(`${prefix}:recommendedNextAction`);
-        if (typeof opportunity?.['suggestedOpener'] !== 'string') issues.push(`${prefix}:opportunitySuggestedOpener`);
-        if (typeof card.data?.['suggestedOpener'] !== 'string') issues.push(`${prefix}:dataSuggestedOpener`);
-        if (typeof card.data?.['invitePolicy'] !== 'string') issues.push(`${prefix}:invitePolicy`);
-        if (recommendationConsent?.['profileDiscoverable'] !== true) issues.push(`${prefix}:profileDiscoverable`);
-        if (recommendationConsent?.['agentCanRecommendMe'] !== true) issues.push(`${prefix}:agentCanRecommendMe`);
-        if (typeof recommendationConsent?.['sourceLabel'] !== 'string') issues.push(`${prefix}:sourceLabel`);
-        if (!String(recommendationConsent?.['privacyLabel']).includes('脱敏')) issues.push(`${prefix}:privacyLabel`);
-        if (typeof recommendationConsent?.['strangerPolicyLabel'] !== 'string') issues.push(`${prefix}:strangerPolicyLabel`);
+        if (typeof opportunity?.['summary'] !== 'string')
+          issues.push(`${prefix}:summary`);
+        if (typeof opportunity?.['safetyBoundary'] !== 'string')
+          issues.push(`${prefix}:safetyBoundary`);
+        if (typeof opportunity?.['recommendedNextAction'] !== 'string')
+          issues.push(`${prefix}:recommendedNextAction`);
+        if (typeof opportunity?.['suggestedOpener'] !== 'string')
+          issues.push(`${prefix}:opportunitySuggestedOpener`);
+        if (typeof card.data?.['suggestedOpener'] !== 'string')
+          issues.push(`${prefix}:dataSuggestedOpener`);
+        if (typeof card.data?.['invitePolicy'] !== 'string')
+          issues.push(`${prefix}:invitePolicy`);
+        if (recommendationConsent?.['profileDiscoverable'] !== true)
+          issues.push(`${prefix}:profileDiscoverable`);
+        if (recommendationConsent?.['agentCanRecommendMe'] !== true)
+          issues.push(`${prefix}:agentCanRecommendMe`);
+        if (typeof recommendationConsent?.['sourceLabel'] !== 'string')
+          issues.push(`${prefix}:sourceLabel`);
+        if (!String(recommendationConsent?.['privacyLabel']).includes('脱敏'))
+          issues.push(`${prefix}:privacyLabel`);
+        if (typeof recommendationConsent?.['strangerPolicyLabel'] !== 'string')
+          issues.push(`${prefix}:strangerPolicyLabel`);
         const hasEnoughColdStartSignals =
           Array.isArray(coldStartSignals) && coldStartSignals.length >= 2;
-        if (!hasEnoughColdStartSignals) issues.push(`${prefix}:coldStartSignals`);
-        if (!Array.isArray(discoverySafetySignals) || discoverySafetySignals.length < 3) issues.push(`${prefix}:discoverySafetySignals`);
+        if (!hasEnoughColdStartSignals)
+          issues.push(`${prefix}:coldStartSignals`);
         if (
           !Array.isArray(discoverySafetySignals) ||
-          !discoverySafetySignals.some((signal) => String(signal).includes('脱敏'))
+          discoverySafetySignals.length < 3
+        )
+          issues.push(`${prefix}:discoverySafetySignals`);
+        if (
+          !Array.isArray(discoverySafetySignals) ||
+          !discoverySafetySignals.some((signal) =>
+            String(signal).includes('脱敏'),
+          )
         ) {
           issues.push(`${prefix}:discoverySafetyPrivacy`);
         }
@@ -2256,13 +2373,17 @@ describe('SocialAgentChat acceptance flow', () => {
               typeof item === 'object' &&
               item !== null &&
               (item as Record<string, unknown>)['key'] === 'approval' &&
-              String((item as Record<string, unknown>)['detail']).includes('确认'),
+              String((item as Record<string, unknown>)['detail']).includes(
+                '确认',
+              ),
           )
         ) {
           issues.push(`${prefix}:recommendationProtocolApproval`);
         }
-        if (!Array.isArray(reasons) || reasons.length < 1) issues.push(`${prefix}:reasons`);
-        if (!Array.isArray(confirmedContext) || confirmedContext.length < 3) issues.push(`${prefix}:confirmedContext`);
+        if (!Array.isArray(reasons) || reasons.length < 1)
+          issues.push(`${prefix}:reasons`);
+        if (!Array.isArray(confirmedContext) || confirmedContext.length < 3)
+          issues.push(`${prefix}:confirmedContext`);
         if (
           !Array.isArray(explanationSteps) ||
           !explanationSteps.some((step) => String(step).startsWith('安全：'))
@@ -2270,10 +2391,11 @@ describe('SocialAgentChat acceptance flow', () => {
           issues.push(`${prefix}:safetyExplanation`);
         }
         return issues;
-      });
+      },
+    );
     expect(cardReadinessIssues).toEqual([]);
     expect(
-      opportunityCards.every((card) => {
+      candidateOpportunityCards.every((card) => {
         const schemaActions = card.actions.map((action) => action.schemaAction);
         return (
           schemaActions.includes('candidate.view_detail') &&
@@ -2284,7 +2406,7 @@ describe('SocialAgentChat acceptance flow', () => {
       }),
     ).toBe(true);
     expect(
-      opportunityCards.every((card) =>
+      candidateOpportunityCards.every((card) =>
         card.actions.some(
           (action) =>
             action.schemaAction === 'candidate.connect' &&
@@ -2421,12 +2543,15 @@ describe('SocialAgentChat acceptance flow', () => {
                 safetyBadges: ['公共场所', '不共享精确位置', '确认后创建'],
                 recommendedNextAction: '确认后我再创建约练，不会自动公开发布。',
                 safetyBoundary: '不共享精确位置，第一次只选公共场所。',
-                publishPolicy: '默认不公开发布；如果需要公开发起，我会单独征得你确认。',
+                publishPolicy:
+                  '默认不公开发布；如果需要公开发起，我会单独征得你确认。',
                 approvalPolicy: '创建约练前必须由你确认时间、地点和参与边界。',
-                meetLoopNextStep: '确认后进入“等待回复/确认到达/评价回写”的约练闭环。',
+                meetLoopNextStep:
+                  '确认后进入“等待回复/确认到达/评价回写”的约练闭环。',
                 checkinReminder: '活动开始前我会提醒你确认是否到达。',
                 reviewPrompt: '活动结束后我会请你做一次简短评价。',
-                lifeGraphUpdatePreview: '完成后会更新你对周末轻运动社交的偏好。',
+                lifeGraphUpdatePreview:
+                  '完成后会更新你对周末轻运动社交的偏好。',
                 trustScoreUpdatePreview:
                   '完成和评价会写入 trust score，用于后续推荐可信度。',
                 activityProtocol: [
@@ -2443,7 +2568,8 @@ describe('SocialAgentChat acceptance flow', () => {
                   {
                     key: 'publish',
                     label: '公开边界',
-                    detail: '默认不公开发布；如果需要公开发起，我会单独征得你确认。',
+                    detail:
+                      '默认不公开发布；如果需要公开发起，我会单独征得你确认。',
                   },
                   {
                     key: 'recovery',
@@ -2459,9 +2585,11 @@ describe('SocialAgentChat acceptance flow', () => {
               participants: '你和小林',
               publicPlaceOnly: true,
               noPreciseLocation: true,
-              publishPolicy: '默认不公开发布；如果需要公开发起，我会单独征得你确认。',
+              publishPolicy:
+                '默认不公开发布；如果需要公开发起，我会单独征得你确认。',
               approvalPolicy: '创建约练前必须由你确认时间、地点和参与边界。',
-              meetLoopNextStep: '确认后进入“等待回复/确认到达/评价回写”的约练闭环。',
+              meetLoopNextStep:
+                '确认后进入“等待回复/确认到达/评价回写”的约练闭环。',
               activityProtocol: [
                 {
                   key: 'public_place',
@@ -2476,7 +2604,8 @@ describe('SocialAgentChat acceptance flow', () => {
                 {
                   key: 'publish',
                   label: '公开边界',
-                  detail: '默认不公开发布；如果需要公开发起，我会单独征得你确认。',
+                  detail:
+                    '默认不公开发布；如果需要公开发起，我会单独征得你确认。',
                 },
                 {
                   key: 'recovery',
@@ -3112,7 +3241,9 @@ describe('SocialAgentChat acceptance flow', () => {
       expect(memory.lastUserMessages).toHaveLength(25);
       expect(memory.lastUserMessages[0]?.text).toContain('第 1 轮');
       expect(memory.lastUserMessages.at(-1)?.text).toContain('第 25 轮');
-      expect(memory.lastUserMessages.every((turn) => turn.intent === 'casual_chat')).toBe(true);
+      expect(
+        memory.lastUserMessages.every((turn) => turn.intent === 'casual_chat'),
+      ).toBe(true);
       expect(executor.executeToolAction).not.toHaveBeenCalled();
     });
 
@@ -4367,7 +4498,10 @@ describe('SocialAgentChat acceptance flow', () => {
           eventType: LifeGraphBehaviorEventType.ActivityCreated,
         }),
       };
-      const { service, taskRepo, approvals } = makeHarness({ activities, lifeGraph });
+      const { service, taskRepo, approvals } = makeHarness({
+        activities,
+        lifeGraph,
+      });
       await taskRepo.save(makeTask());
 
       const draft = await service.performCardAction(7, 101, {
