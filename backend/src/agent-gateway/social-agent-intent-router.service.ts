@@ -795,7 +795,9 @@ export class SocialAgentIntentRouterService {
     });
     const cacheTtlMs = this.intentRouterCacheTtlMs();
     const cached =
-      cacheTtlMs > 0 ? (this.llmOutputCache?.get(cacheKey) ?? null) : null;
+      cacheTtlMs > 0
+        ? ((await this.llmOutputCache?.getAsync(cacheKey)) ?? null)
+        : null;
     const cacheFingerprint = readSocialAgentExactCacheKeyFingerprint(cacheKey);
     this.metrics?.recordLlmOutputCache?.({
       cacheName: 'intent_router_exact',
@@ -825,7 +827,7 @@ export class SocialAgentIntentRouterService {
       const parsed = JSON.parse(content) as Record<string, unknown>;
       const result = normalizeDeepSeekIntentRouterResult(parsed, fallback);
       if (cacheTtlMs > 0) {
-        this.llmOutputCache?.set(cacheKey, content, {
+        await this.llmOutputCache?.setAsync(cacheKey, content, {
           ttlMs: cacheTtlMs,
           approxPromptChars: this.approxChars(messages),
         });
@@ -854,7 +856,7 @@ export class SocialAgentIntentRouterService {
       const parsed = JSON.parse(content) as Record<string, unknown>;
       const result = normalizeDeepSeekIntentRouterResult(parsed, fallback);
       if (cacheTtlMs > 0) {
-        this.llmOutputCache?.set(cacheKey, content, {
+        await this.llmOutputCache?.setAsync(cacheKey, content, {
           ttlMs: cacheTtlMs,
           approxPromptChars: this.approxChars(messages),
         });

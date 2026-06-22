@@ -581,7 +581,9 @@ export class SocialAgentBrainService {
     });
     const cacheTtlMs = this.brainPlannerCacheTtlMs();
     const cached =
-      cacheTtlMs > 0 ? this.llmOutputCacheService().get(cacheKey) : null;
+      cacheTtlMs > 0
+        ? await this.llmOutputCacheService().getAsync(cacheKey)
+        : null;
     const cacheFingerprint = readSocialAgentExactCacheKeyFingerprint(cacheKey);
     if (cacheTtlMs > 0) {
       this.metrics?.recordLlmOutputCache?.({
@@ -613,7 +615,7 @@ export class SocialAgentBrainService {
         JSON.parse(content) as Record<string, unknown>,
       );
       if (cacheTtlMs > 0) {
-        this.llmOutputCacheService().set(cacheKey, content, {
+        await this.llmOutputCacheService().setAsync(cacheKey, content, {
           ttlMs: cacheTtlMs,
           approxPromptChars: this.approxChars(messages),
         });
@@ -643,7 +645,7 @@ export class SocialAgentBrainService {
         JSON.parse(content) as Record<string, unknown>,
       );
       if (cacheTtlMs > 0) {
-        this.llmOutputCacheService().set(cacheKey, content, {
+        await this.llmOutputCacheService().setAsync(cacheKey, content, {
           ttlMs: cacheTtlMs,
           approxPromptChars: this.approxChars(messages),
         });

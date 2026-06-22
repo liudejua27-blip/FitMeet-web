@@ -164,7 +164,7 @@ export class SocialAgentChatLlmService {
     });
     const cacheTtlMs = this.profileExtractionCacheTtlMs();
     if (cacheTtlMs > 0) {
-      const cached = this.profileExtractionCache().get(cacheKey);
+      const cached = await this.profileExtractionCache().getAsync(cacheKey);
       const cacheFingerprint = readSocialAgentExactCacheKeyFingerprint(cacheKey);
       this.metrics.recordLlmOutputCache?.({
         cacheName: 'profile_extraction_exact',
@@ -190,7 +190,7 @@ export class SocialAgentChatLlmService {
       if (!content) return {};
       const extracted = parseSocialAgentProfileExtractionContent(content);
       if (cacheTtlMs > 0) {
-        this.profileExtractionCache().set(cacheKey, content, {
+        await this.profileExtractionCache().setAsync(cacheKey, content, {
           ttlMs: cacheTtlMs,
           approxPromptChars: this.approxChars(messages),
         });

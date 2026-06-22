@@ -226,7 +226,7 @@ export class SocialAgentFinalResponseService {
     });
     const outputCacheTtlMs = this.llmOutputCacheTtlMs();
     if (outputCacheTtlMs > 0) {
-      const cached = this.llmOutputCacheService().get(outputCacheKey);
+      const cached = await this.llmOutputCacheService().getAsync(outputCacheKey);
       this.metrics?.recordLlmOutputCache({
         cacheName: 'final_response_exact',
         hit: cached !== null,
@@ -305,7 +305,7 @@ export class SocialAgentFinalResponseService {
           timeoutMs: this.timeoutMs(useCase),
           traceId: input.traceId ?? null,
         });
-        this.writeLlmOutputCache(
+        await this.writeLlmOutputCache(
           outputCacheKey,
           answer,
           outputCacheTtlMs,
@@ -358,7 +358,7 @@ export class SocialAgentFinalResponseService {
         : ((await response.json()) as Record<string, unknown>);
       const answer =
         streamResult?.content ?? this.readContent(jsonPayload ?? {});
-      this.writeLlmOutputCache(
+      await this.writeLlmOutputCache(
         outputCacheKey,
         answer,
         outputCacheTtlMs,
@@ -708,15 +708,15 @@ export class SocialAgentFinalResponseService {
     ].join('|');
   }
 
-  private writeLlmOutputCache(
+  private async writeLlmOutputCache(
     key: string,
     answer: string | null,
     ttlMs: number,
     approxPromptChars: number,
-  ): void {
+  ): Promise<void> {
     const text = cleanDisplayText(answer, '').trim();
     if (!text || ttlMs <= 0) return;
-    this.llmOutputCacheService().set(key, text, {
+    await this.llmOutputCacheService().setAsync(key, text, {
       ttlMs,
       approxPromptChars,
     });

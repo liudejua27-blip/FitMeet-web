@@ -41,4 +41,46 @@ describe('SocialAgentLlmOutputCacheService', () => {
       size: 0,
     });
   });
+
+  it('shares exact LLM answers through Redis when distributed cache is enabled', async () => {
+    const redisStore = new Map<string, string>();
+    const redis = {
+      get: jest.fn(async (key: string) => redisStore.get(key) ?? null),
+      setex: jest.fn(async (key: string, _ttl: number, value: string) => {
+        redisStore.set(key, value);
+        return 'OK';
+      }),
+    };
+    const config = {
+      get: jest.fn((key: string) =>
+        key === 'SOCIAL_AGENT_CACHE_BACKEND' ? 'redis' : undefined,
+      ),
+    };
+    const redisService = { getClient: jest.fn(() => redis) };
+    const writer = new SocialAgentLlmOutputCacheService(
+      config as never,
+      redisService as never,
+    );
+    const reader = new SocialAgentLlmOutputCacheService(
+      config as never,
+      redisService as never,
+    );
+
+    await writer.setAsync('planner:prompt', '共享计划', {
+      ttlMs: 1500,
+      approxPromptChars: 4096,
+    });
+
+    await expect(reader.getAsync('planner:prompt')).resolves.toBe('共享计划');
+    expect(redis.setex).toHaveBeenCalledWith(
+      expect.stringMatching(/^fitmeet:social-agent:llm-output-cache:/),
+      2,
+      expect.stringContaining('"answer":"共享计划"'),
+    );
+    expect(reader.stats()).toMatchObject({
+      misses: 1,
+      distributedHits: 1,
+      savedApproxPromptChars: 4096,
+    });
+  });
 });

@@ -106,7 +106,9 @@ export class SocialAgentToolJsonModelService {
     });
     const cacheTtlMs = this.toolJsonCacheTtlMs();
     const cached =
-      cacheTtlMs > 0 ? this.llmOutputCacheService().get(cacheKey) : null;
+      cacheTtlMs > 0
+        ? await this.llmOutputCacheService().getAsync(cacheKey)
+        : null;
     const cacheFingerprint = readSocialAgentExactCacheKeyFingerprint(cacheKey);
     if (cacheTtlMs > 0) {
       this.metrics?.recordLlmOutputCache?.({
@@ -168,7 +170,7 @@ export class SocialAgentToolJsonModelService {
         if (!content?.trim()) throw new Error('DeepSeek returned empty JSON');
         const parsed = parseSocialAgentJsonObject(content);
         if (cacheTtlMs > 0) {
-          this.llmOutputCacheService().set(cacheKey, content, {
+          await this.llmOutputCacheService().setAsync(cacheKey, content, {
             ttlMs: cacheTtlMs,
             approxPromptChars: this.approxChars(messages),
           });

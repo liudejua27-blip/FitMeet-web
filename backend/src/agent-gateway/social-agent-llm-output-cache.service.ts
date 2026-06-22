@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { createHash } from 'crypto';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type Redis from 'ioredis';
+import { RedisService } from '../redis/redis.service';
 
 export type SocialAgentLlmOutputCacheStats = {
   hits: number;
@@ -7,6 +11,10 @@ export type SocialAgentLlmOutputCacheStats = {
   evictions: number;
   size: number;
   savedApproxPromptChars: number;
+  distributedHits: number;
+  distributedMisses: number;
+  distributedWrites: number;
+  distributedErrors: number;
 };
 
 type CacheEntry = {
@@ -21,17 +29,34 @@ type CacheOptions = {
   approxPromptChars?: number;
 };
 
+type DistributedCacheEntry = {
+  answer: string;
+  approxChars: number;
+  createdAt: string;
+};
+
 const DEFAULT_TTL_MS = 60_000;
 const DEFAULT_MAX_ENTRIES = 128;
+const REDIS_KEY_PREFIX = 'fitmeet:social-agent:llm-output-cache';
 
 @Injectable()
 export class SocialAgentLlmOutputCacheService {
+  private readonly logger = new Logger(SocialAgentLlmOutputCacheService.name);
   private readonly entries = new Map<string, CacheEntry>();
   private hits = 0;
   private misses = 0;
   private writes = 0;
   private evictions = 0;
   private savedApproxPromptChars = 0;
+  private distributedHits = 0;
+  private distributedMisses = 0;
+  private distributedWrites = 0;
+  private distributedErrors = 0;
+
+  constructor(
+    @Optional() private readonly configService?: ConfigService,
+    @Optional() private readonly redisService?: RedisService,
+  ) {}
 
   get(key: string): string | null {
     const now = Date.now();
@@ -49,6 +74,21 @@ export class SocialAgentLlmOutputCacheService {
     this.hits += 1;
     this.savedApproxPromptChars += entry.approxChars;
     return entry.answer;
+  }
+
+  async getAsync(key: string): Promise<string | null> {
+    const cached = this.get(key);
+    if (cached !== null) return cached;
+    if (!this.distributedCacheEnabled()) return null;
+
+    const distributed = await this.readDistributed(key);
+    if (!distributed) return null;
+    this.set(key, distributed.answer, {
+      ttlMs: DEFAULT_TTL_MS,
+      approxPromptChars: distributed.approxChars,
+    });
+    this.savedApproxPromptChars += distributed.approxChars;
+    return distributed.answer;
   }
 
   set(key: string, answer: string, options: CacheOptions = {}): string {
@@ -70,6 +110,22 @@ export class SocialAgentLlmOutputCacheService {
     return answer;
   }
 
+  async setAsync(
+    key: string,
+    answer: string,
+    options: CacheOptions = {},
+  ): Promise<string> {
+    const stored = this.set(key, answer, options);
+    await this.writeDistributed(key, answer, {
+      ttlMs: this.normalizeTtl(options.ttlMs),
+      approxStoredChars: this.normalizeApproxChars(
+        options.approxPromptChars,
+        answer.length,
+      ),
+    });
+    return stored;
+  }
+
   clear(): void {
     this.entries.clear();
     this.hits = 0;
@@ -77,6 +133,10 @@ export class SocialAgentLlmOutputCacheService {
     this.writes = 0;
     this.evictions = 0;
     this.savedApproxPromptChars = 0;
+    this.distributedHits = 0;
+    this.distributedMisses = 0;
+    this.distributedWrites = 0;
+    this.distributedErrors = 0;
   }
 
   stats(): SocialAgentLlmOutputCacheStats {
@@ -87,7 +147,93 @@ export class SocialAgentLlmOutputCacheService {
       evictions: this.evictions,
       size: this.entries.size,
       savedApproxPromptChars: this.savedApproxPromptChars,
+      distributedHits: this.distributedHits,
+      distributedMisses: this.distributedMisses,
+      distributedWrites: this.distributedWrites,
+      distributedErrors: this.distributedErrors,
     };
+  }
+
+  private async readDistributed(
+    key: string,
+  ): Promise<{ answer: string; approxChars: number } | null> {
+    const client = this.distributedClient();
+    if (!client) return null;
+
+    try {
+      const raw = await client.get(this.redisKey(key));
+      if (!raw) {
+        this.distributedMisses += 1;
+        return null;
+      }
+      const parsed = JSON.parse(raw) as DistributedCacheEntry;
+      if (!parsed.answer) {
+        this.distributedMisses += 1;
+        return null;
+      }
+      this.distributedHits += 1;
+      return {
+        answer: parsed.answer,
+        approxChars:
+          Number.isFinite(parsed.approxChars) && parsed.approxChars >= 0
+            ? parsed.approxChars
+            : parsed.answer.length,
+      };
+    } catch (error) {
+      this.recordDistributedError(error);
+      return null;
+    }
+  }
+
+  private async writeDistributed(
+    key: string,
+    answer: string,
+    options: { ttlMs: number; approxStoredChars: number },
+  ): Promise<void> {
+    const client = this.distributedClient();
+    if (!client) return;
+
+    try {
+      const ttlSeconds = Math.max(1, Math.ceil(options.ttlMs / 1000));
+      const entry: DistributedCacheEntry = {
+        answer,
+        approxChars: options.approxStoredChars,
+        createdAt: new Date().toISOString(),
+      };
+      await client.setex(this.redisKey(key), ttlSeconds, JSON.stringify(entry));
+      this.distributedWrites += 1;
+    } catch (error) {
+      this.recordDistributedError(error);
+    }
+  }
+
+  private distributedClient(): Pick<Redis, 'get' | 'setex'> | null {
+    if (!this.distributedCacheEnabled()) return null;
+    try {
+      return this.redisService?.getClient() ?? null;
+    } catch (error) {
+      this.recordDistributedError(error);
+      return null;
+    }
+  }
+
+  private distributedCacheEnabled(): boolean {
+    const backend = this.configService
+      ?.get<string>('SOCIAL_AGENT_CACHE_BACKEND')
+      ?.trim()
+      .toLowerCase();
+    return backend === 'redis' || backend === 'hybrid';
+  }
+
+  private redisKey(key: string): string {
+    const digest = createHash('sha256').update(key).digest('hex');
+    return `${REDIS_KEY_PREFIX}:${digest}`;
+  }
+
+  private recordDistributedError(error: unknown): void {
+    this.distributedErrors += 1;
+    const message = error instanceof Error ? error.message : String(error);
+    this.logger.debug(`Distributed LLM output cache unavailable: ${message}`);
   }
 
   private evictExpired(now = Date.now()): void {

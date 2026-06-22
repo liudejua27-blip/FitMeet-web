@@ -440,7 +440,7 @@ describe('SocialAgentToolJsonModelService', () => {
 
     await expect(pending).rejects.toThrow('client_aborted');
     expect(fallback).not.toHaveBeenCalled();
-    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('retries retryable DeepSeek HTTP failures before falling back', async () => {

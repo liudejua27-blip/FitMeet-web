@@ -1091,6 +1091,7 @@ describe('SocialAgentFinalResponseService', () => {
     });
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await jest.advanceTimersByTimeAsync(SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS - 1);
