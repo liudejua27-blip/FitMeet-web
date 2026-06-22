@@ -525,11 +525,13 @@ describe('Social Agent route branch production boundary', () => {
       'candidateActions.connectCandidateFromCardAction',
       'meetLoop.performActivityAction',
       'lifeGraphActions.performUpdateAction',
-      'handleMessage(',
     ]) {
       expect(performBody).not.toContain(directHandler);
       expect(toolBody).toContain(directHandler);
     }
+
+    expect(performBody).not.toContain('handleMessage(');
+    expect(toolBody).not.toContain('handleMessage(');
   });
 
   it('keeps approval checkpoints resumable, serializable, and side-effect safe', () => {
