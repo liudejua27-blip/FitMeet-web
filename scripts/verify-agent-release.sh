@@ -257,6 +257,7 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/social-agent-candidate-scoring.spec.ts \
   src/agent-gateway/social-agent-candidate-score-breakdown.spec.ts \
   src/agent-gateway/social-agent-candidate-pool.service.spec.ts \
+  src/agent-gateway/social-agent-user-interest-event.service.spec.ts \
   src/agent-gateway/social-agent-route-branch-boundary.spec.ts \
   src/agent-gateway/social-agent-route-agent-loop-runner.service.spec.ts \
   src/agent-gateway/fitmeet-subagent-worker-command.contract.spec.ts \
@@ -299,6 +300,7 @@ pnpm --dir "${ROOT_DIR}/frontend" exec vitest run \
   src/test/DiscoverClosure.test.ts \
   src/test/discoverContent.test.ts \
   src/test/fitmeetCoreContract.test.ts \
+  src/test/UserProfileInterestSignals.test.ts \
   src/test/socialAgentApiCheckpointStream.test.ts \
   src/test/socialAgentApiReplay.test.ts \
   src/test/socialCodexThreadId.test.ts \
