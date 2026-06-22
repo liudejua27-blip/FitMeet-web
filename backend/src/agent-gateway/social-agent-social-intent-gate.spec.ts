@@ -3,6 +3,7 @@ import {
   enforceExplicitSocialExecutionRoute,
   hasExplicitCandidateRefinementIntent,
   hasExplicitCandidateMessageConfirmationIntent,
+  hasExplicitEmptyCandidateRecoveryIntent,
   hasExistingSocialActionContext,
   hasExplicitSocialExecutionIntent,
   isConversationOnlySocialMention,
@@ -331,6 +332,22 @@ describe('social agent social intent gate', () => {
       hasExplicitCandidateMessageConfirmationIntent('可以，帮我找人'),
     ).toBe(false);
     expect(hasExplicitCandidateMessageConfirmationIntent('还不发')).toBe(false);
+  });
+
+  it('detects empty-candidate recovery instructions without treating help questions as execution', () => {
+    expect(hasExplicitEmptyCandidateRecoveryIntent('扩大到 10 公里')).toBe(
+      true,
+    );
+    expect(hasExplicitEmptyCandidateRecoveryIntent('放宽舞蹈相关偏好')).toBe(
+      true,
+    );
+    expect(hasExplicitEmptyCandidateRecoveryIntent('改到周末下午')).toBe(true);
+    expect(hasExplicitEmptyCandidateRecoveryIntent('怎么扩大匹配范围？')).toBe(
+      false,
+    );
+    expect(
+      hasExplicitEmptyCandidateRecoveryIntent('我只是想找一下设置入口'),
+    ).toBe(false);
   });
 
   it('normalizes allowed social search routes so complete requests can queue search', () => {

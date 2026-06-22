@@ -44,6 +44,9 @@ const explicitCandidateMessageConfirmationPattern =
 const explicitCandidateRefinementPattern =
   /((有没有|有无|筛一下|筛选|优先|最好|只要|更想|换成|找找).{0,18}(女生|男生|女性|男性|女的|男的|舞蹈|编程|程序员|科技|摄影|音乐|读书|学生|同校|附近|同城))|^(女生|男生|女性|男性|女的|男的|舞蹈生|喜欢编程|会编程|附近的|同城的)[。.!！\s]*$/i;
 
+const explicitEmptyCandidateRecoveryPattern =
+  /((扩大|放宽).{0,18}(范围|半径|公里|要求|偏好|条件))|((改|换|调整).{0,18}(时间|地点|区域|城市|活动|周末|下午|晚上|今晚|明天))|((不限|都可以|降低要求).{0,12}(范围|条件|偏好|距离|活动)?)/i;
+
 const profileEnrichmentRequestPattern =
   /(帮我完善.*画像|请帮我完善.*画像|完善.*ai画像|完善.*AI画像|完善.*人物画像|上面.*画像.*完善|刚才.*画像.*完善|把刚才.*写入画像|保存到.*画像|调用工具.*画像|工具.*完善.*画像|写入.*画像|存到.*画像|人物画像|ai画像|AI画像)/i;
 
@@ -120,6 +123,19 @@ export function hasExplicitCandidateRefinementIntent(message: string): boolean {
   if (socialCapabilityQuestionPattern.test(text)) return false;
   if (nonSocialLookupPattern.test(text)) return false;
   return explicitCandidateRefinementPattern.test(text);
+}
+
+export function hasExplicitEmptyCandidateRecoveryIntent(
+  message: string,
+): boolean {
+  const text = message.trim().toLowerCase();
+  if (!text) return false;
+  if (isProfileEnrichmentDominant(text)) return false;
+  if (isConversationOnlySocialMention(text)) return false;
+  if (socialHelpQuestionPattern.test(text)) return false;
+  if (socialCapabilityQuestionPattern.test(text)) return false;
+  if (nonSocialLookupPattern.test(text)) return false;
+  return explicitEmptyCandidateRecoveryPattern.test(text);
 }
 
 export function explicitlyRejectsSocialExecution(message: string): boolean {

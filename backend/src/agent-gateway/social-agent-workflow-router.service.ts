@@ -11,6 +11,7 @@ import {
   hasExistingSocialActionContext,
   hasExistingSocialExecutionContext,
   hasExplicitCandidateRefinementIntent,
+  hasExplicitEmptyCandidateRecoveryIntent,
   hasExplicitSocialExecutionIntent,
   hasExplicitSocialSideEffectIntent,
   isSocialExecutionIntent,
@@ -21,6 +22,7 @@ export type SocialAgentWorkflowRouterDecision = {
   reason:
     | 'explicit_social_workflow'
     | 'candidate_refinement_workflow'
+    | 'empty_candidate_recovery_workflow'
     | 'social_continuation_workflow'
     | 'social_action_workflow';
   skipBrain: true;
@@ -50,6 +52,9 @@ export class SocialAgentWorkflowRouterService {
     const explicitAction = hasExplicitSocialSideEffectIntent(message);
     const candidateRefinement =
       hasExplicitCandidateRefinementIntent(message) && hasExecutionContext;
+    const emptyCandidateRecovery =
+      hasExplicitEmptyCandidateRecoveryIntent(message) &&
+      hasEmptyCandidateContext(input.taskContext);
     const socialContinuation =
       socialContinuationPattern.test(message) && hasExecutionContext;
 
@@ -57,9 +62,19 @@ export class SocialAgentWorkflowRouterService {
       !explicitSocial &&
       !explicitAction &&
       !candidateRefinement &&
+      !emptyCandidateRecovery &&
       !socialContinuation
     ) {
       return null;
+    }
+
+    if (emptyCandidateRecovery) {
+      const route = this.socialContinuationRoute(input);
+      return {
+        route,
+        reason: 'empty_candidate_recovery_workflow',
+        skipBrain: true,
+      };
     }
 
     if (socialContinuation) {
@@ -142,7 +157,7 @@ function hasSlotValue(value: unknown, key: string): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const slot = (value as Record<string, unknown>)[key];
   if (!slot || typeof slot !== 'object' || Array.isArray(slot)) return false;
-  const text = String((slot as Record<string, unknown>).value ?? '').trim();
+  const text = primitiveText((slot as Record<string, unknown>).value);
   return Boolean(text);
 }
 
@@ -150,4 +165,37 @@ function hasKnownSlotConstraint(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const knownSlots = (value as Record<string, unknown>).knownSlots;
   return Array.isArray(knownSlots) && knownSlots.length > 0;
+}
+
+function hasEmptyCandidateContext(
+  taskContext?: SocialAgentIntentRouterInput['taskContext'],
+): boolean {
+  if (!taskContext) return false;
+  return (
+    isNoRealCandidates(taskContext.emptyReason) ||
+    isNoRealCandidates(taskContext.lastSearchEmptyReason) ||
+    isNoRealCandidates(recordValue(taskContext.lastSearch, 'emptyReason')) ||
+    isNoRealCandidates(
+      recordValue(taskContext.shortTermMemory, 'lastSearchEmptyReason'),
+    )
+  );
+}
+
+function recordValue(value: unknown, key: string): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  return (value as Record<string, unknown>)[key];
+}
+
+function isNoRealCandidates(value: unknown): boolean {
+  return primitiveText(value) === 'no_real_candidates';
+}
+
+function primitiveText(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value).trim();
+  }
+  return '';
 }

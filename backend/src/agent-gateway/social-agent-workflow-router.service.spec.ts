@@ -111,6 +111,67 @@ describe('SocialAgentWorkflowRouterService', () => {
     expect(intentRouter.routeByRules).toHaveBeenCalledTimes(1);
   });
 
+  it('routes empty-candidate recovery turns through the social workflow without Brain routing', () => {
+    const intentRouter = {
+      routeByRules: jest.fn(() =>
+        route({
+          intent: 'casual_chat',
+          shouldSearch: false,
+          replyStrategy: 'conversational_answer',
+        }),
+      ),
+    };
+    const service = new SocialAgentWorkflowRouterService(intentRouter as never);
+
+    const decision = service.route({
+      message: '那扩大到 10 公里，放宽舞蹈相关偏好',
+      taskContext: {
+        lastSearchEmptyReason: 'no_real_candidates',
+        taskSlots: {
+          activity: { value: '散步', state: 'completed' },
+          time_window: { value: '今天晚上', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+        },
+      },
+      profile: {},
+      conversationHistory: [],
+      conversationIntent: 'conversation',
+    });
+
+    expect(decision).toMatchObject({
+      reason: 'empty_candidate_recovery_workflow',
+      skipBrain: true,
+      route: {
+        intent: 'social_search',
+        shouldSearch: true,
+        replyStrategy: 'search_candidates',
+      },
+    });
+    expect(intentRouter.routeByRules).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not route empty-candidate recovery copy without an empty-candidate context', () => {
+    const intentRouter = {
+      routeByRules: jest.fn(() => route()),
+    };
+    const service = new SocialAgentWorkflowRouterService(intentRouter as never);
+
+    expect(
+      service.route({
+        message: '扩大到 10 公里',
+        taskContext: {
+          taskSlots: {
+            activity: { value: '散步', state: 'completed' },
+          },
+        },
+        profile: {},
+        conversationHistory: [],
+        conversationIntent: 'conversation',
+      }),
+    ).toBeNull();
+    expect(intentRouter.routeByRules).not.toHaveBeenCalled();
+  });
+
   it('does not route short continuation turns without social workflow context', () => {
     const intentRouter = {
       routeByRules: jest.fn(() => route()),
