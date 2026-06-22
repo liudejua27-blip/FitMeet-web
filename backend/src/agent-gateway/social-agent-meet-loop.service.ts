@@ -264,6 +264,19 @@ export class SocialAgentMeetLoopService {
       state: nextPayload,
       review: null,
     });
+    if (counterpartIntent === 'accepted') {
+      await this.recordMeetLoopInterestEvent(task.ownerUserId, task, {
+        eventType: 'invite_accepted',
+        payload: nextPayload,
+        activityId,
+        candidateUserId,
+        sourceAction: cleanDisplayText(body.action, 'counterpart.reply'),
+        metadata: {
+          counterpartIntent,
+          replyPreview,
+        },
+      });
+    }
 
     const timelineCard = buildSocialAgentMeetLoopTimelineCard({
       taskId: task.id,

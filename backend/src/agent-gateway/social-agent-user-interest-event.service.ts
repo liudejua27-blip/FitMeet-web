@@ -249,6 +249,8 @@ export class SocialAgentUserInterestEventService {
       case 'skip_candidate':
       case 'review_negative':
         return -3;
+      case 'invite_accepted':
+        return 6;
       case 'save_candidate':
       case 'more_like_this':
       case 'send_invite':

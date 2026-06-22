@@ -1571,6 +1571,7 @@ export class SocialAgentChatController {
       'more_like_this',
       'generate_opener',
       'send_invite',
+      'invite_accepted',
       'connect_candidate',
       'discover_click',
       'activity_complete',

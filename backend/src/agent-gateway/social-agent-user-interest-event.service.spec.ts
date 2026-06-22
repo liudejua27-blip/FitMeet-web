@@ -105,6 +105,42 @@ describe('SocialAgentUserInterestEventService', () => {
     ).toBe('connect_candidate');
   });
 
+  it('treats accepted invitations as stronger recommendation outcomes than sent invitations', async () => {
+    const repo = makeRepo();
+    const service = new SocialAgentUserInterestEventService(repo as never);
+
+    await service.recordEvent({
+      ownerUserId: 7,
+      eventType: 'send_invite',
+      targetUserId: 22,
+      activityTags: ['散步'],
+      city: '青岛',
+      dedupeKey: 'send-invite',
+    });
+    await service.recordEvent({
+      ownerUserId: 7,
+      eventType: 'invite_accepted',
+      targetUserId: 33,
+      activityTags: ['羽毛球'],
+      city: '青岛',
+      dedupeKey: 'invite-accepted',
+    });
+
+    const summary = await service.summarizeForUser({ ownerUserId: 7 });
+
+    expect(repo.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ eventType: 'send_invite', weight: 4 }),
+        expect.objectContaining({ eventType: 'invite_accepted', weight: 6 }),
+      ]),
+    );
+    expect(summary.positiveTargetUserIds[0]).toBe(33);
+    expect(summary.activityTagWeights).toEqual([
+      { tag: '羽毛球', weight: 6 },
+      { tag: '散步', weight: 4 },
+    ]);
+  });
+
   it('deduplicates persisted events and summarizes weighted interests', async () => {
     const repo = makeRepo();
     const service = new SocialAgentUserInterestEventService(repo as never);

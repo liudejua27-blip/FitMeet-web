@@ -726,6 +726,7 @@ describe('SocialAgentMeetLoopService', () => {
         activityId: 700,
         candidateUserId: 22,
         source: 'counterpart_reply',
+        replyIntent: 'accepted',
         replyPreview: '可以呀，周六下午在公共操场附近见可以吗？',
       },
     });
@@ -795,6 +796,20 @@ describe('SocialAgentMeetLoopService', () => {
           status: 'reply_received',
           loopStage: 'reply_received',
           lifeGraphUpdatePending: true,
+        }),
+      }),
+    );
+    expect(harness.interestEvents.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        agentTaskId: 101,
+        eventType: 'invite_accepted',
+        targetUserId: 22,
+        activityId: 700,
+        source: 'meet_loop',
+        metadata: expect.objectContaining({
+          counterpartIntent: 'accepted',
+          replyPreview: '可以呀，周六下午在公共操场附近见可以吗？',
         }),
       }),
     );
