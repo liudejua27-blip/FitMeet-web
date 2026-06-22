@@ -331,14 +331,14 @@ describe('tool-ui-schema', () => {
           id: '9901',
           actionType: 'publish_social_request',
           riskLevel: 'medium',
-          actionKey: 'activity.confirm_create',
+          actionKey: 'publish_to_discover',
         },
         inlineApprovalConfirmations: {
-          'activity.confirm_create': {
+          publish_to_discover: {
             id: '9901',
             actionType: 'publish_social_request',
             riskLevel: 'medium',
-            actionKey: 'activity.confirm_create',
+            actionKey: 'publish_to_discover',
           },
         },
       },
@@ -448,11 +448,11 @@ describe('tool-ui-schema', () => {
       schemaType: 'social_match.activity',
       data: {
         inlineApprovalConfirmations: {
-          'activity.confirm_create': {
+          publish_to_discover: {
             id: '9910',
             actionType: 'publish_social_request',
             riskLevel: 'medium',
-            actionKey: 'activity.confirm_create',
+            actionKey: 'publish_to_discover',
           },
         },
       },
@@ -634,7 +634,7 @@ describe('tool-ui-schema', () => {
     ]);
     expect(defaultOpportunityActionsForSchema('social_match.activity')).toEqual([
       {
-        schemaAction: 'activity.confirm_create',
+        schemaAction: 'publish_to_discover',
         requiresConfirmation: true,
         source: 'default',
       },
@@ -676,6 +676,16 @@ describe('tool-ui-schema', () => {
             label: '扩大范围',
             detail: '只搜索公开可发现资料。',
           },
+          {
+            key: 'change_time',
+            label: '换个时间',
+            detail: '保留地点，把时间换成周末下午。',
+          },
+          {
+            key: 'relax_preference',
+            label: '放宽偏好',
+            detail: '保留安全边界，先放宽非必要偏好。',
+          },
         ],
         safetyBoundary: 'traceId planner debug 不会编造候选；不会公开联系方式。',
         nextBestStep: '先发布到发现，或者扩大范围再查。',
@@ -684,7 +694,7 @@ describe('tool-ui-schema', () => {
         {
           id: 'publish',
           label: '发布到发现',
-          schemaAction: 'activity.confirm_create',
+          schemaAction: 'publish_to_discover',
           requiresConfirmation: true,
           payload: { taskId: 1 },
         },
@@ -711,11 +721,54 @@ describe('tool-ui-schema', () => {
         detail: '只搜索公开可发现资料。',
         requiresConfirmation: false,
       },
+      {
+        key: 'change_time',
+        label: '换个时间',
+        detail: '保留地点，把时间换成周末下午。',
+        requiresConfirmation: false,
+      },
+      {
+        key: 'relax_preference',
+        label: '放宽偏好',
+        detail: '保留安全边界，先放宽非必要偏好。',
+        requiresConfirmation: false,
+      },
     ]);
     expect(JSON.stringify(view)).not.toMatch(
       /tool[_\s-]?call|traceId|planner|raw JSON|debug/i,
     );
     expect(JSON.stringify(view)).toContain('不会编造候选');
+  });
+
+  it('keeps candidate empty-state default recovery options complete', () => {
+    const card = normalizeAssistantCard({
+      type: 'candidate_empty_state',
+      schemaType: 'social_match.empty',
+      title: '暂时没有找到合适的人',
+      data: {},
+      actions: [],
+    });
+
+    const view = normalizeCandidateEmptyStateView(card);
+
+    expect(view.recoveryOptions).toEqual([
+      expect.objectContaining({
+        key: 'publish_to_discover',
+        requiresConfirmation: true,
+      }),
+      expect.objectContaining({
+        key: 'expand_radius',
+        requiresConfirmation: false,
+      }),
+      expect.objectContaining({
+        key: 'change_time',
+        requiresConfirmation: false,
+      }),
+      expect.objectContaining({
+        key: 'relax_preference',
+        requiresConfirmation: false,
+      }),
+    ]);
   });
 
   it('normalizes public schema cards without leaking technical wording', () => {

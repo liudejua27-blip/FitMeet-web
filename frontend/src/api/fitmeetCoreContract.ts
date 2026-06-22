@@ -96,6 +96,7 @@ export const fitMeetCoreEndpoints = {
       `/social-agent/chat/threads/${encodeURIComponent(String(threadId))}/delete` as const,
     messageFeedback: (messageId: string) =>
       `/social-agent/chat/messages/${encodeURIComponent(messageId)}/feedback` as const,
+    interestEvents: '/social-agent/chat/interest-events',
     taskSession: (taskId: number) => `/social-agent/chat/tasks/${taskId}/session` as const,
     taskRunStatus: (taskId: number, runId: string) =>
       `/social-agent/chat/tasks/${taskId}/runs/${encodeURIComponent(runId)}` as const,

@@ -144,6 +144,8 @@ describe('AgentWorkspacePage', () => {
     await renderAgentPage();
 
     const shell = await screen.findByTestId('assistant-ui-shell');
+    expect(shell.className).toContain('h-[100svh]');
+    expect(shell.className).not.toContain('100dvh');
     expect(screen.getByRole('heading', { name: '有什么我可以帮你？' })).toBeInTheDocument();
     expect(screen.getByText('开始你的全球社交')).toBeInTheDocument();
     expect(shell).toHaveAttribute('data-sidebar-state', 'open');
@@ -297,6 +299,10 @@ describe('AgentWorkspacePage', () => {
     expect(screen.getByTestId('assistant-ui-composer-input')).toHaveAttribute(
       'data-input-model',
       'single-composer',
+    );
+    expect(screen.getByTestId('assistant-ui-composer-input')).toHaveAttribute(
+      'data-auto-focus',
+      'disabled',
     );
     expect(screen.getByTestId('assistant-ui-composer-toolbar')).toHaveAttribute(
       'data-toolbar-model',
@@ -1524,8 +1530,8 @@ describe('AgentWorkspacePage', () => {
         agentName: 'Social Match Agent',
         toolName: 'social_match_search_turn',
         status: 'running',
-        title: '正在筛选合适的人',
-        detail: '正在筛选合适的人',
+        title: '正在筛选公开可发现的人',
+        detail: '正在筛选公开可发现的人',
       });
       onEvent({
         type: 'tool_call',
@@ -1534,7 +1540,7 @@ describe('AgentWorkspacePage', () => {
         agentName: 'Social Match Agent',
         toolName: 'social_match_search_turn',
         title: '正在处理这一步',
-        detail: '正在筛选合适的人',
+        detail: '正在筛选公开可发现的人',
       });
       onEvent({
         type: 'tool_result',
@@ -1542,8 +1548,8 @@ describe('AgentWorkspacePage', () => {
         stepId: 'rank.candidates:2',
         agentName: 'Social Match Agent',
         toolName: 'social_match_search_turn',
-        title: '已整理结果',
-        detail: '正在筛选合适的人',
+        title: '已筛选公开可发现的人',
+        detail: '正在筛选公开可发现的人',
         status: 'done',
       });
       onEvent({
@@ -1552,7 +1558,7 @@ describe('AgentWorkspacePage', () => {
         id: 'rank.candidates:2',
         kind: 'tool',
         title: '正在处理这一步',
-        detail: '正在筛选合适的人',
+        detail: '正在筛选公开可发现的人',
         state: 'done',
         metadata: {
           stepId: 'rank.candidates:2',
@@ -1648,7 +1654,7 @@ describe('AgentWorkspacePage', () => {
     submitPrompt('普通聊聊，不需要找人');
 
     expect(await screen.findByTestId('assistant-ui-thinking')).toBeInTheDocument();
-    expect(await screen.findByText('正在思考…')).toBeInTheDocument();
+    expect(await screen.findByText('正在理解你的需求…')).toBeInTheDocument();
     expect(screen.queryByText('正在理解你的问题…')).not.toBeInTheDocument();
     expect(screen.queryByText('正在组织自然回复')).not.toBeInTheDocument();
     expect(screen.queryByText('正在检查必要边界')).not.toBeInTheDocument();
@@ -1669,7 +1675,7 @@ describe('AgentWorkspacePage', () => {
       expect(screen.queryByTestId('assistant-ui-thinking')).not.toBeInTheDocument(),
     );
     expect(screen.queryByText('正在整理执行轨迹')).not.toBeInTheDocument();
-    expect(screen.queryByText('正在思考…')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在理解你的需求…')).not.toBeInTheDocument();
     expect(screen.queryByTestId('assistant-ui-tool-ui')).not.toBeInTheDocument();
   });
 
@@ -2362,7 +2368,7 @@ describe('AgentWorkspacePage', () => {
     const streamed: UserFacingAgentResponse = {
       ...mockResponse(),
       assistantMessage: '我先整理了候选方向，等后端返回结构化卡片后再展示可操作候选。',
-      lightStatus: '正在筛选合适的人',
+      lightStatus: '正在筛选公开可发现的人',
       cards: [
         {
           id: 'legacy-candidate-only',
@@ -2831,7 +2837,7 @@ describe('AgentWorkspacePage', () => {
       activityPath?.querySelector('[data-schema-action="activity.modify_location"]'),
     ).toBeNull();
     expect(
-      activityPath?.querySelector('[data-schema-action="activity.confirm_create"]'),
+      activityPath?.querySelector('[data-schema-action="publish_to_discover"]'),
     ).toHaveAttribute('data-requires-confirmation', 'true');
     const activityModifyTimeButton = getEnabledSchemaActionButton('activity.modify_time');
     const activityModifyLocationButton = getEnabledSchemaActionButton('activity.modify_location');
@@ -2842,11 +2848,11 @@ describe('AgentWorkspacePage', () => {
     expect(screen.getByRole('button', { name: '暂不写入' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '发布到发现' })).toHaveAttribute(
       'data-schema-action',
-      'activity.confirm_create',
+      'publish_to_discover',
     );
     const highRiskActionExpectations = [
       ['candidate.connect', '加好友并聊天'],
-      ['activity.confirm_create', '发布到发现'],
+      ['publish_to_discover', '发布到发现'],
       ['life_graph.accept_update', '确认更新'],
       ['meet_loop.resume', '继续推进'],
     ] as const;
@@ -3003,13 +3009,13 @@ describe('AgentWorkspacePage', () => {
     expect(activityPath).toHaveTextContent('修改');
     expect(activityPath).toHaveTextContent('暂不发布');
     expect(
-      activityPath?.querySelector('[data-schema-action="activity.confirm_create"]'),
+      activityPath?.querySelector('[data-schema-action="publish_to_discover"]'),
     ).toHaveAttribute('data-requires-confirmation', 'true');
     expect(
-      activityPath?.querySelector('[data-schema-action="activity.confirm_create"]'),
+      activityPath?.querySelector('[data-schema-action="publish_to_discover"]'),
     ).toHaveAttribute('data-action-source', 'default');
     const candidateConnectButton = getEnabledSchemaActionButton('candidate.connect');
-    const activityCreateButton = getEnabledSchemaActionButton('activity.confirm_create');
+    const activityCreateButton = getEnabledSchemaActionButton('publish_to_discover');
     expect(candidateConnectButton).not.toBeNull();
     expect(candidateConnectButton).toHaveAttribute('data-action-source', 'default');
     expect(candidateConnectButton).toHaveAttribute('data-requires-confirmation', 'true');
@@ -3065,7 +3071,7 @@ describe('AgentWorkspacePage', () => {
           ],
         };
         onEvent({ type: 'result', result: response });
-        expect(data.action).toBe('activity.confirm_create');
+        expect(data.action).toBe('publish_to_discover');
         return response;
       });
 
@@ -3074,7 +3080,7 @@ describe('AgentWorkspacePage', () => {
     submitPrompt('我想找青岛周末下午一起轻松跑步的新朋友');
 
     const publishButton = await waitFor(() => {
-      const button = getEnabledSchemaActionButton('activity.confirm_create');
+      const button = getEnabledSchemaActionButton('publish_to_discover');
       expect(button).not.toBeNull();
       return button as HTMLButtonElement;
     });
@@ -3087,13 +3093,6 @@ describe('AgentWorkspacePage', () => {
 
     fireEvent.click(publishButton);
 
-    await waitFor(() =>
-      expect(actionStreamSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'activity.confirm_create' }),
-        expect.any(Function),
-        expect.any(AbortSignal),
-      ),
-    );
     const inlineApproval = await within(activityCard as HTMLElement).findByTestId(
       'assistant-ui-inline-approval-panel',
     );
@@ -3101,6 +3100,18 @@ describe('AgentWorkspacePage', () => {
     expect(inlineApproval).toHaveTextContent('确认后这张约练卡才会出现在发现页');
     expect(inlineApproval).not.toHaveTextContent(/riskLevel|checkpoint|audit|动作：|风险级别/i);
     expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
+    expect(actionStreamSpy).not.toHaveBeenCalled();
+    fireEvent.click(within(inlineApproval).getByRole('button', { name: '确认发布' }));
+    await waitFor(() =>
+      expect(actionStreamSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'publish_to_discover',
+          payload: expect.objectContaining({ confirmedPublish: true }),
+        }),
+        expect.any(Function),
+        expect.any(AbortSignal),
+      ),
+    );
   });
 
   it('keeps skip-publish as a low-risk opportunity action without opening approval UI', async () => {
@@ -9402,7 +9413,7 @@ function mockCandidateResponse(): UserFacingAgentResponse {
   return {
     ...mockResponse(),
     assistantMessage: '我先给你一个自然回答；如果你真的想找人，可以继续告诉我偏好。',
-    lightStatus: '正在筛选合适的人',
+    lightStatus: '正在筛选公开可发现的人',
     cards: [
       {
         id: 'candidate-1',

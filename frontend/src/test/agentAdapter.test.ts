@@ -163,7 +163,7 @@ describe('Agent adapter layer', () => {
       'searching_candidates',
     );
     expect(
-      events.some((event) => 'lightStatus' in event && event.lightStatus === '正在筛选合适的人'),
+      events.some((event) => 'lightStatus' in event && event.lightStatus === '正在筛选公开可发现的人'),
     ).toBe(false);
     expect(events.some((event) => event.type === 'status')).toBe(false);
   });
@@ -1056,8 +1056,8 @@ describe('Agent adapter layer', () => {
           agentName: 'Social Match Agent',
           toolName: 'social_match_search_turn',
           status: 'running',
-          title: '正在筛选合适的人',
-          detail: '正在筛选合适的人',
+          title: '正在筛选公开可发现的人',
+          detail: '正在筛选公开可发现的人',
         });
         onEvent({
           type: 'tool_call',
@@ -1066,7 +1066,7 @@ describe('Agent adapter layer', () => {
           agentName: 'Social Match Agent',
           toolName: 'social_match_search_turn',
           title: '正在处理这一步',
-          detail: '正在筛选合适的人',
+          detail: '正在筛选公开可发现的人',
         });
         onEvent({
           type: 'tool_result',
@@ -1074,8 +1074,8 @@ describe('Agent adapter layer', () => {
           stepId: 'rank.candidates:2',
           agentName: 'Social Match Agent',
           toolName: 'social_match_search_turn',
-          title: '已整理结果',
-          detail: '正在筛选合适的人',
+          title: '已筛选公开可发现的人',
+          detail: '正在筛选公开可发现的人',
           status: 'done',
         });
         onEvent({
@@ -1084,7 +1084,7 @@ describe('Agent adapter layer', () => {
           id: 'rank.candidates:2',
           kind: 'tool',
           title: '正在处理这一步',
-          detail: '正在筛选合适的人',
+          detail: '正在筛选公开可发现的人',
           state: 'done',
           metadata: {
             stepId: 'rank.candidates:2',
@@ -1120,7 +1120,7 @@ describe('Agent adapter layer', () => {
       'social-codex:summary',
     ]);
     expect(progressEvents.map((event) => event.title)).toEqual([
-      '正在筛选合适的人',
+      '正在筛选公开可发现的人',
       '正在筛选公开可发现的人',
       '已筛选公开可发现的人',
       '已筛选公开可发现的人',
@@ -1218,7 +1218,7 @@ describe('Agent adapter layer', () => {
     );
     expect(progressEvents[1]).toEqual(
       expect.objectContaining({
-        title: '正在推进当前进度',
+        title: '正在筛选公开可发现的人',
         detail: undefined,
         state: 'running',
       }),
@@ -2273,7 +2273,7 @@ describe('Agent adapter layer', () => {
 function mockResponse(): UserFacingAgentResponse {
   return {
     assistantMessage: '我找到了一些建议。',
-    lightStatus: '正在筛选合适的人',
+    lightStatus: '正在筛选公开可发现的人',
     permissionMode: 'limited_auto',
     safeStatus: {
       blocked: false,

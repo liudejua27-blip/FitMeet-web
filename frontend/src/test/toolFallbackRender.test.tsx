@@ -1226,7 +1226,7 @@ describe('assistant-ui tool fallback rendering', () => {
 
   it('renders opportunity actions in one card and opens publish approval inline only after click', async () => {
     const onCardAction = vi.fn((input: { schemaAction?: string | null }) => {
-      if (input.schemaAction === 'activity.confirm_create') {
+      if (input.schemaAction === 'publish_to_discover') {
         return response({
           assistantMessage: '发布前需要你确认。',
           cards: [],
@@ -1273,7 +1273,7 @@ describe('assistant-ui tool fallback rendering', () => {
                     id: 'publish-qdu-walk',
                     label: '确认发布约练',
                     action: 'publish_social_request',
-                    schemaAction: 'activity.confirm_create',
+                    schemaAction: 'publish_to_discover',
                     requiresConfirmation: true,
                     payload: {
                       taskId: 88,
@@ -1320,13 +1320,21 @@ describe('assistant-ui tool fallback rendering', () => {
 
     fireEvent.click(within(actionCard).getByRole('button', { name: '发布到发现' }));
     const inlineApproval = await screen.findByTestId('assistant-ui-inline-approval-panel');
-    expect(onCardAction).toHaveBeenCalledWith(expect.objectContaining({
-      schemaAction: 'activity.confirm_create',
-    }));
+    expect(onCardAction).not.toHaveBeenCalled();
     expect(inlineApproval).toHaveTextContent('确认发布到发现');
     expect(inlineApproval).toHaveTextContent('确认后这张约练卡才会出现在发现页');
     expect(inlineApproval).not.toHaveTextContent(/riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:/i);
     expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
+    fireEvent.click(within(inlineApproval).getByRole('button', { name: '确认发布' }));
+    await waitFor(() =>
+      expect(onCardAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schemaAction: 'publish_to_discover',
+          action: 'publish_to_discover',
+          payload: expect.objectContaining({ confirmedPublish: true }),
+        }),
+      ),
+    );
   });
 
   it('renders schema approval cards as product confirmation cards instead of backend approval forms', async () => {
@@ -1480,7 +1488,6 @@ describe('assistant-ui tool fallback rendering', () => {
 
     const statusLine = within(process).getByTestId('assistant-ui-process-status-line');
     expect(statusLine.textContent?.trim()).toBeTruthy();
-    expect(screen.queryAllByText('正在理解你的需求')).toHaveLength(0);
     expect(screen.getAllByText(statusLine.textContent?.trim() ?? '')).toHaveLength(1);
     expect(screen.queryByTestId('assistant-ui-process-detail')).not.toBeInTheDocument();
     expect(screen.queryByTestId('assistant-ui-process-evidence')).not.toBeInTheDocument();

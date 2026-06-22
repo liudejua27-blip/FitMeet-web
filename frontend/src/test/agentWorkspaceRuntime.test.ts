@@ -2225,7 +2225,7 @@ describe('agent workspace runtime fallback boundaries', () => {
     expect(conversation).toHaveLength(1);
     expect(conversation[0]).toMatchObject({
       id: 'local-covering-status',
-      label: '正在思考…',
+      label: '正在理解你的需求…',
       detail: '我会直接回复，不触发社交工具。',
       processType: 'run_summary',
     });

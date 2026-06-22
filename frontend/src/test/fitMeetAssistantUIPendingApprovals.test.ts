@@ -99,10 +99,10 @@ describe('FitMeetAssistantUI pending approval attachment', () => {
       inlineApprovalConfirmation: expect.objectContaining({
         id: 9901,
         actionType: 'publish_social_request',
-        actionKey: 'activity.confirm_create',
+        actionKey: 'publish_to_discover',
       }),
       inlineApprovalConfirmations: {
-        'activity.confirm_create': expect.objectContaining({
+        publish_to_discover: expect.objectContaining({
           id: 9901,
           actionType: 'publish_social_request',
         }),
