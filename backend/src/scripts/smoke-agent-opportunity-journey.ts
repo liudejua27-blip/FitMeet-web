@@ -707,7 +707,7 @@ async function assertPrivateMatchingScenario(token: string) {
     response.taskId,
   );
   assertNoPendingApproval('private matching first recommendation', response);
-  assertPrivateCandidateRecommendations(response);
+  await assertPrivateCandidateRecommendations(response);
   assertNoDiscoverPublishArtifacts('private matching response', response);
   assertTextIncludesAny(
     'private matching response',
@@ -787,7 +787,83 @@ async function assertDiscoverPublishScenario(
     '约练',
     '搭子',
   ]);
-  pass('publish_to_discover writes a readable PublicSocialIntent detail');
+  await assertPublicIntentDetailClosure(publicIntentId, detail);
+  pass(
+    'publish_to_discover writes a readable PublicSocialIntent detail with profile links',
+  );
+}
+
+async function assertPublicIntentDetailClosure(
+  publicIntentId: string,
+  detail: JsonRecord,
+) {
+  const ownerUserId = readNumber(detail.userId);
+  if (!ownerUserId) {
+    throw new Error(
+      `Public intent ${publicIntentId} did not expose owner userId for /user/:id navigation.`,
+    );
+  }
+  await assertPublicUserProfileReadable(
+    ownerUserId,
+    `public intent ${publicIntentId} owner`,
+  );
+
+  const matches = await requestJson(
+    `/public/social-intents/${encodeURIComponent(publicIntentId)}/matches`,
+    { method: 'GET', token: null },
+  );
+  const request = asRecord(matches.request);
+  if (readString(request.id) !== publicIntentId) {
+    throw new Error(
+      `Public intent matches request mismatch. Expected ${publicIntentId}, got ${readString(request.id) ?? 'missing'}.`,
+    );
+  }
+  const candidates = Array.isArray(matches.candidates)
+    ? matches.candidates.filter(isRecord)
+    : [];
+  if (candidates.length < 1) {
+    throw new Error(
+      `Public intent ${publicIntentId} did not expose any public candidate profiles for detail-page closure.`,
+    );
+  }
+  const firstProfile = asRecord(asRecord(candidates[0]).profile);
+  const candidateUserId = readNumber(firstProfile.id);
+  if (!candidateUserId) {
+    throw new Error(
+      `Public intent ${publicIntentId} candidate match did not expose profile.id for /user/:id navigation.`,
+    );
+  }
+  if (!readString(firstProfile.name)) {
+    throw new Error(
+      `Public intent ${publicIntentId} candidate ${candidateUserId} missing public profile name.`,
+    );
+  }
+  await assertPublicUserProfileReadable(
+    candidateUserId,
+    `public intent ${publicIntentId} candidate`,
+  );
+}
+
+async function assertPublicUserProfileReadable(userId: number, label: string) {
+  const profile = await requestJson(`/users/${userId}`, {
+    method: 'GET',
+    token: null,
+  });
+  if (readNumber(profile.id) !== userId) {
+    throw new Error(
+      `${label} profile read-back mismatch. Expected user ${userId}, got ${readNumber(profile.id) ?? 'missing'}.`,
+    );
+  }
+  if (!readString(profile.name)) {
+    throw new Error(`${label} profile missing public display name.`);
+  }
+  const postsCount = Number(profile.posts ?? 0);
+  const meetCount = Number(profile.meetCount ?? 0);
+  if (!Number.isFinite(postsCount) || !Number.isFinite(meetCount)) {
+    throw new Error(
+      `${label} profile missing public dynamics counters posts/meetCount.`,
+    );
+  }
 }
 
 async function createSmokeThread(token: string, title: string) {
@@ -1250,7 +1326,7 @@ function assertCandidateEmptyStateCard(response: SmokeResponse) {
   assertNoPublicInternalLeak('CandidateEmptyStateCard', emptyCard);
 }
 
-function assertPrivateCandidateRecommendations(response: SmokeResponse) {
+async function assertPrivateCandidateRecommendations(response: SmokeResponse) {
   const candidates = (response.cards ?? []).filter(
     (card) => readString(card.schemaType) === 'social_match.candidate',
   );
@@ -1271,6 +1347,43 @@ function assertPrivateCandidateRecommendations(response: SmokeResponse) {
     ]);
     assertNoPublicInternalLeak(`Private CandidateCard #${index + 1}`, card);
   });
+  await assertPrivateCandidateProfileClosure(candidates[0]);
+}
+
+async function assertPrivateCandidateProfileClosure(candidateCard: JsonRecord) {
+  const data = asRecord(candidateCard.data);
+  const opportunity = asRecord(data.opportunity);
+  const targetUserId =
+    readNumber(data.targetUserId) ??
+    readNumber(data.candidateUserId) ??
+    readNumber(opportunity.targetUserId) ??
+    readNumber(opportunity.candidateUserId);
+  if (!targetUserId) {
+    throw new Error(
+      'Private CandidateCard did not expose targetUserId/candidateUserId for /user/:id navigation.',
+    );
+  }
+  const detailAction = actions(candidateCard).find((action) => {
+    const schemaAction = readString(action.schemaAction) ?? readString(action.action);
+    return schemaAction === 'candidate.view_detail';
+  });
+  if (!detailAction) {
+    throw new Error('Private CandidateCard missing candidate.view_detail action.');
+  }
+  const payload = asRecord(detailAction.payload);
+  const actionTargetUserId =
+    readNumber(payload.targetUserId) ??
+    readNumber(payload.candidateUserId) ??
+    readNumber(payload.userId);
+  if (actionTargetUserId && actionTargetUserId !== targetUserId) {
+    throw new Error(
+      `Private CandidateCard view_detail action target mismatch. card=${targetUserId}, action=${actionTargetUserId}.`,
+    );
+  }
+  await assertPublicUserProfileReadable(
+    targetUserId,
+    'private matching candidate',
+  );
 }
 
 function assertNoDiscoverPublishArtifacts(label: string, response: SmokeResponse) {
