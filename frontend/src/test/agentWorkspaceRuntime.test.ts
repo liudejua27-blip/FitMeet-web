@@ -24,6 +24,7 @@ import {
   shouldAttachVisibleProcessToMessage,
   shouldFetchCheckpointRecovery,
   shouldRestoreReplayTrace,
+  findTaskId,
   threadIdFromResponse,
 } from '../components/agent-workspace/agentWorkspaceRuntime';
 import {
@@ -101,6 +102,27 @@ describe('agent workspace runtime fallback boundaries', () => {
     };
 
     expect(threadIdFromResponse(response)).toBe('agent-task:91');
+  });
+
+  it('recovers task and thread identity from top-level user-facing result fields without cards', () => {
+    const response: UserFacingAgentResponse = {
+      taskId: 117,
+      threadId: 'agent-task:117',
+      assistantMessage: '我已经保留这张约练卡的上下文。',
+      lightStatus: '已整理回复',
+      permissionMode: 'limited_auto',
+      safeStatus: {
+        blocked: false,
+        level: 'low',
+        boundaryNotes: [],
+        requiredConfirmations: [],
+      },
+      pendingConfirmations: [],
+      cards: [],
+    };
+
+    expect(findTaskId(response)).toBe(117);
+    expect(threadIdFromResponse(response)).toBe('agent-task:117');
   });
 
   it('classifies explicit social matching prompts as social even with rich candidate preferences', () => {

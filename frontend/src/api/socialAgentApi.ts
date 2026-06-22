@@ -118,6 +118,8 @@ export interface UserFacingAgentCheckpointStepAction
 }
 
 export interface UserFacingAgentResponse {
+  taskId?: number | null;
+  threadId?: string | null;
   assistantMessage: string;
   assistantMessageSource?: UserFacingAgentAssistantMessageSource;
   recoveryNotice?: UserFacingAgentRecoveryNotice;

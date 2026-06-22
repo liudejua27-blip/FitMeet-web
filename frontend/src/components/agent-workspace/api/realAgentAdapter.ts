@@ -1331,6 +1331,10 @@ function toRunResponsePreferTask(
 }
 
 function findTaskId(response: UserFacingAgentResponse): number | null {
+  const responseTaskId = Number(response.taskId);
+  if (Number.isFinite(responseTaskId) && responseTaskId > 0) {
+    return responseTaskId;
+  }
   for (const card of response.cards) {
     const taskId = Number(card.data.taskId ?? card.data.agentTaskId);
     if (Number.isFinite(taskId) && taskId > 0) return taskId;

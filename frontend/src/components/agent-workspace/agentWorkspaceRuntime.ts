@@ -723,6 +723,8 @@ export function isApprovalProgressEvent(event: AgentStreamEvent) {
 
 export function findTaskId(result: UserFacingAgentResponse | null): number | null {
   if (!result) return null;
+  const fromResponse = numberFromUnknown(result.taskId);
+  if (fromResponse) return fromResponse;
   for (const card of result.cards) {
     const fromData = numberFromUnknown(card.data.taskId);
     if (fromData) return fromData;
@@ -737,6 +739,11 @@ export function findTaskId(result: UserFacingAgentResponse | null): number | nul
 export function threadIdFromResponse(response: UserFacingAgentResponse | null): string | null {
   if (!response) return null;
   const taskId = findTaskId(response);
+  const fromResponse = socialCodexThreadIdOrExisting(
+    stringFromUnknown(response.threadId),
+    taskId,
+  );
+  if (fromResponse) return fromResponse;
   const fromRuntime = socialCodexThreadIdOrExisting(
     stringFromUnknown(response.runtime?.threadId),
     taskId,

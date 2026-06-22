@@ -286,6 +286,19 @@ describe('social agent social intent gate', () => {
     ).toBe(true);
     expect(
       shouldAllowSocialExecution({
+        message: '那你帮我发布到发现',
+        intent: 'action_request',
+        taskContext: {
+          taskSlots: {
+            activity: { value: '健身', state: 'completed' },
+            time_window: { value: '今晚', state: 'completed' },
+            location_text: { value: '青岛大学附近', state: 'completed' },
+          },
+        },
+      }),
+    ).toBe(true);
+    expect(
+      shouldAllowSocialExecution({
         message: '发送吧',
         intent: 'action_request',
       }),

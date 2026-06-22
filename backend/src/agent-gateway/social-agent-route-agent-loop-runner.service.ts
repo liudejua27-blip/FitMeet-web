@@ -28,6 +28,7 @@ import type { SocialAgentHydratedContext } from './social-agent-context-hydrator
 import { buildSocialAgentKnownTaskSlotConstraints } from './social-agent-task-slot-constraints.presenter';
 import {
   hasExistingSocialActionContext,
+  hasExplicitPublishSideEffectIntent,
   hasExplicitSocialSideEffectIntent,
   isSocialExecutionIntent,
   shouldAllowSocialExecution,
@@ -565,6 +566,7 @@ export class SocialAgentRouteAgentLoopRunnerService {
       state: {
         ...input.state,
         assistantMessage: actionTurn.assistantMessage,
+        cards: actionTurn.cards ?? input.state.cards,
       },
       actionTurn,
       observation: {
@@ -774,7 +776,8 @@ export class SocialAgentRouteAgentLoopRunnerService {
       return (
         route.intent === 'action_request' &&
         hasExplicitSocialSideEffectIntent(message) &&
-        hasExistingSocialActionContext({ taskContext })
+        (hasExistingSocialActionContext({ taskContext }) ||
+          this.hasExistingPublishContext(message, taskContext))
       );
     }
     return false;
@@ -795,9 +798,9 @@ export class SocialAgentRouteAgentLoopRunnerService {
       return (
         route.intent === 'action_request' &&
         hasExplicitSocialSideEffectIntent(message) &&
-        hasExistingSocialActionContext({
+        (hasExistingSocialActionContext({
           taskContext: decision.taskContext,
-        })
+        }) || this.hasExistingPublishContext(message, decision.taskContext))
       );
     }
     const allowed = shouldAllowSocialExecution({
@@ -843,8 +846,24 @@ export class SocialAgentRouteAgentLoopRunnerService {
     return (
       route.intent === 'action_request' &&
       hasExplicitSocialSideEffectIntent(message) &&
-      hasExistingSocialActionContext({ taskContext })
+      (hasExistingSocialActionContext({ taskContext }) ||
+        this.hasExistingPublishContext(message, taskContext))
     );
+  }
+
+  private hasExistingPublishContext(
+    message: string,
+    taskContext?: Record<string, unknown>,
+  ): boolean {
+    if (!hasExplicitPublishSideEffectIntent(message)) return false;
+    if (!taskContext) return false;
+    if (this.nonEmptyRecord(taskContext.taskSlots)) return true;
+    if (this.nonEmptyRecord(taskContext.taskSlotSummary)) return true;
+    const taskMemory = this.recordOrNull(taskContext.taskMemory);
+    if (this.nonEmptyRecord(taskMemory?.taskSlots)) return true;
+    if (this.nonEmptyRecord(taskMemory?.taskSlotSummary)) return true;
+    if (this.nonEmptyRecord(taskContext.shortTerm)) return true;
+    return false;
   }
 
   private branchTool(
@@ -1072,6 +1091,10 @@ export class SocialAgentRouteAgentLoopRunnerService {
 
   private recordOrNull(value: unknown): Record<string, unknown> | null {
     return this.isRecord(value) ? value : null;
+  }
+
+  private nonEmptyRecord(value: unknown): boolean {
+    return this.isRecord(value) && Object.keys(value).length > 0;
   }
 
   private recordArray(value: unknown): Array<Record<string, unknown>> {

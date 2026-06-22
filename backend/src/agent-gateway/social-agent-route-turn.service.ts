@@ -126,6 +126,7 @@ export class SocialAgentRouteTurnService {
       runMode: branchRun.state.runMode,
       pendingApproval: branchRun.actionTurn.pendingApproval,
       activityResults: branchRun.state.activityResults,
+      cards: branchRun.actionTurn.cards ?? branchRun.state.cards,
       profileUpdateProposal: branchRun.state.profileUpdateProposal,
       assistantStreamed: branchRun.state.assistantStreamed,
       agentLoop: branchRun.loop,

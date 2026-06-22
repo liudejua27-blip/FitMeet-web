@@ -36,7 +36,10 @@ const explicitActivitySearchPattern =
   /(找|搜索|推荐|参加|发起|创建|有没有|附近|同城).{0,12}(活动|局|约练|跑团|课程|场地|线下见面|户外)/i;
 
 const explicitSocialActionPattern =
-  /(发消息|发送.*(给|第一个|第二个|第三个|这个|那个|他|她|候选)|加好友|邀请(第一个|第二个|第三个|这个|那个|他|她|候选)|约他|约她|联系(第一个|第二个|第三个|这个|那个|他|她|候选)|收藏(第一个|第二个|第三个|这个|那个|他|她|候选)|确认发布|帮我发|帮我加|帮我邀请)/i;
+  /(发消息|发送.*(给|第一个|第二个|第三个|这个|那个|他|她|候选)|加好友|邀请(第一个|第二个|第三个|这个|那个|他|她|候选)|约他|约她|联系(第一个|第二个|第三个|这个|那个|他|她|候选)|收藏(第一个|第二个|第三个|这个|那个|他|她|候选)|确认发布|帮我发|帮我发布|帮我发到发现|发布到发现|发布约练|发布卡片|公开发布|发到发现|同步到发现|帮我加|帮我邀请)/i;
+
+const explicitPublishActionPattern =
+  /(确认发布|帮我发布|帮我发到发现|发布到发现|发布约练|发布卡片|公开发布|发到发现|同步到发现)/i;
 
 const explicitCandidateMessageConfirmationPattern =
   /^(确认发送|确认发出|发送吧|可以发送|发吧|帮我发送|就发这条|确认)[。.!！\s]*$/i;
@@ -100,6 +103,16 @@ export function hasExplicitSocialSideEffectIntent(message: string): boolean {
     explicitSocialActionPattern.test(text) ||
     explicitCandidateMessageConfirmationPattern.test(text)
   );
+}
+
+export function hasExplicitPublishSideEffectIntent(message: string): boolean {
+  const text = message.trim().toLowerCase();
+  if (!text) return false;
+  if (isProfileEnrichmentDominant(text)) return false;
+  if (isConversationOnlySocialMention(text)) return false;
+  if (socialSideEffectNegationPattern.test(text)) return false;
+  if (nonSocialLookupPattern.test(text)) return false;
+  return explicitPublishActionPattern.test(text);
 }
 
 export function hasExplicitCandidateMessageConfirmationIntent(
@@ -231,7 +244,8 @@ export function shouldAllowSocialExecution(input: {
   if (input.intent === 'action_request') {
     return (
       hasExplicitSocialSideEffectIntent(input.message) &&
-      hasExistingSocialActionContext(input)
+      (hasExistingSocialActionContext(input) ||
+        hasExistingPublishContext(input.message, input.taskContext))
     );
   }
   if (hasExplicitSocialExecutionIntent(input.message)) return true;
@@ -319,7 +333,12 @@ export function enforceExplicitSocialExecutionRoute(
   }
   if (!hasExplicitSocialExecutionIntent(input.message)) return gated;
   if (hasExplicitSocialSideEffectIntent(input.message)) {
-    if (!hasExistingSocialActionContext(input)) return gated;
+    if (
+      !hasExistingSocialActionContext(input) &&
+      !hasExistingPublishContext(input.message, input.taskContext)
+    ) {
+      return gated;
+    }
     return normalizeAllowedSocialExecutionRoute({
       ...gated,
       intent: 'action_request',
@@ -341,6 +360,22 @@ export function enforceExplicitSocialExecutionRoute(
     shouldExecuteAction: false,
     replyStrategy: 'search_candidates',
   });
+}
+
+function hasExistingPublishContext(
+  message: string,
+  taskContext?: SocialAgentIntentRouterInput['taskContext'],
+): boolean {
+  if (!hasExplicitPublishSideEffectIntent(message)) return false;
+  if (!taskContext) return false;
+  if (nonEmptyRecord(taskContext.taskSlots)) return true;
+  if (nonEmptyRecord(taskContext.taskSlotSummary)) return true;
+  const taskMemory = nonEmptyRecord(taskContext.taskMemory)
+    ? (taskContext.taskMemory as Record<string, unknown>)
+    : null;
+  if (nonEmptyRecord(taskMemory?.taskSlots)) return true;
+  if (nonEmptyRecord(taskMemory?.taskSlotSummary)) return true;
+  return false;
 }
 
 function positiveNumber(value: unknown): number {

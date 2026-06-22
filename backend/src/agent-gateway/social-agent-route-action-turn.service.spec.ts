@@ -128,6 +128,75 @@ describe('SocialAgentRouteActionTurnService', () => {
     });
   });
 
+  it('turns a natural-language publish request into a confirmable Discover publish card', async () => {
+    const { candidateActions, metrics, service } = makeHarness();
+    const task = makeTask({
+      goal: '今晚青岛大学附近健身约练',
+      memory: {
+        taskSlots: {
+          activity: { value: '健身', state: 'completed' },
+          time_window: { value: '今晚', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+          safety_boundary: {
+            value: '公共场所，先站内聊',
+            state: 'completed',
+          },
+        },
+      },
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      route: makeRoute(),
+      message: '那你帮我发布到发现',
+      assistantMessage: '可以，我会先等你确认。',
+    });
+
+    expect(candidateActions.createActionApproval).not.toHaveBeenCalled();
+    expect(metrics.recordApproval).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      handled: true,
+      pendingApproval: null,
+      assistantMessage: expect.stringContaining('发布确认卡'),
+      cards: [
+        expect.objectContaining({
+          type: 'activity_plan',
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'social_match.activity',
+          status: 'waiting_confirmation',
+          data: expect.objectContaining({
+            taskId: 101,
+            schemaName: 'OpportunityCard',
+            opportunityCard: true,
+            activityType: '健身',
+            time: '今晚',
+            locationName: '青岛大学附近',
+          }),
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              schemaAction: 'publish_to_discover',
+              requiresConfirmation: true,
+              payload: expect.objectContaining({
+                taskId: 101,
+                socialRequestDraft: expect.objectContaining({
+                  activityType: '健身',
+                  timePreference: '今晚',
+                  locationName: '青岛大学附近',
+                  requireUserConfirmation: true,
+                }),
+              }),
+            }),
+            expect.objectContaining({
+              schemaAction: 'activity.skip_publish',
+              requiresConfirmation: false,
+            }),
+          ]),
+        }),
+      ],
+    });
+  });
+
   it('passes hydrated runtime context into approval creation and stores non-sensitive telemetry', async () => {
     const { candidateActions, service } = makeHarness();
     const task = makeTask();

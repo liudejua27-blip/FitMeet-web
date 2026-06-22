@@ -88,8 +88,12 @@ describe('toUserFacingAgentResponse', () => {
       'permissionMode',
       'runtime',
       'safeStatus',
+      'taskId',
+      'threadId',
     ]);
     expect(response).toMatchObject({
+      taskId: 101,
+      threadId: 'agent-task:101',
       assistantMessage: '我会先结合你的 Life Graph，再筛选合适的人。',
       lightStatus: '正在筛选公开可发现的人',
       pendingConfirmations: [],
@@ -197,6 +201,10 @@ describe('toUserFacingAgentResponse', () => {
         sideEffectsBeforeResume: 'idempotent_only',
         duplicatePolicy: 'reuse_idempotency_key',
       },
+    });
+    expect(response).toMatchObject({
+      taskId: 101,
+      threadId: 'agent-task:101',
     });
     const serialized = JSON.stringify(response);
     expect(serialized).not.toContain('hidden-runtime-trace');

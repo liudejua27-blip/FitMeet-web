@@ -50,8 +50,18 @@ export class UserFacingResponseSanitizerService {
     const assistantMessage = this.readAssistantMessage(rawAssistantMessage);
     const assistantMessageSource = this.readAssistantMessageSource(result);
     const cards = this.cardAssembler.assemble(this.readCards(result));
+    const taskId = this.readNumber(
+      this.isRecord(result) ? result.taskId : undefined,
+    );
+    const runtime = this.readRuntime(result);
+    const threadId =
+      (this.isRecord(result) ? this.readText(result.threadId, '') : '') ||
+      runtime?.threadId ||
+      (typeof taskId === 'number' ? `agent-task:${taskId}` : '');
 
     return {
+      ...(typeof taskId === 'number' ? { taskId } : {}),
+      ...(threadId ? { threadId } : {}),
       assistantMessage,
       ...(assistantMessageSource ? { assistantMessageSource } : {}),
       ...this.readRecoveryNoticePatch({
@@ -73,7 +83,7 @@ export class UserFacingResponseSanitizerService {
       pendingConfirmations,
       ...this.readLifeGraphWritebackProposal(result),
       permissionMode,
-      runtime: this.readRuntime(result),
+      runtime,
     };
   }
 

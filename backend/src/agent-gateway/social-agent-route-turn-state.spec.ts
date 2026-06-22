@@ -15,6 +15,7 @@ describe('social agent route turn state', () => {
       assistantMessage: 'fallback',
       assistantMessageSource: 'fallback',
       activityResults: [],
+      cards: [],
       profileUpdateProposal: null,
       assistantStreamed: false,
       agentLoop: null,

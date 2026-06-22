@@ -2,6 +2,7 @@ import { Injectable, Optional } from '@nestjs/common';
 
 import type { LifeGraphProposalDto } from '../life-graph/dto/life-graph.dto';
 import type { AgentTask } from './entities/agent-task.entity';
+import { cleanDisplayText } from '../common/display-text.util';
 import type {
   FitMeetAlphaCard,
   FitMeetAlphaCardAction,
@@ -42,6 +43,7 @@ type CompleteRouteTurnInput = {
   runMode: SocialAgentIntentRouteResult['runMode'];
   pendingApproval: SocialAgentPendingApprovalSnapshot | null;
   activityResults: SocialAgentActivityResult[];
+  cards?: FitMeetAlphaCard[];
   profileUpdateProposal: LifeGraphProposalDto | null;
   assistantStreamed?: boolean;
   agentLoop?: AgentLoopRun | null;
@@ -86,7 +88,10 @@ export class SocialAgentRouteCompletionService {
       queuedRun: input.queuedRun,
       pendingApproval: input.pendingApproval,
       activityResults: input.activityResults,
-      cards: this.cardsForActivityResults(input.task.id, input.activityResults),
+      cards: this.uniqueCards([
+        ...(input.cards ?? []),
+        ...this.cardsForActivityResults(input.task.id, input.activityResults),
+      ]),
       profileUpdateProposal: input.profileUpdateProposal,
       permissionMode: input.task.permissionMode,
       assistantStreamed: input.assistantStreamed ?? false,
@@ -328,6 +333,16 @@ export class SocialAgentRouteCompletionService {
     return activityResults
       .slice(0, 3)
       .map((activity) => this.activityOpportunityCard(taskId, activity));
+  }
+
+  private uniqueCards(cards: FitMeetAlphaCard[]): FitMeetAlphaCard[] {
+    const seen = new Set<string>();
+    return cards.filter((card) => {
+      const key = cleanDisplayText(card.id, '') || JSON.stringify(card.data ?? {});
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   private activityOpportunityCard(

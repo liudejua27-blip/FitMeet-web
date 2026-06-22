@@ -55,6 +55,8 @@ export interface UserFacingAgentRecoveryNotice {
 }
 
 export interface UserFacingAgentResponse {
+  taskId?: number | null;
+  threadId?: string | null;
   assistantMessage: string;
   assistantMessageSource?: SocialAgentAssistantMessageSource;
   recoveryNotice?: UserFacingAgentRecoveryNotice;
