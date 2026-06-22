@@ -9,11 +9,16 @@ function makeRepo() {
       (input: Partial<SocialAgentUserInterestEvent>) =>
         input as SocialAgentUserInterestEvent,
     ),
-    save: jest.fn(async (input: SocialAgentUserInterestEvent) => {
-      if (input.dedupeKey && rows.some((row) => row.dedupeKey === input.dedupeKey)) {
-        const error = new Error('duplicate key value violates unique constraint');
+    save: jest.fn((input: SocialAgentUserInterestEvent) => {
+      if (
+        input.dedupeKey &&
+        rows.some((row) => row.dedupeKey === input.dedupeKey)
+      ) {
+        const error = new Error(
+          'duplicate key value violates unique constraint',
+        );
         (error as { code?: string }).code = '23505';
-        throw error;
+        return Promise.reject(error);
       }
       const saved = {
         ...input,
@@ -21,12 +26,14 @@ function makeRepo() {
         createdAt: new Date(`2026-06-22T00:00:0${rows.length}.000Z`),
       } as SocialAgentUserInterestEvent;
       rows.push(saved);
-      return saved;
+      return Promise.resolve(saved);
     }),
-    find: jest.fn(async (input: { where: { ownerUserId: number }; take: number }) =>
-      rows
-        .filter((row) => row.ownerUserId === input.where.ownerUserId)
-        .slice(0, input.take),
+    find: jest.fn((input: { where: { ownerUserId: number }; take: number }) =>
+      Promise.resolve(
+        rows
+          .filter((row) => row.ownerUserId === input.where.ownerUserId)
+          .slice(0, input.take),
+      ),
     ),
   };
 }
@@ -195,5 +202,36 @@ describe('SocialAgentUserInterestEventService', () => {
       locationWeights: [{ tag: '青岛大学', weight: 4 }],
       timeWindowWeights: [{ tag: '今天晚上', weight: 4 }],
     });
+  });
+
+  it('decays stale behavior so recent recommendation signals win', async () => {
+    const repo = makeRepo();
+    const service = new SocialAgentUserInterestEventService(repo as never);
+
+    await service.recordEvent({
+      ownerUserId: 7,
+      eventType: 'save_candidate',
+      targetUserId: 22,
+      activityTags: ['羽毛球'],
+      dedupeKey: 'old-like',
+    });
+    repo.rows[0].createdAt = new Date('2026-01-01T00:00:00.000Z');
+
+    await service.recordEvent({
+      ownerUserId: 7,
+      eventType: 'save_candidate',
+      targetUserId: 33,
+      activityTags: ['散步'],
+      dedupeKey: 'recent-like',
+    });
+    repo.rows[1].createdAt = new Date('2026-06-22T00:00:00.000Z');
+
+    const summary = await service.summarizeForUser({ ownerUserId: 7 });
+
+    expect(summary.positiveTargetUserIds).toEqual([33, 22]);
+    expect(summary.activityTagWeights).toEqual([
+      { tag: '散步', weight: 4 },
+      { tag: '羽毛球', weight: 1 },
+    ]);
   });
 });

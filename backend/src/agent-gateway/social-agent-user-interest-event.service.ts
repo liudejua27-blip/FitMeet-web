@@ -41,7 +41,9 @@ export type SocialAgentUserInterestSummary = {
 
 @Injectable()
 export class SocialAgentUserInterestEventService {
-  private readonly logger = new Logger(SocialAgentUserInterestEventService.name);
+  private readonly logger = new Logger(
+    SocialAgentUserInterestEventService.name,
+  );
 
   constructor(
     @InjectRepository(SocialAgentUserInterestEvent)
@@ -116,9 +118,10 @@ export class SocialAgentUserInterestEventService {
     const cityWeights = new Map<string, number>();
     const locationWeights = new Map<string, number>();
     const timeWeights = new Map<string, number>();
+    const referenceTime = this.latestEventTime(rows);
 
     for (const row of rows) {
-      const weight = Number.isFinite(row.weight) ? row.weight : 0;
+      const weight = this.recencyAdjustedWeight(row, referenceTime);
       if (row.targetUserId && weight > 0) {
         positiveTargetIds.set(
           row.targetUserId,
@@ -286,6 +289,30 @@ export class SocialAgentUserInterestEventService {
         tag,
         weight: Math.round(weight * 100) / 100,
       }));
+  }
+
+  private latestEventTime(rows: SocialAgentUserInterestEvent[]): number {
+    const times = rows
+      .map((row) => row.createdAt?.getTime?.() ?? Number.NaN)
+      .filter((time) => Number.isFinite(time));
+    return times.length > 0 ? Math.max(...times) : Date.now();
+  }
+
+  private recencyAdjustedWeight(
+    row: SocialAgentUserInterestEvent,
+    referenceTime: number,
+  ): number {
+    const weight = Number.isFinite(row.weight) ? row.weight : 0;
+    const createdAt = row.createdAt?.getTime?.();
+    if (!Number.isFinite(createdAt)) return weight;
+    const ageDays = Math.max(
+      0,
+      (referenceTime - Number(createdAt)) / 86_400_000,
+    );
+    if (ageDays <= 7) return weight;
+    if (ageDays <= 30) return weight * 0.75;
+    if (ageDays <= 90) return weight * 0.45;
+    return weight * 0.25;
   }
 
   private addWeights(
