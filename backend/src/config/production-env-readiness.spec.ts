@@ -23,6 +23,8 @@ const validEnv = {
   REDIS_HOST: 'redis',
   REDIS_PORT: '6379',
   REDIS_PASSWORD: 'strong-redis-password',
+  SOCIAL_AGENT_CACHE_BACKEND: 'redis',
+  SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND: 'redis',
   JWT_SECRET: '1234567890abcdef1234567890abcdef',
   AGENT_WEBHOOK_SIGNING_SECRET: 'webhook-secret-1234567890abcdef',
   ALIYUN_ACCESS_KEY_ID: 'aliyun-key-id',
@@ -239,6 +241,38 @@ describe('production-env-readiness', () => {
       expect.arrayContaining([
         expect.objectContaining({ key: 'DB_HOST' }),
         expect.objectContaining({ key: 'REDIS_HOST' }),
+      ]),
+    );
+  });
+
+  it('requires distributed Social Agent cache in production', () => {
+    const missingCache = buildProductionEnvReport({
+      ...validEnv,
+      SOCIAL_AGENT_CACHE_BACKEND: '',
+      SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND: '',
+    });
+    const processLocalCache = buildProductionEnvReport({
+      ...validEnv,
+      SOCIAL_AGENT_CACHE_BACKEND: 'memory',
+      SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND: 'memory',
+    });
+
+    expect(missingCache.ok).toBe(false);
+    expect(processLocalCache.ok).toBe(false);
+    expect(missingCache.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'SOCIAL_AGENT_CACHE_BACKEND' }),
+        expect.objectContaining({
+          key: 'SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND',
+        }),
+      ]),
+    );
+    expect(processLocalCache.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'SOCIAL_AGENT_CACHE_BACKEND' }),
+        expect.objectContaining({
+          key: 'SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND',
+        }),
       ]),
     );
   });

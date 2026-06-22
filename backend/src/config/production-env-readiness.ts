@@ -130,6 +130,7 @@ export function buildProductionEnvReport(env: EnvMap): ProductionEnvReport {
   checkPostgres(env, error);
   checkMongoUri(env, error);
   checkRedis(env, error);
+  checkSocialAgentCache(env, error);
   checkObjectStorage(env, error);
   checkUploadTempDir(env, error);
   checkAgentModel(env, error);
@@ -286,6 +287,30 @@ function checkRedis(
     requireConfigured(env, key, error);
   }
   checkNonLocalServiceHost(env.REDIS_HOST, 'REDIS_HOST', error);
+}
+
+function checkSocialAgentCache(
+  env: EnvMap,
+  error: (key: string, message: string) => void,
+): void {
+  const backend = `${env.SOCIAL_AGENT_CACHE_BACKEND ?? ''}`
+    .trim()
+    .toLowerCase();
+  const toolBackend = `${env.SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND ?? ''}`
+    .trim()
+    .toLowerCase();
+  if (backend !== 'redis' && backend !== 'hybrid') {
+    error(
+      'SOCIAL_AGENT_CACHE_BACKEND',
+      'must be redis or hybrid in production so Agent cache hits are stable across backend and worker processes.',
+    );
+  }
+  if (toolBackend !== 'redis') {
+    error(
+      'SOCIAL_AGENT_TOOL_RESULT_CACHE_BACKEND',
+      'must be redis in production so repeated candidate/tool results are shared across instances.',
+    );
+  }
 }
 
 function validateServiceUrl(

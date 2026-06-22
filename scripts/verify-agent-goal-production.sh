@@ -21,6 +21,8 @@ Verifies the production fixes for the FitMeet Agent/Discover regression set:
   - public social intents contain at least one real discoverable item
   - production Agent browser QA catches ordinary-chat social leakage, stale
     checkpoint recovery, account menu blocking, and ordinary thread title drift
+  - Social Agent token/cost metrics are fetchable; when
+    REQUIRE_AGENT_COST_DATA=true, live LLM cost buckets must be present
 
 Environment:
   BASE_URL / API_BASE_URL              Production Web/API origins.
@@ -30,6 +32,8 @@ Environment:
   RUN_AGENT_BROWSER_QA=auto|true|false Auto runs when QA credentials exist.
   FITMEET_AGENT_BROWSER_QA_EMAIL       Dedicated QA/smoke account email.
   FITMEET_AGENT_BROWSER_QA_PASSWORD    Dedicated QA/smoke account password.
+  FITMEET_ADMIN_JWT or ADMIN_JWT       Optional admin token for L5 cost data.
+  REQUIRE_AGENT_COST_DATA=true         Fail when live cost evidence is missing.
 EOF
 }
 
@@ -199,5 +203,12 @@ if [[ "${should_run_browser_qa}" == "true" ]]; then
 else
   skip "Production Agent browser QA. Set FITMEET_AGENT_BROWSER_QA_EMAIL/PASSWORD or RUN_AGENT_BROWSER_QA=true."
 fi
+
+API_BASE_URL="${API_BASE_URL}" \
+  REQUIRE_AGENT_COST_DATA="${REQUIRE_AGENT_COST_DATA:-false}" \
+  REQUIRE_STAGE_COSTS="${REQUIRE_STAGE_COSTS:-final_response,planner,brain}" \
+  FITMEET_ADMIN_JWT="${FITMEET_ADMIN_JWT:-${ADMIN_JWT:-}}" \
+  "${ROOT_DIR}/scripts/verify-agent-token-cost.sh"
+ok "Agent token/cost verification completed"
 
 printf '\nFitMeet Agent goal production verification completed successfully for %s\n' "${BASE_URL}"
