@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { socialAgentApi } from '../api/socialAgentApi';
 import * as dataService from '../services/dataService';
+import { useAuthStore } from '../stores';
 import type { PublicSocialCandidate, PublicSocialIntent } from '../types';
 
 export function PublicIntentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { isLoggedIn } = useAuthStore();
   const [intent, setIntent] = useState<PublicSocialIntent | null>(null);
   const [candidates, setCandidates] = useState<PublicSocialCandidate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,6 +44,104 @@ export function PublicIntentDetailPage() {
   }, [id]);
 
   const publicTags = useMemo(() => intent?.interestTags?.slice(0, 6) ?? [], [intent]);
+
+  const publicInterestTags = useMemo(
+    () =>
+      [
+        intent?.requestType,
+        ...(intent?.interestTags ?? []),
+      ].filter((item): item is string => Boolean(item)),
+    [intent?.interestTags, intent?.requestType],
+  );
+
+  useEffect(() => {
+    if (!isLoggedIn || !intent?.id) return;
+    const day = new Date().toISOString().slice(0, 10);
+    const metadata = {
+      publicIntentId: intent.id,
+      detailHref: `/public-intent/${encodeURIComponent(intent.id)}`,
+    };
+    void socialAgentApi
+      .recordInterestEvent({
+        eventType: 'discover_click',
+        targetUserId: intent.userId ?? null,
+        socialRequestId: intent.linkedSocialRequestId ?? null,
+        activityTags: publicInterestTags,
+        city: intent.city || null,
+        locationText: intent.locationPreference || intent.loc || null,
+        timeWindow: intent.timePreference || null,
+        source: 'public_intent_detail_page',
+        dedupeKey: `public-intent:view:${intent.id}:${day}`,
+        metadata,
+      })
+      .catch(() => undefined);
+
+    const timer = window.setTimeout(() => {
+      void socialAgentApi
+        .recordInterestEvent({
+          eventType: 'discover_click',
+          targetUserId: intent.userId ?? null,
+          socialRequestId: intent.linkedSocialRequestId ?? null,
+          weight: 2,
+          activityTags: publicInterestTags,
+          city: intent.city || null,
+          locationText: intent.locationPreference || intent.loc || null,
+          timeWindow: intent.timePreference || null,
+          source: 'public_intent_detail_dwell',
+          dedupeKey: `public-intent:dwell:${intent.id}:${day}`,
+          metadata: {
+            ...metadata,
+            dwellMs: 8000,
+          },
+        })
+        .catch(() => undefined);
+    }, 8000);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    intent?.city,
+    intent?.id,
+    intent?.linkedSocialRequestId,
+    intent?.loc,
+    intent?.locationPreference,
+    intent?.timePreference,
+    intent?.userId,
+    isLoggedIn,
+    publicInterestTags,
+  ]);
+
+  const recordProfileOpen = useCallback(
+    (input: { targetUserId?: number | null; source: string }) => {
+      if (!isLoggedIn || !intent?.id || !input.targetUserId) return;
+      const day = new Date().toISOString().slice(0, 10);
+      void socialAgentApi
+        .recordInterestEvent({
+          eventType: 'view_profile',
+          targetUserId: input.targetUserId,
+          socialRequestId: intent.linkedSocialRequestId ?? null,
+          activityTags: publicInterestTags,
+          city: intent.city || null,
+          locationText: intent.locationPreference || intent.loc || null,
+          timeWindow: intent.timePreference || null,
+          source: input.source,
+          dedupeKey: `public-intent:profile:${intent.id}:${input.targetUserId}:${day}`,
+          metadata: {
+            publicIntentId: intent.id,
+          },
+        })
+        .catch(() => undefined);
+    },
+    [
+      intent?.city,
+      intent?.id,
+      intent?.linkedSocialRequestId,
+      intent?.loc,
+      intent?.locationPreference,
+      intent?.timePreference,
+      isLoggedIn,
+      publicInterestTags,
+    ],
+  );
 
   if (loading) {
     return (
@@ -121,6 +222,12 @@ export function PublicIntentDetailPage() {
             {intent.userId ? (
               <Link
                 to={`/user/${intent.userId}`}
+                onClick={() =>
+                  recordProfileOpen({
+                    targetUserId: intent.userId,
+                    source: 'public_intent_detail_owner_link',
+                  })
+                }
                 className="rounded-full border border-white/15 px-5 py-2 text-sm font-bold text-[#f4efe6] transition hover:border-[#c8ff80]/60"
               >
                 查看发起人
@@ -154,6 +261,12 @@ export function PublicIntentDetailPage() {
                 <Link
                   key={candidate.profile.id}
                   to={`/user/${candidate.profile.id}`}
+                  onClick={() =>
+                    recordProfileOpen({
+                      targetUserId: candidate.profile.id,
+                      source: 'public_intent_detail_candidate_link',
+                    })
+                  }
                   className="rounded-2xl border border-white/10 bg-black/20 p-4 transition hover:border-[#c8ff80]/50"
                 >
                   <div className="flex items-center gap-3">

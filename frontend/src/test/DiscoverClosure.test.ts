@@ -89,6 +89,22 @@ describe('Discover closure links', () => {
     expect(source).toContain("source: 'discover_page'");
     expect(source).toContain("source: 'discover_people_list'");
   });
+
+  it('records public intent detail and profile opens as recommendation behavior signals', () => {
+    const source = readFileSync(
+      join(process.cwd(), 'src/pages/PublicIntentDetailPage.tsx'),
+      'utf8',
+    );
+
+    expect(source).toContain('recordInterestEvent');
+    expect(source).toContain("eventType: 'discover_click'");
+    expect(source).toContain("eventType: 'view_profile'");
+    expect(source).toContain("source: 'public_intent_detail_page'");
+    expect(source).toContain("source: 'public_intent_detail_dwell'");
+    expect(source).toContain("source: 'public_intent_detail_owner_link'");
+    expect(source).toContain("source: 'public_intent_detail_candidate_link'");
+    expect(source).toContain('publicIntentId');
+  });
 });
 
 function publicIntent(
