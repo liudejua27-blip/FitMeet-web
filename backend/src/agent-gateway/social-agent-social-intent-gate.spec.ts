@@ -5,7 +5,10 @@ import {
   hasExplicitCandidateMessageConfirmationIntent,
   hasExplicitEmptyCandidateRecoveryIntent,
   hasExistingSocialActionContext,
+  hasExplicitPublishSideEffectIntent,
+  hasExplicitSocialSideEffectIntent,
   hasExplicitSocialExecutionIntent,
+  explicitlyRejectsSocialExecution,
   isConversationOnlySocialMention,
   shouldAllowSocialExecution,
 } from './social-agent-social-intent-gate';
@@ -229,6 +232,41 @@ describe('social agent social intent gate', () => {
         message: '今天晚上青岛大学附近散步，帮我找人',
         intent: 'social_search',
         conversationIntent: 'conversation',
+      }),
+    ).toBe(true);
+  });
+
+  it('allows cold-start matching when the user opts out of publishing a card', () => {
+    const message = '我不想发布卡片，只想根据我的画像找几个合适的人';
+
+    expect(explicitlyRejectsSocialExecution(message)).toBe(false);
+    expect(hasExplicitSocialExecutionIntent(message)).toBe(true);
+    expect(hasExplicitPublishSideEffectIntent(message)).toBe(false);
+    expect(hasExplicitSocialSideEffectIntent(message)).toBe(false);
+    expect(
+      shouldAllowSocialExecution({
+        message,
+        intent: 'social_search',
+        conversationIntent: 'social',
+      }),
+    ).toBe(true);
+  });
+
+  it('keeps publish opt-out from becoming a publish side effect while preserving explicit matching', () => {
+    expect(hasExplicitPublishSideEffectIntent('先不发布到发现')).toBe(false);
+    expect(
+      shouldAllowSocialExecution({
+        message: '先不发布到发现，也不要推荐人，我只是想普通聊聊',
+        intent: 'social_search',
+        taskContext: { hasSearchContext: true },
+        conversationIntent: 'social',
+      }),
+    ).toBe(false);
+    expect(
+      shouldAllowSocialExecution({
+        message: '先不发布到发现，帮我按兴趣匹配几个公开可发现用户',
+        intent: 'social_search',
+        conversationIntent: 'social',
       }),
     ).toBe(true);
   });

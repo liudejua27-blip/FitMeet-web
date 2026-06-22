@@ -11,6 +11,9 @@ const socialSearchNegationPattern =
 const socialSideEffectNegationPattern =
   /(不想|不用|不要|不是|先不|暂时不|别|无需|不需要).{0,12}(加好友|邀请|联系|发消息|发送消息|私信|自动发)/i;
 
+const publishSideEffectNegationPattern =
+  /(不想|不用|不要|不是|先不|暂不|暂时不|别|无需|不需要).{0,12}(发布|公开|发到发现|同步到发现|卡片|发现)/i;
+
 const conversationOnlySocialMentionPattern =
   /((只是|只想|就想|先|暂时|现在).{0,16}(聊聊|聊天|普通聊|说说|倾诉|安静聊|问一个普通问题))|((心情不好|压力|焦虑|累|有点累|很累|吵架|难过|烦).{0,24}(聊|说说|倾诉|不需要|不要|先不|先别|只是|只想))|((不需要|不要|先不|先别|别|无需|不用).{0,18}(推荐|搜索|找人|约练|匹配|活动|真实用户|候选|加好友|发消息|邀请|社交))/i;
 
@@ -30,13 +33,16 @@ const nonSocialLookupPattern =
   /(找回|查找|找一下|找找|帮我找|给我找|想找).{0,16}(聊天记录|消息记录|历史消息|历史会话|会话|密码|账号|设置|页面|入口|资料|文件|订单|帮助|说明|客服|教程|规则|隐私政策|协议|账单|发票)/i;
 
 const explicitSocialSearchPattern =
-  /(帮我找|给我找|想找|我要找|我想认识|想认识|认识.*(新朋友|朋友|人)|低压力社交|找一个|找个|找人|找.*(女生|男生|女性|男性|搭子|伙伴|朋友)|推荐.{0,8}(用户|朋友|人|搭子|候选|活动)|搜索.{0,8}(用户|朋友|人|搭子|候选|活动)|匹配.{0,8}(用户|朋友|人|搭子|候选)|附近.{0,8}(用户|朋友|人|搭子|活动)|同城.{0,8}(用户|朋友|人|搭子|活动)|真实用户|约练用户|户外搭子|篮球搭子|约练搭子|一起.{0,12}(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|户外|骑行|city\s*walk|citywalk|篮球|网球|游泳|运动|训练)|周末.{0,12}(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|户外|骑行|city\s*walk|citywalk|篮球|运动|训练))/i;
+  /(帮我找|给我找|想找|我要找|我想认识|想认识|认识.*(新朋友|朋友|人)|低压力社交|找一个|找个|找人|找.{0,16}(合适|适合|同频|附近|公开)?.{0,10}(人|用户|朋友|搭子|候选)|找.*(女生|男生|女性|男性|搭子|伙伴|朋友)|根据.{0,12}(画像|偏好|资料|兴趣|条件).{0,18}(找|推荐|匹配|筛选).{0,12}(人|用户|朋友|搭子|候选)|推荐.{0,18}(用户|朋友|人|搭子|候选|活动)|搜索.{0,18}(用户|朋友|人|搭子|候选|活动)|匹配.{0,18}(用户|朋友|人|搭子|候选)|附近.{0,8}(用户|朋友|人|搭子|活动)|同城.{0,8}(用户|朋友|人|搭子|活动)|真实用户|约练用户|户外搭子|篮球搭子|约练搭子|一起.{0,12}(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|户外|骑行|city\s*walk|citywalk|篮球|网球|游泳|运动|训练)|周末.{0,12}(咖啡|拍照|跑步|羽毛球|健身|瑜伽|徒步|户外|骑行|city\s*walk|citywalk|篮球|运动|训练))/i;
 
 const explicitActivitySearchPattern =
   /(找|搜索|推荐|参加|发起|创建|有没有|附近|同城).{0,12}(活动|局|约练|跑团|课程|场地|线下见面|户外)/i;
 
 const explicitSocialActionPattern =
   /(发消息|发送.*(给|第一个|第二个|第三个|这个|那个|他|她|候选)|加好友|邀请(第一个|第二个|第三个|这个|那个|他|她|候选)|约他|约她|联系(第一个|第二个|第三个|这个|那个|他|她|候选)|收藏(第一个|第二个|第三个|这个|那个|他|她|候选)|确认发布|帮我发|帮我发布|帮我发到发现|发布到发现|发布约练|发布卡片|公开发布|发到发现|同步到发现|帮我加|帮我邀请)/i;
+
+const explicitNonPublishSocialActionPattern =
+  /(发消息|发送.*(给|第一个|第二个|第三个|这个|那个|他|她|候选)|加好友|邀请(第一个|第二个|第三个|这个|那个|他|她|候选)|约他|约她|联系(第一个|第二个|第三个|这个|那个|他|她|候选)|收藏(第一个|第二个|第三个|这个|那个|他|她|候选)|帮我加|帮我邀请)/i;
 
 const explicitPublishActionPattern =
   /(确认发布|帮我发布|帮我发到发现|发布到发现|发布约练|发布卡片|公开发布|发到发现|同步到发现)/i;
@@ -59,6 +65,7 @@ const immediateSocialSearchPattern =
 export function hasExplicitSocialExecutionIntent(message: string): boolean {
   const text = message.trim().toLowerCase();
   if (!text) return false;
+  const socialExecutionText = stripPublishSideEffectOptOut(text);
   if (isProfileEnrichmentDominant(text)) return false;
   if (isConversationOnlySocialMention(text)) return false;
   if (socialHelpQuestionPattern.test(text)) return false;
@@ -66,9 +73,9 @@ export function hasExplicitSocialExecutionIntent(message: string): boolean {
   if (socialAdviceQuestionPattern.test(text)) return false;
   if (nonSocialLookupPattern.test(text)) return false;
   const hasSearchIntent =
-    explicitSocialSearchPattern.test(text) ||
-    explicitActivitySearchPattern.test(text);
-  if (socialSearchNegationPattern.test(text)) return false;
+    explicitSocialSearchPattern.test(socialExecutionText) ||
+    explicitActivitySearchPattern.test(socialExecutionText);
+  if (socialSearchNegationPattern.test(socialExecutionText)) return false;
   if (hasSearchIntent) return true;
   const hasActivity =
     /(散步|跑步|羽毛球|篮球|健身|徒步|爬山|骑行|游泳|瑜伽|飞盘|网球|乒乓|咖啡|吃饭|电影|city\s*walk|citywalk)/i.test(
@@ -99,6 +106,12 @@ export function hasExplicitSocialSideEffectIntent(message: string): boolean {
   if (socialHelpQuestionPattern.test(text)) return false;
   if (socialCapabilityQuestionPattern.test(text)) return false;
   if (nonSocialLookupPattern.test(text)) return false;
+  if (
+    publishSideEffectNegationPattern.test(text) &&
+    !explicitNonPublishSocialActionPattern.test(text)
+  ) {
+    return false;
+  }
   return (
     explicitSocialActionPattern.test(text) ||
     explicitCandidateMessageConfirmationPattern.test(text)
@@ -111,6 +124,7 @@ export function hasExplicitPublishSideEffectIntent(message: string): boolean {
   if (isProfileEnrichmentDominant(text)) return false;
   if (isConversationOnlySocialMention(text)) return false;
   if (socialSideEffectNegationPattern.test(text)) return false;
+  if (publishSideEffectNegationPattern.test(text)) return false;
   if (nonSocialLookupPattern.test(text)) return false;
   return explicitPublishActionPattern.test(text);
 }
@@ -154,10 +168,11 @@ export function hasExplicitEmptyCandidateRecoveryIntent(
 export function explicitlyRejectsSocialExecution(message: string): boolean {
   const text = message.trim().toLowerCase();
   if (!text) return false;
+  const socialExecutionText = stripPublishSideEffectOptOut(text);
   return (
-    socialSearchNegationPattern.test(text) ||
-    /(不要|不需要|不用|别|先不|暂时不|无需).{0,20}(推荐|搜索|找人|匹配|候选|真实用户|活动|约练|搭子|发布|邀请|加好友)/i.test(
-      text,
+    socialSearchNegationPattern.test(socialExecutionText) ||
+    /(不要|不需要|不用|别|先不|暂时不|无需).{0,20}(推荐|搜索|找人|匹配|候选|真实用户|活动|约练|搭子|邀请|加好友)/i.test(
+      socialExecutionText,
     )
   );
 }
@@ -165,25 +180,26 @@ export function explicitlyRejectsSocialExecution(message: string): boolean {
 export function isConversationOnlySocialMention(message: string): boolean {
   const text = message.trim().toLowerCase();
   if (!text) return false;
+  const socialExecutionText = stripPublishSideEffectOptOut(text);
   if (
-    safetyBoundaryOnlyPattern.test(text) &&
+    safetyBoundaryOnlyPattern.test(socialExecutionText) &&
     !/(只是|只想|就想|普通|聊聊|聊天|倾诉|说说|心情|压力|焦虑|难过|烦)/i.test(
-      text,
+      socialExecutionText,
     )
   ) {
     return false;
   }
   if (
     /(帮我找|给我找|现在帮我找|马上帮我找|推荐.{0,8}(真实用户|候选|几个人)|搜索.{0,8}(真实用户|候选)|我想认识|想认识|我想找|想找|我要找)/i.test(
-      text,
+      socialExecutionText,
     ) &&
     !/(不要|不需要|先不|先别|别|无需|不用).{0,18}(推荐|搜索|找人|匹配|真实用户|候选)/i.test(
-      text,
+      socialExecutionText,
     )
   ) {
     return false;
   }
-  return conversationOnlySocialMentionPattern.test(text);
+  return conversationOnlySocialMentionPattern.test(socialExecutionText);
 }
 
 export function isSocialAdviceQuestion(message: string): boolean {
@@ -376,6 +392,10 @@ function hasExistingPublishContext(
   if (nonEmptyRecord(taskMemory?.taskSlots)) return true;
   if (nonEmptyRecord(taskMemory?.taskSlotSummary)) return true;
   return false;
+}
+
+function stripPublishSideEffectOptOut(text: string): string {
+  return text.replace(publishSideEffectNegationPattern, '');
 }
 
 function positiveNumber(value: unknown): number {
