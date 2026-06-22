@@ -28,6 +28,8 @@ Environment:
   REQUIRE_AGENT_COST_DATA=true          Fail if live run/cost evidence is missing
   REQUIRE_STAGE_COSTS=csv               Required LLM use-case buckets when REQUIRE_AGENT_COST_DATA=true
   MIN_PROMPT_PREFIX_REUSE_RATE=0.70     Optional fail threshold for stable prompt prefix reuse
+  MIN_STAGE_PROMPT_PREFIX_REUSE_RATE=0.70
+                                      Optional fail threshold applied to each required LLM stage
   MIN_CACHE_HIT_RATE=0.30               Optional fail threshold for combined/public cache hit rate
   MIN_WORKFLOW_ROUTE_RATE=0.30          Optional fail threshold for workflow bypass coverage
   MAX_AVG_LLM_CALLS_PER_RUN=3           Optional fail threshold for live avg LLM calls per run
@@ -174,6 +176,7 @@ if (requireData && number(token.promptFingerprintObservations) < 1) {
 const minWorkflowRouteRate = envNumber('MIN_WORKFLOW_ROUTE_RATE');
 const minCacheHitRate = envNumber('MIN_CACHE_HIT_RATE');
 const minPromptPrefixReuseRate = envNumber('MIN_PROMPT_PREFIX_REUSE_RATE');
+const minStagePromptPrefixReuseRate = envNumber('MIN_STAGE_PROMPT_PREFIX_REUSE_RATE');
 const maxAvgLlmCallsPerRun = envNumber('MAX_AVG_LLM_CALLS_PER_RUN');
 
 if (minWorkflowRouteRate !== null && number(publicWorkflowRouteRate) < minWorkflowRouteRate) {
@@ -232,12 +235,19 @@ if (!observability) {
 
   for (const useCase of useCaseNames) {
     const bucket = llmTokenCost[useCase] || {};
+    const calls = number(bucket.calls);
+    const distinctPromptPrefixHashes = number(bucket.distinctPromptPrefixHashes);
+    const distinctDynamicContextHashes = number(bucket.distinctDynamicContextHashes);
+    const promptPrefixReuseRate =
+      calls > 0 ? Math.max(0, 1 - distinctPromptPrefixHashes / calls) : null;
     console.log(
-      `  - ${useCase}: calls=${number(bucket.calls)} prompt=${number(
+      `  - ${useCase}: calls=${calls} prompt=${number(
         bucket.promptTokens,
       )} cached=${number(bucket.promptCacheHitTokens)} billableInput=${number(
         bucket.estimatedBillableInputTokens,
-      )} cacheHit=${rate(bucket.promptCacheHitRate)}`,
+      )} cacheHit=${rate(bucket.promptCacheHitRate)} prefixReuse=${rate(
+        promptPrefixReuseRate,
+      )} prefixes=${distinctPromptPrefixHashes} dynamic=${distinctDynamicContextHashes}`,
     );
   }
 
@@ -246,7 +256,33 @@ if (!observability) {
     if (number(execution.llmCallCount) < 1) missing.push('LLM call count');
     if (aggregate.promptTokens < 1) missing.push('prompt token metrics');
     for (const stage of requiredStages) {
-      if (!useCaseNames.includes(stage)) missing.push(`LLM stage cost: ${stage}`);
+      const bucket = llmTokenCost[stage];
+      if (!bucket) {
+        missing.push(`LLM stage cost: ${stage}`);
+        continue;
+      }
+      if (number(bucket.calls) < 1) missing.push(`LLM stage calls: ${stage}`);
+      if (number(bucket.promptTokens) < 1) {
+        missing.push(`LLM stage prompt tokens: ${stage}`);
+      }
+      if (number(bucket.distinctPromptPrefixHashes) < 1) {
+        missing.push(`LLM stage prompt prefix hashes: ${stage}`);
+      }
+    }
+  }
+  if (minStagePromptPrefixReuseRate !== null) {
+    for (const stage of requiredStages) {
+      const bucket = llmTokenCost[stage];
+      if (!bucket) continue;
+      const calls = number(bucket.calls);
+      const distinctPromptPrefixHashes = number(bucket.distinctPromptPrefixHashes);
+      const stagePromptPrefixReuseRate =
+        calls > 0 ? Math.max(0, 1 - distinctPromptPrefixHashes / calls) : 0;
+      if (stagePromptPrefixReuseRate < minStagePromptPrefixReuseRate) {
+        missing.push(
+          `${stage} prompt prefix reuse rate >= ${minStagePromptPrefixReuseRate}`,
+        );
+      }
     }
   }
   if (

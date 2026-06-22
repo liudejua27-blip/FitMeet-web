@@ -34,6 +34,7 @@ Environment:
   FITMEET_AGENT_BROWSER_QA_PASSWORD    Dedicated QA/smoke account password.
   FITMEET_ADMIN_JWT or ADMIN_JWT       Optional admin token for L5 cost data.
   REQUIRE_AGENT_COST_DATA=true         Fail when live cost evidence is missing.
+  MIN_STAGE_PROMPT_PREFIX_REUSE_RATE   Optional per-stage prompt prefix reuse threshold.
 EOF
 }
 
