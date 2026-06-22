@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="${APP_DIR:-${ROOT_DIR}}"
 BASE_URL="${BASE_URL:-https://www.ourfitmeet.cn}"
 API_BASE_URL="${API_BASE_URL:-${BASE_URL%/}/api}"
+EXPECTED_RELEASE_COMMIT="${EXPECTED_RELEASE_COMMIT:-}"
 PREPARE_APP_SMOKE_USERS="${PREPARE_APP_SMOKE_USERS:-false}"
 PREPARE_AGENT_SMOKE_SEED="${PREPARE_AGENT_SMOKE_SEED:-false}"
 RUN_APP_SMOKE="${RUN_APP_SMOKE:-false}"
@@ -35,6 +36,8 @@ public feed, and auth guards.
 Options:
   --base-url URL                 Public Web origin. Default: https://www.ourfitmeet.cn
   --api-base-url URL             Public API base. Default: <base-url>/api
+  --expect-release-commit SHA    Expected backend release commit prefix from /api/health.
+                                 Defaults to ./release.json commit when available.
   --prepare-app-smoke-users      Create/update dedicated smoke users first.
   --prepare-agent-smoke-seed     Create/update dedicated Agent smoke users/candidates.
   --run-app-smoke                Run authenticated Web/App smoke against API.
@@ -97,6 +100,7 @@ Environment:
   AGENT_SSE_SKIP_ACCEL_BUFFERING_HEADER=true
                                  Skip the X-Accel-Buffering header assertion for
                                  non-nginx local smoke only. Do not use for ECS.
+  EXPECTED_RELEASE_COMMIT        Same as --expect-release-commit.
   SCAN_COMPOSE_LOGS=auto|true|false
                                  Default auto. Scans logs when docker compose files exist.
   COMPOSE_LOG_TAIL=600           Number of recent log lines to scan per service.
@@ -111,6 +115,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --api-base-url)
       API_BASE_URL="${2:-}"
+      shift
+      ;;
+    --expect-release-commit)
+      EXPECTED_RELEASE_COMMIT="${2:-}"
       shift
       ;;
     --prepare-app-smoke-users)
@@ -162,6 +170,12 @@ done
 BASE_URL="${BASE_URL%/}"
 API_BASE_URL="${API_BASE_URL%/}"
 APP_DIR="${APP_DIR%/}"
+if [[ -z "${EXPECTED_RELEASE_COMMIT}" && -f "${APP_DIR}/release.json" ]]; then
+  EXPECTED_RELEASE_COMMIT="$(
+    node -e "const fs=require('fs');const r=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(String(r.commit||''));" \
+      "${APP_DIR}/release.json" 2>/dev/null || true
+  )"
+fi
 
 info() {
   printf '[post-deploy] %s\n' "$1" >&2
@@ -283,6 +297,10 @@ verify_args=(
   --base-url "${BASE_URL}"
   --api-base-url "${API_BASE_URL}"
 )
+
+if [[ -n "${EXPECTED_RELEASE_COMMIT}" ]]; then
+  verify_args+=(--expect-release-commit "${EXPECTED_RELEASE_COMMIT}")
+fi
 
 if [[ "${RUN_PUBLIC_INTENT_WRITE}" == "true" ]]; then
   verify_args+=(--run-public-intent-write)

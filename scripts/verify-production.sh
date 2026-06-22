@@ -19,7 +19,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/verify-production.sh [--base-url https://www.ourfitmeet.cn] [--api-base-url https://www.ourfitmeet.cn/api] [--agent-token token] [--run-app-smoke] [--run-public-intent-write]
+Usage: scripts/verify-production.sh [--base-url https://www.ourfitmeet.cn] [--api-base-url https://www.ourfitmeet.cn/api] [--agent-token token] [--expect-release-commit <sha>] [--run-app-smoke] [--run-public-intent-write]
 
 Verifies a deployed FitMeet Web/API stack from macOS or Linux:
   - frontend root, backend health, and dependency readiness
@@ -58,6 +58,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --agent-token)
       AGENT_TOKEN="${2:-}"
+      shift
+      ;;
+    --expect-release-commit)
+      EXPECTED_RELEASE_COMMIT="${2:-}"
       shift
       ;;
     --run-app-smoke)
