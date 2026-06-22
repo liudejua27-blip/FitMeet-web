@@ -361,6 +361,51 @@ describe('tool-card-actions runtime identity', () => {
     expect(cardActionNavigationHrefForTests(card, detailAction)).toBe('/user/22');
   });
 
+  it('routes candidate detail actions when user identity is nested in public profile data', () => {
+    const profileCard: SchemaDrivenAssistantCard = {
+      id: 'candidate-profile-only',
+      type: 'candidate_card',
+      schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+      schemaType: 'social_match.candidate',
+      title: '夏禾',
+      data: {
+        candidateRecordId: 502,
+        profile: {
+          id: 33,
+          name: '夏禾',
+        },
+      },
+      actions: [],
+    };
+    const nestedCandidateCard: SchemaDrivenAssistantCard = {
+      id: 'candidate-nested-profile',
+      type: 'candidate_card',
+      schemaVersion: FITMEET_TOOL_UI_SCHEMA_VERSION,
+      schemaType: 'social_match.candidate',
+      title: '林屿',
+      data: {
+        candidateRecordId: 503,
+        candidate: {
+          profile: {
+            id: 44,
+            name: '林屿',
+          },
+        },
+      },
+      actions: [],
+    };
+
+    expect(cardActionNavigationHrefForTests(profileCard, visibleCardActions(profileCard, [])[0])).toBe(
+      '/user/33',
+    );
+    expect(
+      cardActionNavigationHrefForTests(
+        nestedCandidateCard,
+        visibleCardActions(nestedCandidateCard, [])[0],
+      ),
+    ).toBe('/user/44');
+  });
+
   it('keeps published discover detail actions visible and routes them to the public intent page', () => {
     const card: SchemaDrivenAssistantCard = {
       id: 'publish_to_discover:77:intent_302',

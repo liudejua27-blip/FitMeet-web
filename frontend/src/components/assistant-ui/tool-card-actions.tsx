@@ -1872,24 +1872,76 @@ function cardActionNavigationHref(
 ): string | null {
   const payload = payloadForCardAction(card, action);
   if (action.schemaAction === 'candidate.view_detail') {
+    const payloadProfile = recordFromUnknown(payload.profile);
+    const payloadCandidate = recordFromUnknown(payload.candidate);
+    const payloadCandidateProfile = recordFromUnknown(payloadCandidate.profile);
+    const payloadOpportunity = recordFromUnknown(payload.opportunity);
+    const payloadOpportunityProfile = recordFromUnknown(payloadOpportunity.profile);
+    const cardProfile = recordFromUnknown(card.data.profile);
+    const cardCandidate = recordFromUnknown(card.data.candidate);
+    const cardCandidateProfile = recordFromUnknown(cardCandidate.profile);
+    const cardOpportunity = recordFromUnknown(card.data.opportunity);
+    const cardOpportunityProfile = recordFromUnknown(cardOpportunity.profile);
     const direct = firstSafeInternalHref(
       payload.profileHref,
       payload.userHref,
       payload.detailHref,
       payload.href,
+      payloadProfile.href,
+      payloadProfile.profileHref,
+      payloadCandidate.href,
+      payloadCandidate.profileHref,
+      payloadOpportunity.href,
+      payloadOpportunity.profileHref,
       card.data.profileHref,
       card.data.userHref,
       card.data.detailHref,
       card.data.href,
+      cardProfile.href,
+      cardProfile.profileHref,
+      cardCandidate.href,
+      cardCandidate.profileHref,
+      cardOpportunity.href,
+      cardOpportunity.profileHref,
     );
     if (direct) return direct;
     const targetUserId = firstPublicPrimitive(
       payload.targetUserId,
       payload.candidateUserId,
       payload.userId,
+      payload.profileId,
+      payloadProfile.id,
+      payloadProfile.userId,
+      payloadCandidate.targetUserId,
+      payloadCandidate.candidateUserId,
+      payloadCandidate.userId,
+      payloadCandidate.profileId,
+      payloadCandidateProfile.id,
+      payloadCandidateProfile.userId,
+      payloadOpportunity.targetUserId,
+      payloadOpportunity.candidateUserId,
+      payloadOpportunity.userId,
+      payloadOpportunity.profileId,
+      payloadOpportunityProfile.id,
+      payloadOpportunityProfile.userId,
       card.data.targetUserId,
       card.data.candidateUserId,
       card.data.userId,
+      card.data.profileId,
+      cardProfile.id,
+      cardProfile.userId,
+      cardCandidate.targetUserId,
+      cardCandidate.candidateUserId,
+      cardCandidate.userId,
+      cardCandidate.profileId,
+      cardCandidateProfile.id,
+      cardCandidateProfile.userId,
+      cardOpportunity.targetUserId,
+      cardOpportunity.candidateUserId,
+      cardOpportunity.userId,
+      cardOpportunity.profileId,
+      cardOpportunityProfile.id,
+      cardOpportunityProfile.userId,
     );
     return targetUserId === null
       ? null
@@ -1944,6 +1996,10 @@ function navigateToInternalHref(href: string) {
 
 function defaultCardActionPayload(card: SchemaDrivenAssistantCard): Record<string, unknown> {
   const opportunity = isRecord(card.data.opportunity) ? card.data.opportunity : {};
+  const profile = recordFromUnknown(card.data.profile);
+  const candidateRecord = recordFromUnknown(card.data.candidate);
+  const candidateProfile = recordFromUnknown(candidateRecord.profile);
+  const opportunityProfile = recordFromUnknown(opportunity.profile);
   const proposal = isRecord(card.data.proposal) ? card.data.proposal : {};
   const candidate = defaultCandidatePayload(card, opportunity);
   const activity = defaultActivityPayload(card, opportunity);
@@ -1970,19 +2026,53 @@ function defaultCardActionPayload(card: SchemaDrivenAssistantCard): Record<strin
       card.data.targetUserId,
       card.data.userId,
       card.data.candidateUserId,
+      card.data.profileId,
+      profile.id,
+      profile.userId,
+      candidateRecord.targetUserId,
+      candidateRecord.userId,
+      candidateRecord.candidateUserId,
+      candidateRecord.profileId,
+      candidateProfile.id,
+      candidateProfile.userId,
       opportunity.targetUserId,
       opportunity.userId,
       opportunity.candidateUserId,
-      firstActionPayloadPrimitive(card, ['targetUserId', 'userId', 'candidateUserId']),
+      opportunity.profileId,
+      opportunityProfile.id,
+      opportunityProfile.userId,
+      firstActionPayloadPrimitive(card, [
+        'targetUserId',
+        'userId',
+        'candidateUserId',
+        'profileId',
+      ]),
     ),
     candidateUserId: firstPublicPrimitive(
       card.data.candidateUserId,
       card.data.targetUserId,
       card.data.userId,
+      card.data.profileId,
+      profile.userId,
+      profile.id,
+      candidateRecord.candidateUserId,
+      candidateRecord.targetUserId,
+      candidateRecord.userId,
+      candidateRecord.profileId,
+      candidateProfile.userId,
+      candidateProfile.id,
       opportunity.candidateUserId,
       opportunity.targetUserId,
       opportunity.userId,
-      firstActionPayloadPrimitive(card, ['candidateUserId', 'targetUserId', 'userId']),
+      opportunity.profileId,
+      opportunityProfile.userId,
+      opportunityProfile.id,
+      firstActionPayloadPrimitive(card, [
+        'candidateUserId',
+        'targetUserId',
+        'userId',
+        'profileId',
+      ]),
     ),
     socialRequestId: firstPublicPrimitive(card.data.socialRequestId, opportunity.socialRequestId),
     publicIntentId: firstPublicPrimitive(card.data.publicIntentId, opportunity.publicIntentId),
@@ -2246,6 +2336,10 @@ function publicDetail(value: unknown) {
 
 function publicString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function recordFromUnknown(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
