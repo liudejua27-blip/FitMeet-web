@@ -205,6 +205,77 @@ describe('SocialAgentCardActionRouterService', () => {
     ]);
   });
 
+  it('routes private candidate continuation back into the social workflow instead of ending inline', async () => {
+    const { candidateActions, handleMessage, metrics, service } = makeHarness();
+    candidateActions.performCandidatePreferenceAction.mockResolvedValue(
+      routeResult({
+        action: 'reply',
+        assistantMessage: '已记录这次私密匹配偏好。',
+      }),
+    );
+    handleMessage.mockResolvedValue(
+      routeResult({
+        intent: 'social_search',
+        action: 'queue_search' as never,
+        replyStrategy: 'search_candidates',
+        shouldSearch: true,
+        shouldQueueRun: true,
+        runMode: 'initial',
+        assistantMessage: '正在筛选公开可发现的人。',
+      }),
+    );
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'candidate.more_like_this' as never,
+        idempotencyKey: 'private-more-like-this-101',
+        payload: {
+          privateMatchMode: true,
+          publicDiscoverPublishSkipped: true,
+          candidateSearchMode: 'private_match_without_discover_publish',
+          sourceAction: 'activity.skip_publish',
+          title: '青岛大学轻松散步',
+          timePreference: '今天晚上',
+          locationPreference: '青岛大学附近',
+          activityType: '散步',
+        },
+      },
+      handleMessage,
+    });
+
+    expect(candidateActions.performCandidatePreferenceAction).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'candidate.more_like_this' }),
+    );
+    expect(handleMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 101,
+        hasCandidates: true,
+        conversationIntent: 'social',
+        message: expect.stringContaining('不发布到发现，继续私密匹配公开可发现候选人'),
+        clientContext: expect.objectContaining({
+          source: 'agent_card_action',
+          conversationIntent: 'social',
+        }),
+      }),
+      undefined,
+      undefined,
+    );
+    expect(result).toMatchObject({
+      intent: 'social_search',
+      shouldSearch: true,
+      shouldQueueRun: true,
+      runMode: 'initial',
+    });
+    expect(metrics.recordDeterministicAction).not.toHaveBeenCalledWith(
+      'candidate.more_like_this',
+      expect.anything(),
+    );
+  });
+
   it('normalizes legacy low-risk action aliases before dispatching', async () => {
     const { candidateActions, handleMessage, meetLoop, service } = makeHarness();
     candidateActions.performCandidatePreferenceAction.mockResolvedValue(

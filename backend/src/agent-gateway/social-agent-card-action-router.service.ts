@@ -140,11 +140,33 @@ export class SocialAgentCardActionRouterService {
       action === 'candidate.skip' ||
       action === 'candidate.like'
     ) {
-      return this.candidateActions.performCandidatePreferenceAction(
-        ownerUserId,
-        taskId,
-        normalizedBody,
-      );
+      const candidatePreferenceResult =
+        await this.candidateActions.performCandidatePreferenceAction(
+          ownerUserId,
+          taskId,
+          normalizedBody,
+        );
+      if (this.shouldContinuePrivateCandidateSearch(action, normalizedBody)) {
+        return input.handleMessage(
+          {
+            message: this.privateCandidateSearchMessage(normalizedBody),
+            taskId,
+            hasCandidates: true,
+            conversationIntent: 'social',
+            idempotencyKey:
+              normalizedBody.idempotencyKey ??
+              this.privateCandidateSearchIdempotencyKey(taskId, normalizedBody),
+            clientContext: {
+              ...(normalizedBody.clientContext ?? {}),
+              source: 'agent_card_action',
+              conversationIntent: 'social',
+            },
+          },
+          input.emit,
+          input.options,
+        );
+      }
+      return candidatePreferenceResult;
     }
 
     if (action === 'candidate.generate_opener') {
@@ -207,6 +229,59 @@ export class SocialAgentCardActionRouterService {
 
   private isPublishAction(action: string) {
     return action === 'publish_to_discover' || action === 'publish_social_request';
+  }
+
+  private shouldContinuePrivateCandidateSearch(
+    action: string,
+    body: SocialAgentCardActionBody,
+  ): boolean {
+    if (action !== 'candidate.more_like_this') return false;
+    const payload = body.payload ?? {};
+    return (
+      payload.privateMatchMode === true ||
+      payload.publicDiscoverPublishSkipped === true ||
+      this.text(payload.candidateSearchMode).length > 0 ||
+      this.text(payload.sourceAction) === 'activity.skip_publish'
+    );
+  }
+
+  private privateCandidateSearchMessage(body: SocialAgentCardActionBody): string {
+    const payload = body.payload ?? {};
+    const title = this.text(payload.title);
+    const activityType = this.text(payload.activityType ?? payload.activity);
+    const time = this.text(payload.timePreference ?? payload.timeWindow ?? payload.time);
+    const location = this.text(payload.locationPreference ?? payload.locationText ?? payload.location);
+    const details = [title, time, location, activityType]
+      .map((value) => value.trim())
+      .filter(Boolean);
+    return [
+      '不发布到发现，继续私密匹配公开可发现候选人。',
+      details.length ? `沿用当前需求：${details.join('，')}。` : '',
+      '请搜索并排序 3 个真实公开候选，保留安全边界，推荐结果只在当前对话里展示。',
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  private privateCandidateSearchIdempotencyKey(
+    taskId: number,
+    body: SocialAgentCardActionBody,
+  ): string {
+    const payload = body.payload ?? {};
+    const stableTarget =
+      this.text(payload.candidateRecordId) ||
+      this.text(payload.targetUserId) ||
+      this.text(payload.cardId) ||
+      this.text(payload.activityId) ||
+      this.text(payload.title) ||
+      'current-task';
+    return `private-candidate-search:${taskId}:${stableTarget
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9:_-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '') || 'current-task'}`;
   }
 
   private isLifeGraphAction(action: string) {

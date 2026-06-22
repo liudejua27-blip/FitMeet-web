@@ -264,6 +264,9 @@ function shouldAppendActionResultMessage(
   payload: Record<string, unknown> | undefined,
 ) {
   const confirmsExistingApproval = hasApprovalId(payload) || isSafetyApprovalCardPayload(payload);
+  if (action === 'candidate.more_like_this' && isPrivateCandidateContinuationPayload(payload)) {
+    return true;
+  }
   return (
     action === 'opener.reject' ||
     (action === 'candidate.connect' && confirmsExistingApproval) ||
@@ -278,6 +281,9 @@ function shouldRenderCardActionResultInline(
   payload: Record<string, unknown> | undefined,
 ) {
   if (hasApprovalId(payload) || isSafetyApprovalCardPayload(payload)) return false;
+  if (action === 'candidate.more_like_this' && isPrivateCandidateContinuationPayload(payload)) {
+    return false;
+  }
   return (
     action === 'candidate.view_detail' ||
     action === 'candidate.like' ||
@@ -306,6 +312,17 @@ function shouldAppendCardActionResultMessage(
     return response.cards.length > 0 || Boolean(response.assistantMessage.trim());
   }
   return false;
+}
+
+function isPrivateCandidateContinuationPayload(
+  payload: Record<string, unknown> | undefined,
+) {
+  return (
+    payload?.privateMatchMode === true ||
+    payload?.publicDiscoverPublishSkipped === true ||
+    Boolean(stringFromUnknown(payload?.candidateSearchMode)) ||
+    stringFromUnknown(payload?.sourceAction) === 'activity.skip_publish'
+  );
 }
 
 function hasApprovalId(payload: Record<string, unknown> | undefined) {
