@@ -15,6 +15,7 @@ AGENT_REMOTE_SMOKE_EVIDENCE_FILE="${AGENT_REMOTE_SMOKE_EVIDENCE_FILE:-}"
 REQUIRE_AGENT_TOKEN_COST_EVIDENCE="${REQUIRE_AGENT_TOKEN_COST_EVIDENCE:-false}"
 AGENT_TOKEN_COST_EVIDENCE_FILE="${AGENT_TOKEN_COST_EVIDENCE_FILE:-}"
 VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY="${VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY:-false}"
+VALIDATE_AGENT_TOKEN_COST_EVIDENCE_ONLY="${VALIDATE_AGENT_TOKEN_COST_EVIDENCE_ONLY:-false}"
 FITMEET_APP_DIR="${FITMEET_APP_DIR:-/Users/liuchongjiang/Documents/FitMeet app}"
 
 # shellcheck source=scripts/lib/toolchain.sh
@@ -26,7 +27,7 @@ warnings=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/launch-status.sh [--topology vercel-railway|ecs] [--include-railway-docker-build] [--skip-readiness-tests] [--skip-domain-check] [--skip-ios-testflight-check] [--validate-agent-remote-smoke-evidence-only]
+Usage: scripts/launch-status.sh [--topology vercel-railway|ecs] [--include-railway-docker-build] [--skip-readiness-tests] [--skip-domain-check] [--skip-ios-testflight-check] [--validate-agent-remote-smoke-evidence-only] [--validate-agent-token-cost-evidence-only]
 
 Aggregates the non-mutating FitMeet launch gates:
   - local deploy readiness Jest guard
@@ -60,8 +61,17 @@ Environment:
                               Require Agent token/cost JSON evidence file.
   AGENT_TOKEN_COST_EVIDENCE_FILE
                               Evidence JSON from scripts/verify-agent-token-cost.sh.
+  MIN_PROMPT_PREFIX_REUSE_RATE
+                              Optional launch-time override for public prompt prefix reuse.
+  MIN_STAGE_PROMPT_PREFIX_REUSE_RATE
+                              Optional launch-time override for each required LLM stage.
+  MIN_CACHE_HIT_RATE          Optional launch-time override for public cache hit rate.
+  MIN_WORKFLOW_ROUTE_RATE     Optional launch-time override for workflow bypass coverage.
+  MAX_AVG_LLM_CALLS_PER_RUN   Optional launch-time override for live avg LLM calls/run.
   VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY=true
                               Validate only the redacted Agent remote smoke evidence file.
+  VALIDATE_AGENT_TOKEN_COST_EVIDENCE_ONLY=true
+                              Validate only the Agent token/cost evidence file.
 EOF
 }
 
@@ -86,6 +96,10 @@ while [[ $# -gt 0 ]]; do
     --validate-agent-remote-smoke-evidence-only)
       VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY=true
       REQUIRE_AGENT_REMOTE_SMOKE_EVIDENCE=true
+      ;;
+    --validate-agent-token-cost-evidence-only)
+      VALIDATE_AGENT_TOKEN_COST_EVIDENCE_ONLY=true
+      REQUIRE_AGENT_TOKEN_COST_EVIDENCE=true
       ;;
     -h|--help)
       usage
@@ -238,6 +252,34 @@ const fail = (message) => {
   process.exit(1);
 };
 const number = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+const optionalNumber = (value) =>
+  value === null || value === undefined || value === ''
+    ? null
+    : Number.isFinite(Number(value))
+      ? Number(value)
+      : null;
+const envNumber = (key) => {
+  const raw = process.env[key];
+  if (raw === undefined || raw === '') return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) fail(`Invalid numeric threshold ${key}=${raw}`);
+  return parsed;
+};
+const threshold = (name, envKey) => {
+  const envValue = envNumber(envKey);
+  if (envValue !== null) return envValue;
+  return optionalNumber(doc.thresholds && doc.thresholds[name]);
+};
+const assertMin = (label, value, min) => {
+  if (min === null) return;
+  if (optionalNumber(value) === null) fail(`${label} is missing.`);
+  if (number(value) < min) fail(`${label} ${number(value)} is below required ${min}.`);
+};
+const assertMax = (label, value, max) => {
+  if (max === null) return;
+  if (optionalNumber(value) === null) fail(`${label} is missing.`);
+  if (number(value) > max) fail(`${label} ${number(value)} is above allowed ${max}.`);
+};
 if (doc.schemaVersion !== 'fitmeet.agent-token-cost-evidence.v1') {
   fail(`Unexpected token/cost evidence schema: ${doc.schemaVersion || 'missing'}`);
 }
@@ -256,12 +298,37 @@ if (number(l5.llmCallCount) < 1) fail('Agent token/cost evidence has no LLM call
 if (number(l5.avgLlmCallsPerRun) <= 0) {
   fail('Agent token/cost evidence has invalid avg LLM calls/run.');
 }
+assertMax(
+  'Agent token/cost avg LLM calls/run',
+  l5.avgLlmCallsPerRun,
+  threshold('maxAvgLlmCallsPerRun', 'MAX_AVG_LLM_CALLS_PER_RUN'),
+);
 const aggregate = l5.aggregate || {};
 if (number(aggregate.promptTokens) < 1) {
   fail('Agent token/cost evidence has no prompt token data.');
 }
+const publicMetrics = doc.publicMetrics || {};
+assertMin(
+  'Agent token/cost workflow route rate',
+  publicMetrics.workflowRouteRate,
+  threshold('minWorkflowRouteRate', 'MIN_WORKFLOW_ROUTE_RATE'),
+);
+assertMin(
+  'Agent token/cost cache hit rate',
+  publicMetrics.cacheHitRate,
+  threshold('minCacheHitRate', 'MIN_CACHE_HIT_RATE'),
+);
+assertMin(
+  'Agent token/cost prompt prefix reuse rate',
+  publicMetrics.promptPrefixReuseRate,
+  threshold('minPromptPrefixReuseRate', 'MIN_PROMPT_PREFIX_REUSE_RATE'),
+);
 const requiredStages = Array.isArray(doc.requiredStages) ? doc.requiredStages : [];
 const useCases = l5.useCases || {};
+const minStagePromptPrefixReuseRate = threshold(
+  'minStagePromptPrefixReuseRate',
+  'MIN_STAGE_PROMPT_PREFIX_REUSE_RATE',
+);
 for (const stage of requiredStages) {
   const bucket = useCases[stage];
   if (!bucket) fail(`Agent token/cost evidence missing stage: ${stage}`);
@@ -269,6 +336,11 @@ for (const stage of requiredStages) {
   if (number(bucket.promptTokens) < 1) {
     fail(`Agent token/cost evidence stage has no prompt tokens: ${stage}`);
   }
+  assertMin(
+    `Agent token/cost ${stage} prompt prefix reuse rate`,
+    bucket.promptPrefixReuseRate,
+    minStagePromptPrefixReuseRate,
+  );
 }
 console.log(`[PASS] Agent token/cost evidence is present: ${file}`);
 NODE
@@ -278,6 +350,11 @@ cd "${ROOT_DIR}" || exit 1
 
 if [[ "${VALIDATE_AGENT_REMOTE_SMOKE_EVIDENCE_ONLY}" == "true" ]]; then
   validate_agent_remote_smoke_evidence
+  exit $?
+fi
+
+if [[ "${VALIDATE_AGENT_TOKEN_COST_EVIDENCE_ONLY}" == "true" ]]; then
+  validate_agent_token_cost_evidence
   exit $?
 fi
 
