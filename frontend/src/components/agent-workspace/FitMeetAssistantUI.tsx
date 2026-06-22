@@ -8,7 +8,7 @@ import {
   type ThreadMessageLike,
   type ThreadUserMessagePart,
 } from '@assistant-ui/react';
-import { type FormEvent, type ReactNode, useMemo } from 'react';
+import { type FormEvent, type ReactNode, useCallback, useMemo } from 'react';
 
 import type {
   FitMeetAlphaCard,
@@ -19,6 +19,7 @@ import type {
   UserFacingAgentResponse,
 } from '../../api/socialAgentApi';
 import { AssistantShell } from '../assistant-ui/assistant-shell';
+import { requestAssistantComposerFocus } from '../assistant-ui/composer';
 import {
   FitMeetToolUIActionsProvider,
   type FitMeetToolActionInput,
@@ -289,6 +290,13 @@ export function FitMeetAssistantUI(props: FitMeetAssistantUIProps) {
     if (!lastMessage) return false;
     return shouldRenderProcessPart(lastMessage, lastIndex, props.messages, props.steps);
   }, [props.messages, props.steps]);
+  const focusComposerInputAfterNewConversation = useCallback(() => {
+    requestAssistantComposerFocus();
+  }, []);
+  const handleNewConversation = useCallback(() => {
+    props.onNewConversation();
+    focusComposerInputAfterNewConversation();
+  }, [focusComposerInputAfterNewConversation, props.onNewConversation]);
 
   return (
     <FitMeetAssistantRuntimeProvider
@@ -302,7 +310,7 @@ export function FitMeetAssistantUI(props: FitMeetAssistantUIProps) {
       onStop={props.onStop}
       onReloadLast={props.onReloadLast}
       onFeedback={props.onFeedback}
-      onNewConversation={props.onNewConversation}
+      onNewConversation={handleNewConversation}
       onThreadSelect={props.onThreadSelect}
       onThreadRename={props.onThreadRename}
       onThreadDelete={props.onThreadDelete}
@@ -322,7 +330,7 @@ export function FitMeetAssistantUI(props: FitMeetAssistantUIProps) {
           requiresAuth={props.requiresAuth}
           onBranchSwitch={props.onBranchSwitch}
           onFeedback={props.onFeedback}
-          onNewConversation={props.onNewConversation}
+          onNewConversation={handleNewConversation}
           onThreadRename={props.onThreadRename}
           onThreadDelete={props.onThreadDelete}
           onLogin={props.onLogin}

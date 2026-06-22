@@ -28,6 +28,7 @@ import type {
   SocialAgentReminderScene,
 } from '../../api/socialAgentApi';
 import { cn } from '../../lib/utils';
+import { requestAssistantComposerFocus } from './composer';
 import { TooltipIconButton } from './tooltip-icon-button';
 
 type ChatGPTThreadListProps = {
@@ -89,6 +90,9 @@ export function ChatGPTThreadList({
   onToggleReminders,
   onUpdateReminderPreference,
 }: ChatGPTThreadListProps) {
+  const focusComposerInputAfterNewChat = () => {
+    requestAssistantComposerFocus();
+  };
   const threadById = useMemo(() => {
     const items = new Map<string, FitMeetAgentThreadSummary>();
     for (const thread of threads) {
@@ -160,6 +164,7 @@ export function ChatGPTThreadList({
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-[#0d0d0d] transition-colors hover:bg-black/[0.045]"
               onClick={() => {
                 onCloseMobile();
+                focusComposerInputAfterNewChat();
               }}
             >
               <Pencil className="h-4 w-4" aria-hidden="true" />
@@ -173,7 +178,12 @@ export function ChatGPTThreadList({
           </div>
           {threadsLoading ? <ThreadListSkeleton /> : null}
           {!threadsLoading && threads.length === 0 ? (
-            <EmptyThreadHistory onNewConversation={onNewConversation} />
+            <EmptyThreadHistory
+              onNewConversation={() => {
+                onNewConversation();
+                focusComposerInputAfterNewChat();
+              }}
+            />
           ) : null}
           {!threadsLoading && threads.length > 0 ? (
             <div

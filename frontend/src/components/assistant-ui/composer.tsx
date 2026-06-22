@@ -7,7 +7,7 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { cn } from '../../lib/utils';
 import { ChatGPTAttachment } from './attachment';
@@ -22,6 +22,30 @@ type ChatGPTComposerProps = {
   requiresAuth?: boolean;
   onLogin?: () => void;
 };
+
+const COMPOSER_FOCUS_EVENT = 'fitmeet-agent-focus-composer';
+const COMPOSER_FOCUS_UNTIL_ATTRIBUTE = 'data-fitmeet-focus-composer-until';
+
+export function requestAssistantComposerFocus() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  document.documentElement.setAttribute(
+    COMPOSER_FOCUS_UNTIL_ATTRIBUTE,
+    String(Date.now() + 2_000),
+  );
+  window.dispatchEvent(new Event(COMPOSER_FOCUS_EVENT));
+
+  let attempts = 0;
+  const focus = () => {
+    const input = document.querySelector<HTMLTextAreaElement>(
+      '[data-testid="assistant-ui-composer"] textarea',
+    );
+    input?.focus({ preventScroll: true });
+    if (input && document.activeElement === input) return;
+    attempts += 1;
+    if (attempts < 20) window.setTimeout(focus, 100);
+  };
+  window.setTimeout(focus, 0);
+}
 
 type ComposerSurfaceState =
   | 'auth-required'
@@ -49,6 +73,7 @@ function composerSurfaceState({
 }
 
 export function ChatGPTComposer({ requiresAuth, onLogin }: ChatGPTComposerProps) {
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const attachments = useAuiState((state) => state.composer.attachments);
   const attachmentIds = useMemo(
     () => attachments.map((attachment) => attachment.id),
@@ -76,6 +101,20 @@ export function ChatGPTComposer({ requiresAuth, onLogin }: ChatGPTComposerProps)
     surfaceState === 'generating' ||
     surfaceState === 'dictating' ||
     uploadSummary.status === 'uploading';
+  const focusIfRequested = useCallback(() => {
+    if (typeof document === 'undefined') return;
+    const focusUntil = Number(
+      document.documentElement.getAttribute(COMPOSER_FOCUS_UNTIL_ATTRIBUTE) ?? '0',
+    );
+    if (!Number.isFinite(focusUntil) || Date.now() > focusUntil) return;
+    inputRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    focusIfRequested();
+    window.addEventListener(COMPOSER_FOCUS_EVENT, focusIfRequested);
+    return () => window.removeEventListener(COMPOSER_FOCUS_EVENT, focusIfRequested);
+  }, [focusIfRequested]);
 
   return (
     <ComposerPrimitive.Root
@@ -116,6 +155,7 @@ export function ChatGPTComposer({ requiresAuth, onLogin }: ChatGPTComposerProps)
           </div>
         </AuiIf>
         <ComposerPrimitive.Input
+          ref={inputRef}
           rows={1}
           placeholder={requiresAuth ? '登录后继续' : '询问任何问题'}
           aria-describedby={uploadStatusId}

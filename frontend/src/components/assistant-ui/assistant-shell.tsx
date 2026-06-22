@@ -11,6 +11,7 @@ import type {
   FitMeetAssistantMessage,
   FitMeetAssistantRecovery,
 } from '../agent-workspace/FitMeetAssistantUI.types';
+import { requestAssistantComposerFocus } from './composer';
 import { ChatGPTThread } from './thread';
 import { ChatGPTThreadList, MobileThreadListButton } from './thread-list';
 import { TooltipIconButton } from './tooltip-icon-button';
@@ -82,7 +83,12 @@ export function AssistantShell({
 }: AssistantShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(initialSidebarOpen);
   const [isDesktopSidebar, setIsDesktopSidebar] = useState(isDesktopViewport);
+  const [focusComposerOnReady, setFocusComposerOnReady] = useState(false);
   const mobileSidebarButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  const focusComposerInput = useCallback(() => {
+    requestAssistantComposerFocus();
+  }, []);
 
   const openDesktopSidebar = useCallback(() => {
     writeStoredDesktopSidebarOpen(true);
@@ -101,6 +107,48 @@ export function AssistantShell({
     setSidebarOpen(false);
     window.setTimeout(() => mobileSidebarButtonRef.current?.focus(), 0);
   }, []);
+
+  const closeMobileSidebarAndFocusComposer = useCallback(() => {
+    setSidebarOpen(false);
+    setFocusComposerOnReady(true);
+  }, []);
+
+  const handleNewConversation = useCallback(() => {
+    onNewConversation();
+    setFocusComposerOnReady(true);
+  }, [onNewConversation]);
+
+  useEffect(() => {
+    if (!focusComposerOnReady || sidebarOpen || sessionRestoring) return undefined;
+    let attempts = 0;
+    let timeout: number | undefined;
+    const focusUntilReady = () => {
+      focusComposerInput();
+      const input = document.querySelector<HTMLTextAreaElement>(
+        '[data-testid="assistant-ui-composer"] textarea',
+      );
+      if (input && document.activeElement === input) {
+        setFocusComposerOnReady(false);
+        return;
+      }
+      attempts += 1;
+      if (attempts >= 20) {
+        setFocusComposerOnReady(false);
+        return;
+      }
+      timeout = window.setTimeout(focusUntilReady, 100);
+    };
+    timeout = window.setTimeout(focusUntilReady, 0);
+    return () => {
+      if (timeout !== undefined) window.clearTimeout(timeout);
+    };
+  }, [
+    focusComposerInput,
+    focusComposerOnReady,
+    messages.length,
+    sessionRestoring,
+    sidebarOpen,
+  ]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -181,7 +229,7 @@ export function AssistantShell({
           <TooltipIconButton
             tooltip="新对话"
             className="bg-transparent text-[#5d5d5d] shadow-none hover:bg-black/[0.05] hover:text-[#0d0d0d]"
-            onClick={onNewConversation}
+            onClick={handleNewConversation}
             data-testid="assistant-ui-desktop-new-chat"
             aria-label="新对话"
           >
@@ -205,8 +253,8 @@ export function AssistantShell({
         threadsLoading={threadsLoading}
         activeThreadId={activeThreadId}
         requiresAuth={requiresAuth}
-        onCloseMobile={isDesktopSidebar ? () => undefined : closeMobileSidebar}
-        onNewConversation={onNewConversation}
+        onCloseMobile={isDesktopSidebar ? () => undefined : closeMobileSidebarAndFocusComposer}
+        onNewConversation={handleNewConversation}
         onThreadRename={onThreadRename}
         onThreadDelete={onThreadDelete}
         onLogin={onLogin}
