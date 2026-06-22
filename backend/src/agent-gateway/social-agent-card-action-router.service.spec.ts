@@ -610,6 +610,19 @@ describe('SocialAgentCardActionRouterService', () => {
       },
       handleMessage,
     });
+    const directMessageResult = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'send_candidate_message' as never,
+        payload: {
+          actionType: 'send_invite',
+          candidateUserId: 22,
+          message: '你好，想约你一起散步。',
+        },
+      },
+      handleMessage,
+    });
     const connectResult = await service.perform({
       ownerUserId: 7,
       taskId: 101,
@@ -626,11 +639,19 @@ describe('SocialAgentCardActionRouterService', () => {
     expect(handleMessage).not.toHaveBeenCalled();
     expect(
       candidateActions.confirmOpenerSendFromCardAction,
-    ).toHaveBeenCalledTimes(1);
+    ).toHaveBeenCalledTimes(2);
     expect(
       candidateActions.connectCandidateFromCardAction,
     ).toHaveBeenCalledTimes(1);
     expect(sendInviteResult.pendingApproval).toEqual(
+      expect.objectContaining({
+        actionType: 'send_invite',
+        payload: expect.objectContaining({
+          schemaAction: 'opener.confirm_send',
+        }),
+      }),
+    );
+    expect(directMessageResult.pendingApproval).toEqual(
       expect.objectContaining({
         actionType: 'send_invite',
         payload: expect.objectContaining({
@@ -646,7 +667,7 @@ describe('SocialAgentCardActionRouterService', () => {
         }),
       }),
     );
-    expect(executeCalls).toHaveLength(2);
+    expect(executeCalls).toHaveLength(3);
     expect(
       executeCalls.map((call) => ({
         goal: call.goal,
@@ -657,6 +678,15 @@ describe('SocialAgentCardActionRouterService', () => {
         ).tools[0],
       })),
     ).toEqual([
+      {
+        goal: 'card_action:opener.confirm_send',
+        toolInput: expect.objectContaining({
+          agent: 'Social Match Agent',
+          input: expect.objectContaining({
+            action: 'opener.confirm_send',
+          }),
+        }),
+      },
       {
         goal: 'card_action:opener.confirm_send',
         toolInput: expect.objectContaining({

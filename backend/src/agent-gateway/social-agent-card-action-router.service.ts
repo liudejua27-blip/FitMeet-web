@@ -257,6 +257,7 @@ export class SocialAgentCardActionRouterService {
     if (
       normalized === 'send_invite' ||
       normalized === 'send_message' ||
+      normalized === 'send_candidate_message' ||
       normalized === 'send_message_to_candidate'
     ) {
       return 'opener.confirm_send';
