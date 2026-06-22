@@ -429,8 +429,8 @@ describe('CardCopywriterService', () => {
       actions: expect.arrayContaining([
         expect.objectContaining({
           label: '发布到发现',
-          action: 'activity.confirm_create',
-          schemaAction: 'activity.confirm_create',
+          action: 'publish_to_discover',
+          schemaAction: 'publish_to_discover',
           requiresConfirmation: true,
           payload: expect.objectContaining({
             actionType: 'create_activity',

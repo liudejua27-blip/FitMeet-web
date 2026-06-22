@@ -47,6 +47,7 @@ import {
 } from './social-agent-memory.util';
 import { TonePolicyService } from './response-quality/tone-policy.service';
 import { buildRunScopedAssistantMessageId } from './social-agent-stream-message-id.util';
+import { SocialAgentMetricsService } from './social-agent-metrics.service';
 
 @Injectable()
 export class SocialAgentRecommendationResultService {
@@ -74,6 +75,8 @@ export class SocialAgentRecommendationResultService {
     private readonly agentQuality?: AgentQualityEvaluatorService,
     @Optional()
     private readonly selfImprove?: AgentSelfImproveService,
+    @Optional()
+    private readonly metrics?: SocialAgentMetricsService,
   ) {}
 
   async completeRecommendationResult(input: {
@@ -187,6 +190,17 @@ export class SocialAgentRecommendationResultService {
         candidates,
         searchResult,
       });
+    const shouldUseDeterministicEmptyCandidateReply =
+      this.shouldUseDeterministicEmptyCandidateReply({
+        candidates,
+        searchResult,
+      });
+    if (shouldUseDeterministicEmptyCandidateReply) {
+      this.metrics?.recordDeterministicRouteReply(
+        'candidate_search.empty_candidates',
+        { estimatedAvoidedLlmCalls: 1 },
+      );
+    }
     let assistantStreamed = false;
     const streamAssistantDelta = async (delta: string) => {
       if (!delta) return;
@@ -200,17 +214,19 @@ export class SocialAgentRecommendationResultService {
     };
     const assistantMessage =
       this.tonePolicy?.safeAssistantMessage(
-        await this.generateRecommendationAssistantMessage({
-          task,
-          draft,
-          candidates,
-          searchResult,
-          fallbackReply: fallbackAssistantMessage,
-          onDelta: emit ? streamAssistantDelta : undefined,
-          signal: input.signal,
-          buildMemoryContext: input.buildMemoryContext,
-          taskContext: input.taskContext,
-        }),
+        shouldUseDeterministicEmptyCandidateReply
+          ? fallbackAssistantMessage
+          : await this.generateRecommendationAssistantMessage({
+              task,
+              draft,
+              candidates,
+              searchResult,
+              fallbackReply: fallbackAssistantMessage,
+              onDelta: emit ? streamAssistantDelta : undefined,
+              signal: input.signal,
+              buildMemoryContext: input.buildMemoryContext,
+              taskContext: input.taskContext,
+            }),
         fallbackAssistantMessage,
       ) ?? fallbackAssistantMessage;
     const approvalRequiredActions: Array<Record<string, unknown>> = [];
@@ -230,6 +246,9 @@ export class SocialAgentRecommendationResultService {
       status: task.status,
       visibleSteps,
       assistantMessage,
+      ...(shouldUseDeterministicEmptyCandidateReply
+        ? { assistantMessageSource: 'deterministic_route' as const }
+        : {}),
       emptyReason: searchResult.emptyReason,
       message: searchResult.message,
       debugReasons: searchResult.debugReasons,
@@ -262,6 +281,16 @@ export class SocialAgentRecommendationResultService {
     }
     await emit?.({ type: 'result', result, assistantStreamed });
     return result;
+  }
+
+  private shouldUseDeterministicEmptyCandidateReply(input: {
+    candidates: SocialAgentChatCandidate[];
+    searchResult: SocialAgentCandidateSearchResult;
+  }): boolean {
+    return (
+      input.candidates.length === 0 &&
+      input.searchResult.emptyReason === 'no_real_candidates'
+    );
   }
 
   private async generateRecommendationAssistantMessage(input: {

@@ -106,10 +106,11 @@ export class SocialAgentProfileEnrichmentService {
     const extractedProfile = this.extractProfileFieldsFromConversation([
       sourceMessage,
     ]);
-    const llmExtractedProfile = await this.chatLlm.extractProfileFieldsWithLlm(
-      task,
-      sourceMessage,
-    );
+    const llmExtractedProfile = this.hasSufficientDeterministicProfileSignal(
+      extractedProfile,
+    )
+      ? (this.recordDeterministicProfileExtraction(), {})
+      : await this.chatLlm.extractProfileFieldsWithLlm(task, sourceMessage);
     const plannedProfile = this.chatLlm.profileFieldsFromRecord(
       readSocialAgentConversationBrainToolArguments(
         task,
@@ -255,6 +256,18 @@ export class SocialAgentProfileEnrichmentService {
     });
     transitionSocialAgentState(task, 'profile_detected');
     await this.taskRepo.save(task);
+    if (this.hasSufficientDeterministicProfileSignal(mergedProfile)) {
+      this.recordDeterministicProfileReply();
+      return {
+        assistantMessage: fallbackReply,
+        assistantMessageSource: 'deterministic_route',
+        savedContext: true,
+        profileUpdated: false,
+        profileUpdateProposal: null,
+        task,
+        assistantStreamed: false,
+      };
+    }
     const memoryContext = buildMemoryContext(task);
     const taskContext = input.buildTaskContext?.(task, memoryContext) ?? null;
     let assistantStreamed = false;
@@ -595,11 +608,17 @@ export class SocialAgentProfileEnrichmentService {
     }
     const interestMatches = Array.from(
       text.matchAll(
-        /(跑步|咖啡|健身|羽毛球|瑜伽|徒步|骑行|游泳|拍照|篮球|足球|网球)/g,
+        /(跑步|咖啡|健身|羽毛球|瑜伽|徒步|骑行|游泳|拍照|篮球|足球|网球|散步|编程|舞蹈|跳舞|Citywalk|citywalk|书店|电影|桌游|爬山|露营|飞盘)/g,
       ),
     ).map((match) => match[1]);
     if (interestMatches.length > 0)
-      fields.interestTags = Array.from(new Set(interestMatches));
+      fields.interestTags = Array.from(
+        new Set(
+          interestMatches.map((item) =>
+            item.toLowerCase() === 'citywalk' ? 'Citywalk' : item,
+          ),
+        ),
+      );
     const timeMatch = text.match(
       /(周末[^，。,.]{0,12}|下午|晚上|工作日[^，。,.]{0,12})/,
     );
@@ -612,13 +631,108 @@ export class SocialAgentProfileEnrichmentService {
       fields.wantToMeet = [target];
       fields.preferredTraits = [target];
     }
+    const publicTagPreference = this.extractPublicTagPreference(text);
+    if (publicTagPreference) {
+      const existing = Array.isArray(fields.preferredTraits)
+        ? fields.preferredTraits
+        : [];
+      const targetPreferenceParts = Array.from(
+        new Set(
+          [fields.targetPreference, publicTagPreference]
+            .map((item) => cleanDisplayText(item, ''))
+            .filter(Boolean),
+        ),
+      );
+      fields.targetPreference = targetPreferenceParts.join('，');
+      fields.preferredTraits = Array.from(
+        new Set([...existing, ...targetPreferenceParts]),
+      );
+    }
     const rejectMatch = text.match(
       /(?:不喜欢|不接受|不想|拒绝|避免)([^，。,.]{1,40})/,
     );
     if (rejectMatch) fields.rejectRules = rejectMatch[0];
     const privacyMatch = text.match(/(?:隐私|不公开|不透露)([^，。,.]{1,60})/);
     if (privacyMatch) fields.privacyBoundary = privacyMatch[0];
+    const socialBoundary = this.extractSocialSafetyBoundary(text);
+    if (socialBoundary) {
+      fields.socialBoundary = socialBoundary;
+      fields.privacyBoundary = fields.privacyBoundary
+        ? `${fields.privacyBoundary}；${socialBoundary}`
+        : socialBoundary;
+    }
     return fields;
+  }
+
+  private recordDeterministicProfileExtraction(): void {
+    this.metrics.recordDeterministicRouteReply(
+      'profile_extraction.rule_based',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+  }
+
+  private recordDeterministicProfileReply(): void {
+    this.metrics.recordDeterministicRouteReply(
+      'profile_extraction.deterministic_reply',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+  }
+
+  private extractPublicTagPreference(text: string): string {
+    const preferences = [
+      /(?:公开资料|资料|标签|最好|优先)(?:里|中)?[^，。,.]{0,16}(舞蹈|跳舞|编程|程序员|摄影|瑜伽|羽毛球|跑步|健身)[^，。,.]{0,12}/,
+      /(?:找|认识|希望|优先|最好)[^，。,.]{0,16}(女生|男生|同校|同城|校友|舞蹈生|程序员|编程相关|舞蹈相关)[^，。,.]{0,12}/,
+    ]
+      .map((pattern) => text.match(pattern)?.[0])
+      .filter((item): item is string => Boolean(item))
+      .map((item) =>
+        cleanDisplayText(item, '')
+          .replace(/^(想)?(?:找|认识|希望|优先|最好)/, '')
+          .trim(),
+      )
+      .filter(Boolean);
+    return Array.from(new Set(preferences)).slice(0, 3).join('，');
+  }
+
+  private extractSocialSafetyBoundary(text: string): string {
+    const boundaries: string[] = [];
+    if (/公共场所|公开场所|人多|校园内|校内|白天/.test(text)) {
+      boundaries.push('第一次见面优先公共场所');
+    }
+    if (/站内聊|站内沟通|先聊天|先聊|不交换联系方式|不加微信|不留电话/.test(text)) {
+      boundaries.push('先站内沟通，不自动交换联系方式');
+    }
+    if (/不公开精确位置|不透露具体位置|模糊位置|位置保护/.test(text)) {
+      boundaries.push('保护精确位置，只使用模糊区域');
+    }
+    return Array.from(new Set(boundaries)).join('；');
+  }
+
+  private hasSufficientDeterministicProfileSignal(
+    fields: ExtractedProfileFields,
+  ): boolean {
+    const strongKeys = [
+      'city',
+      'school',
+      'nearbyArea',
+      'mbti',
+      'zodiac',
+      'ageRange',
+      'height',
+      'weight',
+      'personality',
+      'interestTags',
+      'availableTimes',
+      'targetPreference',
+      'socialGoal',
+      'privacyBoundary',
+      'rejectRules',
+      'socialBoundary',
+      'preferredTraits',
+    ];
+    const strongSignals = strongKeys.filter((key) => this.hasUsefulValue(fields[key]));
+    if (strongSignals.length >= 2) return true;
+    return Boolean(fields.targetPreference && (fields.city || fields.school || fields.nearbyArea));
   }
 
   private rememberExtractedProfileInTaskMemory(

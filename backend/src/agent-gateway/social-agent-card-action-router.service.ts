@@ -2,7 +2,11 @@ import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 
 import { AgentLoopService } from './agent-loop.service';
 import { SocialAgentCandidateActionService } from './social-agent-candidate-action.service';
-import { messageForSocialAgentSchemaAction } from './social-agent-card-action.presenter';
+import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
+import {
+  SocialRequestSafety,
+  SocialRequestType,
+} from '../social-requests/social-request.entity';
 import type { SocialAgentCardActionBody } from './social-agent-action.types';
 import type {
   SocialAgentIntentRouteResult,
@@ -12,6 +16,8 @@ import type {
 } from './social-agent-chat.types';
 import { SocialAgentLifeGraphCardActionService } from './social-agent-life-graph-card-action.service';
 import { SocialAgentMeetLoopService } from './social-agent-meet-loop.service';
+import { SocialAgentDraftPublicationService } from './social-agent-draft-publication.service';
+import { SocialAgentMetricsService } from './social-agent-metrics.service';
 
 type HandleMessage = (
   body: SocialAgentRouteMessageBody,
@@ -26,6 +32,10 @@ export class SocialAgentCardActionRouterService {
     private readonly meetLoop: SocialAgentMeetLoopService,
     private readonly lifeGraphActions: SocialAgentLifeGraphCardActionService,
     @Optional() private readonly agentLoop?: AgentLoopService,
+    @Optional()
+    private readonly draftPublication?: SocialAgentDraftPublicationService,
+    @Optional()
+    private readonly metrics?: SocialAgentMetricsService,
   ) {}
 
   async perform(input: {
@@ -77,6 +87,11 @@ export class SocialAgentCardActionRouterService {
     if (!finalResult) {
       throw new Error('Card action AgentLoop completed without result.');
     }
+    if (this.isLowRiskDeterministicResult(action, finalResult)) {
+      this.metrics?.recordDeterministicAction(action, {
+        estimatedAvoidedLlmCalls: 1,
+      });
+    }
     finalResult.agentLoop = finalResult.agentLoop ?? execution.loop;
     return finalResult;
   }
@@ -89,7 +104,7 @@ export class SocialAgentCardActionRouterService {
     emit?: StreamEmit;
     options?: SocialAgentStreamOptions;
   }): Promise<SocialAgentIntentRouteResult> {
-    const { ownerUserId, taskId, body, handleMessage, emit, options } = input;
+    const { ownerUserId, taskId, body, options } = input;
     const action = this.normalizeCardAction(body.action);
     if (!action) throw new BadRequestException('Missing agent action');
     const normalizedBody = action === body.action ? body : { ...body, action };
@@ -148,6 +163,10 @@ export class SocialAgentCardActionRouterService {
       );
     }
 
+    if (this.isPublishAction(action)) {
+      return this.publishToDiscoverFromCardAction(ownerUserId, taskId, normalizedBody);
+    }
+
     if (this.isActivityAction(action)) {
       return this.meetLoop.performActivityAction(ownerUserId, taskId, normalizedBody);
     }
@@ -160,17 +179,14 @@ export class SocialAgentCardActionRouterService {
       );
     }
 
-    return handleMessage(
-      {
-        taskId,
-        message: messageForSocialAgentSchemaAction(action),
-        hasCandidates: true,
-        idempotencyKey: body.idempotencyKey ?? null,
-        clientContext: this.clientContextForCardAction(body, taskId),
-      },
-      emit,
-      options,
-    );
+    this.metrics?.recordDeterministicAction('unsupported_card_action', {
+      estimatedAvoidedLlmCalls: 1,
+    });
+    return this.simpleRouteResult({
+      taskId,
+      assistantMessage:
+        '这个操作来自旧卡片或暂时不可用。我没有重新调用模型；你可以使用最新回复里的按钮，或直接告诉我下一步想做什么。',
+    });
   }
 
   private isActivityAction(action: string) {
@@ -189,11 +205,48 @@ export class SocialAgentCardActionRouterService {
     );
   }
 
+  private isPublishAction(action: string) {
+    return action === 'publish_to_discover' || action === 'publish_social_request';
+  }
+
   private isLifeGraphAction(action: string) {
     return (
       action === 'life_graph.accept_update' ||
       action === 'life_graph.reject_update'
     );
+  }
+
+  private isLowRiskDeterministicResult(
+    action: string,
+    result: SocialAgentIntentRouteResult,
+  ): boolean {
+    if (!this.isLowRiskDeterministicAction(action)) return false;
+    if (result.pendingApproval) return false;
+    if (
+      result.shouldSearch ||
+      result.shouldReplan ||
+      result.shouldQueueRun ||
+      result.runMode
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  private isLowRiskDeterministicAction(action: string): boolean {
+    return new Set([
+      'candidate.view_detail',
+      'candidate.more_like_this',
+      'candidate.skip',
+      'candidate.like',
+      'candidate.generate_opener',
+      'opener.regenerate',
+      'opener.reject',
+      'activity.view_detail',
+      'activity.modify_time',
+      'activity.modify_location',
+      'activity.skip_publish',
+    ]).has(action);
   }
 
   private normalizeCardAction(
@@ -219,14 +272,45 @@ export class SocialAgentCardActionRouterService {
     ) {
       return 'candidate.like';
     }
+    if (normalized === 'dislike_candidate' || normalized === 'skip_candidate') {
+      return 'candidate.skip';
+    }
     if (normalized === 'generate_opener' || normalized === 'draft_opener') {
       return 'candidate.generate_opener';
     }
+    if (normalized === 'regenerate_opener' || normalized === 'rewrite_opener') {
+      return 'opener.regenerate';
+    }
+    if (normalized === 'reject_opener') {
+      return 'opener.reject';
+    }
+    if (
+      normalized === 'see_more' ||
+      normalized === 'more_like_this' ||
+      normalized === 'expand_radius' ||
+      normalized === 'relax_preference' ||
+      normalized === 'filter_school' ||
+      normalized === 'filter_gender_female' ||
+      normalized === 'refine_request'
+    ) {
+      return 'candidate.more_like_this';
+    }
+    if (
+      normalized === 'view_profile' ||
+      normalized === 'view_candidate' ||
+      normalized === 'view_user' ||
+      normalized === 'open_profile' ||
+      normalized === 'view_detail'
+    ) {
+      return 'candidate.view_detail';
+    }
     if (
       normalized === 'publish_social_request' ||
-      normalized === 'publish_to_discover' ||
-      normalized === 'create_activity'
+      normalized === 'publish_to_discover'
     ) {
+      return 'publish_to_discover';
+    }
+    if (normalized === 'create_activity') {
       return 'activity.confirm_create';
     }
     if (normalized === 'modify_activity' || normalized === 'change_time') {
@@ -238,10 +322,14 @@ export class SocialAgentCardActionRouterService {
     if (normalized === 'skip_publish') {
       return 'activity.skip_publish';
     }
+    if (normalized === 'view_activity') {
+      return 'activity.view_detail';
+    }
     return action as SocialAgentCardActionBody['action'];
   }
 
   private agentForAction(action: string) {
+    if (this.isPublishAction(action)) return 'FitMeet Main Agent' as const;
     if (action.startsWith('life_graph.')) return 'Life Graph Agent' as const;
     if (
       action.startsWith('activity.') ||
@@ -260,14 +348,230 @@ export class SocialAgentCardActionRouterService {
     return 'FitMeet Main Agent' as const;
   }
 
-  private clientContextForCardAction(
-    body: SocialAgentCardActionBody,
+  private async publishToDiscoverFromCardAction(
+    ownerUserId: number,
     taskId: number,
-  ): SocialAgentRouteMessageBody['clientContext'] {
-    return {
-      ...(body.clientContext ?? {}),
-      threadId: body.clientContext?.threadId ?? `agent-task:${taskId}`,
-      source: body.clientContext?.source ?? 'card_action',
+    body: SocialAgentCardActionBody,
+  ): Promise<SocialAgentIntentRouteResult> {
+    const payload = this.record(body.payload);
+    const confirmed =
+      payload.confirmedPublish === true ||
+      payload.approved === true ||
+      payload.confirmed === true;
+    if (!confirmed) {
+      return this.simpleRouteResult({
+        taskId,
+        assistantMessage:
+          '发布到发现前需要你确认。确认后这张约练卡才会公开给附近可发现用户。',
+        cards: [
+          {
+            id: `publish_to_discover:confirm:${taskId}`,
+            type: 'safety_boundary',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'safety.approval',
+            title: '确认发布到发现',
+            body: '确认后，这张约练卡会公开给附近可发现用户。不会公开精确位置或联系方式。',
+            status: 'waiting_confirmation',
+            data: {
+              taskId,
+              approvalPolicy: 'confirm_before_public_publish',
+              riskLevel: 'medium',
+              actionType: 'publish_social_request',
+              approval: {
+                actionType: 'publish_social_request',
+                riskLevel: 'medium',
+                summary: '发布约练卡到发现页',
+                boundary: '不会公开精确位置、联系方式或私密画像',
+              },
+            },
+            actions: [
+              {
+                id: 'confirm_publish_to_discover',
+                label: '确认发布',
+                action: 'publish_to_discover',
+                schemaAction: 'publish_to_discover',
+                requiresConfirmation: true,
+                payload: {
+                  ...payload,
+                  confirmedPublish: true,
+                  approved: true,
+                  confirmed: true,
+                  taskId,
+                },
+              },
+              {
+                id: 'skip_publish_to_discover',
+                label: '暂不发布',
+                action: 'activity.skip_publish',
+                schemaAction: 'activity.skip_publish',
+                requiresConfirmation: false,
+                payload: { taskId },
+              },
+            ],
+          },
+        ],
+      });
+    }
+    if (!this.draftPublication) {
+      throw new BadRequestException('Discover publish runtime is unavailable');
+    }
+    const result = await this.draftPublication.publishDraft(
+      ownerUserId,
+      taskId,
+      this.publishDraftFromPayload(payload),
+    );
+    const publicIntentId = this.text(result.publicIntentId);
+    const discoverHref = publicIntentId
+      ? `/public-intent/${encodeURIComponent(publicIntentId)}`
+      : '/discover';
+    return this.simpleRouteResult({
+      taskId,
+      assistantMessage: `已发布到发现页。你可以在发现页查看这张约练卡，也可以打开详情继续查看发起人公开信息和动态。`,
+      cards: [
+        {
+          id: `publish_to_discover:${taskId}:${publicIntentId || 'published'}`,
+          type: 'activity_status',
+          schemaVersion: 'fitmeet.tool-ui.v1',
+          schemaType: 'social_match.activity',
+          title: '已发布到发现',
+          body: '公开可发现用户现在可以看到这张约练卡。',
+          status: 'completed',
+          data: {
+            taskId,
+            publicIntentId,
+            discoverHref,
+            autoPublished: true,
+            publishStatus: 'published',
+          },
+          actions: [
+            {
+              id: 'view_public_intent',
+              label: '查看详情',
+              action: 'activity.view_detail',
+              schemaAction: 'activity.view_detail',
+              requiresConfirmation: false,
+              payload: { taskId, publicIntentId, discoverHref },
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  private publishDraftFromPayload(
+    payload: Record<string, unknown>,
+  ): CreateSocialRequestDto & { socialRequestId?: number | null } {
+    const draft = {
+      ...this.record(payload.socialRequestDraft),
+      ...this.record(payload.draft),
+      ...this.record(payload.activity),
+      ...payload,
     };
+    const metadata = {
+      ...this.record(draft.metadata),
+      ...this.record(payload.metadata),
+    };
+    const socialRequestId = this.number(
+      draft.socialRequestId ?? metadata.socialRequestId,
+    );
+    const activityType =
+      this.text(draft.activityType ?? draft.requestType ?? draft.type) || '散步';
+    const title =
+      this.text(draft.title ?? draft.activityTitle ?? draft.opportunityTitle) ||
+      `${this.text(draft.city) || '同城'}${activityType}约练`;
+    const description =
+      this.text(draft.description ?? draft.summary ?? draft.body) ||
+      '公共场所、低压力、先站内沟通的 FitMeet 约练。';
+    return {
+      ...draft,
+      socialRequestId,
+      type: this.socialRequestType(draft.type ?? draft.requestType ?? activityType),
+      title,
+      description,
+      rawText: this.text(draft.rawText ?? description) || description,
+      city: this.text(draft.city) || '青岛',
+      radiusKm: this.number(draft.radiusKm) ?? 5,
+      interestTags: this.stringArray(draft.interestTags ?? draft.tags ?? [activityType]),
+      activityType,
+      safetyRequirement: SocialRequestSafety.LowRiskOnly,
+      agentAllowed: true,
+      requireUserConfirmation: true,
+      metadata: {
+        ...metadata,
+        ...(socialRequestId ? { socialRequestId } : {}),
+        publishSource: 'agent_card_action',
+      },
+    } as CreateSocialRequestDto & { socialRequestId?: number | null };
+  }
+
+  private simpleRouteResult(input: {
+    taskId: number;
+    assistantMessage: string;
+    cards?: SocialAgentIntentRouteResult['cards'];
+  }): SocialAgentIntentRouteResult {
+    return {
+      intent: 'action_request',
+      confidence: 1,
+      entities: {
+        city: '',
+        activityType: '',
+        targetGender: '',
+        timePreference: '',
+        locationPreference: '',
+      },
+      shouldSearch: false,
+      shouldReplan: false,
+      shouldUpdateProfile: false,
+      shouldExecuteAction: true,
+      replyStrategy: 'execute_action',
+      source: 'rules',
+      action: 'reply',
+      taskId: input.taskId,
+      assistantMessage: input.assistantMessage,
+      savedContext: true,
+      profileUpdated: false,
+      shouldQueueRun: false,
+      runMode: null,
+      queuedRun: null,
+      pendingApproval: null,
+      activityResults: [],
+      profileUpdateProposal: null,
+      cards: input.cards ?? [],
+      permissionMode: 'confirm' as never,
+    };
+  }
+
+  private socialRequestType(value: unknown): SocialRequestType {
+    const raw = this.text(value).toLowerCase();
+    if (/running|run|跑步|慢跑/.test(raw)) return SocialRequestType.RunningPartner;
+    if (/fitness|gym|健身|训练/.test(raw)) return SocialRequestType.FitnessPartner;
+    if (/dog|遛狗/.test(raw)) return SocialRequestType.DogWalking;
+    if (/coffee|咖啡/.test(raw)) return SocialRequestType.CoffeeChat;
+    if (/walk|散步|city/.test(raw)) return SocialRequestType.CityWalk;
+    if (/study|学习|自习/.test(raw)) return SocialRequestType.StudyPartner;
+    return SocialRequestType.Custom;
+  }
+
+  private record(value: unknown): Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
+  private text(value: unknown): string {
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  private number(value: unknown): number | null {
+    const num = Number(value);
+    return Number.isFinite(num) && num > 0 ? num : null;
+  }
+
+  private stringArray(value: unknown): string[] {
+    const values = Array.isArray(value) ? value : [value];
+    return values
+      .map((item) => this.text(item))
+      .filter(Boolean)
+      .slice(0, 20);
   }
 }

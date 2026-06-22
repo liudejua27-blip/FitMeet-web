@@ -9,6 +9,7 @@ import { SocialRequestStatus } from './entities/social-request.entity';
 import { CandidateExplanationService } from './candidate-explanation.service';
 import { SceneRiskPolicyService } from './scene-risk-policy.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
+import { SocialAgentToolResultCacheService } from './social-agent-tool-result-cache.service';
 
 function repo<T>(rows: T[] = []) {
   let nextId = 1000;
@@ -164,6 +165,11 @@ function makeService(
     blockedIds?: number[];
     recommendationExcludedIds?: number[];
     lifeGraphSignals?: Record<string, unknown> | null;
+    toolResultCache?: SocialAgentToolResultCacheService;
+    metrics?: { recordToolResultCache: jest.Mock };
+    interestEvents?: {
+      summarizeForUser: jest.Mock;
+    };
   } = {},
 ) {
   const users = repo(options.users ?? [realUser(1), realUser(2)]);
@@ -201,8 +207,27 @@ function makeService(
     new CandidateExplanationService(new SceneRiskPolicyService()),
     new SceneRiskPolicyService(),
     lifeGraph as never,
+    options.toolResultCache,
+    options.metrics as never,
+    options.interestEvents as never,
   );
-  return { service, candidates, safety, lifeGraph };
+  return {
+    service,
+    candidates,
+    safety,
+    lifeGraph,
+    toolResultCache: options.toolResultCache,
+    repos: {
+      users,
+      profiles,
+      delegates,
+      publicIntents,
+      legacyRequests,
+      socialRequests,
+      activities,
+      tasks,
+    },
+  };
 }
 
 describe('SocialAgentCandidatePoolService', () => {
@@ -234,6 +259,371 @@ describe('SocialAgentCandidatePoolService', () => {
         safetyRisk: expect.any(Number),
       }),
     });
+  });
+
+  it('uses persisted user interest events to rerank candidates without LLM sorting', async () => {
+    const interestEvents = {
+      summarizeForUser: jest.fn().mockResolvedValue({
+        ownerUserId: 1,
+        eventCount: 2,
+        positiveTargetUserIds: [],
+        negativeTargetUserIds: [],
+        activityTagWeights: [{ tag: '散步', weight: 8 }],
+        candidatePreferenceWeights: [{ tag: '低压力', weight: 4 }],
+        cityWeights: [],
+        locationWeights: [],
+        timeWindowWeights: [],
+      }),
+    };
+    const { service } = makeService({
+      users: [realUser(1), realUser(2), realUser(3)],
+      profiles: [
+        profile(2, {
+          nickname: '散步候选',
+          interestTags: ['散步', '低压力'],
+          updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        }),
+        profile(3, {
+          nickname: '咖啡候选',
+          interestTags: ['咖啡'],
+          updatedAt: new Date('2026-06-01T00:00:00.000Z'),
+        }),
+      ],
+      interestEvents,
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: [],
+      rawText: '周末找个轻松搭子',
+    });
+
+    expect(interestEvents.summarizeForUser).toHaveBeenCalledWith({
+      ownerUserId: 1,
+      limit: 200,
+    });
+    expect(result.candidates[0]).toMatchObject({
+      candidateUserId: 2,
+      displayName: '散步候选',
+      scoreBreakdown: expect.objectContaining({
+        behaviorPreference: expect.any(Number),
+      }),
+      preferenceHistorySignals: expect.arrayContaining([
+        expect.stringContaining('你之前偏好类似兴趣'),
+      ]),
+    });
+    expect(result.candidates[0].scoreBreakdown.behaviorPreference).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it('uses location and time behavior signals for public intent ranking', async () => {
+    const interestEvents = {
+      summarizeForUser: jest.fn().mockResolvedValue({
+        ownerUserId: 1,
+        eventCount: 2,
+        positiveTargetUserIds: [],
+        negativeTargetUserIds: [],
+        activityTagWeights: [],
+        candidatePreferenceWeights: [],
+        cityWeights: [],
+        locationWeights: [{ tag: '青岛大学', weight: 6 }],
+        timeWindowWeights: [{ tag: '今天晚上', weight: 5 }],
+      }),
+    };
+    const { service } = makeService({
+      users: [realUser(1), realUser(2), realUser(3)],
+      profiles: [
+        profile(2, { nickname: '校园散步候选', interestTags: ['散步'] }),
+        profile(3, { nickname: '周末咖啡候选', interestTags: ['咖啡'] }),
+      ],
+      publicIntents: [
+        publicIntent('intent_2', 2, {
+          title: '今晚青岛大学散步',
+          description: '今天晚上在青岛大学附近轻松散步',
+          interestTags: ['散步'],
+          timePreference: '今天晚上',
+          locationPreference: '青岛大学附近',
+        }),
+        publicIntent('intent_3', 3, {
+          title: '周末咖啡',
+          description: '周末找人喝咖啡',
+          interestTags: ['咖啡'],
+          timePreference: '周末',
+          locationPreference: '市南区',
+        }),
+      ],
+      interestEvents,
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: [],
+      rawText: '帮我看看附近机会',
+    });
+
+    expect(result.candidates[0]).toMatchObject({
+      candidateUserId: 2,
+      preferenceHistorySignals: expect.arrayContaining([
+        expect.stringContaining('你之前更常选择这个区域'),
+        expect.stringContaining('你之前更常选择这个时间'),
+      ]),
+    });
+    expect(result.candidates[0].scoreBreakdown.behaviorPreference).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it('boosts candidates the user previously viewed or clicked from Discover', async () => {
+    const interestEvents = {
+      summarizeForUser: jest.fn().mockResolvedValue({
+        ownerUserId: 1,
+        eventCount: 2,
+        positiveTargetUserIds: [3],
+        negativeTargetUserIds: [],
+        activityTagWeights: [],
+        candidatePreferenceWeights: [],
+        cityWeights: [],
+        locationWeights: [],
+        timeWindowWeights: [],
+      }),
+    };
+    const { service } = makeService({
+      users: [realUser(1), realUser(2), realUser(3)],
+      profiles: [
+        profile(2, {
+          nickname: '资料更完整但没看过',
+          interestTags: ['咖啡', '读书'],
+          updatedAt: new Date('2026-06-20T00:00:00.000Z'),
+        }),
+        profile(3, {
+          nickname: '之前看过的人',
+          interestTags: ['咖啡'],
+          updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        }),
+      ],
+      interestEvents,
+    });
+
+    const result = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['咖啡'],
+      rawText: '帮我找一个咖啡聊天搭子',
+    });
+
+    expect(result.candidates[0]).toMatchObject({
+      candidateUserId: 3,
+      displayName: '之前看过的人',
+      preferenceHistorySignals: expect.arrayContaining([
+        expect.stringContaining('你之前对这位候选表现过兴趣'),
+      ]),
+    });
+    expect(result.candidates[0].scoreBreakdown.behaviorPreference).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it('reuses read-only candidate source snapshots across repeated searches', async () => {
+    const { service, repos, safety, lifeGraph } = makeService({
+      users: [realUser(1), realUser(2)],
+      profiles: [profile(2, { interestTags: ['散步', '咖啡'] })],
+      lifeGraphSignals: {
+        identitySignals: { city: '青岛', nearbyArea: '青岛大学附近' },
+        socialIntentSignals: {
+          currentSocialGoal: '找散步搭子',
+          relationshipGoal: '运动社交',
+        },
+        lifestyleSignals: { availableTimes: ['今天晚上'] },
+        fitnessSignals: { sportsPreferences: ['散步'], publicPlaceOnly: true },
+        behaviorSignals: {
+          pressurePreference: 'low',
+          locationPreference: 'same_school_or_area',
+          recommendationWeights: {
+            sameCity: 70,
+            commonInterest: 80,
+            lowPressure: 90,
+            sports: 80,
+            safetyBoundary: 90,
+          },
+          matchingGuidance: {
+            shouldPreferLowPressure: true,
+            shouldPreferSports: true,
+            shouldUsePublicPlace: true,
+            suggestedFilters: ['低压力', '公共场所'],
+            rankingNotes: ['优先低压力散步。'],
+          },
+          summary: '更适合低压力散步。',
+        },
+        safetySignals: {
+          realNameRequired: false,
+          publicPlaceOnly: true,
+          strictConfirmationRequired: true,
+          blockedScenarios: [],
+          locationSharingAllowed: false,
+          acceptsNightMeet: false,
+        },
+        confidence: { overall: 0.8, byField: {} },
+        missingCriticalFields: [],
+        preferenceHistory: {},
+      } as never,
+    });
+
+    const first = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['散步'],
+      persistCandidates: false,
+    });
+    const second = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['咖啡'],
+      persistCandidates: false,
+    });
+
+    expect(first.candidates[0].candidateUserId).toBe(2);
+    expect(second.candidates[0].candidateUserId).toBe(2);
+    expect(repos.users.find).toHaveBeenCalledTimes(1);
+    expect(repos.profiles.find).toHaveBeenCalledTimes(1);
+    expect(repos.publicIntents.find).toHaveBeenCalledTimes(1);
+    expect(repos.legacyRequests.find).toHaveBeenCalledTimes(1);
+    expect(safety.getAgentRecommendationExcludedUserIds).toHaveBeenCalledTimes(1);
+    expect(lifeGraph?.getUnifiedMatchSignals).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the shared tool result cache for source snapshot reads', async () => {
+    const toolResultCache = new SocialAgentToolResultCacheService();
+    const metrics = { recordToolResultCache: jest.fn() };
+    const { service, repos } = makeService({
+      users: [realUser(1), realUser(2)],
+      profiles: [profile(2, { interestTags: ['散步'] })],
+      toolResultCache,
+      metrics,
+    });
+
+    await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['散步'],
+      persistCandidates: false,
+    });
+    await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['咖啡'],
+      persistCandidates: false,
+    });
+
+    expect(repos.users.find).toHaveBeenCalledTimes(1);
+    expect(toolResultCache.stats()).toMatchObject({
+      hits: expect.any(Number),
+      misses: expect.any(Number),
+      size: expect.any(Number),
+      savedApproxPromptChars: expect.any(Number),
+    });
+    expect(toolResultCache.stats().hits).toBeGreaterThan(0);
+    expect(toolResultCache.stats().savedApproxPromptChars).toBeGreaterThan(0);
+    expect(metrics.recordToolResultCache).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheName: 'candidate_pool_source',
+        hit: false,
+        approxChars: expect.any(Number),
+      }),
+    );
+    expect(metrics.recordToolResultCache).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheName: 'candidate_pool_source',
+        hit: true,
+        approxChars: expect.any(Number),
+      }),
+    );
+  });
+
+  it('caches owner-independent public profile summaries across candidate searches', async () => {
+    const toolResultCache = new SocialAgentToolResultCacheService();
+    const metrics = { recordToolResultCache: jest.fn() };
+    const { service } = makeService({
+      users: [realUser(1), realUser(2)],
+      profiles: [
+        profile(2, {
+          nickname: '青岛散步候选',
+          interestTags: ['散步', '咖啡'],
+          updatedAt: new Date('2026-06-01T00:00:00.000Z'),
+        }),
+      ],
+      toolResultCache,
+      metrics,
+    });
+
+    const first = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['散步'],
+      persistCandidates: false,
+    });
+    const second = await service.searchSocial({
+      ownerUserId: 1,
+      city: '青岛',
+      interestTags: ['咖啡'],
+      persistCandidates: false,
+    });
+
+    expect(first.candidates[0]).toMatchObject({
+      candidateUserId: 2,
+      displayName: '青岛散步候选',
+    });
+    expect(second.candidates[0]).toMatchObject({
+      candidateUserId: 2,
+      displayName: '青岛散步候选',
+    });
+    expect(metrics.recordToolResultCache).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheName: 'candidate_public_profile_summary',
+        hit: false,
+        approxChars: expect.any(Number),
+      }),
+    );
+    expect(metrics.recordToolResultCache).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheName: 'candidate_public_profile_summary',
+        hit: true,
+        approxChars: expect.any(Number),
+      }),
+    );
+  });
+
+  it('keeps candidate row persistence even when source snapshots are cached', async () => {
+    const { service, candidates } = makeService({
+      users: [realUser(1), realUser(2)],
+      profiles: [profile(2, { interestTags: ['散步'] })],
+      socialRequests: [
+        {
+          id: 301,
+          userId: 1,
+          city: '青岛',
+          rawText: '青岛今晚散步',
+          interestTags: ['散步'],
+        },
+      ],
+    });
+
+    await service.searchSocial({
+      ownerUserId: 1,
+      socialRequestId: 301,
+      city: '青岛',
+      interestTags: ['散步'],
+    });
+    await service.searchSocial({
+      ownerUserId: 1,
+      socialRequestId: 301,
+      city: '青岛',
+      interestTags: ['散步'],
+    });
+
+    expect(candidates.save).toHaveBeenCalledTimes(2);
   });
 
   it('social_search uses public_social_intents only for profile-discoverable Agent-matching users', async () => {

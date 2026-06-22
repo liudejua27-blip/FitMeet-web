@@ -17,22 +17,22 @@ export class LightStatusMapperService {
     if (pendingConfirmations.length > 0) return '正在等待你确认';
 
     if ('profileUpdateProposal' in result && result.profileUpdateProposal) {
-      return '正在更新你的 Life Graph';
+      return '正在整理画像变化建议';
     }
     if ('profileUpdated' in result && result.profileUpdated) {
-      return '正在更新你的 Life Graph';
+      return '正在整理画像变化建议';
     }
     if (
       'activityResults' in result &&
       (result.activityResults?.length ?? 0) > 0
     ) {
-      return '正在创建约练计划';
+      return '正在整理约练方案';
     }
     if ('shouldQueueRun' in result && result.shouldQueueRun) {
-      return '正在筛选合适的人';
+      return '正在筛选公开可发现的人';
     }
     if ('candidates' in result && result.candidates.length > 0) {
-      return '正在排除时间不合适的人';
+      return '正在整理合适机会';
     }
     if (
       safety &&

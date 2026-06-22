@@ -53,6 +53,9 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
   const lifeGraphActions = {
     performUpdateAction: jest.fn(),
   };
+  const draftPublication = {
+    publishDraft: jest.fn(),
+  };
   const executeCalls: Array<Record<string, unknown>> = [];
   const agentLoop = {
     execute: jest.fn(async (input: Record<string, unknown>) => {
@@ -72,11 +75,16 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
       };
     }),
   };
+  const metrics = {
+    recordDeterministicAction: jest.fn(),
+  };
   const service = new SocialAgentCardActionRouterService(
     candidateActions as never,
     meetLoop as never,
     lifeGraphActions as never,
     agentLoop as never,
+    draftPublication as never,
+    metrics as never,
   );
   const handleMessage = jest.fn().mockResolvedValue(
     routeResult({
@@ -90,13 +98,15 @@ function makeHarness(options: { runRunner?: boolean } = {}) {
     handleMessage,
     lifeGraphActions,
     meetLoop,
+    metrics,
+    draftPublication,
     service,
   };
 }
 
 describe('SocialAgentCardActionRouterService', () => {
   it('keeps low-risk candidate card actions approval-free while still dispatching through AgentLoop', async () => {
-    const { candidateActions, executeCalls, handleMessage, service } =
+    const { candidateActions, executeCalls, handleMessage, metrics, service } =
       makeHarness();
     candidateActions.performCandidatePreferenceAction.mockResolvedValue(
       routeResult({
@@ -158,6 +168,14 @@ describe('SocialAgentCardActionRouterService', () => {
       expect.objectContaining({ action: 'candidate.generate_opener' }),
     );
     expect(executeCalls).toHaveLength(2);
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
+      'candidate.like',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
+      'candidate.generate_opener',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
     expect(
       executeCalls.map((call) => ({
         goal: call.goal,
@@ -187,9 +205,96 @@ describe('SocialAgentCardActionRouterService', () => {
     ]);
   });
 
+  it('normalizes legacy low-risk action aliases before dispatching', async () => {
+    const { candidateActions, handleMessage, meetLoop, service } = makeHarness();
+    candidateActions.performCandidatePreferenceAction.mockResolvedValue(
+      routeResult({
+        action: 'reply',
+        assistantMessage: '已记录这个偏好。',
+        pendingApproval: null,
+      }),
+    );
+    candidateActions.regenerateOpenerDraftFromCardAction.mockResolvedValue(
+      routeResult({
+        action: 'reply',
+        assistantMessage: '已重新生成开场白草稿。',
+        pendingApproval: null,
+      }),
+    );
+    meetLoop.performActivityAction.mockResolvedValue(
+      routeResult({
+        action: 'reply',
+        assistantMessage: '当前活动详情已整理好。',
+        pendingApproval: null,
+      }),
+    );
+
+    for (const [action, canonical] of [
+      ['save_candidate', 'candidate.like'],
+      ['dislike_candidate', 'candidate.skip'],
+      ['see_more', 'candidate.more_like_this'],
+      ['expand_radius', 'candidate.more_like_this'],
+      ['relax_preference', 'candidate.more_like_this'],
+      ['filter_school', 'candidate.more_like_this'],
+      ['filter_gender_female', 'candidate.more_like_this'],
+      ['refine_request', 'candidate.more_like_this'],
+    ] as const) {
+      await service.perform({
+        ownerUserId: 7,
+        taskId: 101,
+        body: {
+          action: action as never,
+          payload: { candidateRecordId: 501, targetUserId: 22 },
+        },
+        handleMessage,
+      });
+      expect(
+        candidateActions.performCandidatePreferenceAction,
+      ).toHaveBeenLastCalledWith(
+        7,
+        101,
+        expect.objectContaining({ action: canonical }),
+      );
+    }
+
+    await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'regenerate_opener' as never,
+        payload: { candidateRecordId: 501, targetUserId: 22 },
+      },
+      handleMessage,
+    });
+    expect(
+      candidateActions.regenerateOpenerDraftFromCardAction,
+    ).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'opener.regenerate' }),
+    );
+
+    await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'view_activity' as never,
+        payload: { activityId: 700 },
+      },
+      handleMessage,
+    });
+    expect(meetLoop.performActivityAction).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'activity.view_detail' }),
+    );
+    expect(handleMessage).not.toHaveBeenCalled();
+  });
+
   it('dispatches high-risk schema actions only through AgentLoop and preserves pending approval results', async () => {
     const {
       candidateActions,
+      draftPublication,
       executeCalls,
       handleMessage,
       lifeGraphActions,
@@ -419,10 +524,10 @@ describe('SocialAgentCardActionRouterService', () => {
     }
   });
 
-  it('keeps fallback card actions bound to the active thread context', async () => {
-    const { handleMessage, service } = makeHarness();
+  it('handles unknown card actions deterministically without re-entering chat LLM', async () => {
+    const { handleMessage, metrics, service } = makeHarness();
 
-    await service.perform({
+    const result = await service.perform({
       ownerUserId: 7,
       taskId: 101,
       body: {
@@ -437,20 +542,16 @@ describe('SocialAgentCardActionRouterService', () => {
       handleMessage,
     });
 
-    expect(handleMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskId: 101,
-        hasCandidates: true,
-        idempotencyKey: 'card-fallback-1',
-        clientContext: expect.objectContaining({
-          threadId: 'agent-task:101',
-          source: 'card_action',
-          timezone: 'Asia/Shanghai',
-          locale: 'zh-CN',
-        }),
-      }),
-      undefined,
-      undefined,
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      action: 'reply',
+      taskId: 101,
+      pendingApproval: null,
+      assistantMessage: expect.stringContaining('暂时不可用'),
+    });
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
+      'unsupported_card_action',
+      { estimatedAvoidedLlmCalls: 1 },
     );
   });
 
@@ -578,7 +679,7 @@ describe('SocialAgentCardActionRouterService', () => {
   });
 
   it('normalizes legacy raw card actions before dispatching to subagent handlers', async () => {
-    const { candidateActions, executeCalls, handleMessage, meetLoop, service } =
+    const { candidateActions, draftPublication, executeCalls, handleMessage, meetLoop, service } =
       makeHarness();
     candidateActions.performCandidatePreferenceAction.mockResolvedValue(
       routeResult({
@@ -630,24 +731,9 @@ describe('SocialAgentCardActionRouterService', () => {
         },
       }),
     );
-    meetLoop.performActivityAction.mockResolvedValue(
-      routeResult({
-        action: 'await_confirmation',
-        assistantMessage: '发布到发现前需要你确认。',
-        pendingApproval: {
-          id: 8803,
-          type: 'post_publish' as never,
-          actionType: 'publish_social_request',
-          summary: '发布约练卡到发现',
-          riskLevel: 'medium' as never,
-          payload: {
-            schemaAction: 'activity.confirm_create',
-            checkpointRequired: true,
-          },
-          expiresAt: null,
-        },
-      }),
-    );
+    draftPublication.publishDraft.mockResolvedValue({
+      publicIntentId: 'public-intent:walk-qdu',
+    });
 
     const rawActions = [
       'save_candidate',
@@ -668,6 +754,10 @@ describe('SocialAgentCardActionRouterService', () => {
               candidateRecordId: 501,
               targetUserId: 22,
               opportunityId: 'walk-qdu',
+              title: '青岛大学散步约练',
+              city: '青岛',
+              activityType: '散步',
+              confirmedPublish: action === 'publish_social_request',
             },
           },
           handleMessage,
@@ -697,10 +787,19 @@ describe('SocialAgentCardActionRouterService', () => {
       101,
       expect.objectContaining({ action: 'candidate.connect' }),
     );
-    expect(meetLoop.performActivityAction).toHaveBeenCalledWith(
+    expect(meetLoop.performActivityAction).not.toHaveBeenCalledWith(
       7,
       101,
-      expect.objectContaining({ action: 'activity.confirm_create' }),
+      expect.objectContaining({ action: 'publish_to_discover' }),
+    );
+    expect(draftPublication.publishDraft).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({
+        title: '青岛大学散步约练',
+        city: '青岛',
+        activityType: '散步',
+      }),
     );
     expect(results[0].pendingApproval).toBeNull();
     expect(results[1].pendingApproval).toBeNull();
@@ -710,16 +809,136 @@ describe('SocialAgentCardActionRouterService', () => {
     expect(results[3].pendingApproval).toEqual(
       expect.objectContaining({ actionType: 'connect_candidate' }),
     );
-    expect(results[4].pendingApproval).toEqual(
-      expect.objectContaining({ actionType: 'publish_social_request' }),
+    expect(results[4].pendingApproval).toBeNull();
+    expect(results[4].assistantMessage).toContain('已发布到发现页');
+    expect(results[4].cards?.[0]?.data).toEqual(
+      expect.objectContaining({
+        publicIntentId: 'public-intent:walk-qdu',
+        discoverHref: '/public-intent/public-intent%3Awalk-qdu',
+      }),
     );
     expect(executeCalls.map((call) => call.goal)).toEqual([
       'card_action:candidate.like',
       'card_action:candidate.generate_opener',
       'card_action:opener.confirm_send',
       'card_action:candidate.connect',
-      'card_action:activity.confirm_create',
+      'card_action:publish_to_discover',
     ]);
+  });
+
+  it('returns an inline publish confirmation card before publishing to Discover', async () => {
+    const { draftPublication, handleMessage, service } = makeHarness();
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'publish_to_discover' as never,
+        payload: {
+          opportunityId: 'walk-qdu',
+          title: '青岛大学散步约练',
+          city: '青岛',
+          activityType: '散步',
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(draftPublication.publishDraft).not.toHaveBeenCalled();
+    expect(result.pendingApproval).toBeNull();
+    expect(result.cards).toEqual([
+      expect.objectContaining({
+        schemaType: 'safety.approval',
+        status: 'waiting_confirmation',
+        title: '确认发布到发现',
+        data: expect.objectContaining({
+          actionType: 'publish_social_request',
+          riskLevel: 'medium',
+        }),
+        actions: expect.arrayContaining([
+          expect.objectContaining({
+            schemaAction: 'publish_to_discover',
+            requiresConfirmation: true,
+            payload: expect.objectContaining({
+              confirmedPublish: true,
+              title: '青岛大学散步约练',
+            }),
+          }),
+          expect.objectContaining({
+            schemaAction: 'activity.skip_publish',
+            requiresConfirmation: false,
+          }),
+        ]),
+      }),
+    ]);
+  });
+
+  it('routes empty-candidate recovery actions deterministically without chat LLM', async () => {
+    const { candidateActions, handleMessage, meetLoop, metrics, service } =
+      makeHarness();
+    candidateActions.performCandidatePreferenceAction.mockResolvedValue(
+      routeResult({
+        action: 'reply',
+        assistantMessage: '我会按放宽后的条件继续找真实公开候选。',
+        pendingApproval: null,
+      }),
+    );
+    meetLoop.performActivityAction.mockResolvedValue(
+      routeResult({
+        action: 'reply',
+        assistantMessage: '我先保留约练卡，等你确认新的时间。',
+        pendingApproval: null,
+      }),
+    );
+
+    const actions = [
+      ['expand_radius', candidateActions.performCandidatePreferenceAction],
+      ['relax_preference', candidateActions.performCandidatePreferenceAction],
+      ['change_time', meetLoop.performActivityAction],
+    ] as const;
+
+    for (const [action] of actions) {
+      await service.perform({
+        ownerUserId: 7,
+        taskId: 101,
+        body: {
+          action: action as never,
+          payload: {
+            recoveryMode: action,
+            socialRequestDraft: {
+              title: '青岛大学散步约练',
+              city: '青岛',
+              activityType: '散步',
+            },
+          },
+        },
+        handleMessage,
+      });
+    }
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(candidateActions.performCandidatePreferenceAction).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'candidate.more_like_this' }),
+    );
+    expect(candidateActions.performCandidatePreferenceAction).toHaveBeenCalledTimes(
+      2,
+    );
+    expect(meetLoop.performActivityAction).toHaveBeenCalledWith(
+      7,
+      101,
+      expect.objectContaining({ action: 'activity.modify_time' }),
+    );
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
+      'candidate.more_like_this',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
+      'activity.modify_time',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
   });
 
   it('does not dispatch fallback card actions when AgentLoop does not execute the tool runner', async () => {

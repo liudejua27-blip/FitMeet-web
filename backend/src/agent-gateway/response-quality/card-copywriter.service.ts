@@ -168,8 +168,8 @@ export class CardCopywriterService {
         {
           id: 'confirm_create_activity',
           label: '发布到发现',
-          action: 'activity.confirm_create',
-          schemaAction: 'activity.confirm_create',
+          action: 'publish_to_discover',
+          schemaAction: 'publish_to_discover',
           loopStage: 'activity_draft_created',
           requiresConfirmation: true,
           payload: {

@@ -28,26 +28,24 @@ describe('social-agent-chat-stream.presenter', () => {
     expect(running).toMatchObject({
       type: 'tool_call',
       stepId: 'step-analysis',
-      title: '正在推进当前进度',
-      detail: '正在筛选合适的人',
+      title: '正在筛选公开可发现的人',
     });
     expect(done).toMatchObject({
       type: 'tool_result',
       stepId: 'step-analysis',
-      title: '已整理结果',
-      detail: '正在筛选合适的人',
+      title: '已筛选公开可发现的人',
     });
     expect(failed).toMatchObject({
       type: 'tool_result',
       stepId: 'step-analysis',
       title: '刚才连接不稳',
-      detail: '正在筛选合适的人',
+      detail: '这段需求还在，可以继续处理。',
     });
     expect(progress).toMatchObject({
       type: 'progress',
       id: 'tool:search',
-      title: '正在推进当前进度',
-      detail: '正在筛选合适的人',
+      title: '正在筛选公开可发现的人',
+      detail: undefined,
     });
   });
 

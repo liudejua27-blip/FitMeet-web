@@ -441,8 +441,8 @@ describe('FitMeetAlphaAgentSdkService', () => {
       actions: expect.arrayContaining([
         expect.objectContaining({
           label: '发布到发现',
-          action: 'activity.confirm_create',
-          schemaAction: 'activity.confirm_create',
+          action: 'publish_to_discover',
+          schemaAction: 'publish_to_discover',
           requiresConfirmation: true,
           payload: expect.objectContaining({
             approvalRequired: true,
@@ -528,7 +528,7 @@ describe('FitMeetAlphaAgentSdkService', () => {
       actions: expect.arrayContaining([
         expect.objectContaining({
           id: 'publish_to_discover',
-          schemaAction: 'activity.confirm_create',
+          schemaAction: 'publish_to_discover',
           requiresConfirmation: true,
           payload: expect.objectContaining({
             approvalRequired: true,

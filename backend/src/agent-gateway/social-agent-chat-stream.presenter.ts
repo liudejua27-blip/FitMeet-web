@@ -154,7 +154,7 @@ export function toolCallStreamEvent(step: {
   agentName?: string | null;
   toolName?: string | null;
 }): UserFacingStreamEvent | null {
-  const detail = lightStatusFromStep(step.label);
+  const runningTitle = lightStatusFromStep(step.label);
   const toolName =
     cleanMetadataString(step.toolName) ?? toolNameFromLabel(step.label);
   if (!toolName) return null;
@@ -165,31 +165,32 @@ export function toolCallStreamEvent(step: {
       stepId: safeStepId(step.id, step.label),
       agentName: cleanMetadataString(step.agentName),
       toolName,
-      title: '正在推进当前进度',
-      detail,
+      title: runningTitle,
     };
   }
+  const doneTitle =
+    step.status === 'failed' ? '刚才连接不稳' : completedStatusFromStep(step.label);
   return {
     type: 'tool_result',
     lifecycle: lifecycleFromStep(step.label),
     stepId: safeStepId(step.id, step.label),
     agentName: cleanMetadataString(step.agentName),
     toolName,
-    title: step.status === 'failed' ? '刚才连接不稳' : '已整理结果',
-    detail,
+    title: doneTitle,
+    detail: step.status === 'failed' ? '这段需求还在，可以继续处理。' : undefined,
     status: step.status,
   };
 }
 
 export function lightStatusFromStep(label: string): string {
   if (/Life Graph|画像|profile/i.test(label)) {
-    return '正在结合你的 Life Graph';
+    return '正在读取你的偏好';
   }
   if (/筛选|候选|匹配|search|candidate/i.test(label)) {
-    return '正在筛选合适的人';
+    return '正在筛选公开可发现的人';
   }
   if (/时间|排除|rank/i.test(label)) {
-    return '正在排除时间不合适的人';
+    return '正在整理合适机会';
   }
   if (/安全|边界|guardrail|risk/i.test(label)) {
     return '正在检查安全边界';
@@ -201,9 +202,34 @@ export function lightStatusFromStep(label: string): string {
     return '正在等待你确认';
   }
   if (/活动|约练|activity/i.test(label)) {
-    return '正在创建约练计划';
+    return '正在整理约练方案';
   }
   return '正在理解你的需求';
+}
+
+function completedStatusFromStep(label: string): string {
+  if (/Life Graph|画像|profile/i.test(label)) {
+    return '已读取你的偏好';
+  }
+  if (/筛选|候选|匹配|search|candidate/i.test(label)) {
+    return '已筛选公开可发现的人';
+  }
+  if (/时间|排除|rank/i.test(label)) {
+    return '已整理合适机会';
+  }
+  if (/安全|边界|guardrail|risk/i.test(label)) {
+    return '已检查安全边界';
+  }
+  if (/开场白|message|opener/i.test(label)) {
+    return '已生成开场白';
+  }
+  if (/确认|approval|confirm/i.test(label)) {
+    return '已处理你的确认';
+  }
+  if (/活动|约练|activity/i.test(label)) {
+    return '已整理约练方案';
+  }
+  return '已理解你的需求';
 }
 
 function safeStepTitle(label: string): string {
@@ -280,8 +306,15 @@ export function progressFromStep(step: {
     lifecycle: lifecycleFromStep(step.label),
     id: safeStepId(step.id, step.label),
     kind: isTool ? 'tool' : 'analysis',
-    title: isTool ? '正在推进当前进度' : '正在理解你的需求',
-    detail: lightStatusFromStep(step.label),
+    title:
+      step.status === 'failed'
+        ? '刚才连接不稳'
+        : step.status === 'done'
+          ? completedStatusFromStep(step.label)
+          : isTool
+            ? lightStatusFromStep(step.label)
+            : '正在理解你的需求',
+    detail: step.status === 'failed' ? '这段需求还在，可以继续处理。' : undefined,
     state:
       step.status === 'done'
         ? 'done'

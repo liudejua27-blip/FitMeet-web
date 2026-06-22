@@ -57,6 +57,9 @@ function makeHarness(options: { activities?: unknown } = {}) {
   const lifeGraph = {
     recordBehaviorEvent: jest.fn().mockResolvedValue({ id: 1 }),
   };
+  const interestEvents = {
+    recordEvent: jest.fn().mockResolvedValue({ id: 11 }),
+  };
   const l5Runtime = {
     transitionMeetLoop: jest.fn().mockResolvedValue(undefined),
   };
@@ -69,11 +72,13 @@ function makeHarness(options: { activities?: unknown } = {}) {
     lifeGraph as never,
     options.activities as never,
     l5Runtime as never,
+    interestEvents as never,
   );
   return {
     approvals,
     eventRepo,
     lifeGraph,
+    interestEvents,
     l5Runtime,
     metrics,
     savedEvents,
@@ -261,6 +266,17 @@ describe('SocialAgentMeetLoopService', () => {
         }),
       }),
     );
+    expect(harness.interestEvents.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        agentTaskId: 101,
+        eventType: 'activity_complete',
+        targetUserId: 22,
+        activityTags: expect.arrayContaining(['running']),
+        locationText: '青岛大学附近公共场所',
+        source: 'meet_loop',
+      }),
+    );
 
     const reviewed = await harness.service.performActivityAction(7, 101, {
       action: 'review.submit',
@@ -283,6 +299,17 @@ describe('SocialAgentMeetLoopService', () => {
       expect.objectContaining({
         eventType: LifeGraphBehaviorEventType.ActivityReviewedPositive,
         metadata: expect.objectContaining({ rating: 5 }),
+      }),
+    );
+    expect(harness.interestEvents.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        agentTaskId: 101,
+        eventType: 'review_positive',
+        targetUserId: 22,
+        activityTags: expect.arrayContaining(['running']),
+        metadata: expect.objectContaining({ rating: 5, positive: true }),
+        source: 'meet_loop',
       }),
     );
     expect(harness.task.result).toMatchObject({

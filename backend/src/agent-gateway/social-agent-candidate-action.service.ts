@@ -82,6 +82,7 @@ import {
 } from './social-agent-tool-executor.service';
 import { AgentL5RuntimeService } from './agent-l5-runtime.service';
 import type { FitMeetAlphaCard } from './fitmeet-alpha-agent.types';
+import { SocialAgentUserInterestEventService } from './social-agent-user-interest-event.service';
 
 type CandidateActionOptions = {
   signal?: AbortSignal | null;
@@ -106,6 +107,8 @@ export class SocialAgentCandidateActionService {
     private readonly longTermMemory?: SocialAgentLongTermMemoryService,
     @Optional()
     private readonly l5Runtime?: AgentL5RuntimeService,
+    @Optional()
+    private readonly interestEvents?: SocialAgentUserInterestEventService,
   ) {}
 
   async createActionApproval(input: {
@@ -227,6 +230,16 @@ export class SocialAgentCandidateActionService {
       [card],
       null,
     );
+    await this.recordCandidateInterestEvent({
+      ownerUserId,
+      task,
+      action: 'candidate.generate_opener',
+      targetUserId,
+      candidate,
+      candidateRecordId: this.number(payload.candidateRecordId),
+      socialRequestId: this.number(payload.socialRequestId),
+      idempotencyKey: cleanDisplayText(body.idempotencyKey, '') || null,
+    });
     await this.writeEvent(
       task,
       AgentTaskEventType.StepCompleted,
@@ -721,6 +734,16 @@ export class SocialAgentCandidateActionService {
       'done',
     );
     await this.taskRepo.save(task);
+    await this.recordCandidateInterestEvent({
+      ownerUserId,
+      task,
+      action,
+      targetUserId,
+      candidate,
+      candidateRecordId: this.number(body.payload?.candidateRecordId),
+      socialRequestId: this.number(body.payload?.socialRequestId),
+      idempotencyKey: cleanDisplayText(body.idempotencyKey, '') || null,
+    });
 
     const assistantMessage = this.candidatePreferenceAssistantMessage({
       action,
@@ -1795,6 +1818,45 @@ export class SocialAgentCandidateActionService {
     (
       this.sessionAssembler ?? this.fallbackSessionAssembler
     ).rememberCandidateAction(task, candidateUserId, patch);
+  }
+
+  private async recordCandidateInterestEvent(input: {
+    ownerUserId: number;
+    task: AgentTask;
+    action: string;
+    targetUserId: number | null;
+    candidate: Record<string, unknown>;
+    candidateRecordId?: number | null;
+    socialRequestId?: number | null;
+    idempotencyKey?: string | null;
+  }): Promise<void> {
+    if (!this.interestEvents) return;
+    const candidateRecordId =
+      input.candidateRecordId ?? this.number(input.candidate.candidateRecordId);
+    const socialRequestId =
+      input.socialRequestId ?? this.number(input.candidate.socialRequestId);
+    const dedupeKey =
+      input.idempotencyKey ||
+      [
+        'candidate-interest',
+        input.ownerUserId,
+        input.task.id,
+        input.action,
+        input.targetUserId ?? 'no-target',
+        candidateRecordId ?? socialRequestId ?? 'no-record',
+      ].join(':');
+    const eventInput = this.interestEvents.eventFromCandidateAction({
+      action: input.action,
+      ownerUserId: input.ownerUserId,
+      agentTaskId: input.task.id,
+      targetUserId: input.targetUserId,
+      candidateRecordId,
+      socialRequestId,
+      candidate: input.candidate,
+      dedupeKey,
+    });
+    if (!eventInput) return;
+    await this.interestEvents.recordEvent(eventInput);
   }
 
   private isCandidateInviteApprovalAction(actionType: string | null | undefined): boolean {

@@ -69,6 +69,7 @@ function makeHarness(
     ownedTask?: AgentTask;
     hydratedContext?: Record<string, unknown> | null;
     routeTaskContext?: Record<string, unknown>;
+    workflowRouter?: { route: jest.Mock };
   } = {},
 ) {
   const socialProfiles = {
@@ -83,6 +84,7 @@ function makeHarness(
   const metrics = {
     recordError: jest.fn(),
     recordIntent: jest.fn(),
+    recordWorkflowRoute: jest.fn(),
   };
   const longTermSnapshot = {
     taskCount: 2,
@@ -166,6 +168,8 @@ function makeHarness(
         } as never)
       : undefined,
     contextHydrator as never,
+    undefined,
+    options.workflowRouter as never,
   );
   return {
     brain,
@@ -270,6 +274,57 @@ describe('SocialAgentRouteDecisionService', () => {
         ],
       },
     });
+  });
+
+  it('uses deterministic workflow routing without calling LLM intent routing or Brain', async () => {
+    const workflowRoute = makeRoute({
+      intent: 'social_search',
+      shouldSearch: true,
+      replyStrategy: 'search_candidates',
+    });
+    const workflowRouter = {
+      route: jest.fn().mockReturnValue({
+        route: workflowRoute,
+        reason: 'explicit_social_workflow',
+        skipBrain: true,
+      }),
+    };
+    const {
+      brain,
+      intentRouter,
+      metrics,
+      profileEnrichment,
+      service,
+    } = makeHarness({ workflowRouter });
+
+    const result = await service.prepare({
+      ownerUserId: 7,
+      task: makeTask(),
+      body: {
+        taskId: 101,
+        message: '帮我找今晚青岛大学附近散步搭子',
+        conversationIntent: 'social',
+      },
+      message: '帮我找今晚青岛大学附近散步搭子',
+    });
+
+    expect(result.route).toStrictEqual(workflowRoute);
+    expect(workflowRouter.route).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: '帮我找今晚青岛大学附近散步搭子',
+        conversationIntent: 'social',
+      }),
+    );
+    expect(intentRouter.route).not.toHaveBeenCalled();
+    expect(brain.planTurn).not.toHaveBeenCalled();
+    expect(metrics.recordWorkflowRoute).toHaveBeenCalledWith(
+      'social_search',
+      'explicit_social_workflow',
+      { skipBrain: true },
+    );
+    expect(
+      profileEnrichment.executeConversationBrainReadTools,
+    ).toHaveBeenCalledWith(7, result.task, undefined);
   });
 
   it('uses the configured context window for intent routing and brain planning', async () => {

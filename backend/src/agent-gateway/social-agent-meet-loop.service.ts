@@ -67,6 +67,11 @@ import {
 } from './social-agent-memory.util';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { AgentL5RuntimeService } from './agent-l5-runtime.service';
+import {
+  SocialAgentUserInterestEventService,
+  type SocialAgentUserInterestEventInput,
+} from './social-agent-user-interest-event.service';
+import type { SocialAgentUserInterestEventType } from './entities/social-agent-user-interest-event.entity';
 
 @Injectable()
 export class SocialAgentMeetLoopService {
@@ -89,6 +94,8 @@ export class SocialAgentMeetLoopService {
     @Inject(forwardRef(() => ActivitiesService))
     private readonly activities?: ActivitiesService,
     @Optional() private readonly l5Runtime?: AgentL5RuntimeService,
+    @Optional()
+    private readonly interestEvents?: SocialAgentUserInterestEventService,
   ) {}
 
   async performActivityAction(
@@ -896,6 +903,16 @@ export class SocialAgentMeetLoopService {
         weight: 1.5,
       });
     }
+    await this.recordMeetLoopInterestEvent(ownerUserId, task, {
+      eventType: 'activity_complete',
+      payload,
+      activityId: resolvedActivityId,
+      candidateUserId,
+      sourceAction: cleanDisplayText(body.action, 'activity.complete'),
+      metadata: {
+        realActivityPersisted: Boolean(completedActivity),
+      },
+    });
 
     const now = new Date().toISOString();
     task.result = {
@@ -992,6 +1009,18 @@ export class SocialAgentMeetLoopService {
         weight: positive ? 1.2 : 1,
       });
     }
+    await this.recordMeetLoopInterestEvent(ownerUserId, task, {
+      eventType: positive ? 'review_positive' : 'review_negative',
+      payload,
+      activityId,
+      candidateUserId,
+      sourceAction: cleanDisplayText(body.action, 'review.submit'),
+      metadata: {
+        rating,
+        positive,
+        realActivityPersisted: Boolean(reviewResult),
+      },
+    });
 
     const trustScoreDelta = positive ? 2 : 1;
     const now = new Date().toISOString();
@@ -1372,6 +1401,95 @@ export class SocialAgentMeetLoopService {
         }),
       );
     }
+  }
+
+  private async recordMeetLoopInterestEvent(
+    ownerUserId: number,
+    task: AgentTask,
+    input: {
+      eventType: SocialAgentUserInterestEventType;
+      payload: Record<string, unknown>;
+      activityId?: number | null;
+      candidateUserId?: number | null;
+      sourceAction: string;
+      metadata?: Record<string, unknown> | null;
+    },
+  ): Promise<void> {
+    if (!this.interestEvents) return;
+    const event: SocialAgentUserInterestEventInput = {
+      ownerUserId,
+      agentTaskId: task.id,
+      eventType: input.eventType,
+      targetUserId: input.candidateUserId ?? null,
+      activityId: input.activityId ?? null,
+      activityTags: this.cleanInterestList([
+        input.payload.activityType,
+        input.payload.activity,
+        input.payload.title,
+        input.payload.category,
+      ]),
+      candidatePreferenceTags: this.cleanInterestList([
+        input.payload.candidatePreference,
+        input.payload.preference,
+        input.payload.safetyBoundary,
+        input.payload.inviteTone,
+      ]),
+      city: this.cleanInterestText(input.payload.city, 120),
+      locationText:
+        this.cleanInterestText(input.payload.locationName, 160) ||
+        this.cleanInterestText(input.payload.locationText, 160) ||
+        this.cleanInterestText(input.payload.geoArea, 160),
+      timeWindow:
+        this.cleanInterestText(input.payload.timeWindow, 120) ||
+        this.cleanInterestText(input.payload.timeLabel, 120) ||
+        this.cleanInterestText(input.payload.scheduledAt, 120),
+      source: 'meet_loop',
+      dedupeKey: [
+        'meet-loop-interest',
+        ownerUserId,
+        task.id,
+        input.eventType,
+        input.activityId ?? 'no-activity',
+        input.candidateUserId ?? 'no-candidate',
+      ].join(':'),
+      metadata: {
+        sourceAction: input.sourceAction,
+        ...(input.metadata ?? {}),
+      },
+    };
+    try {
+      await this.interestEvents.recordEvent(event);
+    } catch (error) {
+      this.metrics.recordError('user_interest_event_failed');
+      this.logger.warn(
+        JSON.stringify({
+          event: 'social_agent.meet_loop.user_interest_event_failed',
+          ownerUserId,
+          agentTaskId: task.id,
+          eventType: input.eventType,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  }
+
+  private cleanInterestList(values: unknown[]): string[] {
+    const result: string[] = [];
+    for (const value of values) {
+      if (Array.isArray(value)) {
+        result.push(...this.cleanInterestList(value));
+        continue;
+      }
+      const cleaned = this.cleanInterestText(value, 80);
+      if (cleaned) result.push(cleaned);
+    }
+    return [...new Set(result)].slice(0, 12);
+  }
+
+  private cleanInterestText(value: unknown, maxLength: number): string | null {
+    const cleaned = cleanDisplayText(value, '').trim();
+    if (!cleaned) return null;
+    return cleaned.slice(0, maxLength);
   }
 
   private async recordAssistantMessage(

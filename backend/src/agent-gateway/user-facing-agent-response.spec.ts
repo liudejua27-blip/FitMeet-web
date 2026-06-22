@@ -91,7 +91,7 @@ describe('toUserFacingAgentResponse', () => {
     ]);
     expect(response).toMatchObject({
       assistantMessage: '我会先结合你的 Life Graph，再筛选合适的人。',
-      lightStatus: '正在筛选合适的人',
+      lightStatus: '正在筛选公开可发现的人',
       pendingConfirmations: [],
       permissionMode: AgentTaskPermissionMode.Confirm,
       safeStatus: {

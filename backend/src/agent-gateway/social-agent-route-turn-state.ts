@@ -32,6 +32,7 @@ type ConversationTurnPatch = {
 
 type SearchTurnPatch = {
   assistantMessage?: string;
+  assistantMessageSource?: SocialAgentAssistantMessageSource;
   savedContext: boolean;
   activityResults: SocialAgentActivityResult[];
   queuedRun: SocialAgentAsyncRunSnapshot | null;
@@ -81,6 +82,8 @@ export function applySearchTurnState(
   return {
     ...state,
     assistantMessage: patch.assistantMessage ?? state.assistantMessage,
+    assistantMessageSource:
+      patch.assistantMessageSource ?? state.assistantMessageSource,
     savedContext: patch.savedContext || state.savedContext,
     activityResults: patch.activityResults,
     queuedRun: patch.queuedRun,

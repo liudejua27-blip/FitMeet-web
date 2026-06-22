@@ -17,7 +17,8 @@ import {
   socialAgentDeepSeekRetryAttempts,
 } from './social-agent-deepseek-resilience';
 import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
-import { callDeepSeekChatCompletion } from '../common/deepseek.util';
+import { callDeepSeekChatCompletionWithUsage } from '../common/deepseek.util';
+import { AgentObservabilityService } from './agent-observability.service';
 
 /**
  * AI Match Reasoner
@@ -149,6 +150,8 @@ export class MatchReasonerService {
     private readonly modelRouter?: SocialAgentModelRouterService,
     @Optional()
     private readonly deepSeek?: SocialAgentChatDeepSeekClientService,
+    @Optional()
+    private readonly observability?: AgentObservabilityService,
   ) {}
 
   /**
@@ -559,6 +562,8 @@ export class MatchReasonerService {
       messages,
       temperature: fallbackTemperature,
       signal: input.signal ?? null,
+      taskId: input.taskId ?? null,
+      traceId: input.traceId ?? null,
     });
     if (!raw) return null;
     return this.parseDeepseekExplanation(raw, fallback);
@@ -703,6 +708,8 @@ export class MatchReasonerService {
       messages,
       temperature: fallbackTemperature,
       signal: input.signal ?? null,
+      taskId: input.taskId ?? null,
+      traceId: input.traceId ?? null,
     });
     if (!raw) return null;
     return this.parseDeepseekScore(raw, baseScore, fallback);
@@ -852,19 +859,58 @@ export class MatchReasonerService {
     messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
     temperature: number;
     signal?: AbortSignal | null;
+    taskId?: number | null;
+    traceId?: string | null;
   }): Promise<string> {
-    return callDeepSeekChatCompletion({
-      apiKey: input.apiKey,
-      baseUrl: this.config?.get<string>('DEEPSEEK_BASE_URL'),
-      model: this.deepseekModel(),
-      temperature: input.temperature,
-      responseFormat: { type: 'json_object' },
-      retryAttempts: 1,
-      messages: input.messages,
-      signal: input.signal ?? null,
-      timeoutMs: this.deepseekTimeoutMs(),
-      timeoutMessage: 'deepseek_timeout',
-    });
+    const startedAt = Date.now();
+    const model = this.deepseekModel();
+    try {
+      const result = await callDeepSeekChatCompletionWithUsage({
+        apiKey: input.apiKey,
+        baseUrl: this.config?.get<string>('DEEPSEEK_BASE_URL'),
+        model,
+        temperature: input.temperature,
+        responseFormat: { type: 'json_object' },
+        retryAttempts: 1,
+        messages: input.messages,
+        signal: input.signal ?? null,
+        timeoutMs: this.deepseekTimeoutMs(),
+        timeoutMessage: 'deepseek_timeout',
+      });
+      this.observability?.recordLlmCall({
+        traceId: input.traceId ?? null,
+        useCase: 'candidate_summary',
+        model,
+        taskId: input.taskId ?? null,
+        latencyMs: Date.now() - startedAt,
+        success: true,
+        promptTokens: result.usage.promptTokens,
+        promptCacheHitTokens: result.usage.promptCacheHitTokens,
+        promptCacheMissTokens: result.usage.promptCacheMissTokens,
+        completionTokens: result.usage.completionTokens,
+        reasoningTokens: result.usage.reasoningTokens,
+        approxPromptChars: this.approxChars(input.messages),
+      });
+      return result.content;
+    } catch (error) {
+      this.observability?.recordLlmCall({
+        traceId: input.traceId ?? null,
+        useCase: 'candidate_summary',
+        model,
+        taskId: input.taskId ?? null,
+        latencyMs: Date.now() - startedAt,
+        success: false,
+        approxPromptChars: this.approxChars(input.messages),
+        failureReason: socialAgentDeepSeekFailureReason(error),
+      });
+      throw error;
+    }
+  }
+
+  private approxChars(
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  ): number {
+    return messages.reduce((sum, message) => sum + message.content.length, 0);
   }
 
   private toError(error: unknown): Error {

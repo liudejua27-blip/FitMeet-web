@@ -84,6 +84,7 @@ describe('SocialAgentActivitySearchService', () => {
     const metrics = {
       recordActivitySearch: jest.fn(),
       recordError: jest.fn(),
+      recordDeterministicRouteReply: jest.fn(),
     };
     const service = new SocialAgentActivitySearchService(
       candidatePool as never,
@@ -147,6 +148,7 @@ describe('SocialAgentActivitySearchService', () => {
     const metrics = {
       recordActivitySearch: jest.fn(),
       recordError: jest.fn(),
+      recordDeterministicRouteReply: jest.fn(),
     };
     const service = new SocialAgentActivitySearchService(
       candidatePool as never,
@@ -224,6 +226,7 @@ describe('SocialAgentActivitySearchService', () => {
     const metrics = {
       recordActivitySearch: jest.fn(),
       recordError: jest.fn(),
+      recordDeterministicRouteReply: jest.fn(),
     };
     const service = new SocialAgentActivitySearchService(
       candidatePool as never,
@@ -307,6 +310,7 @@ describe('SocialAgentActivitySearchService', () => {
     const metrics = {
       recordActivitySearch: jest.fn(),
       recordError: jest.fn(),
+      recordDeterministicRouteReply: jest.fn(),
     };
     const finalResponses = {
       generate: jest.fn().mockResolvedValue('我按刚才的信息找到了 1 个公开机会。'),
@@ -402,6 +406,7 @@ describe('SocialAgentActivitySearchService', () => {
     const metrics = {
       recordActivitySearch: jest.fn(),
       recordError: jest.fn(),
+      recordDeterministicRouteReply: jest.fn(),
     };
     const service = new SocialAgentActivitySearchService(
       candidatePool as never,
@@ -424,6 +429,42 @@ describe('SocialAgentActivitySearchService', () => {
     expect(result.assistantMessage).toContain('发布约练卡到发现');
   });
 
+  it('skips final response generation for empty activity results', async () => {
+    const candidatePool = {
+      searchActivity: jest.fn().mockResolvedValue({ activityResults: [] }),
+    };
+    const metrics = {
+      recordActivitySearch: jest.fn(),
+      recordError: jest.fn(),
+      recordDeterministicRouteReply: jest.fn(),
+    };
+    const finalResponses = {
+      generate: jest.fn().mockResolvedValue('LLM 空活动回复'),
+    };
+    const service = new SocialAgentActivitySearchService(
+      candidatePool as never,
+      metrics as never,
+      finalResponses as never,
+    );
+
+    const result = await service.handleActivitySearch({
+      ownerUserId: 7,
+      task: makeTask(),
+      route: makeActivityRoute(),
+      message: '今晚青岛大学附近有什么活动',
+      buildMemoryContext: () => null,
+    });
+
+    expect(finalResponses.generate).not.toHaveBeenCalled();
+    expect(metrics.recordDeterministicRouteReply).toHaveBeenCalledWith(
+      'activity_search.empty_results',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+    expect(result.activityResults).toEqual([]);
+    expect(result.assistantMessage).toContain('真实活动或公开约练卡片');
+    expect(result.assistantMessage).toContain('发布约练卡到发现');
+  });
+
   it('records empty activity search state for the next turn', async () => {
     const candidatePool = {
       searchActivity: jest.fn().mockResolvedValue({ activityResults: [] }),
@@ -431,6 +472,7 @@ describe('SocialAgentActivitySearchService', () => {
     const metrics = {
       recordActivitySearch: jest.fn(),
       recordError: jest.fn(),
+      recordDeterministicRouteReply: jest.fn(),
     };
     const service = new SocialAgentActivitySearchService(
       candidatePool as never,

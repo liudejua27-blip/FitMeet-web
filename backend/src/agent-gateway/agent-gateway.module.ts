@@ -67,6 +67,7 @@ import { AgentActionLogService } from './agent-action-log.service';
 import { AgentPermissionService } from './agent-permission.service';
 import { SocialAgentPlannerService } from './social-agent-planner.service';
 import { SocialAgentIntentRouterService } from './social-agent-intent-router.service';
+import { SocialAgentWorkflowRouterService } from './social-agent-workflow-router.service';
 import { SocialAgentBrainService } from './social-agent-brain.service';
 import { FitMeetAlphaAgentSdkService } from './fitmeet-alpha-agent-sdk.service';
 import { FitMeetSubagentRuntimeService } from './fitmeet-subagent-runtime.service';
@@ -143,6 +144,11 @@ import { SocialCodexTraceEvalService } from './social-codex-trace-eval.service';
 import { AgentRunCheckpointService } from './agent-run-checkpoint.service';
 import { FitMeetAgentRuntimeService } from './fitmeet-agent-runtime.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
+import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
+import { SocialAgentSemanticResponseCacheService } from './social-agent-semantic-response-cache.service';
+import { SocialAgentToolResultCacheService } from './social-agent-tool-result-cache.service';
+import { SocialAgentEmbeddingCacheService } from './social-agent-embedding-cache.service';
+import { SocialAgentTokenBudgetContextPackerService } from './social-agent-token-budget-context-packer.service';
 import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import { SocialAgentMetricsController } from './social-agent-metrics.controller';
 import { SocialAgentLongTermMemoryService } from './social-agent-long-term-memory.service';
@@ -152,6 +158,8 @@ import {
   SocialAgentReminder,
   SocialAgentReminderPreference,
 } from './entities/social-agent-reminder.entity';
+import { SocialAgentUserInterestEvent } from './entities/social-agent-user-interest-event.entity';
+import { SocialAgentUserInterestEventService } from './social-agent-user-interest-event.service';
 import { SocialAgentRagService } from './social-agent-rag.service';
 import { SocialAgentRouteContextService } from './social-agent-route-context.service';
 import { SocialAgentRouteCandidateConfirmationService } from './social-agent-route-candidate-confirmation.service';
@@ -271,6 +279,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
       UserSocialProfile,
       SocialAgentLongTermMemory,
       SocialAgentMessageFeedback,
+      SocialAgentUserInterestEvent,
       SocialAgentReminderPreference,
       SocialAgentReminder,
       User,
@@ -307,6 +316,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     FitMeetAgentToolRegistryService,
     SocialAgentPlannerService,
     SocialAgentIntentRouterService,
+    SocialAgentWorkflowRouterService,
     SocialAgentBrainService,
     FitMeetAlphaAgentSdkService,
     FitMeetSubagentRuntimeService,
@@ -373,9 +383,15 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     AgentRunCheckpointService,
     SocialAgentChatService,
     FitMeetAgentRuntimeService,
+    SocialAgentLlmOutputCacheService,
+    SocialAgentSemanticResponseCacheService,
+    SocialAgentToolResultCacheService,
+    SocialAgentEmbeddingCacheService,
+    SocialAgentTokenBudgetContextPackerService,
     SocialAgentCandidatePoolService,
     SocialAgentMetricsService,
     SocialAgentLongTermMemoryService,
+    SocialAgentUserInterestEventService,
     SocialAgentRagService,
     SocialAgentRouteContextService,
     SocialAgentRouteCandidateConfirmationService,
@@ -454,6 +470,7 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     FitMeetAgentToolRegistryService,
     SocialAgentPlannerService,
     SocialAgentIntentRouterService,
+    SocialAgentWorkflowRouterService,
     SocialAgentBrainService,
     FitMeetAlphaAgentSdkService,
     FitMeetSubagentRuntimeService,
@@ -499,8 +516,14 @@ import { AdminRbacModule } from '../admin-rbac/admin-rbac.module';
     SocialAgentFollowUpContextService,
     SocialAgentReplanProgressService,
     FitMeetAgentRuntimeService,
+    SocialAgentLlmOutputCacheService,
+    SocialAgentSemanticResponseCacheService,
+    SocialAgentToolResultCacheService,
+    SocialAgentEmbeddingCacheService,
+    SocialAgentTokenBudgetContextPackerService,
     SocialAgentCandidatePoolService,
     SocialAgentLongTermMemoryService,
+    SocialAgentUserInterestEventService,
     SocialAgentRagService,
     SocialAgentRouteContextService,
     SocialAgentToolExecutorService,

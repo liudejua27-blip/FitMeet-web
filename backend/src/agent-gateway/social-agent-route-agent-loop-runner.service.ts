@@ -1000,7 +1000,7 @@ export class SocialAgentRouteAgentLoopRunnerService {
       return running ? '正在准备需要你确认的动作' : '已整理确认内容';
     if (toolName === 'candidate_confirmation_check')
       return running ? '正在确认候选动作' : '已确认候选动作状态';
-    return running ? '正在推进当前进度' : '已整理当前进度';
+    return running ? '正在整理当前信息' : '已整理当前信息';
   }
 
   private hydratedContextFromTaskContext(input: {

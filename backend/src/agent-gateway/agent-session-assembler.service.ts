@@ -330,7 +330,12 @@ export class AgentSessionAssemblerService {
 
   private assistantMessageSource(
     value: unknown,
-  ): 'llm' | 'fallback' | undefined {
-    return value === 'llm' || value === 'fallback' ? value : undefined;
+  ): 'llm' | 'fallback' | 'deterministic_route' | 'deterministic_action' | undefined {
+    return value === 'llm' ||
+      value === 'fallback' ||
+      value === 'deterministic_route' ||
+      value === 'deterministic_action'
+      ? value
+      : undefined;
   }
 }

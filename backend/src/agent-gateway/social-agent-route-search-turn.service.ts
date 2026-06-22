@@ -9,6 +9,7 @@ import {
 } from './social-agent-candidate-context.presenter';
 import type {
   SocialAgentActivityResult,
+  SocialAgentAssistantMessageSource,
   SocialAgentAsyncRunSnapshot,
   SocialAgentChatReplanRunBody,
   SocialAgentIntentRouteResult,
@@ -51,6 +52,7 @@ type HandleRouteSearchTurnInput = {
 type HandleRouteSearchTurnResult = {
   handled: boolean;
   assistantMessage?: string;
+  assistantMessageSource?: SocialAgentAssistantMessageSource;
   savedContext: boolean;
   activityResults: SocialAgentActivityResult[];
   queuedRun: SocialAgentAsyncRunSnapshot | null;
@@ -80,6 +82,7 @@ export class SocialAgentRouteSearchTurnService {
         return {
           ...this.emptyResult(true),
           assistantMessage: clarification.assistantMessage,
+          assistantMessageSource: 'deterministic_route',
           savedContext: true,
         };
       }
@@ -94,6 +97,7 @@ export class SocialAgentRouteSearchTurnService {
         return {
           ...this.emptyResult(true),
           assistantMessage: gate.assistantMessage,
+          assistantMessageSource: 'deterministic_route',
           savedContext: true,
         };
       }
@@ -102,6 +106,7 @@ export class SocialAgentRouteSearchTurnService {
         return {
           ...this.emptyResult(true),
           assistantMessage: emptySearchReply,
+          assistantMessageSource: 'deterministic_route',
           savedContext: true,
         };
       }
@@ -118,6 +123,7 @@ export class SocialAgentRouteSearchTurnService {
       return {
         handled: true,
         assistantMessage: handled.assistantMessage,
+        assistantMessageSource: handled.assistantMessageSource,
         savedContext: false,
         activityResults: handled.activityResults,
         queuedRun: null,
@@ -150,6 +156,7 @@ export class SocialAgentRouteSearchTurnService {
       return {
         ...this.emptyResult(true),
         assistantMessage: clarification.assistantMessage,
+        assistantMessageSource: 'deterministic_route',
         savedContext: true,
       };
     }
@@ -164,6 +171,7 @@ export class SocialAgentRouteSearchTurnService {
       return {
         ...this.emptyResult(true),
         assistantMessage: gate.assistantMessage,
+        assistantMessageSource: 'deterministic_route',
         savedContext: true,
       };
     }
@@ -184,6 +192,7 @@ export class SocialAgentRouteSearchTurnService {
         return {
           ...this.emptyResult(true),
           assistantMessage: lifeGraphClarification,
+          assistantMessageSource: 'deterministic_route',
           savedContext: true,
         };
       }
@@ -324,6 +333,7 @@ export class SocialAgentRouteSearchTurnService {
       return {
         ...this.emptyResult(true),
         assistantMessage: emptySearchReply,
+        assistantMessageSource: 'deterministic_route',
         savedContext: true,
       };
     }

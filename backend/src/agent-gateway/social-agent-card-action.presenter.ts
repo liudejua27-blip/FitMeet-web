@@ -1400,6 +1400,8 @@ export function messageForSocialAgentSchemaAction(
       return '重新生成开场白';
     case 'opener.reject':
       return '取消发送开场白';
+    case 'publish_to_discover':
+      return '发布这张约练卡到发现';
     case 'activity.skip_publish':
       return '暂不发布这张约练卡';
     case 'activity.modify_time':

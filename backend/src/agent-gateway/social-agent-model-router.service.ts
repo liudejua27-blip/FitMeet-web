@@ -5,6 +5,7 @@ export type SocialAgentModelUseCase =
   | 'casual_chat'
   | 'final_response'
   | 'planner'
+  | 'brain'
   | 'profile_extraction'
   | 'card_generation'
   | 'candidate_summary'
@@ -73,6 +74,8 @@ export class SocialAgentModelRouterService {
         );
       case 'planner':
         return this.plannerModel();
+      case 'brain':
+        return this.brainModel();
       case 'profile_extraction':
         return this.reasoningToolModel(['AGENT_EXTRACTOR_MODEL']);
       case 'card_generation':
@@ -94,12 +97,12 @@ export class SocialAgentModelRouterService {
       this.routingMode() === 'quality'
         ? useCase === 'final_response' || useCase === 'casual_chat'
           ? SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS
-          : useCase === 'planner'
+          : useCase === 'planner' || useCase === 'brain'
             ? SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS
             : SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS
         : useCase === 'final_response' || useCase === 'casual_chat'
           ? SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS
-          : useCase === 'planner'
+          : useCase === 'planner' || useCase === 'brain'
             ? SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS
             : SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS;
     return this.enforceMinimumTimeout(
@@ -119,12 +122,12 @@ export class SocialAgentModelRouterService {
       this.routingMode() === 'quality'
         ? useCase === 'final_response' || useCase === 'casual_chat'
           ? SOCIAL_AGENT_QUALITY_CHAT_FIRST_CHUNK_TIMEOUT_MS
-          : useCase === 'planner'
+          : useCase === 'planner' || useCase === 'brain'
             ? SOCIAL_AGENT_QUALITY_PLANNER_FIRST_CHUNK_TIMEOUT_MS
             : SOCIAL_AGENT_QUALITY_TOOL_FIRST_CHUNK_TIMEOUT_MS
         : useCase === 'final_response' || useCase === 'casual_chat'
           ? SOCIAL_AGENT_QUALITY_CHAT_FIRST_CHUNK_TIMEOUT_MS
-          : useCase === 'planner'
+          : useCase === 'planner' || useCase === 'brain'
             ? SOCIAL_AGENT_QUALITY_PLANNER_FIRST_CHUNK_TIMEOUT_MS
             : SOCIAL_AGENT_QUALITY_TOOL_FIRST_CHUNK_TIMEOUT_MS;
     return this.enforceMinimumFirstChunkTimeout(
@@ -137,6 +140,18 @@ export class SocialAgentModelRouterService {
     return (
       this.firstModel(
         ['AGENT_PLANNER_MODEL', 'DEEPSEEK_CHAT_MODEL'],
+        {
+          fallback: SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+          allowFast: false,
+        },
+      ) ?? SOCIAL_AGENT_DEFAULT_REASONING_MODEL
+    );
+  }
+
+  private brainModel(): string {
+    return (
+      this.firstModel(
+        ['AGENT_BRAIN_MODEL', 'AGENT_PLANNER_MODEL', 'DEEPSEEK_CHAT_MODEL'],
         {
           fallback: SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
           allowFast: false,
@@ -180,6 +195,7 @@ export class SocialAgentModelRouterService {
   getTemperature(useCase: SocialAgentModelUseCase): number {
     switch (useCase) {
       case 'planner':
+      case 'brain':
       case 'profile_extraction':
       case 'safety_check':
         return 0.15;
@@ -231,6 +247,8 @@ export class SocialAgentModelRouterService {
         return 'SOCIAL_AGENT_CHAT_LLM_TIMEOUT_MS';
       case 'planner':
         return 'SOCIAL_AGENT_PLANNER_TIMEOUT_MS';
+      case 'brain':
+        return 'SOCIAL_AGENT_BRAIN_TIMEOUT_MS';
       case 'profile_extraction':
         return 'SOCIAL_AGENT_EXTRACTOR_TIMEOUT_MS';
       case 'card_generation':
@@ -252,6 +270,8 @@ export class SocialAgentModelRouterService {
         return 'SOCIAL_AGENT_CHAT_FIRST_CHUNK_TIMEOUT_MS';
       case 'planner':
         return 'SOCIAL_AGENT_PLANNER_FIRST_CHUNK_TIMEOUT_MS';
+      case 'brain':
+        return 'SOCIAL_AGENT_BRAIN_FIRST_CHUNK_TIMEOUT_MS';
       case 'profile_extraction':
         return 'SOCIAL_AGENT_EXTRACTOR_FIRST_CHUNK_TIMEOUT_MS';
       case 'card_generation':
@@ -273,6 +293,8 @@ export class SocialAgentModelRouterService {
         return 'SOCIAL_AGENT_CHAT_THINKING';
       case 'planner':
         return 'SOCIAL_AGENT_PLANNER_THINKING';
+      case 'brain':
+        return 'SOCIAL_AGENT_BRAIN_THINKING';
       case 'profile_extraction':
         return 'SOCIAL_AGENT_EXTRACTOR_THINKING';
       case 'card_generation':
@@ -299,7 +321,7 @@ export class SocialAgentModelRouterService {
     if (useCase === 'casual_chat' || useCase === 'final_response') {
       return Math.max(timeoutMs, SOCIAL_AGENT_QUALITY_CHAT_TIMEOUT_MS);
     }
-    if (useCase === 'planner') {
+    if (useCase === 'planner' || useCase === 'brain') {
       return Math.max(timeoutMs, SOCIAL_AGENT_QUALITY_PLANNER_TIMEOUT_MS);
     }
     return Math.max(timeoutMs, SOCIAL_AGENT_QUALITY_TOOL_TIMEOUT_MS);
@@ -315,7 +337,7 @@ export class SocialAgentModelRouterService {
         SOCIAL_AGENT_QUALITY_CHAT_FIRST_CHUNK_TIMEOUT_MS,
       );
     }
-    if (useCase === 'planner') {
+    if (useCase === 'planner' || useCase === 'brain') {
       return Math.max(
         timeoutMs,
         SOCIAL_AGENT_QUALITY_PLANNER_FIRST_CHUNK_TIMEOUT_MS,

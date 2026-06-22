@@ -1,4 +1,6 @@
 import { SocialAgentRagService } from './social-agent-rag.service';
+import { SocialAgentEmbeddingCacheService } from './social-agent-embedding-cache.service';
+import { SocialAgentMetricsService } from './social-agent-metrics.service';
 import type { LongTermMemorySnapshot } from './social-agent-long-term-memory.service';
 
 function emptySnapshot(userId: number): LongTermMemorySnapshot {
@@ -33,12 +35,16 @@ function emptySnapshot(userId: number): LongTermMemorySnapshot {
   };
 }
 
-function makeService(snapshot: LongTermMemorySnapshot = emptySnapshot(1)) {
+function makeService(
+  snapshot: LongTermMemorySnapshot = emptySnapshot(1),
+  embeddingCache?: SocialAgentEmbeddingCacheService,
+  metrics?: SocialAgentMetricsService,
+) {
   const longTerm = {
     readSnapshot: jest.fn().mockResolvedValue(snapshot),
     summarizeTask: jest.fn(),
   } as never;
-  return new SocialAgentRagService(longTerm);
+  return new SocialAgentRagService(longTerm, embeddingCache, metrics);
 }
 
 describe('SocialAgentRagService', () => {
@@ -141,5 +147,38 @@ describe('SocialAgentRagService', () => {
     );
     expect(ctx.activitySop.length).toBeGreaterThan(0);
     expect(ctx.userMemorySummary).toBeNull();
+  });
+
+  it('reuses cached lexical embeddings for repeated RAG retrieval', async () => {
+    const embeddingCache = new SocialAgentEmbeddingCacheService();
+    const metrics = new SocialAgentMetricsService();
+    const service = makeService(emptySnapshot(1), embeddingCache, metrics);
+
+    await service.retrieve({
+      intent: 'social_search',
+      ownerUserId: 1,
+      message: '帮我找跑步搭子',
+      activityType: 'running',
+    });
+    await service.retrieve({
+      intent: 'social_search',
+      ownerUserId: 1,
+      message: '帮我找跑步搭子',
+      activityType: 'running',
+    });
+
+    expect(embeddingCache.stats().hits).toBeGreaterThan(0);
+    expect(metrics.snapshot()).toMatchObject({
+      embeddingCacheSummary: {
+        rag_query: expect.objectContaining({
+          hits: expect.any(Number),
+          misses: expect.any(Number),
+        }),
+        rag_doc: expect.objectContaining({
+          hits: expect.any(Number),
+          misses: expect.any(Number),
+        }),
+      },
+    });
   });
 });

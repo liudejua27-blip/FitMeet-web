@@ -45,6 +45,7 @@ function makeHarness() {
     handleActivitySearch: jest.fn().mockResolvedValue({
       activityResults: [{ id: 'activity-1', title: '周末晨跑' }],
       assistantMessage: '找到 1 条活动',
+      assistantMessageSource: 'llm',
     }),
   };
   const profileGate = {
@@ -91,6 +92,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
     expect(result).toMatchObject({
       handled: true,
       savedContext: true,
+      assistantMessageSource: 'deterministic_route',
       activityResults: [],
       queuedRun: null,
       runMode: null,
@@ -139,6 +141,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
     expect(result).toMatchObject({
       handled: true,
       assistantMessage: '找到 1 条活动',
+      assistantMessageSource: 'llm',
       activityResults: [{ id: 'activity-1', title: '周末晨跑' }],
       queuedRun: null,
       runMode: null,
@@ -215,6 +218,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
       queuedRun: null,
       runMode: null,
       savedContext: true,
+      assistantMessageSource: 'deterministic_route',
     });
     expect(result.assistantMessage).toContain('没有找到真实、公开可发现');
     expect(result.assistantMessage).toContain('活动或公开约练卡片');

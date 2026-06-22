@@ -14,13 +14,24 @@ import {
   SOCIAL_AGENT_QUALITY_TOOL_FIRST_CHUNK_TIMEOUT_MS,
   type SocialAgentModelUseCase,
 } from './social-agent-model-router.service';
-import { callDeepSeekChatCompletion } from '../common/deepseek.util';
+import {
+  callDeepSeekChatCompletionWithUsage,
+  type DeepSeekChatCompletionUsage,
+} from '../common/deepseek.util';
 import {
   isRetryableSocialAgentDeepSeekFailure,
   isSocialAgentAbortError,
   socialAgentDeepSeekFailureReason,
   socialAgentDeepSeekRetryAttempts,
 } from './social-agent-deepseek-resilience';
+import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
+import {
+  buildSocialAgentExactCacheKey,
+  buildSocialAgentPromptFingerprint,
+  readSocialAgentExactCacheKeyFingerprint,
+} from './social-agent-prompt-fingerprint.util';
+import { SocialAgentMetricsService } from './social-agent-metrics.service';
+import { AgentObservabilityService } from './agent-observability.service';
 
 type SocialAgentToolJsonModelInput = {
   purpose: string;
@@ -39,6 +50,7 @@ const SOCIAL_AGENT_TOOL_JSON_TIMEOUT_FLOOR_MS = Math.max(
 @Injectable()
 export class SocialAgentToolJsonModelService {
   private readonly logger = new Logger(SocialAgentToolJsonModelService.name);
+  private localLlmOutputCache?: SocialAgentLlmOutputCacheService;
 
   constructor(
     private readonly config: ConfigService,
@@ -46,6 +58,12 @@ export class SocialAgentToolJsonModelService {
     private readonly modelRouter?: SocialAgentModelRouterService,
     @Optional()
     private readonly deepSeek?: SocialAgentChatDeepSeekClientService,
+    @Optional()
+    private readonly llmOutputCache?: SocialAgentLlmOutputCacheService,
+    @Optional()
+    private readonly metrics?: SocialAgentMetricsService,
+    @Optional()
+    private readonly observability?: AgentObservabilityService,
   ) {}
 
   async callJson(
@@ -80,6 +98,33 @@ export class SocialAgentToolJsonModelService {
       },
       { role: 'user' as const, content: input.prompt },
     ];
+    const cacheKey = this.toolJsonCacheKey({
+      model,
+      purpose: input.purpose,
+      prompt: input.prompt,
+      useCase,
+    });
+    const cacheTtlMs = this.toolJsonCacheTtlMs();
+    const cached =
+      cacheTtlMs > 0 ? this.llmOutputCacheService().get(cacheKey) : null;
+    const cacheFingerprint = readSocialAgentExactCacheKeyFingerprint(cacheKey);
+    if (cacheTtlMs > 0) {
+      this.metrics?.recordLlmOutputCache?.({
+        cacheName: 'tool_json_exact',
+        hit: cached !== null,
+        approxChars: cached !== null ? this.approxChars(messages) : null,
+        promptPrefixHash: cacheFingerprint?.promptPrefixHash ?? null,
+        dynamicContextHash: cacheFingerprint?.dynamicContextHash ?? null,
+      });
+    }
+    if (cached) {
+      const parsed = parseSocialAgentJsonObject(cached);
+      return {
+        ...parsed,
+        source: 'deepseek',
+        purpose: input.purpose,
+      };
+    }
     const timeoutMs = this.toolJsonTimeoutMs(useCase);
     const maxAttempts = socialAgentDeepSeekRetryAttempts(this.config, {
       specificKey: 'SOCIAL_AGENT_TOOL_JSON_RETRY_ATTEMPTS',
@@ -88,21 +133,25 @@ export class SocialAgentToolJsonModelService {
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       this.assertNotClientAborted(input.signal);
       const startedAt = Date.now();
+      let fallbackUsage: DeepSeekChatCompletionUsage | null = null;
       try {
-        const content = this.deepSeek
-          ? await this.deepSeek.complete({
-              useCase,
-              taskId: input.taskId ?? null,
-              intent: input.purpose,
-              fallbackTemperature,
-              responseFormat: { type: 'json_object' },
-              retryAttempts: 1,
-              messages,
-              signal: input.signal ?? null,
-              timeoutMs,
-              traceId: input.traceId ?? null,
-            })
-          : await callDeepSeekChatCompletion({
+        const completion = this.deepSeek
+          ? {
+              content: await this.deepSeek.complete({
+                useCase,
+                taskId: input.taskId ?? null,
+                intent: input.purpose,
+                fallbackTemperature,
+                responseFormat: { type: 'json_object' },
+                retryAttempts: 1,
+                messages,
+                signal: input.signal ?? null,
+                timeoutMs,
+                traceId: input.traceId ?? null,
+              }),
+              usage: null as DeepSeekChatCompletionUsage | null,
+            }
+          : await callDeepSeekChatCompletionWithUsage({
               apiKey,
               baseUrl: this.config.get<string>('DEEPSEEK_BASE_URL'),
               model,
@@ -114,8 +163,16 @@ export class SocialAgentToolJsonModelService {
               timeoutMs,
               timeoutMessage: 'deepseek_timeout',
             });
+        const content = completion.content;
+        fallbackUsage = completion.usage;
         if (!content?.trim()) throw new Error('DeepSeek returned empty JSON');
         const parsed = parseSocialAgentJsonObject(content);
+        if (cacheTtlMs > 0) {
+          this.llmOutputCacheService().set(cacheKey, content, {
+            ttlMs: cacheTtlMs,
+            approxPromptChars: this.approxChars(messages),
+          });
+        }
         this.logModelCall({
           useCase,
           model,
@@ -124,6 +181,24 @@ export class SocialAgentToolJsonModelService {
           latencyMs: Date.now() - startedAt,
           success: true,
         });
+        if (fallbackUsage) {
+          this.observability?.recordLlmCall({
+            traceId: input.traceId ?? null,
+            useCase,
+            model,
+            taskId: input.taskId ?? null,
+            latencyMs: Date.now() - startedAt,
+            success: true,
+            promptTokens: fallbackUsage.promptTokens,
+            promptCacheHitTokens: fallbackUsage.promptCacheHitTokens,
+            promptCacheMissTokens: fallbackUsage.promptCacheMissTokens,
+            completionTokens: fallbackUsage.completionTokens,
+            reasoningTokens: fallbackUsage.reasoningTokens,
+            approxPromptChars: this.approxChars(messages),
+            promptPrefixHash: cacheFingerprint?.promptPrefixHash ?? null,
+            dynamicContextHash: cacheFingerprint?.dynamicContextHash ?? null,
+          });
+        }
         return {
           ...parsed,
           source: 'deepseek',
@@ -144,6 +219,25 @@ export class SocialAgentToolJsonModelService {
           success: false,
           reason,
         });
+        if (fallbackUsage) {
+          this.observability?.recordLlmCall({
+            traceId: input.traceId ?? null,
+            useCase,
+            model,
+            taskId: input.taskId ?? null,
+            latencyMs: Date.now() - startedAt,
+            success: false,
+            promptTokens: fallbackUsage.promptTokens,
+            promptCacheHitTokens: fallbackUsage.promptCacheHitTokens,
+            promptCacheMissTokens: fallbackUsage.promptCacheMissTokens,
+            completionTokens: fallbackUsage.completionTokens,
+            reasoningTokens: fallbackUsage.reasoningTokens,
+            approxPromptChars: this.approxChars(messages),
+            promptPrefixHash: cacheFingerprint?.promptPrefixHash ?? null,
+            dynamicContextHash: cacheFingerprint?.dynamicContextHash ?? null,
+            failureReason: reason,
+          });
+        }
         if (
           attempt < maxAttempts &&
           isRetryableSocialAgentDeepSeekFailure(reason, {
@@ -199,6 +293,50 @@ export class SocialAgentToolJsonModelService {
       modelRouter: this.modelRouter,
     });
     return Math.max(selected, SOCIAL_AGENT_TOOL_JSON_TIMEOUT_FLOOR_MS);
+  }
+
+  private llmOutputCacheService(): SocialAgentLlmOutputCacheService {
+    if (this.llmOutputCache) return this.llmOutputCache;
+    this.localLlmOutputCache ??= new SocialAgentLlmOutputCacheService();
+    return this.localLlmOutputCache;
+  }
+
+  private toolJsonCacheKey(input: {
+    model: string;
+    purpose: string;
+    prompt: string;
+    useCase: SocialAgentModelUseCase;
+  }): string {
+    return buildSocialAgentExactCacheKey({
+      cacheName: 'tool_json_exact',
+      fingerprint: buildSocialAgentPromptFingerprint({
+        schema: `social_agent_tool_json.v1:${input.purpose}`,
+        model: input.model,
+        useCase: input.useCase,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are FitMeet Social Agent reply loop. Return only one valid JSON object.',
+          },
+          { role: 'user', content: input.prompt },
+        ],
+      }),
+    });
+  }
+
+  private toolJsonCacheTtlMs(): number {
+    const raw = this.config.get<string>('SOCIAL_AGENT_TOOL_JSON_CACHE_TTL_MS');
+    if (raw === '0') return 0;
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return Math.floor(parsed);
+    }
+    return 30_000;
+  }
+
+  private approxChars(value: unknown): number {
+    return JSON.stringify(value).length;
   }
 
   private assertNotClientAborted(signal?: AbortSignal | null): void {

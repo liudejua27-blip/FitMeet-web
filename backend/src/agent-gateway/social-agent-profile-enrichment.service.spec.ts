@@ -44,6 +44,7 @@ function makeHarness(
   };
   const metrics = {
     recordError: jest.fn(),
+    recordDeterministicRouteReply: jest.fn(),
   };
   const service = new SocialAgentProfileEnrichmentService(
     taskRepo as never,
@@ -258,7 +259,7 @@ describe('SocialAgentProfileEnrichmentService', () => {
     );
   });
 
-  it('marks streamed profile replies as LLM-sourced and non-streamed fallback replies as fallback', async () => {
+  it('marks streamed profile replies as LLM-sourced and deterministic profile replies as deterministic', async () => {
     const { chatLlm, service } = makeHarness();
     const task = makeTask();
     chatLlm.generateAgentBrainReplyWithSource.mockImplementationOnce(
@@ -286,10 +287,6 @@ describe('SocialAgentProfileEnrichmentService', () => {
       expect.objectContaining({ type: 'assistant_delta', source: 'llm' }),
     ]);
 
-    chatLlm.generateAgentBrainReplyWithSource.mockResolvedValueOnce({
-      text: '我先识别到了画像信息。',
-      source: 'fallback',
-    });
     const fallback = await service.handleTurn({
       ownerUserId: 7,
       task: makeTask({ id: 102 }),
@@ -298,7 +295,7 @@ describe('SocialAgentProfileEnrichmentService', () => {
       buildMemoryContext: () => null,
     });
 
-    expect(fallback.assistantMessageSource).toBe('fallback');
+    expect(fallback.assistantMessageSource).toBe('deterministic_route');
     expect(fallback.assistantStreamed).toBe(false);
   });
 
@@ -387,6 +384,99 @@ describe('SocialAgentProfileEnrichmentService', () => {
       },
     });
     expect(result.assistantMessage).toContain('先不直接搜索候选人');
+  });
+
+  it('skips LLM profile extraction when deterministic profile facts are sufficient', async () => {
+    const { chatLlm, metrics, service } = makeHarness();
+    const task = makeTask();
+
+    const result = await service.handleTurn({
+      ownerUserId: 7,
+      task,
+      message: '我是青岛大学男生，周末下午喜欢跑步和咖啡，想找同校女生。',
+      intent: 'profile_enrichment',
+      buildMemoryContext: () => null,
+    });
+
+    expect(chatLlm.extractProfileFieldsWithLlm).not.toHaveBeenCalled();
+    expect(chatLlm.generateAgentBrainReplyWithSource).not.toHaveBeenCalled();
+    expect(metrics.recordDeterministicRouteReply).toHaveBeenCalledWith(
+      'profile_extraction.rule_based',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+    expect(metrics.recordDeterministicRouteReply).toHaveBeenCalledWith(
+      'profile_extraction.deterministic_reply',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+    expect(result.profileUpdated).toBe(false);
+    expect(result.assistantMessageSource).toBe('deterministic_route');
+    expect(task.memory).toMatchObject({
+      pendingProfileEnrichment: {
+        extractedProfile: expect.objectContaining({
+          city: '青岛',
+          school: '青岛大学',
+          gender: '男',
+          interestTags: ['跑步', '咖啡'],
+          availableTimes: ['周末下午喜欢跑步和咖啡'],
+          targetPreference: '同校女生',
+        }),
+      },
+    });
+  });
+
+  it('extracts public tag preferences and safety boundaries without LLM', async () => {
+    const { chatLlm, service } = makeHarness();
+    const task = makeTask();
+
+    await service.handleTurn({
+      ownerUserId: 7,
+      task,
+      message:
+        '我在青岛大学附近，今天晚上想找女生散步，最好公开资料里有舞蹈或编程标签，第一次见面只在公共场所，先站内聊。',
+      intent: 'profile_enrichment',
+      buildMemoryContext: () => null,
+    });
+
+    expect(chatLlm.extractProfileFieldsWithLlm).not.toHaveBeenCalled();
+    expect(task.memory).toMatchObject({
+      pendingProfileEnrichment: {
+        extractedProfile: expect.objectContaining({
+          city: '青岛',
+          school: '青岛大学',
+          nearbyArea: '青岛大学附近',
+          interestTags: expect.arrayContaining(['散步', '编程', '舞蹈']),
+          targetPreference: expect.stringContaining('女生'),
+          preferredTraits: expect.arrayContaining([
+            expect.stringContaining('女生'),
+          ]),
+          socialBoundary:
+            '第一次见面优先公共场所；先站内沟通，不自动交换联系方式',
+          privacyBoundary:
+            '第一次见面优先公共场所；先站内沟通，不自动交换联系方式',
+        }),
+      },
+    });
+  });
+
+  it('keeps LLM profile extraction for sparse profile facts', async () => {
+    const { chatLlm, service } = makeHarness();
+    chatLlm.extractProfileFieldsWithLlm.mockResolvedValueOnce({
+      city: '青岛',
+    });
+    const task = makeTask();
+
+    await service.handleTurn({
+      ownerUserId: 7,
+      task,
+      message: '我在青岛。',
+      intent: 'profile_enrichment',
+      buildMemoryContext: () => null,
+    });
+
+    expect(chatLlm.extractProfileFieldsWithLlm).toHaveBeenCalledWith(
+      task,
+      '我在青岛。',
+    );
   });
 
   it('executes conversation brain read tools and records failures without throwing', async () => {

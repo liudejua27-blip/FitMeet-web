@@ -148,6 +148,9 @@ function makeHarness(task = makeTask()) {
       suggestions: [],
     }),
   };
+  const metrics = {
+    recordDeterministicRouteReply: jest.fn(),
+  };
   const service = new SocialAgentRecommendationResultService(
     taskRepo as never,
     eventRepo as never,
@@ -156,6 +159,8 @@ function makeHarness(task = makeTask()) {
     alphaAgent as never,
     tonePolicy as never,
     agentQuality as never,
+    undefined,
+    metrics as never,
   );
   return {
     agentQuality,
@@ -168,6 +173,7 @@ function makeHarness(task = makeTask()) {
     task,
     taskRepo,
     tonePolicy,
+    metrics,
   };
 }
 
@@ -481,8 +487,8 @@ describe('SocialAgentRecommendationResultService', () => {
     });
   });
 
-  it('constrains final response generation with the product empty-candidate fallback', async () => {
-    const { finalResponses, service, task } = makeHarness();
+  it('skips final response generation for empty candidate results', async () => {
+    const { finalResponses, metrics, service, task } = makeHarness();
     const draft = {
       ...makeDraft(),
       activityType: 'walking',
@@ -509,18 +515,53 @@ describe('SocialAgentRecommendationResultService', () => {
       toEventDto: (event) => ({ id: event.id }),
     });
 
-    const [request] = finalResponses.generate.mock.calls[0];
-    expect(request).toEqual(
-      expect.objectContaining({
-        fallbackReply: expect.stringContaining('真实、公开可发现'),
-        responseGoal:
-          '自然说明当前没有找到真实候选人，并给出放宽条件、补充信息或发布需求的下一步。',
-      }),
+    expect(finalResponses.generate).not.toHaveBeenCalled();
+    expect(metrics.recordDeterministicRouteReply).toHaveBeenCalledWith(
+      'candidate_search.empty_candidates',
+      { estimatedAvoidedLlmCalls: 1 },
     );
-    expect(request.fallbackReply).toContain('周末下午');
-    expect(request.fallbackReply).toContain('崂山区');
-    expect(request.fallbackReply).not.toContain('pool=0');
-    expect(request.fallbackReply).not.toContain('debug');
-    expect(request.fallbackReply).not.toContain('raw_tool_output');
+  });
+
+  it('returns a deterministic product fallback for empty candidate results', async () => {
+    const { finalResponses, service, task } = makeHarness();
+    const draft = {
+      ...makeDraft(),
+      activityType: 'walking',
+      metadata: {
+        timePreference: '周末下午',
+        locationPreference: '崂山区',
+      },
+    } as SocialAgentRequestDraft;
+
+    const result = await service.completeRecommendationResult({
+      ownerUserId: 7,
+      task,
+      visibleSteps: [],
+      draft,
+      candidates: [],
+      searchResult: makeSearchResult({
+        candidates: [],
+        emptyReason: 'no_real_candidates',
+        message: 'no_real_candidates: pool=0 debug raw_tool_output',
+        debugReasons: { accepted: 0 } as never,
+      }),
+      statusReason: 'empty_candidates_waiting_user_refinement',
+      buildMemoryContext: () => ({}),
+      toEventDto: (event) => ({ id: event.id }),
+    });
+
+    expect(finalResponses.generate).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      assistantMessageSource: 'deterministic_route',
+      emptyReason: 'no_real_candidates',
+      candidates: [],
+    });
+    expect(result.assistantMessage).toContain('真实、公开可发现');
+    expect(result.assistantMessage).toContain('周末下午');
+    expect(result.assistantMessage).toContain('崂山区');
+    expect(result.assistantMessage).toContain('发布到发现');
+    expect(result.assistantMessage).not.toContain('pool=0');
+    expect(result.assistantMessage).not.toContain('debug');
+    expect(result.assistantMessage).not.toContain('raw_tool_output');
   });
 });

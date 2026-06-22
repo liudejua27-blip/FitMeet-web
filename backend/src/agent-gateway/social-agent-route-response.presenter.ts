@@ -131,6 +131,12 @@ export function socialAgentAlphaClarifyingMessage(
 }
 
 function casualChatReply(message: string): string {
+  if (/^(谢谢|感谢|多谢|辛苦了)[!！。,.，\s]*$/i.test(message.trim())) {
+    return '不客气。你可以继续正常聊天；等你明确说要找人、找活动或发邀请时，我再进入约练流程。';
+  }
+  if (/^(好的|好|行|可以|明白|知道了)[!！。,.，\s]*$/i.test(message.trim())) {
+    return '收到。当前我不会自动搜索或发送消息；你要继续聊、补充偏好，或者开始找搭子都可以直接说。';
+  }
   if (/(你能做什么|你可以做什么)/i.test(message)) {
     return '我可以先和你正常聊天，也可以记住你的偏好和安全边界。只有当你明确说要找人、找活动或找搭子时，我才会开始匹配；发送消息、加好友、发布约练都需要你确认。';
   }

@@ -27,11 +27,15 @@ import {
   socialAgentDeepSeekFailureReason,
   socialAgentDeepSeekRetryAttempts,
 } from './social-agent-deepseek-resilience';
-import {
-  selectSocialAgentContextWindow,
-  socialAgentContextTurnLimit,
-} from './social-agent-context-window';
 import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
+import {
+  SocialAgentTokenBudgetMode,
+  SocialAgentTokenBudgetContextPackerService,
+  SocialAgentTokenBudgetPackResult,
+} from './social-agent-token-budget-context-packer.service';
+import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
+import { SocialAgentMetricsService } from './social-agent-metrics.service';
+import { SocialAgentSemanticResponseCacheService } from './social-agent-semantic-response-cache.service';
 
 export interface SocialAgentFinalResponseInput {
   userMessage: string;
@@ -65,19 +69,17 @@ type FinalResponseAttemptResult =
       clientAborted: boolean;
     };
 
-type FinalResponseSlotConfirmation =
-  | 'user_confirmed'
-  | 'inferred_context';
-
-type FinalResponseSlotEntry = {
-  value: string;
-  confirmation: FinalResponseSlotConfirmation;
-  state?: string;
+type DeepSeekMessagesInput = {
+  messages: Array<{ role: 'system' | 'user'; content: string }>;
+  promptBudget: SocialAgentTokenBudgetPackResult['promptBudget'];
 };
 
 @Injectable()
 export class SocialAgentFinalResponseService {
   private readonly logger = new Logger(SocialAgentFinalResponseService.name);
+  private localContextPacker?: SocialAgentTokenBudgetContextPackerService;
+  private localLlmOutputCache?: SocialAgentLlmOutputCacheService;
+  private localSemanticResponseCache?: SocialAgentSemanticResponseCacheService;
 
   constructor(
     @Optional() private readonly config?: ConfigService,
@@ -86,6 +88,13 @@ export class SocialAgentFinalResponseService {
     @Optional() private readonly observability?: AgentObservabilityService,
     @Optional()
     private readonly deepSeek?: SocialAgentChatDeepSeekClientService,
+    @Optional()
+    private readonly contextPacker?: SocialAgentTokenBudgetContextPackerService,
+    @Optional()
+    private readonly llmOutputCache?: SocialAgentLlmOutputCacheService,
+    @Optional() private readonly metrics?: SocialAgentMetricsService,
+    @Optional()
+    private readonly semanticResponseCache?: SocialAgentSemanticResponseCacheService,
   ) {}
 
   async generate(
@@ -93,6 +102,15 @@ export class SocialAgentFinalResponseService {
     options: SocialAgentFinalResponseGenerateOptions = {},
   ): Promise<string> {
     const fallback = this.contextAwareFallbackReply(input);
+    const deterministicFallback = this.deterministicFallbackReply(input, fallback);
+    if (deterministicFallback) {
+      await options.onDelta?.(deterministicFallback);
+      this.metrics?.recordDeterministicRouteReply(
+        this.intentOf(input) || 'final_response',
+        { estimatedAvoidedLlmCalls: 1 },
+      );
+      return deterministicFallback;
+    }
     const modelInput =
       fallback === input.fallbackReply
         ? input
@@ -136,6 +154,34 @@ export class SocialAgentFinalResponseService {
     return fallback;
   }
 
+  private deterministicFallbackReply(
+    input: SocialAgentFinalResponseInput,
+    fallback: string,
+  ): string | null {
+    const text = cleanDisplayText(fallback, '').trim();
+    if (!text) return null;
+    const originalFallback = cleanDisplayText(input.fallbackReply, '').trim();
+    const slots = this.tokenBudgetContextPacker().knownSlots(input);
+
+    if (
+      text !== originalFallback &&
+      this.hasActionableSocialSlots(slots) &&
+      /我记得你已经补充了/.test(text)
+    ) {
+      return text;
+    }
+
+    if (this.isNoRealCandidateFallback(input, text)) {
+      return text;
+    }
+
+    if (this.isLowRiskCardActionFallback(text)) {
+      return text;
+    }
+
+    return null;
+  }
+
   private async generateWithDeepSeek(
     input: SocialAgentFinalResponseInput,
     options: SocialAgentFinalResponseGenerateOptions,
@@ -166,7 +212,83 @@ export class SocialAgentFinalResponseService {
           await options.onDelta?.(delta);
         }
       : undefined;
-    const messages = await this.deepSeekMessages(input);
+    const deepSeekInput = await this.deepSeekMessages(input);
+    const { messages, promptBudget } = deepSeekInput;
+    const maxTokens = this.maxTokens();
+    const thinkingMode = this.thinkingMode(useCase);
+    const outputCacheKey = this.llmOutputCacheKey({
+      useCase,
+      model,
+      maxTokens,
+      thinkingMode,
+      promptPrefixHash: promptBudget.promptPrefixHash,
+      dynamicContextHash: promptBudget.dynamicContextHash,
+    });
+    const outputCacheTtlMs = this.llmOutputCacheTtlMs();
+    if (outputCacheTtlMs > 0) {
+      const cached = this.llmOutputCacheService().get(outputCacheKey);
+      this.metrics?.recordLlmOutputCache({
+        cacheName: 'final_response_exact',
+        hit: cached !== null,
+        approxChars: cached !== null ? promptBudget.approxPromptChars : null,
+        promptPrefixHash: promptBudget.promptPrefixHash,
+        dynamicContextHash: promptBudget.dynamicContextHash,
+      });
+      if (cached !== null) {
+        await onDelta?.(cached);
+        this.logModelCall({
+          useCase,
+          model,
+          traceId: input.traceId ?? null,
+          intent: input.intent ?? input.route?.intent,
+          taskId: this.taskIdOf(input),
+          promptPrefixHash: promptBudget.promptPrefixHash,
+          dynamicContextHash: promptBudget.dynamicContextHash,
+          latencyMs: Date.now() - startedAt,
+          success: true,
+          cacheHit: true,
+          cacheType: 'exact',
+        });
+        return { ok: true, answer: cached };
+      }
+    }
+    const semanticCacheTtlMs = this.semanticResponseCacheTtlMs();
+    const semanticCacheEligible = this.isSemanticResponseCacheEligible(input);
+    if (semanticCacheTtlMs > 0 && semanticCacheEligible) {
+      const cached = this.semanticResponseCacheService().get(
+        {
+          userMessage: input.userMessage,
+          intent: this.intentOf(input),
+          model,
+          promptPrefixHash: promptBudget.promptPrefixHash,
+        },
+        { threshold: this.semanticResponseCacheThreshold() },
+      );
+      this.metrics?.recordLlmOutputCache({
+        cacheName: 'final_response_semantic',
+        hit: cached !== null,
+        approxChars: cached !== null ? promptBudget.approxPromptChars : null,
+        promptPrefixHash: promptBudget.promptPrefixHash,
+        dynamicContextHash: promptBudget.dynamicContextHash,
+      });
+      if (cached !== null) {
+        await onDelta?.(cached.answer);
+        this.logModelCall({
+          useCase,
+          model,
+          traceId: input.traceId ?? null,
+          intent: input.intent ?? input.route?.intent,
+          taskId: this.taskIdOf(input),
+          promptPrefixHash: promptBudget.promptPrefixHash,
+          dynamicContextHash: promptBudget.dynamicContextHash,
+          latencyMs: Date.now() - startedAt,
+          success: true,
+          cacheHit: true,
+          cacheType: 'semantic',
+        });
+        return { ok: true, answer: cached.answer };
+      }
+    }
 
     try {
       if (this.deepSeek) {
@@ -175,13 +297,26 @@ export class SocialAgentFinalResponseService {
           taskId: this.taskIdOf(input),
           intent: input.intent ?? input.route?.intent,
           fallbackTemperature: 0.6,
-          maxTokens: this.maxTokens(),
+          maxTokens,
           retryAttempts: 1,
           messages,
           onDelta,
           signal: options.signal ?? null,
           timeoutMs: this.timeoutMs(useCase),
           traceId: input.traceId ?? null,
+        });
+        this.writeLlmOutputCache(
+          outputCacheKey,
+          answer,
+          outputCacheTtlMs,
+          promptBudget.approxPromptChars,
+        );
+        this.writeSemanticResponseCache(input, answer, {
+          model,
+          promptPrefixHash: promptBudget.promptPrefixHash,
+          ttlMs: semanticCacheTtlMs,
+          eligible: semanticCacheEligible,
+          approxPromptChars: promptBudget.approxPromptChars,
         });
         return { ok: true, answer };
       }
@@ -197,10 +332,10 @@ export class SocialAgentFinalResponseService {
           body: JSON.stringify({
             model,
             temperature: this.modelRouter?.getTemperature(useCase) ?? 0.6,
-            max_tokens: this.maxTokens(),
+            max_tokens: maxTokens,
             ...(onDelta ? { stream: true } : {}),
             ...(onDelta ? { stream_options: { include_usage: true } } : {}),
-            thinking: { type: this.thinkingMode(useCase) },
+            thinking: { type: thinkingMode },
             messages,
           }),
         },
@@ -223,6 +358,19 @@ export class SocialAgentFinalResponseService {
         : ((await response.json()) as Record<string, unknown>);
       const answer =
         streamResult?.content ?? this.readContent(jsonPayload ?? {});
+      this.writeLlmOutputCache(
+        outputCacheKey,
+        answer,
+        outputCacheTtlMs,
+        promptBudget.approxPromptChars,
+      );
+      this.writeSemanticResponseCache(input, answer, {
+        model,
+        promptPrefixHash: promptBudget.promptPrefixHash,
+        ttlMs: semanticCacheTtlMs,
+        eligible: semanticCacheEligible,
+        approxPromptChars: promptBudget.approxPromptChars,
+      });
       usageMetrics =
         streamResult ??
         ({
@@ -237,6 +385,8 @@ export class SocialAgentFinalResponseService {
         traceId: input.traceId ?? null,
         intent: input.intent ?? input.route?.intent,
         taskId: this.taskIdOf(input),
+        promptPrefixHash: promptBudget.promptPrefixHash,
+        dynamicContextHash: promptBudget.dynamicContextHash,
         latencyMs,
         success: true,
       });
@@ -245,6 +395,8 @@ export class SocialAgentFinalResponseService {
         model,
         traceId: input.traceId ?? null,
         taskId: this.taskIdOf(input),
+        promptPrefixHash: promptBudget.promptPrefixHash,
+        dynamicContextHash: promptBudget.dynamicContextHash,
         latencyMs,
         firstTokenLatencyMs: streamResult?.firstTokenLatencyMs ?? null,
         tokenCount: streamResult?.tokenCount ?? null,
@@ -257,6 +409,7 @@ export class SocialAgentFinalResponseService {
         promptCacheMissTokens: usageMetrics.promptCacheMissTokens,
         completionTokens: usageMetrics.completionTokens,
         reasoningTokens: usageMetrics.reasoningTokens,
+        approxPromptChars: promptBudget.approxPromptChars,
         systemFingerprint: usageMetrics.systemFingerprint,
         success: true,
       });
@@ -276,6 +429,8 @@ export class SocialAgentFinalResponseService {
         traceId: input.traceId ?? null,
         intent: input.intent ?? input.route?.intent,
         taskId: this.taskIdOf(input),
+        promptPrefixHash: promptBudget.promptPrefixHash,
+        dynamicContextHash: promptBudget.dynamicContextHash,
         latencyMs,
         success: false,
         reason,
@@ -285,12 +440,15 @@ export class SocialAgentFinalResponseService {
         model,
         traceId: input.traceId ?? null,
         taskId: this.taskIdOf(input),
+        promptPrefixHash: promptBudget.promptPrefixHash,
+        dynamicContextHash: promptBudget.dynamicContextHash,
         latencyMs,
         success: false,
         httpHeadersLatencyMs,
         firstSseChunkLatencyMs: usageMetrics.firstSseChunkLatencyMs,
         firstReasoningDeltaLatencyMs: usageMetrics.firstReasoningDeltaLatencyMs,
         firstContentDeltaLatencyMs: usageMetrics.firstContentDeltaLatencyMs,
+        approxPromptChars: promptBudget.approxPromptChars,
         failureReason: reason,
       });
       return {
@@ -314,49 +472,31 @@ export class SocialAgentFinalResponseService {
 
   private async deepSeekMessages(
     input: SocialAgentFinalResponseInput,
-  ): Promise<Array<{ role: 'system' | 'user'; content: string }>> {
-    return [
-      {
-        role: 'system',
-        content: this.systemPrompt(await this.publishedPromptRules()),
-      },
-      {
-        role: 'user',
-        content: JSON.stringify(this.payload(input)),
-      },
-    ];
-  }
-
-  private payload(
-    input: SocialAgentFinalResponseInput,
-  ): Record<string, unknown> {
+  ): Promise<DeepSeekMessagesInput> {
+    const systemPrompt = this.systemPrompt(await this.publishedPromptRules());
+    const { payload, promptBudget } =
+      this.tokenBudgetContextPacker().packFinalResponseInput(input, {
+        promptPrefix: systemPrompt,
+        budgetMode: this.contextBudgetMode('final_response'),
+      });
     return {
-      userMessage: cleanDisplayText(input.userMessage, ''),
-      intent: input.intent ?? input.route?.intent ?? null,
-      route: input.route ?? null,
-      conversationHistory: selectSocialAgentContextWindow(
-        input.conversationHistory,
-        socialAgentContextTurnLimit(this.config),
-      ),
-      memoryContext: input.memoryContext ?? null,
-      taskContext: input.taskContext ?? null,
-      knownTaskSlotConstraints: this.taskSlotConstraints(input),
-      plannerDecision: input.plannerDecision ?? null,
-      toolResults: input.toolResults ?? [],
-      searchResults: input.searchResults ?? null,
-      agentState: input.agentState ?? null,
-      safetyRules:
-        input.safetyRules && input.safetyRules.length > 0
-          ? input.safetyRules
-          : this.defaultSafetyRules(),
-      responseGoal: input.responseGoal ?? null,
-      fallbackReply: input.fallbackReply,
+      messages: [
+        {
+          role: 'system',
+          content: systemPrompt,
+        },
+        {
+          role: 'user',
+          content: JSON.stringify(payload),
+        },
+      ],
+      promptBudget,
     };
   }
 
   private contextAwareFallbackReply(input: SocialAgentFinalResponseInput): string {
     const fallback = cleanDisplayText(input.fallbackReply, '').trim();
-    const slots = this.knownSlots(input);
+    const slots = this.tokenBudgetContextPacker().knownSlots(input);
     if (
       !this.isStaleSlotClarification(fallback, slots) &&
       !this.isGenericRecoveryFallback(fallback, slots) &&
@@ -375,156 +515,6 @@ export class SocialAgentFinalResponseService {
       `我记得你已经补充了：${knownValues.slice(0, 4).join('、')}。`,
       '我会基于这些继续处理，不再重复追问；如果要修改，直接告诉我新的时间、地点或偏好。',
     ].join('');
-  }
-
-  private taskSlotConstraints(
-    input: SocialAgentFinalResponseInput,
-  ): Record<string, unknown> {
-    const slots = this.slotEntries(input);
-    const labels: Record<string, string> = {
-      activity: '活动',
-      time_window: '时间',
-      location_text: '地点',
-      geo_area: '区域',
-      intensity: '强度',
-      visibility: '公开方式',
-      safety_boundary: '安全边界',
-      invite_tone: '邀请语气',
-      candidate_preference: '候选偏好',
-    };
-    const known = Object.entries(slots)
-      .filter(([, slot]) => cleanDisplayText(slot.value, ''))
-      .map(([key, slot]) => ({
-        key,
-        label: labels[key] ?? key,
-        value: slot.value,
-        ...(slot.state ? { state: slot.state } : {}),
-        confirmation: slot.confirmation,
-      }));
-    return {
-      treatAsHardConstraints: known.length > 0,
-      knownSlots: known,
-      doNotAskAgainFor: known
-        .filter((slot) => slot.confirmation === 'user_confirmed')
-        .map((slot) => slot.key),
-      userVisibleSummary: known
-        .map((slot) => `${slot.label}：${slot.value}`)
-        .join('；'),
-      candidatePreferencePolicy:
-        'candidate_preference 只能用于公开可发现资料、公开标签或用户自愿公开信息，不能推断隐私。',
-      instruction:
-        '如果 knownSlots 已包含用户刚才或之前补充的信息，最终回复必须基于这些信息继续推进；除非用户主动修改，否则不要再次询问 doNotAskAgainFor 中的字段。',
-    };
-  }
-
-  private knownSlots(input: SocialAgentFinalResponseInput): Record<string, string> {
-    const out: Record<string, string> = {};
-    for (const [key, slot] of Object.entries(this.slotEntries(input))) {
-      out[key] = slot.value;
-    }
-    return out;
-  }
-
-  private slotEntries(
-    input: SocialAgentFinalResponseInput,
-  ): Record<string, FinalResponseSlotEntry> {
-    const taskContext = this.isRecord(input.taskContext)
-      ? input.taskContext
-      : {};
-    const taskMemory = this.isRecord(taskContext.taskMemory)
-      ? taskContext.taskMemory
-      : {};
-    return {
-      ...this.extractKnownConstraintSlotEntries(input.memoryContext),
-      ...this.extractKnownConstraintSlotEntries(taskMemory),
-      ...this.extractKnownConstraintSlotEntries(taskContext),
-      ...this.extractSlotEntries(input.memoryContext?.taskSlots),
-      ...this.extractSlotEntries(taskMemory.taskSlots),
-      ...this.extractSlotEntries(taskContext.taskSlots),
-    };
-  }
-
-  private extractKnownConstraintSlotEntries(
-    value: unknown,
-  ): Record<string, FinalResponseSlotEntry> {
-    const source = this.isRecord(value) ? value : {};
-    const constraints = this.isRecord(source.knownTaskSlotConstraints)
-      ? source.knownTaskSlotConstraints
-      : {};
-    const knownSlots = Array.isArray(constraints.knownSlots)
-      ? constraints.knownSlots
-      : [];
-    const doNotAskAgainFor = Array.isArray(constraints.doNotAskAgainFor)
-      ? new Set(
-          constraints.doNotAskAgainFor
-            .map((item) => cleanDisplayText(item, ''))
-            .filter(Boolean),
-        )
-      : new Set<string>();
-    const out: Record<string, FinalResponseSlotEntry> = {};
-    for (const rawSlot of knownSlots) {
-      if (!this.isRecord(rawSlot)) continue;
-      const key = cleanDisplayText(rawSlot.key, '');
-      const valueText = cleanDisplayText(rawSlot.value, '');
-      if (!key || !valueText) continue;
-      const state = cleanDisplayText(rawSlot.state, '');
-      const confirmation =
-        rawSlot.confirmation === 'user_confirmed' || doNotAskAgainFor.has(key)
-          ? 'user_confirmed'
-          : 'inferred_context';
-      out[key] = {
-        value: valueText,
-        confirmation,
-        ...(state ? { state } : {}),
-      };
-    }
-    return out;
-  }
-
-  private extractSlotEntries(
-    value: unknown,
-  ): Record<string, FinalResponseSlotEntry> {
-    const slots = this.isRecord(value) ? value : {};
-    const knownStates = new Set([
-      'inferred',
-      'answered',
-      'confirmed',
-      'completed',
-      'modified',
-    ]);
-    const userConfirmedStates = new Set([
-      'answered',
-      'confirmed',
-      'completed',
-      'modified',
-    ]);
-    const out: Record<string, FinalResponseSlotEntry> = {};
-    for (const key of [
-      'activity',
-      'time_window',
-      'location_text',
-      'geo_area',
-      'intensity',
-      'visibility',
-      'safety_boundary',
-      'invite_tone',
-      'candidate_preference',
-    ]) {
-      const raw = slots[key];
-      const slot = this.isRecord(raw) ? raw : {};
-      const state = cleanDisplayText(slot.state, '');
-      if (state && !knownStates.has(state)) continue;
-      const valueText = cleanDisplayText(slot.value ?? raw, '');
-      if (!valueText) continue;
-      out[key] = {
-        value: valueText,
-        confirmation: userConfirmedStates.has(state)
-          ? 'user_confirmed'
-          : 'inferred_context',
-        ...(state ? { state } : {}),
-      };
-    }
-    return out;
   }
 
   private isStaleSlotClarification(
@@ -603,6 +593,43 @@ export class SocialAgentFinalResponseService {
     );
   }
 
+  private isNoRealCandidateFallback(
+    input: SocialAgentFinalResponseInput,
+    fallback: string,
+  ): boolean {
+    const emptyReason = cleanDisplayText(
+      input.searchResults?.emptyReason ??
+        input.taskContext?.emptyReason ??
+        input.plannerDecision?.emptyReason ??
+        '',
+      '',
+    )
+      .trim()
+      .toLowerCase();
+    if (
+      [
+        'no_real_candidates',
+        'no_candidates',
+        'empty_candidates',
+        'no_public_candidates',
+      ].includes(emptyReason)
+    ) {
+      return true;
+    }
+    return /(?:当前|暂时|这次)?没有(?:找到|匹配到).{0,12}(真实候选人|合适的人|公开可发现的人|符合条件的人)|暂无公开可发现/.test(
+      fallback,
+    );
+  }
+
+  private isLowRiskCardActionFallback(fallback: string): boolean {
+    if (/(需要|等待|请你|请先).{0,10}(确认|同意)|确认后|发送前|发布前/.test(fallback)) {
+      return false;
+    }
+    return /(?:已记录|已收藏|已保存|已生成.{0,8}开场白|开场白草稿|暂不发布|这个操作来自旧卡片|旧卡片|暂时不可用|暂不可用)/.test(
+      fallback,
+    );
+  }
+
   private systemPrompt(publishedRules: string[] = []): string {
     const baseRules = [
       '你是 FitMeet Agent 的第 7 层 Final Response Generator。',
@@ -641,13 +668,209 @@ export class SocialAgentFinalResponseService {
     }
   }
 
-  private defaultSafetyRules(): string[] {
+  private tokenBudgetContextPacker(): SocialAgentTokenBudgetContextPackerService {
+    if (this.contextPacker) return this.contextPacker;
+    this.localContextPacker ??= new SocialAgentTokenBudgetContextPackerService(
+      this.config,
+    );
+    return this.localContextPacker;
+  }
+
+  private llmOutputCacheService(): SocialAgentLlmOutputCacheService {
+    if (this.llmOutputCache) return this.llmOutputCache;
+    this.localLlmOutputCache ??= new SocialAgentLlmOutputCacheService();
+    return this.localLlmOutputCache;
+  }
+
+  private semanticResponseCacheService(): SocialAgentSemanticResponseCacheService {
+    if (this.semanticResponseCache) return this.semanticResponseCache;
+    this.localSemanticResponseCache ??=
+      new SocialAgentSemanticResponseCacheService();
+    return this.localSemanticResponseCache;
+  }
+
+  private llmOutputCacheKey(input: {
+    useCase: 'final_response';
+    model: string;
+    maxTokens: number;
+    thinkingMode: 'disabled' | 'enabled';
+    promptPrefixHash: string | null;
+    dynamicContextHash: string;
+  }): string {
     return [
-      '涉及私信、加好友、连接候选人、创建公开活动或公开需求时，必须遵守确认要求。',
-      '不要承诺线下见面安全；提醒优先公共场所、尊重边界。',
-      '不要输出骚扰、操控、越界或隐私泄露式文案。',
-      '不要把推断当成事实。',
+      'final_response_exact',
+      input.useCase,
+      input.model,
+      `max:${input.maxTokens}`,
+      `thinking:${input.thinkingMode}`,
+      `prefix:${input.promptPrefixHash ?? 'none'}`,
+      `dynamic:${input.dynamicContextHash}`,
+    ].join('|');
+  }
+
+  private writeLlmOutputCache(
+    key: string,
+    answer: string | null,
+    ttlMs: number,
+    approxPromptChars: number,
+  ): void {
+    const text = cleanDisplayText(answer, '').trim();
+    if (!text || ttlMs <= 0) return;
+    this.llmOutputCacheService().set(key, text, {
+      ttlMs,
+      approxPromptChars,
+    });
+  }
+
+  private writeSemanticResponseCache(
+    input: SocialAgentFinalResponseInput,
+    answer: string | null,
+    options: {
+      model: string;
+      promptPrefixHash: string | null;
+      ttlMs: number;
+      eligible: boolean;
+      approxPromptChars: number;
+    },
+  ): void {
+    const text = cleanDisplayText(answer, '').trim();
+    if (!text || options.ttlMs <= 0 || !options.eligible) return;
+    this.semanticResponseCacheService().set(
+      {
+        userMessage: input.userMessage,
+        answer: text,
+        intent: this.intentOf(input),
+        model: options.model,
+        promptPrefixHash: options.promptPrefixHash,
+      },
+      { ttlMs: options.ttlMs, approxPromptChars: options.approxPromptChars },
+    );
+  }
+
+  private llmOutputCacheTtlMs(): number {
+    const configuredRaw = this.config?.get<string>(
+      'SOCIAL_AGENT_FINAL_RESPONSE_EXACT_CACHE_TTL_MS',
+    );
+    if (configuredRaw != null && configuredRaw.trim() !== '') {
+      const configured = Number(configuredRaw);
+      if (!Number.isFinite(configured)) return 0;
+      if (configured <= 0) return 0;
+      return Math.min(Math.max(Math.floor(configured), 1_000), 600_000);
+    }
+    return 60_000;
+  }
+
+  private semanticResponseCacheTtlMs(): number {
+    const configuredRaw = this.config?.get<string>(
+      'SOCIAL_AGENT_FINAL_RESPONSE_SEMANTIC_CACHE_TTL_MS',
+    );
+    if (configuredRaw != null && configuredRaw.trim() !== '') {
+      const configured = Number(configuredRaw);
+      if (!Number.isFinite(configured)) return 0;
+      if (configured <= 0) return 0;
+      return Math.min(Math.max(Math.floor(configured), 1_000), 600_000);
+    }
+    return 300_000;
+  }
+
+  private semanticResponseCacheThreshold(): number {
+    const configured = Number(
+      this.config?.get<string>(
+        'SOCIAL_AGENT_FINAL_RESPONSE_SEMANTIC_CACHE_THRESHOLD',
+      ) ?? '',
+    );
+    if (!Number.isFinite(configured) || configured <= 0) return 0.78;
+    return Math.min(Math.max(configured, 0.1), 0.99);
+  }
+
+  private isSemanticResponseCacheEligible(
+    input: SocialAgentFinalResponseInput,
+  ): boolean {
+    const intent = this.intentOf(input);
+    if (!['product_help', 'workflow_help', 'safety_or_boundary'].includes(intent)) {
+      return false;
+    }
+    if (this.taskIdOf(input) != null) return false;
+    if (Array.isArray(input.toolResults) && input.toolResults.length > 0) {
+      return false;
+    }
+    if (this.hasMeaningfulObject(input.searchResults)) return false;
+    if (this.hasMeaningfulObject(input.taskContext)) return false;
+    if (this.hasMeaningfulObject(input.memoryContext)) return false;
+    if (
+      this.routeOrPlannerRequestsExecution(input.route) ||
+      this.routeOrPlannerRequestsExecution(input.plannerDecision)
+    ) {
+      return false;
+    }
+    return !this.isDirectSocialExecutionRequest(input.userMessage);
+  }
+
+  private contextBudgetMode(useCase: 'final_response'): SocialAgentTokenBudgetMode {
+    const configured = cleanDisplayText(
+      this.config?.get<string>('SOCIAL_AGENT_FINAL_RESPONSE_CONTEXT_BUDGET_MODE') ??
+        this.config?.get<string>('SOCIAL_AGENT_DEEPSEEK_CONTEXT_BUDGET_MODE') ??
+        '',
+      '',
+    )
+      .trim()
+      .toLowerCase();
+    if (configured === 'strict' || configured === 'standard') {
+      return configured;
+    }
+    return (
+      this.observability?.recommendedLlmContextMode?.(useCase) ?? 'standard'
+    );
+  }
+
+  private intentOf(input: SocialAgentFinalResponseInput): string {
+    const intent =
+      typeof input.intent === 'string'
+        ? input.intent
+        : typeof input.route?.intent === 'string'
+          ? input.route.intent
+          : '';
+    return cleanDisplayText(intent, '').trim();
+  }
+
+  private hasMeaningfulObject(value: unknown): boolean {
+    if (!this.isRecord(value)) return false;
+    return Object.values(value).some((item) => {
+      if (item == null) return false;
+      if (Array.isArray(item)) return item.length > 0;
+      if (this.isRecord(item)) return this.hasMeaningfulObject(item);
+      if (typeof item === 'string') return item.trim().length > 0;
+      return true;
+    });
+  }
+
+  private routeOrPlannerRequestsExecution(value: unknown): boolean {
+    if (!this.isRecord(value)) return false;
+    const flags = [
+      'shouldSearch',
+      'shouldExecuteAction',
+      'shouldUpdateProfile',
+      'shouldReplan',
+      'shouldCallTools',
+      'shouldPublish',
+      'shouldConnectCandidate',
+      'shouldSendMessage',
+      'requiresApproval',
     ];
+    if (flags.some((flag) => value[flag] === true)) return true;
+    const action = cleanDisplayText(value.action, '').trim();
+    return Boolean(action && !['none', 'answer', 'chat'].includes(action));
+  }
+
+  private isDirectSocialExecutionRequest(message: string): boolean {
+    const text = cleanDisplayText(message, '').trim();
+    if (!text) return false;
+    if (/(怎么|如何|流程|步骤|介绍|说明).{0,12}(找|约|发布|邀请|加好友)/i.test(text)) {
+      return false;
+    }
+    return /(帮我|给我|我要|我想|想|找|推荐|匹配|约|发布|发送|邀请|加好友|私信).{0,18}(搭子|人|女生|男生|活动|约练|朋友|候选|发现|邀请|消息|私信|好友)/i.test(
+      text,
+    );
   }
 
   private readContent(payload: Record<string, unknown>): string {
@@ -771,9 +994,13 @@ export class SocialAgentFinalResponseService {
     traceId?: string | null;
     intent?: unknown;
     taskId: number | null;
+    promptPrefixHash?: string | null;
+    dynamicContextHash?: string | null;
     latencyMs: number;
     success: boolean;
     reason?: string;
+    cacheHit?: boolean;
+    cacheType?: 'exact' | 'semantic';
   }): void {
     this.logger.log(
       JSON.stringify({
@@ -783,8 +1010,12 @@ export class SocialAgentFinalResponseService {
         traceId: input.traceId ?? null,
         taskId: input.taskId,
         intent: typeof input.intent === 'string' ? input.intent : null,
+        promptPrefixHash: input.promptPrefixHash ?? null,
+        dynamicContextHash: input.dynamicContextHash ?? null,
         latencyMs: input.latencyMs,
         success: input.success,
+        ...(input.cacheHit != null ? { cacheHit: input.cacheHit } : {}),
+        ...(input.cacheType ? { cacheType: input.cacheType } : {}),
         ...(input.reason ? { reason: input.reason } : {}),
       }),
     );

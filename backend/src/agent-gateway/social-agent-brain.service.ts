@@ -38,7 +38,15 @@ import {
   socialAgentDeepSeekRetryAttempts,
 } from './social-agent-deepseek-resilience';
 import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
-import { callDeepSeekChatCompletion } from '../common/deepseek.util';
+import { callDeepSeekChatCompletionWithUsage } from '../common/deepseek.util';
+import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
+import {
+  buildSocialAgentExactCacheKey,
+  buildSocialAgentPromptFingerprint,
+  readSocialAgentExactCacheKeyFingerprint,
+} from './social-agent-prompt-fingerprint.util';
+import { SocialAgentMetricsService } from './social-agent-metrics.service';
+import { AgentObservabilityService } from './agent-observability.service';
 
 export interface SocialAgentBrainTurnInput {
   message: string;
@@ -93,6 +101,7 @@ type SocialAgentDeepSeekMessage = {
 @Injectable()
 export class SocialAgentBrainService {
   private readonly logger = new Logger(SocialAgentBrainService.name);
+  private localBrainPlannerCache?: SocialAgentLlmOutputCacheService;
 
   constructor(
     @Optional() private readonly config?: ConfigService,
@@ -100,6 +109,12 @@ export class SocialAgentBrainService {
     @Optional() private readonly modelRouter?: SocialAgentModelRouterService,
     @Optional()
     private readonly deepSeek?: SocialAgentChatDeepSeekClientService,
+    @Optional()
+    private readonly llmOutputCache?: SocialAgentLlmOutputCacheService,
+    @Optional()
+    private readonly metrics?: SocialAgentMetricsService,
+    @Optional()
+    private readonly observability?: AgentObservabilityService,
   ) {}
 
   async planTurn(
@@ -107,7 +122,7 @@ export class SocialAgentBrainService {
   ): Promise<SocialAgentBrainTurnDecision> {
     if (input.signal?.aborted) throw new Error('client_aborted');
     const fallback = this.reviewTurn(input);
-    if (!this.shouldUseLlmPlanner(input.message)) return fallback;
+    if (!this.shouldUseLlmPlanner(input, fallback)) return fallback;
 
     try {
       const maxAttempts = socialAgentDeepSeekRetryAttempts(this.config, {
@@ -453,12 +468,75 @@ export class SocialAgentBrainService {
     );
   }
 
-  private shouldUseLlmPlanner(message: string): boolean {
-    if (!cleanDisplayText(message, '').trim()) return false;
+  private shouldUseLlmPlanner(
+    input: SocialAgentBrainTurnInput,
+    fallback: SocialAgentBrainTurnDecision,
+  ): boolean {
+    if (!cleanDisplayText(input.message, '').trim()) return false;
     if (this.brainPlannerRulesOnlyMode()) {
       return false;
     }
+    if (this.canUseDeterministicBrainDecision(input, fallback)) {
+      return false;
+    }
     return Boolean(this.config?.get<string>('DEEPSEEK_API_KEY'));
+  }
+
+  private canUseDeterministicBrainDecision(
+    input: SocialAgentBrainTurnInput,
+    fallback: SocialAgentBrainTurnDecision,
+  ): boolean {
+    if (!this.brainPlannerWorkflowShortcutsEnabled()) return false;
+    if (
+      fallback.conversationMode === 'search' &&
+      (fallback.route.shouldSearch || fallback.route.shouldReplan) &&
+      this.hasHydratedSearchContext(input.taskContext)
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private brainPlannerWorkflowShortcutsEnabled(): boolean {
+    const value = `${this.config?.get<string>(
+      'SOCIAL_AGENT_BRAIN_WORKFLOW_SHORTCUTS',
+    ) ?? ''}`
+      .trim()
+      .toLowerCase();
+    return !['0', 'false', 'off', 'disabled'].includes(value);
+  }
+
+  private hasHydratedSearchContext(value: unknown): boolean {
+    const taskContext = this.isRecord(value) ? value : {};
+    if (hasExistingSocialExecutionContext({ taskContext } as SocialAgentBrainTurnInput)) {
+      return true;
+    }
+    if (this.hasMeaningfulSlots(taskContext.taskSlots)) return true;
+    const taskMemory = this.isRecord(taskContext.taskMemory)
+      ? taskContext.taskMemory
+      : {};
+    if (this.hasMeaningfulSlots(taskMemory.taskSlots)) return true;
+    const constraints = this.isRecord(taskMemory.knownTaskSlotConstraints)
+      ? taskMemory.knownTaskSlotConstraints
+      : this.isRecord(taskContext.knownTaskSlotConstraints)
+        ? taskContext.knownTaskSlotConstraints
+        : {};
+    const knownSlots = Array.isArray(constraints.knownSlots)
+      ? constraints.knownSlots
+      : [];
+    return knownSlots.some((slot) => {
+      if (!this.isRecord(slot)) return false;
+      return Boolean(cleanDisplayText(slot.key, '') && cleanDisplayText(slot.value, ''));
+    });
+  }
+
+  private hasMeaningfulSlots(value: unknown): boolean {
+    const slots = this.isRecord(value) ? value : {};
+    return Object.values(slots).some((raw) => {
+      if (!this.isRecord(raw)) return Boolean(cleanDisplayText(raw, ''));
+      return Boolean(cleanDisplayText(raw.value, ''));
+    });
   }
 
   private brainPlannerRulesOnlyMode(): boolean {
@@ -493,8 +571,32 @@ export class SocialAgentBrainService {
   ): Promise<SocialAgentLlmPlan | null> {
     const apiKey = this.config?.get<string>('DEEPSEEK_API_KEY');
     if (!apiKey) return null;
-    const useCase = 'planner' as const;
+    const useCase = 'brain' as const;
     const messages = this.deepSeekPlannerMessages(input, fallback);
+    const model = this.modelFor(useCase);
+    const cacheKey = this.brainPlannerCacheKey({
+      messages,
+      model,
+      useCase,
+    });
+    const cacheTtlMs = this.brainPlannerCacheTtlMs();
+    const cached =
+      cacheTtlMs > 0 ? this.llmOutputCacheService().get(cacheKey) : null;
+    const cacheFingerprint = readSocialAgentExactCacheKeyFingerprint(cacheKey);
+    if (cacheTtlMs > 0) {
+      this.metrics?.recordLlmOutputCache?.({
+        cacheName: 'brain_planner_exact',
+        hit: cached !== null,
+        approxChars: cached !== null ? this.approxChars(messages) : null,
+        promptPrefixHash: cacheFingerprint?.promptPrefixHash ?? null,
+        dynamicContextHash: cacheFingerprint?.dynamicContextHash ?? null,
+      });
+    }
+    if (cached !== null) {
+      return normalizeSocialAgentBrainLlmPlan(
+        JSON.parse(cached) as Record<string, unknown>,
+      );
+    }
     if (this.deepSeek) {
       const content = await this.deepSeek.complete({
         useCase,
@@ -507,14 +609,23 @@ export class SocialAgentBrainService {
         signal: input.signal,
       });
       if (!content) return null;
-      return normalizeSocialAgentBrainLlmPlan(
+      const plan = normalizeSocialAgentBrainLlmPlan(
         JSON.parse(content) as Record<string, unknown>,
       );
+      if (cacheTtlMs > 0) {
+        this.llmOutputCacheService().set(cacheKey, content, {
+          ttlMs: cacheTtlMs,
+          approxPromptChars: this.approxChars(messages),
+        });
+      }
+      return plan;
     }
-    const model = this.modelFor(useCase);
     const startedAt = Date.now();
+    let fallbackUsage:
+      | Awaited<ReturnType<typeof callDeepSeekChatCompletionWithUsage>>['usage']
+      | null = null;
     try {
-      const content = await callDeepSeekChatCompletion({
+      const completion = await callDeepSeekChatCompletionWithUsage({
         apiKey,
         baseUrl: this.config?.get<string>('DEEPSEEK_BASE_URL'),
         model,
@@ -526,15 +637,38 @@ export class SocialAgentBrainService {
         timeoutMs: this.plannerTimeoutMs(useCase),
         timeoutMessage: 'deepseek_timeout',
       });
+      fallbackUsage = completion.usage;
+      const content = completion.content;
       const plan = normalizeSocialAgentBrainLlmPlan(
         JSON.parse(content) as Record<string, unknown>,
       );
+      if (cacheTtlMs > 0) {
+        this.llmOutputCacheService().set(cacheKey, content, {
+          ttlMs: cacheTtlMs,
+          approxPromptChars: this.approxChars(messages),
+        });
+      }
       this.logModelCall({
         useCase,
         model,
         intent: plan?.userIntent ?? fallback.route.intent,
         latencyMs: Date.now() - startedAt,
         success: true,
+      });
+      this.observability?.recordLlmCall({
+        useCase,
+        model,
+        taskId: this.taskIdFromTaskContext(input.taskContext),
+        latencyMs: Date.now() - startedAt,
+        success: true,
+        promptTokens: fallbackUsage.promptTokens,
+        promptCacheHitTokens: fallbackUsage.promptCacheHitTokens,
+        promptCacheMissTokens: fallbackUsage.promptCacheMissTokens,
+        completionTokens: fallbackUsage.completionTokens,
+        reasoningTokens: fallbackUsage.reasoningTokens,
+        approxPromptChars: this.approxChars(messages),
+        promptPrefixHash: cacheFingerprint?.promptPrefixHash ?? null,
+        dynamicContextHash: cacheFingerprint?.dynamicContextHash ?? null,
       });
       return plan;
     } catch (error) {
@@ -546,6 +680,22 @@ export class SocialAgentBrainService {
         latencyMs: Date.now() - startedAt,
         success: false,
         reason,
+      });
+      this.observability?.recordLlmCall({
+        useCase,
+        model,
+        taskId: this.taskIdFromTaskContext(input.taskContext),
+        latencyMs: Date.now() - startedAt,
+        success: false,
+        promptTokens: fallbackUsage?.promptTokens,
+        promptCacheHitTokens: fallbackUsage?.promptCacheHitTokens,
+        promptCacheMissTokens: fallbackUsage?.promptCacheMissTokens,
+        completionTokens: fallbackUsage?.completionTokens,
+        reasoningTokens: fallbackUsage?.reasoningTokens,
+        approxPromptChars: this.approxChars(messages),
+        promptPrefixHash: cacheFingerprint?.promptPrefixHash ?? null,
+        dynamicContextHash: cacheFingerprint?.dynamicContextHash ?? null,
+        failureReason: reason,
       });
       throw error;
     }
@@ -570,6 +720,46 @@ export class SocialAgentBrainService {
       'JSON schema: {"intent":"profile_enrichment","reason":"...","state":"profile_building","shouldCallTools":false,"toolCalls":[{"name":"update_profile_from_agent_context","arguments":{}}],"needUserConfirmation":false,"responseGoal":"..."}',
       '兼容字段：userIntent 等同 intent；shouldCallTool 等同 shouldCallTools；tools 等同 toolCalls。',
     ].join('\n');
+  }
+
+  private brainPlannerCacheKey(input: {
+    messages: SocialAgentDeepSeekMessage[];
+    model: string;
+    useCase: 'brain';
+  }): string {
+    return buildSocialAgentExactCacheKey({
+      cacheName: 'brain_planner_exact',
+      fingerprint: buildSocialAgentPromptFingerprint({
+        schema: 'social_agent_brain_planner.v1',
+        model: input.model,
+        useCase: input.useCase,
+        messages: input.messages,
+      }),
+    });
+  }
+
+  private llmOutputCacheService(): SocialAgentLlmOutputCacheService {
+    if (this.llmOutputCache) return this.llmOutputCache;
+    this.localBrainPlannerCache ??= new SocialAgentLlmOutputCacheService();
+    return this.localBrainPlannerCache;
+  }
+
+  private brainPlannerCacheTtlMs(): number {
+    const raw = this.config?.get<string>('SOCIAL_AGENT_BRAIN_PLANNER_CACHE_TTL_MS');
+    if (raw === '0') return 0;
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return Math.floor(parsed);
+    }
+    return 30_000;
+  }
+
+  private approxChars(value: unknown): number {
+    try {
+      return JSON.stringify(value).length;
+    } catch {
+      return 0;
+    }
   }
 
   private deepSeekPlannerMessages(
@@ -985,9 +1175,10 @@ export class SocialAgentBrainService {
     return 'answer';
   }
 
-  private modelFor(useCase: 'planner'): string {
+  private modelFor(useCase: 'brain'): string {
     if (this.modelRouter) return this.modelRouter.getModel(useCase);
     return (
+      this.configuredModel(this.config?.get<string>('AGENT_BRAIN_MODEL')) ||
       this.configuredModel(this.config?.get<string>('AGENT_PLANNER_MODEL')) ||
       this.configuredModel(this.config?.get<string>('DEEPSEEK_CHAT_MODEL')) ||
       SOCIAL_AGENT_DEFAULT_REASONING_MODEL
@@ -1000,7 +1191,7 @@ export class SocialAgentBrainService {
     });
   }
 
-  private plannerTimeoutMs(useCase?: 'planner'): number {
+  private plannerTimeoutMs(useCase?: 'brain'): number {
     if (useCase && this.modelRouter)
       return this.modelRouter.getTimeout(useCase);
     const configured = Number(

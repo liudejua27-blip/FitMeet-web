@@ -157,7 +157,9 @@ export class UserFacingResponseSanitizerService {
   ): UserFacingAgentResponse['assistantMessageSource'] {
     if (!('assistantMessageSource' in result)) return undefined;
     return result.assistantMessageSource === 'llm' ||
-      result.assistantMessageSource === 'fallback'
+      result.assistantMessageSource === 'fallback' ||
+      result.assistantMessageSource === 'deterministic_route' ||
+      result.assistantMessageSource === 'deterministic_action'
       ? result.assistantMessageSource
       : undefined;
   }

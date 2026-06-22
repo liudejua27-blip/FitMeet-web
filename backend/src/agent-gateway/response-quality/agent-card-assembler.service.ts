@@ -146,6 +146,9 @@ export class AgentCardAssemblerService {
         return 'candidate.like';
       case 'connect_candidate':
         return 'candidate.connect';
+      case 'publish_social_request':
+      case 'publish_to_discover':
+        return 'publish_to_discover';
       case 'create_activity':
         return 'activity.confirm_create';
       case 'view_activity':

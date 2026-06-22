@@ -10,7 +10,10 @@ import {
   buildSocialAgentLlmConversationHistory,
   summarizeSocialAgentTaskMemoryForLlm,
 } from './social-agent-chat-memory.presenter';
-import type { SocialAgentActivityResult } from './social-agent-chat.types';
+import type {
+  SocialAgentActivityResult,
+  SocialAgentAssistantMessageSource,
+} from './social-agent-chat.types';
 import type { AgentTask } from './entities/agent-task.entity';
 import type { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
 import { SocialAgentCandidatePoolService } from './social-agent-candidate-pool.service';
@@ -44,6 +47,7 @@ export class SocialAgentActivitySearchService {
   }): Promise<{
     activityResults: SocialAgentActivityResult[];
     assistantMessage: string;
+    assistantMessageSource: SocialAgentAssistantMessageSource;
   }> {
     const activityResults = await this.searchActivityResults(
       input.ownerUserId,
@@ -92,16 +96,34 @@ export class SocialAgentActivitySearchService {
       activityResults.length > 0
         ? `已为你找到 ${activityResults.length} 条公开约练/活动意向，先放在下方卡片里。如果都不合适，告诉我"再找几条"或换个时间/活动，我再补搜候选人。`
         : '当前没有找到符合条件的真实活动或公开约练卡片。我不会编造活动；你可以换个城市、时间或活动类型再试，也可以确认发布约练卡到发现，让合适的人主动回应。';
-    const assistantMessage = await this.generateActivitySearchAssistantMessage({
-      task: input.task,
-      message: input.message,
-      route: input.route,
+    const shouldUseDeterministicEmptyActivityReply =
+      activityResults.length === 0;
+    if (shouldUseDeterministicEmptyActivityReply) {
+      this.metrics.recordDeterministicRouteReply(
+        'activity_search.empty_results',
+        { estimatedAvoidedLlmCalls: 1 },
+      );
+    }
+    const assistantMessage = shouldUseDeterministicEmptyActivityReply
+      ? fallbackReply
+      : await this.generateActivitySearchAssistantMessage({
+          task: input.task,
+          message: input.message,
+          route: input.route,
+          activityResults,
+          fallbackReply,
+          buildMemoryContext: input.buildMemoryContext,
+          taskContext: input.taskContext,
+        });
+    return {
       activityResults,
-      fallbackReply,
-      buildMemoryContext: input.buildMemoryContext,
-      taskContext: input.taskContext,
-    });
-    return { activityResults, assistantMessage };
+      assistantMessage,
+      assistantMessageSource: shouldUseDeterministicEmptyActivityReply
+        ? 'deterministic_route'
+        : this.finalResponses
+          ? 'llm'
+          : 'fallback',
+    };
   }
 
   private async searchActivityResults(

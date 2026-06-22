@@ -5,6 +5,7 @@ import {
 } from './entities/agent-task.entity';
 import { SocialAgentChatDeepSeekClientService } from './social-agent-chat-deepseek-client.service';
 import { SocialAgentChatLlmService } from './social-agent-chat-llm.service';
+import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
 import type { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
 import {
   SOCIAL_AGENT_QUALITY_CHAT_FIRST_CHUNK_TIMEOUT_MS,
@@ -74,12 +75,14 @@ function makeService(
   configValues: Record<string, string | undefined>,
   metrics: { recordError: jest.Mock } = { recordError: jest.fn() },
   selfImprove?: { publishedLifeGraphExtractionRules: jest.Mock },
+  llmOutputCache?: SocialAgentLlmOutputCacheService,
 ): SocialAgentChatLlmService {
   return new SocialAgentChatLlmService(
     metrics as never,
     new SocialAgentChatDeepSeekClientService(makeConfig(configValues) as never),
     undefined,
     selfImprove as never,
+    llmOutputCache,
   );
 }
 
@@ -999,6 +1002,67 @@ describe('SocialAgentChatLlmService', () => {
         (fetchMock.mock.calls[0]?.[1] as { body?: string }).body ?? '{}',
       ).thinking,
     ).toEqual({ type: 'disabled' });
+  });
+
+  it('caches repeated structured profile extraction output', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  city: '青岛',
+                }),
+              },
+            },
+          ],
+        }),
+    });
+    global.fetch = fetchMock as never;
+    const metrics = {
+      recordError: jest.fn(),
+      recordLlmOutputCache: jest.fn(),
+    };
+    const cache = new SocialAgentLlmOutputCacheService();
+    const service = makeService(
+      {
+        DEEPSEEK_API_KEY: 'test-key',
+        DEEPSEEK_BASE_URL: 'https://deepseek.test',
+        SOCIAL_AGENT_PROFILE_EXTRACTION_CACHE_TTL_MS: '300000',
+      },
+      metrics,
+      undefined,
+      cache,
+    );
+
+    await expect(service.extractProfileFieldsWithLlm(makeTask(), '我在青岛。')).resolves.toEqual({
+      city: '青岛',
+    });
+    await expect(service.extractProfileFieldsWithLlm(makeTask(), '我在青岛。')).resolves.toEqual({
+      city: '青岛',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(metrics.recordLlmOutputCache).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheName: 'profile_extraction_exact',
+        hit: false,
+      }),
+    );
+    expect(metrics.recordLlmOutputCache).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheName: 'profile_extraction_exact',
+        hit: true,
+        approxChars: expect.any(Number),
+      }),
+    );
+    expect(cache.stats()).toMatchObject({
+      hits: 1,
+      misses: 1,
+      writes: 1,
+    });
   });
 
   it('does not let explicit fast mode downgrade structured profile extraction', async () => {

@@ -27,12 +27,23 @@ import {
   parseSocialAgentProfileExtractionContent,
   profileFieldsFromRecord,
 } from './social-agent-profile-extraction.presenter';
+import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
+import {
+  buildSocialAgentExactCacheKey,
+  buildSocialAgentPromptFingerprint,
+  readSocialAgentExactCacheKeyFingerprint,
+} from './social-agent-prompt-fingerprint.util';
+import {
+  selectSocialAgentConfiguredModel,
+  SOCIAL_AGENT_DEFAULT_REASONING_MODEL,
+} from './social-agent-model-router.service';
 
 export type { SocialAgentGeneratedAnswer } from './social-agent-chat-llm.types';
 
 @Injectable()
 export class SocialAgentChatLlmService {
   private readonly logger = new Logger(SocialAgentChatLlmService.name);
+  private localProfileExtractionCache?: SocialAgentLlmOutputCacheService;
 
   constructor(
     private readonly metrics: SocialAgentMetricsService,
@@ -41,6 +52,8 @@ export class SocialAgentChatLlmService {
     private readonly finalResponses?: SocialAgentFinalResponseService,
     @Optional()
     private readonly selfImprove?: AgentSelfImproveService,
+    @Optional()
+    private readonly llmOutputCache?: SocialAgentLlmOutputCacheService,
   ) {}
 
   async generateConversationalAnswer(
@@ -136,8 +149,34 @@ export class SocialAgentChatLlmService {
     task: AgentTask,
     sourceMessage: string,
   ): Promise<ExtractedProfileFields> {
-    if (!cleanDisplayText(sourceMessage, '').trim()) return {};
+    const cleanMessage = cleanDisplayText(sourceMessage, '').trim();
+    if (!cleanMessage) return {};
     const useCase = 'profile_extraction' as const;
+    const extraRules = await this.publishedLifeGraphExtractionRules();
+    const messages = buildSocialAgentProfileExtractionMessages(
+      task,
+      cleanMessage,
+      extraRules,
+    );
+    const cacheKey = this.profileExtractionCacheKey({
+      messages,
+      model: this.profileExtractionModel(),
+    });
+    const cacheTtlMs = this.profileExtractionCacheTtlMs();
+    if (cacheTtlMs > 0) {
+      const cached = this.profileExtractionCache().get(cacheKey);
+      const cacheFingerprint = readSocialAgentExactCacheKeyFingerprint(cacheKey);
+      this.metrics.recordLlmOutputCache?.({
+        cacheName: 'profile_extraction_exact',
+        hit: cached !== null,
+        approxChars: cached !== null ? this.approxChars(messages) : null,
+        promptPrefixHash: cacheFingerprint?.promptPrefixHash ?? null,
+        dynamicContextHash: cacheFingerprint?.dynamicContextHash ?? null,
+      });
+      if (cached !== null) {
+        return parseSocialAgentProfileExtractionContent(cached);
+      }
+    }
 
     try {
       const content = await this.deepSeek.complete({
@@ -146,14 +185,17 @@ export class SocialAgentChatLlmService {
         intent: 'profile_enrichment',
         fallbackTemperature: 0.15,
         responseFormat: { type: 'json_object' },
-        messages: buildSocialAgentProfileExtractionMessages(
-          task,
-          sourceMessage,
-          await this.publishedLifeGraphExtractionRules(),
-        ),
+        messages,
       });
       if (!content) return {};
-      return parseSocialAgentProfileExtractionContent(content);
+      const extracted = parseSocialAgentProfileExtractionContent(content);
+      if (cacheTtlMs > 0) {
+        this.profileExtractionCache().set(cacheKey, content, {
+          ttlMs: cacheTtlMs,
+          approxPromptChars: this.approxChars(messages),
+        });
+      }
+      return extracted;
     } catch {
       return {};
     }
@@ -171,6 +213,60 @@ export class SocialAgentChatLlmService {
       );
     } catch {
       return [];
+    }
+  }
+
+  private profileExtractionCache(): SocialAgentLlmOutputCacheService {
+    if (this.llmOutputCache) return this.llmOutputCache;
+    this.localProfileExtractionCache ??= new SocialAgentLlmOutputCacheService();
+    return this.localProfileExtractionCache;
+  }
+
+  private profileExtractionCacheKey(input: {
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+    model: string;
+  }): string {
+    return buildSocialAgentExactCacheKey({
+      cacheName: 'profile_extraction_exact',
+      fingerprint: buildSocialAgentPromptFingerprint({
+        schema: 'social_agent_profile_extraction.v1',
+        model: input.model,
+        useCase: 'profile_extraction',
+        messages: input.messages,
+      }),
+    });
+  }
+
+  private profileExtractionModel(): string {
+    const config = this.deepSeek.configReader();
+    return (
+      selectSocialAgentConfiguredModel(config.get('AGENT_EXTRACTOR_MODEL'), {
+        allowFast: false,
+      }) ??
+      selectSocialAgentConfiguredModel(config.get('DEEPSEEK_CHAT_MODEL'), {
+        allowFast: false,
+      }) ??
+      SOCIAL_AGENT_DEFAULT_REASONING_MODEL
+    );
+  }
+
+  private profileExtractionCacheTtlMs(): number {
+    const configured = Number(
+      this.deepSeek.configReader()?.get(
+        'SOCIAL_AGENT_PROFILE_EXTRACTION_CACHE_TTL_MS',
+      ) ?? '',
+    );
+    if (Number.isFinite(configured) && configured >= 0) {
+      return Math.floor(configured);
+    }
+    return 5 * 60 * 1000;
+  }
+
+  private approxChars(value: unknown): number {
+    try {
+      return JSON.stringify(value).length;
+    } catch {
+      return 0;
     }
   }
 

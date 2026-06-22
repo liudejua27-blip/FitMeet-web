@@ -77,12 +77,16 @@ function makeHarness() {
       candidateActions: { saved: ['candidate-1'] },
     }),
   };
+  const metrics = {
+    recordDeterministicRouteReply: jest.fn(),
+  };
   const service = new SocialAgentRouteConversationTurnService(
     chatLlm as never,
     profileEnrichment as never,
     routeContext as never,
+    metrics as never,
   );
-  return { chatLlm, profileEnrichment, routeContext, service };
+  return { chatLlm, profileEnrichment, routeContext, metrics, service };
 }
 
 describe('SocialAgentRouteConversationTurnService', () => {
@@ -207,6 +211,175 @@ describe('SocialAgentRouteConversationTurnService', () => {
       longTermSnapshot,
     );
     expect(profileEnrichment.handleTurn).not.toHaveBeenCalled();
+  });
+
+  it('routes profile missing-field questions to profile enrichment even when intent is product help', async () => {
+    const { chatLlm, profileEnrichment, routeContext, service } = makeHarness();
+    const task = makeTask({ goal: '功能咨询' });
+    const route = makeRoute({
+      intent: 'product_help',
+      shouldUpdateProfile: false,
+      replyStrategy: 'conversational_answer',
+    });
+
+    const result = await service.handle({
+      ownerUserId: 7,
+      task,
+      message: '我的画像现在还缺什么？',
+      route,
+      profile: null,
+      longTermSnapshot: null,
+      brainToolResults: [],
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      task: expect.objectContaining({ id: 202 }),
+      assistantMessage: '我先保存这条画像线索。',
+      savedContext: true,
+      profileUpdated: true,
+    });
+    expect(profileEnrichment.handleTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        task,
+        message: '我的画像现在还缺什么？',
+        intent: 'profile_enrichment_request',
+      }),
+    );
+    expect(routeContext.buildMemoryContext).not.toHaveBeenCalled();
+    expect(
+      chatLlm.generateConversationalAnswerWithSource,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('answers static product and workflow help without calling the conversational LLM', async () => {
+    const { chatLlm, profileEnrichment, metrics, service } = makeHarness();
+    const task = makeTask({ goal: '解释 FitMeet' });
+
+    const product = await service.handle({
+      ownerUserId: 7,
+      task,
+      message: '你都可以干什么？',
+      route: makeRoute({
+        intent: 'product_help',
+        shouldUpdateProfile: false,
+        replyStrategy: 'conversational_answer',
+      }),
+      profile: null,
+      longTermSnapshot: null,
+      brainToolResults: [],
+    });
+    const workflow = await service.handle({
+      ownerUserId: 7,
+      task,
+      message: '我是先完成人物画像然后再进行约练？还是直接发布需求就可以',
+      route: makeRoute({
+        intent: 'workflow_help',
+        shouldUpdateProfile: false,
+        replyStrategy: 'conversational_answer',
+      }),
+      profile: null,
+      longTermSnapshot: null,
+      brainToolResults: [],
+    });
+    const lowPressure = await service.handle({
+      ownerUserId: 7,
+      task,
+      message: '低压力社交应该怎么理解？',
+      route: makeRoute({
+        intent: 'product_help',
+        shouldUpdateProfile: false,
+        replyStrategy: 'conversational_answer',
+      }),
+      profile: null,
+      longTermSnapshot: null,
+      brainToolResults: [],
+    });
+
+    expect(product).toMatchObject({
+      handled: true,
+      task,
+      assistantMessageSource: 'deterministic_route',
+      savedContext: false,
+      profileUpdated: false,
+    });
+    expect(product.assistantMessage).toContain('FitMeet');
+    expect(product.assistantMessage).toContain('发送消息');
+    expect(lowPressure).toMatchObject({
+      handled: true,
+      task,
+      assistantMessageSource: 'deterministic_route',
+      savedContext: false,
+      profileUpdated: false,
+    });
+    expect(lowPressure.assistantMessage).toContain('低压力社交');
+    expect(lowPressure.assistantMessage).toContain('需要你确认');
+    expect(workflow).toMatchObject({
+      handled: true,
+      task,
+      assistantMessageSource: 'deterministic_route',
+      savedContext: false,
+      profileUpdated: false,
+    });
+    expect(workflow.assistantMessage).toContain('两种都可以');
+    expect(workflow.assistantMessage).toContain('直接发布需求');
+    expect(
+      metrics.recordDeterministicRouteReply,
+    ).toHaveBeenCalledWith('product_help');
+    expect(
+      metrics.recordDeterministicRouteReply,
+    ).toHaveBeenCalledWith('workflow_help');
+    expect(
+      metrics.recordDeterministicRouteReply,
+    ).toHaveBeenCalledWith('product_help');
+    expect(chatLlm.generateConversationalAnswerWithSource).not.toHaveBeenCalled();
+    expect(profileEnrichment.handleTurn).not.toHaveBeenCalled();
+  });
+
+  it('answers simple casual greetings and acknowledgements without calling the conversational LLM', async () => {
+    const { chatLlm, metrics, service } = makeHarness();
+    const task = makeTask({ goal: '普通聊天' });
+    const route = makeRoute({
+      intent: 'casual_chat',
+      shouldUpdateProfile: false,
+      replyStrategy: 'conversational_answer',
+    });
+
+    const greeting = await service.handle({
+      ownerUserId: 7,
+      task,
+      message: '你好',
+      route,
+      profile: null,
+      longTermSnapshot: null,
+      brainToolResults: [],
+    });
+    const thanks = await service.handle({
+      ownerUserId: 7,
+      task,
+      message: '谢谢',
+      route,
+      profile: null,
+      longTermSnapshot: null,
+      brainToolResults: [],
+    });
+
+    expect(greeting).toMatchObject({
+      handled: true,
+      assistantMessageSource: 'deterministic_route',
+    });
+    expect(greeting.assistantMessage).toContain('你好，我在');
+    expect(thanks).toMatchObject({
+      handled: true,
+      assistantMessageSource: 'deterministic_route',
+    });
+    expect(thanks.assistantMessage).toContain('不客气');
+    expect(metrics.recordDeterministicRouteReply).toHaveBeenCalledTimes(2);
+    expect(metrics.recordDeterministicRouteReply).toHaveBeenCalledWith(
+      'casual_chat',
+    );
+    expect(chatLlm.generateConversationalAnswerWithSource).not.toHaveBeenCalled();
   });
 
   it('passes hydrated worker context into direct conversational memory context', async () => {
@@ -377,7 +550,7 @@ describe('SocialAgentRouteConversationTurnService', () => {
       ownerUserId: 7,
       task: makeTask({ goal: '功能咨询' }),
       traceId: 'agent:trace-direct',
-      message: '你有什么功能？',
+      message: '我有点社恐，第一次见陌生人怎么降低尴尬？',
       route,
       profile: null,
       longTermSnapshot: null,
@@ -401,7 +574,7 @@ describe('SocialAgentRouteConversationTurnService', () => {
     const result = await service.handle({
       ownerUserId: 7,
       task: makeTask({ goal: '功能咨询' }),
-      message: '你有什么功能？',
+      message: '我有点社恐，第一次见陌生人怎么降低尴尬？',
       route: makeRoute({
         intent: 'product_help',
         shouldUpdateProfile: false,
@@ -433,7 +606,7 @@ describe('SocialAgentRouteConversationTurnService', () => {
     const result = await service.handle({
       ownerUserId: 7,
       task: makeTask({ goal: '功能咨询' }),
-      message: '你有什么功能？',
+      message: '我有点社恐，第一次见陌生人怎么降低尴尬？',
       route: makeRoute({
         intent: 'product_help',
         shouldUpdateProfile: false,

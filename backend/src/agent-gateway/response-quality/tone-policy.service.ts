@@ -20,17 +20,17 @@ const USER_STATUSES: Record<string, string> = {
   understand: '正在理解你的需求',
   'task.created': '正在理解你的需求',
   permission: '正在检查安全边界',
-  deepseek: '正在结合你的 Life Graph',
-  profile: '正在结合你的 Life Graph',
-  search: '正在筛选合适的人',
-  rank: '正在排除时间不合适的人',
+  deepseek: '正在读取你的偏好',
+  profile: '正在读取你的偏好',
+  search: '正在筛选公开可发现的人',
+  rank: '正在整理合适机会',
   safety_filter: '正在检查安全边界',
   reason: '正在生成开场白',
   icebreaker: '正在生成开场白',
-  draft: '正在创建约练计划',
+  draft: '正在整理约练方案',
   done: '正在等待你确认',
   approval: '正在等待你确认',
-  life_graph_update: '正在更新你的 Life Graph',
+  life_graph_update: '正在整理画像变化建议',
 };
 
 @Injectable()
@@ -53,12 +53,12 @@ export class TonePolicyService {
     if (USER_STATUSES[normalized]) return USER_STATUSES[normalized];
     const cleanedLabel = this.cleanUserText(label, '');
     if (!cleanedLabel) return '正在理解你的需求';
-    if (/Life Graph|画像/.test(cleanedLabel)) return '正在结合你的 Life Graph';
+    if (/Life Graph|画像/.test(cleanedLabel)) return '正在读取你的偏好';
     if (/候选|筛选|匹配|搜索|检索/.test(cleanedLabel))
-      return '正在筛选合适的人';
+      return '正在筛选公开可发现的人';
     if (/安全|边界|风险/.test(cleanedLabel)) return '正在检查安全边界';
     if (/开场|消息/.test(cleanedLabel)) return '正在生成开场白';
-    if (/活动|约练|计划/.test(cleanedLabel)) return '正在创建约练计划';
+    if (/活动|约练|计划/.test(cleanedLabel)) return '正在整理约练方案';
     if (/确认|等待/.test(cleanedLabel)) return '正在等待你确认';
     return cleanedLabel;
   }

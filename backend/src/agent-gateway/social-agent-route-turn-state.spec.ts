@@ -95,4 +95,23 @@ describe('social agent route turn state', () => {
       runMode: 'follow_up',
     });
   });
+
+  it('keeps deterministic assistant source from search turns', () => {
+    const state = createSocialAgentRouteTurnState('fallback');
+
+    expect(
+      applySearchTurnState(state, {
+        assistantMessage: '没有找到真实活动，建议发布到发现。',
+        assistantMessageSource: 'deterministic_route',
+        savedContext: true,
+        activityResults: [],
+        queuedRun: null,
+        runMode: null,
+      }),
+    ).toMatchObject({
+      assistantMessage: '没有找到真实活动，建议发布到发现。',
+      assistantMessageSource: 'deterministic_route',
+      savedContext: true,
+    });
+  });
 });

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/require-await */
 import { SocialAgentBrainService } from './social-agent-brain.service';
 import { SocialAgentIntentRouterResult } from './social-agent-intent-router.service';
+import { SocialAgentLlmOutputCacheService } from './social-agent-llm-output-cache.service';
 
 function route(
   overrides: Partial<SocialAgentIntentRouterResult> = {},
@@ -178,6 +179,7 @@ describe('SocialAgentBrainService', () => {
       get: jest.fn((key: string) => {
         if (key === 'DEEPSEEK_API_KEY') return 'test-key';
         if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
+        if (key === 'SOCIAL_AGENT_BRAIN_WORKFLOW_SHORTCUTS') return 'false';
         return undefined;
       }),
     };
@@ -275,6 +277,7 @@ describe('SocialAgentBrainService', () => {
       get: jest.fn((key: string) => {
         if (key === 'DEEPSEEK_API_KEY') return 'test-key';
         if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
+        if (key === 'SOCIAL_AGENT_BRAIN_WORKFLOW_SHORTCUTS') return 'false';
         return undefined;
       }),
     };
@@ -387,6 +390,61 @@ describe('SocialAgentBrainService', () => {
     expect(decision.tools).toEqual([]);
   });
 
+  it('skips DeepSeek brain planning for hydrated social search continuation by default', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn() as never;
+    const deepSeek = {
+      complete: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          userIntent: 'social_search',
+          shouldCallTool: true,
+          tools: [{ name: 'search_real_candidates', arguments: {} }],
+        }),
+      ),
+    };
+    const config = {
+      get: jest.fn((key: string) => {
+        if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+        return undefined;
+      }),
+    };
+
+    try {
+      const plannedService = new SocialAgentBrainService(
+        config as never,
+        undefined,
+        undefined,
+        deepSeek as never,
+      );
+      const decision = await plannedService.planTurn({
+        message: '可以，继续帮我找人',
+        route: route({
+          intent: 'social_search',
+          shouldSearch: true,
+          replyStrategy: 'search_candidates',
+        }),
+        taskContext: {
+          taskId: 91,
+          taskSlots: {
+            activity: { value: '散步', state: 'completed' },
+            time_window: { value: '今天晚上', state: 'completed' },
+            location_text: { value: '青岛大学附近', state: 'completed' },
+          },
+        },
+      });
+
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(deepSeek.complete).not.toHaveBeenCalled();
+      expect(decision).toMatchObject({
+        plannerSource: 'rules',
+        conversationMode: 'search',
+        shouldExecuteTool: true,
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   it('uses the unified DeepSeek client for brain planning when injected', async () => {
     const originalFetch = global.fetch;
     global.fetch = jest.fn() as never;
@@ -416,6 +474,7 @@ describe('SocialAgentBrainService', () => {
         if (key === 'DEEPSEEK_API_KEY') return 'test-key';
         if (key === 'SOCIAL_AGENT_CONTEXT_TURN_LIMIT') return '8';
         if (key === 'SOCIAL_AGENT_BRAIN_RETRY_ATTEMPTS') return '2';
+        if (key === 'SOCIAL_AGENT_BRAIN_WORKFLOW_SHORTCUTS') return 'false';
         return undefined;
       }),
     };
@@ -468,7 +527,7 @@ describe('SocialAgentBrainService', () => {
         messages: Array<Record<string, unknown>>;
       };
       expect(payload).toMatchObject({
-        useCase: 'planner',
+        useCase: 'brain',
         taskId: 91,
         responseFormat: { type: 'json_object' },
         retryAttempts: 2,
@@ -508,6 +567,155 @@ describe('SocialAgentBrainService', () => {
     } finally {
       global.fetch = originalFetch;
     }
+  });
+
+  it('caches repeated brain planner output for identical context', async () => {
+    const deepSeek = {
+      complete: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          userIntent: 'social_search',
+          reason: 'Continue search from completed slots.',
+          shouldCallTool: true,
+          tools: [
+            {
+              name: 'search_real_candidates',
+              arguments: {
+                activity: '散步',
+                timeWindow: '今天晚上',
+                location: '青岛大学附近',
+              },
+            },
+          ],
+          needUserConfirmation: false,
+          responseGoal: 'Search candidates without repeating completed slots.',
+        }),
+      ),
+    };
+    const config = {
+      get: jest.fn((key: string) => {
+        if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+        if (key === 'SOCIAL_AGENT_BRAIN_PLANNER_CACHE_TTL_MS') return '60000';
+        if (key === 'SOCIAL_AGENT_BRAIN_WORKFLOW_SHORTCUTS') return 'false';
+        return undefined;
+      }),
+    };
+    const cache = new SocialAgentLlmOutputCacheService();
+    const plannedService = new SocialAgentBrainService(
+      config as never,
+      undefined,
+      undefined,
+      deepSeek as never,
+      cache,
+    );
+    const input = {
+      message: '可以，帮我找人',
+      route: route({
+        intent: 'social_search',
+        shouldSearch: true,
+        replyStrategy: 'search_candidates',
+      }),
+      taskContext: {
+        taskId: 91,
+        taskSlots: {
+          activity: { value: '散步', state: 'completed' },
+          time_window: { value: '今天晚上', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+        },
+      },
+      conversationHistory: [
+        { role: 'user', text: '我想在青岛大学附近散步' },
+        { role: 'assistant', text: '我已经记录时间、地点和活动。' },
+      ],
+    };
+
+    await expect(plannedService.planTurn(input)).resolves.toMatchObject({
+      plannerSource: 'deepseek',
+      conversationMode: 'search',
+      shouldExecuteTool: true,
+    });
+    await expect(plannedService.planTurn(input)).resolves.toMatchObject({
+      plannerSource: 'deepseek',
+      conversationMode: 'search',
+      shouldExecuteTool: true,
+    });
+
+    expect(deepSeek.complete).toHaveBeenCalledTimes(1);
+    expect(cache.stats()).toMatchObject({
+      hits: 1,
+      misses: 1,
+      writes: 1,
+    });
+  });
+
+  it('uses a local brain planner exact cache when no shared cache is injected', async () => {
+    const deepSeek = {
+      complete: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          userIntent: 'social_search',
+          reason: 'Continue search from completed slots.',
+          shouldCallTool: true,
+          tools: [
+            {
+              name: 'search_real_candidates',
+              arguments: {
+                activity: '散步',
+                timeWindow: '今天晚上',
+                location: '青岛大学附近',
+              },
+            },
+          ],
+          needUserConfirmation: false,
+          responseGoal: 'Search candidates without repeating completed slots.',
+        }),
+      ),
+    };
+    const config = {
+      get: jest.fn((key: string) => {
+        if (key === 'DEEPSEEK_API_KEY') return 'test-key';
+        if (key === 'SOCIAL_AGENT_BRAIN_PLANNER_CACHE_TTL_MS') return '60000';
+        if (key === 'SOCIAL_AGENT_BRAIN_WORKFLOW_SHORTCUTS') return 'false';
+        return undefined;
+      }),
+    };
+    const plannedService = new SocialAgentBrainService(
+      config as never,
+      undefined,
+      undefined,
+      deepSeek as never,
+    );
+    const input = {
+      message: '可以，帮我找人',
+      route: route({
+        intent: 'social_search',
+        shouldSearch: true,
+        replyStrategy: 'search_candidates',
+      }),
+      taskContext: {
+        taskId: 91,
+        taskSlots: {
+          activity: { value: '散步', state: 'completed' },
+          time_window: { value: '今天晚上', state: 'completed' },
+          location_text: { value: '青岛大学附近', state: 'completed' },
+        },
+      },
+      conversationHistory: [
+        { role: 'user', text: '我想在青岛大学附近散步' },
+        { role: 'assistant', text: '我已经记录时间、地点和活动。' },
+      ],
+    };
+
+    await expect(plannedService.planTurn(input)).resolves.toMatchObject({
+      plannerSource: 'deepseek',
+      conversationMode: 'search',
+      shouldExecuteTool: true,
+    });
+    await expect(plannedService.planTurn(input)).resolves.toMatchObject({
+      plannerSource: 'deepseek',
+      conversationMode: 'search',
+      shouldExecuteTool: true,
+    });
+
+    expect(deepSeek.complete).toHaveBeenCalledTimes(1);
   });
 
   it('does not convert a client-aborted brain planning run into a rule fallback', async () => {
@@ -566,6 +774,7 @@ describe('SocialAgentBrainService', () => {
       get: jest.fn((key: string) => {
         if (key === 'DEEPSEEK_API_KEY') return 'test-key';
         if (key === 'SOCIAL_AGENT_BRAIN_RETRY_ATTEMPTS') return '2';
+        if (key === 'SOCIAL_AGENT_BRAIN_WORKFLOW_SHORTCUTS') return 'false';
         return undefined;
       }),
     };
@@ -616,6 +825,7 @@ describe('SocialAgentBrainService', () => {
       get: jest.fn((key: string) => {
         if (key === 'DEEPSEEK_API_KEY') return 'test-key';
         if (key === 'SOCIAL_AGENT_BRAIN_RETRY_ATTEMPTS') return '1';
+        if (key === 'SOCIAL_AGENT_BRAIN_WORKFLOW_SHORTCUTS') return 'false';
         return undefined;
       }),
     };
@@ -730,6 +940,7 @@ describe('SocialAgentBrainService', () => {
       get: jest.fn((key: string) => {
         if (key === 'DEEPSEEK_API_KEY') return 'test-key';
         if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
+        if (key === 'SOCIAL_AGENT_BRAIN_WORKFLOW_SHORTCUTS') return 'false';
         return undefined;
       }),
     };
@@ -808,6 +1019,7 @@ describe('SocialAgentBrainService', () => {
         if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
         if (key === 'SOCIAL_AGENT_BRAIN_RETRY_ATTEMPTS') return '2';
         if (key === 'SOCIAL_AGENT_PLANNER_TIMEOUT_MS') return '2500';
+        if (key === 'SOCIAL_AGENT_BRAIN_WORKFLOW_SHORTCUTS') return 'false';
         return undefined;
       }),
     };
@@ -889,6 +1101,7 @@ describe('SocialAgentBrainService', () => {
         if (key === 'DEEPSEEK_API_KEY') return 'test-key';
         if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
         if (key === 'SOCIAL_AGENT_BRAIN_LLM_PLANNER') return 'false';
+        if (key === 'SOCIAL_AGENT_BRAIN_WORKFLOW_SHORTCUTS') return 'false';
         return undefined;
       }),
     };
@@ -1108,6 +1321,7 @@ describe('SocialAgentBrainService', () => {
       get: jest.fn((key: string) => {
         if (key === 'DEEPSEEK_API_KEY') return 'test-key';
         if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
+        if (key === 'SOCIAL_AGENT_BRAIN_WORKFLOW_SHORTCUTS') return 'false';
         return undefined;
       }),
     };
@@ -1264,6 +1478,7 @@ describe('SocialAgentBrainService', () => {
       get: jest.fn((key: string) => {
         if (key === 'DEEPSEEK_API_KEY') return 'test-key';
         if (key === 'DEEPSEEK_BASE_URL') return 'https://deepseek.test';
+        if (key === 'SOCIAL_AGENT_BRAIN_WORKFLOW_SHORTCUTS') return 'false';
         return undefined;
       }),
     };

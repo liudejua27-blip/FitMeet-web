@@ -17,6 +17,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import type { Response } from 'express';
 
+import { cleanDisplayText } from '../common/display-text.util';
 import { CreateSocialRequestDto } from '../social-requests/dto/create-social-request.dto';
 import { AgentTaskPermissionMode } from './entities/agent-task.entity';
 import { UserFacingResponseSanitizerService } from './response-quality/user-facing-response-sanitizer.service';
@@ -31,6 +32,7 @@ import type {
   SocialAgentSaveCandidateBody,
   SocialAgentSendMessageBody,
   SocialAgentThreadUpdateBody,
+  SocialAgentUserInterestEventBody,
 } from './social-agent-chat.controller.types';
 import {
   lightStatusFromStep,
@@ -46,6 +48,7 @@ import {
 } from './social-agent-chat-stream.presenter';
 import { SocialAgentChatService } from './social-agent-chat.service';
 import type {
+  SocialAgentAssistantMessageSource,
   SocialAgentChatRunResult,
   SocialAgentIntentRouteResult,
 } from './social-agent-chat.types';
@@ -63,6 +66,8 @@ import { SocialAgentEventStore } from './social-agent-event-store.service';
 import { SocialAgentTaskMemoryStateMachineService } from './social-agent-task-memory-state-machine.service';
 import { SocialAgentMessageLogService } from './social-agent-message-log.service';
 import { SocialAgentTaskLifecycleService } from './social-agent-task-lifecycle.service';
+import { SocialAgentUserInterestEventService } from './social-agent-user-interest-event.service';
+import type { SocialAgentUserInterestEventType } from './entities/social-agent-user-interest-event.entity';
 import {
   SocialCodexEventPipelineService,
   type SocialCodexEventWriter,
@@ -78,6 +83,7 @@ import { readSocialAgentStoredRun } from './social-agent-chat-run.presenter';
 type LlmAssistantTextResult = {
   streamed: boolean;
   text: string | null;
+  source?: SocialAgentAssistantMessageSource;
 };
 
 type StreamUserFacingMessageOptions = {
@@ -136,6 +142,8 @@ export class SocialAgentChatController {
     private readonly messageLog?: SocialAgentMessageLogService,
     @Optional()
     private readonly taskLifecycle?: SocialAgentTaskLifecycleService,
+    @Optional()
+    private readonly interestEvents?: SocialAgentUserInterestEventService,
   ) {}
 
   private initialRunCopy(input?: InitialRunCopyInput | null) {
@@ -143,7 +151,7 @@ export class SocialAgentChatController {
       input?.conversationIntent ?? input?.clientContext?.conversationIntent ?? null;
     if (intent === 'conversation') {
       return {
-        title: '正在思考',
+        title: '正在理解你的需求',
         detail: '会直接回复，不触发社交工具。',
       };
     }
@@ -220,6 +228,41 @@ export class SocialAgentChatController {
       source: body?.source ?? 'agent_web',
       metadata: body?.metadata,
     });
+  }
+
+  @Post('interest-events')
+  @HttpCode(200)
+  async recordInterestEvent(
+    @Req() req: FitMeetRequest,
+    @Body() body: SocialAgentUserInterestEventBody,
+  ) {
+    const eventType = this.interestEventType(body?.eventType);
+    if (!eventType) {
+      throw new BadRequestException('Unsupported social agent interest event type');
+    }
+    const event = await this.requireInterestEvents().recordEvent({
+      ownerUserId: req.user.id,
+      agentTaskId: this.positiveNumber(body?.taskId),
+      eventType,
+      targetUserId: this.positiveNumber(body?.targetUserId),
+      candidateRecordId: this.positiveNumber(body?.candidateRecordId),
+      socialRequestId: this.positiveNumber(body?.socialRequestId),
+      activityId: this.positiveNumber(body?.activityId),
+      weight: Number.isFinite(body?.weight) ? Number(body?.weight) : null,
+      activityTags: this.stringList(body?.activityTags),
+      candidatePreferenceTags: this.stringList(body?.candidatePreferenceTags),
+      city: this.stringValue(body?.city),
+      locationText: this.stringValue(body?.locationText),
+      timeWindow: this.stringValue(body?.timeWindow),
+      source: this.stringValue(body?.source) || 'agent_web',
+      dedupeKey: this.stringValue(body?.dedupeKey),
+      metadata: this.recordValue(body?.metadata),
+    });
+    return {
+      ok: true,
+      recorded: Boolean(event),
+      eventId: event?.id ?? null,
+    };
   }
 
   @Post('run')
@@ -733,7 +776,7 @@ export class SocialAgentChatController {
                 hasAssistantDone = wroteFallback;
                 streamResult = {
                   ...streamResult,
-                  assistantMessageSource: 'fallback',
+                  assistantMessageSource: streamed.source ?? 'fallback',
                 };
               }
             }
@@ -1048,7 +1091,7 @@ export class SocialAgentChatController {
         } else {
           streamResult = {
             ...streamResult,
-            assistantMessageSource: 'fallback',
+            assistantMessageSource: streamed.source ?? 'fallback',
           };
         }
       }
@@ -1149,14 +1192,14 @@ export class SocialAgentChatController {
     try {
       await socialCodexEvents.writeRunStarted(
         v2,
-        '正在处理你的选择',
+        '正在确认你的选择',
         '会先确认当前动作和安全边界，再继续处理。',
       );
       await socialCodexEvents.writeHydrateContext(v2);
       write('status', {
         type: 'status',
         lifecycle: 'received',
-        lightStatus: '正在处理你的选择',
+        lightStatus: '正在理解你的需求',
         taskId,
         threadId: actionThreadId,
       });
@@ -1215,31 +1258,38 @@ export class SocialAgentChatController {
           taskId: result.taskId ?? taskId,
           runId,
         });
-        const streamed = await this.writeLlmAssistantTextForResult(write, {
-          rawResult: streamResult as unknown as Record<string, unknown>,
-          userMessage: this.actionUserMessage(body),
-          messageId: assistantMessageId,
-          userId: req.user.id,
-          taskId: result.taskId ?? taskId,
-          threadId: actionThreadId,
-          signal,
-          socialCodexEvents,
-          v2: assistantV2,
-        });
-        hasAssistantDelta = streamed.streamed;
-        if (streamed.streamed) {
-          streamedAssistantMessageId = assistantMessageId;
+        if (this.shouldUseDeterministicCardActionReply(body, streamResult)) {
           streamResult = {
             ...streamResult,
-            assistantMessage: streamed.text ?? '',
-            assistantStreamed: true,
-            assistantMessageSource: 'llm',
+            assistantMessageSource: 'deterministic_action',
           };
         } else {
-          streamResult = {
-            ...streamResult,
-            assistantMessageSource: 'fallback',
-          };
+          const streamed = await this.writeLlmAssistantTextForResult(write, {
+            rawResult: streamResult as unknown as Record<string, unknown>,
+            userMessage: this.actionUserMessage(body),
+            messageId: assistantMessageId,
+            userId: req.user.id,
+            taskId: result.taskId ?? taskId,
+            threadId: actionThreadId,
+            signal,
+            socialCodexEvents,
+            v2: assistantV2,
+          });
+          hasAssistantDelta = streamed.streamed;
+          if (streamed.streamed) {
+            streamedAssistantMessageId = assistantMessageId;
+            streamResult = {
+              ...streamResult,
+              assistantMessage: streamed.text ?? '',
+              assistantStreamed: true,
+              assistantMessageSource: 'llm',
+            };
+          } else {
+            streamResult = {
+              ...streamResult,
+              assistantMessageSource: streamed.source ?? 'fallback',
+            };
+          }
         }
       }
       const assistantMessageId =
@@ -1500,6 +1550,37 @@ export class SocialAgentChatController {
       throw new Error('SocialAgentMessageFeedbackService is not configured');
     }
     return this.messageFeedback;
+  }
+
+  private requireInterestEvents(): SocialAgentUserInterestEventService {
+    if (!this.interestEvents) {
+      throw new Error('SocialAgentUserInterestEventService is not configured');
+    }
+    return this.interestEvents;
+  }
+
+  private interestEventType(
+    value: unknown,
+  ): SocialAgentUserInterestEventType | null {
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim();
+    const allowed = new Set<SocialAgentUserInterestEventType>([
+      'view_profile',
+      'save_candidate',
+      'skip_candidate',
+      'more_like_this',
+      'generate_opener',
+      'send_invite',
+      'connect_candidate',
+      'discover_click',
+      'activity_complete',
+      'review_positive',
+      'review_negative',
+      'chat_topic',
+    ]);
+    return allowed.has(normalized as SocialAgentUserInterestEventType)
+      ? (normalized as SocialAgentUserInterestEventType)
+      : null;
   }
 
   private requireThreads(): SocialAgentThreadService {
@@ -1775,6 +1856,12 @@ export class SocialAgentChatController {
     },
   ): Promise<LlmAssistantTextResult> {
     if (!this.finalResponses) return { streamed: false, text: null };
+    const deterministicSource = this.deterministicAssistantMessageSource(
+      input.rawResult,
+    );
+    if (deterministicSource) {
+      return { streamed: false, text: null, source: deterministicSource };
+    }
     const hydratedContext = await this.hydrateFinalResponseContext({
       userId: input.userId,
       taskId:
@@ -1880,7 +1967,18 @@ export class SocialAgentChatController {
       streamed: true,
       text:
         (generated ?? streamedText.join('')).trim() || streamedText.join(''),
+      source: 'llm',
     };
+  }
+
+  private deterministicAssistantMessageSource(
+    result: Record<string, unknown>,
+  ): SocialAgentAssistantMessageSource | null {
+    const source = this.stringValue(result.assistantMessageSource);
+    return source === 'deterministic_route' ||
+      source === 'deterministic_action'
+      ? source
+      : null;
   }
 
   private async writeSocialCodexAssistantDelta(input: {
@@ -2025,6 +2123,15 @@ export class SocialAgentChatController {
     return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
   }
 
+  private stringList(value: unknown): string[] | null {
+    if (!Array.isArray(value)) return null;
+    const values = value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return values.length ? [...new Set(values)].slice(0, 20) : null;
+  }
+
   private identifierValue(value: unknown): string | number | null {
     return typeof value === 'string' || typeof value === 'number'
       ? value
@@ -2060,6 +2167,84 @@ export class SocialAgentChatController {
       this.stringValue(record.label) ||
       JSON.stringify(body ?? {})
     );
+  }
+
+  private shouldUseDeterministicCardActionReply(
+    body: SocialAgentCardActionBody,
+    result: SocialAgentIntentRouteResult,
+  ): boolean {
+    const action = this.normalizedLowCostCardAction(body.action);
+    if (!action) return false;
+    if (!cleanDisplayText(result.assistantMessage, '').trim()) return false;
+    if (result.pendingApproval) return false;
+    const pendingConfirmations = (
+      result as { pendingConfirmations?: unknown[] }
+    ).pendingConfirmations;
+    if (Array.isArray(pendingConfirmations) && pendingConfirmations.length > 0) {
+      return false;
+    }
+    if (
+      result.shouldSearch ||
+      result.shouldReplan ||
+      result.shouldQueueRun ||
+      result.runMode
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  private normalizedLowCostCardAction(
+    action: SocialAgentCardActionBody['action'] | string | null | undefined,
+  ): string | null {
+    const normalized = cleanDisplayText(action, '').trim().toLowerCase();
+    if (!normalized) return null;
+    const lowCostAliases: Record<string, string> = {
+      save_candidate: 'candidate.like',
+      favorite_candidate: 'candidate.like',
+      bookmark_candidate: 'candidate.like',
+      collect_candidate: 'candidate.like',
+      generate_opener: 'candidate.generate_opener',
+      draft_opener: 'candidate.generate_opener',
+      regenerate_opener: 'opener.regenerate',
+      rewrite_opener: 'opener.regenerate',
+      view_profile: 'candidate.view_detail',
+      view_candidate: 'candidate.view_detail',
+      view_user: 'candidate.view_detail',
+      open_profile: 'candidate.view_detail',
+      view_detail: 'candidate.view_detail',
+      see_more: 'candidate.more_like_this',
+      more_like_this: 'candidate.more_like_this',
+      expand_radius: 'candidate.more_like_this',
+      relax_preference: 'candidate.more_like_this',
+      filter_school: 'candidate.more_like_this',
+      filter_gender_female: 'candidate.more_like_this',
+      refine_request: 'candidate.more_like_this',
+      skip_candidate: 'candidate.skip',
+      dislike_candidate: 'candidate.skip',
+      reject_opener: 'opener.reject',
+      view_activity: 'activity.view_detail',
+      skip_publish: 'activity.skip_publish',
+      change_time: 'activity.modify_time',
+      modify_activity: 'activity.modify_time',
+      change_location: 'activity.modify_location',
+    };
+    const canonical = lowCostAliases[normalized] ?? normalized;
+    return new Set([
+      'candidate.view_detail',
+      'candidate.more_like_this',
+      'candidate.skip',
+      'candidate.like',
+      'candidate.generate_opener',
+      'opener.regenerate',
+      'opener.reject',
+      'activity.view_detail',
+      'activity.modify_time',
+      'activity.modify_location',
+      'activity.skip_publish',
+    ]).has(canonical)
+      ? canonical
+      : null;
   }
 
   private withAssistantRuntimeAnchor<

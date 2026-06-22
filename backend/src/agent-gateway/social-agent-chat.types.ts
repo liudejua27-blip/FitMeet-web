@@ -201,7 +201,11 @@ export type SocialAgentChatStreamEvent =
     }
   | { type: 'error'; message: string };
 
-export type SocialAgentAssistantMessageSource = 'llm' | 'fallback';
+export type SocialAgentAssistantMessageSource =
+  | 'llm'
+  | 'fallback'
+  | 'deterministic_route'
+  | 'deterministic_action';
 
 export type SocialAgentRequestDraft = NonNullable<
   SocialAgentChatRunResult['socialRequestDraft']

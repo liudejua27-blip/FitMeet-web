@@ -119,6 +119,128 @@ describe('SocialAgentChatController protocol boundaries', () => {
   });
 });
 
+describe('SocialAgentChatController final response routing', () => {
+  it('does not rewrite deterministic route replies with final-response LLM', async () => {
+    const finalResponses = {
+      generate: jest.fn().mockResolvedValue('LLM 改写回复'),
+    };
+    const controller = new SocialAgentChatController(
+      {} as unknown as SocialAgentChatService,
+      {} as unknown as SocialAgentCandidateCommandService,
+      {} as unknown as UserFacingResponseSanitizerService,
+      undefined,
+      undefined,
+      finalResponses as never,
+    );
+
+    const result = await (
+      controller as unknown as {
+        writeLlmAssistantTextForResult: (
+          write: jest.Mock,
+          input: Record<string, unknown>,
+        ) => Promise<Record<string, unknown>>;
+      }
+    ).writeLlmAssistantTextForResult(jest.fn(), {
+      rawResult: {
+        assistantMessage: '没有找到真实候选，可以发布到发现。',
+        assistantMessageSource: 'deterministic_route',
+      },
+      userMessage: '继续找人',
+      messageId: 'agent-message:101:run-1',
+      userId: 7,
+    });
+
+    expect(finalResponses.generate).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      streamed: false,
+      text: null,
+      source: 'deterministic_route',
+    });
+  });
+});
+
+describe('SocialAgentChatController user interest events', () => {
+  const createController = (interestEvents: { recordEvent: jest.Mock }) =>
+    new SocialAgentChatController(
+      {} as unknown as SocialAgentChatService,
+      {} as unknown as SocialAgentCandidateCommandService,
+      {} as unknown as UserFacingResponseSanitizerService,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      interestEvents as never,
+    );
+
+  it('records authenticated Discover and profile behavior as recommendation signals', async () => {
+    const interestEvents = {
+      recordEvent: jest.fn().mockResolvedValue({ id: 91 }),
+    };
+    const controller = createController(interestEvents);
+
+    await expect(
+      controller.recordInterestEvent(
+        { user: { id: 7 } } as never,
+        {
+          eventType: 'discover_click',
+          targetUserId: 11,
+          socialRequestId: 23,
+          activityId: 45,
+          activityTags: ['散步', '低压力'],
+          candidatePreferenceTags: ['女生'],
+          city: '青岛',
+          locationText: '青岛大学附近',
+          timeWindow: '今天晚上',
+          source: 'discover_page',
+          dedupeKey: 'discover:publicIntent:abc:2026-06-22',
+          metadata: {
+            detailHref: '/public-intent/abc',
+            ignoredNested: { unsafe: true },
+          },
+        },
+      ),
+    ).resolves.toEqual({ ok: true, recorded: true, eventId: 91 });
+
+    expect(interestEvents.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 7,
+        eventType: 'discover_click',
+        targetUserId: 11,
+        socialRequestId: 23,
+        activityId: 45,
+        activityTags: ['散步', '低压力'],
+        candidatePreferenceTags: ['女生'],
+        city: '青岛',
+        locationText: '青岛大学附近',
+        timeWindow: '今天晚上',
+        source: 'discover_page',
+        dedupeKey: 'discover:publicIntent:abc:2026-06-22',
+      }),
+    );
+  });
+
+  it('rejects unknown interest event types instead of creating loose analytics rows', async () => {
+    const controller = createController({ recordEvent: jest.fn() });
+
+    await expect(
+      controller.recordInterestEvent(
+        { user: { id: 7 } } as never,
+        { eventType: 'raw_tool_call_started' },
+      ),
+    ).rejects.toThrow('Unsupported social agent interest event type');
+  });
+});
+
 describe('SocialAgentChatController user-facing stream', () => {
   it('emits an early visible slot trace before the final result so users do not stare at waiting dots', async () => {
     const writes: string[] = [];
@@ -472,9 +594,9 @@ describe('SocialAgentChatController user-facing stream', () => {
 
     const early = writes.join('');
     expect(early).toContain('"type":"run.started"');
-    expect(early).toContain('正在思考');
+    expect(early).toContain('正在理解你的需求');
     expect(early).toContain('会直接回复，不触发社交工具');
-    expect(early).not.toContain('正在理解你的需求');
+    expect(early).not.toContain('正在思考');
     expect(early).not.toContain('"type":"assistant_delta"');
 
     releaseRun();
@@ -1508,8 +1630,8 @@ describe('SocialAgentChatController user-facing stream', () => {
     expect(serialized).toContain('"assistantMessageSource":"fallback"');
     expect(serialized).toContain('"type":"progress"');
     expect(serialized).toContain('"lifecycle":"analyzing_intent"');
-    expect(serialized).toContain('正在推进当前进度');
     expect(serialized).toContain('正在理解你的需求');
+    expect(serialized).not.toContain(['正在处理', '当前', '步骤'].join(''));
     expect(serialized).toContain('assistantMessage');
     expect(serialized).toContain('"lifecycle":"checking_safety"');
     expect(serialized).toContain('cards');
@@ -2417,11 +2539,11 @@ describe('SocialAgentChatController user-facing stream', () => {
 
     const serialized = writes.join('');
     expect(serialized).toContain('"type":"run.started"');
-    expect(serialized).toContain('正在处理你的选择');
+    expect(serialized).toContain('正在确认你的选择');
     expect(serialized).toContain('"type":"visible_process.delta"');
     expect(serialized).toContain('"stage":"hydrate_context"');
     expect(serialized).toContain('正在读取你的偏好');
-    expect(serialized).not.toContain('"lightStatus":"正在理解你的需求"');
+    expect(serialized).not.toContain('"lightStatus":"正在处理你的选择"');
     expect(serialized).toContain('"type":"assistant_delta"');
     expect(serialized).toContain('"type":"assistant.delta"');
     expect(serialized).toContain('"source":"llm"');
@@ -2434,6 +2556,124 @@ describe('SocialAgentChatController user-facing stream', () => {
       expect.any(Function),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it('uses deterministic card action replies for low-risk actions without final LLM calls', async () => {
+    const writes: string[] = [];
+    const task = { id: 101, ownerUserId: 7 };
+    const chat = {
+      performCardActionStream: jest.fn(async () => ({
+        taskId: 101,
+        status: AgentTaskStatus.Succeeded,
+        intent: 'candidate_followup',
+        confidence: 0.9,
+        entities: {},
+        shouldSearch: false,
+        shouldReplan: false,
+        shouldUpdateProfile: false,
+        shouldExecuteAction: true,
+        replyStrategy: 'action',
+        source: 'rules',
+        action: 'candidate.like',
+        savedContext: true,
+        profileUpdated: false,
+        shouldQueueRun: false,
+        runMode: null,
+        assistantMessage:
+          '已收藏陈砚。我会把这个偏好用于后续排序，但不会自动发送消息或建立连接。',
+        cards: [],
+        permissionMode: 'limited_auto',
+        safety: {
+          blocked: false,
+          level: 'low',
+          reasons: [],
+          boundaryNotes: ['收藏只是记录偏好。'],
+          requiredConfirmations: [],
+        },
+      })),
+    };
+    const finalResponses = {
+      generate: jest.fn(async () => '不应该调用模型。'),
+    };
+    const messageLog = {
+      recordAssistantMessage: jest.fn().mockResolvedValue(undefined),
+    };
+    const taskLifecycle = {
+      assertTaskOwner: jest.fn().mockResolvedValue(task),
+    };
+    const controller = new SocialAgentChatController(
+      chat as unknown as SocialAgentChatService,
+      {} as unknown as SocialAgentCandidateCommandService,
+      new UserFacingResponseSanitizerService(
+        new LightStatusMapperService(),
+        new AgentCardAssemblerService(),
+      ),
+      undefined,
+      undefined,
+      finalResponses as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      messageLog as never,
+      taskLifecycle as never,
+    );
+    const response = {
+      status: jest.fn(),
+      setHeader: jest.fn(),
+      flushHeaders: jest.fn(),
+      write: jest.fn((chunk: string) => {
+        writes.push(chunk);
+      }),
+      end: jest.fn(),
+    } as unknown as Response;
+
+    await controller.performTaskActionStream(
+      { user: { id: 7 } } as Parameters<
+        SocialAgentChatController['performTaskActionStream']
+      >[0],
+      101,
+      { action: 'candidate.like', idempotencyKey: 'save-1' },
+      response,
+    );
+
+    for (const action of [
+      'view_activity',
+      'see_more',
+      'dislike_candidate',
+      'regenerate_opener',
+      'skip_publish',
+    ]) {
+      await controller.performTaskActionStream(
+        { user: { id: 7 } } as Parameters<
+          SocialAgentChatController['performTaskActionStream']
+        >[0],
+        101,
+        { action: action as never, idempotencyKey: `${action}-1` },
+        response,
+      );
+    }
+
+    const serialized = writes.join('');
+    expect(finalResponses.generate).not.toHaveBeenCalled();
+    expect(taskLifecycle.assertTaskOwner).toHaveBeenCalledWith(101, 7);
+    expect(messageLog.recordAssistantMessage).toHaveBeenCalledWith(
+      task,
+      '已收藏陈砚。我会把这个偏好用于后续排序，但不会自动发送消息或建立连接。',
+      expect.objectContaining({
+        assistantMessage:
+          '已收藏陈砚。我会把这个偏好用于后续排序，但不会自动发送消息或建立连接。',
+        assistantMessageSource: 'deterministic_action',
+      }),
+      { replaceLastAssistantTurn: true },
+    );
+    expect(serialized).toContain('已收藏陈砚');
+    expect(serialized).not.toContain('"assistantMessageSource":"llm"');
   });
 
   it('persists final LLM card action text by replacing the prior action summary', async () => {
@@ -2624,7 +2864,7 @@ describe('SocialAgentChatController user-facing stream', () => {
     expect(response.setHeader).toHaveBeenCalledWith('X-Accel-Buffering', 'no');
     expect(response.flush).toHaveBeenCalled();
     expect(early).toContain('"type":"run.started"');
-    expect(early).toContain('"title":"正在处理你的选择"');
+    expect(early).toContain('"title":"正在确认你的选择"');
     expect(early).toContain('"type":"visible_process.delta"');
     expect(early).toContain('"title":"正在读取你的偏好"');
     expect(early).not.toContain('"type":"assistant_delta"');
