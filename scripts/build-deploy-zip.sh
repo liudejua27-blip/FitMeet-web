@@ -442,6 +442,7 @@ require_file_contains "scripts/verify-agent-release.sh" "social-agent-candidate-
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-candidate-score-breakdown.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-brain.service.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-intent-router.service.spec.ts"
+require_file_contains "scripts/verify-agent-release.sh" "social-agent-workflow-router.service.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-chat-llm.service.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-chat-llm-prompts.spec.ts"
 require_file_contains "scripts/verify-agent-release.sh" "social-agent-chat-memory.presenter.spec.ts"

@@ -226,6 +226,7 @@ pnpm --dir "${ROOT_DIR}/backend" exec jest \
   src/agent-gateway/public-social-intent.presenter.spec.ts \
   src/agent-gateway/social-agent-profile-gate.service.spec.ts \
   src/agent-gateway/social-agent-social-intent-gate.spec.ts \
+  src/agent-gateway/social-agent-workflow-router.service.spec.ts \
   src/agent-gateway/social-agent-opportunity-clarification.spec.ts \
   src/agent-gateway/social-agent-draft-publication.service.spec.ts \
   src/agent-gateway/social-agent-draft-search.service.spec.ts \
