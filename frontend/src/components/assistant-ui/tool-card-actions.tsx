@@ -300,6 +300,25 @@ export function UnifiedActionCard({
           schemaAction: inlineApproval.confirmAction.schemaAction,
           payload: inlineApproval.confirmAction.payload ?? {},
         });
+        const chainedApproval = inlineApprovalFromResponse(
+          response,
+          inlineApproval.actionKey,
+          inlineApproval.confirmAction.schemaAction ??
+            inlineApproval.confirmAction.action ??
+            inlineApproval.actionKey,
+        );
+        if (chainedApproval) {
+          setCardActionRuntimeState(runtimeKey, {
+            busyKey: null,
+            completedKey: null,
+            failedKey: null,
+            error: null,
+            inlineApproval: chainedApproval,
+            inlineDraft: actionState.inlineDraft,
+            inlineOutcome: actionState.inlineOutcome,
+          });
+          return;
+        }
         const outcome = inlineOutcomeFromApprovalResponse(response, inlineApproval, decision);
         setCardActionRuntimeState(runtimeKey, {
           busyKey: null,

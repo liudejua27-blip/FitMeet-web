@@ -435,6 +435,75 @@ export class SocialAgentCardActionRouterService {
       taskId,
       this.publishDraftFromPayload(payload),
     );
+    const publishStatus = this.text(result.status);
+    const pendingApproval = this.record(result.pendingApproval);
+    const approvalId = this.number(result.approvalId ?? pendingApproval.id);
+    if (publishStatus === 'pending_approval' || approvalId) {
+      return this.simpleRouteResult({
+        taskId,
+        assistantMessage:
+          '发布到发现前还需要你确认。确认后，这张约练卡才会公开给附近可发现用户。',
+        pendingApproval:
+          approvalId && Object.keys(pendingApproval).length > 0
+            ? ({
+                id: approvalId,
+                type: pendingApproval.type,
+                actionType:
+                  this.text(pendingApproval.actionType) ||
+                  'publish_social_request',
+                summary:
+                  this.text(pendingApproval.summary) || '发布约练卡到发现页',
+                riskLevel: pendingApproval.riskLevel,
+                payload: this.record(pendingApproval.payload),
+                expiresAt: this.text(pendingApproval.expiresAt) || null,
+              } as never)
+            : null,
+        cards: [
+          {
+            id: `publish_to_discover:approval:${taskId}:${approvalId || 'pending'}`,
+            type: 'safety_boundary',
+            schemaVersion: 'fitmeet.tool-ui.v1',
+            schemaType: 'safety.approval',
+            title: '确认发布到发现',
+            body: '确认后，这张约练卡会公开给附近可发现用户。不会公开精确位置或联系方式。',
+            status: 'waiting_confirmation',
+            data: {
+              taskId,
+              approvalId,
+              approval: pendingApproval,
+              approvalPolicy: 'confirm_before_public_publish',
+              actionType: 'publish_social_request',
+              riskLevel: this.text(pendingApproval.riskLevel) || 'medium',
+            },
+            actions: [
+              {
+                id: 'confirm_publish_to_discover',
+                label: '同意并发布',
+                action: 'publish_to_discover',
+                schemaAction: 'publish_to_discover',
+                requiresConfirmation: true,
+                payload: {
+                  ...payload,
+                  approvalId,
+                  confirmedPublish: true,
+                  approved: true,
+                  confirmed: true,
+                  taskId,
+                },
+              },
+              {
+                id: 'skip_publish_to_discover',
+                label: '暂不发布',
+                action: 'activity.skip_publish',
+                schemaAction: 'activity.skip_publish',
+                requiresConfirmation: false,
+                payload: { taskId },
+              },
+            ],
+          },
+        ],
+      });
+    }
     const publicIntentId = this.text(result.publicIntentId);
     const socialRequestId = this.number(result.socialRequestId);
     const discoverHref = this.text(result.discoverHref) || (publicIntentId
@@ -527,6 +596,7 @@ export class SocialAgentCardActionRouterService {
     taskId: number;
     assistantMessage: string;
     cards?: SocialAgentIntentRouteResult['cards'];
+    pendingApproval?: SocialAgentIntentRouteResult['pendingApproval'];
   }): SocialAgentIntentRouteResult {
     return {
       intent: 'action_request',
@@ -552,7 +622,7 @@ export class SocialAgentCardActionRouterService {
       shouldQueueRun: false,
       runMode: null,
       queuedRun: null,
-      pendingApproval: null,
+      pendingApproval: input.pendingApproval ?? null,
       activityResults: [],
       profileUpdateProposal: null,
       cards: input.cards ?? [],

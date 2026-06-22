@@ -81,6 +81,58 @@ export class SocialAgentDraftPublicationService {
     const output = this.isRecord(publishAction.output)
       ? publishAction.output
       : {};
+    const pendingApproval = this.pendingApprovalFromOutput(output);
+    if (pendingApproval) {
+      await this.writeEvent(
+        task,
+        AgentTaskEventType.ConfirmationRequested,
+        '发布约练等待用户确认',
+        {
+          status: 'pending_approval',
+          approvalId: pendingApproval.id,
+          approval: pendingApproval,
+          toolName: SocialAgentToolName.CreateSocialRequest,
+          toolCallId: publishAction.id,
+        },
+      );
+      this.rememberShortTermStep(
+        task,
+        'publish_social_request_approval',
+        '发布约练等待用户确认',
+        'awaiting_confirmation',
+      );
+      rememberSocialAgentShortTerm(task, {
+        publishStatus: 'pending_approval',
+        pendingPublishApprovalId: pendingApproval.id,
+        pendingApprovals: [pendingApproval],
+      });
+      task.status = AgentTaskStatus.AwaitingConfirmation;
+      task.statusReason = 'publish_social_request_requires_approval';
+      task.result = {
+        ...(task.result ?? {}),
+        publishSocialRequest: {
+          approvalId: pendingApproval.id,
+          pendingApproval,
+          status: 'pending_approval',
+          synced: false,
+          toolCallId: publishAction.id,
+        },
+      };
+      await this.taskRepo.save(task);
+
+      return {
+        success: false,
+        taskId,
+        approvalId: pendingApproval.id,
+        pendingApproval,
+        status: 'pending_approval',
+        taskStatus: task.status,
+        synced: false,
+        toolCallId: publishAction.id,
+        message: '发布到发现前需要你确认，确认后才会公开约练卡。',
+      };
+    }
+
     const socialRequestId = this.number(
       output.socialRequestId ?? output.id ?? requestId,
     );
@@ -228,6 +280,32 @@ export class SocialAgentDraftPublicationService {
   private number(value: unknown): number | null {
     const num = Number(value);
     return Number.isFinite(num) && num > 0 ? num : null;
+  }
+
+  private pendingApprovalFromOutput(
+    output: Record<string, unknown>,
+  ): Record<string, unknown> | null {
+    const isPending =
+      output.pendingApproval === true || output.status === 'pending_approval';
+    if (!isPending) return null;
+    const approval = this.isRecord(output.approval) ? output.approval : {};
+    const approvalId = this.number(output.approvalId ?? approval.id);
+    if (!approvalId) return null;
+    return {
+      id: approvalId,
+      type: cleanDisplayText(approval.type, 'custom'),
+      actionType: cleanDisplayText(
+        approval.actionType,
+        'publish_social_request',
+      ),
+      summary: cleanDisplayText(
+        approval.summary,
+        '发布约练卡到发现页',
+      ),
+      riskLevel: cleanDisplayText(approval.riskLevel, 'medium'),
+      payload: this.isRecord(approval.payload) ? approval.payload : {},
+      expiresAt: cleanDisplayText(approval.expiresAt, '') || null,
+    };
   }
 
   private discoverHref(

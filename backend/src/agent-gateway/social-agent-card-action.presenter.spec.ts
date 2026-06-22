@@ -648,4 +648,40 @@ describe('social agent card action presenter', () => {
       '调整约练时间',
     );
   });
+
+  it('offers private matching actions when a draft is kept private', () => {
+    const timeline = buildSocialAgentMeetLoopTimelineCard({
+      taskId: 101,
+      activityId: 700,
+      candidateUserId: 22,
+      stage: 'activity_draft_private',
+      nextAction:
+        '你可以继续私密匹配公开可发现用户，也可以之后再确认发布到发现。',
+      payload: { city: '青岛', visibility: 'private' },
+    });
+
+    expect(timeline.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: '继续私密匹配',
+          schemaAction: 'candidate.more_like_this',
+          requiresConfirmation: false,
+          payload: expect.objectContaining({
+            privateMatchMode: true,
+            candidateSearchMode: 'private_match_without_discover_publish',
+            publicDiscoverPublishSkipped: true,
+          }),
+        }),
+        expect.objectContaining({
+          label: '重新发布到发现',
+          schemaAction: 'publish_to_discover',
+          requiresConfirmation: true,
+          payload: expect.objectContaining({
+            checkpointRequired: true,
+            resumeMode: 'resume_after_approval',
+          }),
+        }),
+      ]),
+    );
+  });
 });

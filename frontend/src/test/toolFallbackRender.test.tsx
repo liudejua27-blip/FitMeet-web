@@ -1244,9 +1244,16 @@ describe('assistant-ui tool fallback rendering', () => {
       }
       return response({ assistantMessage: '已更新这张约练卡。', cards: [], pendingConfirmations: [] });
     });
+    const onApproveApproval = vi.fn(() =>
+      response({
+        assistantMessage: '已确认，正在发布到发现。',
+        cards: [],
+        pendingConfirmations: [],
+      }),
+    );
 
     render(
-      <FitMeetToolUIActionsProvider value={{ onCardAction }}>
+      <FitMeetToolUIActionsProvider value={{ onApproveApproval, onCardAction }}>
         <AssistantDataFallback
           type="data"
           status={{ type: 'complete' }}
@@ -1332,6 +1339,18 @@ describe('assistant-ui tool fallback rendering', () => {
           schemaAction: 'publish_to_discover',
           action: 'publish_to_discover',
           payload: expect.objectContaining({ confirmedPublish: true }),
+        }),
+      ),
+    );
+    const chainedApproval = await screen.findByTestId('assistant-ui-inline-approval-panel');
+    expect(chainedApproval).toHaveTextContent('确认发布到发现');
+    expect(chainedApproval).not.toHaveTextContent(/riskLevel|medium|checkpoint|audit|风险级别|风险等级|动作：|动作:/i);
+    fireEvent.click(within(chainedApproval).getByRole('button', { name: '确认发布' }));
+    await waitFor(() =>
+      expect(onApproveApproval).toHaveBeenCalledWith(
+        expect.objectContaining({
+          approvalId: 812,
+          payload: expect.objectContaining({ decision: 'approved', approvalId: 812 }),
         }),
       ),
     );

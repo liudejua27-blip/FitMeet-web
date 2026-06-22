@@ -589,6 +589,7 @@ export function buildSocialAgentMeetLoopTimelineCard(input: {
       taskId: input.taskId,
       activityId: input.activityId ?? null,
       candidateUserId: input.candidateUserId ?? null,
+      stage,
       payload,
     }),
   };
@@ -632,9 +633,11 @@ function meetLoopTimelineActions(input: {
   taskId: number;
   activityId: number | null;
   candidateUserId: number | null;
+  stage: string;
   payload: Record<string, unknown>;
 }): FitMeetAlphaCardAction[] {
   const counterpartIntent = cleanDisplayText(input.payload.counterpartIntent, '');
+  const stage = cleanDisplayText(input.stage, '');
   const nextStepText = cleanDisplayText(
     input.payload.nextSafeStep ??
       input.payload.nextAction ??
@@ -647,6 +650,43 @@ function meetLoopTimelineActions(input: {
     candidateUserId: input.candidateUserId,
     ...input.payload,
   };
+  if (
+    stage === 'activity_draft_private' ||
+    cleanDisplayText(input.payload.visibility, '') === 'private'
+  ) {
+    return [
+      {
+        id: 'meet_loop_private_match',
+        label: '继续私密匹配',
+        action: 'candidate.more_like_this',
+        schemaAction: 'candidate.more_like_this',
+        requiresConfirmation: false,
+        payload: {
+          ...basePayload,
+          privateMatchMode: true,
+          candidateSearchMode: 'private_match_without_discover_publish',
+          sourceAction: 'activity.skip_publish',
+          publicDiscoverPublishSkipped: true,
+        },
+      },
+      {
+        id: 'meet_loop_publish_later',
+        label: '重新发布到发现',
+        action: 'publish_to_discover',
+        schemaAction: 'publish_to_discover',
+        requiresConfirmation: true,
+        payload: {
+          ...basePayload,
+          confirmedPublish: false,
+          approvalRequired: true,
+          checkpointRequired: true,
+          resumeMode: 'resume_after_approval',
+          sourceAction: 'activity.skip_publish.republish',
+        },
+      },
+      meetLoopRescheduleAction(basePayload),
+    ];
+  }
   if (counterpartIntent === 'declined') {
     return [
       {

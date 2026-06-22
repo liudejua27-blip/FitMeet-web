@@ -905,10 +905,31 @@ describe('SocialAgentMeetLoopService', () => {
         expect.objectContaining({
           type: 'meet_loop_timeline',
           schemaType: 'meet_loop.timeline',
+          actions: expect.arrayContaining([
+            expect.objectContaining({
+              label: '继续私密匹配',
+              schemaAction: 'candidate.more_like_this',
+              requiresConfirmation: false,
+              payload: expect.objectContaining({
+                privateMatchMode: true,
+                publicDiscoverPublishSkipped: true,
+              }),
+            }),
+            expect.objectContaining({
+              label: '重新发布到发现',
+              schemaAction: 'publish_to_discover',
+              requiresConfirmation: true,
+              payload: expect.objectContaining({
+                checkpointRequired: true,
+                resumeMode: 'resume_after_approval',
+              }),
+            }),
+          ]),
           data: expect.objectContaining({
             loopStage: 'activity_draft_private',
             timeline: expect.objectContaining({
-              nextAction: '你可以继续修改、重新发布，或先和 Agent 聊清楚需求。',
+              nextAction:
+                '你可以继续私密匹配公开可发现用户，也可以之后再确认发布到发现。',
             }),
           }),
         }),

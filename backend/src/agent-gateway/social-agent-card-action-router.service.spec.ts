@@ -928,6 +928,79 @@ describe('SocialAgentCardActionRouterService', () => {
     ]);
   });
 
+  it('keeps publish action waiting when the publish tool returns a pending approval', async () => {
+    const { draftPublication, handleMessage, metrics, service } = makeHarness();
+    draftPublication.publishDraft.mockResolvedValue({
+      success: false,
+      status: 'pending_approval',
+      taskStatus: 'awaiting_confirmation',
+      approvalId: 501,
+      pendingApproval: {
+        id: 501,
+        type: 'post_publish',
+        actionType: 'create_social_request',
+        summary: '创建社交需求属于高风险动作，需要确认后再执行。',
+        riskLevel: 'high',
+        payload: { socialRequestId: 301 },
+        expiresAt: null,
+      },
+      synced: false,
+    });
+
+    const result = await service.perform({
+      ownerUserId: 7,
+      taskId: 101,
+      body: {
+        action: 'publish_to_discover' as never,
+        payload: {
+          confirmedPublish: true,
+          opportunityId: 'walk-qdu',
+          title: '青岛大学散步约练',
+          city: '青岛',
+          activityType: '散步',
+          socialRequestId: 301,
+        },
+      },
+      handleMessage,
+    });
+
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(
+      'publish_to_discover',
+      { estimatedAvoidedLlmCalls: 1 },
+    );
+    expect(result.assistantMessage).toContain('发布到发现前还需要你确认');
+    expect(result.pendingApproval).toEqual(
+      expect.objectContaining({
+        id: 501,
+        actionType: 'create_social_request',
+      }),
+    );
+    expect(result.cards).toEqual([
+      expect.objectContaining({
+        schemaType: 'safety.approval',
+        status: 'waiting_confirmation',
+        title: '确认发布到发现',
+        data: expect.objectContaining({
+          approvalId: 501,
+          actionType: 'publish_social_request',
+        }),
+        actions: expect.arrayContaining([
+          expect.objectContaining({
+            label: '同意并发布',
+            schemaAction: 'publish_to_discover',
+            requiresConfirmation: true,
+            payload: expect.objectContaining({
+              approvalId: 501,
+              confirmedPublish: true,
+              socialRequestId: 301,
+            }),
+          }),
+        ]),
+      }),
+    ]);
+  });
+
   it('routes empty-candidate recovery actions deterministically without chat LLM', async () => {
     const { candidateActions, handleMessage, meetLoop, metrics, service } =
       makeHarness();

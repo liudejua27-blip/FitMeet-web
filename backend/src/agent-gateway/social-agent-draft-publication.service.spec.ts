@@ -179,6 +179,73 @@ describe('SocialAgentDraftPublicationService', () => {
     ).rejects.toThrow('public intent sync failed');
   });
 
+  it('keeps publish requests pending when the tool requires approval', async () => {
+    const { executor, savedEvents, service, task } = makeHarness();
+    executor.executeToolAction.mockResolvedValueOnce({
+      id: 'action_create_social_request_publish_approval',
+      toolName: SocialAgentToolName.CreateSocialRequest,
+      status: 'succeeded',
+      output: {
+        success: false,
+        status: 'pending_approval',
+        pendingApproval: true,
+        approvalId: 501,
+        approval: {
+          id: 501,
+          type: 'post_publish',
+          actionType: 'create_social_request',
+          summary: '创建社交需求属于高风险动作，需要确认后再执行。',
+          riskLevel: 'high',
+          payload: { socialRequestId: 301 },
+          expiresAt: null,
+        },
+      },
+      error: null,
+    } as never);
+
+    const result = await service.publishDraft(7, 101, {
+      socialRequestId: 301,
+      type: SocialRequestType.RunningPartner,
+      rawText: '今晚青岛轻松跑步',
+      title: '今晚青岛轻松跑步',
+      visibility: SocialRequestVisibility.Private,
+      status: UserSocialRequestStatus.Draft,
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      taskId: 101,
+      approvalId: 501,
+      status: 'pending_approval',
+      taskStatus: AgentTaskStatus.AwaitingConfirmation,
+      synced: false,
+      toolCallId: 'action_create_social_request_publish_approval',
+    });
+    expect(task.status).toBe(AgentTaskStatus.AwaitingConfirmation);
+    expect(task.statusReason).toBe('publish_social_request_requires_approval');
+    expect(task.result).toMatchObject({
+      publishSocialRequest: {
+        approvalId: 501,
+        status: 'pending_approval',
+        synced: false,
+      },
+    });
+    expect(task.memory).toMatchObject({
+      shortTerm: {
+        publishStatus: 'pending_approval',
+        pendingPublishApprovalId: 501,
+      },
+    });
+    expect(savedEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: 'confirmation.requested',
+          summary: '发布约练等待用户确认',
+        }),
+      ]),
+    );
+  });
+
   it('requires a socialRequestId from the publish output or draft metadata', async () => {
     const { executor, service } = makeHarness();
     executor.executeToolAction.mockResolvedValueOnce({

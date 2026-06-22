@@ -485,7 +485,8 @@ export class SocialAgentMeetLoopService {
     };
     transitionSocialAgentState(task, 'message_action', {
       objective: 'meet_loop',
-      nextStep: '约练卡已保留为草稿，暂不发布到发现；你可以继续修改或直接聊天。',
+      nextStep:
+        '约练卡已保留为草稿，暂不发布到发现；可以继续私密匹配公开可发现用户。',
       shouldSearchNow: false,
       awaitingSearchConfirmation: false,
       waitingFor: 'user_next_message',
@@ -505,11 +506,12 @@ export class SocialAgentMeetLoopService {
       ),
       stage: 'activity_draft_private',
       description: '这张约练卡已作为草稿保留，暂时不会发布到发现。',
-      nextAction: '你可以继续修改、重新发布，或先和 Agent 聊清楚需求。',
+      nextAction:
+        '你可以继续私密匹配公开可发现用户，也可以之后再确认发布到发现。',
       payload,
     });
     const assistantMessage =
-      '好的，我先不发布这张约练卡，已经把它保留为草稿。你可以继续修改，也可以直接和我聊下一步。';
+      '好的，我先不发布这张约练卡，已经把它保留为草稿。接下来可以直接基于你的画像和公开可发现用户做私密匹配；只有你确认后，我才会发邀请、加好友或公开发布。';
     const result = this.cardActionRouteResult(task, assistantMessage, [card]);
     await this.writeEvent(
       task,
