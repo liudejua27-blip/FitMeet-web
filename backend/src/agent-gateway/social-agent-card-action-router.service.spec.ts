@@ -157,12 +157,16 @@ describe('SocialAgentCardActionRouterService', () => {
     expect(handleMessage).not.toHaveBeenCalled();
     expect(saveResult.pendingApproval).toBeNull();
     expect(openerResult.pendingApproval).toBeNull();
-    expect(candidateActions.performCandidatePreferenceAction).toHaveBeenCalledWith(
+    expect(
+      candidateActions.performCandidatePreferenceAction,
+    ).toHaveBeenCalledWith(
       7,
       101,
       expect.objectContaining({ action: 'candidate.like' }),
     );
-    expect(candidateActions.createOpenerDraftFromCardAction).toHaveBeenCalledWith(
+    expect(
+      candidateActions.createOpenerDraftFromCardAction,
+    ).toHaveBeenCalledWith(
       7,
       101,
       expect.objectContaining({ action: 'candidate.generate_opener' }),
@@ -181,7 +185,11 @@ describe('SocialAgentCardActionRouterService', () => {
         goal: call.goal,
         tool: (
           call.plan as {
-            tools: Array<{ agent: string; toolName: string; input: Record<string, unknown> }>;
+            tools: Array<{
+              agent: string;
+              toolName: string;
+              input: Record<string, unknown>;
+            }>;
           }
         ).tools[0],
       })),
@@ -199,7 +207,9 @@ describe('SocialAgentCardActionRouterService', () => {
         tool: expect.objectContaining({
           agent: 'Social Match Agent',
           toolName: 'card_action_dispatch',
-          input: expect.objectContaining({ action: 'candidate.generate_opener' }),
+          input: expect.objectContaining({
+            action: 'candidate.generate_opener',
+          }),
         }),
       },
     ]);
@@ -211,17 +221,6 @@ describe('SocialAgentCardActionRouterService', () => {
       routeResult({
         action: 'reply',
         assistantMessage: '已记录这次私密匹配偏好。',
-      }),
-    );
-    handleMessage.mockResolvedValue(
-      routeResult({
-        intent: 'social_search',
-        action: 'queue_search' as never,
-        replyStrategy: 'search_candidates',
-        shouldSearch: true,
-        shouldQueueRun: true,
-        runMode: 'initial',
-        assistantMessage: '正在筛选公开可发现的人。',
       }),
     );
 
@@ -236,40 +235,58 @@ describe('SocialAgentCardActionRouterService', () => {
           publicDiscoverPublishSkipped: true,
           candidateSearchMode: 'private_match_without_discover_publish',
           sourceAction: 'activity.skip_publish',
+          city: '青岛',
           title: '青岛大学轻松散步',
           timePreference: '今天晚上',
           locationPreference: '青岛大学附近',
           activityType: '散步',
+          targetGender: '女生',
         },
+        clientContext: { threadId: 'agent-task:101' },
       },
       handleMessage,
     });
 
-    expect(candidateActions.performCandidatePreferenceAction).toHaveBeenCalledWith(
+    expect(
+      candidateActions.performCandidatePreferenceAction,
+    ).toHaveBeenCalledWith(
       7,
       101,
       expect.objectContaining({ action: 'candidate.more_like_this' }),
     );
-    expect(handleMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskId: 101,
-        hasCandidates: true,
-        conversationIntent: 'social',
-        message: expect.stringContaining('不发布到发现，继续私密匹配公开可发现候选人'),
-        clientContext: expect.objectContaining({
-          source: 'agent_card_action',
-          conversationIntent: 'social',
-        }),
-      }),
-      undefined,
-      undefined,
-    );
+    expect(handleMessage).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       intent: 'social_search',
+      action: 'queue_search',
+      replyStrategy: 'search_candidates',
       shouldSearch: true,
       shouldQueueRun: true,
-      runMode: 'initial',
+      runMode: 'follow_up',
+      assistantMessage: expect.stringContaining('不发布到发现'),
+      entities: expect.objectContaining({
+        city: '青岛',
+        activityType: '散步',
+        targetGender: '女生',
+        timePreference: '今天晚上',
+        locationPreference: '青岛大学附近',
+      }),
+      structuredIntent: expect.objectContaining({
+        mode: 'private_candidate_search',
+        publicDiscoverPublishSkipped: true,
+        message: expect.stringContaining(
+          '不发布到发现，继续私密匹配公开可发现候选人',
+        ),
+      }),
+      runtime: expect.objectContaining({
+        threadId: 'agent-task:101',
+        idempotencyKey: 'private-more-like-this-101',
+      }),
     });
+    expect(result.structuredIntent).toEqual(
+      expect.objectContaining({
+        taskId: 101,
+      }),
+    );
     expect(metrics.recordDeterministicAction).not.toHaveBeenCalledWith(
       'candidate.more_like_this',
       expect.anything(),
@@ -277,7 +294,8 @@ describe('SocialAgentCardActionRouterService', () => {
   });
 
   it('normalizes legacy low-risk action aliases before dispatching', async () => {
-    const { candidateActions, handleMessage, meetLoop, service } = makeHarness();
+    const { candidateActions, handleMessage, meetLoop, service } =
+      makeHarness();
     candidateActions.performCandidatePreferenceAction.mockResolvedValue(
       routeResult({
         action: 'reply',
@@ -425,7 +443,8 @@ describe('SocialAgentCardActionRouterService', () => {
       return Promise.resolve(
         routeResult({
           action: 'reply',
-          assistantMessage: '我已恢复到上次保存的邀约进度。下一步仍需要你确认。',
+          assistantMessage:
+            '我已恢复到上次保存的邀约进度。下一步仍需要你确认。',
           cards: [
             {
               id: 'meet-loop-resume',
@@ -751,10 +770,7 @@ describe('SocialAgentCardActionRouterService', () => {
       }),
     );
     expect(executeCalls).toHaveLength(3);
-    for (const action of [
-      'opener.confirm_send',
-      'candidate.connect',
-    ]) {
+    for (const action of ['opener.confirm_send', 'candidate.connect']) {
       expect(metrics.recordDeterministicAction).toHaveBeenCalledWith(action, {
         estimatedAvoidedLlmCalls: 1,
       });
@@ -800,8 +816,14 @@ describe('SocialAgentCardActionRouterService', () => {
   });
 
   it('normalizes legacy raw card actions before dispatching to subagent handlers', async () => {
-    const { candidateActions, draftPublication, executeCalls, handleMessage, meetLoop, service } =
-      makeHarness();
+    const {
+      candidateActions,
+      draftPublication,
+      executeCalls,
+      handleMessage,
+      meetLoop,
+      service,
+    } = makeHarness();
     candidateActions.performCandidatePreferenceAction.mockResolvedValue(
       routeResult({
         action: 'reply',
@@ -887,23 +909,31 @@ describe('SocialAgentCardActionRouterService', () => {
     }
 
     expect(handleMessage).not.toHaveBeenCalled();
-    expect(candidateActions.performCandidatePreferenceAction).toHaveBeenCalledWith(
+    expect(
+      candidateActions.performCandidatePreferenceAction,
+    ).toHaveBeenCalledWith(
       7,
       101,
       expect.objectContaining({ action: 'candidate.like' }),
     );
-    expect(candidateActions.createOpenerDraftFromCardAction).toHaveBeenCalledWith(
+    expect(
+      candidateActions.createOpenerDraftFromCardAction,
+    ).toHaveBeenCalledWith(
       7,
       101,
       expect.objectContaining({ action: 'candidate.generate_opener' }),
     );
-    expect(candidateActions.confirmOpenerSendFromCardAction).toHaveBeenCalledWith(
+    expect(
+      candidateActions.confirmOpenerSendFromCardAction,
+    ).toHaveBeenCalledWith(
       7,
       101,
       expect.objectContaining({ action: 'opener.confirm_send' }),
       { signal: null },
     );
-    expect(candidateActions.connectCandidateFromCardAction).toHaveBeenCalledWith(
+    expect(
+      candidateActions.connectCandidateFromCardAction,
+    ).toHaveBeenCalledWith(
       7,
       101,
       expect.objectContaining({ action: 'candidate.connect' }),
@@ -1116,14 +1146,16 @@ describe('SocialAgentCardActionRouterService', () => {
     }
 
     expect(handleMessage).not.toHaveBeenCalled();
-    expect(candidateActions.performCandidatePreferenceAction).toHaveBeenCalledWith(
+    expect(
+      candidateActions.performCandidatePreferenceAction,
+    ).toHaveBeenCalledWith(
       7,
       101,
       expect.objectContaining({ action: 'candidate.more_like_this' }),
     );
-    expect(candidateActions.performCandidatePreferenceAction).toHaveBeenCalledTimes(
-      2,
-    );
+    expect(
+      candidateActions.performCandidatePreferenceAction,
+    ).toHaveBeenCalledTimes(2);
     expect(meetLoop.performActivityAction).toHaveBeenCalledWith(
       7,
       101,
@@ -1185,7 +1217,9 @@ describe('SocialAgentCardActionRouterService', () => {
     expect(
       candidateActions.performCandidatePreferenceAction,
     ).not.toHaveBeenCalled();
-    expect(candidateActions.connectCandidateFromCardAction).not.toHaveBeenCalled();
+    expect(
+      candidateActions.connectCandidateFromCardAction,
+    ).not.toHaveBeenCalled();
     expect(meetLoop.performActivityAction).not.toHaveBeenCalled();
     expect(lifeGraphActions.performUpdateAction).not.toHaveBeenCalled();
   });

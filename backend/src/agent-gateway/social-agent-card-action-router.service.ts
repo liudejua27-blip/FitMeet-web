@@ -147,24 +147,7 @@ export class SocialAgentCardActionRouterService {
           normalizedBody,
         );
       if (this.shouldContinuePrivateCandidateSearch(action, normalizedBody)) {
-        return input.handleMessage(
-          {
-            message: this.privateCandidateSearchMessage(normalizedBody),
-            taskId,
-            hasCandidates: true,
-            conversationIntent: 'social',
-            idempotencyKey:
-              normalizedBody.idempotencyKey ??
-              this.privateCandidateSearchIdempotencyKey(taskId, normalizedBody),
-            clientContext: {
-              ...(normalizedBody.clientContext ?? {}),
-              source: 'agent_card_action',
-              conversationIntent: 'social',
-            },
-          },
-          input.emit,
-          input.options,
-        );
+        return this.privateCandidateSearchRouteResult(taskId, normalizedBody);
       }
       return candidatePreferenceResult;
     }
@@ -186,11 +169,19 @@ export class SocialAgentCardActionRouterService {
     }
 
     if (this.isPublishAction(action)) {
-      return this.publishToDiscoverFromCardAction(ownerUserId, taskId, normalizedBody);
+      return this.publishToDiscoverFromCardAction(
+        ownerUserId,
+        taskId,
+        normalizedBody,
+      );
     }
 
     if (this.isActivityAction(action)) {
-      return this.meetLoop.performActivityAction(ownerUserId, taskId, normalizedBody);
+      return this.meetLoop.performActivityAction(
+        ownerUserId,
+        taskId,
+        normalizedBody,
+      );
     }
 
     if (this.isLifeGraphAction(action)) {
@@ -228,7 +219,9 @@ export class SocialAgentCardActionRouterService {
   }
 
   private isPublishAction(action: string) {
-    return action === 'publish_to_discover' || action === 'publish_social_request';
+    return (
+      action === 'publish_to_discover' || action === 'publish_social_request'
+    );
   }
 
   private shouldContinuePrivateCandidateSearch(
@@ -245,12 +238,18 @@ export class SocialAgentCardActionRouterService {
     );
   }
 
-  private privateCandidateSearchMessage(body: SocialAgentCardActionBody): string {
+  private privateCandidateSearchMessage(
+    body: SocialAgentCardActionBody,
+  ): string {
     const payload = body.payload ?? {};
     const title = this.text(payload.title);
     const activityType = this.text(payload.activityType ?? payload.activity);
-    const time = this.text(payload.timePreference ?? payload.timeWindow ?? payload.time);
-    const location = this.text(payload.locationPreference ?? payload.locationText ?? payload.location);
+    const time = this.text(
+      payload.timePreference ?? payload.timeWindow ?? payload.time,
+    );
+    const location = this.text(
+      payload.locationPreference ?? payload.locationText ?? payload.location,
+    );
     const details = [title, time, location, activityType]
       .map((value) => value.trim())
       .filter(Boolean);
@@ -261,6 +260,74 @@ export class SocialAgentCardActionRouterService {
     ]
       .filter(Boolean)
       .join(' ');
+  }
+
+  private privateCandidateSearchRouteResult(
+    taskId: number,
+    body: SocialAgentCardActionBody,
+  ): SocialAgentIntentRouteResult {
+    const payload = body.payload ?? {};
+    const idempotencyKey =
+      body.idempotencyKey ??
+      this.privateCandidateSearchIdempotencyKey(taskId, body);
+    const title = this.text(payload.title);
+    const activityType = this.text(payload.activityType ?? payload.activity);
+    const timePreference = this.text(
+      payload.timePreference ?? payload.timeWindow ?? payload.time,
+    );
+    const locationPreference = this.text(
+      payload.locationPreference ?? payload.locationText ?? payload.location,
+    );
+    const assistantMessage =
+      '已记录你不发布到发现的选择。我会继续只筛选公开可发现候选，并把结果留在当前对话里。';
+    return {
+      intent: 'social_search',
+      confidence: 1,
+      entities: {
+        city: this.text(payload.city),
+        activityType,
+        targetGender: this.text(payload.targetGender),
+        timePreference,
+        locationPreference,
+      },
+      shouldSearch: true,
+      shouldReplan: false,
+      shouldUpdateProfile: false,
+      shouldExecuteAction: false,
+      replyStrategy: 'search_candidates',
+      source: 'rules',
+      action: 'queue_search',
+      taskId,
+      assistantMessage,
+      assistantMessageSource: 'deterministic_action',
+      savedContext: true,
+      profileUpdated: false,
+      shouldQueueRun: true,
+      runMode: 'follow_up',
+      queuedRun: null,
+      pendingApproval: null,
+      activityResults: [],
+      profileUpdateProposal: null,
+      cards: [],
+      permissionMode: 'confirm' as never,
+      structuredIntent: {
+        schemaVersion: 'fitmeet.social-intent.v1',
+        source: 'agent_card_action',
+        mode: 'private_candidate_search',
+        taskId,
+        message: this.privateCandidateSearchMessage(body),
+        idempotencyKey,
+        title,
+        activityType,
+        timePreference,
+        locationPreference,
+        publicDiscoverPublishSkipped: true,
+      },
+      runtime: {
+        threadId: this.text(body.clientContext?.threadId) || null,
+        idempotencyKey,
+      },
+    };
   }
 
   private privateCandidateSearchIdempotencyKey(
@@ -275,13 +342,15 @@ export class SocialAgentCardActionRouterService {
       this.text(payload.activityId) ||
       this.text(payload.title) ||
       'current-task';
-    return `private-candidate-search:${taskId}:${stableTarget
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, '-')
-      .replace(/[^a-z0-9:_-]+/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '') || 'current-task'}`;
+    return `private-candidate-search:${taskId}:${
+      stableTarget
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9:_-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '') || 'current-task'
+    }`;
   }
 
   private isLifeGraphAction(action: string) {
@@ -581,11 +650,13 @@ export class SocialAgentCardActionRouterService {
     }
     const publicIntentId = this.text(result.publicIntentId);
     const socialRequestId = this.number(result.socialRequestId);
-    const discoverHref = this.text(result.discoverHref) || (publicIntentId
-      ? `/public-intent/${encodeURIComponent(publicIntentId)}`
-      : socialRequestId
-        ? `/social-request/${encodeURIComponent(String(socialRequestId))}`
-        : '/discover');
+    const discoverHref =
+      this.text(result.discoverHref) ||
+      (publicIntentId
+        ? `/public-intent/${encodeURIComponent(publicIntentId)}`
+        : socialRequestId
+          ? `/social-request/${encodeURIComponent(String(socialRequestId))}`
+          : '/discover');
     return this.simpleRouteResult({
       taskId,
       assistantMessage: `已发布到发现页。你可以在发现页查看这张约练卡，也可以打开详情继续查看发起人公开信息和动态。`,
@@ -613,7 +684,12 @@ export class SocialAgentCardActionRouterService {
               action: 'activity.view_detail',
               schemaAction: 'activity.view_detail',
               requiresConfirmation: false,
-              payload: { taskId, publicIntentId, socialRequestId, discoverHref },
+              payload: {
+                taskId,
+                publicIntentId,
+                socialRequestId,
+                discoverHref,
+              },
             },
           ],
         },
@@ -638,7 +714,8 @@ export class SocialAgentCardActionRouterService {
       draft.socialRequestId ?? metadata.socialRequestId,
     );
     const activityType =
-      this.text(draft.activityType ?? draft.requestType ?? draft.type) || '散步';
+      this.text(draft.activityType ?? draft.requestType ?? draft.type) ||
+      '散步';
     const title =
       this.text(draft.title ?? draft.activityTitle ?? draft.opportunityTitle) ||
       `${this.text(draft.city) || '同城'}${activityType}约练`;
@@ -648,13 +725,17 @@ export class SocialAgentCardActionRouterService {
     return {
       ...draft,
       socialRequestId,
-      type: this.socialRequestType(draft.type ?? draft.requestType ?? activityType),
+      type: this.socialRequestType(
+        draft.type ?? draft.requestType ?? activityType,
+      ),
       title,
       description,
       rawText: this.text(draft.rawText ?? description) || description,
       city: this.text(draft.city) || '青岛',
       radiusKm: this.number(draft.radiusKm) ?? 5,
-      interestTags: this.stringArray(draft.interestTags ?? draft.tags ?? [activityType]),
+      interestTags: this.stringArray(
+        draft.interestTags ?? draft.tags ?? [activityType],
+      ),
       activityType,
       safetyRequirement: SocialRequestSafety.LowRiskOnly,
       agentAllowed: true,
@@ -707,8 +788,10 @@ export class SocialAgentCardActionRouterService {
 
   private socialRequestType(value: unknown): SocialRequestType {
     const raw = this.text(value).toLowerCase();
-    if (/running|run|跑步|慢跑/.test(raw)) return SocialRequestType.RunningPartner;
-    if (/fitness|gym|健身|训练/.test(raw)) return SocialRequestType.FitnessPartner;
+    if (/running|run|跑步|慢跑/.test(raw))
+      return SocialRequestType.RunningPartner;
+    if (/fitness|gym|健身|训练/.test(raw))
+      return SocialRequestType.FitnessPartner;
     if (/dog|遛狗/.test(raw)) return SocialRequestType.DogWalking;
     if (/coffee|咖啡/.test(raw)) return SocialRequestType.CoffeeChat;
     if (/walk|散步|city/.test(raw)) return SocialRequestType.CityWalk;
