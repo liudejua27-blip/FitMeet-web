@@ -142,9 +142,22 @@ export function isAwaitingSocialOpportunityClarification(
   const currentTask = isRecord(taskContext?.currentTask)
     ? taskContext?.currentTask
     : {};
+  const taskMemory = isRecord(taskContext?.taskMemory)
+    ? taskContext?.taskMemory
+    : {};
+  const memoryCurrentTask = isRecord(taskMemory.currentTask)
+    ? taskMemory.currentTask
+    : {};
+  const waitingFor = cleanDisplayText(
+    currentTask.waitingFor ?? memoryCurrentTask.waitingFor,
+    '',
+  );
+  const awaitingSearchConfirmation =
+    currentTask.awaitingSearchConfirmation ??
+    memoryCurrentTask.awaitingSearchConfirmation;
   return (
-    currentTask.awaitingSearchConfirmation === true &&
-    cleanDisplayText(currentTask.waitingFor, '') === 'opportunity_clarification'
+    awaitingSearchConfirmation === true &&
+    waitingFor === 'opportunity_clarification'
   );
 }
 

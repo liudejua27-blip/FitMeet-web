@@ -52,6 +52,8 @@ export function buildSocialAgentOpportunityDraftFromTask(
     inferLocation(task.goal);
   const city =
     cleanDisplayText(taskMemory.activeEntities.city, '') ||
+    slotText(slots, slotSummary, 'city') ||
+    slotText(slots, slotSummary, 'geo_area') ||
     inferCity(location, message, task.goal) ||
     '青岛';
   const missing = [

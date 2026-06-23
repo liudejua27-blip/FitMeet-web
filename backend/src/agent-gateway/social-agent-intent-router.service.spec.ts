@@ -486,6 +486,30 @@ describe('SocialAgentIntentRouterService', () => {
     });
   });
 
+  it('continues opportunity clarification when waiting state is nested in task memory', async () => {
+    const router = makeRouter();
+
+    const result = await router.route({
+      message: '市南区，周六下午，瑜伽，公共场所，先站内聊',
+      taskContext: {
+        taskMemory: {
+          currentTask: {
+            awaitingSearchConfirmation: true,
+            waitingFor: 'opportunity_clarification',
+          },
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      intent: 'social_search',
+      shouldSearch: true,
+      shouldExecuteAction: false,
+      replyStrategy: 'search_candidates',
+      source: 'rules',
+    });
+  });
+
   it.each([
     '先不找了，今天有点焦虑，只想和你聊聊',
     '不需要推荐真实用户，先帮我分析一下怎么和人相处',
