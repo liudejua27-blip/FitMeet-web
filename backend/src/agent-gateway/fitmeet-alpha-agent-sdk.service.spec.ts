@@ -460,7 +460,7 @@ describe('FitMeetAlphaAgentSdkService', () => {
           }),
         }),
         expect.objectContaining({
-          label: '修改信息',
+          label: '修改卡片',
           action: 'reschedule_meet_loop',
           schemaAction: 'activity.modify_time',
           requiresConfirmation: false,

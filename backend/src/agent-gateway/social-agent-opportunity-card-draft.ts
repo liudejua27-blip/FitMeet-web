@@ -263,7 +263,7 @@ export function buildSocialAgentPublishConfirmationCard(input: {
           },
           {
             id: `modify_activity_plan:${task.id}`,
-            label: '修改信息',
+            label: '修改卡片',
             action: 'reschedule_meet_loop',
             schemaAction: 'activity.modify_time',
             loopStage: 'activity_draft_created',

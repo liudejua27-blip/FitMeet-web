@@ -189,7 +189,7 @@ describe('SocialAgentRouteActionTurnService', () => {
               }),
             }),
             expect.objectContaining({
-              label: '修改信息',
+              label: '修改卡片',
               schemaAction: 'activity.modify_time',
               requiresConfirmation: false,
             }),

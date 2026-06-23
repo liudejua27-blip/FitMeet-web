@@ -344,7 +344,7 @@ export function buildSocialAgentActivityPlanCard(input: {
       },
       {
         id: 'activity_modify_time',
-        label: '调整时间',
+        label: '修改卡片',
         action: 'reschedule_meet_loop',
         schemaAction: 'activity.modify_time',
         loopStage: 'activity_draft_created',
@@ -360,7 +360,7 @@ export function buildSocialAgentActivityPlanCard(input: {
       },
       {
         id: 'activity_modify_location',
-        label: '调整地点',
+        label: '修改卡片',
         action: 'reschedule_meet_loop',
         schemaAction: 'activity.modify_location',
         loopStage: 'activity_draft_created',
@@ -785,7 +785,7 @@ function meetLoopRescheduleAction(
 ): FitMeetAlphaCardAction {
   return {
     id: 'meet_loop_reschedule',
-    label: '调整时间',
+    label: '修改卡片',
     action: 'reschedule_meet_loop',
     schemaAction: 'meet_loop.reschedule',
     loopStage: 'activity_draft_created',

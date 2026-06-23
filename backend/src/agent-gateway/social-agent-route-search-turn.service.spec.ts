@@ -218,7 +218,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
               schemaAction: 'publish_to_discover',
             }),
             expect.objectContaining({
-              label: '修改信息',
+              label: '修改卡片',
               schemaAction: 'activity.modify_time',
             }),
             expect.objectContaining({
@@ -793,7 +793,7 @@ describe('SocialAgentRouteSearchTurnService', () => {
               schemaAction: 'publish_to_discover',
             }),
             expect.objectContaining({
-              label: '修改信息',
+              label: '修改卡片',
               schemaAction: 'activity.modify_time',
             }),
             expect.objectContaining({

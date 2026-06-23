@@ -788,7 +788,7 @@ function visualCardActionLabel(
       action.schemaAction === 'activity.modify_time' ||
       action.schemaAction === 'activity.modify_location'
     ) {
-      return '修改信息';
+      return '修改卡片';
     }
     if (action.schemaAction === 'activity.skip_publish') return published ? null : '暂不发布';
     if (action.schemaAction === 'activity.view_detail') return '查看详情';
@@ -1800,7 +1800,7 @@ function normalizeVisibleActionLabel(
     schemaType === 'social_match.activity' &&
     (canonicalKey === 'activity.modify_time' || canonicalKey === 'activity.modify_location')
   ) {
-    return '修改信息';
+    return '修改卡片';
   }
   return label;
 }
@@ -1869,7 +1869,7 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
       },
       {
         id: `${card.id}:edit`,
-        label: '修改信息',
+        label: '修改卡片',
         requiresConfirmation: false,
         schemaAction: 'activity.modify_time',
         action: 'activity.modify_time',

@@ -296,12 +296,12 @@ describe('tool-card-actions runtime identity', () => {
       ],
     );
 
-    expect(actions.map((action) => action.label)).toEqual(['确认发布', '修改信息', '暂不发布']);
+    expect(actions.map((action) => action.label)).toEqual(['确认发布', '修改卡片', '暂不发布']);
     expect(actions).toHaveLength(3);
     expect(actions.find((action) => action.label === '确认发布')).toMatchObject({
       requiresConfirmation: true,
     });
-    expect(actions.find((action) => action.label === '修改信息')).toMatchObject({
+    expect(actions.find((action) => action.label === '修改卡片')).toMatchObject({
       requiresConfirmation: false,
     });
     expect(actions.find((action) => action.label === '暂不发布')).toMatchObject({
@@ -328,7 +328,7 @@ describe('tool-card-actions runtime identity', () => {
 
     expect(actions.find((action) => action.action === 'change_location')).toMatchObject({
       schemaAction: 'activity.modify_location',
-      label: '修改信息',
+      label: '修改卡片',
     });
   });
 

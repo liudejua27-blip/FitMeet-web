@@ -1332,7 +1332,7 @@ describe('assistant-ui tool fallback rendering', () => {
       'data-requires-confirmation',
       'true',
     );
-    expect(within(actionCard).getByRole('button', { name: '修改信息' })).toHaveAttribute(
+    expect(within(actionCard).getByRole('button', { name: '修改卡片' })).toHaveAttribute(
       'data-requires-confirmation',
       'false',
     );

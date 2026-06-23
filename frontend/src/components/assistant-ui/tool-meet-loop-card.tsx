@@ -250,8 +250,8 @@ function meetLoopResumeModeLabel(mode: 'resume' | 'reschedule' | 'review' | 'mem
 function meetLoopRecoverableActionLabel(action: string) {
   if (action === 'meet_loop.resume') return '可继续';
   if (action === 'meet_loop.reschedule') return '可改期';
-  if (action === 'activity.modify_time') return '可调整时间';
-  if (action === 'activity.modify_location') return '可调整地点';
+  if (action === 'activity.modify_time') return '可修改卡片';
+  if (action === 'activity.modify_location') return '可修改卡片';
   if (action === 'candidate.connect') return '确认后连接';
   return '可以继续';
 }

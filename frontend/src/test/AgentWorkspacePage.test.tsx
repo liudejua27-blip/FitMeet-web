@@ -2867,7 +2867,7 @@ describe('AgentWorkspacePage', () => {
     ).toHaveAttribute('data-action-source', 'default');
     expect(activityCard).not.toBeNull();
     expect(within(activityCard as HTMLElement).getByText('确认发布')).toBeInTheDocument();
-    expect(within(activityCard as HTMLElement).getByText('修改信息')).toBeInTheDocument();
+    expect(within(activityCard as HTMLElement).getByText('修改卡片')).toBeInTheDocument();
     expect(within(activityCard as HTMLElement).getByText('暂不发布')).toBeInTheDocument();
     expect(
       (activityCard as HTMLElement).querySelector('[data-schema-action="publish_to_discover"]'),
@@ -3010,7 +3010,7 @@ describe('AgentWorkspacePage', () => {
     expect(screen.queryByTestId('assistant-ui-inline-approval-panel')).not.toBeInTheDocument();
     expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
     expect(screen.getByText('确认发布')).toBeInTheDocument();
-    expect(screen.getByText('修改信息')).toBeInTheDocument();
+    expect(screen.getByText('修改卡片')).toBeInTheDocument();
     expect(screen.getByText('暂不发布')).toBeInTheDocument();
     expect(actionStreamSpy).not.toHaveBeenCalled();
     expect(screen.queryByTestId('assistant-ui-inline-approval-panel')).not.toBeInTheDocument();
@@ -3750,7 +3750,7 @@ describe('AgentWorkspacePage', () => {
             actions: [
               {
                 id: 'modify-time',
-                label: '调整时间',
+                label: '修改卡片',
                 action: 'activity.modify_time',
                 schemaAction: 'activity.modify_time',
                 requiresConfirmation: false,
@@ -3763,7 +3763,7 @@ describe('AgentWorkspacePage', () => {
               },
               {
                 id: 'modify-location',
-                label: '调整地点',
+                label: '修改卡片',
                 action: 'activity.modify_location',
                 schemaAction: 'activity.modify_location',
                 requiresConfirmation: false,
@@ -3789,7 +3789,7 @@ describe('AgentWorkspacePage', () => {
             ? [
                 {
                   id: 'modify-location-next',
-                  label: '调整地点',
+                  label: '修改卡片',
                   action: 'activity.modify_location',
                   schemaAction: 'activity.modify_location',
                   requiresConfirmation: false,
@@ -4103,7 +4103,7 @@ describe('AgentWorkspacePage', () => {
     expect(waitingReplyNote).toHaveTextContent('不会自动追发消息');
     const meetLoopCard = screen.getByTestId('assistant-ui-meet-loop-card');
     expect(meetLoopCard).toHaveTextContent('可继续');
-    expect(meetLoopCard).toHaveTextContent('可调整时间');
+    expect(meetLoopCard).toHaveTextContent('可修改卡片');
     expect(screen.getByTestId('meet-loop-recovery-protocol')).toHaveTextContent('可继续');
     expect(screen.getByTestId('meet-loop-recovery-protocol')).toHaveTextContent(
       '回到当前邀约进度继续处理',
@@ -9583,7 +9583,7 @@ function mockCandidateResponse(): UserFacingAgentResponse {
           },
           {
             id: 'activity-modify-time',
-            label: '调整时间',
+            label: '修改卡片',
             action: 'reschedule_meet_loop',
             schemaAction: 'activity.modify_time',
             requiresConfirmation: false,
@@ -9591,7 +9591,7 @@ function mockCandidateResponse(): UserFacingAgentResponse {
           },
           {
             id: 'activity-modify-location',
-            label: '调整地点',
+            label: '修改卡片',
             action: 'reschedule_meet_loop',
             schemaAction: 'activity.modify_location',
             requiresConfirmation: false,

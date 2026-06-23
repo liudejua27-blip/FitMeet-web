@@ -1461,7 +1461,7 @@ describe('SocialAgentChat acceptance flow', () => {
               requiresConfirmation: true,
             }),
             expect.objectContaining({
-              label: '修改信息',
+              label: '修改卡片',
               requiresConfirmation: false,
             }),
             expect.objectContaining({
@@ -1521,7 +1521,7 @@ describe('SocialAgentChat acceptance flow', () => {
             schemaAction: 'publish_to_discover',
           }),
           expect.objectContaining({
-            label: '修改信息',
+            label: '修改卡片',
             schemaAction: 'activity.modify_time',
           }),
           expect.objectContaining({
@@ -1574,7 +1574,7 @@ describe('SocialAgentChat acceptance flow', () => {
             requiresConfirmation: true,
           }),
           expect.objectContaining({
-            label: '修改信息',
+            label: '修改卡片',
             schemaAction: 'activity.modify_time',
             requiresConfirmation: false,
           }),
@@ -1745,7 +1745,7 @@ describe('SocialAgentChat acceptance flow', () => {
             requiresConfirmation: true,
           }),
           expect.objectContaining({
-            label: '修改信息',
+            label: '修改卡片',
             schemaAction: 'activity.modify_time',
             requiresConfirmation: false,
           }),
