@@ -66,20 +66,14 @@ describe('isPublicHallIntent', () => {
     return {
       id: 'intent_1',
       userId: 2,
-      linkedSocialRequestId: 10,
-      mode: 'public',
       requestType: 'fitness_partner',
       title: '今晚一起跑步',
       description: '公开地点轻松跑',
       interestTags: ['跑步'],
       city: '青岛',
       loc: '五四广场',
-      lat: null,
-      lng: null,
       radiusKm: 5,
       timePreference: '今晚',
-      riskLevel: 'low',
-      requiresUserConfirmation: true,
       matchedCount: 0,
       status: 'active',
       createdAt: '2026-05-24T00:00:00.000Z',
@@ -90,7 +84,7 @@ describe('isPublicHallIntent', () => {
 
   it('accepts only active public intents for the hall feed', () => {
     expect(isPublicHallIntent(makeIntent())).toBe(true);
-    expect(isPublicHallIntent(makeIntent({ mode: 'private_draft' }))).toBe(false);
+    expect(isPublicHallIntent(makeIntent({ id: 'agent_smoke_seed' }))).toBe(false);
     expect(isPublicHallIntent(makeIntent({ status: 'inactive' }))).toBe(false);
   });
 });

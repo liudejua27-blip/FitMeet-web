@@ -178,7 +178,18 @@ const listFrom = (value) => {
   return [];
 };
 const intents = listFrom(doc);
-const forbiddenKeys = new Set(['source', 'filters', 'candidateUserIds']);
+const forbiddenKeys = new Set([
+  'source',
+  'filters',
+  'candidateUserIds',
+  'linkedSocialRequestId',
+  'mode',
+  'lat',
+  'lng',
+  'riskLevel',
+  'requiresUserConfirmation',
+  'matchSignal',
+]);
 const forbiddenText =
   /(agent[\s_-]*smoke|api[\s_-]*smoke|agent-api-smoke|agent_api_smoke|smoke[\s_-]*(account|owner)?|fixture|mock|seed)/i;
 const failures = [];
@@ -240,7 +251,20 @@ const fs = require('fs');
 const detail = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const matches = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 const ownerUserId = Number(process.argv[4] || 0);
-const forbiddenIntentKeys = new Set(['source', 'filters', 'candidateUserIds']);
+const forbiddenIntentKeys = new Set([
+  'source',
+  'filters',
+  'candidateUserIds',
+  'linkedSocialRequestId',
+  'mode',
+  'lat',
+  'lng',
+  'riskLevel',
+  'requiresUserConfirmation',
+  'matchSignal',
+  'matchedBy',
+]);
+const forbiddenCandidateKeys = new Set(['score', 'reasonTags', 'nextAction']);
 const forbiddenText =
   /(agent[\s_-]*smoke|api[\s_-]*smoke|agent-api-smoke|agent_api_smoke|smoke[\s_-]*(account|owner)?|fixture|mock|seed)/i;
 const failures = [];
@@ -277,7 +301,7 @@ const candidatesFrom = (doc) => {
 scan(detail, 'detail');
 const candidates = candidatesFrom(matches);
 candidates.forEach((candidate, index) => {
-  scan(candidate, `matches.candidates[${index}]`, new Set());
+  scan(candidate, `matches.candidates[${index}]`, forbiddenCandidateKeys);
   const candidateId = Number(candidate?.profile?.id ?? candidate?.userId ?? candidate?.id);
   if (
     Number.isFinite(ownerUserId) &&

@@ -13,14 +13,12 @@ describe('Discover closure links', () => {
     const linked = publicIntentToDiscoverMeet(
       publicIntent({
         id: 'intent:linked-run',
-        linkedSocialRequestId: 301,
       }),
       0,
     );
     const standalone = publicIntentToDiscoverMeet(
       publicIntent({
         id: 'intent:standalone-run',
-        linkedSocialRequestId: null,
       }),
       1,
     );
@@ -111,8 +109,6 @@ function publicIntent(overrides: Partial<PublicSocialIntent> = {}): PublicSocial
   return {
     id: 'intent:qingdao-run',
     userId: 7,
-    linkedSocialRequestId: null,
-    mode: 'public',
     requestType: 'running',
     title: '青岛周末慢跑',
     description: '想找一个周末下午一起慢跑的人，先站内聊。',
@@ -121,18 +117,9 @@ function publicIntent(overrides: Partial<PublicSocialIntent> = {}): PublicSocial
     loc: '市南区',
     locationPreference: '市南区公共路线',
     socialGoal: '找跑步搭子',
-    lat: null,
-    lng: null,
     radiusKm: 5,
     timePreference: '周末下午',
-    riskLevel: 'low',
-    requiresUserConfirmation: false,
     matchedCount: 3,
-    matchSignal: {
-      score: 86,
-      confidence: 'high',
-      updatedAt: '2026-06-15T00:00:00.000Z',
-    },
     status: 'active',
     createdAt: '2026-06-15T00:00:00.000Z',
     updatedAt: '2026-06-15T00:00:00.000Z',

@@ -114,6 +114,7 @@ import {
 } from './agent-gateway-message-log.mapper';
 import {
   buildPublicSocialCandidates,
+  serializePublicSocialCandidates,
   type PublicSocialCandidateCard,
 } from './public-social-candidate.presenter';
 import {
@@ -807,12 +808,13 @@ export class AgentGatewayService {
     };
     await this.enforcePublicSocialIntentAbuseControls(sanitizedDto, meta);
 
-    const candidates = await this.searchSocialCandidates(0, {
+    const rawCandidates = await this.searchSocialCandidates(0, {
       ...sanitizedDto,
       verifiedOnly: sanitizedDto.verifiedOnly ?? true,
       visibility: 'matched_users_only',
       limit: Math.min(sanitizedDto.limit ?? 5, 5),
     });
+    const candidates = this.publicVisibleSocialCandidates(rawCandidates, null);
     const riskLevel = classifyPublicSocialRisk(sanitizedDto);
     const matchSignal = buildPublicIntentMatchSignalFromRequest(
       sanitizedDto,
@@ -864,37 +866,10 @@ export class AgentGatewayService {
     );
 
     return {
-      mode: 'public',
-      request: {
-        id: intent.id,
-        requestType: intent.requestType,
-        title: intent.title,
-        description: intent.description,
-        city: intent.city,
-        loc: intent.loc,
-        radiusKm: intent.radiusKm,
-        timePreference: intent.timePreference,
-        riskLevel: intent.riskLevel,
-        requiresUserConfirmation: intent.requiresUserConfirmation,
-        matchedCount: intent.matchedCount,
-        matchSignal,
-        status: intent.status,
-        createdAt: intent.createdAt,
-      },
-      candidates,
-      matchedBy: 'fitmeet_matching_engine',
-      limitations: [
-        'no_owner_long_term_preferences',
-        'no_history_management',
-        'no_autonomous_message_send',
-        'no_contact_exchange',
-        'no_payment_or_funds_related_actions',
-      ],
-      upgrade: {
-        mode: 'authorized',
-        requirement: 'login_once_and_complete_real_name_verification',
-        tokenEndpoint: '/api/agents/personal-token',
-      },
+      publicIntentId: intent.id,
+      discoverHref: `/discover?publicIntentId=${encodeURIComponent(intent.id)}`,
+      request: serializePublicSocialIntent(intent),
+      candidates: serializePublicSocialCandidates(candidates),
     };
   }
 
@@ -1045,8 +1020,7 @@ export class AgentGatewayService {
     await this.publicIntentRepo.save(intent);
     return {
       request: serializePublicSocialIntent(intent),
-      candidates,
-      matchedBy: 'fitmeet_matching_engine',
+      candidates: serializePublicSocialCandidates(candidates),
     };
   }
 

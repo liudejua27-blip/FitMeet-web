@@ -128,8 +128,6 @@ export interface SocialCandidate {
 export interface PublicSocialIntent {
   id: string;
   userId?: number | null;
-  linkedSocialRequestId?: number | null;
-  mode: string;
   requestType: string;
   title: string;
   description: string;
@@ -138,18 +136,9 @@ export interface PublicSocialIntent {
   loc: string;
   locationPreference?: string;
   socialGoal?: string;
-  lat: number | null;
-  lng: number | null;
   radiusKm: number;
   timePreference: string;
-  riskLevel: SocialRequestRiskLevel;
-  requiresUserConfirmation: boolean;
   matchedCount: number;
-  matchSignal?: {
-    score: number;
-    confidence?: 'low' | 'medium' | 'high' | string;
-    updatedAt?: string;
-  };
   status: SocialRequestStatus;
   createdAt: string;
   updatedAt: string;
@@ -168,14 +157,15 @@ export interface PublicSocialCandidate {
     interestTags?: string[];
     distanceKm?: number | null;
   };
-  score: number;
-  reasonTags: string[];
+  matchLevel?: '匹配度：中等' | '匹配度：较高' | '匹配度：很高' | string;
+  score?: number;
+  reasonTags?: string[];
   reasonText: string;
-  nextAction: 'draft_invitation' | string;
+  nextAction?: 'draft_invitation' | string;
 }
 
 export interface PublicSocialIntentMatches {
   request: PublicSocialIntent;
   candidates: PublicSocialCandidate[];
-  matchedBy: string;
+  matchedBy?: string;
 }

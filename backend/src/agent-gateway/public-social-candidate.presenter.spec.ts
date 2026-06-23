@@ -1,6 +1,7 @@
 import {
   buildPublicSocialCandidates,
   parsePublicSocialTimeWindow,
+  serializePublicSocialCandidates,
 } from './public-social-candidate.presenter';
 import { CreateSocialRequestDto } from './dto/agent-gateway.dto';
 import { UserPreference } from './entities/user-preference.entity';
@@ -229,5 +230,37 @@ describe('public social candidate presenter', () => {
       'evening',
       'weekday',
     ]);
+  });
+
+  it('serializes public candidates without raw scores, reason tags, or action ids', () => {
+    const candidates = buildPublicSocialCandidates({
+      users: [
+        user({
+          id: 1,
+          name: '林一舟',
+          bio: '周末跑步，也喜欢轻松聊天',
+          interestTags: ['running', 'fitness'],
+        }),
+      ],
+      preferencesByUserId: new Map(),
+      dto: request({ timePreference: '周末上午', limit: 1 }),
+      ownerLat: 36.06,
+      ownerLng: 120.38,
+      radiusKm: 5,
+      city: '青岛',
+      nowMs,
+    });
+
+    const publicCandidates = serializePublicSocialCandidates(candidates);
+
+    expect(publicCandidates).toHaveLength(1);
+    expect(publicCandidates[0]).toMatchObject({
+      profile: expect.objectContaining({ id: 1, name: '林一舟' }),
+      matchLevel: '匹配度：很高',
+      reasonText: expect.any(String),
+    });
+    expect(publicCandidates[0]).not.toHaveProperty('score');
+    expect(publicCandidates[0]).not.toHaveProperty('reasonTags');
+    expect(publicCandidates[0]).not.toHaveProperty('nextAction');
   });
 });

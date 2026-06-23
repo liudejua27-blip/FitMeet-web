@@ -4,7 +4,6 @@ import type { Meet, PublicSocialIntent } from '../types';
 export type DiscoverMeet = Meet & {
   sourceKind?: 'meet' | 'publicIntent';
   publicIntentId?: string;
-  linkedSocialRequestId?: number | null;
   detailHref?: string;
 };
 
@@ -30,8 +29,8 @@ export function publicIntentToDiscoverMeet(
     time: intent.timePreference || '时间待定',
     loc: intent.locationPreference || intent.loc || intent.city || '地点待定',
     city: intent.city,
-    lat: intent.lat,
-    lng: intent.lng,
+    lat: null,
+    lng: null,
     dist: intent.radiusKm ? `${intent.radiusKm}km 内` : '附近',
     price: '免费',
     slots: Math.max(1, intent.matchedCount || 1),
@@ -40,14 +39,13 @@ export function publicIntentToDiscoverMeet(
     desc: intent.description || intent.socialGoal || '发起人正在寻找合适的同频伙伴。',
     status: 'active',
     participants: (intent.interestTags || []).filter(isPublicTag).slice(0, 3),
-    cert: intent.riskLevel !== 'high',
-    rating: Math.max(4, Math.min(5, (intent.matchSignal?.score ?? 86) / 20)),
+    cert: true,
+    rating: publicIntentRating(intent),
     meetCount: intent.matchedCount || 1,
     startAt: intent.timePreference,
     createdAt: intent.createdAt,
     sourceKind: 'publicIntent',
     publicIntentId: intent.id,
-    linkedSocialRequestId: intent.linkedSocialRequestId,
     detailHref,
   };
 }
@@ -70,6 +68,12 @@ function publicIntentLevel(intent: PublicSocialIntent) {
   if (/(高强度|进阶|认真|训练)/i.test(text)) return '较高强度';
   if (/(轻松|低压力|散步|新手)/i.test(text)) return '轻松';
   return '中等';
+}
+
+function publicIntentRating(intent: PublicSocialIntent) {
+  if (intent.matchedCount >= 3) return 4.8;
+  if (intent.matchedCount > 0) return 4.4;
+  return 4.1;
 }
 
 function isPublicTag(tag: string) {

@@ -203,6 +203,14 @@ describe('AgentGatewayService public social intents', () => {
     expect(result.candidates.map((candidate) => candidate.profile.id)).toEqual([
       9,
     ]);
+    expect(result.candidates[0]).toMatchObject({
+      matchLevel: '匹配度：较高',
+      reasonText: '同在青岛，建议先站内沟通。',
+    });
+    expect(result).not.toHaveProperty('matchedBy');
+    expect(result.candidates[0]).not.toHaveProperty('score');
+    expect(result.candidates[0]).not.toHaveProperty('reasonTags');
+    expect(result.candidates[0]).not.toHaveProperty('nextAction');
     expect(JSON.stringify(result)).not.toMatch(/Agent Smoke|agent_api_smoke/i);
   });
 });

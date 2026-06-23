@@ -57,7 +57,6 @@ export const DiscoverPage = () => {
   const searchParamKey = searchParams.toString();
   const focusScene = searchParams.get('focusScene')?.trim();
   const focusPublicIntentId = searchParams.get('publicIntentId')?.trim();
-  const focusSocialRequestId = searchParams.get('socialRequestId')?.trim();
   const [activeSport, setActiveSport] = useState('all');
   const [activeTab, setActiveTab] = useState<'recommend' | 'nearby' | 'latest' | 'match'>(
     'recommend',
@@ -127,24 +126,24 @@ export const DiscoverPage = () => {
     if (activeTab === 'match') {
       data = [...data].sort((a, b) => matchScore(b) - matchScore(a));
     }
-    if (focusPublicIntentId || focusSocialRequestId) {
+    if (focusPublicIntentId) {
       data = [...data].sort((a, b) => {
-        const aFocused = isFocusedDiscoverMeet(a, focusPublicIntentId, focusSocialRequestId);
-        const bFocused = isFocusedDiscoverMeet(b, focusPublicIntentId, focusSocialRequestId);
+        const aFocused = isFocusedDiscoverMeet(a, focusPublicIntentId);
+        const bFocused = isFocusedDiscoverMeet(b, focusPublicIntentId);
         return Number(bFocused) - Number(aFocused);
       });
     }
     return data;
-  }, [activeSport, activeTab, focusPublicIntentId, focusSocialRequestId, meets, publicIntents]);
+  }, [activeSport, activeTab, focusPublicIntentId, meets, publicIntents]);
 
   useEffect(() => {
-    if (focusPublicIntentId || focusSocialRequestId) {
+    if (focusPublicIntentId) {
       const targetMeet = displayMeets.find((meet) =>
-        isFocusedDiscoverMeet(meet, focusPublicIntentId, focusSocialRequestId),
+        isFocusedDiscoverMeet(meet, focusPublicIntentId),
       );
       if (!targetMeet) return;
       const target = document.querySelector<HTMLElement>(
-        `[data-public-intent-id="${cssEscapeValue(targetMeet.publicIntentId)}"], [data-social-request-id="${cssEscapeValue(String(targetMeet.linkedSocialRequestId ?? ''))}"]`,
+        `[data-public-intent-id="${cssEscapeValue(targetMeet.publicIntentId)}"]`,
       );
       target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
@@ -169,7 +168,7 @@ export const DiscoverPage = () => {
     if (target) {
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-  }, [displayMeets, focusPublicIntentId, focusScene, focusSocialRequestId]);
+  }, [displayMeets, focusPublicIntentId, focusScene]);
 
   useEffect(() => {
     void loadDiscover();
@@ -263,7 +262,7 @@ export const DiscoverPage = () => {
         .recordInterestEvent({
           eventType: 'discover_click',
           targetUserId,
-          socialRequestId: meet.linkedSocialRequestId ?? null,
+          socialRequestId: null,
           activityId:
             Number.isFinite(meet.activityId) && Number(meet.activityId) > 0
               ? Number(meet.activityId)
@@ -674,7 +673,6 @@ function MeetupMatchCard({
       className="match-card-link"
       data-meet-anchor={meet.id}
       data-public-intent-id={meet.publicIntentId ?? undefined}
-      data-social-request-id={meet.linkedSocialRequestId ?? undefined}
       onClick={onOpen}
     >
       <article className={`match-card match-card--${tone}`}>
@@ -733,12 +731,8 @@ function MeetupMatchCard({
 function isFocusedDiscoverMeet(
   meet: DiscoverMeet,
   publicIntentId?: string | null,
-  socialRequestId?: string | null,
 ) {
-  return (
-    Boolean(publicIntentId && meet.publicIntentId === publicIntentId) ||
-    Boolean(socialRequestId && String(meet.linkedSocialRequestId ?? '') === socialRequestId)
-  );
+  return Boolean(publicIntentId && meet.publicIntentId === publicIntentId);
 }
 
 function cssEscapeValue(value: string | null | undefined) {

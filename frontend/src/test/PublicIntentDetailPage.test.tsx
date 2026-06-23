@@ -33,9 +33,8 @@ describe('PublicIntentDetailPage', () => {
     dataServiceMock.getPublicSocialIntent.mockResolvedValue(smokeIntent());
     dataServiceMock.getPublicSocialIntentMatches.mockResolvedValue({
       request: smokeIntent(),
-      matchedBy: 'fitmeet_matching_engine',
       candidates: [
-        candidate({ id: 7, name: 'Agent Smoke Owner', bio: 'agent_api_smoke owner', score: 90 }),
+        candidate({ id: 7, name: 'Agent Smoke Owner', bio: 'agent_api_smoke owner' }),
         candidate({ id: 8, name: 'Agent Smoke Candidate', bio: 'fixture smoke candidate' }),
         candidate({ id: 9, name: '林一舟', bio: '周末喜欢轻松跑步' }),
       ],
@@ -76,8 +75,6 @@ function smokeIntent(): PublicSocialIntent {
   return {
     id: 'public_agent_api_smoke_qingdao_walk',
     userId: 7,
-    linkedSocialRequestId: null,
-    mode: 'public',
     requestType: 'custom',
     title: '青岛同频约练',
     description: '周末下午找散步搭子',
@@ -86,18 +83,9 @@ function smokeIntent(): PublicSocialIntent {
     loc: '市南区公共路线',
     locationPreference: '市南区公共路线',
     socialGoal: '周末下午找散步搭子',
-    lat: null,
-    lng: null,
     radiusKm: 5,
     timePreference: '周末下午',
-    riskLevel: 'low',
-    requiresUserConfirmation: false,
     matchedCount: 1,
-    matchSignal: {
-      score: 82,
-      confidence: 'high',
-      updatedAt: '2026-06-23T00:00:00.000Z',
-    },
     status: 'matched',
     createdAt: '2026-06-23T00:00:00.000Z',
     updatedAt: '2026-06-23T00:00:00.000Z',
@@ -108,12 +96,10 @@ function candidate({
   id,
   name,
   bio,
-  score = 82,
 }: {
   id: number;
   name: string;
   bio: string;
-  score?: number;
 }): PublicSocialCandidate {
   return {
     profile: {
@@ -125,9 +111,7 @@ function candidate({
       bio,
       interestTags: ['跑步'],
     },
-    score,
-    reasonTags: ['same_city'],
+    matchLevel: '匹配度：较高',
     reasonText: '同在青岛，建议先站内沟通。',
-    nextAction: 'draft_invitation',
   };
 }

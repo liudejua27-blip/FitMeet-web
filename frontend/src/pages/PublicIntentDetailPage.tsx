@@ -67,7 +67,6 @@ export function PublicIntentDetailPage() {
   );
   const publicIntentId = intent?.id ?? null;
   const publicIntentOwnerUserId = intent?.userId ?? null;
-  const publicIntentSocialRequestId = intent?.linkedSocialRequestId ?? null;
   const publicIntentCity = intent?.city || null;
   const publicIntentLocation = intent?.locationPreference || intent?.loc || null;
   const publicIntentTime = intent?.timePreference || null;
@@ -83,7 +82,7 @@ export function PublicIntentDetailPage() {
       .recordInterestEvent({
         eventType: 'discover_click',
         targetUserId: publicIntentOwnerUserId,
-        socialRequestId: publicIntentSocialRequestId,
+        socialRequestId: null,
         activityTags: publicInterestTags,
         city: publicIntentCity,
         locationText: publicIntentLocation,
@@ -99,7 +98,7 @@ export function PublicIntentDetailPage() {
         .recordInterestEvent({
           eventType: 'discover_click',
           targetUserId: publicIntentOwnerUserId,
-          socialRequestId: publicIntentSocialRequestId,
+          socialRequestId: null,
           weight: 2,
           activityTags: publicInterestTags,
           city: publicIntentCity,
@@ -122,7 +121,6 @@ export function PublicIntentDetailPage() {
     publicIntentId,
     publicIntentLocation,
     publicIntentOwnerUserId,
-    publicIntentSocialRequestId,
     publicIntentTime,
     publicInterestTags,
   ]);
@@ -135,7 +133,7 @@ export function PublicIntentDetailPage() {
         .recordInterestEvent({
           eventType: 'view_profile',
           targetUserId: input.targetUserId,
-          socialRequestId: publicIntentSocialRequestId,
+          socialRequestId: null,
           activityTags: publicInterestTags,
           city: publicIntentCity,
           locationText: publicIntentLocation,
@@ -153,7 +151,6 @@ export function PublicIntentDetailPage() {
       publicIntentCity,
       publicIntentId,
       publicIntentLocation,
-      publicIntentSocialRequestId,
       publicIntentTime,
       publicInterestTags,
     ],
@@ -292,7 +289,7 @@ export function PublicIntentDetailPage() {
                       </strong>
                       <small className="text-[#9a9487]">
                         {candidate.profile.city || '城市待完善'} ·{' '}
-                        {matchLevelLabel(candidate.score)}
+                        {candidate.matchLevel || matchLevelLabel(candidate.score ?? 0)}
                       </small>
                     </div>
                   </div>

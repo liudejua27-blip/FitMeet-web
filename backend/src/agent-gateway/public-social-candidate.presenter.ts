@@ -36,6 +36,31 @@ export type PublicSocialCandidateCard = {
   nextAction: 'draft_invitation';
 };
 
+export type PublicSocialCandidatePublicCard = {
+  profile: PublicSocialCandidateCard['profile'];
+  matchLevel: '匹配度：中等' | '匹配度：较高' | '匹配度：很高';
+  reasonText: string;
+};
+
+export function serializePublicSocialCandidate(
+  candidate: PublicSocialCandidateCard,
+): PublicSocialCandidatePublicCard {
+  return {
+    profile: candidate.profile,
+    matchLevel: publicMatchLevel(candidate.score),
+    reasonText: publicProfileText(
+      candidate.reasonText,
+      '你们的活动偏好、时间或城市比较接近，适合先轻松聊聊。',
+    ),
+  };
+}
+
+export function serializePublicSocialCandidates(
+  candidates: PublicSocialCandidateCard[],
+): PublicSocialCandidatePublicCard[] {
+  return candidates.map(serializePublicSocialCandidate);
+}
+
 export function buildPublicSocialCandidates({
   users,
   preferencesByUserId,
@@ -159,6 +184,14 @@ export function buildPublicSocialCandidates({
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, dto.limit ?? 10);
+}
+
+function publicMatchLevel(
+  score: number,
+): PublicSocialCandidatePublicCard['matchLevel'] {
+  if (score >= 85) return '匹配度：很高';
+  if (score >= 68) return '匹配度：较高';
+  return '匹配度：中等';
 }
 
 export function parsePublicSocialTimeWindow(text?: string): string[] {

@@ -56,42 +56,36 @@ describe('serializePublicSocialIntent', () => {
     expect(serializePublicSocialIntent(intent)).toEqual({
       id: 'public-intent-1',
       userId: null,
-      linkedSocialRequestId: null,
-      mode: 'public',
       requestType: 'fitness_partner',
       title: '寻找附近约练搭子',
       description: '周末一起练腿和拉伸',
       interestTags: [],
       city: 'Shanghai',
       loc: '徐汇',
-      lat: 31.2,
-      lng: 121.4,
       radiusKm: 5,
       timePreference: '周末 morning',
       locationPreference: 'nearby gym',
       socialGoal: 'fitness_partner',
-      riskLevel: SocialRequestRiskLevel.Low,
-      requiresUserConfirmation: true,
       matchedCount: 2,
-      matchSignal: {
-        score: 82,
-        confidence: 'high',
-        updatedAt: createdAt.toISOString(),
-      },
       status: SocialRequestStatus.Active,
       createdAt,
       updatedAt: createdAt,
     });
   });
 
-  it('does not expose internal sources, filters, candidate ids, or reasons', () => {
+  it('does not expose internal sources, filters, candidate ids, location fixes, or match signals', () => {
     const response = serializePublicSocialIntent(makeIntent());
 
     expect(response).not.toHaveProperty('source');
     expect(response).not.toHaveProperty('filters');
     expect(response).not.toHaveProperty('candidateUserIds');
-    expect(response.matchSignal).not.toHaveProperty('source');
-    expect(response.matchSignal).not.toHaveProperty('reasons');
+    expect(response).not.toHaveProperty('linkedSocialRequestId');
+    expect(response).not.toHaveProperty('mode');
+    expect(response).not.toHaveProperty('lat');
+    expect(response).not.toHaveProperty('lng');
+    expect(response).not.toHaveProperty('riskLevel');
+    expect(response).not.toHaveProperty('requiresUserConfirmation');
+    expect(response).not.toHaveProperty('matchSignal');
   });
 
   it('maps smoke fixture copy to user-facing public card copy', () => {
@@ -122,16 +116,23 @@ describe('serializePublicSocialIntent', () => {
     );
   });
 
-  it('builds a deterministic match signal when metadata does not include one', () => {
+  it('keeps match signal metadata private even when the entity stores one', () => {
     const response = serializePublicSocialIntent(
-      makeIntent({ metadata: {}, matchedCount: 0 }),
-    );
-
-    expect(response.matchSignal).toEqual(
-      expect.objectContaining({
-        confidence: 'low',
+      makeIntent({
+        metadata: {
+          matchSignal: {
+            score: 99,
+            confidence: 'high',
+            source: 'private_engine',
+            reasons: ['internal rule'],
+          },
+        },
       }),
     );
-    expect(response.matchSignal).not.toHaveProperty('source');
+
+    expect(response).not.toHaveProperty('matchSignal');
+    expect(JSON.stringify(response)).not.toMatch(
+      /private_engine|internal rule/,
+    );
   });
 });
