@@ -742,7 +742,7 @@ export class FitMeetAlphaAgentSdkService {
               id: 'confirm_create_activity',
               label: '发布卡片',
               action: 'publish_to_discover',
-              schemaAction: 'activity.confirm_create',
+              schemaAction: 'publish_to_discover',
               loopStage: 'activity_draft_created',
               requiresConfirmation: true,
               payload: {

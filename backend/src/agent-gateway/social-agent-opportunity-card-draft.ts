@@ -236,20 +236,6 @@ export function buildSocialAgentPublishConfirmationCard(input: {
               sideEffect: 'edit_draft_only',
             },
           },
-          {
-            id: `close_activity:${task.id}`,
-            label: '关闭卡片',
-            action: 'activity.skip_publish',
-            schemaAction: 'activity.skip_publish',
-            loopStage: 'activity_confirmed',
-            requiresConfirmation: false,
-            payload: {
-              taskId: task.id,
-              socialRequestId: input.socialRequestId ?? null,
-              publicIntentId: input.publicIntentId ?? null,
-              sideEffect: 'local_dismiss',
-            },
-          },
         ]
       : [
           {

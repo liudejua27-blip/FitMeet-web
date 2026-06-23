@@ -99,9 +99,8 @@ describe('SocialAgentRouteSearchTurnService', () => {
     });
     expect(result.assistantMessage).toContain('城市/大致区域');
     expect(result.assistantMessage).toContain('时间');
-    expect(result.assistantMessage).toContain(
-      '安全边界和是否发布到发现，会在真正发送邀请或公开前再让你确认',
-    );
+    expect(result.assistantMessage).toContain('确认前不会公开');
+    expect(result.assistantMessage).toContain('不会替你联系别人');
     expect(activitySearch.handleActivitySearch).not.toHaveBeenCalled();
   });
 
@@ -525,9 +524,8 @@ describe('SocialAgentRouteSearchTurnService', () => {
     });
     expect(result.assistantMessage).toContain('城市/大致区域');
     expect(result.assistantMessage).toContain('时间');
-    expect(result.assistantMessage).toContain(
-      '安全边界和是否发布到发现，会在真正发送邀请或公开前再让你确认',
-    );
+    expect(result.assistantMessage).toContain('确认前不会公开');
+    expect(result.assistantMessage).toContain('不会替你联系别人');
     expect(result.assistantMessage).not.toContain('是否接受陌生人');
     expect(result.assistantMessage).not.toContain('是否公开发起活动');
     expect(result.assistantMessage).not.toContain('运动强度');

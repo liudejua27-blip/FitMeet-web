@@ -99,6 +99,12 @@ export function buildSocialAgentProfileContextPatch(
     updatedFields.push('matchSignals');
   }
 
+  if (hasMatchableProfileSignals(dto)) {
+    dto.agentCanRecommendMe = true;
+    dto.agentCanStartChatAfterApproval = true;
+    updatedFields.push('agentCanRecommendMe', 'agentCanStartChatAfterApproval');
+  }
+
   for (const field of [
     'availableTimes',
     'privacyBoundary',
@@ -116,4 +122,20 @@ export function buildSocialAgentProfileContextPatch(
     missingFields,
     sourceMessage,
   };
+}
+
+function hasMatchableProfileSignals(dto: UpdateSocialProfileDto): boolean {
+  const hasArea = Boolean(dto.city || dto.nearbyArea);
+  const hasPreference =
+    nonEmptyList(dto.interestTags) ||
+    nonEmptyList(dto.fitnessGoals) ||
+    nonEmptyList(dto.availableTimes) ||
+    nonEmptyList(dto.wantToMeet) ||
+    nonEmptyList(dto.preferredTraits) ||
+    nonEmptyList(dto.traits);
+  return hasArea && hasPreference;
+}
+
+function nonEmptyList(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0;
 }

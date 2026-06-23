@@ -50,7 +50,10 @@ describe('buildSocialAgentProfileContextPatch', () => {
           'I am an Aries male studying in Qingdao University and want running friends.',
         updatedAt: expect.any(String),
       }),
+      agentCanRecommendMe: true,
+      agentCanStartChatAfterApproval: true,
     });
+    expect(patch.dto).not.toHaveProperty('profileDiscoverable');
     expect(patch.updatedFields).toEqual(
       expect.arrayContaining([
         'gender',
@@ -59,6 +62,8 @@ describe('buildSocialAgentProfileContextPatch', () => {
         'availableTimes',
         'wantToMeet',
         'matchSignals',
+        'agentCanRecommendMe',
+        'agentCanStartChatAfterApproval',
       ]),
     );
     expect(patch.memoryFields).toEqual(

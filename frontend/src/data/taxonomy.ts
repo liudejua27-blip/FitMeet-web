@@ -40,11 +40,21 @@ export interface SportTaxonomyNode {
   subcategories: SportSubcategory[];
 }
 
-export const CONTENT_TYPES: Array<{ id: ContentType; label: string; shortLabel: string; description: string }> = [
+export const CONTENT_TYPES: Array<{
+  id: ContentType;
+  label: string;
+  shortLabel: string;
+  description: string;
+}> = [
   { id: 'all', label: '全部', shortLabel: '全部', description: '浏览所有约练、动态和求助' },
   { id: 'meet', label: '约练', shortLabel: '约练', description: '发布或加入线下运动活动' },
   { id: 'log', label: '动态', shortLabel: '动态', description: '分享训练记录和运动日常' },
-  { id: 'help', label: '其他求助', shortLabel: '求助', description: '找装备建议、路线搭子、临时协助和小众兴趣伙伴' },
+  {
+    id: 'help',
+    label: '其他求助',
+    shortLabel: '求助',
+    description: '找装备建议、路线搭子、临时协助和小众兴趣伙伴',
+  },
 ];
 
 export const SPORT_TAXONOMY: SportTaxonomyNode[] = [
@@ -60,9 +70,33 @@ export const SPORT_TAXONOMY: SportTaxonomyNode[] = [
     needsVenue: true,
     needsCoach: false,
     subcategories: [
-      { id: 'strength', label: '力量训练', scenarioTags: ['力量区', '自由重量'], equipmentTags: ['杠铃', '腰带'], riskLevel: 'medium', needsVenue: true, needsCoach: false },
-      { id: 'hiit', label: 'HIIT', scenarioTags: ['团课', '燃脂'], equipmentTags: ['训练鞋'], riskLevel: 'medium', needsVenue: true, needsCoach: false },
-      { id: 'muscle', label: '增肌', scenarioTags: ['健身房', '固定器械'], equipmentTags: ['护腕', '蛋白粉'], riskLevel: 'medium', needsVenue: true, needsCoach: false },
+      {
+        id: 'strength',
+        label: '力量训练',
+        scenarioTags: ['力量区', '自由重量'],
+        equipmentTags: ['杠铃', '腰带'],
+        riskLevel: 'medium',
+        needsVenue: true,
+        needsCoach: false,
+      },
+      {
+        id: 'hiit',
+        label: 'HIIT',
+        scenarioTags: ['团课', '燃脂'],
+        equipmentTags: ['训练鞋'],
+        riskLevel: 'medium',
+        needsVenue: true,
+        needsCoach: false,
+      },
+      {
+        id: 'muscle',
+        label: '增肌',
+        scenarioTags: ['健身房', '固定器械'],
+        equipmentTags: ['护腕', '蛋白粉'],
+        riskLevel: 'medium',
+        needsVenue: true,
+        needsCoach: false,
+      },
     ],
   },
   {
@@ -77,9 +111,33 @@ export const SPORT_TAXONOMY: SportTaxonomyNode[] = [
     needsVenue: false,
     needsCoach: false,
     subcategories: [
-      { id: 'jogging', label: '慢跑', scenarioTags: ['公园', '下班后'], equipmentTags: ['跑鞋'], riskLevel: 'low', needsVenue: false, needsCoach: false },
-      { id: 'marathon', label: '马拉松', scenarioTags: ['长距离', '备赛'], equipmentTags: ['补给', '运动手表'], riskLevel: 'medium', needsVenue: false, needsCoach: false },
-      { id: 'trail-running', label: '越野跑', scenarioTags: ['山路', '郊野'], equipmentTags: ['越野跑鞋', '水袋包'], riskLevel: 'high', needsVenue: false, needsCoach: false },
+      {
+        id: 'jogging',
+        label: '慢跑',
+        scenarioTags: ['公园', '下班后'],
+        equipmentTags: ['跑鞋'],
+        riskLevel: 'low',
+        needsVenue: false,
+        needsCoach: false,
+      },
+      {
+        id: 'marathon',
+        label: '马拉松',
+        scenarioTags: ['长距离', '备赛'],
+        equipmentTags: ['补给', '运动手表'],
+        riskLevel: 'medium',
+        needsVenue: false,
+        needsCoach: false,
+      },
+      {
+        id: 'trail-running',
+        label: '越野跑',
+        scenarioTags: ['山路', '郊野'],
+        equipmentTags: ['越野跑鞋', '水袋包'],
+        riskLevel: 'high',
+        needsVenue: false,
+        needsCoach: false,
+      },
     ],
   },
   {
@@ -94,9 +152,33 @@ export const SPORT_TAXONOMY: SportTaxonomyNode[] = [
     needsVenue: false,
     needsCoach: false,
     subcategories: [
-      { id: 'flow-yoga', label: '流瑜伽', scenarioTags: ['瑜伽馆', '晨练'], equipmentTags: ['瑜伽垫'], riskLevel: 'low', needsVenue: false, needsCoach: false },
-      { id: 'pilates', label: '普拉提', scenarioTags: ['工作室', '核心训练'], equipmentTags: ['普拉提圈'], riskLevel: 'low', needsVenue: true, needsCoach: false },
-      { id: 'stretching', label: '拉伸恢复', scenarioTags: ['训练后', '居家'], equipmentTags: ['泡沫轴'], riskLevel: 'low', needsVenue: false, needsCoach: false },
+      {
+        id: 'flow-yoga',
+        label: '流瑜伽',
+        scenarioTags: ['瑜伽馆', '晨练'],
+        equipmentTags: ['瑜伽垫'],
+        riskLevel: 'low',
+        needsVenue: false,
+        needsCoach: false,
+      },
+      {
+        id: 'pilates',
+        label: '普拉提',
+        scenarioTags: ['工作室', '核心训练'],
+        equipmentTags: ['普拉提圈'],
+        riskLevel: 'low',
+        needsVenue: true,
+        needsCoach: false,
+      },
+      {
+        id: 'stretching',
+        label: '拉伸恢复',
+        scenarioTags: ['训练后', '居家'],
+        equipmentTags: ['泡沫轴'],
+        riskLevel: 'low',
+        needsVenue: false,
+        needsCoach: false,
+      },
     ],
   },
   {
@@ -111,13 +193,76 @@ export const SPORT_TAXONOMY: SportTaxonomyNode[] = [
     needsVenue: false,
     needsCoach: false,
     subcategories: [
-      { id: 'hiking', label: '徒步', englishLabel: 'Hiking', scenarioTags: ['日落徒步', '城市绿道', '自然风光'], equipmentTags: ['适配装备', '专业向导', '技术装备'], riskLevel: 'low', needsVenue: false, needsCoach: false },
-      { id: 'camping', label: '露营', englishLabel: 'Camping', scenarioTags: ['营地', '周末'], equipmentTags: ['帐篷', '防潮垫'], riskLevel: 'medium', needsVenue: false, needsCoach: false },
-      { id: 'mountaineering', label: '登山', englishLabel: 'Mountaineering', scenarioTags: ['高海拔', '路线规划'], equipmentTags: ['登山杖', '冲锋衣'], riskLevel: 'high', needsVenue: false, needsCoach: true },
-      { id: 'climbing', label: '攀岩', englishLabel: 'Climbing', scenarioTags: ['岩馆', '天然岩壁'], equipmentTags: ['安全带', '攀岩鞋'], riskLevel: 'high', needsVenue: true, needsCoach: true },
-      { id: 'trail-running', label: '越野跑', englishLabel: 'Trail Running', scenarioTags: ['山路', '林道'], equipmentTags: ['越野跑鞋', '水袋包'], riskLevel: 'high', needsVenue: false, needsCoach: false },
-      { id: 'ski', label: '滑雪', englishLabel: 'Skiing', scenarioTags: ['雪场', '冬季'], equipmentTags: ['雪板', '护具'], riskLevel: 'high', needsVenue: true, needsCoach: true },
-      { id: 'diving', label: '潜水', englishLabel: 'Diving', scenarioTags: ['泳池', '海岛'], equipmentTags: ['潜水镜', '呼吸管'], riskLevel: 'high', needsVenue: true, needsCoach: true },
+      {
+        id: 'hiking',
+        label: '徒步',
+        englishLabel: 'Hiking',
+        scenarioTags: ['日落徒步', '城市绿道', '自然风光'],
+        equipmentTags: ['适配装备', '专业向导', '技术装备'],
+        riskLevel: 'low',
+        needsVenue: false,
+        needsCoach: false,
+      },
+      {
+        id: 'camping',
+        label: '露营',
+        englishLabel: 'Camping',
+        scenarioTags: ['营地', '周末'],
+        equipmentTags: ['帐篷', '防潮垫'],
+        riskLevel: 'medium',
+        needsVenue: false,
+        needsCoach: false,
+      },
+      {
+        id: 'mountaineering',
+        label: '登山',
+        englishLabel: 'Mountaineering',
+        scenarioTags: ['高海拔', '路线规划'],
+        equipmentTags: ['登山杖', '冲锋衣'],
+        riskLevel: 'high',
+        needsVenue: false,
+        needsCoach: true,
+      },
+      {
+        id: 'climbing',
+        label: '攀岩',
+        englishLabel: 'Climbing',
+        scenarioTags: ['岩馆', '天然岩壁'],
+        equipmentTags: ['安全带', '攀岩鞋'],
+        riskLevel: 'high',
+        needsVenue: true,
+        needsCoach: true,
+      },
+      {
+        id: 'trail-running',
+        label: '越野跑',
+        englishLabel: 'Trail Running',
+        scenarioTags: ['山路', '林道'],
+        equipmentTags: ['越野跑鞋', '水袋包'],
+        riskLevel: 'high',
+        needsVenue: false,
+        needsCoach: false,
+      },
+      {
+        id: 'ski',
+        label: '滑雪',
+        englishLabel: 'Skiing',
+        scenarioTags: ['雪场', '冬季'],
+        equipmentTags: ['雪板', '护具'],
+        riskLevel: 'high',
+        needsVenue: true,
+        needsCoach: true,
+      },
+      {
+        id: 'diving',
+        label: '潜水',
+        englishLabel: 'Diving',
+        scenarioTags: ['泳池', '海岛'],
+        equipmentTags: ['潜水镜', '呼吸管'],
+        riskLevel: 'high',
+        needsVenue: true,
+        needsCoach: true,
+      },
     ],
   },
   {
@@ -132,8 +277,24 @@ export const SPORT_TAXONOMY: SportTaxonomyNode[] = [
     needsVenue: true,
     needsCoach: false,
     subcategories: [
-      { id: 'freestyle', label: '自由泳', scenarioTags: ['泳池', '长距离'], equipmentTags: ['泳镜'], riskLevel: 'medium', needsVenue: true, needsCoach: false },
-      { id: 'open-water', label: '公开水域', scenarioTags: ['湖泊', '海边'], equipmentTags: ['救生浮标'], riskLevel: 'high', needsVenue: true, needsCoach: true },
+      {
+        id: 'freestyle',
+        label: '自由泳',
+        scenarioTags: ['泳池', '长距离'],
+        equipmentTags: ['泳镜'],
+        riskLevel: 'medium',
+        needsVenue: true,
+        needsCoach: false,
+      },
+      {
+        id: 'open-water',
+        label: '公开水域',
+        scenarioTags: ['湖泊', '海边'],
+        equipmentTags: ['救生浮标'],
+        riskLevel: 'high',
+        needsVenue: true,
+        needsCoach: true,
+      },
     ],
   },
   {
@@ -148,8 +309,24 @@ export const SPORT_TAXONOMY: SportTaxonomyNode[] = [
     needsVenue: true,
     needsCoach: true,
     subcategories: [
-      { id: 'boxing', label: '拳击', scenarioTags: ['拳馆', '靶训练'], equipmentTags: ['拳套', '手靶'], riskLevel: 'high', needsVenue: true, needsCoach: true },
-      { id: 'sanda', label: '散打', scenarioTags: ['轻对抗', '陪练'], equipmentTags: ['护具', '拳套'], riskLevel: 'high', needsVenue: true, needsCoach: true },
+      {
+        id: 'boxing',
+        label: '拳击',
+        scenarioTags: ['拳馆', '靶训练'],
+        equipmentTags: ['拳套', '手靶'],
+        riskLevel: 'high',
+        needsVenue: true,
+        needsCoach: true,
+      },
+      {
+        id: 'sanda',
+        label: '散打',
+        scenarioTags: ['轻对抗', '陪练'],
+        equipmentTags: ['护具', '拳套'],
+        riskLevel: 'high',
+        needsVenue: true,
+        needsCoach: true,
+      },
     ],
   },
   {
@@ -164,9 +341,33 @@ export const SPORT_TAXONOMY: SportTaxonomyNode[] = [
     needsVenue: true,
     needsCoach: false,
     subcategories: [
-      { id: 'badminton', label: '羽毛球', scenarioTags: ['球馆', '双打'], equipmentTags: ['球拍', '球鞋'], riskLevel: 'medium', needsVenue: true, needsCoach: false },
-      { id: 'basketball', label: '篮球', scenarioTags: ['半场', '3v3'], equipmentTags: ['篮球鞋'], riskLevel: 'medium', needsVenue: true, needsCoach: false },
-      { id: 'pickleball', label: '匹克球', scenarioTags: ['社区球场', '新手友好'], equipmentTags: ['球拍'], riskLevel: 'low', needsVenue: true, needsCoach: false },
+      {
+        id: 'badminton',
+        label: '羽毛球',
+        scenarioTags: ['球馆', '双打'],
+        equipmentTags: ['球拍', '球鞋'],
+        riskLevel: 'medium',
+        needsVenue: true,
+        needsCoach: false,
+      },
+      {
+        id: 'basketball',
+        label: '篮球',
+        scenarioTags: ['半场', '3v3'],
+        equipmentTags: ['篮球鞋'],
+        riskLevel: 'medium',
+        needsVenue: true,
+        needsCoach: false,
+      },
+      {
+        id: 'pickleball',
+        label: '匹克球',
+        scenarioTags: ['社区球场', '新手友好'],
+        equipmentTags: ['球拍'],
+        riskLevel: 'low',
+        needsVenue: true,
+        needsCoach: false,
+      },
     ],
   },
   {
@@ -181,8 +382,24 @@ export const SPORT_TAXONOMY: SportTaxonomyNode[] = [
     needsVenue: false,
     needsCoach: false,
     subcategories: [
-      { id: 'city-cycling', label: '城市骑行', scenarioTags: ['绿道', '夜骑'], equipmentTags: ['头盔', '车灯'], riskLevel: 'medium', needsVenue: false, needsCoach: false },
-      { id: 'road-cycling', label: '公路骑行', scenarioTags: ['郊区', '长距离'], equipmentTags: ['公路车', '补给'], riskLevel: 'high', needsVenue: false, needsCoach: false },
+      {
+        id: 'city-cycling',
+        label: '城市骑行',
+        scenarioTags: ['绿道', '夜骑'],
+        equipmentTags: ['头盔', '车灯'],
+        riskLevel: 'medium',
+        needsVenue: false,
+        needsCoach: false,
+      },
+      {
+        id: 'road-cycling',
+        label: '公路骑行',
+        scenarioTags: ['郊区', '长距离'],
+        equipmentTags: ['公路车', '补给'],
+        riskLevel: 'high',
+        needsVenue: false,
+        needsCoach: false,
+      },
     ],
   },
   {
@@ -197,8 +414,24 @@ export const SPORT_TAXONOMY: SportTaxonomyNode[] = [
     needsVenue: true,
     needsCoach: false,
     subcategories: [
-      { id: 'zumba', label: '尊巴', scenarioTags: ['团课', '燃脂'], equipmentTags: ['训练鞋'], riskLevel: 'low', needsVenue: true, needsCoach: false },
-      { id: 'street-dance', label: '街舞', scenarioTags: ['舞房', '排练'], equipmentTags: ['护膝'], riskLevel: 'medium', needsVenue: true, needsCoach: false },
+      {
+        id: 'zumba',
+        label: '尊巴',
+        scenarioTags: ['团课', '燃脂'],
+        equipmentTags: ['训练鞋'],
+        riskLevel: 'low',
+        needsVenue: true,
+        needsCoach: false,
+      },
+      {
+        id: 'street-dance',
+        label: '街舞',
+        scenarioTags: ['舞房', '排练'],
+        equipmentTags: ['护膝'],
+        riskLevel: 'medium',
+        needsVenue: true,
+        needsCoach: false,
+      },
     ],
   },
   {
@@ -213,8 +446,24 @@ export const SPORT_TAXONOMY: SportTaxonomyNode[] = [
     needsVenue: false,
     needsCoach: false,
     subcategories: [
-      { id: 'mobility', label: '灵活性', scenarioTags: ['训练后', '居家'], equipmentTags: ['弹力带'], riskLevel: 'low', needsVenue: false, needsCoach: false },
-      { id: 'rehab', label: '运动康复', scenarioTags: ['康复室', '伤病预防'], equipmentTags: ['泡沫轴'], riskLevel: 'low', needsVenue: false, needsCoach: true },
+      {
+        id: 'mobility',
+        label: '灵活性',
+        scenarioTags: ['训练后', '居家'],
+        equipmentTags: ['弹力带'],
+        riskLevel: 'low',
+        needsVenue: false,
+        needsCoach: false,
+      },
+      {
+        id: 'rehab',
+        label: '运动康复',
+        scenarioTags: ['康复室', '伤病预防'],
+        equipmentTags: ['泡沫轴'],
+        riskLevel: 'low',
+        needsVenue: false,
+        needsCoach: true,
+      },
     ],
   },
   {
@@ -252,8 +501,12 @@ export const SPORT_ALIAS_MAP: Record<string, SportGroup> = {
   trailrunning: 'outdoor',
 };
 
-export const SCENARIO_TAGS = Array.from(new Set(SPORT_TAXONOMY.flatMap((node) => node.scenarioTags)));
-export const EQUIPMENT_TAGS = Array.from(new Set(SPORT_TAXONOMY.flatMap((node) => node.equipmentTags)));
+export const SCENARIO_TAGS = Array.from(
+  new Set(SPORT_TAXONOMY.flatMap((node) => node.scenarioTags)),
+);
+export const EQUIPMENT_TAGS = Array.from(
+  new Set(SPORT_TAXONOMY.flatMap((node) => node.equipmentTags)),
+);
 export const LEVEL_FILTERS = [
   { id: 'all', label: '全部' },
   { id: 'beginner', label: '新手' },
@@ -285,7 +538,14 @@ export const DISCOVER_FILTERS = [
 ];
 
 export const POST_CONTENT_TYPES = CONTENT_TYPES.filter(
-  (item): item is { id: Exclude<ContentType, 'all'>; label: string; shortLabel: string; description: string } => item.id !== 'all',
+  (
+    item,
+  ): item is {
+    id: Exclude<ContentType, 'all'>;
+    label: string;
+    shortLabel: string;
+    description: string;
+  } => item.id !== 'all',
 );
 export const SPORT_GROUP_OPTIONS = SPORT_TAXONOMY.map((node) => ({
   id: node.id,
@@ -294,7 +554,10 @@ export const SPORT_GROUP_OPTIONS = SPORT_TAXONOMY.map((node) => ({
 }));
 
 export function normalizeSportGroup(value?: string | null): SportGroup | 'default' {
-  const key = (value || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+  const key = (value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-');
   if (!key) return 'default';
   if (SPORT_TAXONOMY.some((node) => node.id === key)) return key as SportGroup;
   return SPORT_ALIAS_MAP[key] ?? 'default';
@@ -310,11 +573,15 @@ export function getSportNode(value?: string | null) {
 }
 
 export function getSportLabel(value?: string | null): string {
+  const normalized = (value || '').trim().toLowerCase();
+  if (!normalized || normalized === 'default' || normalized === 'custom') return '自定义';
   const node = getSportNode(value);
   return node?.label ?? value ?? '自定义';
 }
 
 export function getSportFilterLabel(value?: string | null): string {
+  const normalized = (value || '').trim().toLowerCase();
+  if (!normalized || normalized === 'default' || normalized === 'custom') return '自定义';
   const node = getSportNode(value);
   return node ? `${node.icon} ${node.label}` : value || '自定义';
 }

@@ -2703,17 +2703,17 @@ describe('AgentWorkspacePage', () => {
     const activityModifyLocationButton = getEnabledSchemaActionButton('activity.modify_location');
     expect(activityModifyTimeButton).not.toBeNull();
     expect(activityModifyLocationButton).toBeNull();
-    expect(screen.getByRole('button', { name: '发布到发现' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发布卡片' })).toBeInTheDocument();
     expect(screen.getByText('发布卡片')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '确认更新' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '暂不写入' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '发布到发现' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: '发布卡片' })).toHaveAttribute(
       'data-schema-action',
       'publish_to_discover',
     );
     const highRiskActionExpectations = [
       ['candidate.connect', '加好友并聊天'],
-      ['publish_to_discover', '发布到发现'],
+      ['publish_to_discover', '发布卡片'],
       ['life_graph.accept_update', '确认更新'],
       ['meet_loop.resume', '继续推进'],
     ] as const;

@@ -43,7 +43,20 @@ export function PublicIntentDetailPage() {
   const error = errorState && errorState.id === id ? errorState.message : '';
   const loading = Boolean(id) && !error && intent?.id !== id;
 
-  const publicTags = useMemo(() => intent?.interestTags?.slice(0, 6) ?? [], [intent]);
+  const publicTags = useMemo(
+    () => intent?.interestTags?.filter(isPublicTag).slice(0, 6) ?? [],
+    [intent],
+  );
+  const visibleCandidates = useMemo(
+    () =>
+      candidates.filter(
+        (candidate) =>
+          candidate.profile.id !== intent?.userId &&
+          !isInternalFixtureText(candidate.profile.name) &&
+          !isInternalFixtureText(candidate.profile.bio),
+      ),
+    [candidates, intent?.userId],
+  );
 
   const publicInterestTags = useMemo(
     () =>
@@ -184,14 +197,16 @@ export function PublicIntentDetailPage() {
 
         <section className="mt-6 rounded-[28px] border border-white/10 bg-white/[0.05] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.24)]">
           <div className="flex flex-wrap items-center gap-2 text-xs font-black uppercase tracking-[0.22em] text-[#c8ff80]">
-            <span>Public Intent</span>
+            <span>约练卡片</span>
             <span className="rounded-full bg-white/10 px-2 py-1 text-[#d5d0c4]">
-              {intent.status}
+              {publicStatusLabel(intent.status)}
             </span>
           </div>
-          <h1 className="mt-4 text-3xl font-black tracking-tight sm:text-4xl">{intent.title}</h1>
+          <h1 className="mt-4 text-3xl font-black tracking-tight sm:text-4xl">
+            {publicIntentTitle(intent)}
+          </h1>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-[#c7c2b0]">
-            {intent.description || intent.socialGoal || '发起人正在寻找同频伙伴。'}
+            {publicIntentDescription(intent)}
           </p>
 
           <div className="mt-6 grid gap-3 sm:grid-cols-3">
@@ -246,13 +261,13 @@ export function PublicIntentDetailPage() {
               </p>
             </div>
             <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-[#c7c2b0]">
-              {candidates.length} 位
+              {visibleCandidates.length} 位
             </span>
           </div>
 
-          {candidates.length > 0 ? (
+          {visibleCandidates.length > 0 ? (
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {candidates.slice(0, 4).map((candidate) => (
+              {visibleCandidates.slice(0, 4).map((candidate) => (
                 <Link
                   key={candidate.profile.id}
                   to={`/user/${candidate.profile.id}`}
@@ -272,14 +287,17 @@ export function PublicIntentDetailPage() {
                       {(candidate.profile.avatar || candidate.profile.name || 'F').slice(0, 1)}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <strong className="block truncate">{candidate.profile.name}</strong>
+                      <strong className="block truncate">
+                        {publicProfileName(candidate.profile.name)}
+                      </strong>
                       <small className="text-[#9a9487]">
-                        {candidate.profile.city || '城市待完善'} · {candidate.score}% 匹配
+                        {candidate.profile.city || '城市待完善'} ·{' '}
+                        {matchLevelLabel(candidate.score)}
                       </small>
                     </div>
                   </div>
                   <p className="mt-3 line-clamp-2 text-sm leading-6 text-[#c7c2b0]">
-                    {candidate.reasonText || '兴趣、时间或活动边界比较接近。'}
+                    {publicReasonText(candidate.reasonText)}
                   </p>
                 </Link>
               ))}
@@ -301,6 +319,65 @@ function Info({ label, value }: { label: string; value: string }) {
       <p className="text-xs text-[#9a9487]">{label}</p>
       <strong className="mt-1 block text-sm text-[#f4efe6]">{value}</strong>
     </div>
+  );
+}
+
+function publicStatusLabel(status: PublicSocialIntent['status']) {
+  if (status === 'matched') return '正在匹配';
+  if (status === 'searching') return '正在寻找';
+  if (status === 'active') return '可参与';
+  if (status === 'completed') return '已完成';
+  if (status === 'closed' || status === 'inactive') return '已关闭';
+  if (status === 'cancelled') return '已取消';
+  return '可参与';
+}
+
+function publicIntentTitle(intent: PublicSocialIntent) {
+  const title = safePublicText(intent.title);
+  if (title) return title;
+  const city = safePublicText(intent.city) || '附近';
+  return `${city}同频约练`;
+}
+
+function publicIntentDescription(intent: PublicSocialIntent) {
+  return (
+    safePublicText(intent.description) ||
+    safePublicText(intent.socialGoal) ||
+    '发起人正在寻找同频伙伴，建议先站内沟通并选择公共场所见面。'
+  );
+}
+
+function publicProfileName(name?: string) {
+  const text = safePublicText(name);
+  if (!text) return 'FitMeet 用户';
+  return text;
+}
+
+function publicReasonText(text?: string) {
+  return safePublicText(text) || '你们的活动偏好、时间或城市比较接近，适合先轻松聊聊。';
+}
+
+function matchLevelLabel(score: number) {
+  if (score >= 85) return '匹配度：很高';
+  if (score >= 68) return '匹配度：较高';
+  return '匹配度：中等';
+}
+
+function safePublicText(value?: string | null) {
+  const text = `${value ?? ''}`.trim();
+  if (!text || isInternalFixtureText(text)) return '';
+  if (/^(default|unknown|null|undefined)$/i.test(text)) return '';
+  return text;
+}
+
+function isPublicTag(tag: string) {
+  return Boolean(safePublicText(tag)) && !/^(default|custom)$/i.test(tag.trim());
+}
+
+function isInternalFixtureText(value?: string | null) {
+  const text = `${value ?? ''}`.trim();
+  return /\b(agent\s*smoke|smoke\s*account|api\s*smoke|smoke|fixture|seed|test\s*account)\b/i.test(
+    text,
   );
 }
 

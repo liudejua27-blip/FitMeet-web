@@ -932,7 +932,8 @@ export class SocialAgentProfileEnrichmentService {
         ? `作为补充偏好记录：${memoryFields.join('、')}`
         : '',
       lines.length > 0 ? `本次识别：${lines.join('；')}` : '',
-      '还缺少可约时间、明确边界和具体约练偏好。你可以继续补充，或者告诉我“现在开始搜索”。',
+      '我已允许 Agent 在匹配池中基于这些公开安全字段推荐你，但不会公开精确位置、联系方式或替你发消息。',
+      '还缺少可约时间、明确边界和具体约练偏好时，你可以继续补充。准备好后我会单独问你是否开始匹配；未确认前不会自动推荐候选。',
     ]
       .filter(Boolean)
       .join('\n');

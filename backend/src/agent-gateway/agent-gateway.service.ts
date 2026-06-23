@@ -967,22 +967,28 @@ export class AgentGatewayService {
   async getPublicSocialIntentMatches(id: string) {
     const intent = await this.publicIntentRepo.findOne({ where: { id } });
     if (!intent) throw new NotFoundException('Public social intent not found');
-    const candidates = await this.searchSocialCandidates(0, {
-      requestType: intent.requestType,
-      title: intent.title,
-      description: intent.description,
-      city: intent.city,
-      loc: intent.loc,
-      lat: intent.lat ?? undefined,
-      lng: intent.lng ?? undefined,
-      radiusKm: intent.radiusKm,
-      timePreference: intent.timePreference,
-      verifiedOnly: Boolean(intent.filters?.verifiedOnly ?? true),
-      interests: Array.isArray(intent.filters?.interests)
-        ? (intent.filters.interests as string[])
-        : [],
-      limit: 5,
-    });
+    const candidates = await this.searchSocialCandidates(
+      0,
+      {
+        requestType: intent.requestType,
+        title: intent.title,
+        description: intent.description,
+        city: intent.city,
+        loc: intent.loc,
+        lat: intent.lat ?? undefined,
+        lng: intent.lng ?? undefined,
+        radiusKm: intent.radiusKm,
+        timePreference: intent.timePreference,
+        verifiedOnly: Boolean(intent.filters?.verifiedOnly ?? true),
+        interests: Array.isArray(intent.filters?.interests)
+          ? (intent.filters.interests as string[])
+          : [],
+        limit: 5,
+      },
+      {
+        excludedUserIds: intent.userId ? [intent.userId] : [],
+      },
+    );
     intent.candidateUserIds = candidates.map(
       (candidate) => candidate.profile.id,
     );
@@ -1961,6 +1967,7 @@ export class AgentGatewayService {
   private async searchSocialCandidates(
     userId: number,
     dto: SearchNearbyPeopleDto,
+    options: { excludedUserIds?: number[] } = {},
   ) {
     const owner = await this.userRepo.findOne({ where: { id: userId } });
 
@@ -1978,10 +1985,19 @@ export class AgentGatewayService {
     // blocked the caller.
     const blockedSet = await this.safetyService.getMutualBlockUserIds(userId);
 
+    const excludedUserIds = [userId, ...(options.excludedUserIds ?? [])].filter(
+      (id) => Number.isFinite(id) && id > 0,
+    );
+
     const qb = this.userRepo
       .createQueryBuilder('u')
-      .where('u.id != :uid', { uid: userId })
-      .andWhere('u."acceptNearbyMatch" = true');
+      .where('u."acceptNearbyMatch" = true');
+
+    if (excludedUserIds.length > 0) {
+      qb.andWhere('u.id NOT IN (:...excludedUserIds)', {
+        excludedUserIds: Array.from(new Set(excludedUserIds)),
+      });
+    }
 
     if (blockedSet.size > 0) {
       qb.andWhere('u.id NOT IN (:...blocked)', {

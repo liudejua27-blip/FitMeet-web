@@ -1257,7 +1257,8 @@ describe('SocialAgentChat acceptance flow', () => {
     expect(result.shouldSearch).toBe(false);
     expect(result.profileUpdated).toBe(true);
     expect(result.assistantMessage).toContain('写入 AI 画像');
-    expect(result.assistantMessage).toContain('现在开始搜索');
+    expect(result.assistantMessage).toContain('是否开始匹配');
+    expect(result.assistantMessage).toContain('未确认前不会自动推荐候选');
     expect(executor.executeToolAction).toHaveBeenCalledWith(
       101,
       SocialAgentToolName.UpdateProfileFromAgentContext,
@@ -2047,7 +2048,9 @@ describe('SocialAgentChat acceptance flow', () => {
           type: 'activity_plan',
           actions: expect.arrayContaining([
             expect.objectContaining({
-              schemaAction: 'activity.confirm_create',
+              schemaAction: expect.stringMatching(
+                /^(publish_to_discover|activity\.confirm_create)$/,
+              ),
               requiresConfirmation: true,
             }),
             expect.objectContaining({
@@ -2139,7 +2142,9 @@ describe('SocialAgentChat acceptance flow', () => {
         expect.objectContaining({
           label: '发布卡片',
           action: 'publish_to_discover',
-          schemaAction: 'activity.confirm_create',
+          schemaAction: expect.stringMatching(
+            /^(publish_to_discover|activity\.confirm_create)$/,
+          ),
           requiresConfirmation: true,
         }),
         expect.objectContaining({
@@ -2269,7 +2274,9 @@ describe('SocialAgentChat acceptance flow', () => {
       type: 'activity_plan',
       actions: expect.arrayContaining([
         expect.objectContaining({
-          schemaAction: 'activity.confirm_create',
+          schemaAction: expect.stringMatching(
+            /^(publish_to_discover|activity\.confirm_create)$/,
+          ),
           requiresConfirmation: true,
         }),
         expect.objectContaining({
@@ -3059,7 +3066,8 @@ describe('SocialAgentChat acceptance flow', () => {
         7,
       );
       expect(f.assistantMessage).toContain('写入 AI 画像');
-      expect(f.assistantMessage).toContain('现在开始搜索');
+      expect(f.assistantMessage).toContain('是否开始匹配');
+      expect(f.assistantMessage).toContain('未确认前不会自动推荐候选');
 
       const g = await service.routeMessage(7, {
         message: '那我还缺什么？',

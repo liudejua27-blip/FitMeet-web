@@ -115,4 +115,47 @@ describe('AgentGatewayService public social intents', () => {
       { q: '%羽毛球%' },
     );
   });
+
+  it('excludes the public intent owner from public intent matches', async () => {
+    const publicIntentRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'intent-1',
+        userId: 7,
+        requestType: 'running_partner',
+        title: '青岛跑步搭子',
+        description: '周末轻松跑步',
+        city: '青岛',
+        loc: '青岛大学',
+        lat: null,
+        lng: null,
+        radiusKm: 5,
+        timePreference: '周末下午',
+        filters: { verifiedOnly: true },
+        candidateUserIds: [],
+      }),
+      save: jest.fn((intent) => Promise.resolve(intent)),
+    };
+    const service = makeService(publicIntentRepo);
+    const searchSpy = jest
+      .spyOn(
+        service as unknown as { searchSocialCandidates: jest.Mock },
+        'searchSocialCandidates',
+      )
+      .mockResolvedValue([
+        {
+          profile: { id: 8 },
+        },
+      ]);
+
+    await service.getPublicSocialIntentMatches('intent-1');
+
+    expect(searchSpy).toHaveBeenCalledWith(
+      0,
+      expect.objectContaining({ city: '青岛', loc: '青岛大学' }),
+      { excludedUserIds: [7] },
+    );
+    expect(publicIntentRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ candidateUserIds: [8] }),
+    );
+  });
 });

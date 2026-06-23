@@ -764,7 +764,11 @@ async function loadPublicDiscoverIntents() {
   );
   const byId = new Map<string, PublicSocialIntent>();
   for (const intent of batches.flat()) {
-    if (intent.status !== 'cancelled' && intent.status !== 'closed') {
+    if (
+      intent.status !== 'cancelled' &&
+      intent.status !== 'closed' &&
+      !isInternalFixtureIntent(intent)
+    ) {
       byId.set(intent.id, intent);
     }
   }
@@ -785,6 +789,7 @@ function publicDisplayName(name: string | undefined, index: number) {
     !trimmed ||
     trimmed.length <= 1 ||
     /^(test|demo|seed|user)$/i.test(trimmed) ||
+    /\b(agent\s*smoke|smoke|fixture)\b/i.test(trimmed) ||
     /^用户\s*\d+$/i.test(trimmed) ||
     /^同频发起人$/i.test(trimmed) ||
     /^FitMeet\s*用户$/i.test(trimmed)
@@ -796,7 +801,7 @@ function publicDisplayName(name: string | undefined, index: number) {
 }
 
 function formatLevel(level: string | undefined) {
-  if (!level || level === 'all') return '轻松';
+  if (!level || level === 'all' || level === 'default') return '轻松';
   return level;
 }
 
@@ -854,6 +859,21 @@ function sportIcon(sport: string) {
   const normalized = normalizeSportGroup(sport);
   const found = sportFilters.find((item) => item.id === normalized);
   return found?.icon ?? '⚡';
+}
+
+function isInternalFixtureIntent(intent: PublicSocialIntent) {
+  const text = [
+    intent.id,
+    intent.source,
+    intent.title,
+    intent.description,
+    intent.socialGoal,
+    intent.requestType,
+    ...(intent.interestTags ?? []),
+  ]
+    .filter(Boolean)
+    .join(' ');
+  return /\b(agent\s*smoke|api\s*smoke|smoke\s*seed|smoke|fixture|seed\s*intent)\b/i.test(text);
 }
 
 export default DiscoverPage;

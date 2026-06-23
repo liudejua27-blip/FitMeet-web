@@ -12,14 +12,17 @@ export function publicIntentToDiscoverMeet(
   intent: PublicSocialIntent,
   index: number,
 ): DiscoverMeet {
-  const sport = normalizeSportGroup(intent.requestType || intent.interestTags?.[0] || 'custom');
+  const normalizedSport = normalizeSportGroup(
+    intent.requestType || intent.interestTags?.[0] || 'custom',
+  );
+  const sport = normalizedSport === 'default' ? 'other' : normalizedSport;
   const color = ['#10a37f', '#f97316', '#4f46e5', '#d97706'][index % 4];
   const detailHref = `/public-intent/${encodeURIComponent(intent.id)}`;
   return {
     id: publicIntentSyntheticId(intent.id, index),
     userId: intent.userId ?? undefined,
     title: intent.title || '新的社交机会',
-    type: intent.requestType || sport,
+    type: sport,
     sport,
     username: '同频发起人',
     color,
@@ -36,7 +39,7 @@ export function publicIntentToDiscoverMeet(
     level: publicIntentLevel(intent),
     desc: intent.description || intent.socialGoal || '发起人正在寻找合适的同频伙伴。',
     status: 'active',
-    participants: (intent.interestTags || []).slice(0, 3),
+    participants: (intent.interestTags || []).filter(isPublicTag).slice(0, 3),
     cert: intent.riskLevel !== 'high',
     rating: Math.max(4, Math.min(5, (intent.matchSignal?.score ?? 86) / 20)),
     meetCount: intent.matchedCount || 1,
@@ -67,4 +70,8 @@ function publicIntentLevel(intent: PublicSocialIntent) {
   if (/(高强度|进阶|认真|训练)/i.test(text)) return '较高强度';
   if (/(轻松|低压力|散步|新手)/i.test(text)) return '轻松';
   return '中等';
+}
+
+function isPublicTag(tag: string) {
+  return !/^(default|custom|seed|test|smoke)$/i.test(tag.trim());
 }

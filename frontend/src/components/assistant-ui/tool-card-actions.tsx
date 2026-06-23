@@ -732,11 +732,15 @@ function visualActionsForCard(
         action.schemaAction === 'activity.modify_time' ||
         action.schemaAction === 'activity.modify_location',
     );
-    const publish = actions.find((action) => action.schemaAction === 'publish_to_discover');
+    const publish = actions.find(
+      (action) =>
+        action.schemaAction === 'publish_to_discover' ||
+        action.schemaAction === 'activity.confirm_create',
+    );
     const close = actions.find((action) => action.schemaAction === 'activity.skip_publish');
     const detail = actions.find((action) => action.schemaAction === 'activity.view_detail');
     return published
-      ? compactVisualActions([modify, close, detail]).slice(0, 2)
+      ? compactVisualActions([modify, detail]).slice(0, 2)
       : compactVisualActions([publish, modify, close]);
   }
   if (card.schemaType === 'social_match.candidate') {
@@ -774,7 +778,12 @@ function visualCardActionLabel(
 ) {
   if (card.schemaType === 'social_match.activity') {
     const published = isPublishedActivityCard(card);
-    if (action.schemaAction === 'publish_to_discover') return published ? '已发布' : '发布卡片';
+    if (
+      action.schemaAction === 'publish_to_discover' ||
+      action.schemaAction === 'activity.confirm_create'
+    ) {
+      return published ? '已发布' : '发布卡片';
+    }
     if (
       action.schemaAction === 'activity.modify_time' ||
       action.schemaAction === 'activity.modify_location'
@@ -1779,10 +1788,10 @@ function normalizeVisibleActionLabel(
     return '发送邀请';
   }
   if (schemaType === 'social_match.activity' && canonicalKey === 'publish_to_discover') {
-    return '发布到发现';
+    return '发布卡片';
   }
   if (schemaType === 'social_match.activity' && canonicalKey === 'activity.confirm_create') {
-    return '创建约练';
+    return '发布卡片';
   }
   if (schemaType === 'social_match.activity' && canonicalKey === 'activity.skip_publish') {
     return '暂不发布';
@@ -1851,7 +1860,7 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
     return [
       {
         id: `${card.id}:publish`,
-        label: '发布到发现',
+        label: '发布卡片',
         requiresConfirmation: true,
         schemaAction: 'publish_to_discover',
         action: 'publish_to_discover',
@@ -1882,7 +1891,7 @@ function defaultCardActions(card: SchemaDrivenAssistantCard): VisibleCardAction[
     return [
       {
         id: `${card.id}:publish`,
-        label: '发布到发现',
+        label: '发布卡片',
         requiresConfirmation: true,
         schemaAction: 'publish_to_discover',
         action: 'publish_to_discover',

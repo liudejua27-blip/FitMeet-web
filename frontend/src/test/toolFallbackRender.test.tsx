@@ -1184,7 +1184,7 @@ describe('assistant-ui tool fallback rendering', () => {
                 recoveryOptions: [
                   {
                     key: 'publish_to_discover',
-                    label: '发布到发现',
+                    label: '发布卡片',
                     detail: '公开前仍需要你确认。',
                     requiresConfirmation: true,
                   },
@@ -1218,7 +1218,7 @@ describe('assistant-ui tool fallback rendering', () => {
     expect(emptyCard).not.toHaveTextContent('只搜索公开可发现资料。');
     expect(emptyCard).not.toHaveTextContent('保留活动和地点。');
     const actionCard = within(emptyCard).getByTestId('assistant-ui-unified-action-card');
-    expect(within(actionCard).getByRole('button', { name: '发布到发现' })).toHaveAttribute(
+    expect(within(actionCard).getByRole('button', { name: '发布卡片' })).toHaveAttribute(
       'data-requires-confirmation',
       'true',
     );
@@ -1328,7 +1328,7 @@ describe('assistant-ui tool fallback rendering', () => {
 
     const opportunity = screen.getByTestId('assistant-ui-schema-card');
     const actionCard = within(opportunity).getByTestId('assistant-ui-unified-action-card');
-    expect(within(actionCard).getByRole('button', { name: '发布到发现' })).toHaveAttribute(
+    expect(within(actionCard).getByRole('button', { name: '发布卡片' })).toHaveAttribute(
       'data-requires-confirmation',
       'true',
     );
@@ -1342,7 +1342,7 @@ describe('assistant-ui tool fallback rendering', () => {
     );
     expect(screen.queryByTestId('assistant-ui-approval-tool')).not.toBeInTheDocument();
 
-    fireEvent.click(within(actionCard).getByRole('button', { name: '发布到发现' }));
+    fireEvent.click(within(actionCard).getByRole('button', { name: '发布卡片' }));
     const inlineApproval = await screen.findByTestId('assistant-ui-inline-approval-panel');
     expect(onCardAction).not.toHaveBeenCalled();
     expect(inlineApproval).toHaveTextContent('确认发布到发现');

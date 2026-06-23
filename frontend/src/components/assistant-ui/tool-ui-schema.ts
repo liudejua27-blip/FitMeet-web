@@ -1,7 +1,4 @@
-import {
-  isLowRiskApprovalActionType,
-  isLowRiskApprovalText,
-} from './tool-risk-policy';
+import { isLowRiskApprovalActionType, isLowRiskApprovalText } from './tool-risk-policy';
 
 export type ToolUISchemaType =
   | 'social_match.candidate'
@@ -275,13 +272,17 @@ export function extractAssistantCards(data: unknown): SchemaDrivenAssistantCard[
 
 export function extractCanonicalAssistantCards(data: unknown): SchemaDrivenAssistantCard[] {
   if (!isRecord(data) || !Array.isArray(data.cards)) return [];
-  return dedupeAssistantCards(data.cards
-    .filter(isRecord)
-    .map((card, index) => normalizeAssistantCard(card, index))
-    .filter((card) => isCanonicalAssistantCard(card)));
+  return dedupeAssistantCards(
+    data.cards
+      .filter(isRecord)
+      .map((card, index) => normalizeAssistantCard(card, index))
+      .filter((card) => isCanonicalAssistantCard(card)),
+  );
 }
 
-export function dedupeAssistantCards(cards: SchemaDrivenAssistantCard[]): SchemaDrivenAssistantCard[] {
+export function dedupeAssistantCards(
+  cards: SchemaDrivenAssistantCard[],
+): SchemaDrivenAssistantCard[] {
   const hostCards = collectApprovalHostCards(cards);
   for (const card of cards) {
     if (card.schemaType !== 'safety.approval') continue;
@@ -326,7 +327,10 @@ export function dedupeAssistantCards(cards: SchemaDrivenAssistantCard[]): Schema
   for (const originalCard of cards) {
     const card = cardsWithInlineApproval.get(originalCard.id) ?? originalCard;
     const keys = cardIdentityKeys(card);
-    if (card.schemaType === 'safety.approval' && approvalCardShouldCollapseIntoActionCard(card, hostCards)) {
+    if (
+      card.schemaType === 'safety.approval' &&
+      approvalCardShouldCollapseIntoActionCard(card, hostCards)
+    ) {
       continue;
     }
     if (keys.some((key) => seen.has(key))) continue;
@@ -352,8 +356,7 @@ function collectApprovalHostCards(cards: SchemaDrivenAssistantCard[]): ApprovalH
   return cards
     .filter(
       (card) =>
-        card.schemaType === 'social_match.candidate' ||
-        card.schemaType === 'social_match.activity',
+        card.schemaType === 'social_match.candidate' || card.schemaType === 'social_match.activity',
     )
     .map((card) => ({
       card,
@@ -383,12 +386,14 @@ function findApprovalHostCard(
   if (keyedMatch) return keyedMatch;
 
   const text = approvalCardSearchText(approvalCard);
-  const wantsCandidate = /candidate|connect|friend|send|message|invite|contact|候选|加好友|好友|连接|发送|私信|邀请|联系/.test(
-    text,
-  );
-  const wantsActivity = /publish|social_request|activity|meet|location|precise|发布|发现|活动|约练|位置|精确/.test(
-    text,
-  );
+  const wantsCandidate =
+    /candidate|connect|friend|send|message|invite|contact|候选|加好友|好友|连接|发送|私信|邀请|联系/.test(
+      text,
+    );
+  const wantsActivity =
+    /publish|social_request|activity|meet|location|precise|发布|发现|活动|约练|位置|精确/.test(
+      text,
+    );
   const candidateHosts = hostCards.filter((host) => host.hostType === 'candidate');
   const activityHosts = hostCards.filter((host) => host.hostType === 'activity');
   const candidateNameMatch = uniqueHostByTextHint(candidateHosts, text);
@@ -401,7 +406,10 @@ function findApprovalHostCard(
   return null;
 }
 
-function uniqueHostByTextHint(hostCards: ApprovalHostCard[], text: string): ApprovalHostCard | null {
+function uniqueHostByTextHint(
+  hostCards: ApprovalHostCard[],
+  text: string,
+): ApprovalHostCard | null {
   const matches = hostCards.filter((host) =>
     hostCardTextHints(host.card).some((hint) => text.includes(hint)),
   );
@@ -439,10 +447,7 @@ function inlineApprovalConfirmationFromApprovalCard(
   hostCard: SchemaDrivenAssistantCard | undefined,
 ): InlineApprovalCandidate | null {
   const sources = approvalIdentitySources(card);
-  const id =
-    approvalIdFromCardData(card) ??
-    approvalIdFromCardActions(card) ??
-    card.id;
+  const id = approvalIdFromCardData(card) ?? approvalIdFromCardActions(card) ?? card.id;
   if (!id) return null;
   const actionType =
     firstPrimitiveFromSources(sources, ['schemaAction', 'actionType', 'action']) ??
@@ -451,8 +456,7 @@ function inlineApprovalConfirmationFromApprovalCard(
     firstPublicDetailFromSources(sources, ['summary', 'boundary']) ??
     card.body ??
     '确认前不会触达对方或公开敏感信息。';
-  const riskLevel =
-    firstPrimitiveFromSources(sources, ['riskLevel', 'risk_level']) ?? 'medium';
+  const riskLevel = firstPrimitiveFromSources(sources, ['riskLevel', 'risk_level']) ?? 'medium';
   return {
     priority: approvalCardPriority(card),
     confirmation: {
@@ -632,16 +636,14 @@ function cardIdentityKeys(card: SchemaDrivenAssistantCard): string[] {
       'activityId',
       'publicIntentId',
       'socialRequestId',
-    ]) ?? (isRecord(card.data.opportunity) ? primitiveIdentityString(card.data.opportunity.id) : null);
+    ]) ??
+    (isRecord(card.data.opportunity) ? primitiveIdentityString(card.data.opportunity.id) : null);
   if (taskId && opportunityId) keys.add(`opportunity:${taskId}:${opportunityId}`);
   if (keys.size === 0) keys.add(`id:${card.id}`);
   return [...keys];
 }
 
-function shouldUseCandidateOnlyCardKey(
-  card: SchemaDrivenAssistantCard,
-  actionType: string | null,
-) {
+function shouldUseCandidateOnlyCardKey(card: SchemaDrivenAssistantCard, actionType: string | null) {
   if (card.schemaType === 'safety.approval') return false;
   if (actionType && isCandidateActionResultCard(card, actionType)) return false;
   return true;
@@ -819,13 +821,9 @@ export function summarizeToolUICardCollection(
     (card) => card.schemaType === 'social_match.candidate',
   ).length;
   const emptyCount = cards.filter((card) => card.schemaType === 'social_match.empty').length;
-  const activityCount = cards.filter(
-    (card) => card.schemaType === 'social_match.activity',
-  ).length;
+  const activityCount = cards.filter((card) => card.schemaType === 'social_match.activity').length;
   const approvalCount = cards.filter((card) => card.schemaType === 'safety.approval').length;
-  const lifeGraphDiffCount = cards.filter(
-    (card) => card.schemaType === 'life_graph.diff',
-  ).length;
+  const lifeGraphDiffCount = cards.filter((card) => card.schemaType === 'life_graph.diff').length;
   const meetLoopCount = cards.filter((card) => card.schemaType === 'meet_loop.timeline').length;
   const genericCount = cards.filter((card) => card.schemaType === 'generic.card').length;
   const opportunityCount = candidateCount + activityCount;
@@ -846,13 +844,13 @@ export function summarizeToolUICardCollection(
       ? '候选、约练和真实动作都按结构化卡片展示；涉及连接、发送或公开时会先确认。'
       : emptyCount > 0
         ? '没有真实候选时，不会编造结果；你可以选择发布到发现、扩大范围或调整时间。'
-      : approvalCount > 0
-        ? '这次操作涉及真实动作或隐私边界，确认前不会自动执行。'
-        : lifeGraphDiffCount > 0
-          ? '画像变化会展示依据、冲突和撤回边界，确认后才写入长期记忆。'
-          : meetLoopCount > 0
-            ? '约练进展按发起、等待、改期、确认、评价和画像回写展示。'
-            : '结果已按安全的消息卡片展示。';
+        : approvalCount > 0
+          ? '这次操作涉及真实动作或隐私边界，确认前不会自动执行。'
+          : lifeGraphDiffCount > 0
+            ? '画像变化会展示依据、冲突和撤回边界，确认后才写入长期记忆。'
+            : meetLoopCount > 0
+              ? '约练进展按发起、等待、改期、确认、评价和画像回写展示。'
+              : '结果已按安全的消息卡片展示。';
 
   return {
     title,
@@ -1052,8 +1050,7 @@ export function normalizeCandidateEmptyStateView(
       publicDetail(card.data.safetyBoundary) ??
       '不会编造候选；发送邀请、公开位置或交换联系方式前必须确认。',
     nextBestStep:
-      publicDetail(card.data.nextBestStep) ??
-      '建议先发布到发现，或放宽范围后重新搜索。',
+      publicDetail(card.data.nextBestStep) ?? '建议先发布到发现，或放宽范围后重新搜索。',
   };
 }
 
@@ -1245,9 +1242,7 @@ function candidateReasoningQuality(
     source,
     confidence,
     label: degraded ? '我先用公开资料保守推荐' : null,
-    detail: degraded
-      ? '更细的个性化解释稍后可重试；发送邀请前仍会等你确认。'
-      : null,
+    detail: degraded ? '更细的个性化解释稍后可重试；发送邀请前仍会等你确认。' : null,
     actionLabel: degraded && retryable ? '可稍后重新生成推荐解释' : null,
   };
 }
@@ -1261,8 +1256,7 @@ function candidateTrustSignals(
     primary.trustSignals ??
       primary.consentSignals ??
       fallback.trustSignals ??
-      fallback.consentSignals ??
-      [
+      fallback.consentSignals ?? [
         isRecord(primary.recommendationConsent)
           ? primary.recommendationConsent.sourceLabel
           : undefined,
@@ -1348,7 +1342,7 @@ function defaultCandidateEmptyRecoveryOptions(): CandidateEmptyStateRecoveryOpti
   return [
     {
       key: 'publish_to_discover',
-      label: '发布到发现',
+      label: '发布卡片',
       detail: '让公开可发现的人看到你的约练卡；发布前仍需要确认。',
       requiresConfirmation: true,
     },
@@ -1422,9 +1416,7 @@ function candidateDiscoverySafetySignals(
   const signals = [
     '仅整理公开可发现或已授权匹配的信息',
     '资料默认脱敏，不展示精确位置或私密联系方式',
-    hasConfirmRequiredAction(actions)
-      ? '发送邀请前必须确认'
-      : '涉及真实触达时必须确认',
+    hasConfirmRequiredAction(actions) ? '发送邀请前必须确认' : '涉及真实触达时必须确认',
     '可跳过、重试或从确认点恢复',
   ];
   return Array.from(new Set(signals)).slice(0, 5);
@@ -1675,14 +1667,10 @@ export function normalizeActivityOpportunityView(
       publicDetail(opportunity.trustScoreUpdatePreview) ??
       publicDetail(card.data.trustScoreUpdatePreview) ??
       '完成、评价和守约情况会作为后续推荐可信度的弱信号。',
-    autoPublished:
-      opportunity.autoPublished === true || card.data.autoPublished === true,
+    autoPublished: opportunity.autoPublished === true || card.data.autoPublished === true,
     publicIntentId:
-      publicString(opportunity.publicIntentId) ??
-      publicString(card.data.publicIntentId),
-    discoverHref:
-      publicString(opportunity.discoverHref) ??
-      publicString(card.data.discoverHref),
+      publicString(opportunity.publicIntentId) ?? publicString(card.data.publicIntentId),
+    discoverHref: publicString(opportunity.discoverHref) ?? publicString(card.data.discoverHref),
   };
 }
 
@@ -1845,23 +1833,17 @@ export function normalizeMeetLoopTimelineView(
       publicDetail(card.data.replyIntent) ??
       publicDetail(timeline.counterpartIntent),
     replyIntentLabel:
-      publicDetail(card.data.replyIntentLabel) ??
-      publicDetail(timeline.replyIntentLabel),
+      publicDetail(card.data.replyIntentLabel) ?? publicDetail(timeline.replyIntentLabel),
     replyIntentDescription:
       publicDetail(card.data.replyIntentDescription) ??
       publicDetail(timeline.replyIntentDescription),
-    nextSafeStep:
-      publicDetail(card.data.nextSafeStep) ??
-      publicDetail(timeline.nextSafeStep),
-    waitingFor:
-      publicDetail(card.data.waitingFor) ??
-      publicDetail(timeline.waitingFor),
+    nextSafeStep: publicDetail(card.data.nextSafeStep) ?? publicDetail(timeline.nextSafeStep),
+    waitingFor: publicDetail(card.data.waitingFor) ?? publicDetail(timeline.waitingFor),
     nextRecoverableActions: publicStringArray(
       card.data.nextRecoverableActions ?? timeline.nextRecoverableActions,
     ).slice(0, 4),
     sideEffectPolicy:
-      publicDetail(card.data.sideEffectPolicy) ??
-      publicDetail(timeline.sideEffectPolicy),
+      publicDetail(card.data.sideEffectPolicy) ?? publicDetail(timeline.sideEffectPolicy),
     recoveryProtocol: normalizeMeetLoopRecoveryProtocol(
       card.data.recoveryProtocol ?? timeline.recoveryProtocol,
     ),
@@ -1873,9 +1855,7 @@ export function normalizeMeetLoopTimelineView(
   };
 }
 
-function normalizeMeetLoopRecoveryProtocol(
-  value: unknown,
-): MeetLoopRecoveryProtocolItemView[] {
+function normalizeMeetLoopRecoveryProtocol(value: unknown): MeetLoopRecoveryProtocolItemView[] {
   if (!Array.isArray(value)) return [];
   return value
     .filter(isRecord)
@@ -2197,7 +2177,8 @@ function meetLoopDefaultLabel(key: string) {
 }
 
 function meetLoopStageDescription(label: string, state: MeetLoopStageState) {
-  const prefix = state === 'done' ? '已完成' : state === 'current' ? '当前进度' : '等待前面事项完成';
+  const prefix =
+    state === 'done' ? '已完成' : state === 'current' ? '当前进度' : '等待前面事项完成';
   if (label === '发起') return `${prefix}：整理邀约对象、时间和边界。`;
   if (label === '等待回复') return `${prefix}：等待对方回复，不重复打扰。`;
   if (label === '改期') return `${prefix}：双方时间不合适时再调整。`;

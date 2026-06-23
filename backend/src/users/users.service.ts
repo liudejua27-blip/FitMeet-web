@@ -34,7 +34,7 @@ export class UsersService {
       where: { userId: id },
     });
 
-    const rest = this.sanitizeUser(user);
+    const rest = this.toPublicUser(user);
     return {
       ...rest,
       followers: followersCount,
@@ -86,12 +86,50 @@ export class UsersService {
 
   async findAll() {
     const users = await this.userRepo.find();
-    return users.map((user) => this.sanitizeUser(user));
+    return users.map((user) => this.toPublicUser(user));
   }
 
-  private sanitizeUser(user: User) {
-    const result: Partial<User> = { ...user };
-    delete result.password;
-    return result;
+  private toPublicUser(user: User) {
+    return {
+      id: user.id,
+      name: this.publicText(user.name, 'FitMeet 用户'),
+      avatar: this.publicText(user.avatar, ''),
+      color: user.color,
+      gender: this.publicText(user.gender, ''),
+      age: user.age,
+      city: this.publicText(user.city, ''),
+      gym: this.publicText(user.gym, ''),
+      bio: this.publicText(user.bio, '这位用户正在寻找同频的运动社交伙伴。'),
+      coverUrl: this.publicText(user.coverUrl ?? '', ''),
+      singleCert: user.singleCert,
+      verified: user.verified,
+      interestTags: this.publicTags(user.interestTags ?? []),
+      trainingDays: user.trainingDays,
+      trainingCount: user.trainingCount,
+      caloriesBurned: user.caloriesBurned,
+      trustScore: user.trustScore,
+      socialTrustCount: user.socialTrustCount,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+  }
+
+  private publicTags(tags: string[]) {
+    return tags
+      .map((tag) => this.publicText(tag, ''))
+      .filter((tag) => tag.length > 0);
+  }
+
+  private publicText(value: string | null | undefined, fallback: string) {
+    const text = `${value ?? ''}`.trim();
+    if (!text || this.isInternalFixtureText(text)) return fallback;
+    if (/^unknown$/i.test(text)) return fallback;
+    return text;
+  }
+
+  private isInternalFixtureText(text: string) {
+    return /\b(agent\s*smoke|smoke\s*account|api\s*smoke|seed|fixture|test\s*account)\b/i.test(
+      text,
+    );
   }
 }

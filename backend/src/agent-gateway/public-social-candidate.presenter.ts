@@ -125,14 +125,19 @@ export function buildPublicSocialCandidates({
       return {
         profile: {
           id: user.id,
-          name: user.name,
-          avatar: user.avatar,
+          name: publicProfileText(user.name, 'FitMeet 用户'),
+          avatar: publicProfileText(user.avatar, ''),
           color: user.color,
           age: user.age,
-          city: user.city,
-          bio: user.bio,
+          city: publicProfileText(user.city, ''),
+          bio: publicProfileText(
+            user.bio,
+            '这位用户正在寻找同频的运动社交伙伴。',
+          ),
           verified: user.verified,
-          interestTags: user.interestTags ?? [],
+          interestTags: (user.interestTags ?? [])
+            .map((tag) => publicProfileText(tag, ''))
+            .filter(Boolean),
           distanceKm:
             distanceKm != null ? Math.round(distanceKm * 100) / 100 : null,
         },
@@ -185,4 +190,18 @@ function haversineKm(
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
   return 2 * radius * Math.asin(Math.sqrt(a));
+}
+
+function publicProfileText(value: string | null | undefined, fallback: string) {
+  const text = `${value ?? ''}`.trim();
+  if (!text || /^unknown$/i.test(text) || isInternalFixtureText(text)) {
+    return fallback;
+  }
+  return text;
+}
+
+function isInternalFixtureText(text: string) {
+  return /\b(agent\s*smoke|smoke\s*account|api\s*smoke|smoke|fixture|seed|test\s*account)\b/i.test(
+    text,
+  );
 }

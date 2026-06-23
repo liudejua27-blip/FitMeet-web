@@ -123,6 +123,13 @@ function requiredFieldsForRoute(
     'time',
     'activity',
   ];
+  if (
+    route.intent === 'action_request' ||
+    route.shouldExecuteAction === true ||
+    route.replyStrategy === 'execute_action'
+  ) {
+    return [...base, 'location', 'boundary'];
+  }
   if (route.intent === 'social_search') {
     return base;
   }
@@ -200,7 +207,9 @@ function resolveFields(input: {
         relationshipGoal,
       ) || taskSlots.candidate_preference,
     boundary:
-      hasCommunicationBoundary(boundaries, combined) || boundaries.noAutoMessage
+      useSafeDefaultBoundary(combined) ||
+      hasCommunicationBoundary(boundaries, combined) ||
+      boundaries.noAutoMessage
         ? boundarySummary(boundaries, combined)
         : taskSlots.safety_boundary
           ? taskSlots.safety_boundary
@@ -381,9 +390,9 @@ function buildClarifyingQuestion(input: {
       focusMissing.length === missing.length
         ? `现在只差 ${allMissingText}`
         : `新增信息已记下，现在只差 ${allMissingText}`;
-    return `${knownText}${prefix}。直接补这几项就可以；如果不确定，也可以说“由你按安全默认值处理”。`;
+    return `${knownText}${prefix}。直接补这几项就可以；如果不确定，也可以说“由你按安全默认值处理”。确认前不会公开，也不会替你联系别人。`;
   }
-  return `${knownText}还差 ${missingText}。你可以直接一句话补齐；安全边界和是否发布到发现，会在真正发送邀请或公开前再让你确认。`;
+  return `${knownText}还差 ${missingText}。你可以直接一句话补齐；所有问题都可以跳过，不确定也可以说“由你按安全默认值处理”。确认前不会公开，也不会替你联系别人。`;
 }
 
 function extractActivity(text: string): string {
@@ -608,22 +617,33 @@ function hasCommunicationBoundary(
   );
 }
 
+function useSafeDefaultBoundary(text: string): boolean {
+  return /(安全默认|默认安全|按默认|你来处理|由你处理|你看着办|不确定)/i.test(
+    text,
+  );
+}
+
 function boundarySummary(
   boundaries: ReturnType<typeof readSocialAgentTaskMemory>['boundaries'],
   text: string,
 ): string {
   const parts = [
-    boundaries.publicPlaceOnly || /(公共场所|公开场所)/i.test(text)
+    boundaries.publicPlaceOnly ||
+    useSafeDefaultBoundary(text) ||
+    /(公共场所|公开场所)/i.test(text)
       ? '公共场所'
       : '',
     boundaries.noContactExchange ||
+    useSafeDefaultBoundary(text) ||
     /(不交换|不加微信|不留电话|站内聊)/i.test(text)
       ? '先站内沟通'
       : '',
     boundaries.noNightMeet || /(不要夜间|不要晚上|不晚上)/i.test(text)
       ? '避开夜间'
       : '',
-    boundaries.noAutoMessage || /(不要自动|先确认|发送前确认)/i.test(text)
+    boundaries.noAutoMessage ||
+    useSafeDefaultBoundary(text) ||
+    /(不要自动|先确认|发送前确认)/i.test(text)
       ? '发送前确认'
       : '',
     boundaries.acceptsStrangers === true ||

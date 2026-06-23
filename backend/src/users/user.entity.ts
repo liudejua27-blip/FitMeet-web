@@ -66,7 +66,7 @@ export class User {
   bio: string;
 
   @Column({ nullable: true })
-  coverUrl: string;
+  coverUrl: string | null;
 
   @Column({ default: false })
   singleCert: boolean;
